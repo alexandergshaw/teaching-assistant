@@ -48,7 +48,7 @@
 // the write-path one.
 
 import type { CanvasModule } from "@/lib/canvas-modules";
-import { effectiveKindOf, type EffectiveKind, type NewQuizFlagged } from "./courseItems-routing";
+import { effectiveKindOf, type EffectiveKind, type RealKindFlagged } from "./courseItems-routing";
 
 /** The module-tree lookup key: TYPE-DISCRIMINATED, so an assignment id that
  *  happens to collide numerically with some quiz's id can never cross-match
@@ -117,13 +117,59 @@ export type ItemModuleInfo = { known: true; names: string[] } | { known: false }
  * rule the write paths use) does the resolution from `kind` plus the item's
  * own `isNewQuiz` flag, exactly as it does for every write in
  * CourseItemsView.tsx.
+ *
+ * SHADOW-QUIZ CARVE-OUT (bulk.ts's Assignment-branch bug fix): a classic
+ * quiz's shadow assignment row now appears in the Assignments tab, keyed by
+ * its own (shadow assignment) id - but Canvas never files a module item
+ * under that id. It files the module item as type "Quiz", keyed by the
+ * underlying QUIZ's own id (`item.shadowQuizId`, populated by bulk.ts from
+ * the same `quiz_id` it reads to set `isClassicQuizShadow`). Falling through
+ * to the ordinary `effectiveKindOf`-based lookup for such a row would look
+ * up "Assignment:<shadowId>" and never find it, silently reporting "No
+ * module" for a row that may well be in one - so this is checked FIRST,
+ * before the ordinary path runs.
+ *
+ * DISCUSSION-SHADOW CARVE-OUT (finding 3 fix, verified against
+ * https://canvas.instructure.com/doc/api/assignments.html): a graded
+ * discussion's shadow assignment row (`isGradedDiscussionShadow`) needs the
+ * same treatment as the classic-quiz carve-out above, and Canvas's own
+ * Assignment object model documents `discussion_topic` as a base field of
+ * the assignment itself ("(Optional) the DiscussionTopic associated with the
+ * assignment, if applicable") - not one of the supplemental fields gated
+ * behind the assignments-index endpoint's include[] allowlist, the same way
+ * `quiz_id` already is not (see raw-types.ts's own citation for that
+ * endpoint's include[] list). bulk.ts carries the topic's own id through as
+ * `shadowDiscussionTopicId` whenever Canvas's response actually populates the
+ * field. Canvas's own wording ("if applicable") leaves open that a given row
+ * might not carry it, so this is checked defensively: when the id IS present,
+ * this resolves exactly like the classic-quiz carve-out, keyed by module-item
+ * type "Discussion". When it is genuinely ABSENT, this returns `known: false`
+ * (UNKNOWN) rather than falling through to the ordinary lookup below - that
+ * fallback keys on "Assignment:<shadowId>", which Canvas never files a module
+ * item under for a graded discussion, so it would silently and WRONGLY report
+ * "No module" for a row whose true module status was never actually
+ * observed. Reporting UNKNOWN is the honest answer; asserting "No module"
+ * would not be (see courseItems-filters.ts's F2 reasoning, which already
+ * treats `known: false` as excluded from both the "in a module" and "not in
+ * any module" facets for exactly this reason).
  */
 export function modulesForItem(
-  item: NewQuizFlagged & { id: string },
+  item: RealKindFlagged & { id: string },
   kind: EffectiveKind,
   index: ReadonlyMap<string, string[]> | null
 ): ItemModuleInfo {
   if (index === null) return { known: false };
+  if (item.isClassicQuizShadow && typeof item.shadowQuizId === "number") {
+    const key = moduleIndexKey("Quiz", item.shadowQuizId);
+    return { known: true, names: index.get(key) ?? [] };
+  }
+  if (item.isGradedDiscussionShadow) {
+    if (typeof item.shadowDiscussionTopicId === "number") {
+      const key = moduleIndexKey("Discussion", item.shadowDiscussionTopicId);
+      return { known: true, names: index.get(key) ?? [] };
+    }
+    return { known: false };
+  }
   const effKind = effectiveKindOf(item, kind);
   const key = moduleIndexKey(effKind, Number(item.id));
   return { known: true, names: index.get(key) ?? [] };

@@ -60,38 +60,77 @@ export function planQuizPurgeDeletes(
  *
  * DELIBERATE SEMANTICS, PINNED BY TEST (REGRESSION.md check 8): ticking
  * "Assignments" alone must NEVER delete a Classic quiz or a graded
- * discussion. Before listBulkItems("Assignment") excluded their shadow
- * assignment rows (bulk.ts's isClassicQuizShadow / isDiscussionShadow, fixing
- * Finding 1), it silently did: the shadow rows were IN that list, so ticking
- * only "Assignments" issued DELETE /assignments/{shadowId} against them,
- * which Canvas cascades into deleting the quiz/discussion itself. That was
- * an accident of Canvas's data model (a graded quiz/discussion's shadow
- * assignment) leaking into what "an assignment" means to a user, not a
- * decision anyone made. This app already exposes separate purge checkboxes
- * for "Quizzes" (this function, kind "Quiz", /quizzes endpoint) and
- * "Discussions" (CourseCopyModal.tsx's own kindMap loop, kind "Discussion",
- * /discussion_topics endpoint, outside this file's scope entirely) - so a
- * user who ticks only "Assignments" now gets exactly what that checkbox
- * says: real Assignment objects (ordinary assignments plus New Quizzes,
- * because a New Quiz IS an Assignment object, per above) and nothing else.
- * A Classic quiz is deleted only when "Quizzes" is ticked; a graded
- * discussion is deleted only when "Discussions" is ticked. This function
- * enforces the "Assignments does not touch Quiz-kind" half by construction
- * (it only ever pushes a "Quiz" plan entry when opts.purgeQuizzes is true);
- * the discussion half is enforced upstream, by listBulkItems never handing a
- * discussion's shadow row to this function (or to anything else) as an
- * assignment id in the first place.
+ * discussion.
+ *
+ * BUG FIX UPDATE (live report 2026-08-22): listBulkItems("Assignment") used
+ * to enforce this by EXCLUDING classic-quiz and graded-discussion shadow
+ * rows from its own output (bulk.ts's old isClassicQuizShadow /
+ * isDiscussionShadow filter) - so `opts.assignmentItems` could never contain
+ * one, and this function did not need to look. That exclusion was itself the
+ * bug this fix addresses (it also hid those rows from the Assignments TAB,
+ * not just from this purge plan - see bulk.ts's own header), so
+ * `opts.assignmentItems` may now legitimately contain both flagged rows. The
+ * "Assignments alone never deletes a quiz/discussion" decision has NOT
+ * changed - it is now enforced explicitly, right here, by filtering both
+ * flags out before any id from `assignmentItems` is ever added to the
+ * assignment delete set, rather than relying on the listing to have already
+ * left them out. The correct way to delete the underlying quiz/discussion
+ * object is still through its OWN kind - "Quizzes" (this function, kind
+ * "Quiz", /quizzes endpoint, using the quiz's own id from `quizItems`, never
+ * the shadow assignment id) or "Discussions" (CourseCopyModal.tsx's own
+ * kindMap loop, kind "Discussion", /discussion_topics endpoint, outside this
+ * file's scope entirely) - never via the shadow assignment id, no matter
+ * which checkbox combination is ticked. A user who ticks only "Assignments"
+ * gets exactly what that checkbox says: real Assignment objects (ordinary
+ * assignments plus New Quizzes, because a New Quiz IS an Assignment object,
+ * per above) and nothing else.
+ *
+ * FINDING 2 FIX: `opts.assignmentItems` now ALSO legitimately contains New
+ * Quiz rows (flagged `isNewQuiz`) for the same reason it contains the two
+ * shadow flags - bulk.ts's Assignment listing no longer excludes anything
+ * assignment-shaped. A New Quiz id therefore now arrives from BOTH
+ * `assignmentItems` (its native home, since it IS a real Assignment object)
+ * AND `quizItems` (Canvas's own Quizzes page also lists it). Without also
+ * filtering `isNewQuiz` out of `realAssignmentItems` below, ticking either
+ * "Assignments" alone or both checkboxes together double-added the same New
+ * Quiz id: once straight from `assignmentItems`, and a second time from the
+ * `quizItems`-derived merge a few lines down (the "else if" branch below, or
+ * the `purgeQuizzes` branch's own merge) - producing a plan like
+ * `["901","902","901"]` and issuing a second, redundant
+ * `DELETE /assignments/901` that 404s (right id, wrong count: proven by
+ * course-copy-purge.test.ts's own fixture, which used to be stale - see that
+ * file's header for how it was corrected to actually catch this). New Quiz
+ * ids are sourced from `quizItems` ONLY (via `planQuizPurgeDeletes` when
+ * `purgeQuizzes` is ticked, or the explicit `quizItems.filter(isNewQuiz)`
+ * fallback below when it is not) - `realAssignmentItems` excludes them so
+ * each New Quiz id is added to the merged Assignment delete set exactly once,
+ * from exactly one source, no matter which checkbox combination is ticked.
  */
 export function planAssignmentPurgeDeletes(opts: {
   purgeAssignments: boolean;
   purgeQuizzes: boolean;
-  /** listBulkItemsAction(destUrl, "Assignment", ...).items - never includes New Quizzes (C3). */
-  assignmentItems: Array<Pick<BulkItem, "id">>;
+  /** listBulkItemsAction(destUrl, "Assignment", ...).items - now includes
+   *  New Quizzes, classic-quiz shadow rows and graded-discussion shadow rows
+   *  too (bulk.ts's bug fix), each flagged; this function filters all three
+   *  back out of its own real-assignment set itself (see this function's own
+   *  header) rather than relying on the listing to have excluded them - a New
+   *  Quiz id is re-added afterward, but only ever from `quizItems`, never
+   *  from here, so it is never counted twice. */
+  assignmentItems: Array<Pick<BulkItem, "id" | "isClassicQuizShadow" | "isGradedDiscussionShadow" | "isNewQuiz">>;
   /** listBulkItemsAction(destUrl, "Quiz", ...).items - Classic quizzes plus New Quizzes, the latter flagged isNewQuiz. */
   quizItems: Array<Pick<BulkItem, "id" | "isNewQuiz">>;
 }): Array<{ kind: BulkKind; ids: string[] }> {
   const plan: Array<{ kind: BulkKind; ids: string[] }> = [];
-  const assignmentIds: string[] = opts.purgeAssignments ? opts.assignmentItems.map((i) => i.id) : [];
+  // A real, ORDINARY Assignment object only - a classic quiz's or graded
+  // discussion's shadow row must never reach the assignment delete set
+  // regardless of which checkbox combination is ticked (see this function's
+  // own header), and a New Quiz id must never reach it FROM HERE either: it
+  // is re-added below, sourced only from `quizItems`, so including it here
+  // too would double it (finding 2 - the exact bug this filter now prevents).
+  const realAssignmentItems = opts.assignmentItems.filter(
+    (i) => !i.isClassicQuizShadow && !i.isGradedDiscussionShadow && !i.isNewQuiz
+  );
+  const assignmentIds: string[] = opts.purgeAssignments ? realAssignmentItems.map((i) => i.id) : [];
 
   if (opts.purgeQuizzes) {
     // Reuse the already-tested Classic/New split rather than re-deriving it.

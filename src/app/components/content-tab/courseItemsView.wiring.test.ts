@@ -118,27 +118,34 @@ describe("New Quiz routing and labelling (D1, C2/C4, finding 6)", () => {
     expect(stripped).not.toMatch(/function groupSelectedByEffectiveKind\(/);
   });
 
-  it("labels a New Quiz row only in the Quiz tab, never the Assignment tab (C2/C3), regardless of label casing", () => {
-    const guardMarker = 'kind === "Quiz" && it.isNewQuiz && (';
-    const guardStart = stripped.indexOf(guardMarker);
-    expect(guardStart, "no kind===\"Quiz\" && isNewQuiz gated block found").toBeGreaterThan(-1);
-    const blockEnd = stripped.indexOf(")}", guardStart);
-    expect(blockEnd).toBeGreaterThan(guardStart);
-    const guardBlock = stripped.slice(guardStart, blockEnd);
-    // The gating condition must include both kind === "Quiz" and isNewQuiz -
-    // a label gated on isNewQuiz alone would (incorrectly) also fire if such
-    // a row ever reached the Assignment tab.
-    expect(guardBlock).toMatch(/kind === "Quiz"/);
-    expect(guardBlock).toMatch(/it\.isNewQuiz/);
-    // Pins the FACT that a "new quiz" label is rendered inside this guard,
-    // case-insensitively - never the exact spelling/casing (finding 7,
-    // source-text-tests-overspecify). Checked only in the JSX CHILDREN after
-    // the guard's own condition, not the whole block - the condition text
-    // itself contains the code identifier `isNewQuiz`, whose "NewQuiz"
-    // substring would otherwise satisfy this regex without any label ever
-    // being rendered.
-    const childrenPart = guardBlock.slice(guardMarker.length);
-    expect(childrenPart).toMatch(/new\s*quiz/i);
+  // The per-row New Quiz/shadow labelling itself (isNewQuiz/
+  // isClassicQuizShadow/isGradedDiscussionShadow badges) moved into
+  // CourseItemRow.tsx along with the rest of the per-row render - see
+  // CourseItemRow.wiring.test.ts for those assertions now. This file only
+  // pins that CourseItemsView.tsx actually RENDERS that component (below) and
+  // that every write path still routes through the shared effective-kind
+  // helper.
+  it("renders CourseItemRow for each shown item, passing item/selected/onToggle/moduleInfo/moduleIndexFailed", () => {
+    expect(stripped).toMatch(
+      /import\s*\{\s*CourseItemRow\s*\}\s*from\s*["']\.\/CourseItemRow["']/
+    );
+    const mapIdx = stripped.indexOf("shown.map((it) => (");
+    expect(mapIdx, "shown.map((it) => (...)) rendering CourseItemRow not found").toBeGreaterThan(-1);
+    const mapEnd = stripped.indexOf("))}", mapIdx);
+    const body = stripped.slice(mapIdx, mapEnd);
+    expect(body).toMatch(/<CourseItemRow/);
+    expect(body).toMatch(/item=\{it\}/);
+    expect(body).toMatch(/selected=\{selection\.selected\.has\(it\.id\)\}/);
+    expect(body).toMatch(/onToggle=\{\(\)\s*=>\s*selection\.toggle\(it\.id\)\}/);
+    expect(body).toMatch(/moduleInfo=\{moduleInfoById\.get\(it\.id\)\s*\?\?\s*\{\s*known:\s*false\s*\}\}/);
+    expect(body).toMatch(/moduleIndexFailed=\{moduleIndexFailed\}/);
+  });
+
+  it("builds moduleInfoById from filterRows (never calling modulesForItem a second time per row)", () => {
+    expect(stripped).toMatch(/const moduleInfoById = useMemo\(/);
+    const idx = stripped.indexOf("const moduleInfoById = useMemo(");
+    const end = stripped.indexOf(");", idx);
+    expect(stripped.slice(idx, end)).toMatch(/filterRows\.map\(\(r\) => \[r\.item\.id, r\.moduleInfo\]/);
   });
 
   it("deletes and points/publish writes use the same grouped-by-effective-kind helper the New Quiz routing relies on", () => {
@@ -178,6 +185,73 @@ describe("B3: rubrics and submission type are offered for Assignments only", () 
 
   it("never offers Move or Remove from module (D5) - this view has no module context at all", () => {
     expect(stripped).not.toMatch(/bulkMoveToModule|bulkRemoveFromModule|Move to module|Remove from module/);
+  });
+});
+
+// FINDING 1 FIX: both writes used to be gated on the TAB only, taking
+// `[...selection.selected]` verbatim - so a New Quiz, a classic-quiz shadow
+// row, or a graded-discussion shadow row selected in the Assignments tab
+// reached the rubric/submission-type write. The real per-row proof lives in
+// courseItems-eligibility.test.ts (it calls ordinaryAssignmentSelection
+// directly - a source-text match here cannot prove a New Quiz id is actually
+// excluded, only that the right function is called). This file only pins the
+// WIRING: the view calls that pure helper rather than sending the raw
+// selection, and the buttons are ALSO disabled up front when nothing in the
+// selection is eligible.
+describe("FINDING 1: rubric/submission-type writes are gated per ROW, not just per tab", () => {
+  it("imports ordinaryAssignmentSelection and both bulkRubric/bulkUpdateSubmissionType call it instead of sending the raw selection", () => {
+    expect(stripped).toMatch(
+      /import\s*\{\s*ordinaryAssignmentSelection\s*\}\s*from\s*["']\.\/courseItems-eligibility["']/
+    );
+    expect(stripped).not.toMatch(/function ordinaryAssignmentSelection\(/);
+
+    const rubricIdx = stripped.indexOf("const bulkRubric = () => {");
+    expect(rubricIdx, "bulkRubric not found").toBeGreaterThan(-1);
+    const rubricEnd = stripped.indexOf("const bulkUpdateSubmissionType", rubricIdx);
+    const rubricBody = stripped.slice(rubricIdx, rubricEnd);
+    expect(rubricBody).toMatch(/ordinaryAssignmentSelection\(selection\.selected,\s*itemsById\)/);
+    // The old unfiltered form must be gone from this function.
+    expect(rubricBody).not.toMatch(/const ids = \[\.\.\.selection\.selected\];/);
+
+    const subtypeIdx = rubricEnd;
+    const subtypeEnd = stripped.indexOf("const bulkSetDescription", subtypeIdx);
+    const subtypeBody = stripped.slice(subtypeIdx, subtypeEnd);
+    expect(subtypeBody).toMatch(/ordinaryAssignmentSelection\(selection\.selected,\s*itemsById\)/);
+    expect(subtypeBody).not.toMatch(/const ids = \[\.\.\.selection\.selected\];/);
+  });
+
+  it("both functions bail out with a note (never an empty-selection silent no-op) when zero rows are eligible", () => {
+    for (const fnName of ["bulkRubric", "bulkUpdateSubmissionType"]) {
+      const fnIdx = stripped.indexOf(`const ${fnName} = () => {`);
+      expect(fnIdx, `${fnName} not found`).toBeGreaterThan(-1);
+      const nextFnIdx = stripped.indexOf("\n  const ", fnIdx + 10);
+      const body = stripped.slice(fnIdx, nextFnIdx > -1 ? nextFnIdx : undefined);
+      expect(body, `${fnName} does not check ids.length === 0`).toMatch(/if \(ids\.length === 0\)/);
+      expect(body, `${fnName} does not report a "not eligible" note`).toMatch(/setNote\(\{\s*kind:\s*"error"/);
+    }
+  });
+
+  it("both result notes mention how many rows were skipped and why, never silently dropping ineligible rows", () => {
+    expect(stripped).toMatch(/\$\{skipped \? `, \$\{skipped\} skipped \(not an ordinary assignment\)` : ""\}/g);
+  });
+
+  it("computes eligibleAssignmentCount from ordinaryAssignmentSelection and disables both buttons when it is zero, in addition to the pre-existing gates", () => {
+    expect(stripped).toMatch(/const eligibleAssignmentCount =/);
+    const rubricButtonIdx = stripped.indexOf("onClick={bulkRubric}");
+    expect(rubricButtonIdx).toBeGreaterThan(-1);
+    const rubricButtonStart = stripped.lastIndexOf("<Button", rubricButtonIdx);
+    const rubricDisabled = stripped.slice(rubricButtonStart, rubricButtonIdx);
+    expect(rubricDisabled).toMatch(/eligibleAssignmentCount === 0/);
+
+    const subtypeButtonIdx = stripped.indexOf("onClick={bulkUpdateSubmissionType}");
+    expect(subtypeButtonIdx).toBeGreaterThan(-1);
+    const subtypeButtonStart = stripped.lastIndexOf("<Button", subtypeButtonIdx);
+    const subtypeDisabled = stripped.slice(subtypeButtonStart, subtypeButtonIdx);
+    expect(subtypeDisabled).toMatch(/eligibleAssignmentCount === 0/);
+  });
+
+  it("surfaces a hint when the selection is non-empty but nothing in it is eligible", () => {
+    expect(stripped).toMatch(/selection\.selected\.size > 0 && eligibleAssignmentCount === 0/);
   });
 });
 
@@ -341,68 +415,65 @@ describe("module associations column (which module each item belongs to)", () =>
     expect(stripped.slice(idx, end)).toMatch(/loadModuleIndex\(\)/);
   });
 
-  it("A2/A3/A4/NIT11: the row render distinguishes all four module outcomes - still loading, genuinely failed, no module, and one-or-more module names - as genuinely different branches, not one collapsed fallback", () => {
-    const idx = stripped.indexOf("const moduleInfo = modulesForItem(it, kind, moduleIndex);");
-    expect(idx, "moduleInfo lookup not found in the row render").toBeGreaterThan(-1);
-    const end = stripped.indexOf("return (", idx);
-    const body = stripped.slice(idx, end);
-    // Structural anchor: the unknown case and the no-module case must be
-    // gated by two SEPARATE conditions, not one combined `||` (which would
-    // still contain both substrings below while actually conflating the two
-    // - "unavailable" and "genuinely empty" are different facts, A4 vs A2).
-    expect(body).not.toMatch(/!moduleInfo\.known\s*\|\|/);
-    expect(body).toMatch(/!moduleInfo\.known/);
-    expect(body).toMatch(/moduleInfo\.names\.length === 0/);
-    expect(body).toMatch(/moduleInfo\.names\.join\(", "\)/);
-    // NIT11: within the `!moduleInfo.known` branch, a SEPARATE condition
-    // (moduleIndexFailed) distinguishes "still loading" from "genuinely
-    // failed" - a bare `!moduleInfo.known` collapsing straight to a failure
-    // message would claim a failure during the ordinary initial-load window,
-    // when nothing has failed at all.
-    expect(body).toMatch(/moduleIndexFailed/);
-    // Three distinct rendered `text` literals (a joined names list is
-    // computed, not a literal, so it never appears here) - none may render
-    // the same literal string as another, which would silently conflate two
-    // different facts.
-    const texts = [...body.matchAll(/text:\s*"([^"]*)"/g)].map((m) => m[1]);
-    expect(texts.length).toBe(3);
-    expect(new Set(texts).size).toBe(3);
-  });
+  // The four-way module-cell rendering (A2/A3/A4/NIT11) moved into
+  // CourseItemRow.tsx along with the rest of the per-row render - see
+  // CourseItemRow.wiring.test.ts for those assertions now.
 
-  it("the module cell's computed text and tooltip actually reach a rendered element, not just a discarded local - deleting the cell from the JSX must fail this test", () => {
-    const idx = stripped.indexOf("const moduleInfo = modulesForItem(it, kind, moduleIndex);");
-    expect(idx, "moduleInfo lookup not found in the row render").toBeGreaterThan(-1);
-    // Past the `return (` this time (unlike the test above) - all the way to
-    // the next sibling cell's own computation, so the slice necessarily
-    // covers the JSX the moduleCell ternary feeds, not just the ternary
-    // itself.
-    const end = stripped.indexOf('it.dueAt ? formatDueDate(it.dueAt)', idx);
-    expect(end, "due-date cell (the module cell's next sibling) not found").toBeGreaterThan(idx);
-    const body = stripped.slice(idx, end);
-    // The computed value must be rendered as a child AND used as the
-    // tooltip - both reaching an actual DOM-bound JSX expression, not a
-    // value computed and then dropped on the floor.
-    expect(body).toMatch(/\{moduleCell\.text\}/);
-    expect(body).toMatch(/title=\{moduleCell\.title\}/);
-    // Structural anchor: `{moduleCell.text}` must sit inside a <span ...>
-    // element (this column's own cell), not be a bare reference floating
-    // outside any rendered tag.
-    const textIdx = body.indexOf("{moduleCell.text}");
-    const precedingSpanOpen = body.lastIndexOf("<span", textIdx);
-    const precedingSpanClose = body.lastIndexOf("</span>", textIdx);
-    expect(precedingSpanOpen).toBeGreaterThan(-1);
-    expect(precedingSpanOpen).toBeGreaterThan(precedingSpanClose);
-  });
-
-  it("DECISION (NIT13): search is title-only - the module column was explicitly kept out of scope for search, so a real title match is never diluted by unrelated module-name matches, and 'Select all' cannot silently widen beyond title matches", () => {
-    const idx = stripped.indexOf("const shown = items.filter(");
-    expect(idx, "shown filter not found").toBeGreaterThan(-1);
+  it("DECISION (NIT13): search stays title-only, now delegated to the shared filterCourseItems leaf (courseItems-filters.ts) rather than a hand-rolled inline filter", () => {
+    const idx = stripped.indexOf("const shown = filterCourseItems(");
+    expect(idx, "shown must be computed via filterCourseItems").toBeGreaterThan(-1);
     const end = stripped.indexOf("const visibleIds =", idx);
     const body = stripped.slice(idx, end);
-    expect(body).toMatch(/it\.title\.toLowerCase\(\)\.includes\(query\)/);
-    // Must not reintroduce a module-name search path.
-    expect(body).not.toMatch(/modulesForItem/);
-    expect(body).not.toMatch(/info\.names\.some\(/);
+    expect(body).toMatch(/filterCourseItems\(filterRows,\s*filters,\s*search\)/);
+  });
+});
+
+describe("facet filters (this feature's own AC): delegated to the pure courseItems-filters leaf", () => {
+  it("imports the filtering leaf's functions rather than redefining the logic in the component", () => {
+    expect(stripped).toMatch(
+      /import\s*\{[\s\S]*?\bfilterCourseItems\b[\s\S]*?\}\s*from\s*["']\.\/courseItems-filters["']/
+    );
+    expect(stripped).not.toMatch(/function filterCourseItems\(/);
+    expect(stripped).not.toMatch(/function matchesCourseItemFilters\(/);
+    expect(stripped).not.toMatch(/function matchesTitleSearch\(/);
+  });
+
+  it("builds filterRows from modulesForItem (the same module leaf the row render itself uses), not a second copy of the association rule", () => {
+    const idx = stripped.indexOf("const filterRows = useMemo(");
+    expect(idx, "filterRows not found").toBeGreaterThan(-1);
+    const end = stripped.indexOf(");", idx);
+    expect(stripped.slice(idx, end)).toMatch(/modulesForItem\(it,\s*kind,\s*moduleIndex\)/);
+  });
+
+  it("every facet control is a MenuItem-based select bound to `filters`, and quiz kind is gated on kind === \"Quiz\" (Assignments tab never renders it, C3)", () => {
+    expect(stripped).toMatch(/value=\{filters\.published\}/);
+    expect(stripped).toMatch(/value=\{filters\.module\}/);
+    expect(stripped).toMatch(/value=\{filters\.dueDate\}/);
+    expect(stripped).toMatch(/value=\{filters\.points\}/);
+    const quizKindIdx = stripped.indexOf("value={filters.quizKind}");
+    expect(quizKindIdx).toBeGreaterThan(-1);
+    const guardIdx = stripped.lastIndexOf('kind === "Quiz" && (', quizKindIdx);
+    expect(guardIdx, "quiz-kind select is not gated on kind === \"Quiz\"").toBeGreaterThan(-1);
+  });
+
+  it("persists all five facets together under one ta-course-items-filters key, scoped per kind - not five independent keys", () => {
+    expect(stripped).toMatch(/const filtersKey = courseItemFiltersStorageKey\(kindLower\)/);
+    expect(stripped).toMatch(/localStorage\.getItem\(filtersKey\)/);
+    expect(stripped).toMatch(/localStorage\.setItem\(filtersKey,\s*serializeCourseItemFilters\(filters\)\)/);
+  });
+
+  it("offers a way to clear every facet at once (F4), only surfaced while a facet is actually narrowed", () => {
+    expect(stripped).toMatch(/const clearFilters = \(\) => setFilters\(DEFAULT_COURSE_ITEM_FILTERS\)/);
+    expect(stripped).toMatch(/\{filtersActive && \(/);
+  });
+
+  it("F6: the empty-filtered-result message is worded differently depending on whether the facets are active, distinct from the whole-course-empty state", () => {
+    const idx = stripped.indexOf("{shown.length === 0 && (");
+    expect(idx, "empty-filtered-result block not found").toBeGreaterThan(-1);
+    const end = stripped.indexOf("{shown.map((it) => {", idx);
+    const body = stripped.slice(idx, end);
+    expect(body).toMatch(/filtersActive/);
+    expect(body).toMatch(/clearFilters/);
   });
 });
 

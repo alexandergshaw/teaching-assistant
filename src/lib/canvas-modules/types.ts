@@ -162,6 +162,46 @@ export interface BulkItem {
   /** True when this assignment row is an LTI-backed New Quiz (D1). Absent
    *  for every other kind and for Classic Quizzes - see new-quiz.ts. */
   isNewQuiz?: boolean;
+  /** Set only on an Assignment-tab row that is really a classic quiz's
+   *  shadow assignment record (Canvas creates one for every graded quiz,
+   *  reported via `quiz_id` - see new-quiz.ts). This row's own `id` IS the
+   *  assignment id, and deleting it via DELETE /assignments/{id} is exactly
+   *  what Canvas's own Assignments page does (it cascades into deleting the
+   *  quiz) - correct, but the instructor must be able to tell this row apart
+   *  from an ordinary assignment before choosing to delete it. Absent for
+   *  every other row, including a classic quiz's own row in the Quizzes tab
+   *  (which carries no such flag - see bulk.ts). */
+  isClassicQuizShadow?: boolean;
+  /** The underlying classic quiz's own id (the /quizzes record) - populated
+   *  only alongside `isClassicQuizShadow`, from the same `quiz_id` field
+   *  bulk.ts already reads to set that flag. Lets courseItems-modules.ts look
+   *  up which module the QUIZ is filed under: Canvas records that module
+   *  item as type "Quiz" keyed by THIS id, never by the shadow assignment's
+   *  own `id` above. */
+  shadowQuizId?: number;
+  /** Set only on an Assignment-tab row that is really a graded discussion's
+   *  shadow assignment record (Canvas creates one for every graded
+   *  discussion topic, the same way it does for classic quizzes, identified
+   *  by `submission_types` including "discussion_topic"). Same reasoning as
+   *  `isClassicQuizShadow` above: this row's `id` is the assignment id, and
+   *  deleting it cascades into deleting the discussion, so it must be
+   *  labelled rather than left indistinguishable from an ordinary
+   *  assignment. */
+  isGradedDiscussionShadow?: boolean;
+  /** The underlying graded discussion topic's own id - populated only
+   *  alongside `isGradedDiscussionShadow`, from Canvas's `discussion_topic.id`
+   *  field on the assignment payload (a base field of the Assignment object
+   *  model itself, not one gated behind the assignments-index endpoint's
+   *  include[] allowlist - see raw-types.ts's own citation). Absent when
+   *  Canvas's response genuinely does not carry the field for this row
+   *  ("if applicable", per Canvas's own docs) - callers must treat that as
+   *  UNKNOWN, never as "no discussion topic id therefore no module" (see
+   *  courseItems-modules.ts's own reasoning). Lets courseItems-modules.ts look
+   *  up which module the DISCUSSION is filed under: Canvas records that
+   *  module item as type "Discussion" keyed by THIS id, never by the shadow
+   *  assignment's own `id` above - the same reasoning `shadowQuizId` already
+   *  documents for a classic quiz. */
+  shadowDiscussionTopicId?: number;
 }
 
 /** A grading rubric available to the course (for bulk association). Course-

@@ -122,29 +122,36 @@ export function CourseCopyModal({
     }
     // Assignments and Quizzes are planned TOGETHER, not as two independent
     // loop iterations: a New Quiz is a Canvas Assignment object that
-    // listBulkItemsAction only ever returns under ONE of the two kinds
-    // (never "Assignment" - C3 - always "Quiz", flagged isNewQuiz, keyed by
-    // its assignment id). Planning them separately either silently lost New
-    // Quizzes entirely when only "Assignments" was ticked, or could target
-    // one for delete twice when both were ticked. See
-    // planAssignmentPurgeDeletes' own comment for the full reasoning.
+    // listBulkItemsAction now returns under BOTH kinds (bulk.ts's own bug
+    // fix - it no longer excludes New Quizzes from the "Assignment" listing;
+    // it is also still returned under "Quiz", flagged isNewQuiz, keyed by its
+    // assignment id, exactly as before). Planning the two checkboxes as
+    // independent loop iterations over their own listings would double-count
+    // a New Quiz whenever both were ticked (the same id reachable from either
+    // list) - planAssignmentPurgeDeletes below is what dedupes it into a
+    // single Assignment delete call regardless of which checkbox combination
+    // is ticked. See that function's own comment for the full reasoning.
     //
     // CHECKBOX-TO-CANVAS-OBJECT SEMANTICS, DELIBERATE (REGRESSION.md check
     // 8): ticking "Assignments" alone deletes real Assignment objects only -
     // ordinary assignments plus New Quizzes (a New Quiz IS an Assignment
     // object). It does NOT delete Classic quizzes or graded discussions, even
     // though Canvas's /assignments endpoint still returns a "shadow"
-    // assignment row for each of those (listBulkItems filters those shadow
-    // rows out before they ever reach this function - bulk.ts's
-    // isClassicQuizShadow / isDiscussionShadow). Deleting a Classic quiz
-    // requires ticking "Quizzes" (this block, kind "Quiz", /quizzes
-    // endpoint); deleting a graded discussion requires ticking "Discussions"
-    // (the kindMap loop below, kind "Discussion", /discussion_topics
-    // endpoint). Before the shadow-row exclusion existed, ticking
-    // "Assignments" alone silently deleted both too, because Canvas cascades
+    // assignment row for each of those, and listBulkItems("Assignment") now
+    // DOES include those shadow rows (bulk.ts's bug fix, live report
+    // 2026-08-22 - the Assignments TAB must show them too, not just this
+    // purge plan). The exclusion enforcing this purge decision lives inside
+    // planAssignmentPurgeDeletes itself now (it filters out
+    // isClassicQuizShadow / isGradedDiscussionShadow explicitly), not in what
+    // listBulkItems happens to return. Deleting a Classic quiz requires
+    // ticking "Quizzes" (this block, kind "Quiz", /quizzes endpoint, using
+    // the quiz's own id); deleting a graded discussion requires ticking
+    // "Discussions" (the kindMap loop below, kind "Discussion",
+    // /discussion_topics endpoint). Ticking "Assignments" alone must never
+    // reach either through the shadow assignment id, because Canvas cascades
     // DELETE /assignments/{shadowId} into deleting the underlying quiz or
-    // discussion - that was Canvas's data model leaking into "assignments",
-    // not an intentional purge scope, so it is not restored here. Pinned in
+    // discussion - that would be Canvas's data model leaking into
+    // "assignments", not an intentional purge scope. Pinned in
     // course-copy-purge.test.ts.
     const purgeAssignments = purgeTypes.has("assignments");
     const purgeQuizzes = purgeTypes.has("quizzes");

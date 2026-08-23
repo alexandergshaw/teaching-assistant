@@ -35,13 +35,29 @@ import {
   updateGradableAction,
 } from "../../actions";
 import styles from "../../page.module.css";
-import { formatDueDate } from "./utils";
 import { gateOperation, type ContentSourceContext } from "./contentSourceGating";
 import { useFlatItemSelection } from "./useFlatItemSelection";
 import { isConfirmArmed, selectionSignature } from "./modules/confirmArming";
 import { effectiveKindOf, groupSelectedByEffectiveKind } from "./courseItems-routing";
 import { buildModuleIndex, modulesForItem } from "./courseItems-modules";
+import { ordinaryAssignmentSelection } from "./courseItems-eligibility";
+import { CourseItemRow } from "./CourseItemRow";
 import { interpretRubricsResult } from "./modules/useRubrics";
+import {
+  DEFAULT_COURSE_ITEM_FILTERS,
+  courseItemFiltersStorageKey,
+  parseCourseItemFilters,
+  serializeCourseItemFilters,
+  filterCourseItems,
+  hiddenUnknownModuleCount,
+  isFiltersActive,
+  type CourseItemFilters,
+  type PublishedFilter,
+  type ModuleFilter,
+  type DueDateFilter,
+  type PointsFilter,
+  type QuizKindFilter,
+} from "./courseItems-filters";
 
 export interface CourseItemsViewProps {
   courseUrl: string;
@@ -115,6 +131,23 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
     if (typeof window !== "undefined") localStorage.setItem(searchKey, search);
   }, [search, searchKey]);
 
+  // Facet filters (this feature's own AC: filter by published vs not,
+  // assigned to a module vs not, etc). All five persist together under ONE
+  // ta- key per kind - see courseItems-filters.ts's own "Persistence"
+  // section for why grouping (rather than five parallel keys) is the right
+  // call here, and why none of the five are excluded the way the one-shot
+  // bulk-operation fields below deliberately are: every facet is a standing
+  // viewing preference, exactly like the pre-existing `search` above.
+  const filtersKey = courseItemFiltersStorageKey(kindLower);
+  const [filters, setFilters] = useState<CourseItemFilters>(() =>
+    parseCourseItemFilters(typeof window !== "undefined" ? localStorage.getItem(filtersKey) : null)
+  );
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem(filtersKey, serializeCourseItemFilters(filters));
+  }, [filters, filtersKey]);
+  const filtersActive = isFiltersActive(filters);
+  const clearFilters = () => setFilters(DEFAULT_COURSE_ITEM_FILTERS);
+
   // Bulk-operation input fields. Deliberately NOT persisted, matching
   // BulkItemsSection/useBulkItemActions.ts's own precedent for the identical
   // controls on the Modules view: these are one-shot inputs for whatever is
@@ -139,6 +172,23 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
   // compare-and-adjust prune).
   const currentIds = useMemo(() => items.map((it) => it.id), [items]);
   const selection = useFlatItemSelection(currentIds);
+
+  // Filtering input (courseItems-filters.ts's own CourseItemFilterRow shape):
+  // pairs every item with its already-looked-up module association, computed
+  // ONCE per items/moduleIndex change - never per keystroke in the search
+  // box or per facet change, both of which only re-slice this same array.
+  const filterRows = useMemo(
+    () => items.map((it) => ({ item: it, moduleInfo: modulesForItem(it, kind, moduleIndex) })),
+    [items, kind, moduleIndex]
+  );
+  // Reuses filterRows' own already-computed moduleInfo for the row render
+  // below, rather than calling modulesForItem a second time per row per
+  // render - the two used to disagree in nothing but cost (same inputs,
+  // same pure function), so folding them to one lookup is free.
+  const moduleInfoById = useMemo(
+    () => new Map(filterRows.map((r) => [r.item.id, r.moduleInfo] as const)),
+    [filterRows]
+  );
 
   const reload = async () => {
     // Never hits the live Canvas API while viewing a stored export - see the
@@ -388,14 +438,26 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
   };
 
   // Rubrics (assignments only, B1/B3) - the Quizzes tab never renders the
-  // control that calls this, so `ids` here are always plain Assignment ids.
+  // control that calls this. FINDING 1 FIX: gated per ROW, not just per tab -
+  // a New Quiz, a classic-quiz shadow row, or a graded-discussion shadow row
+  // selected in this tab must never reach this write (a New Quiz's own
+  // tooltip already says rubric changes "do not apply"; this is what makes
+  // that true). `ordinaryAssignmentSelection` filters the selection down to
+  // eligible ids and reports how many were left out, so the note can say so
+  // plainly rather than silently dropping them.
   const bulkRubric = () => {
     if (bulkRubricId === "") {
       setNote({ kind: "error", text: "Pick a rubric first." });
       return;
     }
-    const ids = [...selection.selected];
-    if (ids.length === 0) return;
+    const { eligible: ids, skipped } = ordinaryAssignmentSelection(selection.selected, itemsById);
+    if (ids.length === 0) {
+      setNote({
+        kind: "error",
+        text: "Rubric association only applies to ordinary assignments - none of the selected rows are eligible (New Quizzes, classic quizzes, and graded discussions cannot receive a rubric here).",
+      });
+      return;
+    }
     void (async () => {
       setBusy(true);
       setNote(null);
@@ -407,20 +469,30 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
       }
       setNote({
         kind: result.failures.length ? "error" : "success",
-        text: `Rubric associated: ${result.updated} done${result.failures.length ? `, ${result.failures.length} failed` : ""}.`,
+        text: `Rubric associated: ${result.updated} done${result.failures.length ? `, ${result.failures.length} failed` : ""}${skipped ? `, ${skipped} skipped (not an ordinary assignment)` : ""}.`,
       });
       void reload();
     })();
   };
 
-  // Submission type (assignments only, B1/B3) - same reasoning as rubrics.
+  // Submission type (assignments only, B1/B3) - same reasoning and same
+  // FINDING 1 per-row eligibility gate as bulkRubric above. This one matters
+  // even more: PUT assignment[submission_types][]=... against a New Quiz
+  // replaces the `external_tool` submission type that IS the New Quiz,
+  // destroying it - not merely mislabeling it.
   const bulkUpdateSubmissionType = () => {
     if (bulkSubType === "") {
       setNote({ kind: "error", text: "Pick a submission type first." });
       return;
     }
-    const ids = [...selection.selected];
-    if (ids.length === 0) return;
+    const { eligible: ids, skipped } = ordinaryAssignmentSelection(selection.selected, itemsById);
+    if (ids.length === 0) {
+      setNote({
+        kind: "error",
+        text: "Submission type can only be changed on ordinary assignments - none of the selected rows are eligible (New Quizzes, classic quizzes, and graded discussions are not affected).",
+      });
+      return;
+    }
     void (async () => {
       setBusy(true);
       setNote(null);
@@ -432,7 +504,7 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
       }
       setNote({
         kind: result.failures.length ? "error" : "success",
-        text: `Submission type updated on ${result.updated} assignment${result.updated === 1 ? "" : "s"}${result.failures.length ? `, ${result.failures.length} failed` : ""}.`,
+        text: `Submission type updated on ${result.updated} assignment${result.updated === 1 ? "" : "s"}${result.failures.length ? `, ${result.failures.length} failed` : ""}${skipped ? `, ${skipped} skipped (not an ordinary assignment)` : ""}.`,
       });
       void reload();
     })();
@@ -471,6 +543,14 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
       void reload();
     })();
   };
+
+  // FINDING 1: how many of the CURRENTLY selected rows are actually eligible
+  // for the rubric/submission-type writes (ordinary assignments only) -
+  // drives both button-disabling below and the "none eligible" hint, so the
+  // UI communicates ineligibility BEFORE a click, not only after one via the
+  // error note in bulkRubric/bulkUpdateSubmissionType above.
+  const eligibleAssignmentCount =
+    kind === "Assignment" ? ordinaryAssignmentSelection(selection.selected, itemsById).eligible.length : 0;
 
   const selectionSig = selectionSignature(selection.selected);
   const confirmDelete = isConfirmArmed(deleteArmedFor, selectionSig);
@@ -519,10 +599,27 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
   // wanted later, it belongs in the AC doc as its own criterion, with the
   // select-all interaction called out explicitly, not folded silently into
   // the module-column change.
-  const query = search.trim().toLowerCase();
-  const shown = items.filter((it) => it.title.toLowerCase().includes(query));
+  // F1: title search and every facet combine (filterCourseItems runs the
+  // search AND every facet over the same `filterRows`, never one replacing
+  // the other). F3: narrowing ANY of them - the search box or a facet below
+  // - only ever shrinks `visibleIds`. A row that was already selected before
+  // the narrowing stays in `selection.selected` even once it drops out of
+  // `shown` - hidden, not deselected - because `selectAllVisible` only ever
+  // adds/removes exactly `visibleIds` (mergeOrClearVisible in
+  // useFlatItemSelection.ts never touches anything outside that list), so a
+  // subsequent bulk action still hits it. It only leaves the selection once
+  // it becomes genuinely invalid (deleted, or dropped by a reload) via
+  // `pruneSelection` - a filter alone never removes it. This is exactly the
+  // pre-existing search behaviour; the facets just widen what "visible" can
+  // mean.
+  const shown = filterCourseItems(filterRows, filters, search);
   const visibleIds = shown.map((it) => it.id);
   const allShownSelected = selection.allVisibleSelected(visibleIds);
+  // F2/F4: how many rows the Module facet alone is holding back because
+  // their module status is UNKNOWN, not because they genuinely fail the
+  // facet - surfaced as its own hint below rather than left as an
+  // unexplained gap between the search count and the shown count.
+  const hiddenUnknownModules = hiddenUnknownModuleCount(filterRows, filters);
 
   return (
     <div className={styles.form}>
@@ -539,8 +636,94 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
           sx={{ flex: "1 1 200px", maxWidth: 300 }}
         />
         <span className={styles.fieldHint} style={{ margin: 0 }}>
-          {search.trim() ? `${shown.length} of ${items.length}` : items.length} {items.length === 1 ? kindLabelSingular : kindLabelPlural}
+          {search.trim() || filtersActive ? `${shown.length} of ${items.length}` : items.length}{" "}
+          {items.length === 1 ? kindLabelSingular : kindLabelPlural}
         </span>
+      </div>
+
+      {/* Facet filters (F1: each independent, and they combine with each
+          other and with the title search above rather than replacing it).
+          "filtered vs not" from the original request read as PUBLISHED vs
+          not - the one boolean every row already shows as PUBLISHED/
+          UNPUBLISHED below - since the data has no other "already filtered"
+          state to answer; "assigned to a module vs not" is the Module
+          select; "etc" is covered by the two facets the row data can
+          actually answer (due date, points), plus quiz kind on the Quizzes
+          tab only (D1's isNewQuiz), never a facet invented past what a
+          BulkItem carries. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <TextField
+          select
+          size="small"
+          label="Published"
+          value={filters.published}
+          onChange={(e) => setFilters((f) => ({ ...f, published: e.target.value as PublishedFilter }))}
+          sx={{ minWidth: 150 }}
+        >
+          <MenuItem value="all">All</MenuItem>
+          <MenuItem value="published">Published only</MenuItem>
+          <MenuItem value="unpublished">Unpublished only</MenuItem>
+        </TextField>
+        <TextField
+          select
+          size="small"
+          label="Module"
+          value={filters.module}
+          onChange={(e) => setFilters((f) => ({ ...f, module: e.target.value as ModuleFilter }))}
+          sx={{ minWidth: 170 }}
+        >
+          <MenuItem value="all">All</MenuItem>
+          <MenuItem value="in-module">In a module</MenuItem>
+          <MenuItem value="no-module">Not in any module</MenuItem>
+        </TextField>
+        <TextField
+          select
+          size="small"
+          label="Due date"
+          value={filters.dueDate}
+          onChange={(e) => setFilters((f) => ({ ...f, dueDate: e.target.value as DueDateFilter }))}
+          sx={{ minWidth: 150 }}
+        >
+          <MenuItem value="all">All</MenuItem>
+          <MenuItem value="has-due">Has a due date</MenuItem>
+          <MenuItem value="no-due">No due date</MenuItem>
+        </TextField>
+        <TextField
+          select
+          size="small"
+          label="Points"
+          value={filters.points}
+          onChange={(e) => setFilters((f) => ({ ...f, points: e.target.value as PointsFilter }))}
+          sx={{ minWidth: 140 }}
+        >
+          <MenuItem value="all">All</MenuItem>
+          <MenuItem value="has-points">Has points</MenuItem>
+          <MenuItem value="no-points">No points</MenuItem>
+        </TextField>
+        {kind === "Quiz" && (
+          <TextField
+            select
+            size="small"
+            label="Quiz kind"
+            value={filters.quizKind}
+            onChange={(e) => setFilters((f) => ({ ...f, quizKind: e.target.value as QuizKindFilter }))}
+            sx={{ minWidth: 140 }}
+          >
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="classic">Classic quiz</MenuItem>
+            <MenuItem value="new-quiz">New Quiz</MenuItem>
+          </TextField>
+        )}
+        {filtersActive && (
+          <Button variant="text" size="small" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        )}
+        {filters.module !== "all" && hiddenUnknownModules > 0 && (
+          <span className={styles.fieldHint} style={{ margin: 0 }}>
+            ({hiddenUnknownModules} with unknown module status excluded)
+          </span>
+        )}
       </div>
 
       {selection.selected.size > 0 && (
@@ -595,6 +778,26 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
             </Button>
           </div>
 
+          {/* FINDING 1: rubric association and submission-type change only
+              ever apply to an ORDINARY assignment - never a New Quiz, a
+              classic-quiz shadow row, or a graded-discussion shadow row, even
+              though all three can now appear in this tab (bulk.ts's own bug
+              fix). Both controls below stay gated on kind === "Assignment"
+              (the Quizzes tab never renders them at all), but are now ALSO
+              disabled whenever the current selection contains zero eligible
+              rows - communicated up front, before a click, rather than only
+              after one via the error note in bulkRubric/
+              bulkUpdateSubmissionType. A selection that mixes eligible and
+              ineligible rows still applies to the eligible subset (never
+              silently drops the rest without saying so - see those
+              functions' own "skipped" wording). */}
+          {kind === "Assignment" && selection.selected.size > 0 && eligibleAssignmentCount === 0 && (
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              None of the selected rows are ordinary assignments - New Quizzes, classic quizzes, and graded
+              discussions cannot receive a rubric or submission-type change here.
+            </p>
+          )}
+
           {kind === "Assignment" && (
             <div className={styles.bulkRow}>
               <span className={styles.bulkLabel}>Rubric</span>
@@ -614,7 +817,12 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
                   </MenuItem>
                 ))}
               </TextField>
-              <Button variant="outlined" size="small" disabled={busy || bulkRubricId === ""} onClick={bulkRubric}>
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={busy || bulkRubricId === "" || eligibleAssignmentCount === 0}
+                onClick={bulkRubric}
+              >
                 Associate
               </Button>
             </div>
@@ -638,7 +846,12 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
                   </MenuItem>
                 ))}
               </TextField>
-              <Button variant="outlined" size="small" disabled={busy || bulkSubType === ""} onClick={bulkUpdateSubmissionType}>
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={busy || bulkSubType === "" || eligibleAssignmentCount === 0}
+                onClick={bulkUpdateSubmissionType}
+              >
                 Apply
               </Button>
             </div>
@@ -698,79 +911,45 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
           />
           <div className={styles.ccItems} style={{ borderTop: "1px solid var(--card-border)" }}>
             {shown.length === 0 && (
+              // F6: distinct from the "this course has no X yet" empty state
+              // above (that one fires when `items.length === 0` - a genuinely
+              // empty course - and this block is never reached in that case).
+              // This is the OTHER empty state: the course has items, but the
+              // search and/or facets have narrowed them all out - worded
+              // according to which is actually active, and pointing straight
+              // at the clear-filters affordance when a facet is involved.
               <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
-                No {kindLabelPlural} match your search.
+                No {kindLabelPlural} match{" "}
+                {search.trim() && filtersActive
+                  ? "your search and filters"
+                  : filtersActive
+                    ? "these filters"
+                    : "your search"}
+                .
+                {filtersActive && (
+                  <Button variant="text" size="small" onClick={clearFilters} style={{ marginLeft: 8 }}>
+                    Clear filters
+                  </Button>
+                )}
               </p>
             )}
-            {shown.map((it) => {
-              // A1/A2/A3/A4: one lookup per row against the already-built
-              // index (never a tree walk per row - the index itself was
-              // built once, in the effect/reload above). `known: false`
-              // (module tree unavailable) is further split by
-              // `moduleIndexFailed` (NIT11) so a still-in-flight load reads
-              // "Loading" rather than claiming a failure that has not
-              // happened yet - "Unknown" is reserved for a genuine fetch
-              // error. `known: true, names: []` (tree loaded, item is in zero
-              // modules) renders "No module" explicitly, in the warning
-              // color, since an unassociated assignment is usually a mistake
-              // worth noticing; `known: true, names: [...]` joins every
-              // module name (A3 - never just the first).
-              const moduleInfo = modulesForItem(it, kind, moduleIndex);
-              const moduleCell = !moduleInfo.known
-                ? moduleIndexFailed
-                  ? { text: "Unknown", title: "The module list could not be loaded for this course.", warn: false, dim: true }
-                  : { text: "Loading…", title: "Module associations are still loading.", warn: false, dim: true }
-                : moduleInfo.names.length === 0
-                  ? { text: "No module", title: "This item is not in any module.", warn: true, dim: false }
-                  : { text: moduleInfo.names.join(", "), title: moduleInfo.names.join(", "), warn: false, dim: false };
-              return (
-                <div key={it.id} className={styles.ccItem}>
-                  <Checkbox
-                    size="small"
-                    className={styles.ccCheckbox}
-                    checked={selection.selected.has(it.id)}
-                    onChange={() => selection.toggle(it.id)}
-                    aria-label={`Select ${it.title}`}
-                  />
-                  <span className={styles.ccType} title={it.published ? "Published" : "Unpublished"}>
-                    {it.published ? "PUBLISHED" : "UNPUBLISHED"}
-                  </span>
-                  {kind === "Quiz" && it.isNewQuiz && (
-                    <span
-                      className={styles.ccType}
-                      title="LTI-backed New Quiz (Quizzes 2) - rubric and submission-type changes do not apply"
-                    >
-                      NEW QUIZ
-                    </span>
-                  )}
-                  <span className={styles.ccItemName} title={it.title} style={{ display: "flex", alignItems: "center" }}>
-                    {it.title}
-                  </span>
-                  <span
-                    className={styles.ccCount}
-                    style={{
-                      width: 170,
-                      textAlign: "left",
-                      flexShrink: 0,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      color: moduleCell.warn ? "var(--danger)" : moduleCell.dim ? "var(--text-secondary)" : undefined,
-                      fontStyle: moduleCell.dim ? "italic" : "normal",
-                    }}
-                    title={moduleCell.title}
-                  >
-                    {moduleCell.text}
-                  </span>
-                  <span className={styles.ccCount} style={{ width: 150, textAlign: "right", flexShrink: 0 }}>
-                    {it.dueAt ? formatDueDate(it.dueAt) : "No due date"}
-                  </span>
-                  <span className={styles.ccCount} style={{ width: 70, textAlign: "right", flexShrink: 0 }}>
-                    {it.pointsPossible != null ? `${it.pointsPossible} pts` : "—"}
-                  </span>
-                </div>
-              );
-            })}
+            {/* Per-row rendering (New Quiz/shadow labels, the four-way
+                module cell) lives in CourseItemRow.tsx now - extracted out of
+                this file once it approached this repo's 1000-line ceiling.
+                `moduleInfoById` (built above from `filterRows`, which already
+                computed each row's moduleInfo once) is looked up here rather
+                than calling modulesForItem a second time per row per
+                render. */}
+            {shown.map((it) => (
+              <CourseItemRow
+                key={it.id}
+                item={it}
+                selected={selection.selected.has(it.id)}
+                onToggle={() => selection.toggle(it.id)}
+                moduleInfo={moduleInfoById.get(it.id) ?? { known: false }}
+                moduleIndexFailed={moduleIndexFailed}
+              />
+            ))}
           </div>
         </div>
       )}

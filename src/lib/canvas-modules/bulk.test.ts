@@ -109,34 +109,78 @@ const GRADED_DISCUSSION_SHADOW_ASSIGNMENT = {
   due_at: "2026-03-06T00:00:00Z",
   points_possible: 20,
   submission_types: ["discussion_topic"],
+  discussion_topic: { id: 77 },
 };
 
-describe("listBulkItems('Assignment') excludes New Quizzes (C3)", () => {
-  it("drops a row the classifier flags as a New Quiz, keeping ordinary assignments", async () => {
+// Finding 3: the same shape as above, but Canvas's own docs say
+// `discussion_topic` is present only "if applicable" - this fixture models a
+// row where the field is genuinely absent, which courseItems-modules.ts must
+// treat as UNKNOWN module status, never "no module".
+const GRADED_DISCUSSION_SHADOW_ASSIGNMENT_NO_TOPIC_ID = {
+  id: 905,
+  name: "Week 4 Discussion",
+  published: true,
+  due_at: null,
+  points_possible: 10,
+  submission_types: ["discussion_topic"],
+};
+
+// BUG FIX (live report 2026-08-22): the Assignments tab used to EXCLUDE New
+// Quizzes, classic-quiz shadow assignment rows, and graded-discussion shadow
+// assignment rows, on the theory that none of them was "an assignment" the
+// way the tab means it. That was the reported bug: a real course with one
+// ordinary "Syllabus Acknowledgement" assignment plus three classic
+// "Syllabus Acknowledgement" quizzes shows all FOUR on Canvas's own
+// Assignments page, but this tab silently showed only one. The fix returns
+// every assignment-shaped row here now, each labelled for what it really is.
+describe("listBulkItems('Assignment') now returns every assignment-shaped row, each labelled (bug fix)", () => {
+  it("includes a row the classifier flags as a New Quiz alongside an ordinary assignment, both present and correctly flagged", async () => {
     stubCanvas({ assignments: [[NEW_QUIZ_ASSIGNMENT, ORDINARY_ASSIGNMENT]] });
 
     const items = await listBulkItems(COURSE_URL, "Assignment", "MCC");
 
-    expect(items.map((i) => i.id)).toEqual(["902"]);
-    expect(items[0].title).toBe("Essay 1");
+    expect(items.map((i) => i.id).sort()).toEqual(["901", "902"]);
+    expect(items.find((i) => i.id === "901")?.isNewQuiz).toBe(true);
+    expect(items.find((i) => i.id === "902")?.isNewQuiz).toBeUndefined();
+    expect(items.find((i) => i.id === "902")?.title).toBe("Essay 1");
   });
-});
 
-describe("listBulkItems('Assignment') also excludes Classic-quiz and graded-discussion shadow assignments (Finding 1)", () => {
-  it("drops a Classic quiz's shadow assignment row (quiz_id populated), keeping ordinary assignments", async () => {
+  it("includes a Classic quiz's shadow assignment row (quiz_id populated), flagged isClassicQuizShadow with its own shadowQuizId, alongside an ordinary assignment", async () => {
     stubCanvas({ assignments: [[CLASSIC_QUIZ_SHADOW_ASSIGNMENT, ORDINARY_ASSIGNMENT]] });
 
     const items = await listBulkItems(COURSE_URL, "Assignment", "MCC");
 
-    expect(items.map((i) => i.id)).toEqual(["902"]);
+    expect(items.map((i) => i.id).sort()).toEqual(["902", "903"]);
+    const shadow = items.find((i) => i.id === "903");
+    expect(shadow?.isClassicQuizShadow).toBe(true);
+    expect(shadow?.shadowQuizId).toBe(55);
+    expect(shadow?.isNewQuiz).toBeUndefined();
+    const ordinary = items.find((i) => i.id === "902");
+    expect(ordinary?.isClassicQuizShadow).toBeUndefined();
+    expect(ordinary?.shadowQuizId).toBeUndefined();
   });
 
-  it("drops a graded discussion's shadow assignment row (submission_types includes discussion_topic)", async () => {
+  it("includes a graded discussion's shadow assignment row (submission_types includes discussion_topic), flagged isGradedDiscussionShadow, carrying the discussion topic's own id (finding 3)", async () => {
     stubCanvas({ assignments: [[GRADED_DISCUSSION_SHADOW_ASSIGNMENT, ORDINARY_ASSIGNMENT]] });
 
     const items = await listBulkItems(COURSE_URL, "Assignment", "MCC");
 
-    expect(items.map((i) => i.id)).toEqual(["902"]);
+    expect(items.map((i) => i.id).sort()).toEqual(["902", "904"]);
+    const shadow = items.find((i) => i.id === "904");
+    expect(shadow?.isGradedDiscussionShadow).toBe(true);
+    expect(shadow?.isClassicQuizShadow).toBeUndefined();
+    expect(shadow?.isNewQuiz).toBeUndefined();
+    expect(shadow?.shadowDiscussionTopicId).toBe(77);
+  });
+
+  it("finding 3: a graded-discussion shadow row whose payload genuinely has no discussion_topic id leaves shadowDiscussionTopicId undefined, never a fabricated 0/null", async () => {
+    stubCanvas({ assignments: [[GRADED_DISCUSSION_SHADOW_ASSIGNMENT_NO_TOPIC_ID]] });
+
+    const items = await listBulkItems(COURSE_URL, "Assignment", "MCC");
+
+    const shadow = items.find((i) => i.id === "905");
+    expect(shadow?.isGradedDiscussionShadow).toBe(true);
+    expect(shadow?.shadowDiscussionTopicId).toBeUndefined();
   });
 
   it("never mislabels a graded discussion's shadow assignment as a New Quiz in the Quiz tab either", async () => {
@@ -144,9 +188,71 @@ describe("listBulkItems('Assignment') also excludes Classic-quiz and graded-disc
 
     const items = await listBulkItems(COURSE_URL, "Quiz", "MCC");
 
-    // Only the Classic quiz - the graded discussion belongs in neither tab
-    // this chunk builds (no flat Discussions tab yet).
+    // Only the Classic quiz - the graded discussion's shadow row belongs
+    // only in the Assignments tab (there is no flat Discussions tab yet).
     expect(items.map((i) => i.id)).toEqual(["55"]);
+  });
+});
+
+// THE EXACT REPORTED COURSE SHAPE: one real assignment plus three classic
+// quizzes, all titled "Syllabus Acknowledgement" (verified against the
+// user's own .imscc export). Pins A1 directly: all four Canvas objects must
+// surface in the Assignments tab, and the three quiz shadows must also each
+// resolve (by their OWN quiz id, never the shadow assignment id) in the
+// Quizzes tab.
+const SYLLABUS_ACK_ASSIGNMENT = {
+  id: 950,
+  name: "Syllabus Acknowledgement",
+  published: true,
+  due_at: "2026-09-04T23:59:00Z",
+  points_possible: 100,
+  submission_types: ["online_text_entry"],
+};
+const SYLLABUS_ACK_QUIZ_IDS = [61, 62, 63];
+const SYLLABUS_ACK_QUIZ_SHADOWS = SYLLABUS_ACK_QUIZ_IDS.map((quizId, i) => ({
+  id: 970 + i,
+  name: "Syllabus Acknowledgement",
+  published: true,
+  due_at: null,
+  points_possible: 1,
+  submission_types: ["online_quiz"],
+  quiz_id: quizId,
+}));
+const SYLLABUS_ACK_QUIZZES = SYLLABUS_ACK_QUIZ_IDS.map((quizId) => ({
+  id: quizId,
+  title: "Syllabus Acknowledgement",
+  published: true,
+  due_at: null,
+  points_possible: 1,
+}));
+
+describe("THE REPORTED BUG: one real assignment + three classic quizzes, all titled 'Syllabus Acknowledgement'", () => {
+  it("the Assignments tab lists all four objects - the real assignment plus every classic-quiz shadow row, none silently dropped", async () => {
+    stubCanvas({ assignments: [[SYLLABUS_ACK_ASSIGNMENT, ...SYLLABUS_ACK_QUIZ_SHADOWS]] });
+
+    const items = await listBulkItems(COURSE_URL, "Assignment", "MCC");
+
+    expect(items).toHaveLength(4);
+    expect(items.every((i) => i.title === "Syllabus Acknowledgement")).toBe(true);
+    const shadows = items.filter((i) => i.isClassicQuizShadow);
+    expect(shadows).toHaveLength(3);
+    expect(shadows.map((i) => i.shadowQuizId).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual(SYLLABUS_ACK_QUIZ_IDS);
+    const ordinary = items.filter((i) => !i.isClassicQuizShadow);
+    expect(ordinary).toHaveLength(1);
+    expect(ordinary[0].id).toBe("950");
+  });
+
+  it("each of the three quiz shadows also resolves in the Quizzes tab by its OWN quiz id (61/62/63), never by its shadow assignment id (970/971/972)", async () => {
+    stubCanvas({ assignments: [[SYLLABUS_ACK_ASSIGNMENT, ...SYLLABUS_ACK_QUIZ_SHADOWS]], quizzes: SYLLABUS_ACK_QUIZZES });
+
+    const quizItems = await listBulkItems(COURSE_URL, "Quiz", "MCC");
+
+    expect(quizItems.map((i) => i.id).sort()).toEqual(["61", "62", "63"]);
+    expect(quizItems.every((i) => i.isNewQuiz === undefined)).toBe(true);
+    // The shadow assignment ids must never leak into the Quiz tab.
+    for (const shadowId of ["970", "971", "972"]) {
+      expect(quizItems.map((i) => i.id)).not.toContain(shadowId);
+    }
   });
 });
 
@@ -182,20 +288,17 @@ describe("listBulkItems('Quiz') includes Classic AND New Quizzes, each labelled 
   });
 });
 
-describe("Classic and New Quiz lists cannot double-count (C5)", () => {
-  // Fixture set includes the Classic quiz's SHADOW ASSIGNMENT (id 903,
-  // title "Classic Quiz") alongside the Classic quiz's own /quizzes record
-  // (id 55, same title). Counting by id - as this test used to - cannot
-  // catch a double-listed Classic quiz: the shadow assignment and the quiz
-  // object have DIFFERENT ids, so `every(c => c === 1)` passed even while
-  // Finding 1's bug shipped it in both tabs. Counting by TITLE across both
-  // tabs together is what actually pins "one Canvas object, one row".
-  it("a Classic quiz appears exactly once by TITLE across both tabs combined, despite its shadow assignment having a different id", async () => {
+// BUG FIX UPDATE: a Classic quiz and a New Quiz may now legitimately appear
+// in BOTH tabs at once - that reversal is the whole point of the fix (Canvas
+// itself double-lists a quiz under both its Assignments and Quizzes pages).
+// What must NEVER happen is a row appearing TWICE WITHIN the same tab, or the
+// shadow assignment id ever being mistaken for the quiz's own id.
+describe("Classic and New Quiz rows may legitimately appear in both tabs now, never duplicated WITHIN one tab", () => {
+  it("a Classic quiz's shadow assignment row (Assignments tab) and its own /quizzes record (Quizzes tab) are two DIFFERENT ids for the same object - by design, not a bug", async () => {
     stubCanvas({
       assignments: [[NEW_QUIZ_ASSIGNMENT, ORDINARY_ASSIGNMENT, CLASSIC_QUIZ_SHADOW_ASSIGNMENT]],
       quizzes: [CLASSIC_QUIZ],
     });
-
     const assignmentItems = await listBulkItems(COURSE_URL, "Assignment", "MCC");
     stubCanvas({
       assignments: [[NEW_QUIZ_ASSIGNMENT, ORDINARY_ASSIGNMENT, CLASSIC_QUIZ_SHADOW_ASSIGNMENT]],
@@ -203,25 +306,33 @@ describe("Classic and New Quiz lists cannot double-count (C5)", () => {
     });
     const quizItems = await listBulkItems(COURSE_URL, "Quiz", "MCC");
 
-    const allTitles = [...assignmentItems.map((i) => i.title), ...quizItems.map((i) => i.title)];
-    const titleCounts = new Map<string, number>();
-    for (const t of allTitles) titleCounts.set(t, (titleCounts.get(t) ?? 0) + 1);
+    // Neither list contains a row twice WITHIN itself.
+    expect(new Set(assignmentItems.map((i) => i.id)).size).toBe(assignmentItems.length);
+    expect(new Set(quizItems.map((i) => i.id)).size).toBe(quizItems.length);
 
-    // "Classic Quiz" must appear exactly once TOTAL, not once per tab.
-    expect(titleCounts.get("Classic Quiz")).toBe(1);
-    expect(titleCounts.get("Chapter 3 New Quiz")).toBe(1);
-    expect(titleCounts.get("Essay 1")).toBe(1);
-    expect([...titleCounts.values()].every((c) => c === 1)).toBe(true);
+    // The shadow assignment's own id (903) surfaces in the Assignments tab,
+    // labelled - it is a real, distinct row now, not suppressed.
+    const shadowRow = assignmentItems.find((i) => i.id === "903");
+    expect(shadowRow?.isClassicQuizShadow).toBe(true);
+    expect(shadowRow?.shadowQuizId).toBe(55);
+    // The quiz's own id (55) surfaces separately in the Quizzes tab.
+    expect(quizItems.map((i) => i.id)).toContain("55");
+    // 903 must never appear in the Quizzes tab (it is not a quiz id).
+    expect(quizItems.map((i) => i.id)).not.toContain("903");
 
-    // And by id: the shadow assignment's own id (903) must not surface as a
-    // distinct row anywhere - it is the same object as id 55, not a second one.
-    const allIds = [...assignmentItems.map((i) => i.id), ...quizItems.map((i) => i.id)];
-    expect(allIds).not.toContain("903");
+    // A New Quiz (901) now appears in BOTH tabs - both are the SAME
+    // assignment id, never a second, different id invented for either tab.
+    expect(assignmentItems.find((i) => i.id === "901")?.isNewQuiz).toBe(true);
+    expect(quizItems.find((i) => i.id === "901")?.isNewQuiz).toBe(true);
+
+    // The ordinary assignment (902) appears only in the Assignments tab.
+    expect(assignmentItems.map((i) => i.id)).toContain("902");
+    expect(quizItems.map((i) => i.id)).not.toContain("902");
   });
 });
 
-describe("pagination still works for both kinds after the New Quiz split (E1)", () => {
-  it("Assignment: follows the Link header across pages, keeping only non-New-Quiz rows from EACH page", async () => {
+describe("pagination still works for both kinds after the Assignment-branch bug fix (E1)", () => {
+  it("Assignment: follows the Link header across pages, keeping every row (including New Quizzes) from EACH page", async () => {
     stubCanvas({
       assignments: [
         [NEW_QUIZ_ASSIGNMENT, ORDINARY_ASSIGNMENT],
@@ -231,7 +342,8 @@ describe("pagination still works for both kinds after the New Quiz split (E1)", 
 
     const items = await listBulkItems(COURSE_URL, "Assignment", "MCC");
 
-    expect(items.map((i) => i.id).sort()).toEqual(["902", "999"]);
+    expect(items.map((i) => i.id).sort()).toEqual(["901", "902", "999"]);
+    expect(items.find((i) => i.id === "901")?.isNewQuiz).toBe(true);
   });
 
   it("Quiz: multi-page assignments AND multi-page quizzes both fully resolve", async () => {

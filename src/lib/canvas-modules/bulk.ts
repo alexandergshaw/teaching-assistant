@@ -31,8 +31,11 @@ export async function listBulkItems(
     // object at all (D1), so the only way to find one is the assignments
     // endpoint - the Quiz branch below needs this fetch just as much as the
     // Assignment branch does. Classifying once here and branching on the
-    // result is what keeps a New Quiz from appearing in both tabs (C5): it
-    // is filtered OUT of Assignment's own output and filtered IN to Quiz's.
+    // result is what lets BOTH tabs show a New Quiz (Assignment's own branch
+    // below no longer excludes it, per the bug fix documented there) while
+    // still labelling it consistently in each: this is one Canvas object
+    // that genuinely belongs on both Canvas's own Assignments and Quizzes
+    // pages, not two independently-derived guesses that could disagree.
     const rawAssignments = await fetchAll<RawBulkAssignment>(`${base}/assignments?per_page=100`, ctx);
     const assignmentRows = rawAssignments
       .filter((a) => typeof a.id === "number")
@@ -47,59 +50,76 @@ export async function listBulkItems(
         // assignment row IS the same Canvas quiz object already listed by
         // the Quiz branch's own /quizzes fetch below (per the docs quoted in
         // new-quiz.ts, quiz_id is populated only on a classic quiz's shadow
-        // assignment). Keeping it here too would double-list one Canvas
-        // object under two ids (AC C5) - and deleting it via
-        // DELETE /assignments/{id} cascades to delete the quiz itself, so a
-        // user who only meant to delete "an assignment" would silently
-        // delete a quiz. This is the same disqualifying signal new-quiz.ts
+        // assignment). This is the same disqualifying signal new-quiz.ts
         // already uses to keep a classic quiz's shadow OUT of the New Quiz
-        // set; here it is used to keep it out of the Assignment set too.
+        // set; here it is carried through as a LABEL (see the Assignment
+        // branch below), not an exclusion.
         isClassicQuizShadow: a.quiz_id !== undefined && a.quiz_id !== null,
         // A graded DISCUSSION's shadow assignment: Canvas creates one of
         // these for every graded discussion topic, the same way it does for
         // classic quizzes, identified by submission_types including
-        // "discussion_topic". This app already models discussions as their
-        // own first-class BulkKind ("Discussion", src/lib/canvas-modules/
-        // types.ts) with their own listing off /discussion_topics (below)
-        // and their own update/delete paths (bulkUpdateRequest, bulkDelete) -
-        // so exactly as with quizzes, a discussion's shadow assignment is
-        // not "an assignment" from the user's point of view, and deleting it
-        // via the assignment endpoint is not the same thing as the user
-        // choosing to delete a discussion. There is no flat Discussions tab
-        // yet (out of scope for this chunk - see
-        // docs/assignments-quizzes-tabs-acceptance-criteria.md, which adds
-        // only "assignments" and "quizzes" views), so excluding these rows
-        // here means they simply do not appear in either new tab until that
-        // tab exists - deliberate: showing them mislabelled as ordinary
-        // assignments in the meantime is worse than omitting them.
+        // "discussion_topic".
         isDiscussionShadow:
           Array.isArray(a.submission_types) && a.submission_types.includes("discussion_topic"),
       }));
 
     if (kind === "Assignment") {
-      // C3 and the shadow-record exclusions above: New Quizzes, classic
-      // quiz shadows and graded discussion shadows are all excluded here -
-      // none of them is "an assignment" the way this tab means it.
-      return assignmentRows
-        .filter((row) => !row.isNewQuiz && !row.isClassicQuizShadow && !row.isDiscussionShadow)
-        .map(({ raw: a }) => ({
-          id: String(a.id),
-          title: (a.name ?? "").trim() || `Assignment ${a.id}`,
-          published: a.published ?? false,
-          dueAt: a.due_at ?? null,
-          pointsPossible: typeof a.points_possible === "number" ? a.points_possible : null,
-        }));
+      // BUG FIX (live report 2026-08-22): this branch used to EXCLUDE New
+      // Quizzes, classic-quiz shadow rows and graded-discussion shadow rows,
+      // reasoning that none of them was "an assignment" the way this tab
+      // means it. That reasoning was wrong, and it is what the reported bug
+      // actually was: a course with one real "Syllabus Acknowledgement"
+      // assignment plus three classic "Syllabus Acknowledgement" quizzes
+      // shows all FOUR objects on Canvas's own Assignments page (a Canvas
+      // quiz or graded discussion IS backed by an assignment record), but
+      // this tab silently dropped the three quiz rows - Canvas's own
+      // "double-listing" of a quiz/discussion (once under Assignments, once
+      // under Quizzes/Discussions) is the platform's data model, not a
+      // mistake to hide. Making rows vanish is a worse failure than showing
+      // a title twice with an explanation, so every assignment-shaped row is
+      // returned here now, each flagged for what it really is so
+      // CourseItemsView.tsx can label it (A2) - never silently
+      // indistinguishable from an ordinary assignment. Deleting any of these
+      // rows still deletes the underlying Canvas object it really is
+      // (DELETE /assignments/{id} cascades for a quiz/discussion shadow, and
+      // a New Quiz IS an assignment) - see courseItems-routing.ts and
+      // course-copy-purge.ts for how writes and purges still route by the
+      // row's real kind, never by this tab alone.
+      return assignmentRows.map(({ raw: a, isNewQuiz, isClassicQuizShadow, isDiscussionShadow }) => ({
+        id: String(a.id),
+        title: (a.name ?? "").trim() || `Assignment ${a.id}`,
+        published: a.published ?? false,
+        dueAt: a.due_at ?? null,
+        pointsPossible: typeof a.points_possible === "number" ? a.points_possible : null,
+        isNewQuiz: isNewQuiz || undefined,
+        isClassicQuizShadow: isClassicQuizShadow || undefined,
+        // The underlying quiz's own id, straight off the same `quiz_id` field
+        // that set `isClassicQuizShadow` - see that flag's own doc comment in
+        // types.ts for why courseItems-modules.ts needs it.
+        shadowQuizId: isClassicQuizShadow && typeof a.quiz_id === "number" ? a.quiz_id : undefined,
+        isGradedDiscussionShadow: isDiscussionShadow || undefined,
+        // The underlying discussion topic's own id, straight off Canvas's
+        // `discussion_topic.id` field - present on the assignment payload as
+        // a base field, not gated behind the assignments-index endpoint's
+        // include[] allowlist (see raw-types.ts's own citation). Absent when
+        // Canvas's response genuinely does not carry it for this row -
+        // courseItems-modules.ts treats that as UNKNOWN, never "no module".
+        shadowDiscussionTopicId:
+          isDiscussionShadow && typeof a.discussion_topic?.id === "number" ? a.discussion_topic.id : undefined,
+      }));
     }
 
-    // kind === "Quiz": Classic quizzes come from their own endpoint (a
-    // separate page from the assignments fetch above, so this is genuinely
-    // two independent lists, not a re-slice of one - per C5's "different
-    // endpoints" requirement). New Quizzes are the rows just excluded from
-    // Assignment above, each flagged isNewQuiz: true so the view can label
-    // them and withhold operations that do not apply (C2, C4). The row's id
-    // is the underlying ASSIGNMENT id (New Quizzes have no quiz id to use
-    // instead), which matters for any future write path: a New Quiz must be
-    // addressed as an assignment, never as a quiz.
+    // kind === "Quiz": unchanged by the Assignment-branch bug fix above (A6).
+    // Classic quizzes come from their own endpoint (a separate page from the
+    // assignments fetch above, so this is genuinely two independent lists,
+    // not a re-slice of one). New Quizzes are taken from the SAME
+    // assignmentRows the Assignment branch now also returns them from - one
+    // Canvas object correctly appearing in both listings, each flagged
+    // isNewQuiz: true so the view can label them and withhold operations
+    // that do not apply (C2, C4). The row's id is the underlying ASSIGNMENT
+    // id (New Quizzes have no quiz id to use instead), which matters for
+    // every write path: a New Quiz must be addressed as an assignment, never
+    // as a quiz (courseItems-routing.ts).
     const rawQuizzes = await fetchAll<RawBulkQuiz>(`${base}/quizzes?per_page=100`, ctx);
     const classicQuizzes: BulkItem[] = rawQuizzes
       .filter((q) => typeof q.id === "number")

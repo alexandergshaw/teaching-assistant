@@ -29184,3 +29184,533 @@ so the criteria this entry checks against have never been committed and could
 have been amended during implementation without leaving a trace; and `AGENTS.md`
 carries an unrelated +42-line working-preference section in this same push,
 which no criterion here covers and which nothing in the suite reads.
+
+## 327. Reversing entry 325's shadow-row exclusion: the Assignments tab lists everything Canvas lists, labelled - plus facet filters on both tabs
+
+Acceptance criteria:
+`docs/rubric-source-module-column-route-handler-acceptance-criteria.md` for the
+module column this change had to correct (M1-M7), and entry 325's
+`docs/assignments-quizzes-tabs-acceptance-criteria.md` (Contracts 1-3) for the
+listing this change reverses part of. Two pieces in one working tree, both
+driven by a LIVE BUG REPORT rather than a criteria document: (A) the
+Assignments tab silently dropped rows Canvas's own Assignments page shows, and
+(B) neither tab could be filtered by anything except a title substring. One
+new source file (`courseItems-filters.ts`), one new test file
+(`courseItems-filters.test.ts`), seven edited source files, six edited test
+files. `git diff --numstat` for the source: `CourseItemsView.tsx` +195/-5,
+`bulk.ts` +55/-43, `courseItems-routing.ts` +37/-6, `course-copy-purge.ts`
++37/-24, `courseItems-modules.ts` +28/-2, `types.ts` +26/-0,
+`CourseCopyModal.tsx` +14/-10. Previous work is committed at `3c4aafb`, so
+`git status --short` plus `git diff` is exactly this change and nothing else.
+
+1. **THE BUG AS REPORTED, THE DIAGNOSIS FROM THE USER'S OWN EXPORT, AND THE
+   FACT THAT WE CAUSED IT OURSELVES EARLIER THE SAME SESSION.** The report,
+   verbatim: "there were multiple syllabus acknowledgements in the assignments
+   list on canvas, but only one showed up in the assignments list in the ui."
+   Diagnosed against the user's real course export, not reproduced from a
+   guess: the course contains FOUR Canvas objects titled
+   `Syllabus Acknowledgement` - one ordinary assignment, plus THREE classic
+   quizzes, each of which Canvas backs with its own shadow assignment record.
+   Canvas's own Assignments index lists all four. This tab listed one.
+   THE CAUSE WAS ENTRY 325'S CHECK 5, MADE IN THE SAME SESSION AS THE REPORT.
+   That check added a three-way classification in `listBulkItems` and excluded
+   classic-quiz shadow rows, graded-discussion shadow rows and New Quizzes
+   from the Assignment output. The three quiz shadows matched the first
+   exclusion, so the tab returned only the ordinary assignment - exactly one
+   row, exactly as reported. The bug was not a Canvas quirk and not an old
+   defect: it was our own change, shipped hours earlier, with a full entry
+   arguing for it.
+   THE REASONING ERROR, RECORDED PLAINLY BECAUSE IT IS THE POINT. The
+   exclusion was added to stop a Classic quiz appearing in BOTH tabs under two
+   different ids, which was described as a double-listing to be deduplicated.
+   It is not. Canvas's Assignments page lists quizzes and graded discussions,
+   because in Canvas every gradable object IS backed by an assignment record -
+   the assignments index is the gradebook's backing list, which entry 325's
+   own check 5 said in as many words and then drew the opposite conclusion
+   from. The "double listing" is the platform's data model and the
+   instructor's expectation; suppressing it was data loss dressed as
+   deduplication. THE LESSON WORTH KEEPING: when our view disagrees with what
+   the source system shows, the source system is usually right, and making
+   rows VANISH is a far worse failure than showing a title twice with an
+   explanation. A duplicate-looking row is a question the user can answer by
+   looking; a missing row is invisible, and the user only discovers it by
+   counting against the system we were supposed to be mirroring.
+
+2. **WHAT THE ASSIGNMENTS TAB LISTS NOW, AND HOW EACH ROW KIND IS LABELLED.**
+   `listBulkItems("Assignment")` returns EVERY assignment-shaped row Canvas
+   returns, with no kind exclusion at all - the only remaining filter is
+   `typeof a.id === "number"` (`bulk.ts:41`), which drops malformed payload
+   entries, not content. The three classifications entry 325 used to exclude
+   by are now carried through as FLAGS instead (`bulk.ts:44-63`, emitted at
+   `:88-101`): `isNewQuiz` (the unchanged `isNewQuizAssignment` rule),
+   `isClassicQuizShadow` (`quiz_id` populated), `shadowQuizId` (that same
+   `quiz_id`, carried for the module join in check 6), and
+   `isGradedDiscussionShadow` (`submission_types` includes
+   `discussion_topic`). All four are declared on `BulkItem`
+   (`types.ts:164`, `:174`, `:181`, `:190`), each with the Canvas doc sentence
+   it rests on.
+   THE LABELS, one badge per row kind, each with its own guard and its own
+   distinct visible text (`CourseItemsView.tsx:906-935`): `NEW QUIZ` on
+   `it.isNewQuiz`, `QUIZ` on `it.isClassicQuizShadow` with the tooltip
+   "Classic quiz - this row is the assignment record Canvas created for
+   grading; deleting it deletes the quiz", and `DISCUSSION` on
+   `it.isGradedDiscussionShadow` with the matching discussion wording. The
+   `NEW QUIZ` badge specifically was UNGATED from `kind === "Quiz"` in the
+   same edit: a New Quiz can now appear in either tab, and leaving the old
+   gate would have made an Assignments-tab New Quiz indistinguishable from an
+   ordinary assignment - the precise failure this fix exists to prevent. An
+   ordinary assignment carries no badge, which is what makes the badges
+   meaningful.
+   THE QUIZZES TAB IS UNCHANGED (`bulk.ts:104-135`): Classic quizzes off
+   `/quizzes` under their own quiz ids, plus New Quizzes taken from the same
+   classified assignment rows. A classic quiz's shadow assignment id never
+   reaches it, and `bulk.test.ts` pins that directly.
+
+3. **WRITES STILL ROUTE BY THE ROW'S REAL KIND, NEVER BY THE TAB'S, AND THE
+   PER-KIND MAPPING IS SPELLED OUT RATHER THAN ASSERTED.** This is the safety
+   property the reversal put at risk, because the Assignments tab now contains
+   three row kinds it never used to. `effectiveKindOf` (`courseItems-routing.ts:63-65`)
+   is unchanged in behaviour and its header now records why the reversal does
+   not change it: a classic-quiz-shadow or graded-discussion-shadow row only
+   ever reaches it with `kind === "Assignment"`, and such a row's own `id`
+   already IS the assignment id Canvas needs. The mapping, verified path by
+   path in the current source:
+   - ORDINARY ASSIGNMENT, Assignments tab: `Assignment` -> `/assignments/{id}`.
+   - CLASSIC-QUIZ SHADOW, Assignments tab: `Assignment` -> `/assignments/{shadowId}`.
+     Correct id space; this is the same request Canvas's own Assignments page
+     issues, and Canvas cascades it into the quiz. Labelled `QUIZ` so that is a
+     choice, not a surprise.
+   - GRADED-DISCUSSION SHADOW, Assignments tab: `Assignment` ->
+     `/assignments/{shadowId}`. Same reasoning, labelled `DISCUSSION`.
+   - NEW QUIZ, Assignments tab: `Assignment` -> `/assignments/{id}` (its only id).
+   - NEW QUIZ, Quizzes tab: `Assignment` -> `/assignments/{id}`. This is the
+     one case where the row's kind disagrees with its tab, and the one the
+     helper exists for.
+   - CLASSIC QUIZ, Quizzes tab: `Quiz` -> `/quizzes/{quizId}`.
+   Every write reaches that resolution: publish (`CourseItemsView.tsx:379-385`),
+   points (`:418-429`) and delete (`:522-537`) through
+   `runGroupedBulkSummary` -> `groupSelectedByEffectiveKind` (`:351`); due
+   dates per id at `:397`, whose `type` is then routed again by
+   `due-dates.ts:14` to `/assignments/{contentId}`; description per id at
+   `:502`. NO path routes by the tab's `kind` where a row could disagree. Two
+   new `courseItems-routing.test.ts` cases pin the shadow rows explicitly, and
+   sabotage m1/m3/m6 below prove the surrounding facts are pinned too.
+   ONE PATH IS NOT SAFE AND IS RECORDED AS A FINDING, NOT GLOSSED - see
+   check 9(i): the two ASSIGNMENT-ONLY bulk operations (rubric association,
+   submission type) are still gated at TAB granularity and now reach row kinds
+   they must not.
+
+4. **THE PURGE DECISION IS NOW ENFORCED WHERE IT IS MADE, INSTEAD OF INHERITED
+   FROM WHAT THE LISTING HAPPENED TO RETURN.** Entry 325's check 8 decided
+   that ticking `Assignments` alone must NOT delete a destination course's
+   Classic quizzes or graded discussions - each has its own purge checkbox,
+   and `DELETE /assignments/{shadowId}` cascades. That decision was enforced
+   only by the listing exclusion this change reverses, so reverting the
+   listing would have silently restored the old, undecided behaviour on a
+   DESTRUCTIVE path against a destination course. `planAssignmentPurgeDeletes`
+   now filters both shadow flags itself, before any id from `assignmentItems`
+   can enter the assignment delete set (`course-copy-purge.ts:104-107`), and
+   the input type widened to carry the flags (`:91-95`). Four new cases pin
+   it, including an id-collision case where a shadow assignment and an
+   unrelated quiz share the number 42, proving the exclusion is by FLAG and
+   never by numeric id. Sabotage m2 reddens exactly those four.
+   A NEW QUIZ IS STILL PURGED BY `Assignments` ALONE, verified: it carries
+   neither shadow flag, so it survives the new filter and is in
+   `assignmentIds`; ticking `Quizzes` alone still routes it to the assignment
+   endpoint through `planQuizPurgeDeletes`. A New Quiz IS an Assignment object
+   and has no `Quiz` object to delete instead, so any other answer would leave
+   it behind to re-import as a duplicate.
+   THE SAME REVERSAL BROKE THE "EXACTLY ONCE" HALF OF THAT FUNCTION, AND THIS
+   PASS FOUND IT - see check 9(ii). It is a real defect, proven by execution,
+   not an argument.
+
+5. **THE FILTERS, AND THE ONE FACET THAT HAD TO REFUSE TO ANSWER.** Five
+   facets on both tabs, in one pure leaf (`courseItems-filters.ts`, 209 lines)
+   for the same reason `courseItems-routing.ts` and `courseItems-modules.ts`
+   are leaves: this repo's vitest never renders a component, so logic left in
+   the `.tsx` can only be regex-matched. Published (`published`/`unpublished`),
+   Module, Due date (`has-due`/`no-due`), Points (`has-points`/`no-points`),
+   and Quiz kind (`classic`/`new-quiz`, rendered on the Quizzes tab only,
+   `CourseItemsView.tsx:669`). Each facet is derived from a field a `BulkItem`
+   already carries; none was invented past the data. "Filtered vs not" from
+   the request was read as PUBLISHED vs not, with that reading written down at
+   the top of the file rather than left implicit.
+   THEY COMBINE, WITH EACH OTHER AND WITH THE SEARCH, BY CONSTRUCTION.
+   `filterCourseItems` (`:131-140`) runs `matchesTitleSearch` and then
+   `matchesCourseItemFilters` over the same row array; every facet clause is
+   an independent early `return false` (`:107-121`), so `all` on every facet
+   is a no-op and any narrowing can only shrink the result. The view has ONE
+   `shown` (`CourseItemsView.tsx:576`) - there is no second pass that could
+   disagree. Three F1 cases pin the combination, including one proving a facet
+   and the search each still exclude rows the other would have admitted.
+   THE MODULE FACET IS THREE-STATE, NOT TWO, AND THAT IS THE POINT.
+   `ItemModuleInfo` is `{known: true, names}` or `{known: false}` - the latter
+   meaning the module tree failed or has not arrived. `no-module` requires
+   `known && names.length === 0` and `in-module` requires
+   `known && names.length > 0` (`:110-111`), so an UNKNOWN row matches
+   NEITHER. Counting it as "not in a module" would assert a fact nobody
+   observed; counting it as "in a module" would fabricate in the other
+   direction. Four cases pin both refusals plus the `all` case, and
+   `hiddenUnknownModuleCount` (`:152-155`) exists so the view can say how many
+   rows that cost (`CourseItemsView.tsx:583`, rendered at `:684-686`) instead
+   of leaving an unexplained gap. Sabotage m4 - making `no-module` admit
+   unknown rows - reddens the F2 case and the F1 combination case, and only
+   those.
+   SELECT-ALL STILL APPLIES TO VISIBLE ROWS ONLY: `selection.selectAllVisible(visibleIds)`
+   (`:837`) is passed exactly `shown`'s ids (`:577`), and `allShownSelected`
+   reads the same list. Nothing about the facets widened it.
+   PERSISTENCE: all five facets under ONE key per kind,
+   `ta-course-items-filters-{assignment|quiz}` (`:176-178`), validated field by
+   field on read so a corrupt or stale value degrades ONE facet to `all`
+   rather than throwing or collapsing the object (`:192-209`). Seven cases pin
+   it, including malformed JSON, a non-object body, one bad field among four
+   good ones, and a partially-written blob.
+
+6. **THE MODULE COLUMN HAD TO BE CORRECTED IN THE SAME CHANGE, BECAUSE THE
+   REVERSAL PUT ROWS IN FRONT OF IT THAT IT COULD NOT ANSWER FOR.** Entry
+   326's join is `(module-item type, contentId) -> module names`, with the
+   type resolved by `effectiveKindOf`. That is right for an ordinary
+   assignment, a New Quiz and a Classic quiz's own row - but a classic quiz's
+   SHADOW assignment row is keyed by the shadow assignment id, and Canvas
+   never files a module item under it. Canvas files that module item as type
+   `Quiz` under the QUIZ's own id. Falling through to the ordinary lookup
+   would have looked up `Assignment:903`, missed, and reported "No module" for
+   a quiz that is in one. `modulesForItem` now checks the carve-out FIRST
+   (`courseItems-modules.ts:149-152`), keying `Quiz:{shadowQuizId}` from the
+   id `bulk.ts:99` carries off the same `quiz_id` that set the flag. Four new
+   cases pin it: the resolution itself, the proof that the naive
+   `Assignment:903` key finds nothing, a missing-`shadowQuizId` row degrading
+   to "no module" instead of throwing, and an id collision where an ordinary
+   assignment and a shadow assignment share the number 903 and still resolve
+   to different modules. Sabotage m3 (disable the carve-out) and m6 (never
+   populate `shadowQuizId`) both redden, m3 with exactly two cases and m6 with
+   three.
+   THE REMAINING GAP IS REAL, AND IT IS THE WORSE KIND. A graded-discussion
+   shadow row has no equivalent id available: Canvas files its module item as
+   type `Discussion` under the discussion TOPIC's id, and `RawBulkAssignment`
+   (`raw-types.ts:110-117`) declares only `submission_types`,
+   `is_quiz_assignment` and `quiz_id` - there is no `discussion_topic` field
+   declared, so nothing carries the topic id through. Such a row falls to the
+   ordinary lookup, misses, and returns `{known: true, names: []}`, which the
+   render turns into "No module" in the WARNING colour with the tooltip "This
+   item is not in any module." (`CourseItemsView.tsx:885-886`). So the column
+   is WRONG for that row, not UNKNOWN - it makes a positive false claim rather
+   than declining to answer, which is the strictly worse of the two failures
+   and the opposite of what check 5's module facet was carefully built to
+   avoid. The source states the limitation honestly
+   (`courseItems-modules.ts:132-141`); the UI does not. It compounds into the
+   facet: those rows are `known: true`, so "Not in any module" claims them
+   too. Not fixed here. The fix is available and small - Canvas's Assignment
+   object carries a `discussion_topic` object; declaring it in `raw-types.ts`
+   and adding a second carve-out would close it the same way `shadowQuizId`
+   closed the quiz half.
+
+7. **THE SYLLABUS-ACKNOWLEDGEMENT IDEMPOTENCY CHECK AGAINST THIS EXACT COURSE.**
+   `createSyllabusAckQuizAction` lists `"Quiz"` (`lms-syllabus-buttons.ts:440`),
+   filters out New Quizzes (`:452`, entry 325's fix, untouched here), and
+   matches by normalised title with `findExistingAckQuiz`
+   (`syllabus-ack-quiz.ts:105-107`, a plain `.find`). For the reported course
+   - one assignment and three quizzes all titled `Syllabus Acknowledgement` -
+   the behaviour is: the ordinary assignment NEVER reaches this check at all,
+   because the `"Quiz"` listing does not contain assignment rows (only Classic
+   quizzes plus flagged New Quizzes), so it cannot be mistaken for the quiz;
+   the FIRST of the three quizzes in Canvas's own `/quizzes` order is matched;
+   nothing is created; and the already-exists message names that quiz. That is
+   correct for the property the check exists to hold - the button never
+   creates a fourth acknowledgement quiz - and it is unaffected by this
+   change, since the reversal touched only the `"Assignment"` branch. Pinned
+   by new case R (`lms-syllabus-buttons.test.ts:561-591`), which uses that
+   exact shape, asserts NO Canvas write happens, asserts the result names one
+   of `/quizzes/61|62|63`, and asserts `/quizzes/950` (the assignment id)
+   never appears. WHAT IT DOES NOT DO, stated because it is a real gap in the
+   user's actual course: it does not notice or report that THREE
+   acknowledgement quizzes exist. It silently picks one. A course with three
+   duplicates is almost certainly a mistake the instructor would want told
+   about, and nothing in this app tells them.
+
+8. **REGRESSION SWEEP OVER WHAT THE REVERSAL COULD HAVE BROKEN, EACH ITEM READ
+   IN THE CURRENT SOURCE.**
+   (a) NOTHING ELSE FILTERS THE LISTING PATH. Swept every branch of
+   `listBulkItems`: `Page` filters on a non-empty `url` (`bulk.ts:20`),
+   `Assignment`/`Quiz` filter only on `typeof id === "number"` (`:41`, `:117`),
+   `Discussion` filters announcements out (`:139`, pre-existing and correct -
+   announcements have their own surface). `listBulkItemsAction`
+   (`canvas-files-bulk.ts:165-176`) adds `requireOwner()` and an error wrap,
+   no filtering. The only other narrowing between Canvas and the screen is the
+   view's own `shown` (search plus facets), which is user-driven and visible.
+   (b) PAGINATION STILL RETURNS EVERY PAGE. `fetchAll`
+   (`fetch-helpers.ts:26-44`) loops the RFC-5988 `Link` header with no page
+   cap and no early exit, and it is untouched by this diff. The Assignment
+   pagination test was updated to assert that a New Quiz on page one AND an
+   ordinary assignment on page two both survive (`bulk.test.ts:309-323`), so
+   the multi-page path is pinned against the new expectation rather than the
+   old one; sabotage m1 reddens it.
+   (c) THE QUIZZES TAB IS BYTE-EQUIVALENT. `bulk.ts:104-135` is unchanged
+   apart from its comment. A classic-quiz shadow id (903) never appears there,
+   pinned twice.
+   (d) `CourseCopyModal`'s OTHER PURGE TYPES ARE UNTOUCHED. Its diff is
+   +14/-10, entirely inside the comment block above the assignment/quiz plan
+   (`:125-152`); `context_modules`, the `kindMap` loop for
+   `discussion_topics`/`wiki_pages` (`:183-194`) and `attachments` (`:195-200`)
+   are not in the diff.
+   (e) THE MODULES VIEW AND ITS BULK BAR (entries 321-323) ARE UNTOUCHED:
+   `ModulesView.tsx`, `BulkItemsSection.tsx`, `BulkModulesSection.tsx`,
+   `useBulkItemActions.ts`, `useBulkModuleActions.ts`, `useModuleSelection.ts`,
+   `useRubrics.ts` and `useFlatItemSelection.ts` are NONE of them in
+   `git status --short`.
+   (f) ENTRY 326'S RUBRIC AND ROUTE-HANDLER WORK IS UNTOUCHED: `rubrics.ts`,
+   `useCourseImportActions.ts`, `selection-coverage.ts`,
+   `useVisualizerCoverage.ts`, `visualizer-selection.ts` and
+   `api/visualizer/create/route.ts` are all absent from the diff. The rubric
+   effect inside `CourseItemsView.tsx` (`:290-308`) still routes through
+   `interpretRubricsResult`, unchanged.
+
+9. **THE FINDINGS THIS PASS MADE THAT WERE NOT FIXED, WITH THE WORST FIRST.**
+   (i) THE TWO ASSIGNMENT-ONLY BULK OPERATIONS NOW REACH ROW KINDS THEY MUST
+   NOT. `Associate rubric` (`CourseItemsView.tsx:742-765`) and
+   `Submission type` (`:767-788`) are gated on `kind === "Assignment"` and
+   nothing else - tab granularity, which was SUFFICIENT while the Assignments
+   tab contained only ordinary assignments, and is not any more. Both handlers
+   take `[...selection.selected]` verbatim (`:438`, `:463`) with no per-row
+   filter, so an instructor can select a New Quiz, a classic-quiz shadow or a
+   graded-discussion shadow row in the Assignments tab and apply either. The
+   sharpest case: `bulkUpdateAction(courseUrl, "Assignment", ids, {submissionType})`
+   issues `PUT /assignments/{id}?assignment[submission_types][]=...` against a
+   New Quiz, replacing the `external_tool` submission type that is what MAKES
+   it a New Quiz - damage, not a mislabel. This also contradicts entry 325's
+   C4 ("operations that cannot apply to a New Quiz are not offered") and the
+   row's own tooltip (`:909`), which promises "rubric and submission-type
+   changes do not apply" while the tab offers exactly those. Entry 325 already
+   recorded C4 as satisfied at tab granularity only (its check 12(i)); the
+   reversal turned that recorded imprecision into a reachable hazard. No test
+   covers it - the wiring guard pins only that the controls are gated on
+   `kind === "Assignment"`, which is the very gate that is now too coarse.
+   (ii) A NEW QUIZ IS NOW TARGETED TWICE BY THE PURGE. Proven by execution,
+   not argued: `planAssignmentPurgeDeletes` returns
+   `[{kind: "Assignment", ids: ["902","901","901"]}]` for BOTH
+   `{Assignments only}` and `{Assignments + Quizzes}` once `assignmentItems`
+   carries the New Quiz row the new listing puts there.
+   `realAssignmentItems` (`course-copy-purge.ts:104-106`) filters the two
+   SHADOW flags but not `isNewQuiz`, so the id arrives once via
+   `assignmentItems` and again via `quizItems` at `:117` (both ticked) or
+   `:126` (assignments alone). The consequence is one extra
+   `DELETE /assignments/{id}` per New Quiz, which 404s, is recorded as a
+   failure inside `bulkDelete` (`bulk.ts:237-239`), and is then discarded by
+   the best-effort purge (`CourseCopyModal.tsx:179` ignores the result). No
+   wrong resource is deleted and no data is lost - the id and the endpoint are
+   both right - but it breaks the exact property the function's own comment
+   claims at `:113-117` ("that merge is what keeps a New Quiz from being
+   targeted twice") and that entry 325's check 4(a) recorded as fixed. THE
+   TEST THAT PINS IT PASSES ONLY BECAUSE ITS FIXTURE IS STALE:
+   `course-copy-purge.test.ts:100-115` asserts "901 must not appear twice"
+   against `assignmentItems = [{id: "902"}]` (`:64`) - a shape
+   `listBulkItems("Assignment")` no longer emits. That is this repo's own
+   recorded `fixtures-must-match-emitted-shape` failure, occurring again in
+   the same file that the change edited.
+   (iii) THE MODULE COLUMN LIES FOR GRADED-DISCUSSION SHADOW ROWS (check 6).
+   (iv) A FACET CAN MAKE A BULK ACTION HIT ROWS THE USER CANNOT SEE. Selecting
+   rows and then narrowing a facet leaves them selected but hidden: the
+   comment at `CourseItemsView.tsx:563-575` states this is deliberate and
+   inherited from the search box, and `selectAllVisible` genuinely never
+   touches anything outside `visibleIds`. But Delete, Publish, Points and
+   Description all act on `selection.selected`, not on `shown`, so a two-click
+   delete can remove rows that are not on screen. The only signal is the
+   count at `:694` ("N assignments selected"); nothing says how many of them
+   are hidden, and nothing offers to drop them. It was already true of the
+   search box; five PERSISTED facets make it far more reachable, including on
+   first paint before the user has touched anything.
+   (v) A PERSISTED MODULE FACET BLANKS THE LIST UNTIL THE MODULE TREE ARRIVES.
+   `moduleIndex` starts `null`, so every row is `known: false`; with `module`
+   restored from localStorage as `in-module` or `no-module`, `shown` is empty
+   on every load until `listCourseContentAction` resolves, showing "No
+   assignments match these filters" and the unknown-count hint. It self-heals,
+   nothing is lost, and no test covers it.
+   (vi) THREE COMMENTS NOW ASSERT THE OPPOSITE OF THE CODE, having been left
+   behind by the reversal: `courseItems-filters.ts:17-20` ("the Assignments
+   tab never contains a New Quiz row (C3)"), `CourseCopyModal.tsx:125-127`
+   ("listBulkItemsAction only ever returns under ONE of the two kinds (never
+   'Assignment' - C3)"), and `course-copy-purge.test.ts:128-129`
+   ("listBulkItems('Assignment') now excludes Classic-quiz and
+   graded-discussion shadow assignments"). Harmless to execution, actively
+   misleading to the next reader, and the third sits directly above the tests
+   that now assert the opposite.
+   (vii) `modulesForItem` RUNS TWICE PER ROW PER RENDER - once building
+   `filterRows` (`CourseItemsView.tsx:180`) and once in the row map (`:880`).
+   Same function, so they cannot disagree, but the memo saved nothing for the
+   render path.
+   (viii) `hiddenUnknownModuleCount` IGNORES THE SEARCH BOX by design
+   (`courseItems-filters.ts:152-155`), so with a narrow search and a failed
+   module tree the hint can report a count many times larger than the rows the
+   user is even looking at.
+
+10. **TEST QUALITY: WHICH TESTS WOULD STILL PASS IF A ROW TYPE WERE DROPPED
+    FROM THE LISTING AGAIN, OR A LABEL REMOVED - NAMED, NOT ESTIMATED.**
+    Enumerated by reading every test file in the diff. If the exclusion came
+    back tomorrow, ALL of these stay green: the 39 assertions in
+    `courseItemsView.wiring.test.ts` (they read `CourseItemsView.tsx` as text
+    and never touch `bulk.ts`); all 29 in `courseItems-filters.test.ts`; all
+    15 in `courseItems-modules.test.ts` and all 10 in
+    `courseItems-routing.test.ts` (pure functions over hand-built rows); all
+    16 in `course-copy-purge.test.ts` (same); and case R in
+    `lms-syllabus-buttons.test.ts`, which mocks `listBulkItemsAction`
+    outright. `bulk.test.ts` is the ONLY guard on the listing itself, and
+    sabotage m1 measures exactly how much of it: 6 of its 13 cases redden.
+    That concentration is not a defect - it is where the fact lives - but it
+    means one file deleted or one `describe` skipped would return the tab to
+    the reported bug with 12142 other tests still green.
+    IF A LABEL WERE REMOVED: only `courseItemsView.wiring.test.ts` notices,
+    and it does (m7/m8/m9/m10 below). Nothing else in the repo reads that
+    file's JSX.
+
+11. **SABOTAGE: TEN MUTATIONS, WITHOUT EDITING ONE REPO FILE.** Two harnesses,
+    the same split entries 323-326 needed. For the EXECUTABLE tests, a
+    scratchpad vitest config outside the repo (a plain exported object, no
+    `vitest/config` import) carried a pre-enforced transform plugin that
+    rewrote one source file in memory and THREW if its own search pattern was
+    not found, so a silently-missed mutation cannot masquerade as a passing
+    run. Baseline through that harness over the seven relevant test files:
+    121 tests, green. Results, each naming what went red:
+    m1, RE-IMPOSE THE ORIGINAL EXCLUSION on the Assignment branch (the
+    reported bug, restored) -> 6 `bulk.test.ts` cases fail, including "the
+    Assignments tab lists all four objects" (the reported course shape) and
+    the multi-page Link-header case;
+    m2, drop the shadow filter from `planAssignmentPurgeDeletes` -> the four
+    new `course-copy-purge.test.ts` cases fail, including the 42/42 id
+    collision;
+    m3, disable the `shadowQuizId` carve-out in `modulesForItem` -> two
+    `courseItems-modules.test.ts` cases fail, and only those;
+    m4, let the `no-module` facet claim UNKNOWN rows -> the F2 refusal case
+    and the F1 combination case fail, which is the direct proof that check 5's
+    three-state decision is pinned rather than merely commented;
+    m5, drop `.filter((item) => !item.isNewQuiz)` from the syllabus-ack
+    idempotency check -> case Q fails, and only it. NOT case R, and that is
+    recorded rather than rounded away: R's fixture is the reported course
+    shape, which contains no New Quiz at all, so R cannot discriminate that
+    rule - Q is what does;
+    m6, never populate `shadowQuizId` in `bulk.ts` -> three `bulk.test.ts`
+    cases fail, including the reported-shape case, which is what proves the id
+    the module join depends on is pinned at its source and not only at its
+    consumer.
+    For the LABEL guards a transform plugin cannot reach the subject -
+    `courseItemsView.wiring.test.ts` reads `CourseItemsView.tsx` with
+    `readFileSync` - so a scratchpad script replayed that test's own
+    extraction and assertion logic verbatim against IN-MEMORY mutated copies.
+    Baseline: both assertions pass. m7, delete the classic-quiz-shadow label
+    block -> the shadow-label assertion fails ("gated block not found"), the
+    New Quiz one still passes; m8, delete the graded-discussion-shadow label
+    block -> same, for that guard; m9, RE-GATE the New Quiz label on
+    `kind === "Quiz"` (the pre-fix condition) -> the New Quiz assertion fails
+    on the explicit preceding-text check, and only it; m10, make both shadow
+    badges render the same visible text -> the distinctness assertion fails.
+    All ten discriminate. As entries 323-326 each recorded for the same
+    technique, the source-text replay is one step weaker than a sabotage run
+    through vitest against edited files.
+    A SEPARATE SCRATCHPAD HARNESS PRODUCED FINDING 9(ii) rather than
+    confirming a claim: `planAssignmentPurgeDeletes` was called directly with
+    the shape `listBulkItems("Assignment")` NOW emits (a New Quiz row present
+    in `assignmentItems`), and returned `["902","901","901"]` in both checkbox
+    combinations. That is the defect, executed.
+
+12. **THE GATES, WITH REAL NUMBERS.** `npx vitest run`: 604 test files, 12148
+    tests, ALL passing, exit 0. `npx tsc --noEmit`: clean, exit 0, no output -
+    the gate that covers the three new optional `BulkItem` fields and the
+    widened `planAssignmentPurgeDeletes` input type. `npx eslint` over all
+    fifteen touched and new files (eight source, seven test): exit 0, no
+    errors, no warnings - which matters here because `CourseItemsView.tsx`
+    keeps three nested-async-IIFE effects specifically to satisfy this repo's
+    setState-in-effect rule, and this change added a plain
+    `useEffect(() => { localStorage.setItem(...) })` for the filters
+    (`:144-146`) that sets no state at all. `src/lib/no-emojis.test.ts`,
+    `src/lib/use-server-exports.test.ts` and
+    `src/lib/workflows/headless.test.ts` run together: 3 files, 48 tests,
+    green - the emoji rule is never hand-rolled here, this chunk adds no
+    `"use server"` module and no workflow step, so the headless exact-count
+    canary needed no bump.
+    THE FILE COUNT CLOSES EXACTLY: `git ls-tree -r HEAD` counts 603 tracked
+    `src/**/*.test.ts` files and the worktree has 604 - the one new file,
+    `courseItems-filters.test.ts`. THE TEST COUNT DOES NOT CLOSE, AND THE
+    DISCREPANCY IS IN THE RECORDED BASELINE RATHER THAN IN THIS DIFF.
+    Counting `it(` blocks at HEAD versus the worktree for the seven touched
+    test files gives +49 (`courseItems-filters` 0->29,
+    `courseItemsView.wiring` 32->39, `bulk` 11->13, `course-copy-purge`
+    12->16, `courseItems-modules` 11->15, `courseItems-routing` 8->10,
+    `lms-syllabus-buttons` 26->27), while the suite moved 12094 -> 12148,
+    a delta of +54. Since `git status --short` proves no OTHER test file
+    changed, the missing 5 cannot have come from this change; entry 326's
+    recorded baseline is also one FILE short of the 603 its own commit
+    tracks. Recorded as an open discrepancy in the running series, now six
+    passes long, rather than reconciled by adjusting a number.
+
+13. **FILE SIZES AGAINST THE 1000-LINE CEILING.** All under, and one is close
+    enough to be the headline. `CourseItemsView.tsx` 969 - 31 lines from the
+    cap, up from 779 at entry 326 and 604 at entry 325, meaning it has grown
+    365 lines across three consecutive chunks and the NEXT feature to touch it
+    will have to split it first. Entry 325 said the same about
+    `ContentTab.tsx` and entry 319 about `ModulesView.tsx`; this is the third
+    file in the same neighbourhood to reach the warning band. The pure leaves
+    that kept it from being worse: `courseItems-filters.ts` 209 (new),
+    `courseItems-modules.ts` 156, `courseItems-routing.ts` 87,
+    `course-copy-purge.ts` 131. Others: `CourseCopyModal.tsx` 594,
+    `types.ts` 315, `bulk.ts` 242. Tests:
+    `courseItemsView.wiring.test.ts` 514, `bulk.test.ts` 394,
+    `course-copy-purge.test.ts` 239, `courseItems-filters.test.ts` 228,
+    `courseItems-modules.test.ts` 220, `courseItems-routing.test.ts` 90. The
+    two test files entry 322 recorded as OWED A SPLIT
+    (`lms-generation.test.ts`, `lms-generation-refine.test.ts`) are not in
+    this diff and are still owed.
+
+**Limits.** NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - the config is
+node-env and collects only `src/**/*.test.ts` (`vitest.config.ts:13-14`), and
+`CourseItemsView` is a `.tsx` client component - so EVERY LABEL AND UI CLAIM IN
+THIS ENTRY IS SOURCE-TEXT ONLY. Nothing here proves the `NEW QUIZ`, `QUIZ` or
+`DISCUSSION` badges are painted, that they are distinguishable on screen rather
+than merely distinct as string literals, that their `title` tooltips are
+reachable by keyboard or announced at all, that the five facet selects are
+operable, that "Clear filters" appears where an instructor would look, that the
+unknown-module hint is legible beside them, or that the module cell's warning
+colour reads as a warning. The label sabotage in check 11 (m7-m10) is a proof
+about SOURCE TEXT, one step weaker than exercising markup, exactly as entries
+323 through 326 recorded for the same technique.
+THE GRADED-DISCUSSION MODULE-COLUMN GAP IS REAL AND IT MAKES THE COLUMN WRONG,
+NOT UNKNOWN (check 6 and 9(iii)). A graded discussion that IS in a module is
+told "No module", in the colour reserved for a problem, with a tooltip stating
+it as fact. The `no-module` facet claims those same rows. Neither is fixed
+here, and no test asserts the false answer either way, so nothing in the suite
+would notice if it got worse.
+THIS HAS NOT BEEN RUN AGAINST THE USER'S LIVE CANVAS - ONLY AGAINST THEIR
+EXPORT. The four-object course shape in `bulk.test.ts` was reconstructed by
+hand from the `.imscc` the user provided; `fetch` is stubbed and every server
+action is mocked. No assignment has been listed, published, deleted or
+described by this code against a real course in this pass, and the claim that
+`DELETE /assignments/{shadowId}` cascades into deleting the quiz or discussion
+is still INHERITED from `bulk.ts`'s comment, unverified here, exactly as entry
+325's Limits recorded. Because that cascade is the whole reason the purge
+carve-out and the row labels exist, their JUSTIFICATION rests on an unmeasured
+Canvas behaviour.
+NOR IS IT VERIFIED THAT CANVAS ACCEPTS THE WRITES THIS CHANGE NEWLY MAKES
+POSSIBLE. Publishing, re-pointing or re-dating a classic-quiz or
+graded-discussion SHADOW assignment through `/assignments/{shadowId}` is now
+reachable from the Assignments tab for the first time. The id space is right
+and the endpoint is right, but whether Canvas honours, ignores or rejects
+`assignment[published]` or `assignment[points_possible]` on a quiz's shadow
+record has not been observed - only reasoned from the fact that Canvas's own
+Assignments page offers the same controls.
+FINDING 9(i) IS UNFIXED AND IS THE MOST SERIOUS THING IN THIS ENTRY: the
+Assignments tab now offers rubric association and submission-type changes to
+New Quiz and shadow rows, and a submission-type write against a New Quiz would
+strip the `external_tool` type that defines it. That is reasoned from the
+request `bulkUpdateRequest` builds (`bulk.ts:164`), not observed against
+Canvas, and it has no test. FINDING 9(ii) IS PROVEN BY EXECUTION but its
+CONSEQUENCE is not: that the second `DELETE` returns 404 rather than something
+worse is an assumption about Canvas, and the failure is swallowed either way.
+Beyond that: `hiddenUnknownModuleCount` and the filter persistence are pinned
+only as pure functions, never as things a browser actually stored and read
+back; the "filter hides a selected row that a bulk action still hits"
+behaviour (9(iv)) is stated in a comment and read in the source, but no test
+exercises the sequence; the module-tree fetch is still duplicated per tab and
+repeated after every bulk write, unmeasured, as entry 326's 15(iii) recorded;
+the acceptance-criteria document for THIS change does not exist - the brief was
+a live bug report plus a one-line filter request, so the criteria labels used
+in the source comments (A1-A6, F1-F6) were coined during implementation and are
+recorded in no document that predates it; and the 5 unattributed tests in
+check 12 remain unexplained.

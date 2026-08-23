@@ -557,6 +557,38 @@ describe("createSyllabusAckQuizAction", () => {
     expect(result.message).not.toContain("/quizzes/901");
     expect(result.message.toLowerCase()).not.toContain("already present");
   });
+
+  // ── R. THE EXACT REPORTED COURSE SHAPE (live report 2026-08-22) ────────────
+  // One real assignment plus three classic quizzes, all titled "Syllabus
+  // Acknowledgement" - verified against the user's own .imscc export. A5:
+  // the idempotency check must find one of the three quizzes and must never
+  // be confused by the real assignment of the same title (it cannot be -
+  // listBulkItemsAction(.., "Quiz", ..) never returns plain assignments,
+  // per bulk.ts's Quiz branch), nor by a New Quiz sharing the title (test Q
+  // above already pins that half).
+  it('R: with one real assignment plus three classic quizzes all titled "Syllabus Acknowledgement" (the reported course shape), the idempotency check finds a quiz - never the assignment - and creates nothing', async () => {
+    vi.mocked(listBulkItemsAction).mockResolvedValue({
+      items: [
+        { id: "61", title: SYLLABUS_ACK_QUIZ_TITLE, published: true, dueAt: null, pointsPossible: 1 },
+        { id: "62", title: SYLLABUS_ACK_QUIZ_TITLE, published: true, dueAt: null, pointsPossible: 1 },
+        { id: "63", title: SYLLABUS_ACK_QUIZ_TITLE, published: true, dueAt: null, pointsPossible: 1 },
+        // NOTE: the real assignment (id 950) is deliberately absent from this
+        // fixture - it is what bulk.ts's "Quiz" branch actually returns for
+        // this course shape (assignments never appear there), which is
+        // exactly why the idempotency check can never be confused by it.
+      ],
+    } as never);
+    vi.mocked(listCourseContentAction).mockResolvedValue({ courseName: "x", modules: [WEEK_ONE], pages: [] } as never);
+
+    const result = await createSyllabusAckQuizAction(COURSE_URL, undefined, null);
+
+    expectNoCanvasWrites();
+    if ("error" in result) throw new Error("expected a success message");
+    // Must resolve to one of the three quiz ids (61/62/63), never the
+    // assignment id (950), which never even reaches this action's list.
+    expect(["61", "62", "63"].some((id) => result.message.includes(`/quizzes/${id}`))).toBe(true);
+    expect(result.message).not.toContain("/quizzes/950");
+  });
 });
 
 // ── resolveLmsCourseRowByIdAction (AC1/AC2 defect fix) ──────────────────────

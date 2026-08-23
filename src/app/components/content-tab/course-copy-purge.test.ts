@@ -61,7 +61,21 @@ describe("planQuizPurgeDeletes", () => {
 // New Quizzes, "Quizzes" alone still does too (unchanged from
 // planQuizPurgeDeletes), and ticking BOTH purges each New Quiz exactly once.
 describe("planAssignmentPurgeDeletes", () => {
-  const assignmentItems = [{ id: "902" }];
+  // FINDING 2 FIX: this fixture used to be `assignmentItems = [{ id: "902" }]`
+  // - a shape listBulkItems("Assignment") no longer emits now that bulk.ts's
+  // bug fix stopped excluding New Quizzes from the Assignment listing (a New
+  // Quiz IS a real Assignment object, so it appears in BOTH `assignmentItems`
+  // and `quizItems` now, exactly like `901` below - see bulk.ts's own "may
+  // legitimately appear in both tabs now" tests). That stale fixture was WHY
+  // the "901 must not appear twice" assertion further down used to pass even
+  // while the double-delete bug it was meant to catch was live: with only
+  // one item in `assignmentItems` (and it not being the New Quiz), the old,
+  // unfiltered `realAssignmentItems` could never actually produce the
+  // duplicate. Restoring the real shape here - a New Quiz id present in BOTH
+  // lists, the way Canvas's own data genuinely looks - is what makes these
+  // tests actually exercise the fix (see course-copy-purge.ts's own
+  // `!i.isNewQuiz` filter and its header comment for the corrected logic).
+  const assignmentItems = [{ id: "902" }, { id: "901", isNewQuiz: true }];
   const quizItems = [{ id: "55" }, { id: "901", isNewQuiz: true }];
 
   it("does nothing when neither purge type is ticked", () => {
@@ -125,12 +139,13 @@ describe("planAssignmentPurgeDeletes", () => {
   });
 });
 
-// Finding (REGRESSION.md check 8): listBulkItems("Assignment") now excludes
-// Classic-quiz and graded-discussion shadow assignments for EVERY course
-// (Finding 1), not only ones with New Quizzes. That silently changed
-// CourseCopyModal's DESTRUCTIVE purge path too: ticking "Assignments" alone
-// used to also delete a destination course's Classic quizzes and graded
-// discussions, because their shadow assignment rows used to be part of the
+// Finding (REGRESSION.md check 8): listBulkItems("Assignment") now INCLUDES
+// (no longer excludes) Classic-quiz and graded-discussion shadow assignments
+// for EVERY course (Finding 1's bug fix, bulk.ts), not only ones with New
+// Quizzes. That silently changed CourseCopyModal's DESTRUCTIVE purge path
+// too: ticking "Assignments" alone used to also delete a destination
+// course's Classic quizzes and graded discussions, because their shadow
+// assignment rows used to be part of the
 // "Assignment" list and DELETE /assignments/{shadowId} cascades into
 // deleting the quiz/discussion itself. These tests pin the DELIBERATE
 // decision (see planAssignmentPurgeDeletes' own comment): that old sweep is
@@ -169,5 +184,71 @@ describe("Finding (REGRESSION.md check 8): checkbox-to-Canvas-object purge seman
       quizItems: [{ id: "55" }],
     });
     expect(plan).toEqual([{ kind: "Quiz", ids: ["55"] }]);
+  });
+});
+
+// BUG FIX UPDATE (live report 2026-08-22): listBulkItems("Assignment") no
+// longer excludes classic-quiz and graded-discussion shadow assignment rows
+// from its OWN output (the Assignments tab must show them too, labelled -
+// bulk.ts's own header) - so `assignmentItems` passed into this function can
+// now legitimately contain both. These tests pin that the exclusion
+// enforcing "Assignments alone never deletes a quiz or discussion" is now
+// done EXPLICITLY inside planAssignmentPurgeDeletes itself (filtering by the
+// row's own isClassicQuizShadow/isGradedDiscussionShadow flag), never
+// inherited from the listing having already left them out.
+describe("planAssignmentPurgeDeletes filters shadow rows out of assignmentItems itself, explicitly (A4)", () => {
+  it("a classic-quiz-shadow row present in assignmentItems is excluded from the Assignment delete set even when ticking Assignments alone", () => {
+    const plan = planAssignmentPurgeDeletes({
+      purgeAssignments: true,
+      purgeQuizzes: false,
+      assignmentItems: [{ id: "902" }, { id: "903", isClassicQuizShadow: true }],
+      quizItems: [],
+    });
+    expect(plan).toEqual([{ kind: "Assignment", ids: ["902"] }]);
+  });
+
+  it("a graded-discussion-shadow row present in assignmentItems is excluded from the Assignment delete set even when ticking Assignments alone", () => {
+    const plan = planAssignmentPurgeDeletes({
+      purgeAssignments: true,
+      purgeQuizzes: false,
+      assignmentItems: [{ id: "902" }, { id: "904", isGradedDiscussionShadow: true }],
+      quizItems: [],
+    });
+    expect(plan).toEqual([{ kind: "Assignment", ids: ["902"] }]);
+  });
+
+  it("both shadow kinds are excluded together, alongside a New Quiz (from quizItems) which IS still included, and ticking Quizzes too still never deletes the shadow rows by the assignment id", () => {
+    const plan = planAssignmentPurgeDeletes({
+      purgeAssignments: true,
+      purgeQuizzes: true,
+      assignmentItems: [
+        { id: "902" },
+        { id: "903", isClassicQuizShadow: true },
+        { id: "904", isGradedDiscussionShadow: true },
+      ],
+      quizItems: [{ id: "55" }, { id: "901", isNewQuiz: true }],
+    });
+    const assignmentGroup = plan.find((p) => p.kind === "Assignment");
+    // Ordinary assignment (902) plus the New Quiz (901, from quizItems) -
+    // never 903 or 904, the two shadow assignment ids.
+    expect(assignmentGroup?.ids.sort()).toEqual(["901", "902"]);
+    expect(assignmentGroup?.ids).not.toContain("903");
+    expect(assignmentGroup?.ids).not.toContain("904");
+    // The Classic quiz is deleted through its own id, via the Quiz group.
+    expect(plan.find((p) => p.kind === "Quiz")?.ids).toEqual(["55"]);
+  });
+
+  it("SABOTAGE CHECK: an id collision between a shadow assignment (Assignment:42) and an unrelated quiz (Quiz:42) never cross-matches - the shadow row is still excluded purely by its own flag, never by its numeric id", () => {
+    const plan = planAssignmentPurgeDeletes({
+      purgeAssignments: true,
+      purgeQuizzes: true,
+      assignmentItems: [{ id: "42", isClassicQuizShadow: true }],
+      quizItems: [{ id: "42" }],
+    });
+    // The shadow assignment (Assignment:42) must never appear in the
+    // Assignment delete group - only the quiz's own id (Quiz:42) is deleted,
+    // through the Quiz group.
+    expect(plan.find((p) => p.kind === "Assignment")).toBeUndefined();
+    expect(plan).toEqual([{ kind: "Quiz", ids: ["42"] }]);
   });
 });

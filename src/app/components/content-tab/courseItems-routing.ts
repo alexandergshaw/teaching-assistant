@@ -10,12 +10,28 @@
 // just a wiring guard proving the call sites exist.
 //
 // The one rule that matters: a New Quiz row (`isNewQuiz: true`) exists ONLY
-// as an Assignment underneath, even when it is displayed in the Quizzes tab -
-// src/lib/canvas-modules/bulk.ts's own comment already says so: "a New Quiz
-// must be addressed as an assignment, never as a quiz." Every write in
+// as an Assignment underneath, no matter which tab displays it - src/lib/
+// canvas-modules/bulk.ts's own comment already says so: "a New Quiz must be
+// addressed as an assignment, never as a quiz." Every write in
 // CourseItemsView - publish/unpublish, due dates, points, description,
 // delete - must route through this, never through the view's own `kind`
 // prop directly.
+//
+// BUG FIX UPDATE (live report 2026-08-22, see bulk.ts's own header): the
+// Assignments tab used to never contain a New Quiz, a classic quiz's shadow
+// assignment, or a graded discussion's shadow assignment (all three were
+// excluded from listBulkItems("Assignment") entirely) - that assumption is
+// now false, on purpose: bulk.ts returns every assignment-shaped row there,
+// each labelled for what it really is. This does not change what
+// `effectiveKindOf` computes: a classic-quiz-shadow or graded-discussion-
+// shadow row only ever reaches this function with `kind === "Assignment"`
+// (bulk.ts never sets those two flags on a Quiz-tab row), and its own `id`
+// already IS the assignment id Canvas needs for the write - so it always
+// resolves to "Assignment" regardless, which is the same resource Canvas's
+// own Assignments page would act on. A New Quiz row can now appear under
+// EITHER tab's `kind`; this function is what keeps a Quiz-tab New Quiz
+// routed to "Assignment" while an Assignment-tab New Quiz (trivially) stays
+// "Assignment" too - never special-cased per call site.
 
 import type { BulkItem } from "@/lib/canvas-modules";
 
@@ -25,10 +41,29 @@ export type EffectiveKind = "Assignment" | "Quiz";
  *  full `BulkItem` or any object carrying just this one field. */
 export type NewQuizFlagged = Pick<BulkItem, "isNewQuiz">;
 
+/** Every flag that together describes a row's REAL Canvas kind, independent
+ *  of which tab lists it (bulk.ts's own header) - the single shared shape so
+ *  a consumer (courseItems-modules.ts's module lookup, CourseItemsView.tsx's
+ *  labels) reads the same fields `effectiveKindOf` itself is defined against,
+ *  rather than each inventing its own ad hoc pick of BulkItem and risking one
+ *  drifting from another. */
+export type RealKindFlagged = Pick<
+  BulkItem,
+  | "isNewQuiz"
+  | "isClassicQuizShadow"
+  | "isGradedDiscussionShadow"
+  | "shadowQuizId"
+  | "shadowDiscussionTopicId"
+>;
+
 /** The Canvas kind a given row must actually be addressed as for any write -
- *  never the view's own `kind` prop directly. The Assignments tab never
- *  contains a New Quiz row (C3), so this collapses to `kind` unchanged
- *  there; only the Quizzes tab can ever disagree with its own `kind`. */
+ *  never the view's own `kind` prop directly. A classic-quiz-shadow or
+ *  graded-discussion-shadow row (isClassicQuizShadow/isGradedDiscussionShadow)
+ *  never changes this: both flags are only ever set on an Assignment-tab row
+ *  (bulk.ts), where this already collapses to `kind` unchanged - deleting or
+ *  updating it via the assignment id is exactly what Canvas's own Assignments
+ *  page does. Only a New Quiz row (`isNewQuiz`) can ever disagree with its
+ *  own tab's `kind`, and only when shown in the Quizzes tab. */
 export function effectiveKindOf(item: NewQuizFlagged, kind: EffectiveKind): EffectiveKind {
   return item.isNewQuiz ? "Assignment" : kind;
 }

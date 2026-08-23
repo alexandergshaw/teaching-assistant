@@ -3,7 +3,7 @@
 // which can only regex-match source text because vitest here never renders a
 // component, this file calls the functions directly.
 import { describe, it, expect } from "vitest";
-import { effectiveKindOf, groupSelectedByEffectiveKind, type NewQuizFlagged } from "./courseItems-routing";
+import { effectiveKindOf, groupSelectedByEffectiveKind, type NewQuizFlagged, type RealKindFlagged } from "./courseItems-routing";
 
 describe("effectiveKindOf", () => {
   it("routes a New Quiz row to Assignment from the Quiz tab (D1)", () => {
@@ -24,6 +24,23 @@ describe("effectiveKindOf", () => {
   it("never routes a New Quiz row to Quiz, even when isNewQuiz is explicitly false", () => {
     const item: NewQuizFlagged = { isNewQuiz: false };
     expect(effectiveKindOf(item, "Quiz")).toBe("Quiz");
+  });
+
+  // BUG FIX (live report 2026-08-22): a classic-quiz-shadow or graded-
+  // discussion-shadow row now appears in the Assignments tab (bulk.ts no
+  // longer excludes it), so this pins the safety property that must survive
+  // that reversal - the row's own id is already the assignment id Canvas
+  // needs, and neither flag ever changes the effective kind away from
+  // "Assignment", which is exactly the resource Canvas's own Assignments
+  // page would act on for the same delete/update.
+  it("a classic-quiz-shadow row (Assignments tab) still routes to Assignment for any write - its own id already is the assignment id", () => {
+    const item: RealKindFlagged = { isNewQuiz: undefined, isClassicQuizShadow: true, shadowQuizId: 55 };
+    expect(effectiveKindOf(item, "Assignment")).toBe("Assignment");
+  });
+
+  it("a graded-discussion-shadow row (Assignments tab) still routes to Assignment for any write", () => {
+    const item: RealKindFlagged = { isNewQuiz: undefined, isGradedDiscussionShadow: true };
+    expect(effectiveKindOf(item, "Assignment")).toBe("Assignment");
   });
 });
 

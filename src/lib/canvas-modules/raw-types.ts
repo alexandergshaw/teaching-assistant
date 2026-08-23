@@ -115,6 +115,22 @@ export interface RawBulkAssignment {
    *  submission_types is ['online_quiz']" per the docs) - never on a New
    *  Quiz. Used as a disqualifying signal in new-quiz.ts. */
   quiz_id?: number | null;
+  /**
+   * Present only on a graded discussion's shadow assignment
+   * (`submission_types` includes "discussion_topic"). Verified against
+   * https://canvas.instructure.com/doc/api/assignments.html: the Assignment
+   * object model documents `discussion_topic` as a base field - "(Optional)
+   * the DiscussionTopic associated with the assignment, if applicable" -
+   * distinct from the assignments-index endpoint's include[] allowlist
+   * (submission, assignment_visibility, all_dates, overrides, observed_users,
+   * can_edit, score_statistics, ab_guid), which does NOT list
+   * "discussion_topic" at all. So, like `quiz_id` above, no query-string
+   * change is needed to receive it when Canvas's response carries it. The
+   * docs' own "if applicable" wording means a given row may still not carry
+   * it - bulk.ts and courseItems-modules.ts treat that as UNKNOWN, never as
+   * "no module".
+   */
+  discussion_topic?: { id?: number } | null;
 }
 
 export interface RawBulkQuiz {

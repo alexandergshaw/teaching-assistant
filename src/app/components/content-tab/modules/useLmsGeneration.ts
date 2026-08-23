@@ -104,6 +104,8 @@ import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-gene
 // called from here - the sibling-built commit executor, commit-execute.ts,
 // calls it) expects.
 import type { ModuleTarget } from "@/lib/lms-generation/commit-plan";
+// See lmsGenerationDiscussion.ts's own header comment (Findings 1/2/4).
+import { discussionCheckpointsKey, resolveDiscussionDeadlinesForClientPost } from "./lmsGenerationDiscussion";
 import { resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
 import {
   artifactDownloadFormats,
@@ -176,10 +178,10 @@ import {
   type DeckTemplateOption,
 } from "./lmsGenerationDeckHelpers";
 
-// ── Re-exports (implementations moved to the sibling modules imported
+// -- Re-exports (implementations moved to the sibling modules imported
 // above - see each one's own header comment and doc comments for the full
 // design rationale, preserved verbatim from where it used to live in this
-// file) ──────────────────────────────────────────────────────────────────
+// file) --
 
 export type { GenerationKindId };
 // Re-exported so GeneratedPreviewModal.tsx can pull every hook-facing
@@ -237,7 +239,7 @@ export {
  * own. */
 export { NEW_MODULE_TARGET_VALUE } from "@/lib/syllabus-ack-quiz-target";
 
-// ── Hook ─────────────────────────────────────────────────────────────────
+// -- Hook --
 
 export interface GenerationPreviewState {
   kindId: GenerationKindId;
@@ -251,6 +253,10 @@ export interface GenerationPreviewState {
    * newest version (omitted descriptions, truncation, per-item fetch
    * failures) - empty after a refine, which does not re-gather materials. */
   notes: string[];
+  /** D3/AC14i: the course's `startDate`, so `post` can compute
+   * introDiscussion's deadlines client-side. Meaningless for other kinds;
+   * carried forward (not re-fetched) by refine/saveEdit's setPreview calls. */
+  courseStartDate?: string | null;
 }
 
 export interface UseLmsGenerationReturn {
@@ -271,6 +277,12 @@ export interface UseLmsGenerationReturn {
   scriptLengthOptions: readonly number[];
   scriptMinutes: number;
   setScriptMinutes: (minutes: number) => void;
+  /** introDiscussion only - "Use Canvas discussion checkpoints" checkbox
+   * value; every other kind ignores it, same as templateId/scriptMinutes
+   * above. Persisted per course under a `ta-` key (REPO INVARIANT). Default
+   * FALSE - checkpoints are explicit opt-in, never assumed. */
+  useDiscussionCheckpoints: boolean;
+  setUseDiscussionCheckpoints: (v: boolean) => void;
   preview: GenerationPreviewState | null;
   closePreview: () => void;
   /** Switch which already-loaded version the modal displays - no network
@@ -476,6 +488,17 @@ export function useLmsGeneration(
     localStorage.setItem(scriptMinutesKey(courseUrl), String(scriptMinutes));
   }, [courseUrl, scriptMinutes]);
 
+  // Checkpoints are explicit opt-in, off by default - persisted per course
+  // exactly like scriptMinutes above.
+  const [useDiscussionCheckpoints, setUseDiscussionCheckpoints] = useState<boolean>(
+    () => readStored(discussionCheckpointsKey(courseUrl)) === "true"
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(discussionCheckpointsKey(courseUrl), String(useDiscussionCheckpoints));
+  }, [courseUrl, useDiscussionCheckpoints]);
+
   // setState-in-effect idiom (this repo's own convention): an inline async
   // IIFE with a `cancelled` flag, setState only after the await - never a
   // synchronous setState reached directly from the effect body.
@@ -512,7 +535,9 @@ export function useLmsGeneration(
     // in `generate`'s body, which also runs on the refusal/error paths) is
     // what makes "written on every successful generation, never on a
     // refusal or error" structurally true rather than true by vigilance.
-    defaultModuleChoice: string
+    defaultModuleChoice: string,
+    // D3/AC14i: see GenerationPreviewState's own doc comment.
+    courseStartDate?: string | null
   ) => {
     const kindLabel = kindLabelFor(kindId);
     const versions = await loadVersionsForPreview(
@@ -532,7 +557,7 @@ export function useLmsGeneration(
     setPostTargetFromSelection(defaultModuleChoice !== "");
     setPostModuleChoice(defaultModuleChoice);
     setPostNewModuleName("");
-    setPreview({ kindId, kindLabel, versions, selectedVersion: artifact.version, notes });
+    setPreview({ kindId, kindLabel, versions, selectedVersion: artifact.version, notes, courseStartDate });
     setInstructions("");
     setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
     setNote({ kind: "success", text: generationSuccessNote(kindId, artifact.version, selectionLabel) });
@@ -636,7 +661,7 @@ export function useLmsGeneration(
         finishGenerateError(result.error);
         return;
       }
-      await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel, defaultModuleChoice);
+      await finishGenerateSuccess(kindId, result.artifact, result.notes, selectionLabel, defaultModuleChoice, result.startDate); // D3
     })();
   };
 
@@ -651,7 +676,7 @@ export function useLmsGeneration(
 
   const refine = () => {
     if (!preview || !canStartGeneration(busy) || !instructions.trim()) return;
-    const { kindId, kindLabel } = preview;
+    const { kindId, kindLabel, courseStartDate } = preview;
     const currentVersion = preview.versions.find((v) => v.version === preview.selectedVersion);
     const currentText = currentVersion?.text ?? "";
 
@@ -697,7 +722,7 @@ export function useLmsGeneration(
         exportCourseId,
         acronym
       );
-      setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [] });
+      setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [], courseStartDate });
       setInstructions("");
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
       setRefining(false);
@@ -735,7 +760,7 @@ export function useLmsGeneration(
       setNote({ kind: "error", text: "Cannot save an empty edit." });
       return;
     }
-    const { kindId, kindLabel } = preview;
+    const { kindId, kindLabel, courseStartDate } = preview;
     const currentVersion = preview.versions.find((v) => v.version === preview.selectedVersion);
 
     void (async () => {
@@ -769,7 +794,7 @@ export function useLmsGeneration(
         exportCourseId,
         acronym
       );
-      setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [] });
+      setPreview({ kindId, kindLabel, versions, selectedVersion: result.artifact.version, notes: [], courseStartDate });
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "finish" }));
       setSavingEdit(false);
       setNote({ kind: "success", text: editSuccessNote(kindId, result.artifact.version) });
@@ -836,7 +861,11 @@ export function useLmsGeneration(
 
     const artifact = preview.versions.find((v) => v.version === preview.selectedVersion);
     if (!artifact) return;
-    const { kindId } = preview;
+    const { kindId, courseStartDate } = preview;
+
+    // D3/AC14i (THE TIMEZONE FIX): computed HERE in the browser - see
+    // lmsGenerationDiscussion.ts's own doc comment for Findings 1/2/4.
+    const discussionDeadlines = resolveDiscussionDeadlinesForClientPost(kindId, target, modules, courseStartDate);
 
     void (async () => {
       setLocalBusy((prev) => nextGenerationBusy(prev, { type: "start", kind: kindId }));
@@ -849,6 +878,8 @@ export function useLmsGeneration(
         kind: kindId,
         artifactId: artifact.id,
         target,
+        discussionDeadlines, // D3: undefined for every kind but "introDiscussion".
+        useDiscussionCheckpoints, // Sent unconditionally, like targetMinutes; ignored server-side elsewhere.
         // M12: see this hook's own `acronym` parameter doc comment.
         acronym,
       });
@@ -859,7 +890,9 @@ export function useLmsGeneration(
         setNote({ kind: "error", text: result.error });
         return;
       }
-      setNote(postResultNote(result.summary));
+      // W6: result.notes carries what summary.text has no channel for
+      // (AC14c/AC21/AC14g) - undefined, so unchanged, for every other kind.
+      setNote(postResultNote(result.summary, result.notes));
       reload();
     })();
   };
@@ -932,6 +965,8 @@ export function useLmsGeneration(
     scriptLengthOptions: SCRIPT_LENGTH_OPTIONS,
     scriptMinutes,
     setScriptMinutes,
+    useDiscussionCheckpoints,
+    setUseDiscussionCheckpoints,
     preview,
     closePreview,
     selectVersion,

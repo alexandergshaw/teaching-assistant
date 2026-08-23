@@ -113,6 +113,7 @@ const TITLED_GENERIC_KINDS: readonly GenerationKindId[] = [
   "announcements",
   "scripts",
   "resources",
+  "introDiscussion",
 ];
 
 export interface RefineGeneratedArtifactInput {

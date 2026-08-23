@@ -1,6 +1,27 @@
 import { describe, it, expect, vi } from "vitest";
 import { executePostPlanSteps, type CanvasWriters } from "./commit-execute";
-import type { PostPlanStep } from "./commit-plan";
+import { summarizePostOutcome, type PostPlanStep } from "./commit-plan";
+
+// NewGradedDiscussion (src/lib/canvas-modules/graded-discussion.ts) is owned
+// by a sibling agent and is not necessarily on disk yet - this file never
+// imports it (even as a type), matching commit-plan.test.ts's own approach.
+// useCheckpoints/initialPostPoints/repliesPoints (added to that type by the
+// frozen contract, landed concurrently by that sibling agent) are included
+// here structurally so this fixture keeps matching the real shape.
+function discussionFields() {
+  return {
+    title: "Introduce Yourself",
+    message: "<p>Tell us about yourself.</p>",
+    pointsPossible: 20,
+    initialPostAt: "2026-09-04T03:59:00.000Z",
+    repliesDueAt: "2026-09-07T03:59:00.000Z",
+    requiredReplyCount: 2,
+    published: false,
+    useCheckpoints: false,
+    initialPostPoints: 10,
+    repliesPoints: 10,
+  };
+}
 
 // Pure in-memory fixtures only - no vi.mock (X1). vi.fn() below is a plain
 // spy on an object literal method, not module mocking.
@@ -17,6 +38,7 @@ function makeWriters(overrides: Partial<CanvasWriters> = {}): CanvasWriters {
     createQuizQuestion: vi.fn(async () => ({ question: {} })),
     publishQuiz: vi.fn(async () => ({ ok: true as const })),
     createAnnouncement: vi.fn(async () => ({ announcement: {} })),
+    createDiscussion: vi.fn(async () => ({ id: 9, path: "checkpoints" as const })),
     ...overrides,
   };
 }
@@ -265,6 +287,229 @@ describe("executePostPlanSteps", () => {
 
       expect(outcomes).toEqual([{ step: steps[0], status: "failed", detail: "nope" }]);
     });
+  });
+
+  describe("discussion", () => {
+    it("create-discussion then link-discussion: both done, writers called with the right args", async () => {
+      const writers = makeWriters();
+      const fields = discussionFields();
+      const steps: PostPlanStep[] = [
+        { step: "create-discussion", fields },
+        { step: "link-discussion", title: fields.title },
+      ];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers, "MIT");
+
+      expect(outcomes).toEqual([
+        { step: steps[0], status: "done", detail: undefined },
+        { step: steps[1], status: "done" },
+      ]);
+      expect(writers.createDiscussion).toHaveBeenCalledWith(COURSE_URL, fields, "MIT");
+      expect(writers.createModuleItem).toHaveBeenCalledWith(
+        COURSE_URL,
+        MODULE_ID,
+        { type: "Discussion", contentId: 9, title: fields.title },
+        "MIT"
+      );
+    });
+
+    // SABOTAGE TARGET: create-discussion is content-defining - a failure
+    // there must stop execution immediately (return outcomes right away),
+    // exactly like create-page/create-quiz/create-announcement. Nothing
+    // downstream can succeed against content that was never created.
+    it("SABOTAGE TARGET: create-discussion failure stops execution - link-discussion is never attempted", async () => {
+      const writers = makeWriters({ createDiscussion: vi.fn(async () => ({ error: "Canvas is down" })) });
+      const fields = discussionFields();
+      const steps: PostPlanStep[] = [
+        { step: "create-discussion", fields },
+        { step: "link-discussion", title: fields.title },
+      ];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers);
+
+      expect(outcomes).toEqual([{ step: steps[0], status: "failed", detail: "Canvas is down" }]);
+      expect(writers.createModuleItem).not.toHaveBeenCalled();
+    });
+
+    it("the orphan case: discussion created but link-discussion fails - both outcomes recorded, not aborted", async () => {
+      const writers = makeWriters({ createModuleItem: vi.fn(async () => ({ error: "link failed" })) });
+      const fields = discussionFields();
+      const steps: PostPlanStep[] = [
+        { step: "create-discussion", fields },
+        { step: "link-discussion", title: fields.title },
+      ];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers);
+
+      expect(outcomes).toEqual([
+        { step: steps[0], status: "done", detail: undefined },
+        { step: steps[1], status: "failed", detail: "link failed" },
+      ]);
+    });
+
+    it("a link-discussion step reached with moduleId null is reported failed without calling the writer", async () => {
+      const writers = makeWriters();
+      const fields = discussionFields();
+      const steps: PostPlanStep[] = [
+        { step: "create-discussion", fields },
+        { step: "link-discussion", title: fields.title },
+      ];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, null, steps, writers);
+
+      expect(outcomes[1]).toEqual({ step: steps[1], status: "failed", detail: "No discussion/module to link." });
+      expect(writers.createModuleItem).not.toHaveBeenCalled();
+    });
+
+    it("a link-discussion step reached with no discussionId (defensive) is reported failed without calling the writer", async () => {
+      const writers = makeWriters();
+      const steps: PostPlanStep[] = [{ step: "link-discussion", title: "Introduce Yourself" }];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers);
+
+      expect(outcomes[0].status).toBe("failed");
+      expect(writers.createModuleItem).not.toHaveBeenCalled();
+    });
+
+    // AC14g: the classic-path fallback must never be silent. When
+    // writers.createDiscussion reports path "classic", the reason must
+    // survive onto the outcome, not disappear once the step is marked
+    // "done".
+    it("SABOTAGE TARGET: a classic-path fallback carries its reason on the outcome, not silently as a plain success", async () => {
+      const writers = makeWriters({
+        createDiscussion: vi.fn(async () => ({
+          id: 9,
+          path: "classic" as const,
+          fallbackReason: "discussion_checkpoints feature flag must be enabled",
+        })),
+      });
+      const fields = discussionFields();
+      const steps: PostPlanStep[] = [{ step: "create-discussion", fields }];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers);
+
+      expect(outcomes[0].status).toBe("done");
+      expect(outcomes[0].detail).toBeDefined();
+      expect(outcomes[0].detail).toContain("discussion_checkpoints feature flag must be enabled");
+    });
+
+    // M1 (fix): the outcome's `detail` used to WRAP fallbackReason
+    // ("Classic fallback used (<reason>) - only the initial-post deadline is
+    // enforced by Canvas.") even though the write layer's own
+    // describeFallback() already ends with that exact warning - doubling it.
+    // This custom reason string deliberately shares NO words with either the
+    // old wrapper text or the real describeFallback() sentence, so an exact
+    // (not `.toContain`) match is the only way this test can pass - any
+    // re-introduced wrapping/appending would fail it immediately.
+    it("M1: fallbackReason reaches the outcome VERBATIM - no wrapping prefix, no appended suffix", async () => {
+      const fallbackReason = "CUSTOM SENTINEL TEXT WITH NO CANVAS WRAPPING WHATSOEVER";
+      const writers = makeWriters({
+        createDiscussion: vi.fn(async () => ({ id: 9, path: "classic" as const, fallbackReason })),
+      });
+      const fields = discussionFields();
+      const steps: PostPlanStep[] = [{ step: "create-discussion", fields }];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers);
+
+      expect(outcomes[0].detail).toBe(fallbackReason);
+    });
+
+    it("the checkpoints path (the normal case) carries no fallback detail", async () => {
+      const writers = makeWriters();
+      const fields = discussionFields();
+      const steps: PostPlanStep[] = [{ step: "create-discussion", fields }];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers);
+
+      expect(outcomes[0]).toEqual({ step: steps[0], status: "done", detail: undefined });
+    });
+
+    // End-to-end (D5's silent-failure hop #1): a fully successful discussion
+    // post must summarize as "success", never "Nothing was posted." - the
+    // failure this guards against produces exactly that string with a fully
+    // successful Canvas write underneath it.
+    it("end-to-end: a successful discussion plan summarizes as success, not 'Nothing was posted.'", async () => {
+      const writers = makeWriters();
+      const fields = discussionFields();
+      const steps: PostPlanStep[] = [
+        { step: "create-discussion", fields },
+        { step: "link-discussion", title: fields.title },
+      ];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers);
+      const summary = summarizePostOutcome(outcomes);
+
+      expect(summary.status).toBe("success");
+      expect(summary.text).not.toBe("Nothing was posted.");
+      expect(summary.text).toContain(fields.title);
+    });
+  });
+
+  // A NEW COMPLETENESS TEST (docs/intro-discussion-from-modules-acceptance-
+  // criteria.md, "TESTS" section): nothing today pins that every
+  // PostPlanStep["step"] literal actually produces an outcome when executed -
+  // that switch has no `default` and no return-type pressure, so a missing
+  // case is silently skipped rather than a compile error. TypeScript's
+  // discriminated union cannot be enumerated at runtime, so this list of
+  // every step literal is HAND-WRITTEN and is itself a canary: bump it in the
+  // same commit as any future PostPlanStep addition, or this test stops
+  // proving anything.
+  //
+  // Finding 3 (fix): the ORIGINAL `Array<PostPlanStep["step"]>` annotation
+  // only enforces that every LISTED value is a valid step kind - it does
+  // nothing to enforce the reverse (every valid kind is LISTED). Add a
+  // twelfth step kind to PostPlanStep and that old annotation stays green
+  // while this list silently omits it - exactly the defect this canary
+  // exists to catch. `satisfies Record<PostPlanStep["step"], true>` makes the
+  // object literal itself compile-time exhaustive: TypeScript rejects it the
+  // moment a PostPlanStep step kind is missing a key, OR a key does not
+  // correspond to a real step kind. See this chunk's own report for the
+  // sabotage transcript (a thirteenth key added, `tsc --noEmit` re-run,
+  // reverted).
+  const ALL_POST_PLAN_STEP_KINDS = Object.keys({
+    "create-page": true,
+    "update-page": true,
+    "link-page": true,
+    "create-assignment": true,
+    "create-quiz": true,
+    "create-quiz-question": true,
+    "publish-quiz": true,
+    "link-quiz": true,
+    "create-announcement": true,
+    "create-discussion": true,
+    "link-discussion": true,
+  } satisfies Record<PostPlanStep["step"], true>) as Array<PostPlanStep["step"]>;
+
+  it("COMPLETENESS: every PostPlanStep step kind produces an attempted outcome, none silently skipped", async () => {
+    const writers = makeWriters();
+    const megaPlan: PostPlanStep[] = [
+      { step: "create-page", title: "P", body: "b" },
+      { step: "link-page", title: "P" },
+      { step: "update-page", pageUrl: "existing-page", title: "P2", body: "b2" },
+      { step: "create-assignment", fields: {
+        name: "A", description: "d", pointsPossible: null, dueAt: "", submissionType: "none", published: false,
+      } },
+      { step: "create-quiz", title: "Q", description: "d" },
+      { step: "create-quiz-question", index: 0, total: 1, question: QUESTION },
+      { step: "publish-quiz" },
+      { step: "link-quiz", title: "Q" },
+      { step: "create-announcement", title: "N", message: "m" },
+      { step: "create-discussion", fields: discussionFields() },
+      { step: "link-discussion", title: discussionFields().title },
+    ];
+
+    const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, megaPlan, writers);
+
+    // Nothing was skipped: exactly one outcome per planned step, in order.
+    expect(outcomes).toHaveLength(megaPlan.length);
+    expect(outcomes.every((o) => o.status === "done")).toBe(true);
+
+    const attemptedKinds = outcomes.map((o) => o.step.step);
+    for (const kind of ALL_POST_PLAN_STEP_KINDS) {
+      expect(attemptedKinds).toContain(kind);
+    }
+    // And the canary itself is exhaustive against what the mega-plan sent in.
+    expect(new Set(attemptedKinds)).toEqual(new Set(ALL_POST_PLAN_STEP_KINDS));
   });
 
   it("an empty plan produces an empty outcome list without calling any writer", async () => {

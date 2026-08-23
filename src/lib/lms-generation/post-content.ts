@@ -13,9 +13,14 @@
 // fetch. GenerationFailure is declared in kinds.ts (not lms-generation.ts)
 // for exactly this reason - see that type's own doc comment.
 import type { GeneratedArtifact } from "@/lib/supabase/generated-artifacts";
-import type { PostContent } from "@/lib/lms-generation/commit-plan";
+import type { CanvasPostKind, PostContent } from "@/lib/lms-generation/commit-plan";
 import type { GenerationFailure, KnowledgeCheckGeneratedQuestion } from "@/lib/lms-generation/kinds";
 import { markdownLiteToHtml } from "@/lib/markdown-lite";
+import {
+  INTRO_DISCUSSION_POINTS,
+  REQUIRED_REPLY_COUNT,
+  splitCheckpointPoints,
+} from "@/lib/lms-generation/intro-discussion-deadlines";
 
 /**
  * Parse a knowledge-check artifact's `structured` column - or a raw LLM JSON
@@ -60,21 +65,53 @@ export function quizQuestionFromKnowledgeCheck(q: KnowledgeCheckGeneratedQuestio
   };
 }
 
+/** The client-computed instants for a graded discussion's two deadlines -
+ * see D3 in docs/intro-discussion-from-modules-acceptance-criteria.md: these
+ * are produced IN THE BROWSER from the AC8 pure leaf, never on the server,
+ * because a server-computed `.toISOString()` would silently shift every
+ * 11:59pm by the server's UTC offset. Optional on buildPostContentForKind so
+ * every existing kind's emitted PostContent stays byte-identical. */
+export interface PostDiscussionDeadlines {
+  /** ISO8601 with offset, or "" - the initial-post deadline (Thursday). */
+  initialPostAt: string;
+  /** ISO8601 with offset, or "" - the replies deadline (Sunday). */
+  repliesDueAt: string;
+}
+
 /**
  * Build this kind's PostContent from an already-re-read artifact row - pure
  * given the row (no I/O), so every branch is a straight structural mapping.
- * `canvasObjectKind`'s four literals are exhaustively covered with no
- * `default`, the same "last statement in the function, TypeScript proves
- * exhaustiveness itself" pattern commit-plan.ts's own planPostSteps already
- * uses. The "quiz" branch is the only one that can itself fail (no usable
- * questions were ever saved on this version) - modelled as a return value,
- * never a throw, consistent with every other validation in lms-generation.ts.
+ * `canvasObjectKind` is exhaustively covered with no `default`, the same
+ * "last statement in the function, TypeScript proves exhaustiveness itself"
+ * pattern commit-plan.ts's own planPostSteps already uses. The "quiz" branch
+ * is the only one that can itself fail (no usable questions were ever saved
+ * on this version) - modelled as a return value, never a throw, consistent
+ * with every other validation in lms-generation.ts.
+ *
+ * `deadlines` is optional and used only by the "discussion" arm - every
+ * other arm ignores it, so their emitted PostContent is unaffected by this
+ * parameter's addition (post-content.test.ts:53 pins this for the assignment
+ * arm).
+ *
+ * `useDiscussionCheckpoints` (also discussion-arm-only) is the client's own
+ * opt-in checkbox value (GenerateFromSelectionSection.tsx's "Use Canvas
+ * discussion checkpoints" control) - Canvas's createDiscussionTopic mutation
+ * is NOT transactional on a flag-off account (it persists the orphan
+ * assignment, THEN raises), so checkpoints are EXPLICIT opt-in and default to
+ * FALSE here - a caller that omits this parameter gets the classic,
+ * single-deadline path, never checkpoints by surprise. `initialPostPoints`/
+ * `repliesPoints` are computed here (splitCheckpointPoints, the AC8 leaf),
+ * not inside the Canvas write layer, so the checkpoints split and the classic
+ * path's whole-total `pointsPossible` can never independently disagree about
+ * what INTRO_DISCUSSION_POINTS is - see that function's own doc comment.
  */
 export function buildPostContentForKind(
-  canvasObjectKind: "page" | "assignment" | "quiz" | "announcement",
+  canvasObjectKind: CanvasPostKind,
   title: string,
   artifact: GeneratedArtifact,
-  publishedOnCreation: boolean
+  publishedOnCreation: boolean,
+  deadlines?: PostDiscussionDeadlines,
+  useDiscussionCheckpoints = false
 ): PostContent | GenerationFailure {
   switch (canvasObjectKind) {
     case "page":
@@ -108,5 +145,29 @@ export function buildPostContentForKind(
 
     case "announcement":
       return { kind: "announcement", title, message: artifact.text };
+
+    case "discussion": {
+      const { initialPostPoints, repliesPoints } = splitCheckpointPoints(INTRO_DISCUSSION_POINTS);
+      return {
+        kind: "discussion",
+        fields: {
+          title,
+          message: markdownLiteToHtml(artifact.text),
+          pointsPossible: INTRO_DISCUSSION_POINTS,
+          initialPostAt: deadlines?.initialPostAt ?? "",
+          repliesDueAt: deadlines?.repliesDueAt ?? "",
+          requiredReplyCount: REQUIRED_REPLY_COUNT,
+          published: publishedOnCreation,
+          // Frozen contract (checkpoints are explicit opt-in, off by
+          // default): useCheckpoints threads the client's own checkbox value
+          // straight through; initialPostPoints/repliesPoints are always
+          // computed and sent (not only when useCheckpoints is true) so the
+          // write layer never needs to re-derive the split itself.
+          useCheckpoints: useDiscussionCheckpoints,
+          initialPostPoints,
+          repliesPoints,
+        },
+      };
+    }
   }
 }

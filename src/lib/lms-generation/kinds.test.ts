@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { OUTPUT_FAMILIES } from "@/lib/output-selection";
+import type { CanvasPostKind } from "./commit-plan";
 import {
   GENERATION_KIND_IDS,
   GENERATION_KIND_CONFIGS,
@@ -14,6 +15,8 @@ import {
   announcementsKindConfig,
   scriptsKindConfig,
   resourcesKindConfig,
+  introDiscussionKindConfig,
+  type GenerationCommitMeta,
   type QaGeneratedContent,
   type CurrentEventsGeneratedContent,
   type DeckGeneratedContent,
@@ -22,7 +25,22 @@ import {
   type KnowledgeCheckGeneratedContent,
   type AnnouncementGeneratedContent,
   type ScriptGeneratedContent,
+  type IntroDiscussionGeneratedContent,
 } from "./kinds";
+
+// Type-level assertion (docs/intro-discussion-from-modules-acceptance-
+// criteria.md, section 5b W7): every value GenerationCommitMeta.canvasObjectKind
+// can take must be assignable to CanvasPostKind (src/lib/lms-generation/
+// commit-plan.ts). kinds.ts keeps canvasObjectKind as a hand-copied literal
+// union rather than importing CanvasPostKind (its own leaf rule forbids that
+// import - see kinds.ts's header comment), so this is what stops the two
+// duplicate unions from silently drifting apart again. If a value is ever
+// added to one side and not the other, this line fails to compile: the
+// conditional resolves to `never`, and `true` is not assignable to `never`.
+type _AssertCanvasObjectKindAssignableToCanvasPostKind =
+  GenerationCommitMeta["canvasObjectKind"] extends CanvasPostKind ? true : never;
+const _assertCanvasObjectKindAssignableToCanvasPostKind: _AssertCanvasObjectKindAssignableToCanvasPostKind = true;
+void _assertCanvasObjectKindAssignableToCanvasPostKind;
 
 describe("GENERATION_KIND_IDS", () => {
   // CANARY: bump this list (same commit as any GENERATION_KIND_IDS change) -
@@ -30,9 +48,11 @@ describe("GENERATION_KIND_IDS", () => {
   // derive from GENERATION_KIND_IDS itself, so a kind added or removed from
   // the registry without a matching edit here fails loudly rather than
   // silently drifting. "resources" (docs/learning-resources-page-acceptance-
-  // criteria.md, A1) is the ninth kind, joining "scripts" in
-  // NON_FAMILY_KIND_IDS - see that constant's own doc comment (kinds.ts).
-  it("is exactly the nine kinds shipped so far, in a stable order", () => {
+  // criteria.md, A1) is the ninth kind; "introDiscussion"
+  // (docs/intro-discussion-from-modules-acceptance-criteria.md, AC5) is the
+  // TENTH, joining "scripts" and "resources" in NON_FAMILY_KIND_IDS - see
+  // that constant's own doc comment (kinds.ts).
+  it("is exactly the ten kinds shipped so far, in a stable order", () => {
     expect(GENERATION_KIND_IDS).toEqual([
       "qa",
       "currentEvents",
@@ -43,6 +63,7 @@ describe("GENERATION_KIND_IDS", () => {
       "announcements",
       "scripts",
       "resources",
+      "introDiscussion",
     ]);
   });
 
@@ -111,6 +132,7 @@ describe("GENERATION_KIND_CONFIGS", () => {
     expect(GENERATION_KIND_CONFIGS.announcements).toBe(announcementsKindConfig);
     expect(GENERATION_KIND_CONFIGS.scripts).toBe(scriptsKindConfig);
     expect(GENERATION_KIND_CONFIGS.resources).toBe(resourcesKindConfig);
+    expect(GENERATION_KIND_CONFIGS.introDiscussion).toBe(introDiscussionKindConfig);
   });
 });
 
@@ -155,31 +177,37 @@ describe("R1: commitMode", () => {
 
   // Per-kind canvasObjectKind values have no derivable formula (they are a
   // deliberate per-kind choice, not a function of commitMode), so this stays
-  // a hand-written list - including "resources", added per finding 5.
+  // a hand-written list - including "resources" (finding 5) and
+  // "introDiscussion", the first kind whose canvasObjectKind is "discussion"
+  // rather than page/assignment/quiz/announcement (docs/intro-discussion-
+  // from-modules-acceptance-criteria.md, section 5b W7).
   it("declares the right Canvas object kind per new kind", () => {
     expect(objectivesKindConfig.commitMeta?.canvasObjectKind).toBe("page");
     expect(assignmentsKindConfig.commitMeta?.canvasObjectKind).toBe("assignment");
     expect(knowledgeChecksKindConfig.commitMeta?.canvasObjectKind).toBe("quiz");
     expect(announcementsKindConfig.commitMeta?.canvasObjectKind).toBe("announcement");
     expect(resourcesKindConfig.commitMeta?.canvasObjectKind).toBe("page");
+    expect(introDiscussionKindConfig.commitMeta?.canvasObjectKind).toBe("discussion");
   });
 
-  it("page/assignment/quiz/resources kinds are unpublished on creation, matching every other creation path in this tab", () => {
+  it("page/assignment/quiz/resources/introDiscussion kinds are unpublished on creation, matching every other creation path in this tab", () => {
     expect(objectivesKindConfig.commitMeta?.publishedOnCreation).toBe(false);
     expect(assignmentsKindConfig.commitMeta?.publishedOnCreation).toBe(false);
     expect(knowledgeChecksKindConfig.commitMeta?.publishedOnCreation).toBe(false);
     expect(resourcesKindConfig.commitMeta?.publishedOnCreation).toBe(false);
+    expect(introDiscussionKindConfig.commitMeta?.publishedOnCreation).toBe(false);
   });
 
   it("announcements are published on creation (no unpublished-draft state exists for them)", () => {
     expect(announcementsKindConfig.commitMeta?.publishedOnCreation).toBe(true);
   });
 
-  it("page/assignment/quiz/resources kinds place their content as a module item", () => {
+  it("page/assignment/quiz/resources/introDiscussion kinds place their content as a module item", () => {
     expect(objectivesKindConfig.commitMeta?.placement).toBe("module-item");
     expect(assignmentsKindConfig.commitMeta?.placement).toBe("module-item");
     expect(knowledgeChecksKindConfig.commitMeta?.placement).toBe("module-item");
     expect(resourcesKindConfig.commitMeta?.placement).toBe("module-item");
+    expect(introDiscussionKindConfig.commitMeta?.placement).toBe("module-item");
   });
 
   it("announcements are course-level, NOT a module item", () => {
@@ -697,5 +725,91 @@ describe("scriptsKindConfig", () => {
 
   it("renderStructured is undefined - a script's text column round-trips it completely", () => {
     expect(scriptsKindConfig.renderStructured).toBeUndefined();
+  });
+});
+
+// introDiscussionKindConfig's own identity block (docs/intro-discussion-
+// from-modules-acceptance-criteria.md, AC4-AC7 as amended by section 5b's
+// W1). docs/REGRESSION.md entry 322's Limits records that "resources" shipped
+// WITHOUT one of these - this block exists so introDiscussion does not repeat
+// that gap.
+describe("introDiscussionKindConfig", () => {
+  it("carries the expected identity fields", () => {
+    expect(introDiscussionKindConfig.id).toBe("introDiscussion");
+    // Permanent - the sole version-history query key. See kinds.ts's own
+    // comment on introDiscussionKindConfig.artifactKind for why it must
+    // never change once shipped.
+    expect(introDiscussionKindConfig.artifactKind).toBe("intro-discussion");
+    expect(introDiscussionKindConfig.label).toBe("Intro discussion");
+    expect(introDiscussionKindConfig.needsCourseRow).toBe(true);
+    expect(introDiscussionKindConfig.commitMode).toBe("save-and-post");
+  });
+
+  it("buildPrompt folds in the course name, module label, and materials text", () => {
+    const prompt = introDiscussionKindConfig.buildPrompt("SOME MATERIALS TEXT", {
+      courseName: "Intro to Widgets",
+      moduleLabel: "Week 3",
+    });
+    expect(prompt).toContain("Intro to Widgets");
+    expect(prompt).toContain("Week 3");
+    expect(prompt).toContain("SOME MATERIALS TEXT");
+  });
+
+  it("buildPrompt falls back to a generic course label when courseName is blank", () => {
+    const prompt = introDiscussionKindConfig.buildPrompt("materials", {
+      courseName: "",
+      moduleLabel: "Week 1",
+    });
+    expect(prompt).toContain("this course");
+  });
+
+  it("render returns the generated message verbatim - the title is not folded in", () => {
+    const generated: IntroDiscussionGeneratedContent = {
+      title: "Introduce Yourself",
+      message: "Tell us about your career and how it relates to this course.",
+    };
+    const text = introDiscussionKindConfig.render(generated);
+    expect(text).toBe("Tell us about your career and how it relates to this course.");
+    expect(text).not.toContain("Introduce Yourself");
+  });
+
+  it("isEmpty is true when either the title or the message is blank", () => {
+    expect(introDiscussionKindConfig.isEmpty({ title: "", message: "Body text" })).toBe(true);
+    expect(introDiscussionKindConfig.isEmpty({ title: "Title", message: "" })).toBe(true);
+    expect(introDiscussionKindConfig.isEmpty({ title: "  ", message: "  " })).toBe(true);
+    expect(introDiscussionKindConfig.isEmpty({ title: "Title", message: "Body" })).toBe(false);
+  });
+
+  it("renderStructured is undefined - keeps kindSupportsTextEdit true so the prompt stays hand-editable", () => {
+    expect(introDiscussionKindConfig.renderStructured).toBeUndefined();
+  });
+
+  it("deliveredAloud is absent - a discussion prompt is posted for students to read, never read aloud on camera", () => {
+    expect(introDiscussionKindConfig.deliveredAloud).toBeUndefined();
+  });
+
+  // AC7/W1: the generated-content shape has NO pointsPossible field. Points
+  // are the constant INTRO_DISCUSSION_POINTS, applied at post time - a
+  // model-supplied points value would be discarded at save time
+  // (saveGeneratedArtifactVersion persists only title/text/structured) and
+  // could never reach Canvas.
+  //
+  // This is a COMPILE-TIME exhaustiveness check, not a runtime one - a
+  // runtime object literal typed as the interface can never fail this way
+  // (step-10 finding 3a: the previous version built a two-key literal and
+  // then asserted Object.keys of THAT SAME LITERAL equalled two keys, which
+  // cannot fail no matter what the interface says). `-?` strips optionality
+  // from the mapped type, so ALL_KEYS below requires an entry for every key
+  // of the interface EVEN AN OPTIONAL ONE - adding any field to
+  // IntroDiscussionGeneratedContent, required or optional, makes the object
+  // literal below fail to compile with "Property '<name>' is missing",
+  // caught by `tsc --noEmit`, not by vitest (vitest's esbuild transform does
+  // not type-check).
+  it("IntroDiscussionGeneratedContent has exactly title and message - compile-time exhaustiveness", () => {
+    const ALL_KEYS: { [K in keyof IntroDiscussionGeneratedContent]-?: true } = {
+      title: true,
+      message: true,
+    };
+    expect(Object.keys(ALL_KEYS).sort()).toEqual(["message", "title"]);
   });
 });

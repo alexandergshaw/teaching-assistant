@@ -29714,3 +29714,380 @@ a live bug report plus a one-line filter request, so the criteria labels used
 in the source comments (A1-A6, F1-F6) were coined during implementation and are
 recorded in no document that predates it; and the 5 unattributed tests in
 check 12 remain unexplained.
+
+## 328. An introduce-yourself graded discussion, generated from the Modules view and posted into a module with a Thursday initial post and a Sunday replies deadline
+
+Acceptance criteria:
+`docs/intro-discussion-from-modules-acceptance-criteria.md` - section 5b is the
+FINAL contract and wins wherever it disagrees with sections 1-5 above it. A
+TENTH generation kind in the Modules view's existing "Generate from selection"
+row - `introDiscussion`, labelled "Intro discussion" - that turns the selected
+module's material into an "introduce yourself and talk about your career as it
+relates to this course" prompt, saves it as a version, and posts it into a
+module as a GRADED Canvas discussion worth 20 points: initial post due 11:59pm
+Thursday of that module's week, two replies due 11:59pm Sunday of the SAME
+week. Built by eight agents in two waves (D4), then a reviewer, a researcher,
+three fixers and a confirmation review.
+
+1. **THE CHAIN, TRACED FROM THE BUTTON TO A GRADED CANVAS DISCUSSION LINKED IN
+   A MODULE, NOT ASSUMED.** Tick any item or module checkbox ->
+   `ModulesView.tsx` renders the bulk bar -> `<GenerateFromSelectionSection>`
+   -> `offerableGenerationKinds` (`lmsGenerationKindHelpers.ts:98-100`) returns
+   `GENERATION_KINDS`, which is `GENERATION_KIND_IDS.map(...)` over the
+   registry itself (`:23-26`) -> one `<Button>` per kind, so the "Intro
+   discussion" button EXISTS because the id was added to the registry and for
+   no other reason -> `onGenerate("introDiscussion", ...)` ->
+   `useLmsGeneration.generate` -> `generateFromSelectionAction` ->
+   `requireOwner()` -> course row resolved -> `expandModuleSelection` against a
+   FRESH module tree -> `gatherSelectionMaterials` ->
+   `case "introDiscussion":` (`lms-generation.ts:675`) -> deadline TEXTS
+   computed by `planIntroDiscussionDeadlines`/`formatDeadlineForPrompt` ->
+   `generateIntroDiscussionForSelection` -> `stripRestatedDeadlineLines` ->
+   `saveGeneratedArtifactVersion` with `kind: "intro-discussion"` and the
+   MODEL'S OWN title -> the response carries `startDate` back ->
+   `finishGenerateSuccess` opens `GeneratedPreviewModal`, seeds the post target
+   from the selection (entry 320) and stores `courseStartDate` -> preview /
+   refine / hand-edit / download, all generic -> "Post to Canvas" (shown
+   because `kindOffersPost` reads `commitMode`) ->
+   `resolveDiscussionDeadlinesForClientPost` computes the two absolute instants
+   IN THE BROWSER -> `postGeneratedArtifactAction` -> `planModuleTarget` ->
+   `buildPostContentForKind("discussion", ...)` -> `planPostSteps`' new
+   discussion branch -> `create-discussion` then `link-discussion`
+   (`commit-plan.ts:251-258`) -> `LIVE_CANVAS_WRITERS.createDiscussion`
+   (`lms-generation-writers.ts:67`) -> `createGradedDiscussionAction` ->
+   `createGradedDiscussion` -> classic REST create (or the GraphQL checkpoints
+   mutation, opted in) -> `createModuleItemAction` with `type: "Discussion"`
+   -> `summarizePostOutcome` plus `harvestPostOutcomeNotes`. Every hop was read
+   in the current source.
+
+2. **CHECKPOINTS ARE AN EXPLICIT OPT-IN, AND THE REASON IS A NON-TRANSACTIONAL
+   CANVAS MUTATION - THIS IS THE DECISION MOST WORTH RE-READING.** The 5b
+   design (D2) treated Canvas Discussion Checkpoints as the DEFAULT path,
+   always attempted, falling back on the flag-off error. The step-10 review
+   overturned that (H1), for a mechanical reason: read against
+   `instructure/canvas-lms` master, `Mutations::CreateDiscussionTopic#resolve`
+   is NOT transactional. It persists the parent assignment via
+   `create_api_assignment` FIRST, then runs the checkpoint block - exactly
+   where the flag-off error is raised - and `discussion_topic.save!` only runs
+   AFTER that block. So on a flag-off account (the default; the flag is
+   `state: allowed`) a speculative attempt leaves a stray, unattached
+   assignment in the instructor's course EVERY SINGLE TIME, with nothing to
+   roll it back and no safe way for this app to delete it (a title-matched
+   delete could destroy a legitimate assignment). The account-scoped flag
+   cannot be probed either: it is `applies_to: Account`, so a course-scoped
+   `GET /courses/:id/features/enabled` cannot see it - absent there is
+   indistinguishable from off. There is no way to ask before trying, and trying
+   costs the instructor real cleanup. The resolution is a checkbox, "Use Canvas
+   discussion checkpoints", default OFF, whose tooltip states the admin
+   requirement. With it off, `createGradedDiscussion` never touches GraphQL at
+   all (`graded-discussion.ts:315-318`). With it on and the flag genuinely off,
+   the fallback still fires - and `describeFallback` (`:243-254`) warns the
+   instructor BY NAME about the stray assignment it may have just created.
+   Recorded at length because "we made the good path opt-in" reads as timidity
+   until you know the mutation discards nothing on failure.
+
+3. **THE THURSDAY/SUNDAY ENCODING IS TWO RULES OVER ONE EXISTING FUNCTION, AND
+   IT RE-DERIVES NO DATE ARITHMETIC.** `INITIAL_POST_RULE` is
+   `{day: "thu", time: "23:59"}` and `REPLIES_RULE` is
+   `{day: "sun", time: "23:59"}` (`intro-discussion-deadlines.ts:19-21`), both
+   fed to `dueDateForWeek` (`assignment-due-rule.ts:122`), this repo's existing
+   Monday-anchored week helper and the ONLY date arithmetic in the leaf - no
+   `setDate`, no manual day offsets, no `Date.now()`. Under that convention
+   `thu` is Monday+3 and `sun` is Monday+6 of the SAME week, which is exactly
+   "the Thursday before the Sunday of that week", so the two deadlines are
+   ordered without a comparison ever being written. The week number comes from
+   `extractModuleNumber` over the TARGET MODULE'S name, the term anchor from
+   `parseCourseDate(startDate)`; either returning null returns null, which is a
+   REAL ANSWER - the discussion posts with no dates and the note says which of
+   the two causes it was, in two distinct sentences
+   (`describeMissingDeadlines:99-114`, D5 item 7).
+
+4. **THE DEADLINES ARE COMPUTED IN THE BROWSER, AND THAT IS THE WHOLE FIX FOR A
+   BUG THAT WOULD HAVE SHIPPED SILENTLY.** `.toISOString()` on a Date built
+   from local wall-clock components encodes the CALLING PROCESS's timezone.
+   Vercel runs UTC, so every server-computed "11:59pm" would have reached
+   Canvas as 11:59pm UTC - hours off for every instructor in the Americas, with
+   no error and nothing in any gate that could see it (D5 item 5). D3's answer:
+   the client already knows the target module, so `useLmsGeneration.post()`
+   calls `resolveDiscussionDeadlinesForClientPost`
+   (`lmsGenerationDiscussion.ts:56-75`) -> `planIntroDiscussionPost` IN THE
+   BROWSER and sends absolute instants in
+   `PostGeneratedArtifactInput.discussionDeadlines`. The server has NO path
+   that can compute one: the fixer round deleted the server-side fallback
+   outright, and `resolveDiscussionDeadlinesForPost`
+   (`post-outcome-notes.ts:40-53`) performs no date arithmetic and calls
+   `.toISOString()` nowhere - a caller that omits the field gets empty strings
+   and a note saying so, never a wrong date. The one server-side date call that
+   REMAINS is `formatDeadlineForPrompt` in the generate case - display text
+   only, pure local arithmetic, identical in any process timezone.
+
+5. **THE REGISTRY WAS APPENDED TO, NEVER REORDERED, AND NOT ONE PRE-EXISTING
+   `artifactKind` STRING MOVED.** `GENERATION_KIND_IDS` (`kinds.ts:186-197`) is
+   the pre-existing nine in their original order with the tenth appended.
+   `NON_FAMILY_KIND_IDS` grew to `["scripts", "resources", "introDiscussion"]`,
+   and the `Extract`-derived union still lists exactly the same seven
+   family-backed ids, so no existing id lost its per-id compile-time rename
+   protection. The new `artifactKind` is `intro-discussion` - permanent,
+   kebab-case, distinct from all nine, covered automatically by the DERIVED
+   uniqueness canary. Unlike `resources`, this kind DID get its own per-kind
+   identity block (`kinds.test.ts:736-815`), closing for itself the gap entry
+   322's Limits recorded.
+
+6. **THE SIX CANARIES 5b/D6 SAID TO BUMP WERE BUMPED, AND THE FOUR IT SAID NOT
+   TO TOUCH WERE NOT - VERIFIED BY DIFF, NOT BY CLAIM.** `git diff -U0` over
+   every touched test file shows exactly SEVEN deleted lines in total, all
+   comment or `it(...)` TITLE text plus one import - not one assertion was
+   deleted or weakened. Bumped (hand-written by necessity): the ten-ids
+   ordering list, the per-kind `canvasObjectKind` list, the
+   `publishedOnCreation: false` list, the `placement: "module-item"` list
+   (`kinds.test.ts:177-211`), the `kindOffersPost` list
+   (`useLmsGeneration.test.ts:449`), and `EXPECTED_TITLED_GENERIC_KINDS`
+   (`lms-generation-refine.test.ts:1024`). NOT touched, because they self-adapt
+   and editing one hides the drift it exists to catch: the `artifactKind`
+   uniqueness test, the family/non-family disjointness test, the
+   `GENERATION_KIND_CONFIGS`-keys test, and `useLmsGeneration.test.ts:79-89`.
+
+7. **THE `discussion` POST KIND IS THE FIRST TO BREAK THE REGISTRY'S FREE RIDE,
+   AND THE TWO DUPLICATE UNIONS NOW HAVE A COMPILE-TIME TIE.** Entry 322
+   recorded that a new kind costs nothing downstream because every discriminant
+   reads `commitMeta`, never a kind id. That held for nine kinds and stops
+   here: `discussion` is a new Canvas object type, so `CanvasPostKind`,
+   `PostContent`, `PostPlanStep`, `planPostSteps`, `isContentStep`,
+   `isLinkStep`, `describeContent`, `CanvasWriters` and `executePostPlanSteps`
+   all had to learn it. W7's separate hazard -
+   `GenerationCommitMeta.canvasObjectKind` is a HAND-COPIED duplicate of
+   `CanvasPostKind`, because `kinds.ts`'s leaf rule forbids importing from
+   `commit-plan.ts` - is now held by a type-level assertion
+   (`kinds.test.ts:36-42`): add a value to one union and not the other and the
+   file fails to COMPILE. Caught by `tsc`, not vitest, which does not
+   type-check.
+
+8. **THE SEVEN SILENT-FAILURE HOPS (D5), CHECKED ONE BY ONE.** (1)
+   `isContentStep` includes `create-discussion` and `isLinkStep` includes
+   `link-discussion` (`commit-plan.ts:290-307`), so a fully successful post
+   does not report "Nothing was posted."; `describeContent` gained its case.
+   (2) `executePostPlanSteps` has both new cases (`commit-execute.ts:233-269`);
+   its switch has no `default` and no return-type pressure, so a missing case
+   would have skipped the step silently. (3) Exactly TWO checkpoints are always
+   sent (`graded-discussion.ts:181-193`) - sending one makes Canvas silently
+   create an ordinary graded discussion with no error at all, and three or more
+   is the same silent no-op (same `== 2` equality guard). (4)
+   `"introDiscussion"` is in `TITLED_GENERIC_KINDS` - the exact defect that
+   shipped with `resources` (entry 322 check 4). (5) Deadlines are client-side.
+   (6) The classic fallback is never silent. (7) The two no-deadline causes
+   produce two different strings.
+
+9. **THE FALLBACK REASON IS OWNED IN EXACTLY ONE PLACE, AFTER IT WAS BRIEFLY
+   OWNED IN TWO.** `describeFallback` already ends with "only the initial-post
+   deadline is graded by Canvas; the replies deadline is enforced by the thread
+   closing, not by a separate grade." `commit-execute.ts` used to wrap that and
+   append its own copy of the same warning, so the instructor read it twice.
+   Fixed (M1): passed through VERBATIM (`commit-execute.ts:252`). There is a
+   SECOND, distinct reason - `describeMissingDatesFallback` (`:263-270`) - for
+   the case in the Limits where no GraphQL call was made at all and therefore
+   no stray assignment can exist; collapsing the two would have sent the
+   instructor hunting for an assignment that was never created.
+
+10. **THE `notes` CHANNEL IS ADDITIVE, PROVEN BY A FROZEN LITERAL RATHER THAN
+    AN ARGUMENT.** `PostGeneratedArtifactSuccess.notes` is optional, and
+    `harvestPostOutcomeNotes` (`post-outcome-notes.ts:21-26`) matches ONLY a
+    `create-discussion` outcome, so every other kind harvests `[]`.
+    `postResultNote` gained an optional second parameter and joins with a
+    space, so `[summary.text].join(" ")` is `summary.text` exactly; a
+    frozen-literal test asserts byte-identical output for the no-notes call.
+    The kind rule (success/partial/failed -> success/error/error) is unchanged,
+    pinned by a partial-with-notes case that must still resolve to `error`.
+
+11. **THE CHECKBOX THREADING IS COMPILE-ENFORCED, NOT TEST-ENFORCED.**
+    `useDiscussionCheckpoints` / `onUseDiscussionCheckpointsChange` are
+    REQUIRED props (`GenerateFromSelectionSection.tsx:80-86`), so
+    `ModulesView.tsx:614-615` cannot omit them without failing `tsc`. This is
+    the hop that has shipped dead in this repo before. The checkbox is gated on
+    `offersIntroDiscussion` (mirroring the deck-template and script-length
+    pickers), disabled while `busy !== ""`, and persists per course under
+    `ta-lms-discussion-checkpoints-{courseUrl}`. `isDiscussionKind`
+    (`lmsGenerationDiscussion.ts:22-24`) reads
+    `commitMeta.canvasObjectKind === "discussion"` from the SAME registry the
+    server reads, rather than the literal `kindId === "introDiscussion"` the
+    first cut used - a literal that would silently stop matching the moment a
+    second discussion kind exists, sending every deadline back to the
+    server-side UTC path in check 4.
+
+12. **THE AMENDMENT TO D4 IS RECORDED IN THE AC ITSELF, NOT QUIETLY DELETED.**
+    D4's original split named `GenerateFromSelectionSection.tsx` and
+    `ModulesView.tsx` among "files nobody touches". That was correct as first
+    specified and became WRONG the moment H1 forced checkpoints behind an
+    opt-in: an opt-in needs a control, the control lives in the Generate row,
+    and its props must be threaded from `ModulesView`. Both are in scope and
+    the AC says so in writing - because "the AC said nobody touches this file"
+    is exactly the sentence a future reviewer would otherwise use to call this
+    scope creep. Two other modules exist that no D4 assignment named -
+    `lms-generation-writers.ts`, and `post-outcome-notes.ts` /
+    `lmsGenerationDiscussion.ts` - both traceable to W9's line budget rather
+    than to new scope; the AC records them too.
+
+13. **LIVE_FETCHERS AND LIVE_CANVAS_WRITERS MOVED FILES, VERBATIM, AND TWO
+    RECORDED REFERENCES IN ENTRY 322 NO LONGER RESOLVE.** To keep
+    `lms-generation.ts` under the ceiling, both moved to the new
+    `src/app/actions/lms-generation-writers.ts` - `LIVE_FETCHERS` at `:30`,
+    `LIVE_CANVAS_WRITERS` at `:47`. Compared method by method against the
+    deleted block: identical, including `publishQuiz`'s `{updated, failures}`
+    translation, plus one added `createDiscussion` key. The new file is
+    deliberately NOT a `"use server"` module - it exports plain non-async
+    object constants, which a `"use server"` file may not do
+    (`src/lib/use-server-exports.test.ts`, green). CONSEQUENCE FOR THE RECORD:
+    entry 322's checks 1 and 3 cite `LIVE_CANVAS_WRITERS` at
+    `lms-generation.ts:164`, now a different file; entry 322 check 1 cites
+    `case "resources":` at `:636` and entry 324 the generator call at
+    `:643-648`, now `:643` and `:650`. Behaviour unchanged in all three; the
+    line references are stale.
+
+14. **REGRESSION SWEEP OVER WHAT THIS COULD HAVE BROKEN, EACH READ IN THE
+    CURRENT SOURCE.** (a) The assignment post arm still sends no due date and
+    no points (`post-content.ts:120-131`), and the frozen-literal test pinning
+    it (`post-content.test.ts:53-67`) was NOT edited - `git diff -U0` shows one
+    addition-only hunk and zero deleted lines. (b) Page reuse by title
+    (entries 322/324) is untouched (`commit-plan.ts:220`); a DISCUSSION
+    deliberately does NOT follow that rule - it follows the quiz rule and is
+    never reused by title. (c) The post-target seed (entry 320) is
+    byte-identical; `finishGenerateSuccess` gained only an optional sixth
+    parameter and the decks call site still passes five. (d) The preview modal
+    (312/314) and teleprompter (313) are untouched BY CONSTRUCTION -
+    `GeneratedPreviewModal.tsx`, `lmsGenerationKindHelpers.ts` and the
+    teleprompter files are none of them in `git status --short`; this kind's
+    modal behaviour is entirely derived, and the derived `aloudIds` canary
+    still reads exactly `["scripts"]`. (e) `AskAiSelectionSection.tsx`
+    (entry 321), `DownloadSelectionSection.tsx` and `page.module.css` are not
+    in the diff. (f) `createGradable`/`gradables.ts` was NOT widened, per D2's
+    explicit withdrawal of AC16; its `published=false` hardcode and missing
+    `lock_at` stay as they are. (g) The overlapped Canvas read cannot reorder
+    anything: `Promise.all([gatherSelectionMaterials(...), courseModulesRead])`
+    is a no-op for every kind but the ITEMS-ONLY `introDiscussion` path, and
+    the `moduleIds.length > 0` branch stays strictly SERIAL because `items` is
+    rebuilt from that fetch by `expandModuleSelection`.
+
+15. **THE GATES, WITH REAL NUMBERS - AND THE TEST COUNT CLOSES EXACTLY, FOR THE
+    FIRST TIME IN THIS SERIES.** `npx vitest run`: 618 test files, 12338 tests,
+    ALL passing, against the measured pre-chunk baseline of 606 files and
+    12171 tests - a delta of +12 files and +167 tests. THE FILE COUNT CLOSES:
+    606 tracked `src/**/*.test.ts` plus exactly 12 new untracked ones. THE TEST
+    COUNT CLOSES TOO, measured rather than argued: the 12 new files alone
+    report 128 tests; the six modified test files gained +38 static `it(`
+    blocks (`kinds` 73->81, `commit-plan` 18->26, `commit-execute` 15->25,
+    `post-content` 12->20, `useLmsGeneration` 81->85, `lms-generation-refine`
+    38->38); and the 167th is the DERIVED `it.each(genericPathKinds)` in
+    `lms-generation-refine.test.ts:1035`, which iterates
+    `GENERATION_KIND_IDS.filter(kindSupportsTextEdit)` and gains one RUNTIME
+    case from the new kind with zero static change. 128 + 38 + 1 = 167. Entries
+    322, 326 and 327 each recorded an unattributed remainder here; this one has
+    none. `npx tsc --noEmit`: clean, exit 0 - the gate covering the widened
+    `CanvasPostKind`, the W7 type-level assertion, and the required checkbox
+    props. `npx eslint` over all touched source files: exit 0, no warnings -
+    which matters because `useLmsGeneration.ts` added a `useEffect` that writes
+    localStorage and sets no state, and this repo's setState-in-effect rule
+    would have rejected the naive shape. `next build`: "Compiled successfully";
+    its prerender tail fails locally without Supabase keys, documented and
+    expected. `no-emojis.test.ts` green - never hand-rolled.
+    `use-server-exports.test.ts` green, the only gate besides `next build` that
+    would catch a type re-export from the new `"use server"` file
+    `canvas-discussions.ts`. **`HEADLESS_SAFE_STEP_TYPES.size` DID NOT MOVE** -
+    still 154 (`headless.test.ts:186`), and that file is not in
+    `git status --short`: this chunk registers NO workflow step type.
+
+16. **FILE SIZES AGAINST THE 1000-LINE CEILING - EVERY SOURCE FILE IS UNDER,
+    AND THREE ARE UNCOMFORTABLY CLOSE.** `lms-generation.ts` 985 (was 891; W9
+    demanded under 1000 and it landed there at the cost of the two extractions
+    in check 13 - 15 lines of headroom). `useLmsGeneration.ts` 995 - 5 lines of
+    headroom, which is why `lmsGenerationDiscussion.ts` (75) was split out.
+    `useLmsGeneration.test.ts` is EXACTLY 1000, which is why
+    `useLmsGeneration.discussion.test.ts` (71) exists separately. Also
+    `kinds.ts` 899, `ModulesView.tsx` 934, `commit-plan.ts` 400,
+    `graded-discussion.ts` 363, `commit-execute.ts` 277,
+    `intro-discussion-generator.ts` 277, `GenerateFromSelectionSection.tsx` 190,
+    `post-content.ts` 173, `intro-discussion-deadlines.ts` 150, `graphql.ts`
+    105, `intro-discussion-post.ts` 86, `post-outcome-notes.ts` 76,
+    `lms-generation-writers.ts` 68, `canvas-discussions.ts` 31. THE TWO FILES
+    ENTRY 322 RECORDED AS OWED A SPLIT ARE STILL OWED: `lms-generation.test.ts`
+    is 1112 and was not touched at all (W9 sent the new action tests to a new
+    file, which is why), and `lms-generation-refine.test.ts` is 1069, up one
+    line for its canary. Both `useLmsGeneration.ts` and its test want a split
+    BEFORE the next change lands, not after.
+
+**Limits.** NO CODE PATH IN THIS CHUNK HAS EVER BEEN RUN AGAINST A REAL CANVAS
+COURSE. No discussion has been created, no module item linked, no deadline
+honoured or rejected, no points awarded. Every Canvas interaction is proven
+against a stubbed `fetch` and mocked server actions only.
+THE CHECKPOINTS PATH SPECIFICALLY HAS NEVER BEEN EXERCISED AGAINST A REAL
+ACCOUNT WITH THE FEATURE FLAG ON. The mutation's shape, its field casing,
+`forCheckpoints`, the two-checkpoint requirement, `repliesRequired`, and the
+exact flag-off error string `discussion_checkpoints feature flag must be
+enabled` are all READ OUT OF `instructure/canvas-lms` SOURCE (checked
+2026-08-23), not observed from a response. The fallback fires on a verbatim
+string match, so a Canvas release that rewords that message turns a graceful
+fallback into a thrown error - and the stray-assignment warning would then
+never be shown at all.
+WHETHER CANVAS ACCEPTS A CHECKPOINT `dates[]` ENTRY WITH NO `dueAt` COULD NOT
+BE CONFIRMED FROM SOURCE. `Mutations::DiscussionCheckpointDate` and the
+checkpoint creator service were both read and neither settles it. Rather than
+gamble on the one path that can leave a stray assignment behind, the code
+DIVERTS: opted into checkpoints but missing either deadline, it takes the
+classic path without ever calling GraphQL (`graded-discussion.ts:322-325`).
+`checkpointDate` is exported ONLY so a unit test can pin the omission shape;
+that behaviour is deliberately unreachable end to end, so the test pins a shape
+nothing currently sends.
+NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - node-env, collecting only
+`src/**/*.test.ts` (`vitest.config.ts:13-14`), and both
+`GenerateFromSelectionSection` and `GeneratedPreviewModal` are `.tsx` client
+components. EVERY UI CLAIM IN THIS ENTRY IS SOURCE-TEXT ONLY. Nothing here
+proves the checkbox is painted, that it is reachable or toggleable by keyboard,
+that its `title` tooltip is announced or even reachable by a keyboard user (a
+`title` on a `FormControlLabel` is not an accessible description), that its
+disabled state is visible while a generation runs, that the "Intro discussion"
+button renders beside the other nine without the row wrapping badly, or that
+the preview modal shows the generated prompt at all.
+`GenerateFromSelectionSection.checkpoints.test.ts` reads the `.tsx` with
+`readFileSync` and regex-matches it - one step weaker than exercising markup,
+exactly as entries 323 through 327 recorded for the same technique. The
+localStorage persistence is pinned only as a key-name string in source, never
+as a value a browser stored and read back.
+THE WEEK-1 SUNDAY-START QUIRK IS REAL, RECORDED DELIBERATELY, AND MUST NOT BE
+"FIXED" HERE. For a course whose `startDate` falls on a SUNDAY,
+`dueDateForWeek` (`assignment-due-rule.ts:126-128`) anchors week 1 to the
+Monday SIX DAYS EARLIER, so week 1's Thursday deadline lands THREE DAYS BEFORE
+the term opens, and week 1's Sunday deadline lands on the start date itself.
+This is not introduced here: it falls out of the Monday anchoring that
+`weekDeadline` established and that `dueDateForWeek` was built to match for
+every `n` and every start weekday - the equivalence is what let the rule be
+adopted without silently changing any existing course's deadlines. Every other
+week-numbered deadline in this repo behaves identically. Changing it for the
+intro discussion alone would put this one item out of step with every
+assignment, quiz and announcement the app generates. Recorded so the next
+reader recognises a system-wide convention rather than discovering it as a bug
+on a live course.
+THE MODEL'S COMPLIANCE IS NOT PROVABLE, ONLY ITS INPUTS AND ONE MECHANICAL
+FILTER. The generator is handed both deadline strings as literal context and
+instructed to state them; `stripRestatedDeadlineLines` then removes any model
+line that echoes one verbatim, before the code-authored block is appended
+(AC20b). That strip is reliable precisely BECAUSE the strings are handed over
+literally - but nothing detects a model that PARAPHRASES a deadline ("by the
+end of Thursday"), and such a line would survive and could contradict the
+code-authored block.
+THE POINTS SPLIT IS ENFORCED, THE POINTS TOTAL IS NOT OBSERVED.
+`createGradedDiscussion` throws if `initialPostPoints + repliesPoints` does not
+equal `pointsPossible`, so the two paths can never post different totals - but
+whether Canvas records 20 points, sums the checkpoints as documented, or
+applies its own grading rules has not been seen. Likewise
+`assignment[lock_at]` is sent alone and never alongside a top-level `lock_at`,
+on the strength of reading `prefer_assignment_availability_dates`; the
+resulting lock behaviour has not been observed.
+THE STRAY-ASSIGNMENT WARNING IS ITSELF UNVERIFIED. `describeFallback` tells the
+instructor Canvas "may also have already created a stray, unattached
+assignment" and to go delete it by hand. That rests entirely on the source
+reading in check 2; nobody has watched a flag-off account and confirmed the
+orphan exists, what it is named, or whether it is visible in the Gradebook. If
+the reading is wrong, this app sends instructors hunting for something that is
+not there.
+FINALLY, TWO ENTRY-322 GAPS REMAIN OPEN AND WERE NOT CLOSED HERE:
+`resourcesKindConfig` still has no per-kind identity block in `kinds.test.ts`
+(every other config, now including this one, has one), and its `label` string
+is pinned by no test at all.

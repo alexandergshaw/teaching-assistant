@@ -122,6 +122,24 @@
 // (commit-plan.ts / commit-execute.ts / post-content.ts) apply to it
 // unmodified - see resourcesKindConfig's own comment below and this feature's
 // AC doc, finding A12.
+//
+// docs/intro-discussion-from-modules-acceptance-criteria.md (chunk A of the
+// "two module-anchored graded items" backlog group, AC4-AC7 as amended by
+// section 5b's W1) adds a TENTH kind: "introDiscussion", an "introduce
+// yourself and talk about your career as it relates to this course" graded
+// discussion posted into the checkmarked module. It joins "scripts" and
+// "resources" in NON_FAMILY_KIND_IDS for the identical reason (no
+// OUTPUT_FAMILIES member exists for it). It is "save-and-post" like
+// objectives/assignments/knowledgeChecks/announcements/resources, but is the
+// FIRST kind whose commitMeta.canvasObjectKind is "discussion" rather than
+// page/assignment/quiz/announcement - see GenerationCommitMeta's own doc
+// comment below for that addition. Per W1, IntroDiscussionGeneratedContent
+// carries NO `pointsPossible` field: saveGeneratedArtifactVersion persists
+// only title/text/structured, so a model-supplied points value would be
+// discarded at save time and could never reach Canvas. Points are the
+// constant INTRO_DISCUSSION_POINTS owned by
+// src/lib/lms-generation/intro-discussion-deadlines.ts (a sibling chunk of
+// this same feature), applied at post time, not here.
 import type { OutputFamily } from "@/lib/output-selection";
 
 /**
@@ -141,7 +159,9 @@ import type { OutputFamily } from "@/lib/output-selection";
  * run-form option nobody asked for and nothing would ever populate.
  * "resources" joins this same carve-out for the identical reason: it is a
  * single-shot, LMS-selection-driven generation kind with no COURSE_BUILD
- * step behind it and no "resources" output family to speak of.
+ * step behind it and no "resources" output family to speak of. "introDiscussion"
+ * (docs/intro-discussion-from-modules-acceptance-criteria.md) joins for the
+ * same reason again - see this file's header comment.
  *
  * WHAT THIS CARVE-OUT DOES NOT COST: the seven family-backed ids below keep
  * their existing per-id compile-time rename protection unchanged - the
@@ -151,7 +171,7 @@ import type { OutputFamily } from "@/lib/output-selection";
  * carve-out, is completeness against some other list - see kinds.test.ts's
  * disjointness test for how that gap is covered instead.
  */
-export const NON_FAMILY_KIND_IDS = ["scripts", "resources"] as const;
+export const NON_FAMILY_KIND_IDS = ["scripts", "resources", "introDiscussion"] as const;
 
 /** Reused from OUTPUT_FAMILIES rather than a parallel id - see this file's
  * header comment. Resolves to `never` (a compile error at the array literal
@@ -174,6 +194,7 @@ export const GENERATION_KIND_IDS: readonly GenerationKindId[] = [
   "announcements",
   "scripts",
   "resources",
+  "introDiscussion",
 ];
 
 /**
@@ -221,8 +242,15 @@ export type GenerationCommitMode = "save-version" | "save-and-post";
  * by a future edit that "just adds one Canvas call" straight into this leaf.
  */
 export interface GenerationCommitMeta {
-  /** Which Canvas object this kind's post creates. */
-  canvasObjectKind: "page" | "assignment" | "quiz" | "announcement";
+  /** Which Canvas object this kind's post creates. "discussion" (added by
+   * docs/intro-discussion-from-modules-acceptance-criteria.md, introDiscussion)
+   * is a hand-copied DUPLICATE of CanvasPostKind (src/lib/lms-generation/
+   * commit-plan.ts) - kept as a literal here, deliberately, per this file's
+   * own leaf rule (see the header comment): this file may not import from
+   * commit-plan.ts without breaking that rule. kinds.test.ts carries a
+   * type-level assertion that every value of this field is assignable to
+   * CanvasPostKind, so the two unions cannot silently drift apart. */
+  canvasObjectKind: "page" | "assignment" | "quiz" | "announcement" | "discussion";
   /** Whether the created Canvas object is published (visible to students)
    * immediately on creation. Every OTHER creation path in this tab defaults
    * to UNPUBLISHED: createPage sends `fields.published ?? false`
@@ -494,6 +522,24 @@ export interface ResourcesGeneratedContent {
   text: string;
 }
 
+/** Structural mirror of generateIntroDiscussionForSelection's success shape
+ * (src/app/actions/intro-discussion-generator.ts, a sibling chunk of this
+ * same feature) - see this file's header comment for why this is a
+ * structural copy rather than an import. Deliberately carries NO
+ * `pointsPossible` field - see this file's header comment (the
+ * introDiscussion paragraph) and section 5b/W1 of
+ * docs/intro-discussion-from-modules-acceptance-criteria.md for why: points
+ * are the constant `INTRO_DISCUSSION_POINTS`, applied at post time, never a
+ * model-supplied value that `saveGeneratedArtifactVersion` would silently
+ * discard. */
+export interface IntroDiscussionGeneratedContent {
+  title: string;
+  /** The discussion prompt as markdown. markdownLiteToHtml runs in
+   * post-content.ts, never here - see this file's header comment on why this
+   * module stays free of any Canvas-write concern. */
+  message: string;
+}
+
 export interface GenerationKindConfig<TGenerated> {
   id: GenerationKindId;
   /** generated_artifacts.kind - see this file's header comment for why
@@ -752,6 +798,50 @@ export const resourcesKindConfig: GenerationKindConfig<ResourcesGeneratedContent
   emptyMessage: "The model returned no learning resources for this selection.",
 };
 
+// The intro discussion kind, below (docs/intro-discussion-from-modules-
+// acceptance-criteria.md, AC4-AC7 as amended by section 5b's W1) -
+// "save-and-post" like objectives/assignments/knowledgeChecks/announcements/
+// resources above, and the FIRST kind whose commitMeta.canvasObjectKind is
+// "discussion" rather than page/assignment/quiz/announcement (see
+// GenerationCommitMeta's own doc comment above). No `renderStructured` - this
+// keeps `kindSupportsTextEdit` true for this kind, so the generated prompt
+// stays hand-editable in the preview modal before posting, exactly like
+// objectives/assignments/resources. No `deliveredAloud` either - a discussion
+// prompt is posted for students to read, never read aloud on camera.
+
+export const introDiscussionKindConfig: GenerationKindConfig<IntroDiscussionGeneratedContent> = {
+  id: "introDiscussion",
+  // Permanent (A2/D5 precedent) - the sole version-history query key
+  // (generated_artifacts is keyed on (courseId, kind)). Distinct from every
+  // other artifactKind string above and kebab-case, matching this file's
+  // header-comment convention.
+  artifactKind: "intro-discussion",
+  label: "Intro discussion",
+  needsCourseRow: true,
+  commitMode: "save-and-post",
+  commitMeta: {
+    canvasObjectKind: "discussion",
+    // Every non-announcement creation path in this tab creates unpublished;
+    // an instructor publishes when ready - same reasoning as
+    // objectives/assignments/knowledgeChecks/resources above.
+    publishedOnCreation: false,
+    placement: "module-item",
+  },
+  // This is the RECONSTRUCTED audit-trail text saved to
+  // generated_artifacts.prompt (see GenerationPromptMeta's own doc comment
+  // above), not the literal prompt sent to the model - that is composed by
+  // the generator itself (src/app/actions/intro-discussion-generator.ts, a
+  // sibling chunk of this same feature).
+  buildPrompt: (materialsText, meta) =>
+    `Introduce-yourself discussion for ${meta.courseName || "this course"} (${meta.moduleLabel}), grounded in the following selected material:\n\n${materialsText}`,
+  render: (generated) => generated.message,
+  isEmpty: (generated) => !generated.title.trim() || !generated.message.trim(),
+  // Names this kind specifically, so a blank model response here reads
+  // distinctly from objectives'/resources'/announcements' own empty-response
+  // message - same convention as every other kind's emptyMessage above.
+  emptyMessage: "The model returned no intro discussion for this selection.",
+};
+
 /**
  * Whether a kind's saved `text` IS the whole artifact, so hand-editing that
  * text produces a complete, self-consistent version (chunk 3e,
@@ -805,4 +895,5 @@ export const GENERATION_KIND_CONFIGS = {
   announcements: announcementsKindConfig,
   scripts: scriptsKindConfig,
   resources: resourcesKindConfig,
+  introDiscussion: introDiscussionKindConfig,
 } satisfies Record<GenerationKindId, GenerationKindConfig<never>>;

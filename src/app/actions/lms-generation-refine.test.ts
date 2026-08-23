@@ -1021,6 +1021,7 @@ const EXPECTED_TITLED_GENERIC_KINDS: readonly GenerationKindId[] = [
   "announcements",
   "scripts",
   "resources",
+  "introDiscussion",
 ];
 
 describe("TITLED_GENERIC_KINDS canary - generic-path title carry-forward", () => {

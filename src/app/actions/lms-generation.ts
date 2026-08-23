@@ -87,23 +87,16 @@ import { generateKnowledgeCheckAction } from "./knowledge-check";
 import { draftAnnouncementAction } from "./messaging";
 import { generateModuleIntroScriptAction } from "./media";
 import { generateLearningResourcesForSelection } from "./learning-resources-generator";
-import {
-  getPageAction,
-  previewFileAction,
-  createPageAction,
-  updatePageAction,
-  createGradableAction,
-  createQuizQuestionAction,
-  bulkUpdateAction,
-} from "./canvas-files-bulk";
-import { fetchCanvasMetaAction } from "./grading";
-import {
-  listCourseContentAction,
-  createModuleAction,
-  createModuleItemAction,
-  createCourseAssignmentAction,
-} from "./canvas-modules";
-import { createAnnouncementAction } from "./canvas-inbox";
+import { generateIntroDiscussionForSelection } from "./intro-discussion-generator";
+import { listCourseContentAction, createModuleAction } from "./canvas-modules";
+// LIVE_FETCHERS/LIVE_CANVAS_WRITERS (and every action import only THEY
+// needed - getPageAction, previewFileAction, fetchCanvasMetaAction,
+// createPageAction, updatePageAction, createModuleItemAction,
+// createCourseAssignmentAction, createGradableAction, createQuizQuestionAction,
+// bulkUpdateAction, createAnnouncementAction, createGradedDiscussionAction)
+// moved to ./lms-generation-writers.ts (step-10 fixer round) for this file's
+// 1000-line ceiling - see that file's own header comment.
+import { LIVE_FETCHERS, LIVE_CANVAS_WRITERS } from "./lms-generation-writers";
 import {
   saveGeneratedArtifactVersion,
   listGeneratedArtifactVersions,
@@ -113,7 +106,6 @@ import {
   gatherSelectionMaterials,
   expandModuleSelection,
   type SelectedMaterialItem,
-  type MaterialsFetchers,
 } from "@/lib/lms-generation/materials";
 import {
   GENERATION_KIND_CONFIGS,
@@ -128,58 +120,34 @@ import {
   type ExistingModuleContent,
   type PostSummary,
 } from "@/lib/lms-generation/commit-plan";
-import { executePostPlanSteps, type CanvasWriters } from "@/lib/lms-generation/commit-execute";
+import { executePostPlanSteps } from "@/lib/lms-generation/commit-execute";
 import { buildPostContentForKind } from "@/lib/lms-generation/post-content";
+import {
+  planIntroDiscussionDeadlines,
+  formatDeadlineForPrompt,
+  NO_DATE_INITIAL_POST_TEXT,
+  NO_DATE_REPLIES_TEXT,
+  REQUIRED_REPLY_COUNT,
+  INTRO_DISCUSSION_POINTS,
+} from "@/lib/lms-generation/intro-discussion-deadlines";
+// planIntroDiscussionPost (intro-discussion-post.ts) is deliberately NOT
+// imported here (Finding 1 of the step-10 fixer round): its .toISOString()
+// call must run in the browser, not on this UTC server - see that leaf's own
+// header comment. harvestPostOutcomeNotes/resolveDiscussionDeadlinesForPost/
+// otherModuleNamesFor used to be inlined here - moved to
+// src/lib/lms-generation/post-outcome-notes.ts (a leaf) for the 1000-line
+// ceiling, same split rationale as post-content.ts's own header comment.
+import {
+  harvestPostOutcomeNotes,
+  resolveDiscussionDeadlinesForPost,
+  otherModuleNamesFor,
+} from "@/lib/lms-generation/post-outcome-notes";
 import { resolveScriptMinutes } from "@/lib/lms-generation/script-length";
 import { isCourseNotLinkedMessage } from "@/lib/lms-generation/course-not-linked";
 import { DEFAULT_MODULE_LABEL } from "@/lib/lms-generation/default-module-label";
 import type { LlmProvider } from "@/lib/llm";
 import { resolveCourseKind } from "@/lib/course-kind";
 import type { Json } from "@/lib/supabase/types";
-
-// The real Canvas reads gatherSelectionMaterials needs for live-sourced
-// items, wired to the app's own existing actions - see materials.ts's own
-// header comment for why those reads are injected there rather than
-// imported directly. Not exported: a "use server" module may export only
-// async functions (src/lib/use-server-exports.test.ts).
-const LIVE_FETCHERS: MaterialsFetchers = {
-  getPage: (courseUrl, pageUrl, institution) => getPageAction(courseUrl, pageUrl, institution),
-  previewFile: (courseUrl, contentId, institution) => previewFileAction(courseUrl, contentId, institution),
-  fetchMeta: (contentUrl) => fetchCanvasMetaAction(contentUrl),
-};
-
-/**
- * The real Canvas writes postGeneratedArtifactAction's executePostPlanSteps
- * needs, wired to this app's own existing actions - same injection pattern
- * as LIVE_FETCHERS above (see that constant's own comment). Every method
- * here is a direct pass-through except `publishQuiz`: bulkUpdateAction
- * returns `{updated, failures}` rather than a plain `{ok:true}` success
- * marker (it is a BATCH endpoint that can partially fail even for a single
- * id), so this is the one place that result gets translated into
- * CanvasWriters' plain ok/error contract - a per-id failure is surfaced as
- * this writer's own `{error}` rather than silently reported as `{ok:true}`.
- * Not exported: a "use server" module may export only async functions
- * (src/lib/use-server-exports.test.ts) - see LIVE_FETCHERS's own comment.
- */
-const LIVE_CANVAS_WRITERS: CanvasWriters = {
-  createPage: (courseUrl, fields, acronym) => createPageAction(courseUrl, fields, acronym),
-  updatePage: (courseUrl, pageUrl, fields, acronym) => updatePageAction(courseUrl, pageUrl, fields, acronym),
-  createModuleItem: (courseUrl, moduleId, item, acronym) => createModuleItemAction(courseUrl, moduleId, item, acronym),
-  createAssignment: (courseUrl, fields, moduleId, acronym) =>
-    createCourseAssignmentAction(courseUrl, fields, moduleId, acronym),
-  createQuiz: (courseUrl, fields, acronym) => createGradableAction(courseUrl, "Quiz", fields, acronym),
-  createQuizQuestion: (courseUrl, quizId, question, acronym) =>
-    createQuizQuestionAction(courseUrl, quizId, question, acronym),
-  publishQuiz: async (courseUrl, quizId, acronym) => {
-    const result = await bulkUpdateAction(courseUrl, "Quiz", [String(quizId)], { published: true }, acronym);
-    if ("error" in result) return { error: result.error };
-    if (result.failures.length > 0) {
-      return { error: result.failures[0]?.error ?? "Could not publish the quiz." };
-    }
-    return { ok: true };
-  },
-  createAnnouncement: (courseUrl, title, message, acronym) => createAnnouncementAction(courseUrl, title, message, acronym),
-};
 
 // isCourseNotLinkedMessage moved to src/lib/lms-generation/course-not-linked.ts
 // (a pure leaf, imported above) - it is read by resolveGenerationCourseRow's
@@ -309,6 +277,10 @@ export interface GenerateFromSelectionSuccess {
    * limitations, per-item fetch failures) - surfaced so the instructor can
    * see what the generation was actually grounded on. */
   notes: string[];
+  /** D3/AC14i: the course's own `startDate`, so the CLIENT can compute a
+   * discussion's deadlines in ITS OWN timezone (see useLmsGeneration.ts's
+   * `post()`). Populated only by "introDiscussion"; every other kind omits it. */
+  startDate?: string | null;
 }
 
 /**
@@ -374,15 +346,44 @@ export async function generateFromSelectionAction(
     // (content-tab/utils.ts) - this module must stay free of any
     // content-tab/client import, matching materials.ts's own established
     // precedent for the same reason.
+    // W5: hoisted so "introDiscussion" can read every module's NAME (AC18)
+    // even for an items-only selection, where the block below never runs.
+    let courseModules: Array<{ id: number; name: string }> = [];
+    // Non-null only on the items-only "introDiscussion" path below, where the
+    // module-name read runs CONCURRENTLY with gatherSelectionMaterials - see
+    // M2 on that branch for why, and why the other branch must not do this.
+    let courseModulesRead: Promise<void> | null = null;
     let items = input.items ?? [];
     if (moduleIds.length > 0) {
       const content = await listCourseContentAction(course.canvasUrl ?? "", course.institution ?? undefined);
       if ("error" in content) return { error: content.error };
+      courseModules = content.modules;
       items = expandModuleSelection(
         items,
         moduleIds.map((id) => `live:${id}`),
         content.modules
       );
+    } else if (input.kind === "introDiscussion") {
+      // W5: module names are context only, never a reason to fail generation
+      // - degrades to [] on ANY failure ({error} or a thrown exception).
+      //
+      // M2 (step-10b researcher): NOT awaited here. `items` does not depend on
+      // this read, so awaiting it ahead of gatherSelectionMaterials below
+      // serialised two independent multi-request Canvas reads for no reason -
+      // listCourseContentAction alone is ~19 requests on a 16-module course
+      // (listModules fetches items per module). The promise is started here
+      // and joined at the Promise.all below.
+      //
+      // The `moduleIds.length > 0` branch above MUST stay serial: `items` is
+      // rebuilt from that fetch's result by expandModuleSelection.
+      courseModulesRead = (async () => {
+        try {
+          const content = await listCourseContentAction(course.canvasUrl ?? "", course.institution ?? undefined);
+          if (!("error" in content)) courseModules = content.modules;
+        } catch {
+          /* degrade to [] */
+        }
+      })();
     }
 
     // A selected module that turns out to have zero items (rare) falls
@@ -390,11 +391,17 @@ export async function generateFromSelectionAction(
     // trivially produces empty materialsText - the SAME "no usable material"
     // check below already covers it, so there is no separate empty-items
     // branch here.
-    const materials = await gatherSelectionMaterials(items, {
-      canvasUrl: course.canvasUrl ?? "",
-      institution: course.institution ?? undefined,
-      fetchers: LIVE_FETCHERS,
-    });
+    // M2: the two reads are independent, so they overlap rather than queue.
+    // `courseModulesRead` is null on every path but the items-only
+    // "introDiscussion" one, where awaiting a resolved null is a no-op.
+    const [materials] = await Promise.all([
+      gatherSelectionMaterials(items, {
+        canvasUrl: course.canvasUrl ?? "",
+        institution: course.institution ?? undefined,
+        fetchers: LIVE_FETCHERS,
+      }),
+      courseModulesRead,
+    ]);
 
     if (!materials.materialsText.trim()) {
       return { error: "The selected item(s) had no usable material to ground generation on." };
@@ -663,6 +670,53 @@ export async function generateFromSelectionAction(
         return { artifact, notes: materials.notes };
       }
 
+      // The tenth kind, "introDiscussion" - "save-and-post", generation only
+      // ever saves a version (P2); posting is a separate job, below.
+      case "introDiscussion": {
+        const config = GENERATION_KIND_CONFIGS.introDiscussion;
+        // AC20/AC21: dates computed by code (A1), never the model; null means
+        // no start date or no derivable week number, so the AC21 fallback
+        // phrases stand in and the Canvas post carries no due/lock date.
+        const deadlines = planIntroDiscussionDeadlines({ startDate: course.startDate, moduleName: moduleLabel });
+        const initialPostDeadlineText = deadlines ? formatDeadlineForPrompt(deadlines.initialPostAt) : NO_DATE_INITIAL_POST_TEXT;
+        const repliesDeadlineText = deadlines ? formatDeadlineForPrompt(deadlines.repliesDueAt) : NO_DATE_REPLIES_TEXT;
+        // AC18: target module's name plus every OTHER module's name (hoist
+        // above) - see otherModuleNamesFor's own doc comment (researcher
+        // finding: identity, not a label-string match).
+        const otherModuleNames = otherModuleNamesFor(courseModules, moduleIds, moduleLabel);
+
+        const generated = await generateIntroDiscussionForSelection(
+          {
+            courseName: course.name,
+            courseCode: course.courseCode ?? null,
+            description: course.description ?? null,
+            topicOutline: course.topicOutline ?? null,
+            institution: course.institution,
+            targetModuleName: moduleLabel,
+            otherModuleNames,
+            materialsText: materials.materialsText,
+            initialPostDeadlineText,
+            repliesDeadlineText,
+            requiredReplyCount: REQUIRED_REPLY_COUNT,
+            pointsPossible: INTRO_DISCUSSION_POINTS,
+          },
+          provider,
+          courseKind
+        );
+        if ("error" in generated) return { error: generated.error };
+        if (config.isEmpty(generated)) return { error: config.emptyMessage };
+
+        const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {
+          courseId: course.id,
+          kind: config.artifactKind,
+          title: generated.title, // Model-supplied (AC7) - see TITLED_GENERIC_KINDS.
+          text: config.render(generated),
+          prompt: config.buildPrompt(materials.materialsText, promptMeta),
+        });
+        // D3/AC14i: lets the CLIENT compute posting instants in its own timezone.
+        return { artifact, notes: materials.notes, startDate: course.startDate };
+      }
+
       default: {
         const unhandledKind: never = input.kind;
         throw new Error(
@@ -708,10 +762,25 @@ export interface PostGeneratedArtifactInput {
    * "course-level" kind such as announcements, which has no module to
    * choose at all. */
   target?: ModuleTarget;
+  /** "introDiscussion" only - D3/AC14i: absolute Canvas instants ALREADY
+   * computed client-side (instructor's own timezone) plus a `note` describing
+   * them. Optional: an omitting caller gets no dates at all, never a
+   * server-computed one (Finding 1 - see resolveDiscussionDeadlinesForPost,
+   * post-outcome-notes.ts). */
+  discussionDeadlines?: { initialPostAt: string; repliesDueAt: string; note: string };
+  /** "introDiscussion" only - the client's "Use Canvas discussion
+   * checkpoints" checkbox (GenerateFromSelectionSection.tsx). Default FALSE:
+   * Canvas's createDiscussionTopic mutation is not transactional on a
+   * flag-off account (it persists the orphan assignment, THEN raises), so
+   * checkpoints are explicit opt-in. Every other kind ignores this. */
+  useDiscussionCheckpoints?: boolean;
 }
 
 export interface PostGeneratedArtifactSuccess {
   summary: PostSummary;
+  /** W6: extra facts summary.text has no channel for - discussion deadlines
+   * (or why none were set) and which Canvas path ran (AC14g: never silent). */
+  notes?: string[];
 }
 
 /**
@@ -773,7 +842,29 @@ export async function postGeneratedArtifactAction(
     }
 
     const title = (artifact.title ?? "").trim() || config.label;
-    const contentResult = buildPostContentForKind(meta.canvasObjectKind, title, artifact, meta.publishedOnCreation);
+
+    // AC14c/D3/W6: the client (useLmsGeneration.ts's post(), in the browser)
+    // always computes and sends the discussion's real Canvas instants for
+    // this kind, plus a note describing them. Finding 1 (fix): this used to
+    // fall back to computing a real instant SERVER-side when the caller sent
+    // no `discussionDeadlines` at all - see resolveDiscussionDeadlinesForPost's
+    // own doc comment (post-outcome-notes.ts) for why that path is gone.
+    const notes: string[] = [];
+    let discussionDeadlines: { initialPostAt: string; repliesDueAt: string } | undefined;
+    if (meta.canvasObjectKind === "discussion") {
+      const resolved = resolveDiscussionDeadlinesForPost(input.discussionDeadlines);
+      discussionDeadlines = resolved.deadlines;
+      notes.push(resolved.note);
+    }
+
+    const contentResult = buildPostContentForKind(
+      meta.canvasObjectKind,
+      title,
+      artifact,
+      meta.publishedOnCreation,
+      discussionDeadlines,
+      input.useDiscussionCheckpoints ?? false
+    );
     if ("error" in contentResult) return contentResult;
     const content = contentResult;
 
@@ -788,7 +879,8 @@ export async function postGeneratedArtifactAction(
         LIVE_CANVAS_WRITERS,
         acronym
       );
-      return { summary: summarizePostOutcome(outcomes) };
+      notes.push(...harvestPostOutcomeNotes(outcomes));
+      return { summary: summarizePostOutcome(outcomes), notes: notes.length > 0 ? notes : undefined };
     }
 
     if (!input.target) {
@@ -838,7 +930,9 @@ export async function postGeneratedArtifactAction(
       LIVE_CANVAS_WRITERS,
       acronym
     );
-    return { summary: summarizePostOutcome(outcomes) };
+    notes.push(...harvestPostOutcomeNotes(outcomes));
+
+    return { summary: summarizePostOutcome(outcomes), notes: notes.length > 0 ? notes : undefined };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the generated content to Canvas." };
   }

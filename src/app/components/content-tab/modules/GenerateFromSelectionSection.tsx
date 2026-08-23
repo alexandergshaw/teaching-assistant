@@ -37,8 +37,17 @@
 // the row itself renders at all (offerableGenerationKinds does not vary per
 // kind) - gated on that explicitly anyway so this stays correct if that ever
 // changes.
+//
+// THE CHECKPOINTS CHECKBOX (step-10 fixer round, frozen contract) follows the
+// exact same per-kind-picker precedent as the two controls above: a plain
+// inline checkbox, shown only when "introDiscussion" is among the offerable
+// kinds, no new dialog. Canvas's createDiscussionTopic mutation is NOT
+// transactional on a flag-off account (it persists the orphan parent
+// assignment, THEN raises), so this defaults to OFF and is explicit opt-in -
+// its tooltip says plainly what enabling it requires and what leaving it off
+// does.
 
-import { Button, MenuItem, TextField } from "@mui/material";
+import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
 import styles from "../../../page.module.css";
 import type { DeckTemplateOption, GenerationBusy, GenerationKindDef, GenerationKindId } from "./useLmsGeneration";
 
@@ -68,6 +77,12 @@ export interface GenerateFromSelectionSectionProps {
   /** Scripts only - fires when the intro video length picker's selection
    * changes. Every other kind ignores this. */
   onScriptMinutesChange: (minutes: number) => void;
+  /** introDiscussion only - the "Use Canvas discussion checkpoints"
+   * checkbox's current value. Every other kind ignores this. */
+  useDiscussionCheckpoints: boolean;
+  /** introDiscussion only - fires when the checkpoints checkbox changes.
+   * Every other kind ignores this. */
+  onUseDiscussionCheckpointsChange: (checked: boolean) => void;
 }
 
 export function GenerateFromSelectionSection({
@@ -80,9 +95,12 @@ export function GenerateFromSelectionSection({
   scriptLengthOptions,
   scriptMinutes,
   onScriptMinutesChange,
+  useDiscussionCheckpoints,
+  onUseDiscussionCheckpointsChange,
 }: GenerateFromSelectionSectionProps) {
   const offersDeck = kinds.some((k) => k.id === "decks");
   const offersScript = kinds.some((k) => k.id === "scripts");
+  const offersIntroDiscussion = kinds.some((k) => k.id === "introDiscussion");
   const selectedTemplateName = templates.find((t) => t.id === templateId)?.name ?? "the selected";
 
   // `kinds` is empty only when NEITHER an item nor a whole module is
@@ -131,6 +149,20 @@ export function GenerateFromSelectionSection({
             </MenuItem>
           ))}
         </TextField>
+      )}
+      {offersIntroDiscussion && (
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              checked={useDiscussionCheckpoints}
+              onChange={(e) => onUseDiscussionCheckpointsChange(e.target.checked)}
+              disabled={busy !== ""}
+            />
+          }
+          label="Use Canvas discussion checkpoints"
+          title="Requires a Canvas admin to have enabled the Discussion Checkpoints feature for this account. Leaving this off creates a normal graded discussion with one due date."
+        />
       )}
       {kinds.map((k) => (
         <Button

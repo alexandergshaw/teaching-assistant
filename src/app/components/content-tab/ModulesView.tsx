@@ -611,6 +611,8 @@ export function ModulesView({
                 scriptLengthOptions={lmsGeneration.scriptLengthOptions}
                 scriptMinutes={lmsGeneration.scriptMinutes}
                 onScriptMinutesChange={lmsGeneration.setScriptMinutes}
+                useDiscussionCheckpoints={lmsGeneration.useDiscussionCheckpoints}
+                onUseDiscussionCheckpointsChange={lmsGeneration.setUseDiscussionCheckpoints}
               />
 
               <DownloadSelectionSection

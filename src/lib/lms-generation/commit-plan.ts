@@ -42,6 +42,7 @@
 // src/app/actions/lms-generation.ts (or a sibling), same split as
 // kinds.ts/its own header comment describes for generation.
 import type { NewAssignment, QuizQuestionInput } from "@/lib/canvas-modules/types";
+import type { NewGradedDiscussion } from "@/lib/canvas-modules/graded-discussion";
 
 // ---------------------------------------------------------------------------
 // P5: where does the post land.
@@ -108,7 +109,7 @@ export function planModuleTarget(
 /** The Canvas object type a posting kind produces - R2's four new kinds map
  * one each: objectives -> "page", assignments -> "assignment",
  * knowledgeChecks -> "quiz", announcements -> "announcement". */
-export type CanvasPostKind = "page" | "assignment" | "quiz" | "announcement";
+export type CanvasPostKind = "page" | "assignment" | "quiz" | "announcement" | "discussion";
 
 /** The generated content for one post, discriminated by the Canvas object it
  * becomes. `assignment.fields` and `quiz.questions[*]` reuse this codebase's
@@ -119,7 +120,8 @@ export type PostContent =
   | { kind: "page"; title: string; body: string }
   | { kind: "assignment"; fields: NewAssignment }
   | { kind: "quiz"; title: string; description: string; questions: QuizQuestionInput[] }
-  | { kind: "announcement"; title: string; message: string };
+  | { kind: "announcement"; title: string; message: string }
+  | { kind: "discussion"; fields: NewGradedDiscussion };
 
 /** A page's identity as read off the course (title + stable slug) - the
  * shape postGuidesToLms reads out of listCourseContentAction's
@@ -187,7 +189,13 @@ export type PostPlanStep =
   // link step here would describe an impossible Canvas write, so this plan
   // never emits one for an announcement; this is the ONLY kind whose plan is
   // always exactly one step with no possible follow-up.
-  | { step: "create-announcement"; title: string; message: string };
+  | { step: "create-announcement"; title: string; message: string }
+  // Discussion: createGradedDiscussion creates the topic only - unlike
+  // createCourseAssignmentAction it does NOT link into a module in the same
+  // call (contrast the assignment case above), so a discussion plan always
+  // needs this separate link step.
+  | { step: "create-discussion"; fields: NewGradedDiscussion }
+  | { step: "link-discussion"; title: string };
 
 /**
  * Build the ordered list of Canvas writes required to post `content`,
@@ -239,6 +247,17 @@ export function planPostSteps(content: PostContent, existing: ExistingModuleCont
 
     case "announcement":
       return [{ step: "create-announcement", title: content.title, message: content.message }];
+
+    case "discussion":
+      // Two steps, unlike an assignment's one: the discussion writer creates
+      // the topic but does not link it into a module (contrast
+      // createCourseAssignmentAction, which does both in one call). A
+      // discussion is never reused by title - it follows the quiz rule
+      // (ExistingModuleContent's own doc comment), not the page rule.
+      return [
+        { step: "create-discussion", fields: content.fields },
+        { step: "link-discussion", title: content.fields.title },
+      ];
   }
 }
 
@@ -254,7 +273,11 @@ export function planPostSteps(content: PostContent, existing: ExistingModuleCont
 export interface PostStepOutcome {
   step: PostPlanStep;
   status: "done" | "failed";
-  /** Present on "failed" - typically the Canvas error message. */
+  /** Present on "failed" - typically the Canvas error message. Also present
+   * on a "done" `create-discussion` outcome when the classic (non-
+   * checkpointed) Canvas path ran instead of checkpoints - AC14g forbids that
+   * fallback from being silent, so the reason travels here rather than being
+   * dropped. */
   detail?: string;
 }
 
@@ -268,18 +291,19 @@ export interface PostSummary {
  * publishing). Every valid plan from planPostSteps has EXACTLY one of these,
  * always first - it is what summarizePostOutcome anchors the whole summary
  * to: nothing here means nothing was created, full stop. */
-function isContentStep(step: PostPlanStep): boolean {
+export function isContentStep(step: PostPlanStep): boolean {
   return (
     step.step === "create-page" ||
     step.step === "update-page" ||
     step.step === "create-assignment" ||
     step.step === "create-quiz" ||
-    step.step === "create-announcement"
+    step.step === "create-announcement" ||
+    step.step === "create-discussion"
   );
 }
 
-function isLinkStep(step: PostPlanStep): boolean {
-  return step.step === "link-page" || step.step === "link-quiz";
+export function isLinkStep(step: PostPlanStep): boolean {
+  return step.step === "link-page" || step.step === "link-quiz" || step.step === "link-discussion";
 }
 
 /** A short human label for the object a content-defining step created or
@@ -297,10 +321,14 @@ function describeContent(step: PostPlanStep): string {
       return `Quiz "${step.title}"`;
     case "create-announcement":
       return `Announcement "${step.title}"`;
+    case "create-discussion":
+      return `Discussion "${step.fields.title}"`;
     default:
       // Not reachable from a content step (isContentStep only matches the
-      // four cases above) - kept as a safe fallback rather than a thrown
-      // error, consistent with this file never throwing.
+      // SIX cases above - page/update-page/assignment/quiz/announcement/
+      // discussion, the last two added after this comment was first written)
+      // - kept as a safe fallback rather than a thrown error, consistent with
+      // this file never throwing.
       return "The content";
   }
 }

@@ -120,6 +120,142 @@ describe("buildPostContentForKind", () => {
     const result = buildPostContentForKind("announcement", "Heads up!", artifact, true);
     expect(result).toEqual({ kind: "announcement", title: "Heads up!", message: "Heads up, class is moved." });
   });
+
+  describe("discussion", () => {
+    // Frozen literals (docs/DEV_LOOP.md step 9), not re-imported from
+    // intro-discussion-deadlines.ts's own constants - importing the same
+    // constant the code under test uses would make this assertion a
+    // tautology that can never fail when the constant itself is wrong.
+    const EXPECTED_POINTS = 20;
+    const EXPECTED_REQUIRED_REPLIES = 2;
+
+    it("builds fields from title/artifact.text/deadlines, with the discussion's message run through markdownLiteToHtml", () => {
+      const artifact = makeArtifact({ text: "Tell us about your career." });
+      const result = buildPostContentForKind("discussion", "Introduce Yourself", artifact, false, {
+        initialPostAt: "2026-09-04T03:59:00.000Z",
+        repliesDueAt: "2026-09-07T03:59:00.000Z",
+      });
+      expect(result).toEqual({
+        kind: "discussion",
+        fields: {
+          title: "Introduce Yourself",
+          message: "<p>Tell us about your career.</p>",
+          pointsPossible: EXPECTED_POINTS,
+          initialPostAt: "2026-09-04T03:59:00.000Z",
+          repliesDueAt: "2026-09-07T03:59:00.000Z",
+          requiredReplyCount: EXPECTED_REQUIRED_REPLIES,
+          published: false,
+          // Frozen contract amendment: useCheckpoints defaults to false when
+          // the sixth parameter is omitted; initialPostPoints/repliesPoints
+          // are always computed (splitCheckpointPoints(20) = 10/10).
+          useCheckpoints: false,
+          initialPostPoints: 10,
+          repliesPoints: 10,
+        },
+      });
+    });
+
+    // AC21: no start date (or no derivable module week) means null deadlines
+    // from the AC8 leaf, which the caller represents by omitting the
+    // `deadlines` argument entirely. The Canvas post must carry NO dates in
+    // that case, not a fabricated one - "" is this codebase's own convention
+    // for "no due date" (the assignment arm's own dueAt: "" above).
+    it("AC21: with no deadlines argument, initialPostAt and repliesDueAt are both empty strings, never fabricated", () => {
+      const artifact = makeArtifact({ text: "Tell us about your career." });
+      const result = buildPostContentForKind("discussion", "Introduce Yourself", artifact, false);
+      if ("error" in result) throw new Error("expected a discussion PostContent");
+      if (result.kind !== "discussion") throw new Error("expected a discussion PostContent");
+      expect(result.fields.initialPostAt).toBe("");
+      expect(result.fields.repliesDueAt).toBe("");
+    });
+
+    it("publishedOnCreation threads through as true too, not hardcoded", () => {
+      const artifact = makeArtifact();
+      const result = buildPostContentForKind("discussion", "T", artifact, true);
+      if ("error" in result) throw new Error("expected a discussion PostContent");
+      if (result.kind !== "discussion") throw new Error("expected a discussion PostContent");
+      expect(result.fields.published).toBe(true);
+    });
+
+    // SABOTAGE TARGET: pointsPossible/requiredReplyCount must be the fixed
+    // constants regardless of what the generated artifact contains - the
+    // model never supplies points (W1), and the reply count is a Canvas
+    // requirement, not a model output.
+    it("pointsPossible and requiredReplyCount are always the fixed constants, independent of the artifact", () => {
+      const artifact = makeArtifact({ text: "anything" });
+      const result = buildPostContentForKind("discussion", "T", artifact, false);
+      if ("error" in result) throw new Error("expected a discussion PostContent");
+      if (result.kind !== "discussion") throw new Error("expected a discussion PostContent");
+      expect(result.fields.pointsPossible).toBe(EXPECTED_POINTS);
+      expect(result.fields.requiredReplyCount).toBe(EXPECTED_REQUIRED_REPLIES);
+    });
+
+    // Frozen contract amendment (checkpoints are explicit opt-in, off by
+    // default - Canvas's createDiscussionTopic mutation is not transactional
+    // on a flag-off account). NewGradedDiscussion's `useCheckpoints`/
+    // `initialPostPoints`/`repliesPoints` fields are read through an
+    // intermediate cast in these three tests because the sibling-owned type
+    // (src/lib/canvas-modules/graded-discussion.ts) may not have landed the
+    // same three fields yet in a concurrent wave - see this chunk's own
+    // report for the exact tsc state.
+    it("useCheckpoints defaults to FALSE when the caller omits the sixth parameter - safe by default", () => {
+      const artifact = makeArtifact({ text: "Tell us about your career." });
+      const result = buildPostContentForKind("discussion", "Introduce Yourself", artifact, false, {
+        initialPostAt: "2026-09-04T03:59:00.000Z",
+        repliesDueAt: "2026-09-07T03:59:00.000Z",
+      });
+      if ("error" in result) throw new Error("expected a discussion PostContent");
+      if (result.kind !== "discussion") throw new Error("expected a discussion PostContent");
+      const fields = result.fields as unknown as Record<string, unknown>;
+      expect(fields.useCheckpoints).toBe(false);
+    });
+
+    it("SABOTAGE TARGET: useCheckpoints threads through as true when the caller opts in", () => {
+      const artifact = makeArtifact();
+      const result = buildPostContentForKind("discussion", "T", artifact, false, undefined, true);
+      if ("error" in result) throw new Error("expected a discussion PostContent");
+      if (result.kind !== "discussion") throw new Error("expected a discussion PostContent");
+      const fields = result.fields as unknown as Record<string, unknown>;
+      expect(fields.useCheckpoints).toBe(true);
+    });
+
+    it("initialPostPoints and repliesPoints always sum EXACTLY to pointsPossible, regardless of useCheckpoints", () => {
+      const artifact = makeArtifact();
+      for (const useCheckpoints of [false, true]) {
+        const result = buildPostContentForKind("discussion", "T", artifact, false, undefined, useCheckpoints);
+        if ("error" in result) throw new Error("expected a discussion PostContent");
+        if (result.kind !== "discussion") throw new Error("expected a discussion PostContent");
+        const fields = result.fields as unknown as { initialPostPoints: number; repliesPoints: number; pointsPossible: number };
+        expect(fields.initialPostPoints + fields.repliesPoints).toBe(fields.pointsPossible);
+      }
+    });
+  });
+});
+
+// AC14b / the canary this chunk must not disturb: buildPostContentForKind's
+// fifth (deadlines) parameter is OPTIONAL, so every one of the four
+// PRE-EXISTING arms must still emit byte-identical PostContent when called
+// with the old four-argument signature. This is what proves the discussion
+// arm's addition was additive - the test above at "assignment: ... always
+// online_text_entry with no due date or points" already pins the exact
+// shape; this one pins that adding a fifth arm to the switch changed nothing
+// about how the other four are reached (their branches never read
+// `deadlines` at all).
+describe("buildPostContentForKind - fifth parameter is additive only", () => {
+  // Finding 11: this test used to be titled "page/quiz/announcement arms are
+  // unaffected" but only ever called buildPostContentForKind with "page" -
+  // the title asserted coverage the body never provided. Now genuinely
+  // exercises all three named kinds.
+  it("page/quiz/announcement arms are unaffected by an unrelated deadlines argument they never read", () => {
+    const artifact = makeArtifact({ text: "Read chapter 3.", structured: VALID_QUESTIONS });
+    const deadlines = { initialPostAt: "2026-01-01T00:00:00Z", repliesDueAt: "2026-01-04T00:00:00Z" };
+
+    for (const kind of ["page", "quiz", "announcement"] as const) {
+      const withoutDeadlines = buildPostContentForKind(kind, "T", artifact, false);
+      const withDeadlines = buildPostContentForKind(kind, "T", artifact, false, deadlines);
+      expect(withDeadlines).toEqual(withoutDeadlines);
+    }
+  });
 });
 
 describe("parseKnowledgeCheckStructured", () => {

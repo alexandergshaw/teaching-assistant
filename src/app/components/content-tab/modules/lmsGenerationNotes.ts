@@ -87,9 +87,27 @@ export function previewMetaText(kindId: GenerationKindId, version: number): stri
  * bare success when it was not linked" - but with `summary.text`, which
  * already names what WAS created, never a bare "failed" either. Only a TRUE
  * "success" status gets `kind: "success"`.
+ *
+ * W6 (docs/intro-discussion-from-modules-acceptance-criteria.md, section 5b):
+ * `notes` is extra facts the action recorded that `summary.text` alone has no
+ * channel for - today, the two dates actually written to Canvas (AC14c), or
+ * the REASON none were set (AC21), or which Canvas path ran (checkpoints vs.
+ * the classic fallback, AC14g). Appended, in order, after `summary.text`,
+ * space-joined - never inserted before it or interleaved. The `kind` rule
+ * above is UNCHANGED by this parameter: an existing caller that passes no
+ * `notes` (every caller before this feature, and every "save-and-post" kind
+ * that never populates `PostGeneratedArtifactSuccess.notes`) gets a
+ * byte-identical `text` to before - `[summary.text].join(" ")` is
+ * `summary.text` exactly, with no trailing separator.
  */
-export function postResultNote(summary: PostSummary): { kind: "success" | "error"; text: string } {
-  return { kind: summary.status === "success" ? "success" : "error", text: summary.text };
+export function postResultNote(
+  summary: PostSummary,
+  notes?: readonly string[]
+): { kind: "success" | "error"; text: string } {
+  return {
+    kind: summary.status === "success" ? "success" : "error",
+    text: [summary.text, ...(notes ?? [])].join(" "),
+  };
 }
 
 /**

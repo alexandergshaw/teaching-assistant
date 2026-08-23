@@ -24,7 +24,8 @@
 // a failed step never throws - it becomes a "failed" PostStepOutcome - and
 // the loop keeps going UNLESS the step that failed was the plan's own
 // content-defining step (create-page/update-page/create-assignment/create-
-// quiz/create-announcement - commit-plan.ts's isContentStep), because
+// quiz/create-announcement/create-discussion - commit-plan.ts's
+// isContentStep), because
 // nothing downstream (a link, a question, a publish) can succeed against
 // content that was never created; execution stops there and returns
 // whatever outcomes were already recorded. A create-quiz-question failure is
@@ -42,6 +43,7 @@
 // plan, and moduleId is the caller's job to resolve before calling this
 // function at all for a module-item placement).
 import type { NewAssignment, NewModuleItem, QuizQuestionInput } from "@/lib/canvas-modules/types";
+import type { NewGradedDiscussion } from "@/lib/canvas-modules/graded-discussion";
 import type { PostPlanStep, PostStepOutcome } from "./commit-plan";
 
 export interface CanvasWriteError {
@@ -95,6 +97,11 @@ export interface CanvasWriters {
     message: string,
     acronym?: string
   ) => Promise<{ announcement: unknown } | CanvasWriteError>;
+  createDiscussion: (
+    courseUrl: string,
+    fields: NewGradedDiscussion,
+    acronym?: string
+  ) => Promise<{ id: number; path: "checkpoints" | "classic"; fallbackReason?: string } | CanvasWriteError>;
 }
 
 /**
@@ -122,6 +129,7 @@ export async function executePostPlanSteps(
   const outcomes: PostStepOutcome[] = [];
   let pageUrl: string | null = null;
   let quizId: number | null = null;
+  let discussionId: number | null = null;
 
   for (const step of steps) {
     switch (step.step) {
@@ -220,6 +228,46 @@ export async function executePostPlanSteps(
           return outcomes;
         }
         outcomes.push({ step, status: "done" });
+        break;
+      }
+
+      case "create-discussion": {
+        const res = await writers.createDiscussion(courseUrl, step.fields, acronym);
+        if ("error" in res) {
+          outcomes.push({ step, status: "failed", detail: res.error });
+          return outcomes;
+        }
+        discussionId = res.id;
+        // The fallback is never silent (AC14g): when the classic path ran
+        // instead of checkpoints, say so - and why - right on the outcome, so
+        // the caller (the post summary/notes surfaced to the instructor) can
+        // tell the two paths apart instead of a bare "posted successfully"
+        // implying both deadlines are enforced when only one is.
+        //
+        // M1 (fix): `res.fallbackReason` (the write layer's own
+        // describeFallback()) is passed through VERBATIM - it already ends
+        // with "only the initial-post deadline is graded by Canvas; the
+        // replies deadline is enforced by the thread closing, not by a
+        // separate grade." Wrapping it in "Classic fallback used (...)" and
+        // appending "- only the initial-post deadline is enforced by
+        // Canvas." (as this used to do) doubled that exact warning in the
+        // instructor-facing note. No re-wording, no re-wrapping.
+        outcomes.push({ step, status: "done", detail: res.path === "classic" ? res.fallbackReason : undefined });
+        break;
+      }
+
+      case "link-discussion": {
+        if (moduleId === null || discussionId === null) {
+          outcomes.push({ step, status: "failed", detail: "No discussion/module to link." });
+          break;
+        }
+        const res = await writers.createModuleItem(
+          courseUrl,
+          moduleId,
+          { type: "Discussion", contentId: discussionId, title: step.title },
+          acronym
+        );
+        outcomes.push("error" in res ? { step, status: "failed", detail: res.error } : { step, status: "done" });
         break;
       }
     }

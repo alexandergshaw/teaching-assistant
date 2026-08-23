@@ -48,6 +48,7 @@ import {
 // own module, same as every other file that reaches it.
 import { previewHeaderTitle } from "./lmsGenerationNotes";
 import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "../contentSourceGating";
+import { describeMissingDeadlines } from "@/lib/lms-generation/intro-discussion-deadlines";
 
 describe("offerableGenerationKinds", () => {
   it("offers nothing for an empty item selection", () => {
@@ -445,6 +446,11 @@ describe("generationSuccessNote / refineSuccessNote", () => {
     // is the fifth save-and-post kind - without this line, nothing asserted
     // that posting is even offered for it (finding 5).
     expect(kindOffersPost("resources")).toBe(true);
+    // "introDiscussion" (docs/intro-discussion-from-modules-acceptance-
+    // criteria.md) is the sixth save-and-post kind - the graded discussion
+    // this chunk adds. Without this line, nothing asserted that posting is
+    // even offered for it, the same gap "resources" closed above.
+    expect(kindOffersPost("introDiscussion")).toBe(true);
   });
 });
 
@@ -638,6 +644,60 @@ describe("postResultNote (P4)", () => {
       kind: "error",
       text: "Nothing was posted.",
     });
+  });
+
+  // W6 (docs/intro-discussion-from-modules-acceptance-criteria.md, section
+  // 5b): `notes` is a NEW, optional second parameter - every caller that
+  // predates this feature (and every "save-and-post" kind whose action
+  // response carries no `notes`) must get a BYTE-IDENTICAL `text` to before.
+  it("FROZEN LITERAL: calling with no notes argument returns byte-identical text to before this parameter existed", () => {
+    expect(postResultNote(summary({ status: "success", text: 'Page "Week 3 Objectives" posted successfully.' }))).toEqual(
+      { kind: "success", text: 'Page "Week 3 Objectives" posted successfully.' }
+    );
+  });
+
+  it("an empty notes array is the same as omitting the argument entirely - no trailing separator", () => {
+    expect(postResultNote(summary({ text: "Posted." }), [])).toEqual({ kind: "success", text: "Posted." });
+  });
+
+  it("SABOTAGE TARGET: appends notes, in order, after summary.text - and the kind rule (P4) is unchanged by their presence", () => {
+    const result = postResultNote(
+      summary({ status: "success", text: "Discussion \"Introduce yourself\" posted successfully." }),
+      ["Initial post due Thursday, September 10, 2026 at 11:59 PM.", "Replies due Sunday, September 13, 2026 at 11:59 PM."]
+    );
+    expect(result).toEqual({
+      kind: "success",
+      text:
+        'Discussion "Introduce yourself" posted successfully. Initial post due Thursday, September 10, 2026 at 11:59 PM. Replies due Sunday, September 13, 2026 at 11:59 PM.',
+    });
+    // The kind rule (success/partial/failed -> success/error/error) still
+    // applies with notes present - a partial result is not laundered into a
+    // clean success just because it also carries extra notes.
+    const partialWithNotes = postResultNote(
+      summary({ status: "partial", text: "Created but not linked." }),
+      ["No due or lock dates were set on the discussion."]
+    );
+    expect(partialWithNotes.kind).toBe("error");
+    expect(partialWithNotes.text).toBe("Created but not linked. No due or lock dates were set on the discussion.");
+  });
+
+  // AC21/D5 item 7: "no course start date" and "module name carries no week
+  // number" must never collapse into one indistinguishable message. This
+  // pins the CHANNEL this file owns (postResultNote must actually carry
+  // whatever distinct reason it is given through to the final note text,
+  // rather than only ever emitting one fixed sentence regardless of what is
+  // passed) - the reasons THEMSELVES are describeMissingDeadlines' own
+  // contract (intro-discussion-deadlines.ts, a sibling-owned leaf).
+  // Finding 10 (fix): pinned against the REAL leaf function, not hand-invented text.
+  it("the two distinct no-deadline reasons produce two DIFFERENT note texts, using the REAL describeMissingDeadlines wording", () => {
+    const noStartDateReason = describeMissingDeadlines({ startDate: "", moduleName: "Module 1" })!;
+    const noWeekNumberReason = describeMissingDeadlines({ startDate: "2026-01-05", moduleName: "Course Resources" })!;
+    expect(noStartDateReason).toBe("This course has no start date, so no due or lock dates were set on the discussion.");
+    expect(noWeekNumberReason).toBe('The module name "Course Resources" carries no week number, so no due or lock dates were set on the discussion.');
+
+    const noStartDate = postResultNote(summary({ status: "success" }), [noStartDateReason]);
+    const noWeekNumber = postResultNote(summary({ status: "success" }), [noWeekNumberReason]);
+    expect(noStartDate.text).not.toBe(noWeekNumber.text);
   });
 });
 
@@ -937,3 +997,4 @@ describe("acronym reaches every by-URL resolve call the hook makes (M12 reachabi
     expect(hookSource.slice(sigStart, sigEnd)).toMatch(/acronym\?:\s*string/);
   });
 });
+

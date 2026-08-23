@@ -3,9 +3,35 @@ import {
   planModuleTarget,
   planPostSteps,
   summarizePostOutcome,
+  isContentStep,
+  isLinkStep,
   type PostStepOutcome,
 } from "./commit-plan";
 import type { NewAssignment, QuizQuestionInput } from "@/lib/canvas-modules/types";
+
+// NewGradedDiscussion (src/lib/canvas-modules/graded-discussion.ts) is owned
+// by a sibling agent and is not necessarily on disk yet - see this file's own
+// header comment on why commit-plan.ts only ever type-imports it. This test
+// file deliberately never imports that module (even as a type) so it keeps
+// running under vitest regardless; the fixture below is written out
+// structurally to match AC12/D2's NewGradedDiscussion shape instead.
+// useCheckpoints/initialPostPoints/repliesPoints (the frozen contract's
+// checkpoints amendment, landed concurrently by that sibling agent) are
+// included so this fixture keeps matching the real shape.
+function discussionFields() {
+  return {
+    title: "Introduce Yourself",
+    message: "<p>Tell us about yourself.</p>",
+    pointsPossible: 20,
+    initialPostAt: "2026-09-04T03:59:00.000Z",
+    repliesDueAt: "2026-09-07T03:59:00.000Z",
+    requiredReplyCount: 2,
+    published: false,
+    useCheckpoints: false,
+    initialPostPoints: 10,
+    repliesPoints: 10,
+  };
+}
 
 describe("planModuleTarget", () => {
   it("an existing target always resolves to using that id, with no lookup needed", () => {
@@ -150,6 +176,56 @@ describe("planPostSteps - quiz", () => {
   });
 });
 
+describe("planPostSteps - discussion", () => {
+  // SABOTAGE TARGET: a discussion, unlike an assignment, needs its OWN link
+  // step - the writer creates the topic but does not link it into a module.
+  // Emitting only "create-discussion" (the assignment shape) would leave the
+  // discussion invisible in the module tree.
+  it("emits exactly two steps, create-discussion then link-discussion, in that order", () => {
+    const fields = discussionFields();
+    const steps = planPostSteps(
+      { kind: "discussion", fields },
+      { pages: [], linkedPageUrls: new Set() }
+    );
+    expect(steps).toEqual([
+      { step: "create-discussion", fields },
+      { step: "link-discussion", title: fields.title },
+    ]);
+    expect(steps).toHaveLength(2);
+  });
+
+  // SABOTAGE TARGET: ExistingModuleContent's page-reuse rule must NOT apply
+  // to discussions - a discussion follows the quiz rule (never reused by
+  // title), so a same-title existing page must have no effect on the plan.
+  it("never reuses an existing page/module-content entry by title - a discussion is always freshly created", () => {
+    const fields = discussionFields();
+    const steps = planPostSteps(
+      { kind: "discussion", fields },
+      { pages: [{ title: fields.title, url: "some-other-page" }], linkedPageUrls: new Set(["some-other-page"]) }
+    );
+    expect(steps[0].step).toBe("create-discussion");
+  });
+});
+
+describe("isContentStep / isLinkStep - discussion", () => {
+  // SABOTAGE TARGET: this is D5's #1 silent-failure hop - miss either of
+  // these and a fully successful post reports "Nothing was posted." with no
+  // error anywhere. Asserted directly, not only through an end-to-end
+  // summary, so a regression here fails at the exact function responsible.
+  it("isContentStep(create-discussion) is true", () => {
+    expect(isContentStep({ step: "create-discussion", fields: discussionFields() })).toBe(true);
+  });
+
+  it("isLinkStep(link-discussion) is true", () => {
+    expect(isLinkStep({ step: "link-discussion", title: "Introduce Yourself" })).toBe(true);
+  });
+
+  it("create-discussion is not (also) treated as a link step, and link-discussion is not (also) treated as content", () => {
+    expect(isLinkStep({ step: "create-discussion", fields: discussionFields() })).toBe(false);
+    expect(isContentStep({ step: "link-discussion", title: "Introduce Yourself" })).toBe(false);
+  });
+});
+
 describe("summarizePostOutcome", () => {
   it("success: every step done", () => {
     const outcomes: PostStepOutcome[] = [
@@ -244,5 +320,40 @@ describe("summarizePostOutcome", () => {
     expect(summary.status).toBe("failed");
     expect(summary.text).toContain("Week 3 update");
     expect(summary.text).toContain("no permission");
+  });
+
+  it("success: a discussion created and linked", () => {
+    const outcomes: PostStepOutcome[] = [
+      { step: { step: "create-discussion", fields: discussionFields() }, status: "done" },
+      { step: { step: "link-discussion", title: "Introduce Yourself" }, status: "done" },
+    ];
+    const summary = summarizePostOutcome(outcomes);
+    expect(summary.status).toBe("success");
+    expect(summary.text).toContain("Introduce Yourself");
+  });
+
+  it("failed: a discussion whose create step failed", () => {
+    const outcomes: PostStepOutcome[] = [
+      { step: { step: "create-discussion", fields: discussionFields() }, status: "failed", detail: "no permission" },
+    ];
+    const summary = summarizePostOutcome(outcomes);
+    expect(summary.status).toBe("failed");
+    expect(summary.text).toContain("Introduce Yourself");
+    expect(summary.text).toContain("no permission");
+  });
+
+  // SABOTAGE TARGET: the discussion orphan case - topic created but the
+  // module link failed. Must be "partial", never a bare "success" (the
+  // instructor would think it landed in the module) or a bare "failed" (the
+  // topic DOES exist in Canvas and must not be silently recreated).
+  it("partial: a discussion created but not linked is reported as partial and names what was created", () => {
+    const outcomes: PostStepOutcome[] = [
+      { step: { step: "create-discussion", fields: discussionFields() }, status: "done" },
+      { step: { step: "link-discussion", title: "Introduce Yourself" }, status: "failed", detail: "module not found" },
+    ];
+    const summary = summarizePostOutcome(outcomes);
+    expect(summary.status).toBe("partial");
+    expect(summary.text).toContain("Introduce Yourself");
+    expect(summary.text.toLowerCase()).toContain("not linked");
   });
 });

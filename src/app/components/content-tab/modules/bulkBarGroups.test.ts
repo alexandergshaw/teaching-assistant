@@ -455,10 +455,10 @@ describe("BULK_BAR_GROUPS shape", () => {
     );
   });
 
-  it("counts 29 controls for BulkItemsSection's own groups (items/content/dueDates/grading/submissionType/move), matching section 0's own tally", () => {
+  it("counts 30 controls for BulkItemsSection's own groups (items/content/dueDates/grading/submissionType/move) - was 29 before docs/rubric-bulk-action-acceptance-criteria.md AC5 added itemsGenerateAssociateRubric to the existing grading group (not a sixteenth group, per that control's own comment in bulkBarGroupCatalog.ts)", () => {
     const sectionGroupIds = ["items", "content", "dueDates", "grading", "submissionType", "move"];
     const total = sectionGroupIds.reduce((sum, id) => sum + findGroup(id).controls.length, 0);
-    expect(total).toBe(29);
+    expect(total).toBe(30);
   });
 
   it("counts 15 visible controls for BulkModulesSection's groups on the Assignment path, matching section 0's own tally", () => {

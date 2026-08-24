@@ -31231,3 +31231,353 @@ reading the report - the same gate this project already records for implementer
 subagents, applied one round later. And the F2 guard in check 16 was caught only
 by EXECUTING its extraction against a synthetic new member; reading it looked
 fine. A verification that reads a guard is weaker than one that runs it.
+
+## 332. Generate a rubric and associate it to every selected item - one point-agnostic spec in percentages, materialised as one Canvas rubric per distinct point total
+
+Acceptance criteria: `docs/rubric-bulk-action-acceptance-criteria.md`. Chunk H of
+the Modules-view backlog (chunk A is entry 328, chunk B entry 330, the bulk-bar
+reorg entry 329, carry-pattern-forward entry 331). The ask, verbatim
+(2026-08-24): "i need a bulk action that generates and associates a rubric to
+all selected items". The reuse survey's central finding was that the pipeline
+already existed and had shipped - `generateRubric` -> `parseGeneratedRubric` ->
+`createRubric` - wired to a workflow step fed by a repo zip and never once
+pointed at a selection. The new work is the selection wiring, the association
+fan-out, and AC1's decision to author the spec in PERCENTAGES. A step-10 review
+produced TEN confirmed defects; three fixers closed them; a step-11 pass
+verified every one in the source rather than in a report, by EXECUTING the
+shipped arithmetic.
+
+1. **C1 - A FRACTIONAL `points_possible` WAS UNREACHABLE, AND THE PROOF IS AN
+   EXECUTION, NOT A READING.** The largest-remainder loop distributed a
+   remainder it assumed was a whole number of points: `[25,25,25,25]` at 7.5
+   floored to `[1,1,1,1]`, left `3.5`, `Math.round`ed that to `4`, and handed
+   out four whole points - a 7.5-point worksheet got a rubric summing to 8, a
+   WRONG GRADE on every submission. Fixed by apportioning in the total's OWN
+   precision: `pointPrecisionScale` picks the smallest power of ten (1, 10,
+   100) that makes the total whole, the same loop runs on those integer units,
+   and the result divides back down. Verified by compiling the shipped file
+   standalone and running it: `7.5 -> [1.9, 1.9, 1.9, 1.8]`,
+   `2.5 -> [0.7, 0.6, 0.6, 0.6]`, `0.5 -> [0.2, 0.1, 0.1, 0.1]`, every one
+   summing exactly. The DECISION that beat its alternative is picking the
+   SMALLEST sufficient scale rather than always 100: an integer total then
+   scales by 1 and reproduces the pre-fix arithmetic bit for bit, so
+   `100 -> [25,25,25,25]` stays four whole numbers and no existing expectation
+   moved. Reading this function looked fine before the fix, which is how it
+   shipped past one review already.
+
+2. **C2 - A SPEC INSIDE THE TOLERANCE COULD STILL OVER-SUM, BECAUSE THE
+   CORRECTION LOOP ONLY EVER ADDS.** The function divided each percent by the
+   literal `100`, so "34%, 34%, 33%" - a spec summing to 101, precisely what
+   `PERCENT_SUM_TOLERANCE` exists to admit - produced exact shares summing to
+   101 percent of the total, and the largest-remainder loop has no branch that
+   takes a unit back. A 100-point essay got a rubric worth 101. Fixed by
+   normalising against the spec's REAL sum: `exact_i = (percent_i /
+   percentSum) * scaledTotal`. That makes the loop's one-directional shape
+   correct BY CONSTRUCTION rather than by luck - the shares now sum to
+   `scaledTotal` exactly, so `flooredSum <= scaledTotal` and the remainder is
+   always in `[0, n]`. Executed: `[34,34,33] @ 100 -> [34,33,33] = 100`, and
+   the other direction `[33,33,33] (=99) @ 100 -> [34,33,33] = 100`. The
+   remainder was confirmed never to exceed the criterion count across 50,000
+   accepted specs, so the single-pass loop cannot silently drop units.
+
+3. **THE REFUSAL AND THE NORMALISATION CANNOT CANCEL EACH OTHER OUT, AND THIS
+   IS THE SUBTLEST THING IN THE CHUNK.** C2's fix introduces a renormaliser -
+   which, run in the wrong order, would SILENTLY RESCUE the exact defect the
+   percent-sum validation exists to catch. The hazard is real, not theoretical:
+   feeding a three-area 75-percent spec straight to `scaleSpecToPoints` returns
+   `[34,33,33] = 100`, a rubric that looks perfect and grades an essay on
+   three-quarters of the criteria the model wrote. What stops that is ORDERING,
+   not tolerance: `buildPercentSpecFromRows` refuses on the UNNORMALISED sum at
+   construction time, before a spec object exists to scale. Executed against
+   the boundary: 99 ACCEPTED, 101 ACCEPTED, 103 REFUSED, 125 REFUSED, 75
+   REFUSED (both as three-of-four areas and as a zero-weight row), empty rows
+   refused with a distinct message. The tolerance is still exactly 1 and did
+   not widen. **And the ordering is enforced structurally, not by convention:**
+   the only production reach into `scaleSpecToPoints` is from `rubric-bulk.ts`,
+   whose `spec` can only have come from `buildPercentSpecFromRows` - verified
+   by grepping every caller in `src`.
+
+4. **C3 - A FAILED DETAIL FETCH WAS READ AS "HAS NO RUBRIC", WHICH WOULD HAVE
+   POSTED OVER A HAND-BUILT GRADING RUBRIC WITH NO REPORT.** The only finding
+   in the chunk that DESTROYS WORK A HUMAN DID. One Canvas 500 on one
+   assignment's detail GET made that assignment look eligible, and the run
+   generated a rubric and associated it over the instructor's own, then
+   reported "N rubric associations created" with no mention that a lookup had
+   failed. The DECISION: a fetch-failed item is dropped from the server's
+   `targets` array entirely and reported as its own "failed" outcome carrying
+   the fetch's error text (`classifyAssignmentDetailFetch` and
+   `detailFetchFailureOutcome` in `bulkRubricGenerateSummary.ts`). It beat the
+   alternative the AC allowed - a `detailUnknown` flag with its own skip
+   reason - because that needs a new member on `RubricTargetSkipReason`, a
+   closed union in a sibling-owned file, whereas a synthetic client-side
+   outcome folds into the report `summarizeRubricGenerateOutcomes` already
+   builds. **"We could not read whether it has one" never collapses into "it
+   has none."** The decision was also extracted into a PURE function precisely
+   because the branch is unreachable from this repo's node-env vitest as it
+   was originally written.
+
+5. **C4 - THE NEW QUIZ GUARD DEGRADED OPEN, SILENTLY, ON A FETCH FAILURE.**
+   `resolveNewQuizFlags` returned an empty map on error and every target then
+   fell back to `isNewQuiz ?? false`, so ONE hiccup on `/assignments` turned
+   AC4's refusal completely off with no indication - the same end state as the
+   unguarded shipped control, reached by a different route. It now returns
+   `{map, ok}` and `classifyTargets` REFUSES an Assignment target with a
+   numeric contentId when `!ok` and the caller supplied no flag of its own: a
+   guard that cannot verify must refuse, not assume. Enforced at the boundary
+   that actually knows whether the fetch succeeded, because
+   `classifyRubricEligibility` has no concept of "unverifiable". The join that
+   would have made this cosmetic was checked: `BulkItem.id` is a string
+   (`String(a.id)`) and the lookup is `get(String(target.contentId))`, so the
+   key types agree and tsc holds them there. A non-New-Quiz row is present in
+   the map with value `false`, so the derived value wins over the caller's in
+   BOTH directions, not only the true one. The pre-existing test looked like it
+   covered this and did not - it supplied `isNewQuiz: true` on the target,
+   which the real UI path never sends now that the fetch is the action's job.
+
+6. **C5 - THE IDEMPOTENCY CHECK RAN AFTER THE MODEL SPEND.** AC3's pre-check
+   exists so a re-run costs nothing, and a `generateRubric` call is not
+   nothing. `prepareRubricPlan` - classification plus the one course-level New
+   Quiz fetch, all Canvas READS and no model call - now runs FIRST, and a
+   selection with zero groups left to materialise returns every item's
+   already-computed outcome without calling the model at all. Pinned by a
+   sabotage that forced the short-circuit off: the generator went from 0 calls
+   to 1. The structural consequence is check 16.
+
+7. **C6 - THE INSTRUCTOR-FACING NOTE WAS COMPOSED TWICE, IN TWO FILES, WITH
+   DIFFERENT WORDING, AND BOTH WERE PINNED.** Two sources of truth for one
+   sentence, each with its own green test, free to drift forever - the twin
+   pattern entry 330's Limits records, in message form. Now
+   `describeRubricGenerateNote` is the only composition and the section renders
+   its `.text`; the JSX keeps exactly one job the pure function cannot do,
+   naming the orphan rubrics by title and id. The guard is a NEGATIVE
+   assertion - the render block must NOT contain "already had a rubric" or
+   "cannot take a rubric" - which is the only shape that fails when the twin
+   returns, since a positive assertion passes whether the wording appears once
+   or twice. The step-11 pass materialised that test's slice rather than
+   trusting it: 486 real characters, so the negative assertions run against the
+   actual render and not an empty region.
+
+8. **C7 - A DUPLICATE COURSE-LEVEL FETCH AND AN UNBOUNDED N-WAY FAN-OUT.** The
+   hook made its own `listBulkItemsAction` call purely to fill `isNewQuiz`, a
+   value the server discards whenever its own fetch has an answer - deleted
+   rather than kept "just in case", with a test asserting the deletion STAYS
+   deleted rather than merely that the feature still works. The per-assignment
+   detail GETs were a bare `Promise.all`: forty selected assignments meant
+   forty concurrent Canvas GETs with no throttle budget, unlike
+   `bulkAssociateRubric` which deliberately shares one - and the throttle
+   failures that produced fed straight into C3, since a throttled fetch looks
+   like every other failure. Now bounded at 5 by `mapWithConcurrency`,
+   order-preserving so `results[i]` still matches `items[i]`.
+
+9. **C9 - ONE ASSIGNMENT IN TWO MODULES COLLIDED IN THE OUTCOME LIST.** Two
+   module items share one `contentId`, so the association was POSTed twice and
+   `failureById` mapped one failure onto both keys arbitrarily. Fixed by
+   de-duplicating only the ids SENT to Canvas while every module item,
+   duplicates included, still looks itself up in `failureById` - correct
+   precisely because items sharing a contentId share the same association
+   result. The alternative, de-duplicating the ITEMS, would have left one of
+   the two module items with no reported outcome at all: the AC4 violation this
+   chunk exists to avoid.
+
+10. **C10 - A THROW LOST THE ORPHAN REPORT.** `bulkAssociateRubric` sat outside
+    any try, so a throw from inside it (`resolveCourse` rejecting the URL, say)
+    unwound past the loop and a rubric just created was never reported. Now
+    wrapped, reporting the same orphan a per-item failure already would. Never
+    auto-deleted: entry 258 check 11's reasoning applies unchanged.
+
+11. **C8 - THREE FALSE CLAIMS IN COMMENTS, THE LAST OF WHICH SURVIVED ITS OWN
+    FIX.** Two stale header paragraphs in `rubric-bulk.ts` were corrected. The
+    third was introduced BY the C1 fix and caught only by the step-11 pass
+    opening the file it cited: `rubric-bulk-plan.ts` claimed Canvas's
+    two-decimal rubric granularity had been "verified against Canvas's rubric
+    UI elsewhere in this repo", citing
+    `cartridge-import-blackboard-rubrics.ts`. That file is real and its
+    constant is real, but the words "verified interactively" there attach to an
+    IEEE754 artifact (`12 * 40 / 100` landing on 4.800000000000001), NOT to
+    Canvas's granularity - the granularity sentence beside it is an unsourced
+    assumption. The comment now says so plainly and records that an earlier
+    draft cited it as an already-verified external fact, in the file that owns
+    the grading arithmetic, which is the worst place for a claim like that.
+    Consequence-free: the constant is only a CEILING on `pointPrecisionScale`
+    and never binds for a realistic total.
+
+12. **AC1 - ONE SPEC, ONE RUBRIC PER DISTINCT TOTAL, AND THE PARTITION IS
+    TOTAL.** Ten 100-point essays produce exactly one rubric. AC1b (one shared
+    rubric across differing totals) is rejected because a rubric's criteria
+    must sum to ITS assignment's total and one object cannot match ten; AC1c (N
+    tailored rubrics unconditionally) is rejected because it is what
+    `RubricBuilderModal` already does and it leaves ten near-identical rubrics
+    to maintain - and it is NOT precluded, being a change at one call site.
+    Executed against a nine-item mixed selection: `100pts x2 | 7.5pts x1`
+    grouped in first-seen order, one already-has-rubric, and five ineligible
+    split across `unsupported-type` (Page and Quiz), `missing-points`,
+    `missing-content-id` and `new-quiz` - **9 of 9 items land in exactly one
+    bucket.** Nothing dropped, nothing double-counted, which is what makes
+    AC4's "reported, never silently dropped" a property of the data structure
+    rather than a promise in a comment.
+
+13. **ELIGIBILITY IS BROADER THAN THE AC's LITERAL LIST, AND THE REASON IS A
+    CANVAS IDENTIFIER, NOT A POLICY.** The AC names Pages, files, subheaders
+    and external URLs. Quiz and Discussion module items are ALSO refused,
+    because their `contentId` is the quiz's or discussion topic's OWN id, not
+    the shadow assignment's - and `bulkAssociateRubric` hardcodes
+    `association_type: "Assignment"`, so sending it would associate against the
+    wrong Canvas resource entirely. Both wave-1 agents reached this
+    independently.
+
+14. **AC5 - THE CONTROL JOINED THE EXISTING `grading` GROUP, AND THE CANARY
+    THAT MOVED IS THE ONE THAT WAS SUPPOSED TO.** Declared with
+    `tier: "fan-out-write"` and the same `visible: (f) => f.itemCount > 0` as
+    its four siblings; the group's existing `consequenceTag` was EXTENDED, not
+    duplicated. Three of chunk B's four reasons for a separate group do not
+    apply, and the fourth - canary hygiene - is why it joined `grading`: a
+    sixteenth group would have moved the group-id list instead of the section's
+    own control count. **BulkItemsSection's visible-control count moved
+    29 -> 30.** Entry 331 check 17 recorded that number as NOT MOVED; it moves
+    here, by exactly one, and this entry supersedes that line. The derived tier
+    is unchanged because `itemsAssociateRubric` already made the group
+    `fan-out-write`, so `auditGroupModel`'s I5 keeps requiring the
+    `consequenceTag` it already had.
+
+15. **REACHABILITY, HOP BY HOP, BECAUSE A CAPABILITY CAN SHIP DEAD WITH EVERY
+    GATE GREEN.** `BulkItemsSection.tsx`'s `onClick={bulkGenerateAndAssociate
+    Rubric}` (no intermediate handler) <- `ModulesView.tsx` <-
+    `useBulkItemActions.ts` -> `generateAndAssociateRubricAction` ->
+    `prepareRubricPlan` -> `runGenerateSpecs` -> `writeMaterializations` ->
+    `createRubric` / `bulkAssociateRubric`. The two props are declared REQUIRED
+    with no `?`, so a caller that omits either fails `tsc` rather than
+    rendering a live button that does nothing - and that fact is itself pinned
+    as a sabotage target, which is stronger than asserting the button exists.
+    This is not hypothetical diligence: the wave-2 agent deliberately left the
+    two props unwired so `tsc` would fail, and it did.
+
+16. **`buildRubricBulkPlan` WAS DELETED RATHER THAN LEFT AS A GREEN TEST OVER A
+    DEAD PATH.** The composed one-call wrapper made sense until C5's fix
+    required inspecting the grouping BEFORE a spec exists to scale, so the
+    action began calling `planRubricMaterialization` and `scaleSpecToPoints`
+    separately and the wrapper lost its only production caller. The step-11
+    pass found it reachable solely from its own two tests. Deleted, with a note
+    in its place recording why - dead code exercised only by its own tests is a
+    shape this project has recorded before, and it is worse than absent code
+    because the suite reports coverage of a path production does not take.
+
+17. **THE EXTRACTION WAS BEHAVIOUR-NEUTRAL, AND NO SOURCE-TEXT TEST NOW SLICES
+    AN EMPTY REGION.** `useBulkItemActions.ts` went 999 -> 867 by moving four
+    pure clusters out: `computeSelectedGradables` and `groupIdsByKind`
+    (`bulkItemSelectionQueries.ts`), `planModuleShiftMoves` and
+    `planMoveToModulePositions` (`bulkItemModulePlacementPlan.ts`). All four
+    were diffed against the code they replaced and are VERBATIM moves, the only
+    change being that `planMoveToModulePositions` takes `target.items.length`
+    as a parameter instead of the module object. Both had NO direct test before
+    - the hook cannot be rendered by this repo's vitest - and gained 17 between
+    them, which is the real prize of the move. What could have gone green by
+    emptiness was checked: the two pre-existing tests reading this file's source
+    assert `useState`-backed field names and a type import, and none of the
+    moved code was either. The new slices are guarded by `toBeGreaterThan`
+    assertions on BOTH anchors, so an anchor that moves reddens the test instead
+    of silently emptying it - the failure mode entry 331 check 16 records.
+
+18. **THE GATES, WITH REAL NUMBERS - AND THE BASELINE WAS MEASURED FROM HEAD,
+    NOT CARRIED FORWARD.** `npx vitest run`: **655 test files, 13176 tests, all
+    passing.** The baseline was measured directly from `8c405ed` in a detached
+    worktree created with `git -c core.autocrlf=false worktree add --detach` at
+    a SHORT path, given its OWN `npm ci` - **node_modules was deliberately NOT
+    junctioned**, because an earlier pass this session did that, removed the
+    worktree, and the recursive delete followed the junction and EMPTIED the
+    real `node_modules`, requiring a full reinstall. Baseline: **649 files /
+    13025 tests.** FILES +6, every one a new untracked test file. TESTS +151,
+    attributed per file with nothing left over. **No file lost a test except
+    the two deleted with `buildRubricBulkPlan` (check 16).** One caution for
+    the next session: the baseline run initially reported exit code 0 having
+    collected NOTHING, because `--reporter=basic` is not a reporter in vitest
+    4.1.9 and the load error did not set a non-zero exit. **A green exit code
+    from vitest is not proof it ran; read the file count.** `npx tsc --noEmit`:
+    clean, exit 0. `npx eslint` over all touched files: 0 errors. `next build`:
+    "Compiled successfully"; the prerender tail fails for want of Supabase
+    keys, documented and expected. `no-emojis.test.ts`,
+    `use-server-exports.test.ts` and `headless.test.ts` all green. Every
+    touched file under 1000 lines - `useBulkItemActions.ts` at **867, down from
+    999**. Byte-scanned with `LC_ALL=C grep -n '[^ -~\t]'`: six non-ASCII hits,
+    all pre-existing UI copy; piping `git diff -U0 | grep '^+'` through the same
+    scan returns nothing, so zero non-ASCII characters were ADDED.
+
+19. **CANARIES, AND THE COMPLETE SET OF DELETED LINES.** By `git diff -U0`,
+    across every modified test file there are exactly TWO deleted assertion
+    lines: one `it(` title and `expect(total).toBe(29)`, both replaced by the
+    same assertion at 30. **No assertion was deleted or weakened anywhere**
+    except the two removed WITH the dead function they tested. NOT MOVED, each
+    re-verified as still a real proof: the FIFTEEN-group id list (the AC's own
+    text says "fourteen", which was stale before this chunk began - entry 331
+    moved it to fifteen); `bulkActionsPersistence`'s `declared.length === 1`
+    (file untouched); and `HEADLESS_SAFE_STEP_TYPES.size === 154` (file
+    untouched).
+
+**Limits.** NOTHING IN THIS CHUNK HAS EVER RUN AGAINST A REAL CANVAS COURSE, AND
+NO MODEL HAS EVER BEEN CALLED. No rubric has been created, no association
+POSTed, no orphan observed, no New Quiz refused in production. Every Canvas
+interaction is proven against mocks; `generateRubric` is stubbed in every test.
+NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - node-env, collecting only
+`src/**/*.test.ts` - so EVERY UI CLAIM IN THIS ENTRY IS SOURCE-TEXT ONLY.
+Nothing proves the button paints, that it is reachable by keyboard, that the
+`role="status"` report is announced, or that a thirtieth control does not push
+the bar past its own 60vh ceiling.
+THE AC's OWN RISK 1 IS STILL OPEN AND THE DESIGN RESTS ON IT. Whether a rubric
+POSTed with NO `rubric_association` appears in the course rubric list at all is
+UNVERIFIED. AC1's create-then-associate split assumes it does.
+`RubricBuilderModal` already ships that sequence, which is suggestive and is not
+evidence. Two curl calls settle it and were not made. If the assumption is
+wrong, every rubric this control creates is invisible until its association
+lands - and an ORPHAN, which this code deliberately never deletes, may be
+unfindable by the human it is reported to, by id, as the remedy.
+THE GENERATION PROMPT RECEIVES RAW, UNCAPPED CANVAS HTML, CONCATENATED ACROSS
+EVERY SELECTED ASSIGNMENT. `buildRubricGenerationInstructions` joins each item's
+title and description with blank lines and applies no length cap and no HTML
+stripping; `generateRubric` interpolates the result verbatim. Forty selected
+assignments with rich-text descriptions send forty HTML bodies to the model in
+one call. Nothing truncates, nothing strips tags, and nothing reports that it
+happened - so the likely failure is a silently generic rubric rather than an
+error.
+THE COURSE KIND IS NEVER RESOLVED, SO EVERY RUBRIC IS GENERATED WITH THE CODING
+PROMPT. The hook passes `undefined` for `courseKind`, so the action's "coding"
+default applies, whose closing rule tells the model that "Every criterion must
+evaluate only the presence or absence of things in the submitted code itself".
+An English essay selected in the Modules view gets a rubric written under that
+instruction. Consistent with every other shipped `generateRubric` caller - all
+five omit the argument - and `courseKindFromCourseName` exists and is not used
+here. Pre-existing in shape, newly reachable from this control, not fixed.
+RATING TIER POINTS ROUND HALF UP, SO A TIER'S LABEL AND ITS VALUE CAN DISAGREE.
+Tiers are deliberately not apportioned (they are alternates, not shares), so a
+"75%" tier on a 25-point criterion is worth 19 - that is 76 percent - and a
+"50%" tier is worth 13, or 52. Canvas shows the instructor both the label and
+the number. Executed, not inferred.
+FRACTIONAL TOTALS GET A COARSER GRAIN THAN CANVAS ALLOWS. `pointPrecisionScale`
+picks the smallest scale that makes the TOTAL whole, so 7.5 apportions in tenths
+(`[1.9, 1.9, 1.9, 1.8]`) where hundredths (`[1.88, 1.88, 1.87, 1.87]`) are both
+representable and more even. That choice is what preserves integer totals
+bit-for-bit and is the right trade, but four equal criteria on a fractional
+assignment are visibly unequal, and below one point it is stark: a 0.01-point
+total yields `[0.01, 0, 0, 0]`. The sum is always exact; the distribution is not
+always sensible.
+THE `lms-rubric` WORKFLOW STEP SCORES TIERS AT 100/50/0 WHILE THE PROMPT
+PROMISES 100/75/50. That step builds "Full marks" / "Partial credit"
+(`pointsValue / 2`) / "No marks", which does not match what `grade/rubric.ts`
+tells the model to write - so the rubric TEXT says a "Meets Expectations" answer
+earns 75 percent and the Canvas rubric awards 50. Not owned by this chunk;
+recorded, deliberately not fixed. THIS pipeline is unaffected:
+`buildRatingsFromSubcategories` parses each subcategory's own embedded
+percentage and falls back to [100, 75, 50] only when the wording departs from
+the prompt.
+THE SHIPPED `bulkRubric` CONTROL STILL SILENTLY DROPS INELIGIBLE ITEMS. It
+filters non-Assignment and no-contentId items out with no report and carries no
+New Quiz guard at all - the exact defect AC4 exists to prevent, sitting one
+function above the new one. Explicitly NOT inherited (the new control reuses
+none of its filtering) and explicitly NOT fixed, per this chunk's non-goals. The
+two controls sit side by side in the same group and behave differently about the
+same items.
+FINALLY, ON TRUSTING AGENT REPORTS. Eight agents reported success. Nine of the
+ten findings verified in the source exactly as reported. The tenth fixed two
+header claims and introduced a third - a citation that overstated its own
+source - caught only by opening the cited file and reading which sentence the
+word "verified" attached to. And C1 and C2 were both found originally by
+EXECUTING the arithmetic, then re-verified the same way with 200,000 fuzz cases,
+because reading either one looked fine before the fix and looks fine after.

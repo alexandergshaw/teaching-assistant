@@ -16,10 +16,48 @@ import {
   updateModuleItemAction,
   updatePageAction,
 } from "../../../actions";
+import {
+  generateAndAssociateRubricAction,
+  type RubricTargetItem,
+  type RubricTargetOutcome,
+} from "@/app/actions/rubric-bulk";
 import type { EditableQuestion } from "../types";
 import { itemKey, quizQuestionToInput, toLocalInput } from "../utils";
 import { isConfirmArmed, selectionSignature } from "./confirmArming";
 import type { RubricBuilderTarget } from "./useRubrics";
+import {
+  buildRubricGenerationInstructions,
+  classifyAssignmentDetailFetch,
+  describeRubricGenerateNote,
+  detailFetchFailureOutcome,
+  mapWithConcurrency,
+  RUBRIC_DETAIL_FETCH_CONCURRENCY,
+  summarizeRubricGenerateOutcomes,
+  type BulkRubricGenerateReport,
+} from "./bulkRubricGenerateSummary";
+import { planModuleShiftMoves, planMoveToModulePositions } from "./bulkItemModulePlacementPlan";
+import { computeSelectedGradables, groupIdsByKind } from "./bulkItemSelectionQueries";
+
+// docs/rubric-bulk-action-acceptance-criteria.md, chunk H, agent 2B's slice
+// (AC4/AC5): "Generate & associate rubric" is the grading group's own new
+// control (bulkBarGroupCatalog.ts's `itemsGenerateAssociateRubric`). Its pure
+// core (instructions text, outcome summarisation, the instructor-facing
+// note) lives in ./bulkRubricGenerateSummary.ts - re-exported below so every
+// existing importer of the type (BulkItemsSection.tsx) keeps working
+// unchanged - and is exercised directly by bulkRubricGenerateSummary.test.ts.
+// `bulkGenerateAndAssociateRubric` below stays here because it is stateful
+// (useState/async); its own wiring is checked by source text in
+// useBulkItemActions.test.ts.
+//
+// AC4 IS THE PART MOST LIKELY TO BE GOT WRONG, AND THE BAD PRECEDENT SITS
+// RIGHT NEXT TO THIS CODE: `bulkRubric` below (the shipped "Associate"
+// button) silently drops every non-Assignment / no-contentId item from its
+// own `.filter(...)` and carries no New Quiz guard at all. That is
+// pre-existing, explicitly NOT inherited here per the chunk's own brief, and
+// NOT fixed here either (out of scope) - `bulkGenerateAndAssociateRubric`
+// below does not reuse `bulkRubric`'s filtering and must not be made to
+// resemble it later without re-reading this comment.
+export type { BulkRubricGenerateReport } from "./bulkRubricGenerateSummary";
 
 export interface UseBulkItemActionsReturn {
   opBusy: boolean;
@@ -46,6 +84,8 @@ export interface UseBulkItemActionsReturn {
   setBulkPoints: (v: string) => void;
   bulkRubricId: number | "";
   setBulkRubricId: (v: number | "") => void;
+  bulkRubricGenerateReport: BulkRubricGenerateReport | null;
+  bulkGenerateAndAssociateRubric: () => void;
   bulkSubType: string;
   setBulkSubType: (v: string) => void;
   confirmDeleteContent: boolean;
@@ -123,6 +163,13 @@ export function useBulkItemActions(
   // runs anyway - there is nothing for a stored value to usefully survive
   // between. Matches the catalog's `itemsRubricSelect` unpersistedReason.
   const [bulkRubricId, setBulkRubricId] = useState<number | "">("");
+  // Output-only report from the last "Generate & associate rubric" run
+  // (AC4) - never restored from storage and never fed back into a control's
+  // own value, so it carries no persistence concern of its own; it is reset
+  // to null at the start of every new run (see bulkGenerateAndAssociateRubric
+  // below) so a stale report from a previous, different selection can never
+  // be mistaken for the current run's outcome.
+  const [bulkRubricGenerateReport, setBulkRubricGenerateReport] = useState<BulkRubricGenerateReport | null>(null);
   const [bulkSubType, setBulkSubType] = useState("");
   // Two-click "Confirm delete" arming for the item selection. `selected` is
   // already the raw item-key Set (moduleId:itemId, the same shape `itemKey`
@@ -135,22 +182,9 @@ export function useBulkItemActions(
   const itemSelectionSig = selectionSignature(selected);
   const confirmDeleteContent = isConfirmArmed(deleteArmedFor, itemSelectionSig);
 
-  // The selected gradable items plus the data needed to pre-fill the bulk fields.
-  const selGradables = (() => {
-    const arr: Array<{ type: string; contentId: number; dueAt: string | null; pointsPossible: number | null }> = [];
-    for (const mod of modules) {
-      for (const it of mod.items) {
-        if (
-          selected.has(itemKey(mod.id, it.id)) &&
-          ["Assignment", "Quiz", "Discussion"].includes(it.type) &&
-          typeof it.contentId === "number"
-        ) {
-          arr.push({ type: it.type, contentId: it.contentId, dueAt: it.dueAt, pointsPossible: it.pointsPossible });
-        }
-      }
-    }
-    return arr;
-  })();
+  // The selected gradable items plus the data needed to pre-fill the bulk
+  // fields (computeSelectedGradables, ./bulkItemSelectionQueries.ts).
+  const selGradables = computeSelectedGradables(modules, selected);
   // Sorted "kind:id" signature, so the effect only re-runs when the set changes.
   const gradableSelSig = selGradables.map((g) => `${g.type}:${g.contentId}`).sort().join("|");
   // Latest data read by the effect without widening its dependencies.
@@ -225,23 +259,10 @@ export function useBulkItemActions(
     };
   }, [gradableSelSig, courseUrl, acronym]);
 
-  // Group selected items' ids by kind for the per-kind bulk endpoints.
-  const idsByKind = (kinds: BulkKind[], usePageSlug = false): Record<string, string[]> => {
-    const map: Record<string, string[]> = {};
-    for (const { item } of selectedItems()) {
-      if (!kinds.includes(item.type as BulkKind)) continue;
-      const id =
-        item.type === "Page"
-          ? usePageSlug
-            ? item.pageUrl
-            : null
-          : item.contentId != null
-            ? String(item.contentId)
-            : null;
-      if (id) (map[item.type] ??= []).push(id);
-    }
-    return map;
-  };
+  // Group selected items' ids by kind for the per-kind bulk endpoints
+  // (groupIdsByKind, ./bulkItemSelectionQueries.ts).
+  const idsByKind = (kinds: BulkKind[], usePageSlug = false): Record<string, string[]> =>
+    groupIdsByKind(selectedItems(), kinds, usePageSlug);
 
   // Run a bulk op that returns an {updated, failures} summary; report + refresh.
   const runBulkSummary = async (
@@ -380,24 +401,10 @@ export function useBulkItemActions(
     }
     const delta = dir * steps;
 
-    const moduleIndex = new Map<number, number>();
-    modules.forEach((mod, idx) => moduleIndex.set(mod.id, idx));
-
     // Plan each move: source module + target module + the 1-based position the
-    // item should take at the end of that target (accounting for others moving
-    // into the same module ahead of it in this batch).
-    const appended = new Map<number, number>();
-    const plan = new Map<number, { srcModuleId: number; targetModuleId: number; position: number }>();
-    for (const { item, moduleId } of items) {
-      const srcIdx = moduleIndex.get(moduleId);
-      if (srcIdx === undefined) continue;
-      const targetIdx = Math.min(modules.length - 1, Math.max(0, srcIdx + delta));
-      if (targetIdx === srcIdx) continue; // already at the top/bottom in this direction
-      const target = modules[targetIdx];
-      const n = appended.get(target.id) ?? 0;
-      plan.set(item.id, { srcModuleId: moduleId, targetModuleId: target.id, position: target.items.length + n + 1 });
-      appended.set(target.id, n + 1);
-    }
+    // item should take at the end of that target (planModuleShiftMoves,
+    // ./bulkItemModulePlacementPlan.ts).
+    const plan = planModuleShiftMoves(items, modules, delta);
 
     const moveItems = items.filter(({ item }) => plan.has(item.id));
     if (moveItems.length === 0) {
@@ -438,14 +445,9 @@ export function useBulkItemActions(
     if (items.length === 0) return;
 
     // Position each moved item at the end of the target, after any already there
-    // plus the others moving in ahead of it in this batch.
-    let appended = 0;
-    const plan = new Map<number, number>();
-    for (const { item, moduleId } of items) {
-      if (moduleId === targetId) continue; // already in the target module
-      plan.set(item.id, target.items.length + appended + 1);
-      appended += 1;
-    }
+    // plus the others moving in ahead of it in this batch
+    // (planMoveToModulePositions, ./bulkItemModulePlacementPlan.ts).
+    const plan = planMoveToModulePositions(items, targetId, target.items.length);
 
     const moveItems = items.filter(({ item }) => plan.has(item.id));
     if (moveItems.length === 0) {
@@ -514,6 +516,167 @@ export function useBulkItemActions(
       return;
     }
     void runBulkSummary(() => bulkAssociateRubricAction(courseUrl, Number(bulkRubricId), ids, acronym), "Rubric associated");
+  };
+
+  // docs/rubric-bulk-action-acceptance-criteria.md AC1/AC4/AC5: generate ONE
+  // point-agnostic rubric spec and associate it to every ELIGIBLE selected
+  // item, creating one Canvas rubric per distinct point total. Every item is
+  // reported (AC4) - the report is left for BulkItemsSection to render, not
+  // decided here.
+  //
+  // REACHABILITY, hop by hop: this function is the button's own onClick
+  // (BulkItemsSection.tsx's "Generate & associate rubric") ->
+  // generateAndAssociateRubricAction (src/app/actions/rubric-bulk.ts) ->
+  // runGenerateSpecs (one generateRubric call) -> runMaterialize (createRubric
+  // once per distinct point total, then bulkAssociateRubric per group) ->
+  // real Canvas writes. Nothing in this chain is a dead end: the button is
+  // wired directly to this function (no intermediate handler that could
+  // silently no-op), and this function always calls the server action when
+  // there is a selection, never merely opening a modal or composing state
+  // for a later click.
+  const bulkGenerateAndAssociateRubric = () => {
+    const items = selectedItems();
+    if (items.length === 0) return;
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      setBulkRubricGenerateReport(null);
+
+      // Only "Assignment" module items with a real contentId can ever be
+      // eligible (AC4's own extension: a Quiz/Discussion module item's
+      // contentId is the quiz's/discussion topic's own id, never its shadow
+      // assignment's - see rubric-bulk-plan.ts's classifyRubricEligibility
+      // header for the full citation). Every other kind is still included in
+      // `targets` below, unchanged, so the server's own classification
+      // reports it as ineligible rather than this hook silently dropping it
+      // - the exact defect AC4 calls out in the shipped `bulkRubric` above.
+      const assignmentEntries = items.filter(
+        ({ item }) => item.type === "Assignment" && typeof item.contentId === "number"
+      );
+
+      // AC4 / new-quiz.ts: New Quiz detection is now entirely the server
+      // action's own job (rubric-bulk.ts's resolveNewQuizFlags makes ONE
+      // course-level fetch and its value always wins whenever it has a row).
+      // This hook used to make an identical, second course-level fetch here
+      // purely to fill RubricTargetItem.isNewQuiz - a redundant round trip
+      // whose result the server discarded whenever it had its own answer
+      // (step-10 review, C7 - "the action always prefers its own value").
+      // Deleted rather than kept "just in case": `isNewQuiz` is simply left
+      // unset on every target below, which the server reads as "unknown,
+      // fall back to its own fetch" - exactly the fallback path
+      // RubricTargetItem.isNewQuiz's own doc comment describes.
+
+      // Per-assignment detail (existing rubric id, for AC3's idempotency key;
+      // description, doubling as the generation source text), fetched with
+      // BOUNDED concurrency (C7: a bare Promise.all here used to issue one
+      // Canvas GET per selected assignment with no throttle budget at all -
+      // forty selected assignments, forty concurrent GETs - and the throttle
+      // failures that produced fed straight into the C3 defect below).
+      // mapWithConcurrency (bulkRubricGenerateSummary.ts) caps this fan-out.
+      const detailByKey = new Map<string, { existingRubricId?: number; description: string }>();
+      // C3: a fetch that failed tells us nothing about whether the item
+      // already has a rubric - it must never be read as "no rubric" (see
+      // classifyAssignmentDetailFetch's own header for the full argument).
+      // Collected here as real RubricTargetOutcome "failed" entries, carrying
+      // the fetch's own error text, and merged into every report below so
+      // the instructor is told which item could not be checked and that
+      // nothing was written to it - never silently dropped, never silently
+      // treated as eligible.
+      const detailFetchFailures: RubricTargetOutcome[] = [];
+      if (assignmentEntries.length > 0) {
+        const details = await mapWithConcurrency(assignmentEntries, RUBRIC_DETAIL_FETCH_CONCURRENCY, ({ item }) =>
+          getGradableAction(courseUrl, "Assignment", item.contentId as number, acronym)
+        );
+        assignmentEntries.forEach(({ item, moduleId }, i) => {
+          const key = itemKey(moduleId, item.id);
+          const outcome = classifyAssignmentDetailFetch(key, details[i]);
+          if (outcome.status === "fetch-failed") {
+            detailFetchFailures.push(detailFetchFailureOutcome(outcome));
+          } else {
+            detailByKey.set(key, { existingRubricId: outcome.existingRubricId, description: outcome.description });
+          }
+        });
+      }
+      const detailFetchFailureKeys = new Set(detailFetchFailures.map((f) => f.itemId));
+
+      const descriptionParts: string[] = [];
+      const targets: RubricTargetItem[] = items
+        // C3: drop exactly the assignments whose own detail fetch failed -
+        // every other item (including every non-Assignment kind) passes
+        // through unchanged so the server's own classification still reports
+        // it, per AC4.
+        .filter(({ item, moduleId }) => !detailFetchFailureKeys.has(itemKey(moduleId, item.id)))
+        .map(({ item, moduleId }) => {
+          const key = itemKey(moduleId, item.id);
+          const detail = detailByKey.get(key);
+          if (!detail) {
+            // Not an Assignment module item at all (Page/File/SubHeader/
+            // ExternalUrl/ExternalTool), or a Quiz/Discussion module item -
+            // passed through as-is so the server's own kind check reports it
+            // "ineligible-kind" rather than this hook dropping it.
+            return { itemId: key, kind: item.type, contentId: item.contentId, pointsPossible: item.pointsPossible };
+          }
+          if (detail.description.trim()) {
+            descriptionParts.push(`${item.title}\n${detail.description}`);
+          }
+          return {
+            itemId: key,
+            kind: item.type,
+            contentId: item.contentId,
+            pointsPossible: item.pointsPossible,
+            existingRubricId: detail.existingRubricId,
+          };
+        });
+
+      const instructions = buildRubricGenerationInstructions(descriptionParts);
+
+      // provider/courseKind deliberately left `undefined` rather than
+      // hard-coded here: generateAndAssociateRubricAction already defaults
+      // both ("gemini" / "coding"), and passing `undefined` explicitly lets
+      // this call site track that default instead of duplicating it as a
+      // second literal that could drift from the action's own.
+      const result = await generateAndAssociateRubricAction(
+        courseUrl,
+        instructions,
+        targets,
+        "Generated Rubric",
+        undefined,
+        undefined,
+        acronym
+      );
+      setOpBusy(false);
+
+      if ("error" in result) {
+        const report: BulkRubricGenerateReport = {
+          ...summarizeRubricGenerateOutcomes(detailFetchFailures, []),
+          actionError: result.error,
+        };
+        setBulkRubricGenerateReport(report);
+        setNote(describeRubricGenerateNote(report));
+        return;
+      }
+      if (result.phase === "generation-failed") {
+        const report: BulkRubricGenerateReport = {
+          ...summarizeRubricGenerateOutcomes(detailFetchFailures, []),
+          generationFailedReason: result.reason,
+        };
+        setBulkRubricGenerateReport(report);
+        setNote(describeRubricGenerateNote(report));
+        return;
+      }
+
+      // C3: the detail-fetch failures merge into the SAME report the
+      // server's own outcomes populate - one code path, one instructor-
+      // facing count, never a second parallel "some items were never
+      // checked" mechanism.
+      const report = summarizeRubricGenerateOutcomes(
+        [...detailFetchFailures, ...result.result.outcomes],
+        result.result.orphans
+      );
+      setBulkRubricGenerateReport(report);
+      setNote(describeRubricGenerateNote(report));
+      reload();
+    })();
   };
 
   // Open the rubric builder, pre-targeting the selected assignments to associate.
@@ -693,7 +856,9 @@ export function useBulkItemActions(
     bulkStaggerUnit, setBulkStaggerUnit, bulkModuleShift, setBulkModuleShift, bulkTargetModule, setBulkTargetModule,
     bulkItemsDescription, setBulkItemsDescription, bulkItemsQuestions, setBulkItemsQuestions,
     bulkItemsQuestionsOpen, setBulkItemsQuestionsOpen, descSharedState,
-    bulkPoints, setBulkPoints, bulkRubricId, setBulkRubricId, bulkSubType, setBulkSubType,
+    bulkPoints, setBulkPoints, bulkRubricId, setBulkRubricId,
+    bulkRubricGenerateReport, bulkGenerateAndAssociateRubric,
+    bulkSubType, setBulkSubType,
     confirmDeleteContent,
     bulkPublish, bulkSetDue, bulkShiftDue, bulkStaggerDue, bulkShiftModules, bulkMoveToModule,
     bulkSetPoints, bulkRubric, openRubricBuilder, selectedAssignmentCount, bulkUpdateSubmissionType,

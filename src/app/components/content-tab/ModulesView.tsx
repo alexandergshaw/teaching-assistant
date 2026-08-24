@@ -535,6 +535,8 @@ export function ModulesView({
                     setBulkRubricId={bulkItemActions.setBulkRubricId}
                     rubrics={rubricsHook.rubrics}
                     bulkRubric={bulkItemActions.bulkRubric}
+                    bulkGenerateAndAssociateRubric={bulkItemActions.bulkGenerateAndAssociateRubric}
+                    bulkRubricGenerateReport={bulkItemActions.bulkRubricGenerateReport}
                     setRubricBuilder={rubricsHook.setRubricBuilder}
                     onRubricBuilderTrigger={onRubricBuilderTrigger}
                     openRubricBuilder={bulkItemActions.openRubricBuilder}

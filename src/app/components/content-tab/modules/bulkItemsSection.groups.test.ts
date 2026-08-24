@@ -240,6 +240,57 @@ describe("every control visible today is still rendered", () => {
     expect(code).toMatch(/onClick=\{\(e\)\s*=>\s*\{\s+onRubricBuilderTrigger\(e\.currentTarget\);\s+openRubricBuilder\(\);/);
   });
 
+  // docs/rubric-bulk-action-acceptance-criteria.md AC4/AC5 - "Generate &
+  // associate rubric" joins this same grading group (AC5: not a sixteenth
+  // group) with its own button and an AC4 outcome report, both reachable
+  // from the same JSX region as the four controls above.
+  describe("grading group: Generate & associate rubric (AC4/AC5)", () => {
+    it("wires the button directly to bulkGenerateAndAssociateRubric - no intermediate handler that could no-op", () => {
+      expect(code).toMatch(/onClick=\{bulkGenerateAndAssociateRubric\}/);
+    });
+
+    it("renders the AC4 outcome report only when one exists, gated on bulkRubricGenerateReport", () => {
+      expect(code).toMatch(/\{bulkRubricGenerateReport\s*&&/);
+    });
+
+    // C6: this block used to independently compose the same "already had a
+    // rubric" / "cannot take a rubric" sentence set describeRubricGenerateNote
+    // (bulkRubricGenerateSummary.ts) already builds from the SAME report -
+    // two sources of truth for one instructor-facing message, each pinned by
+    // its own test, free to drift apart while both stayed green (entry 330's
+    // Limits, in message form). Fixed by rendering the shared function's own
+    // text here; describeRubricGenerateNote's own test file
+    // (bulkRubricGenerateSummary.test.ts) is now the ONE place that pins the
+    // "already had a rubric" / "cannot take a rubric" wording.
+    it("renders the report via the single shared describeRubricGenerateNote(...).text, never a second inline composition (C6)", () => {
+      const reportStart = code.indexOf("bulkRubricGenerateReport &&");
+      expect(reportStart, "the report block was not found").toBeGreaterThan(-1);
+      const reportEnd = code.indexOf(")}", reportStart);
+      const reportBlock = code.slice(reportStart, reportEnd > -1 ? reportEnd + 2 : reportStart + 2000);
+      expect(reportBlock).toMatch(/describeRubricGenerateNote\(bulkRubricGenerateReport\)\.text/);
+      // The orphan id/title list is the one piece of JSX this file still
+      // composes itself - describeRubricGenerateNote's own text only
+      // gestures at it ("see below"), since it has no JSX of its own to list
+      // named rubrics in.
+      expect(reportBlock).toMatch(/orphans/);
+      expect(reportBlock).toMatch(/rubricTitle/);
+      expect(reportBlock).toMatch(/rubricId/);
+      // SABOTAGE TARGET: a regression that reintroduces the old twin inline
+      // composition would still pass every assertion above (both wordings
+      // would still be present, just duplicated) - these two catch that
+      // specific defect, not merely "the text exists somewhere".
+      expect(reportBlock).not.toMatch(/already had a rubric/i);
+      expect(reportBlock).not.toMatch(/cannot take a rubric/i);
+    });
+
+    it("SABOTAGE TARGET: bulkGenerateAndAssociateRubric and bulkRubricGenerateReport are declared as REQUIRED props on BulkItemsSectionProps (no trailing '?'), so omitting either wiring fails tsc rather than silently rendering a dead button", () => {
+      expect(code).toMatch(/bulkGenerateAndAssociateRubric:\s*\(\)\s*=>\s*void;/);
+      expect(code).toMatch(/bulkRubricGenerateReport:\s*BulkRubricGenerateReport\s*\|\s*null;/);
+      expect(code).not.toMatch(/bulkGenerateAndAssociateRubric\?:/);
+      expect(code).not.toMatch(/bulkRubricGenerateReport\?:/);
+    });
+  });
+
   it("submissionType group: Apply", () => {
     expect(code).toMatch(/onClick=\{bulkUpdateSubmissionType\}/);
   });

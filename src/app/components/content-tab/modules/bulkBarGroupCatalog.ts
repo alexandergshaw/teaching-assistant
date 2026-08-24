@@ -164,7 +164,13 @@ const gradingGroup: BulkBarGroupDef = {
   label: "Grading",
   disclosure: true,
   defaultOpen: true,
-  consequenceTag: "Set points / Associate rubric apply to every selected item at once.",
+  // Extended for docs/rubric-bulk-action-acceptance-criteria.md, AC5: the
+  // "generate and associate" control below is folded into THIS existing
+  // group's own consequence sentence rather than declaring a second one -
+  // see that control's own comment for why this joins "grading" instead of
+  // becoming a sixteenth group.
+  consequenceTag:
+    "Set points / Associate rubric apply to every selected item at once; Generate & associate rubric additionally creates a new Canvas rubric (one per distinct point total in the selection) and associates it to every eligible item.",
   visible: (f) => f.itemCount > 0,
   controls: [
     { id: "itemsPoints", kind: "textField", label: "Points", tier: "read-only", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: ITEM_TYPE_UNPERSISTED },
@@ -180,6 +186,31 @@ const gradingGroup: BulkBarGroupDef = {
       nearDead: RUBRIC_NEAR_DEAD,
     },
     { id: "itemsAssociateRubric", kind: "button", label: "Associate", tier: "fan-out-write", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: ONE_CLICK_UNPERSISTED },
+    /**
+     * docs/rubric-bulk-action-acceptance-criteria.md AC5. JOINS the existing
+     * "grading" group rather than declaring a sixteenth one: chunk B's D5
+     * gave four reasons `currentEvents` needed its own group (see that
+     * group's own comment above), and three of the four do not hold here -
+     * this group's `consequenceTag` already names a rubric-related fan-out
+     * write and is merely extended, not duplicated; this control persists
+     * nothing at all, so there is no hidden-input-outlives-visibility hazard
+     * `addToEach`'s own comment warns about; and this is one more way to
+     * write a rubric onto the selection, not an unrelated capability sharing
+     * a home of convenience the way `currentEvents`/`carryPattern` are. The
+     * fourth reason (canary hygiene: a new group would move a DIFFERENT
+     * canary than the one this chunk is supposed to move) is exactly why
+     * this joins "grading" INSTEAD of getting its own group - the AC5 canary
+     * is this section's OWN 29 -> 30 visible-control count moving, which
+     * only happens if the control lands inside a group BulkItemsSection
+     * already owns, not a new sixteenth entry in BULK_BAR_GROUPS.
+     *
+     * "fan-out-write", not "destructive": like `itemsAssociateRubric`
+     * immediately above, this creates/associates rather than overwriting or
+     * deleting existing content, and AC3's bounded orphan-rubric risk is
+     * reported (never auto-deleted), not a destructive action the way
+     * `itemsDeleteButton` is.
+     */
+    { id: "itemsGenerateAssociateRubric", kind: "button", label: "Generate & associate rubric", tier: "fan-out-write", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: ONE_CLICK_UNPERSISTED },
     { id: "itemsEditRubric", kind: "button", label: "Edit", tier: "read-only", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: MODAL_OPENER_UNPERSISTED },
     { id: "itemsNewRubric", kind: "button", label: "New rubric", tier: "read-only", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: MODAL_OPENER_UNPERSISTED },
   ],

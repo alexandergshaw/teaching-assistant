@@ -5,6 +5,8 @@ import { Button, MenuItem, TextField } from "@mui/material";
 import type { CanvasModule, CanvasModuleItem, CanvasRubric } from "@/lib/canvas-modules";
 import styles from "../../../page.module.css";
 import type { RubricBuilderTarget } from "./useRubrics";
+import type { BulkRubricGenerateReport } from "./useBulkItemActions";
+import { describeRubricGenerateNote } from "./bulkRubricGenerateSummary";
 import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 import { BulkBarGroup } from "./BulkBarGroup";
 import { groupById, type BulkBarFacts, type BulkBarGroupRuntime } from "./bulkBarGroups";
@@ -118,6 +120,15 @@ export interface BulkItemsSectionProps {
   setBulkRubricId: (v: number | "") => void;
   rubrics: CanvasRubric[];
   bulkRubric: () => void;
+  /** docs/rubric-bulk-action-acceptance-criteria.md AC4/AC5 - "Generate &
+   * associate rubric". Deliberately REQUIRED (no `?`): a caller that omits
+   * either of these two fails `tsc`, rather than this section silently
+   * rendering a button whose click does nothing - the reachability failure
+   * mode this repo has recorded most often (see this file's own header for
+   * the "never becomes dead" discipline every other handler prop here
+   * already follows). */
+  bulkGenerateAndAssociateRubric: () => void;
+  bulkRubricGenerateReport: BulkRubricGenerateReport | null;
   setRubricBuilder: React.Dispatch<React.SetStateAction<RubricBuilderTarget | null>>;
   /** Same capture-alongside-the-existing-setter shape as
    * onGradableEditorTrigger above - RubricBuilderModal's four openers (this
@@ -192,6 +203,8 @@ export function BulkItemsSection({
   setBulkRubricId,
   rubrics,
   bulkRubric,
+  bulkGenerateAndAssociateRubric,
+  bulkRubricGenerateReport,
   setRubricBuilder,
   onRubricBuilderTrigger,
   openRubricBuilder,
@@ -503,6 +516,43 @@ export function BulkItemsSection({
           >
             New rubric
           </Button>
+          {/* docs/rubric-bulk-action-acceptance-criteria.md AC1/AC4/AC5:
+              generates one point-agnostic rubric spec and associates it to
+              every ELIGIBLE selected item, creating one Canvas rubric per
+              distinct point total. Unlike "Associate" above (which requires
+              an existing rubric already picked from the select), this needs
+              no prior selection of its own - it both creates and associates. */}
+          <Button variant="outlined" size="small" disabled={opBusy} onClick={bulkGenerateAndAssociateRubric}>
+            Generate &amp; associate rubric
+          </Button>
+          {/* AC4: every selected item's outcome is reported here, never
+              silently dropped - "already has a rubric" (skipped, unchanged)
+              is worded distinctly from "this kind can never have one"
+              (ineligible), and an orphan rubric (created but attached to
+              nothing, AC3) is named by id and title rather than hidden. */}
+          {/* C6: this span used to independently re-compose the same
+              sentence set describeRubricGenerateNote (bulkRubricGenerateSummary.ts)
+              already builds from the same report, with different wording -
+              two sources of truth for one instructor-facing message that
+              could silently drift apart while both stayed green. Rendering
+              the shared function's own text here leaves this file with
+              exactly one extra job: naming the orphan rubrics themselves,
+              which the note text only gestures at ("see below") since it has
+              no JSX of its own to list them in. */}
+          {bulkRubricGenerateReport && (
+            <span role="status" aria-live="polite" className={styles.bulkHint}>
+              {describeRubricGenerateNote(bulkRubricGenerateReport).text}
+              {bulkRubricGenerateReport.orphans.length > 0 && (
+                <>
+                  {" "}
+                  Created but not attached to anything: {bulkRubricGenerateReport.orphans
+                    .map((o) => `"${o.rubricTitle}" (id ${o.rubricId})`)
+                    .join(", ")}
+                  .
+                </>
+              )}
+            </span>
+          )}
         </div>
       </BulkBarGroup>
       <BulkBarGroup group={groupById("submissionType")} facts={facts} runtime={staticRuntime(opBusy)} state={groupsState} announceBusy={false}>

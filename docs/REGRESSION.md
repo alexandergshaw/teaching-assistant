@@ -32262,3 +32262,74 @@ reddened exactly the "a row due at EXACTLY now is due" test and nothing else.
   requires unpublishing already-published content at commit time, and Canvas
   can REFUSE for a quiz that has submissions. That decision is target-set
   dependent and therefore waits on the same F9 experiment.
+
+## 339. Scheduled publishing, part two: due releases run first inside the cron tick
+
+Contract: `docs/scheduled-publishing-from-modules-acceptance-criteria.md` F2's
+runner half. Entry 338 shipped the durable rows; this makes them execute.
+**Still no UI and no unpublish-at-commit** - a release can be executed but not
+yet created from the app.
+
+1. **RELEASES RUN FIRST, UNDER A SUB-BUDGET CARVED FROM THE FRONT OF THE
+   EXISTING ONE.** F2 is explicit: run releases first "or a long workflow run
+   eats the 60-second cap and releases silently miss their window". The
+   ordering is real - the release phase sits ahead of both the workflow stale
+   sweep and the due-schedule query. The budget is
+   `min(now + 15s, runDeadlineMs)`, NOT a second independent 50-second budget
+   added to a 60-second function. And because `runDeadlineMs` is an ABSOLUTE
+   timestamp that is never recomputed, whatever wall clock the releases consumed
+   is already subtracted from what the workflow loop has left - the two halves
+   cannot both spend the same seconds.
+2. **A TARGET THE BUDGET DOES NOT REACH IS NEVER CLAIMED**, so it stays
+   `pending` and is independently due next tick. The test asserts this the only
+   way that proves it - by asserting `claim` was never called for the deferred
+   targets, not merely that they were skipped.
+3. **A PER-TARGET FAILURE NEVER ABORTS THE TICK.** Claim, publish, mark
+   done/failed, each inside its own try/catch. This is the property one row per
+   target exists to give (entry 338), and the test drives it directly: the
+   middle target throws, the other two still complete.
+4. **A FAILED RELEASE DOES NOT TOUCH THE HEARTBEAT'S `last_error`.** That field
+   is for a TOP-LEVEL tick failure; one target failing is not the tick failing,
+   and conflating them would make a healthy scheduler read as broken. The
+   failure is visible on the release's own row instead. Recorded as a decision
+   in a comment rather than left to inference.
+5. **A STALE RELEASE CLAIM IS SWEPT, WITHOUT BEING ASKED FOR.** A claim orphaned
+   by a crashed tick would otherwise sit `claimed` forever - already claimed, so
+   never re-selected. The sweep mirrors the workflow-schedule sweep the route
+   already ran, which is the right instinct: entry 338 built the recovery
+   transition, and a transition nothing ever drives is not a recovery.
+
+### The follow-up this creates, stated rather than buried
+
+**An item target costs a `listModules` call to resolve which module owns it,
+once per target.** `listModules` is one request per module (entry 337 defect 1
+is the same shape, at greater scale), so a tick releasing several items pays it
+repeatedly. It is bounded here - the 15-second sub-budget and the per-tick cap
+both limit it, and unlike the browser case there is no already-loaded tree to
+read from - so this is not the storm entry 337 fixed. But it is avoidable
+outright: **the module id is known at SCHEDULE time and could simply be stored
+on the row.** Entry 338 deliberately left the target reference generic while
+F9's item-vs-module question is open; adding a nullable `module_id` alongside
+it does not narrow that choice and removes the lookup. Do it when the F9
+experiment is answered.
+
+### Gates
+
+`npx eslint src` 0 errors (4 pre-existing warnings in untouched files);
+`npx tsc --noEmit` clean; full `vitest run` **13500 tests** green, 19 new.
+`git diff -w` on the route is 80 insertions and 0 deletions - purely additive,
+so a reviewer sees the release phase rather than a reindent. Sabotage-checked:
+flipping the sub-budget boundary from `<=` to `<` reddened exactly the two
+boundary tests and nothing else.
+
+### Limits
+
+- **Nothing creates a release yet.** No bulk-bar control, no date picker; the
+  runner has no rows to find until F's UI half lands.
+- **F4's unpublish-at-commit is still not built**, and it remains the most
+  surprising behaviour in the feature: "students see nothing until release"
+  requires unpublishing already-visible content AT COMMIT TIME, and Canvas can
+  REFUSE for a quiz that has submissions. What gets unpublished depends on the
+  same unanswered F9 question about item-vs-module visibility.
+- **The publish path has never run against a real Canvas.** vitest is node-env;
+  every Canvas interaction here is stubbed.

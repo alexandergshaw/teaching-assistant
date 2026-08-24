@@ -7,6 +7,11 @@ import {
   claimFanoutSchedule, checkpointFanoutInstitution, deferFanoutResume, finishFanoutSchedule,
   listStaleClaimedWorkflowSchedules, recoverStaleWorkflowSchedule,
 } from "@/lib/workflow-schedules";
+import {
+  listDueScheduledReleases, claimScheduledRelease, markScheduledReleaseDone, markScheduledReleaseFailed,
+  listStaleClaimedScheduledReleases, recoverStaleScheduledRelease,
+} from "@/lib/scheduled-releases";
+import { runDueReleases, releaseSubBudgetDeadlineMs, type ReleaseRunResult, type ReleaseRunSummary } from "@/lib/release-runner";
 import { updateScheduleRunOutcome } from "@/lib/workflow-run-status";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
@@ -130,6 +135,13 @@ export async function GET(req: NextRequest) {
   // fail the request; it just records as "unknown".
   const source = resolveTickSource(req);
   let triggerResults: Awaited<ReturnType<typeof runDueUnattendedTriggers>> = [];
+  // Scheduled-publishing release results for this tick (F2 - see the block
+  // below, run before the workflow-schedule stale sweep and loop). Declared
+  // here, outside the try, so a mid-tick throw still lets the JSON response
+  // (never reached on a throw, since it re-throws below - see tickError) and
+  // any future reporting see whatever was accumulated before the failure.
+  let releaseResults: ReleaseRunResult[] = [];
+  let releaseSummary: ReleaseRunSummary | null = null;
   // Whatever this tick throws, captured for the heartbeat's last_error and
   // then re-thrown unchanged below - the heartbeat write must never mask or
   // alter the tick's own outcome.
@@ -162,6 +174,68 @@ export async function GET(req: NextRequest) {
       lastError: null,
     });
     if (!startHeartbeatOk) console.error("Failed to write the start-of-tick cron heartbeat.");
+
+    // SCHEDULED-PUBLISHING RELEASES RUN FIRST, UNDER THEIR OWN SUB-BUDGET
+    // (F2, docs/scheduled-publishing-from-modules-acceptance-criteria.md).
+    // Ahead of the workflow-schedule stale sweep and the workflow loop below,
+    // so a long workflow run can never eat the 60s maxDuration cap and make a
+    // release silently miss its window. releaseDeadlineMs is the front slice
+    // of the SAME runDeadlineMs the workflow loop already uses (see
+    // releaseSubBudgetDeadlineMs's own comment) - not a second budget added
+    // on top of it - and runDeadlineMs itself is never recomputed after this
+    // block, so whatever wall-clock time the release phase actually consumed
+    // is automatically subtracted from what the workflow loop has left.
+    //
+    // Stale-claimed release rows are swept first, mirroring the workflow-
+    // schedule sweep immediately below: a row stuck at "claimed" (its runner
+    // - a prior tick killed at the maxDuration cap - never reported back)
+    // would otherwise sit there forever, since claiming already moved it out
+    // of "pending" and nothing else ever revisits a claimed row. Per-row
+    // try/catch so one failure to recover a stale claim never aborts the tick.
+    const releaseDeadlineMs = releaseSubBudgetDeadlineMs(now, runDeadlineMs);
+    const staleReleases = await listStaleClaimedScheduledReleases(supabase, now);
+    for (const stale of staleReleases) {
+      try {
+        await recoverStaleScheduledRelease(supabase, stale, now);
+      } catch (err) {
+        console.error("Failed to recover stale scheduled-release claim:", stale.id, err);
+      }
+    }
+
+    const dueReleases = await listDueScheduledReleases(supabase, now);
+    const releaseRun = await runDueReleases({
+      due: dueReleases,
+      deadlineMs: releaseDeadlineMs,
+      claim: (release, claimNow) => claimScheduledRelease(supabase, release, claimNow),
+      markDone: (id, doneNow) => markScheduledReleaseDone(supabase, id, doneNow),
+      markFailed: (id, failNow, detail) => markScheduledReleaseFailed(supabase, id, failNow, detail),
+    });
+    releaseResults = releaseRun.results;
+    releaseSummary = releaseRun.summary;
+    // NOT reflected in the heartbeat's schedulesProcessed/triggersProcessed
+    // counts or last_error below (H1/entry 334): those exist to answer "is
+    // the cron tick itself firing", and a single release failing is not a
+    // tick failure - it is already visible, per AC8, on that release's own
+    // row (last_error, status "failed") via markScheduledReleaseFailed above.
+    // Folding it into the heartbeat would conflate "the deployment's cron
+    // stopped ticking" with "one instructor's one publish got refused",
+    // which is exactly the ambiguity entry 334 was written to remove. The
+    // release counts are reported only in this tick's own JSON response
+    // (releasesProcessed/releases, added below) for whoever inspects that
+    // response directly.
+    if (releaseSummary.notStarted > 0) {
+      // Ran out of sub-budget before every due release was attempted. The
+      // untouched ones were never claimed, so they are still "pending" in
+      // scheduled_releases and will be selected by listDueScheduledReleases
+      // again on the very next tick - the same partial-run independence the
+      // storage layer already guarantees for a mid-run crash (entry 338),
+      // extended here to a mid-run budget cutoff. Logged, not treated as an
+      // error: this is the sub-budget working as designed under a large due
+      // backlog, not a failure.
+      console.warn(
+        `Release sub-budget exhausted: ${releaseSummary.notStarted} due release(s) deferred to the next tick.`
+      );
+    }
 
     // Sweep stale claims BEFORE processing due schedules/triggers: a row stuck
     // at "started" (its runner - a browser tab or a prior process - never
@@ -483,6 +557,12 @@ export async function GET(req: NextRequest) {
       results,
       triggersProcessed: triggerResults.length,
       triggers: triggerResults,
+      // New field (F2): scheduled-publishing release counts for this tick.
+      // Deliberately NOT folded into the heartbeat - see the comment at the
+      // release phase above for why a single release's outcome is a
+      // different kind of fact than "did the tick itself run".
+      releasesProcessed: releaseResults.length,
+      releases: releaseResults,
     });
   } catch (err) {
     tickError = err;

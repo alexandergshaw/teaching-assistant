@@ -32193,3 +32193,72 @@ a non-adopting allowlist.
 - **The unsupported-field list is the model's honesty plus our allowlist.** A
   request we refuse is named; a request the model silently declines to make is
   invisible to us.
+
+## 338. Scheduled publishing, part one: one durable row per target
+
+Contract: `docs/scheduled-publishing-from-modules-acceptance-criteria.md`
+section F2 and the storage half of F5. Entry 334 shipped F5's monitoring half
+(the heartbeat). **No UI, no cron wiring and no Canvas call is added here** -
+this is the durable layer only, pushed on its own so the state machine can be
+reviewed without a feature wrapped around it.
+
+1. **ONE ROW PER TARGET, AND THAT IS THE WHOLE DESIGN.** F2 disqualifies
+   reusing `workflow_schedules` for three reasons, and the middle one is
+   decisive: N targets inside one `field_values` blob makes "crashed after
+   publishing 3 of 10" unrepresentable, **and that state is the entire problem
+   this feature exists to survive.** One row per target makes a partial run a
+   readable fact rather than a lost one, which the tests pin directly: ten
+   targets, three done and one claimed mid-crash, and the remaining six are
+   still independently due.
+2. **A ONE-SHOT RELEASE HAS NO NEXT OCCURRENCE, SO THE CLAIM CANNOT ADVANCE
+   ONE.** `workflow_schedules`'s claim advances or disables its row; that is
+   correct for a recurring schedule and wrong here. The state machine is
+   `pending -> claimed -> done|failed`, with a stale claim looping back to
+   `pending` exactly once and then to `failed` - never silently re-armed
+   forever.
+3. **THE TARGET REFERENCE IS DELIBERATELY GENERIC, BECAUSE THE QUESTION THAT
+   WOULD NARROW IT IS STILL OPEN.** F9's first unknown - does an item published
+   inside an UNPUBLISHED module actually become visible to students - decides
+   whether releases operate on items, modules or both, and it needs ten minutes
+   in Student View that this environment cannot provide. A `(target_kind,
+   target_id)` pair survives either answer, and the migration header says so,
+   so nobody narrows it prematurely on a guess.
+4. **KEYED ON `course_url`, NOT A `course_hub` FOREIGN KEY** (F2) - `resolveCourse`
+   needs only the URL plus an acronym, and a foreign key would tie a release to
+   a tile's lifetime rather than to the course it actually publishes into.
+5. **USER-SCOPED RLS, UNLIKE THE HEARTBEAT.** Entry 334's row is deliberately
+   not user-scoped because a cron tick belongs to the deployment; a release
+   belongs to the instructor who scheduled it. The cron route reaches it with
+   the service-role client, exactly as it already does for
+   `workflow_schedules`.
+6. **`scheduleRelease` IS AN UPDATE-THEN-INSERT, NOT AN UPSERT**, because
+   PostgREST cannot name a PARTIAL unique index as an `ON CONFLICT` arbiter -
+   and the index has to be partial to enforce "one PENDING row per target"
+   while still allowing the history of done and failed rows. Documented inline
+   so it is not "simplified" into an upsert that silently stops deduping.
+7. **THE MIGRATION-COLUMN GUARD FROM ENTRY 334 WAS CARRIED FORWARD WITHOUT
+   BEING ASKED FOR.** The table handle is an `any` cast (the generated
+   `Database` type does not know this table), so a mis-spelled column is
+   invisible to tsc, eslint, vitest AND `next build` while every write 400s in
+   production. The test reads the real migration file and asserts every write
+   payload key against it - the same guard, now the local convention.
+
+### Gates
+
+`npx eslint src` 0 errors (4 pre-existing warnings in untouched files);
+`npx tsc --noEmit` clean; full `vitest run` **13481 tests** green, 55 of them
+new. Sabotage-checked: flipping `isReleaseDue`'s boundary from `<=` to `<`
+reddened exactly the "a row due at EXACTLY now is due" test and nothing else.
+
+### Limits
+
+- **Nothing calls any of this yet.** No cron wiring, no UI, no Canvas write.
+  Dead code by design, and the usual warning applies at full strength: the
+  suite proves the pure decisions behave, and nothing about whether they will
+  be wired correctly.
+- **The migration applies on push** via the existing Action; verify that run.
+- **F4's unpublish-at-commit is NOT built**, and it is the most surprising
+  behaviour in the feature: delivering "students see nothing until release"
+  requires unpublishing already-published content at commit time, and Canvas
+  can REFUSE for a quiz that has submissions. That decision is target-set
+  dependent and therefore waits on the same F9 experiment.

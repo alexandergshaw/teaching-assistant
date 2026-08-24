@@ -271,7 +271,14 @@ describe("index.tsx never calls gradeRepoAction or postCanvasGradesAction from i
   it("postCanvasGradesAction is called from inside handlePostColumn, the function wired to RepoGradesGrid's onPostColumn prop - not some other unrelated function", () => {
     const defIdx = indexSource.indexOf("const handlePostColumn = async");
     expect(defIdx).toBeGreaterThan(-1);
-    const body = indexSource.slice(defIdx, defIdx + 2000);
+    // Bounded by the NEXT handler's definition rather than by a fixed
+    // character count (the sibling gradeRepoAction assertion above already
+    // does this): a fixed window silently turns "the call moved out of this
+    // handler" and "this handler grew past N characters" into the same
+    // failure, and the activity-log wave's added recordLog calls are exactly
+    // the benign growth that tripped the old 2000-character bound.
+    const nextFnIdx = indexSource.indexOf("const handlePostOneCell", defIdx);
+    const body = indexSource.slice(defIdx, nextFnIdx > -1 ? nextFnIdx : indexSource.length);
     expect(body).toContain("postCanvasGradesAction(");
     expect(indexSource).toContain("onPostColumn={handlePostColumn}");
   });
@@ -518,5 +525,89 @@ describe("index.tsx's Post/Re-post confirmation and per-column busy state are wi
     expect(body).toContain("disabled={busy || plan.postable.length === 0}");
     expect(body).toContain("plan.postable.length");
     expect(body).toContain('alreadyAttempted ? "Re-post" : "Post"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Activity log wiring (docs/repo-grades-activity-log-acceptance-criteria.md
+// L6 item 28). Two guarantees this file's text-reading approach can prove
+// that a node-env test of the pure module cannot:
+//   1. The download and the destructive clear happen only from a real click -
+//      a download that fired on render would drop a file into the
+//      instructor's Downloads folder every time the view re-rendered, and a
+//      clear that fired on render would destroy the audit trail outright.
+//   2. index.tsx actually renders the panel and actually appends entries on
+//      the post path - the log is worthless if nothing writes to it, and a
+//      pure-module test passes happily against a log nothing ever calls.
+// callSitesGatedByClick's canary (top of this file) is what stops these from
+// passing vacuously.
+const LOG_PANEL_PATH = join(process.cwd(), "src/app/components/repo-grades/RepoGradesLogPanel.tsx");
+const logPanelSource = readFileSync(LOG_PANEL_PATH, "utf8");
+
+describe("the activity log's download and clear are click-gated", () => {
+  it("every triggerFileDownload call site sits inside an onClick handler", () => {
+    const sites = callSitesGatedByClick(logPanelSource, "handleDownload");
+    expect(sites.length).toBeGreaterThan(0);
+    expect(sites.every(Boolean)).toBe(true);
+    // The download itself lives in that handler, never at module or render scope.
+    const defIdx = logPanelSource.indexOf("const handleDownload =");
+    const endIdx = logPanelSource.indexOf("const handleClear =", defIdx);
+    expect(logPanelSource.slice(defIdx, endIdx)).toContain("triggerFileDownload(");
+  });
+
+  it("clearing the log is behind a window.confirm that runs before onClear", () => {
+    const defIdx = logPanelSource.indexOf("const handleClear =");
+    expect(defIdx).toBeGreaterThan(-1);
+    const confirmIdx = logPanelSource.indexOf("window.confirm(", defIdx);
+    const clearIdx = logPanelSource.indexOf("onClear()", defIdx);
+    expect(confirmIdx).toBeGreaterThan(-1);
+    expect(confirmIdx).toBeLessThan(clearIdx);
+  });
+
+  it("no download or clear is reachable from a useEffect body", () => {
+    const bodies = extractUseEffectBodies(logPanelSource);
+    expect(bodies.some((b) => b.includes("triggerFileDownload("))).toBe(false);
+    expect(bodies.some((b) => b.includes("onClear("))).toBe(false);
+  });
+
+  it("the panel builds its file through the shared triggerFileDownload, not a hand-rolled object URL", () => {
+    expect(logPanelSource).toContain("triggerFileDownload");
+    // Matched as CALLS, not as bare words: RepoGradesLogPanel.tsx's own
+    // header comment names the hand-rolled dance it is avoiding, so a
+    // substring check for "createObjectURL" alone goes red on a comment that
+    // is documenting the very rule this test enforces.
+    expect(logPanelSource).not.toContain("URL.createObjectURL(");
+    expect(logPanelSource).not.toContain("document.createElement(");
+  });
+});
+
+describe("index.tsx actually feeds and renders the activity log", () => {
+  it("renders RepoGradesLogPanel with this course's log and a clear handler", () => {
+    expect(indexSource).toContain("<RepoGradesLogPanel");
+    expect(indexSource).toContain("log={log}");
+    expect(indexSource).toContain("onClear={() => setLog([])}");
+  });
+
+  it("records an entry on both post outcomes and on both grading outcomes", () => {
+    for (const kind of ['"post-succeeded"', '"post-failed"', '"grade-succeeded"', '"grade-failed"']) {
+      expect(indexSource).toContain(kind);
+    }
+  });
+
+  it("restores this course's log in the same branch that resets the ephemeral cell state", () => {
+    const branchIdx = indexSource.indexOf("if (uiState.courseId !== cellStateResetForCourse)");
+    expect(branchIdx).toBeGreaterThan(-1);
+    const branch = indexSource.slice(branchIdx, branchIdx + 400);
+    expect(branch).toContain("setLog(loadRepoGradeLog(uiState.courseId))");
+  });
+
+  it("persists the log only once the restore for the CURRENT course has run", () => {
+    const bodies = extractUseEffectBodies(indexSource);
+    const persistBody = bodies.find((b) => b.includes("persistRepoGradeLog("));
+    expect(persistBody).toBeDefined();
+    // The guard is what stops this effect from firing on the first commit
+    // with the untouched `[]` default and wiping a real stored log - the
+    // exact mount-time race the selection Set's own regression above records.
+    expect(persistBody).toContain("if (cellStateResetForCourse !== uiState.courseId) return;");
   });
 });

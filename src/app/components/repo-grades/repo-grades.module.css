@@ -462,3 +462,91 @@
     max-width: 100%;
   }
 }
+
+/* Activity log panel (docs/repo-grades-activity-log-acceptance-criteria.md
+   L4) - rendered by RepoGradesLogPanel.tsx below the grid. Deliberately
+   quieter than the grid: a subtle surface, no accent colour and no badges,
+   because this is a record of what already happened, not a control the
+   instructor acts on. Only the three buttons are interactive. */
+.logPanel {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
+.logHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.logTitle {
+  margin: 0 0 2px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.logActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logList {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* One entry as a four-column row at full width: time, event, target,
+   detail. The detail column takes the remaining space (1fr) because it is
+   the only field with unbounded length - a Canvas error message or an AI
+   comment. */
+.logEntry {
+  display: grid;
+  grid-template-columns: minmax(140px, auto) minmax(110px, auto) minmax(160px, auto) 1fr;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.logEntryTime {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.logEntryKind {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.logEntryTarget {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.logEntryDetail {
+  overflow-wrap: anywhere;
+}
+
+/* Same 700px breakpoint the grid's own reflow uses (see that media query's
+   comment): once the grid has stacked into cards, a four-column entry row
+   has nowhere near the width it needs, so each entry becomes its own small
+   stack. WCAG 2.2 SC 1.4.10 - no horizontal scrolling is introduced here. */
+@media (max-width: 700px) {
+  .logEntry {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

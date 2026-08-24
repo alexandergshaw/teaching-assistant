@@ -24,20 +24,28 @@
 // async body that awaits before any setState. This file only reads that
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { gradeRepoAction, postCanvasGradesAction } from "@/app/actions";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { useRepoGradesData } from "./useRepoGradesData";
 import {
   loadAssignmentMapping,
+  loadRepoGradeLog,
   loadRepoGradesUiState,
   loadSelectedRepoIds,
   persistAssignmentMapping,
+  persistRepoGradeLog,
   persistRepoGradesUiState,
   persistSelectedRepoIds,
   type RepoGradesUiState,
 } from "./repoGradesUiState";
+import {
+  appendRepoGradeLogEntries,
+  type RepoGradeLogEntry,
+  type RepoGradeLogEventKind,
+} from "./repoGradesLog";
+import RepoGradesLogPanel from "./RepoGradesLogPanel";
 import { buildRepoGradeGridModel, sortRepoGradeRows, type RepoGradeColumn, type RepoGradeRow, type RepoGradeSortField, type SortDirection } from "./repoGradesRows";
 import {
   applyRepoGradeAssignmentMapping,
@@ -204,6 +212,37 @@ export default function RepoGradesTab() {
     const next = setRepoGradeAssignmentMapping(assignmentMapping, folder, assignmentId);
     setAssignmentMapping(next);
     persistAssignmentMapping(uiState.courseId, next);
+    // L1 item 8: which assignment a column posts to is the single setting
+    // most able to send a whole column's grades to the wrong place, so the
+    // change is recorded with the assignment's NAME as well as its id - an id
+    // alone is unreadable months later, and the name is only resolvable while
+    // `assignments` is still loaded.
+    const assignmentName = assignmentId ? (assignments.find((a) => a.id === assignmentId)?.name ?? assignmentId) : "";
+    recordLog([
+      buildLogEntry("assignment-mapped", {
+        folder,
+        assignmentId: assignmentId ?? "",
+        detail: assignmentId ? `Mapped to "${assignmentName}"` : "Mapping cleared",
+      }),
+    ]);
+  };
+
+  // L1 item 7: a binding decides WHICH student a later post lands on, so it
+  // belongs in the same trail as the grades themselves. This wrapper only
+  // observes - it forwards useRepoGradesData's own acceptBinding result
+  // through unchanged, and records nothing when that call reports an error,
+  // so the log never claims a binding that did not actually persist.
+  const handleAcceptBinding = async (repo: string, canvasUserId: string, student: string, username: string | null) => {
+    const result = await acceptBinding(repo, canvasUserId, student, username);
+    if ("ok" in result) {
+      recordLog([
+        buildLogEntry("binding-confirmed", {
+          repo,
+          detail: `Bound to ${student}${username ? ` (${username})` : ""}, Canvas user ${canvasUserId}`,
+        }),
+      ]);
+    }
+    return result;
   };
 
   // ---- per-cell editable state (AC4 items 20-21) and per-column posting
@@ -218,13 +257,93 @@ export default function RepoGradesTab() {
   const [cellEdits, setCellEdits] = useState<RepoGradeCellEditsByRepo>(EMPTY_REPO_GRADE_CELL_EDITS);
   const [columnPosting, setColumnPosting] = useState<Record<string, boolean>>({});
   const [postSummary, setPostSummary] = useState("");
+  // ---- the activity log (docs/repo-grades-activity-log-acceptance-criteria.md).
+  // Unlike cellEdits above this one DOES persist (L3): it is the record of
+  // what this view did to a live gradebook, and postCanvasGradesAction keeps
+  // no such record anywhere else - not in Canvas's own UI beyond the final
+  // score, and not on our server at all. It is restored per course in the
+  // very same compare-and-adjust branch that resets the ephemeral cell state,
+  // so a course switch always swaps BOTH together and one course's log can
+  // never be shown, appended to, or persisted under another course's id.
+  const [log, setLog] = useState<readonly RepoGradeLogEntry[]>([]);
   const [cellStateResetForCourse, setCellStateResetForCourse] = useState<string | null>(null);
   if (uiState.courseId !== cellStateResetForCourse) {
     setCellStateResetForCourse(uiState.courseId);
     setCellEdits(EMPTY_REPO_GRADE_CELL_EDITS);
     setColumnPosting({});
     setPostSummary("");
+    setLog(loadRepoGradeLog(uiState.courseId));
   }
+
+  // The log is the ONE piece of state in this file persisted from an effect
+  // rather than from its explicit mutators, and the reason is concurrency,
+  // not convenience: two "Grade" calls (or a column post and a grade) can be
+  // in flight at once, and each resolves with a closure over the `log` value
+  // from ITS render - so computing `next` at each call site and persisting
+  // that would let the slower handler write a log missing the faster one's
+  // entries. Appending inside the setState updater (pure array math, safe to
+  // re-run) is what keeps concurrent appends correct, and this effect then
+  // persists whatever those appends actually produced.
+  //
+  // The first-commit hazard this file's other comments warn about
+  // (an effect firing with an untouched default and overwriting real stored
+  // data before the restore branch has run) is closed by the
+  // `cellStateResetForCourse !== courseId` guard: that branch above runs
+  // during render and is what makes the two equal, so this effect cannot fire
+  // with `log`'s pre-restore `[]` for a course whose stored log has not been
+  // read yet.
+  useEffect(() => {
+    if (cellStateResetForCourse !== uiState.courseId) return;
+    persistRepoGradeLog(uiState.courseId, log);
+  }, [log, uiState.courseId, cellStateResetForCourse]);
+
+  /** Builds one entry, stamped now, already carrying this view's course
+   * identity - callers only supply what is specific to their event. Every
+   * field defaults to "" (never null/absent) so a CSV row always has the same
+   * column count (L2 item 10). */
+  const buildLogEntry = (
+    kind: RepoGradeLogEventKind,
+    fields: Partial<Omit<RepoGradeLogEntry, "kind" | "at" | "courseId" | "courseName">> = {}
+  ): RepoGradeLogEntry => ({
+    at: new Date().toISOString(),
+    kind,
+    courseId: uiState.courseId,
+    courseName: course?.name ?? "",
+    repo: "",
+    folder: "",
+    assignmentId: "",
+    score: "",
+    detail: "",
+    ...fields,
+  });
+
+  const recordLog = (entries: readonly RepoGradeLogEntry[]) => {
+    if (entries.length === 0) return;
+    setLog((prev) => appendRepoGradeLogEntries(prev, entries));
+  };
+
+  // L1 item 9: a failed org scan is recorded ONCE per distinct message, never
+  // once per render - `scanError` is a value that survives re-renders, so
+  // appending it unconditionally from an effect keyed on it would still be
+  // safe, but a re-scan that fails the same way twice deserves a second
+  // entry while a re-render deserves none. A ref (not state) holds the
+  // last-recorded message: writing state here is exactly what
+  // react-hooks/set-state-in-effect forbids, and this value is bookkeeping
+  // that must never itself trigger a render.
+  const lastLoggedScanError = useRef<string | null>(null);
+  useEffect(() => {
+    if (!scanError) {
+      lastLoggedScanError.current = null;
+      return;
+    }
+    if (lastLoggedScanError.current === scanError) return;
+    lastLoggedScanError.current = scanError;
+    recordLog([buildLogEntry("scan-failed", { detail: scanError })]);
+    // recordLog/buildLogEntry are redefined every render by design (they close
+    // over the current course); depending on them here would re-run this
+    // effect constantly. The ref guard above is what makes that safe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanError]);
 
   const handleScoreChange = (repo: string, folder: string, score: string) => {
     setCellEdits((prev) => setRepoGradeCellEdit(prev, repo, folder, { score }));
@@ -258,6 +377,9 @@ export default function RepoGradesTab() {
     const result = await gradeRepoAction(row.repo, uiState.instructions, uiState.rubric, provider, undefined, column.folder);
     if ("error" in result) {
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
+      // L1 item 2. A grading failure otherwise leaves only a per-cell error
+      // string that the next attempt overwrites.
+      recordLog([buildLogEntry("grade-failed", { repo: row.repo, folder: column.folder, detail: result.error })]);
       return;
     }
     const first = result.run.results[0];
@@ -271,6 +393,18 @@ export default function RepoGradesTab() {
         generatedScore: first?.totalScore ?? null,
       })
     );
+    // L1 item 1: the score AS GENERATED, with the provider that produced it -
+    // so a later "why is this score what it is" question can tell an AI
+    // result from a hand-typed one even after the instructor has edited the
+    // cell (the same distinction repoGradeScoreWasEdited makes at post time).
+    recordLog([
+      buildLogEntry("grade-succeeded", {
+        repo: row.repo,
+        folder: column.folder,
+        score: first?.totalScore ?? "",
+        detail: `Graded by ${provider}`,
+      }),
+    ]);
   };
 
   // AC5 items 27-32: the dangerous half. ONE postCanvasGradesAction call for
@@ -313,11 +447,25 @@ export default function RepoGradesTab() {
     const usingSelection = selected.size > 0;
     // Now reachable post-A1 (e.g. every selected row is unbound) - say so.
     if (plan.postable.length === 0) {
-      setPostSummary(
-        usingSelection
-          ? `${column.folder}: none of the ${selected.size} selected row(s) are postable in this column.`
-          : `${column.folder}: nothing is postable in this column yet.`
-      );
+      const summary = usingSelection
+        ? `${column.folder}: none of the ${selected.size} selected row(s) are postable in this column.`
+        : `${column.folder}: nothing is postable in this column yet.`;
+      setPostSummary(summary);
+      // L1 item 5: every skipped row with its OWN reason from the plan, not
+      // just the one-line summary - "why was this student not posted" is the
+      // question the log exists to answer, and the reasons differ per row
+      // (unbound, no folder, no score, no assignment mapped).
+      recordLog([
+        buildLogEntry("post-skipped", { folder: column.folder, assignmentId: column.assignmentId ?? "", detail: summary }),
+        ...plan.skipped.map((skip) =>
+          buildLogEntry("post-skipped", {
+            repo: skip.repo,
+            folder: column.folder,
+            assignmentId: column.assignmentId ?? "",
+            detail: skip.reason,
+          })
+        ),
+      ]);
       return;
     }
 
@@ -326,14 +474,25 @@ export default function RepoGradesTab() {
       ? ` This posts only your ${plan.postable.length} selected row(s), not the whole column.`
       : ` No rows are selected, so this posts the whole column (all ${plan.postable.length} postable row(s)).`;
     if (!window.confirm(`Post ${plan.postable.length} grade(s) to Canvas? This writes to the live gradebook.${scopeSentence}`)) {
+      // L1 item 6: "nothing happened and I do not remember why" is exactly
+      // the question a log exists to answer.
+      recordLog([
+        buildLogEntry("post-cancelled", {
+          folder: column.folder,
+          assignmentId: column.assignmentId ?? "",
+          detail: `Declined the confirm for ${plan.postable.length} grade(s)`,
+        }),
+      ]);
       return;
     }
 
     const assignmentUrl = column.assignmentId ? repoGradeAssignmentUrl(course.canvasUrl ?? "", column.assignmentId) : null;
     if (!assignmentUrl) {
-      setPostSummary(
-        `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`
-      );
+      const summary = `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`;
+      setPostSummary(summary);
+      recordLog([
+        buildLogEntry("post-skipped", { folder: column.folder, assignmentId: column.assignmentId ?? "", detail: summary }),
+      ]);
       return;
     }
 
@@ -364,6 +523,31 @@ export default function RepoGradesTab() {
     });
     setColumnPosting((prev) => ({ ...prev, [column.folder]: false }));
 
+    // L1 items 3-5: one entry per ATTEMPTED row carrying the exact score that
+    // went out (read off the plan, never re-read from the edit state, which
+    // the instructor may have kept typing into while the call was in flight),
+    // plus one per row the plan dropped before the call.
+    const gradeByRepo = new Map(plan.postable.map((item) => [item.repo, item.grade.grade]));
+    recordLog([
+      ...fanout.map((outcome) =>
+        buildLogEntry(outcome.postStatus === "error" ? "post-failed" : "post-succeeded", {
+          repo: outcome.repo,
+          folder: column.folder,
+          assignmentId: column.assignmentId ?? "",
+          score: gradeByRepo.get(outcome.repo) ?? "",
+          detail: outcome.postMessage ?? "",
+        })
+      ),
+      ...plan.skipped.map((skip) =>
+        buildLogEntry("post-skipped", {
+          repo: skip.repo,
+          folder: column.folder,
+          assignmentId: column.assignmentId ?? "",
+          detail: skip.reason,
+        })
+      ),
+    ]);
+
     const failedCount = fanout.filter((f) => f.postStatus === "error").length;
     setPostSummary(
       `${column.folder}: posted ${fanout.length - failedCount}${failedCount ? `, ${failedCount} failed` : ""}.`
@@ -388,13 +572,36 @@ export default function RepoGradesTab() {
     if (!course) return;
     const candidates = repoGradePostCandidateRows([row], cellEdits, column.folder);
     const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
-    if (plan.postable.length === 0) return;
+    if (plan.postable.length === 0) {
+      // This path is otherwise completely silent (by design - the button that
+      // reaches it is already only rendered for a plausible cell), which is
+      // precisely why the log should say the retry did nothing and name the
+      // plan's own reason for it.
+      recordLog(
+        plan.skipped.map((skip) =>
+          buildLogEntry("post-skipped", {
+            repo: skip.repo,
+            folder: column.folder,
+            assignmentId: column.assignmentId ?? "",
+            detail: skip.reason,
+          })
+        )
+      );
+      return;
+    }
 
     const assignmentUrl = column.assignmentId ? repoGradeAssignmentUrl(course.canvasUrl ?? "", column.assignmentId) : null;
     if (!assignmentUrl) {
-      setPostSummary(
-        `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`
-      );
+      const summary = `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`;
+      setPostSummary(summary);
+      recordLog([
+        buildLogEntry("post-skipped", {
+          repo: row.repo,
+          folder: column.folder,
+          assignmentId: column.assignmentId ?? "",
+          detail: summary,
+        }),
+      ]);
       return;
     }
 
@@ -416,6 +623,19 @@ export default function RepoGradesTab() {
       }
       return next;
     });
+
+    const singleGrade = plan.postable[0]?.grade.grade ?? "";
+    recordLog(
+      fanout.map((outcome) =>
+        buildLogEntry(outcome.postStatus === "error" ? "post-failed" : "post-succeeded", {
+          repo: outcome.repo,
+          folder: column.folder,
+          assignmentId: column.assignmentId ?? "",
+          score: singleGrade,
+          detail: outcome.postMessage ?? "Single-row retry",
+        })
+      )
+    );
 
     const failed = fanout.some((f) => f.postStatus === "error");
     setPostSummary(`${row.repo} / ${column.folder}: ${failed ? "failed to post." : "posted."}`);
@@ -605,7 +825,7 @@ export default function RepoGradesTab() {
           roster={roster}
           selected={selected}
           onToggleSelected={toggleSelected}
-          onAcceptBinding={acceptBinding}
+          onAcceptBinding={handleAcceptBinding}
           assignments={assignments}
           cellEdits={cellEdits}
           onScoreChange={handleScoreChange}
@@ -615,6 +835,21 @@ export default function RepoGradesTab() {
           onPostColumn={handlePostColumn}
           onPostOneCell={handlePostOneCell}
           columnPosting={columnPosting}
+        />
+      )}
+
+      {/* L4 item 17: shown for any chosen course, including one whose scan
+          failed or whose org is unset - a log of what went wrong is most
+          useful exactly when the grid itself has nothing to render. It
+          announces through setPostSummary, the view's existing role="status"
+          region above, rather than adding a second live region (item 21). */}
+      {course && (
+        <RepoGradesLogPanel
+          log={log}
+          courseId={uiState.courseId}
+          courseName={course.name}
+          onClear={() => setLog([])}
+          onAnnounce={setPostSummary}
         />
       )}
     </div>

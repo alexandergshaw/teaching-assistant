@@ -11,9 +11,12 @@ import {
   loadRepoGradesUiState,
   loadSelectedRepoIds,
   persistAssignmentMapping,
+  loadRepoGradeLog,
+  persistRepoGradeLog,
   persistRepoGradesUiState,
   persistSelectedRepoIds,
 } from "./repoGradesUiState";
+import type { RepoGradeLogEntry } from "./repoGradesLog";
 import { DEFAULT_REPO_GRADE_SORT } from "./repoGradesRows";
 
 class FakeStorage {
@@ -246,5 +249,86 @@ describe("loadSelectedRepoIds / persistSelectedRepoIds - AC4 item 23", () => {
     delete (globalThis as { window?: unknown }).window;
     expect(() => persistSelectedRepoIds(new Set(["org/a"]))).not.toThrow();
     expect(fakeStorage.getItem("ta-repo-grades-selected")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Activity log persistence (docs/repo-grades-activity-log-acceptance-criteria.md
+// L3). The VALIDATION of a stored entry is repoGradesLog.ts's job and is
+// pinned by repoGradesLog.test.ts; what these tests own is the localStorage
+// half - the per-course slicing, the "other courses stay untouched"
+// guarantee, and the best-effort write.
+
+function logEntry(overrides: Partial<RepoGradeLogEntry> = {}): RepoGradeLogEntry {
+  return {
+    at: "2026-08-24T15:04:05.123Z",
+    kind: "post-succeeded",
+    courseId: "course-1",
+    courseName: "CS 101",
+    repo: "org/student-a",
+    folder: "week-1",
+    assignmentId: "9001",
+    score: "18",
+    detail: "",
+    ...overrides,
+  };
+}
+
+describe("loadRepoGradeLog / persistRepoGradeLog", () => {
+  it("round-trips one course's entries", () => {
+    const entries = [logEntry({ repo: "org/a" }), logEntry({ repo: "org/b", kind: "grade-failed" })];
+    persistRepoGradeLog("course-1", entries);
+    expect(loadRepoGradeLog("course-1")).toEqual(entries);
+  });
+
+  it("returns [] for a course with nothing stored, and for a blank course id", () => {
+    persistRepoGradeLog("course-1", [logEntry()]);
+    expect(loadRepoGradeLog("course-2")).toEqual([]);
+    expect(loadRepoGradeLog("")).toEqual([]);
+  });
+
+  // L3 item 13 - a grading session's record must never surface under a
+  // different course, which is the same guarantee the assignment mapping
+  // above already makes.
+  it("leaves every other course's log untouched when one course's is written", () => {
+    persistRepoGradeLog("course-1", [logEntry({ repo: "org/one" })]);
+    persistRepoGradeLog("course-2", [logEntry({ repo: "org/two" })]);
+    persistRepoGradeLog("course-1", [logEntry({ repo: "org/one" }), logEntry({ repo: "org/one-again" })]);
+    expect(loadRepoGradeLog("course-2").map((e) => e.repo)).toEqual(["org/two"]);
+    expect(loadRepoGradeLog("course-1").map((e) => e.repo)).toEqual(["org/one", "org/one-again"]);
+  });
+
+  it("stores an empty array when the log is cleared, rather than leaving the old entries", () => {
+    persistRepoGradeLog("course-1", [logEntry()]);
+    persistRepoGradeLog("course-1", []);
+    expect(loadRepoGradeLog("course-1")).toEqual([]);
+  });
+
+  it("drops a malformed blob, a non-object root, and a non-array course slice", () => {
+    fakeStorage.setItem("ta-repo-grades-log", "{not json");
+    expect(loadRepoGradeLog("course-1")).toEqual([]);
+    fakeStorage.setItem("ta-repo-grades-log", JSON.stringify(["a", "b"]));
+    expect(loadRepoGradeLog("course-1")).toEqual([]);
+    fakeStorage.setItem("ta-repo-grades-log", JSON.stringify({ "course-1": "not an array" }));
+    expect(loadRepoGradeLog("course-1")).toEqual([]);
+  });
+
+  it("keeps the valid entries and drops the invalid ones from a partially-corrupt slice", () => {
+    const good = logEntry({ repo: "org/keep" });
+    fakeStorage.setItem("ta-repo-grades-log", JSON.stringify({ "course-1": [good, { kind: "nonsense" }, null] }));
+    expect(loadRepoGradeLog("course-1")).toEqual([good]);
+  });
+
+  it("does not throw and does not write when localStorage refuses the write (L3 item 16)", () => {
+    fakeStorage.throwOnSet = true;
+    expect(() => persistRepoGradeLog("course-1", [logEntry()])).not.toThrow();
+    fakeStorage.throwOnSet = false;
+    expect(loadRepoGradeLog("course-1")).toEqual([]);
+  });
+
+  it("does nothing with window undefined", () => {
+    delete (globalThis as { window?: unknown }).window;
+    expect(loadRepoGradeLog("course-1")).toEqual([]);
+    expect(() => persistRepoGradeLog("course-1", [logEntry()])).not.toThrow();
   });
 });

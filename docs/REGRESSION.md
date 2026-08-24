@@ -31581,3 +31581,135 @@ source - caught only by opening the cited file and reading which sentence the
 word "verified" attached to. And C1 and C2 were both found originally by
 EXECUTING the arithmetic, then re-verified the same way with 200,000 fuzz cases,
 because reading either one looked fine before the fix and looks fine after.
+
+## 333. A downloadable activity log for the Repo Grades view - the audit trail the live-gradebook write never had
+
+Acceptance criteria: `docs/repo-grades-activity-log-acceptance-criteria.md`. The
+ask, verbatim (2026-08-24): "give me downloadable logs in the repo grader view".
+
+The reuse survey found the premise already stated in the codebase's own words:
+`repoGradesPosting.ts`'s header says `postCanvasGradesAction` has "no undo, no
+audit table and no dry-run". The view's only record of a gradebook write was a
+per-cell `postStatus` and a one-line `postSummary`, and BOTH are wiped by a
+reload and by a course switch (index.tsx's `cellStateResetForCourse` branch
+resets them by design). So "which students did I post, at what score, to which
+assignment" and "what did Canvas actually say about the one that failed" were
+unanswerable ten minutes after a grading session. This chunk makes the view
+keep that record and hand it over as a file.
+
+### What shipped
+
+- `repoGradesLog.ts` (new, pure): the entry type, `appendRepoGradeLogEntries`
+  (cap 500), `parseRepoGradeLogEntries` (validate on restore),
+  `summarizeRepoGradeLog`, `recentRepoGradeLogEntries`,
+  `formatRepoGradeLogCsv`, `formatRepoGradeLogJson`, `repoGradeLogFileName`.
+- `repoGradesUiState.ts`: `loadRepoGradeLog` / `persistRepoGradeLog`, one
+  `ta-repo-grades-log` blob keyed by course id, sliced exactly the way the
+  per-column assignment mapping already is.
+- `RepoGradesLogPanel.tsx` (new): counts, the ten most recent entries, Download
+  CSV, Download JSON, Clear log.
+- `index.tsx`: nine event kinds recorded - grade succeeded/failed, post
+  succeeded/failed/skipped/cancelled, binding confirmed, assignment mapped,
+  scan failed.
+
+### The decisions worth re-reading before changing any of this
+
+1. **THE LOG IS THE ONE PIECE OF STATE IN `index.tsx` PERSISTED FROM AN EFFECT,
+   AND THE REASON IS CONCURRENCY, NOT CONVENIENCE.** Every other value in this
+   file persists from its explicit mutator, and two long comments there explain
+   why (an effect keyed on the state fires on the first commit with the
+   untouched default and overwrites real stored data before the restore branch
+   has run - the exact bug the selection Set shipped with). The log cannot
+   follow that rule: two "Grade" calls, or a grade and a column post, can be in
+   flight at once, and each resolves holding a closure over the `log` value from
+   ITS render - so computing `next` at the call site and persisting THAT would
+   let the slower handler write a log missing the faster one's entries.
+   Appending inside the `setLog` updater (pure array math, safe to re-run) is
+   what keeps concurrent appends correct. The first-commit hazard is then closed
+   by a GUARD rather than by the mutator rule: the effect returns early unless
+   `cellStateResetForCourse === uiState.courseId`, and that equality is
+   established by the render-phase restore branch itself. A wiring test pins the
+   guard line, because without it this effect reintroduces the selection Set's
+   bug on a value that cannot be re-derived from anything.
+
+2. **THE CAP DROPS THE OLDEST, AND THAT DIRECTION IS THE WHOLE POINT.** A log
+   that stops recording once full goes quiet during exactly the long session
+   that filled it - the session whose record matters most. Sabotaged to
+   `slice(0, MAX)` and confirmed red before being trusted.
+
+3. **EVERY ENTRY FIELD IS A PLAIN STRING AND ALWAYS PRESENT.** Not tidiness: the
+   CSV writer emits one column per field unconditionally, so an optional field
+   would silently shift every later column on the rows that omitted it - a
+   corruption that looks like plausible data.
+
+4. **THE SCORE IN A POST ENTRY IS READ OFF THE PLAN, NEVER RE-READ FROM THE EDIT
+   STATE.** The instructor can keep typing in a cell while the post call is in
+   flight; recording the current edit value would log a number that was never
+   sent to Canvas. `buildRepoGradePostPlan`'s own `grade.grade` is the only
+   thing that was actually on the wire.
+
+5. **SKIPPED ROWS ARE LOGGED WITH THE PLAN'S OWN PER-ROW REASON, NOT THE
+   SUMMARY LINE.** "Why was this student not posted" has four different answers
+   (unbound, no folder, no score, no assignment mapped) and the one-line
+   summary carries none of them.
+
+6. **ONLY OUTCOMES ARE RECORDED, NEVER "STARTED".** An entry means something
+   finished, so the file reads as a list of facts rather than a list of
+   intentions. The cost is honest and stated in the AC: a call that never
+   resolves leaves no trace at all.
+
+7. **`scan-failed` IS DEDUPED BY A REF, NOT BY STATE.** Writing state from that
+   effect is what `react-hooks/set-state-in-effect` forbids, and the
+   last-recorded message is bookkeeping that must never itself trigger a
+   render. The ref also makes the effect's own `setLog` safe: its dep list is
+   `[scanError]`, which the append does not change, so there is no loop.
+
+8. **DOWNLOADS GO THROUGH `triggerFileDownload`.** REGRESSION entry 267 check 4
+   already refused a sixth hand-rolled `createObjectURL`/anchor/click/revoke
+   dance; this is not the seventh. CSV escaping likewise reuses
+   `escapeCsvValue` (`src/lib/course-tasks-view-csv.ts`) - an AI-written
+   overall comment routinely contains a comma, a quote AND a newline, and a
+   local escaper is where one of the three gets forgotten. Sabotaged (escaping
+   removed) and confirmed red.
+
+9. **CLEARING IS BEHIND A CONFIRM NAMING THE COUNT; DOWNLOADING IS NOT.**
+   localStorage is the only store these entries ever had - nothing on the
+   server has seen them - so a clear destroys the sole copy. A download costs
+   nothing, and this project treats click cost as a first-class factor, which
+   is also why CSV and JSON are two buttons rather than a format picker plus a
+   download button.
+
+10. **A WIRING GUARD HAD TO BE FIXED, NOT WORKED AROUND.** The existing
+    "postCanvasGradesAction is called from inside handlePostColumn" assertion
+    sliced a fixed 2000 characters from the handler's definition, and the added
+    `recordLog` calls pushed the call past that bound. A fixed window conflates
+    "the call moved out of this handler" with "this handler grew", so the slice
+    is now bounded by the NEXT handler's definition, matching the sibling
+    `gradeRepoAction` assertion that already worked that way.
+
+### Gates
+
+`npx eslint src/app/components/repo-grades` clean; `npx tsc --noEmit` clean;
+full `vitest run` 657 files / 13239 tests green (211 in this view, 24 of them
+new in `repoGradesLog.test.ts` plus 8 persistence tests); `npx next build`
+"Compiled successfully" and "Finished TypeScript", stopping at the known
+env-dependent prerender tail (`/_not-found`, missing Supabase keys).
+`index.tsx` grew 622 to 857 lines.
+
+### Limits - read before assuming this covers more than it does
+
+- **This is a CLIENT-SIDE log in one browser's localStorage.** Another machine,
+  another browser profile, or cleared site data has no record. It is not a
+  server-side audit table and must not be cited as one.
+- **It only records what THIS VIEW did.** Grades posted from `GradingResults`,
+  from a workflow step, or from Canvas itself are invisible to it.
+- **Nothing renders in a test.** vitest here is node-env and collects only
+  `src/**/*.test.ts`, so `RepoGradesLogPanel.tsx`'s markup, its disabled
+  states, and its keyboard behaviour are unverified by the suite - the wiring
+  test reads that file as TEXT, which proves the click gating and the shared
+  download helper, and proves nothing about how the panel looks or behaves.
+  The view itself was not opened in a browser for this chunk.
+- **`index.tsx` at 857 lines is within sight of the 1000-line cap.** The next
+  addition to this view should extract, not append - the log's own handlers and
+  the `buildLogEntry`/`recordLog` pair are the obvious first candidates for a
+  `useRepoGradesLog` hook.

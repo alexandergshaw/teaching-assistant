@@ -15,6 +15,7 @@ import {
 } from "@/lib/automations-table-helpers";
 import { needsAttention } from "./automation-inventory-logic";
 import { ScheduleRow, TriggerRow } from "./AutomationRow";
+import { CronHeartbeatStatus } from "./CronHeartbeatStatus";
 import styles from "../../page.module.css";
 import tableStyles from "./AutomationsTable.module.css";
 
@@ -129,6 +130,11 @@ export function AutomationsPanel({
   if (schedules !== null && triggers !== null && scheduled.length === 0 && triggered.length === 0) {
     return (
       <div>
+        {/* The scheduler's own status belongs here too (H3 item 13): "is the
+            runner alive at all" is a fact about the deployment, not about
+            whether this instructor has scheduled anything yet - an empty
+            list and a dead cron are unrelated problems. */}
+        <CronHeartbeatStatus />
         <p className={styles.fieldHint}>No workflows are scheduled or have triggers yet.</p>
         <p className={styles.fieldHint} style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
           Open a workflow in the Workflows tab and use the Automate panel to add schedules or triggers.
@@ -166,6 +172,13 @@ export function AutomationsPanel({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+      {/* The scheduler's own status, above both groups (H3 item 13) - this
+          is the view that already answers "what is set to run
+          automatically", so "is the runner alive at all" belongs at its
+          top, ahead of the per-row "Needs attention" summary below (which is
+          about individual schedules/triggers, not the cron process itself). */}
+      <CronHeartbeatStatus />
+
       {anyNeedsAttention && (
         <div>
           <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`} style={{ display: "inline-block" }}>

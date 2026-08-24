@@ -14,6 +14,10 @@ name: Run scheduled workflows
 #
 # Note: GitHub scheduled runs are best-effort and can lag several minutes under
 # load; they also auto-pause after ~60 days of no repo activity.
+#
+# ?source=github-actions identifies this caller in the cron heartbeat row
+# (docs/cron-heartbeat-acceptance-criteria.md H1 item 6) - free text, so it
+# never affects whether the request succeeds.
 
 on:
   schedule:
@@ -44,7 +48,7 @@ jobs:
           fi
           code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "https://teaching-assistant-pi.vercel.app/api/cron/run-schedules")
+            "https://teaching-assistant-pi.vercel.app/api/cron/run-schedules?source=github-actions")
           echo "HTTP $code"
           cat /tmp/resp.json 2>/dev/null || true
           echo

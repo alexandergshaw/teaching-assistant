@@ -31713,3 +31713,133 @@ env-dependent prerender tail (`/_not-found`, missing Supabase keys).
   addition to this view should extract, not append - the log's own handlers and
   the `buildLogEntry`/`recordLog` pair are the obvious first candidates for a
   `useRepoGradesLog` hook.
+
+## 334. The cron heartbeat - shipped alone, so "is the scheduler alive" stops being unanswerable
+
+Acceptance criteria: `docs/cron-heartbeat-acceptance-criteria.md`, an increment
+carved out of `docs/scheduled-publishing-from-modules-acceptance-criteria.md`'s
+F5/F9(2), which ranks "does the Actions cron fire reliably for this repo?" as
+that feature's second highest-risk unknown and says to ship this piece ALONE
+first, as the experiment that answers it with real data. Scheduled publishing
+itself is not built here.
+
+The hole: with an empty due list, `/api/cron/run-schedules` performed ZERO
+database writes, so a dead cron and a quiet one were indistinguishable from
+inside the app. `last_run_status` cannot close it - that is per-schedule state
+written only by a tick that ran, so it can never report the tick that never
+happened. This repository is PUBLIC, so GitHub's 60-day auto-disable of
+scheduled workflows on inactive repos applies, and a quiet summer would have
+stopped the scheduler with nothing noticing.
+
+### What shipped
+
+One `cron_heartbeat` row per (tick, caller), upserted by the route on every
+tick - at start AND at finish; a pure classifier
+(`never`/`healthy`/`failing`/`late`/`stalled`) whose thresholds derive from the
+workflow's own 15-minute cadence; a read-only server action; and a status line
+at the top of the Automations hub, in both of its return paths.
+
+### The four defects the verification pass found, and why each mattered
+
+1. **A SECOND, UNLABELLED CALLER OF THE SAME ROUTE WOULD HAVE MADE A DEAD CRON
+   READ HEALTHY.** `vercel.json` still registers `/api/cron/run-schedules` on
+   its own `*/10` schedule, and Vercel auto-sends the `CRON_SECRET` bearer -
+   so it passes the auth gate and writes the heartbeat. On Hobby, Vercel
+   silently throttles sub-daily crons to roughly once a day. With ONE shared
+   row, the exact failure this feature exists to expose - the GitHub schedule
+   silently not registering, which `.github/workflows/unattended-runs.yml`
+   records as having ALREADY HAPPENED ONCE ("0 schedule-event runs repo-wide
+   in 9 days despite state: active") - would have rendered as "the scheduler
+   last ran 3 minutes ago" for a stretch of every single day. **The fix is the
+   key, not the label:** rows are keyed per (tick, caller) via
+   `heartbeatIdForSource`, so an unlabelled or hostile `?source=` can only
+   ever create its OWN harmless row and the app reads the `github-actions` row
+   it actually means. The labelling is belt-and-braces on top.
+2. **A TICK FIRING PUNCTUALLY AND THROWING EVERY TIME READ AS PERFECTLY
+   HEALTHY.** The route recorded `last_error` faithfully and the component
+   read only `lastTickAt`, so a scheduler broken on every run rendered "ran
+   less than a minute ago", forever - a false healthy on exactly the failure
+   this feature is for. Added the `failing` state, with an explicit
+   precedence: **not-firing outranks firing-badly**, so a late or stalled gap
+   still reports late/stalled rather than letting a stale error crowd out
+   newer, worse news.
+3. **NOTHING ASSERTED WHAT THE UPSERT ACTUALLY WRITES, AND NO OTHER GATE
+   COULD.** The table handle is cast to `any` (the generated `Database` type
+   does not know this table), so a mis-spelled column name is invisible to
+   tsc, eslint, vitest AND `next build` while every tick 400s in production
+   and the hub reads "has not reported yet" forever. The test now CAPTURES the
+   upsert payload and checks every key against the migration's own SQL text -
+   the only thing standing between a typo and a silently dead feature.
+   Sabotage-checked by renaming `last_tick_at` to `last_tick_atx`: three tests
+   went red, the guard naming the offending key.
+4. **THE CONTRACT'S OWN RATIONALE FOR ITEM 4 WAS FALSE.** It justified storing
+   the tick START time with "a tick that hangs past the 60-second maxDuration
+   cap shows as a stale heartbeat rather than as no heartbeat" - but the only
+   write lived in a `finally`, and **a function killed at the platform cap
+   never runs its `finally`**, so a hung tick would have written nothing at
+   all. Now written twice, at start and at finish. The AC was amended in place
+   to record the correction rather than being left reading as though it was
+   right the first time.
+
+### A fix that was itself reversed, deliberately
+
+The first fix for defect 1 put `?source=vercel-cron` in `vercel.json`'s cron
+`path`. That was reverted: `vercel.json` is deploy-critical on a project that
+auto-deploys from main, and a `path` value the schema rejects breaks
+production for what is only a label - while the per-caller row key already
+delivers the whole defence. The Vercel caller is now identified by its
+`vercel-cron` user-agent inside the route, which cannot fail a deploy.
+
+### Other decisions worth re-reading
+
+5. **THE HEARTBEAT WRITE IS BEST-EFFORT BY CONTRACT.** `recordCronHeartbeat`
+   returns a boolean and cannot throw (its whole body, `.upsert()` included,
+   is inside its own try). A monitoring feature that can break the thing it
+   monitors is worse than no monitoring.
+6. **AN UNAUTHORIZED REQUEST WRITES NO HEARTBEAT.** Both early returns fire
+   before the service client is even created. An attacker able to stamp this
+   row could make a dead scheduler look alive, which is the precise state the
+   feature exists to expose. Verified by control flow, not by reading the
+   comment that claims it.
+7. **THE TABLE HAS NO INSERT OR UPDATE POLICY AT ALL.** Only the service-role
+   client in the route can write it; the app's action is read-only by
+   construction rather than by convention. The verification pass confirmed
+   `createServiceClient` really does pass `SUPABASE_SERVICE_ROLE_KEY` - had it
+   not, the upsert would have failed silently forever and the feature would
+   have shipped dead with every gate green.
+8. **`never` IS NOT WORDED AS A FAILURE.** A fresh deployment has genuinely
+   never ticked, and `late` names a next step that is "wait one interval, then
+   look" rather than sending the reader to the Actions tab over ordinary
+   GitHub scheduling jitter. A monitor that cries wolf is ignored exactly when
+   it is right.
+
+### Gates
+
+`npx eslint src` - 0 errors (4 pre-existing warnings in untouched files);
+`npx tsc --noEmit` clean; full `vitest run` 658 files / 13294 tests green (55
+of them in the new `src/lib/cron-heartbeat.test.ts`, up from 13239 before this
+chunk); `npx next build` "Compiled successfully" and "Finished TypeScript",
+stopping at the known env-dependent prerender tail.
+
+### Limits - read before assuming this covers more than it does
+
+- **It reports the GitHub Actions caller only.** The Vercel cron writes its own
+  row, which nothing currently renders. If the GitHub schedule is deliberately
+  retired in favour of Vercel, this surface will read `stalled` and be wrong
+  until it is pointed at the other row.
+- **The migration has not been applied yet at the time of writing.** It applies
+  itself through the existing Action on push to main; that run must be
+  verified before the feature is believed to work in production.
+- **Nothing renders in a test.** vitest here is node-env and collects only
+  `src/**/*.test.ts`, so the four UI states, their roles and their colours are
+  unverified by the suite; the reachability trace (WorkflowsPanel ->
+  AutomationsTabView -> AutomationsPanel, present in BOTH return paths) is
+  from reading, not from running. The app was not opened in a browser for this
+  chunk - there is no local Supabase env to boot it with.
+- **The added await narrows the response budget** by one database round-trip
+  near the 60-second cap. `runDeadlineMs` reserves 10 seconds of slack, so the
+  window is narrow, but a tick already at the edge could now be killed
+  mid-flush, and the Action treats any non-200 as a failure.
+- **The heartbeat proves the tick RAN, not that it did the right thing.** A
+  per-schedule failure still lives on that schedule's own row; this row only
+  carries a top-level throw.

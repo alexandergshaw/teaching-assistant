@@ -27,6 +27,24 @@ export interface BuildBulkBarFactsArgs {
 }
 
 /**
+ * Whether "Post to Canvas" inside GeneratedPreviewModal is reachable right
+ * now. Derived HERE rather than taken as a caller-supplied boolean (unlike
+ * `carryReviewOpen` above) because every input is already on the
+ * `lmsGeneration` hook this function receives whole - so there is no seam for
+ * a caller to get wrong, and the three conditions cannot drift apart from the
+ * modal's own render by being restated at a call site. See
+ * BulkBarFacts.generatePostReachable for why it is three conditions and not
+ * one.
+ */
+function generatePostReachableFrom(lmsGeneration: UseLmsGenerationReturn): boolean {
+  return (
+    lmsGeneration.preview !== null &&
+    lmsGeneration.offersPost &&
+    !lmsGeneration.postUnavailableReason
+  );
+}
+
+/**
  * Builds the bulk bar's own consequence/visibility facts (BulkBarFacts,
  * docs/bulk-bar-reorganization-acceptance-criteria.md section 3b/D1) from
  * state ModulesView already holds. Extracted structurally out of
@@ -79,5 +97,6 @@ export function buildBulkBarFacts({
     coveredCount: visualizerCoverage.coverage?.covered.length ?? 0,
     creatableGapsCount: visualizerCoverage.coverage ? conceptsForCreate(visualizerCoverage.coverage).length : 0,
     carryReviewOpen,
+    generatePostReachable: generatePostReachableFrom(lmsGeneration),
   };
 }

@@ -61,6 +61,7 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     coveredCount: 0,
     creatableGapsCount: 0,
     carryReviewOpen: false,
+    generatePostReachable: false,
     ...overrides,
   };
 }
@@ -177,7 +178,14 @@ describe("ConsequenceTier has four members, per section 3b/D1", () => {
     expect(findControl("visualizerScan").tier).toBe("read-only");
   });
 
-  it("groupTier for Generate is reversible-write once kinds are offered - neither read-only nor fan-out-write", () => {
+  // NOTE (2026-08-24): still true, and still the right assertion, but no
+  // longer the whole story - `generatePostReachable` defaults to false in
+  // baseFacts, so this pins Generate's tier while the modal-hosted "Post to
+  // Canvas" write is UNREACHABLE. Once it is reachable the group correctly
+  // derives fan-out-write; see the "generate group" describe at the bottom of
+  // this file for that half. Deliberately left scoped rather than widened:
+  // the resting tier is a fact worth pinning on its own.
+  it("groupTier for Generate is reversible-write once kinds are offered, while no post is reachable", () => {
     const group = findGroup("generate");
     const tier = groupTier(group, baseFacts({ itemCount: 1, generationKindsCount: 10 }));
     expect(tier).toBe("reversible-write");
@@ -408,6 +416,15 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
     baseFacts({ itemCount: 1, coverageScanned: true, coveredCount: 3 }),
     baseFacts({ itemCount: 1, coverageScanned: true, creatableGapsCount: 2 }),
     baseFacts({ moduleCount: 1, carryReviewOpen: true }),
+    // Without this entry the sweep never observes `generate`'s TRUE reachable
+    // tier - every other entry leaves `generatePostReachable` false, so
+    // `generatePostToCanvas` is invisible, `observedMaxTier` reports
+    // reversible-write, and this test would then DEMAND a null consequenceTag
+    // on a group whose flow ends in a Canvas write. That is the same
+    // correction the carryReviewOpen entry above had to make, and it is the
+    // precise shape of the defect being fixed: a sweep that cannot see a
+    // modal-hosted control asserts the group is safe, in green.
+    baseFacts({ itemCount: 1, generationKindsCount: 10, generatePostReachable: true }),
   ];
 
   function observedMaxTier(group: BulkBarGroupDef): ConsequenceTier {
@@ -725,6 +742,96 @@ describe("carryPattern group (docs/carry-module-pattern-forward-acceptance-crite
       group.consequenceTag = "";
       const violations = auditGroupModel();
       expect(violations.some((v) => v.startsWith("I5:") && v.includes("carryPattern"))).toBe(true);
+    } finally {
+      group.consequenceTag = original;
+    }
+    expect(auditGroupModel()).toEqual([]);
+  });
+});
+
+// The same hole carryPatternGroup's own header recorded as SHIPPED in the
+// Generate group and deliberately left standing. Closed 2026-08-24 by
+// declaring generatePostToCanvas, which lives in GeneratedPreviewModal.tsx
+// and was invisible to groupTier's reduction until then - so this group's
+// derived tier topped out at reversible-write from the ten kind buttons
+// while its flow ends in a real Canvas write, and the audit asserted, in
+// green, that the group was safer than it is.
+describe("generate group: the modal-hosted Post to Canvas write (D17's shape, applied to the instance it recorded)", () => {
+  it("declares generatePostToCanvas at fan-out-write, gated on reachability rather than on the group being visible", () => {
+    const control = findControl("generatePostToCanvas");
+    // fan-out-write by elimination against this file's own tier definitions:
+    // reversible-write PROMISES reversibility and a Canvas post is not
+    // reversible from this app; destructive is reserved for the four writes
+    // carrying a two-click confirm-arm, and this one commits on first click.
+    expect(control.tier).toBe("fan-out-write");
+    expect(control.persistKey).toBeNull();
+    expect(control.unpersistedReason ?? "").not.toBe("");
+  });
+
+  it("THEOREM: groupTier is reversible-write while the post is unreachable, and fan-out-write once it is reachable", () => {
+    const group = findGroup("generate");
+    const visible = { itemCount: 1, generationKindsCount: 10 };
+    expect(groupTier(group, baseFacts({ ...visible, generatePostReachable: false }))).toBe("reversible-write");
+    expect(groupTier(group, baseFacts({ ...visible, generatePostReachable: true }))).toBe("fan-out-write");
+  });
+
+  it("THEOREM: mayCollapse is true while the post is unreachable and false once it is reachable", () => {
+    const group = findGroup("generate");
+    const visible = { itemCount: 1, generationKindsCount: 10 };
+    expect(mayCollapse(group, baseFacts({ ...visible, generatePostReachable: false }))).toBe(true);
+    expect(mayCollapse(group, baseFacts({ ...visible, generatePostReachable: false, hasDiagLog: true }))).toBe(true);
+    expect(mayCollapse(group, baseFacts({ ...visible, generatePostReachable: true }))).toBe(false);
+  });
+
+  it("I5 now requires a consequenceTag on this group, and it names the Canvas write rather than the generation", () => {
+    const group = findGroup("generate");
+    expect(group.consequenceTag).not.toBeNull();
+    expect((group.consequenceTag ?? "").trim()).not.toBe("");
+    // Pin the FACT, not the sentence: the tag must describe the write that
+    // is actually reachable from here. Generating a draft costs a model call
+    // and touches nothing, so a tag claiming the GENERATION writes to Canvas
+    // would overstate the common case (C11's lesson, one group over).
+    expect(group.consequenceTag ?? "").toMatch(/canvas/i);
+  });
+
+  // SABOTAGE, entry 330 check 5's shape. Reproduces the pre-fix state in
+  // place - the post control invisible to the derivation, exactly as if it
+  // had never been declared - and confirms the group then lies about its own
+  // safety WHILE the post button is genuinely on screen. try/finally because
+  // findGroup/findControl hand back references into ONE shared module-level
+  // array, and a mid-test throw would corrupt the catalog for every later
+  // test in this run.
+  it("SABOTAGE: with the post control invisible to the derivation the group claims to be safe while the write is on screen, and the real declaration does not", () => {
+    const control = findControl("generatePostToCanvas");
+    const original = control.visible;
+    const reachable = baseFacts({ itemCount: 1, generationKindsCount: 10, generatePostReachable: true });
+    try {
+      control.visible = () => false;
+      const group = findGroup("generate");
+      // The shipped defect, reproduced: a real Canvas write is one click
+      // away and the group still derives reversible-write and stays
+      // collapsible.
+      expect(groupTier(group, reachable)).toBe("reversible-write");
+      expect(mayCollapse(group, reachable)).toBe(true);
+    } finally {
+      control.visible = original;
+    }
+    const group = findGroup("generate");
+    expect(groupTier(group, reachable)).toBe("fan-out-write");
+    expect(mayCollapse(group, reachable)).toBe(false);
+  });
+
+  // I5's maxPossibleTier ignores visibility and reads DECLARED tiers, so the
+  // tag requirement must hold whether or not the modal happens to be open
+  // when the audit runs - which is what makes it a real invariant rather
+  // than a property of the facts a test chose.
+  it("sabotage: emptying this group's consequenceTag trips I5, and restoring it clears the violation", () => {
+    const group = findGroup("generate");
+    const original = group.consequenceTag;
+    try {
+      group.consequenceTag = "";
+      const violations = auditGroupModel();
+      expect(violations.some((v) => v.startsWith("I5:") && v.includes("generate"))).toBe(true);
     } finally {
       group.consequenceTag = original;
     }

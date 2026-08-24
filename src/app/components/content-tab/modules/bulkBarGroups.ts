@@ -286,6 +286,29 @@ export interface BulkBarFacts {
    * whenever the group is, which would force the group open and show its
    * consequence tag even when nothing destructive is currently reachable). */
   carryReviewOpen: boolean;
+  /**
+   * Whether the "Post to Canvas" write inside `GeneratedPreviewModal` is
+   * REACHABLE RIGHT NOW - the same shape as `carryReviewOpen` above, applied
+   * to the hole that one was written to fix and then, by its own admission,
+   * left standing in `generateGroup`.
+   *
+   * THREE conditions, not one, and each removal was checked against the
+   * modal's own render rather than assumed:
+   *   1. `lmsGeneration.preview` is non-null - the modal is mounted at all
+   *      (ModulesView.tsx gates the whole element on it);
+   *   2. `offersPost` - only the "save-and-post" kinds render the block
+   *      (GeneratedPreviewModal.tsx's `{offersPost && (...)}`);
+   *   3. no `postUnavailableReason` - when one is set the button is REPLACED
+   *      by a plain hint paragraph, so nothing clickable exists.
+   *
+   * Tracking only "the modal is open" would OVER-report: the tier would rise
+   * for a deck or a script preview that offers no post at all, forcing the
+   * group open and showing a consequence tag for a write that is not on
+   * screen. Over-reporting is the mirror of the defect being fixed, and this
+   * model's whole claim is that the derived tier tracks reachability - not
+   * "something write-ish exists somewhere in this feature".
+   */
+  generatePostReachable: boolean;
 }
 
 /** Per-group runtime state `groupOpen` needs, supplied by the group's OWN
@@ -503,6 +526,12 @@ const MINIMAL_AUDIT_FACTS: BulkBarFacts = {
   // visualizerCoverage before a scan - see that field's own comment in this
   // file's BulkBarFacts interface.
   carryReviewOpen: false,
+  // False for the same reason `carryReviewOpen` is: I3 asks "is this group
+  // more than read-only the MOMENT it becomes visible, with nothing else
+  // toggled on", and a modal-hosted write is by definition not reachable
+  // then. Setting either true here would make I3 demand `defaultOpen: true`
+  // for a tier neither group reaches until a modal opens.
+  generatePostReachable: false,
 };
 
 /**

@@ -441,18 +441,20 @@ const currentEventsGroup: BulkBarGroupDef = {
  * this is pinned as (with an in-place sabotage), not merely a declaration
  * that happens to be true today.
  *
- * THE SAME HOLE ALREADY EXISTS, SHIPPED, IN THE GENERATE GROUP BELOW - found
- * by reading, per this chunk's own brief, and NOT fixed here: it is a
- * pre-existing defect in entry 329's own model, out of this chunk's scope,
- * and correcting it would move canaries this chunk has no business moving.
- * `GeneratedPreviewModal.tsx`'s own "Post to Canvas" button (that file,
- * around line 705, gated on `offersPost`) writes directly to Canvas but is
- * not declared anywhere in `generateGroup` below - it is invisible to
- * `groupTier`'s reduction over that group's controls, so `generateGroup`'s
- * derived tier tops out at "reversible-write" (the ten kind buttons) even
- * though clicking "Post to Canvas", reachable from the very artifact those
- * buttons produce, writes to Canvas immediately with no confirmation step
- * this model's own audit is aware of.
+ * THE SAME HOLE EXISTED, SHIPPED, IN THE GENERATE GROUP BELOW - recorded
+ * here when this group was written, deliberately left standing as out of
+ * that chunk's scope, and CLOSED on 2026-08-24 by declaring
+ * `generatePostToCanvas` with `visible: (f) => f.generatePostReachable`, on
+ * exactly this group's pattern. `GeneratedPreviewModal.tsx`'s "Post to
+ * Canvas" button writes directly to Canvas; until it was declared,
+ * `groupTier`'s reduction could not see it, so `generateGroup`'s derived
+ * tier topped out at "reversible-write" from the ten kind buttons and the
+ * audit asserted in perpetuity that the group was safer than it is. The fix
+ * also forced `generateGroup` to gain the `consequenceTag` I5 had never
+ * demanded of it. Left in place rather than deleted, because the shape
+ * generalises: ANY control this bar owns but renders elsewhere is invisible
+ * to the derivation until something declares it, and that invisibility is
+ * silent and green.
  */
 const carryPatternGroup: BulkBarGroupDef = {
   id: "carryPattern",
@@ -571,7 +573,17 @@ const generateGroup: BulkBarGroupDef = {
   label: "Generate",
   disclosure: true,
   defaultOpen: true,
-  consequenceTag: null,
+  // Was `null`, correctly, while every declared control here was read-only or
+  // reversible-write. Declaring `generatePostToCanvas` below makes I5 require
+  // one - and I5 is right to: the preview this group opens ends in a real
+  // Canvas write, and an instructor reading only the bar could not previously
+  // tell. Worded for the write that is actually reachable from here, not for
+  // the generation that precedes it: generating a draft costs a model call
+  // and touches nothing, and saying otherwise would overstate the common case
+  // (C11's lesson from carryPatternGroup - a tag that overstates is worse
+  // than one that understates, because it is the one always-visible sentence
+  // describing what this group does).
+  consequenceTag: "Post to Canvas, inside the generated-content preview, writes the drafted content into the live course.",
   visible: (f) => f.generationKindsCount > 0,
   controls: [
     {
@@ -605,6 +617,44 @@ const generateGroup: BulkBarGroupDef = {
     },
     ...(Object.keys(GENERATE_KIND_LABELS) as GenerationKindId[]).map(generateKindControl),
     { id: "generateDownloadDiagLog", kind: "button", label: "Download diagnostic log", tier: "read-only", visible: (f) => f.generationKindsCount > 0 && f.hasDiagLog, persistKey: null, unpersistedReason: ONE_CLICK_UNPERSISTED },
+    {
+      id: "generatePostToCanvas",
+      kind: "button",
+      label: "Post to Canvas",
+      // THE control this declaration exists for. It lives in
+      // GeneratedPreviewModal.tsx, not in the bar, and until now was
+      // declared nowhere - so `groupTier`'s reduction never saw it and this
+      // group's derived tier topped out at "reversible-write" from the ten
+      // kind buttons, while its flow ends in a real Canvas write. The audit
+      // therefore asserted, permanently, that the group was safer than it
+      // is: a green check on an unexamined path, which is worse than no
+      // check. Fixed here on `carryPatternGroup`'s pattern (D17), which was
+      // written for this exact shape and then explicitly left this instance
+      // standing as out of that chunk's scope.
+      //
+      // TIER. "fan-out-write", by elimination against this model's own
+      // definitions rather than by feel: "reversible-write" PROMISES the
+      // write is reversible ("a new version, never an overwrite"), and
+      // posting generated content into a live Canvas course is not
+      // reversible from this app, so declaring it there would make the tier
+      // string itself a false claim; "destructive" is reserved for the four
+      // writes carrying a two-click confirm-arm in their owning hook, and
+      // this one commits on its first click. That leaves "fan-out-write",
+      // whose defining property here is exactly "unconfirmed write that
+      // commits on first click" - the same reading chunk F's design pass
+      // reached independently for Publish/Unpublish.
+      tier: "fan-out-write",
+      // Reachability, not existence - see BulkBarFacts.generatePostReachable,
+      // which ANDs the modal being mounted, the kind offering a post at all,
+      // and no `postUnavailableReason` (which replaces the button with a
+      // hint). Do not relax this to `f.generationKindsCount > 0`: that would
+      // make the group permanently fan-out-write, force it open forever, and
+      // show a consequence tag for a write that is not on screen - the
+      // over-reporting mirror of the defect this fixes.
+      visible: (f) => f.generatePostReachable,
+      persistKey: null,
+      unpersistedReason: ONE_CLICK_UNPERSISTED,
+    },
   ],
 };
 

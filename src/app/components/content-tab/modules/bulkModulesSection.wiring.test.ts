@@ -74,6 +74,7 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     coveredCount: 0,
     creatableGapsCount: 0,
     carryReviewOpen: false,
+    generatePostReachable: false,
     ...overrides,
   };
 }

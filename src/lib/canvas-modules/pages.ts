@@ -1,3 +1,19 @@
+// Canvas wiki page reads/writes.
+//
+// HAZARD (errata G5, docs/llm-command-interface-acceptance-criteria.md
+// section 10) - DO NOT "simplify" this file back to slug-only addressing:
+// `wiki_page.rb` declares `acts_as_url :title, sync_url: true`, so changing
+// a page's title changes its slug. Module items address pages BY SLUG
+// (`CanvasModuleItem.pageUrl` is `raw.page_url` - see mappers.ts), and
+// `PUT /courses/:id/pages/:url` is an UPSERT (Canvas's `Wiki#find_page`
+// creates on a miss rather than 404ing). So: a title-changing write, followed
+// by a retry (after a partial bulk failure, a timeout, a double-click) that
+// still addresses the OLD now-stale slug, does not fail loudly - it silently
+// CREATES A SECOND PAGE under the old slug, carrying the rewritten body,
+// linked to nothing. `Wiki#find_page` also accepts a numeric page id or
+// `page_id:<id>` - both stable across a title change - so any write that
+// might repeat (retries, bulk apply) should address the page by id, via
+// `updatePage`'s `opts.pageId`, not by slug.
 import { canvasError, resolveCourse } from "../canvas-core";
 import { fetchAll, writeJson } from "./fetch-helpers";
 import { mapPageSummary, mapPage } from "./mappers";
@@ -39,20 +55,30 @@ export async function getPage(
 /**
  * Update a page's title, HTML body, and/or publish state. The body is sent
  * verbatim. Returns the saved page (its slug may change if the title changed).
+ *
+ * `pageUrl` is still accepted for every existing caller (a one-shot edit,
+ * where a stale slug cannot yet exist). Pass `opts.pageId` instead - the
+ * page's stable numeric id - for any write that might be RETRIED (a bulk
+ * apply, anything with a retry-after-partial-failure path): see this file's
+ * header comment for why addressing a repeatable write by slug can silently
+ * duplicate the page (G5). When `opts.pageId` is given, `pageUrl` is only
+ * used as the `wiki_page[title]` field source and is not part of the URL.
  */
 export async function updatePage(
   courseUrl: string,
   pageUrl: string,
   fields: { title?: string; body?: string; published?: boolean },
-  code?: string
+  code?: string,
+  opts?: { pageId?: number }
 ): Promise<CanvasPage> {
   const ctx = resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   if (typeof fields.title === "string") params.append("wiki_page[title]", fields.title);
   if (typeof fields.body === "string") params.append("wiki_page[body]", fields.body);
   if (typeof fields.published === "boolean") params.append("wiki_page[published]", String(fields.published));
+  const address = opts?.pageId !== undefined ? `page_id:${opts.pageId}` : encodeURIComponent(pageUrl);
   const raw = await writeJson<RawPage>(
-    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/pages/${encodeURIComponent(pageUrl)}`,
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/pages/${address}`,
     "PUT",
     ctx,
     params

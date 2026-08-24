@@ -44,14 +44,22 @@ export async function getGradable(
   };
 }
 
-/** Update an assignment/quiz/discussion's title, description, and/or points. */
+/**
+ * Update an assignment/quiz/discussion's title, description, and/or points.
+ * Returns Canvas's own parsed response for whichever branch actually wrote
+ * (undefined when no field was supplied and no write was made), so a caller
+ * can read back what actually landed instead of trusting the sent value
+ * (errata G4, docs/llm-command-interface-acceptance-criteria.md section 10) -
+ * this is purely additive: every existing caller already discards the
+ * resolved value, so `await updateGradable(...)` still compiles unchanged.
+ */
 export async function updateGradable(
   courseUrl: string,
   kind: GradableKind,
   contentId: number,
   fields: { title?: string; description?: string; pointsPossible?: number; submissionType?: string },
   code?: string
-): Promise<void> {
+): Promise<Record<string, unknown> | undefined> {
   const ctx = resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const params = new URLSearchParams();
@@ -61,19 +69,32 @@ export async function updateGradable(
     if (description !== undefined) params.append("assignment[description]", description);
     if (fields.pointsPossible !== undefined) params.append("assignment[points_possible]", String(fields.pointsPossible));
     if (fields.submissionType !== undefined) params.append("assignment[submission_types][]", fields.submissionType);
-    if ([...params.keys()].length > 0) await writeJson(`${base}/assignments/${contentId}`, "PUT", ctx, params);
-    return;
+    if ([...params.keys()].length === 0) return undefined;
+    return await writeJson<Record<string, unknown>>(`${base}/assignments/${contentId}`, "PUT", ctx, params);
   }
   if (kind === "Quiz") {
     if (fields.title !== undefined) params.append("quiz[title]", fields.title);
     if (description !== undefined) params.append("quiz[description]", description);
     if (fields.pointsPossible !== undefined) params.append("quiz[points_possible]", String(fields.pointsPossible));
-    if ([...params.keys()].length > 0) await writeJson(`${base}/quizzes/${contentId}`, "PUT", ctx, params);
-    return;
+    if ([...params.keys()].length === 0) return undefined;
+    // G6: quizzes_api_controller.rb documents quiz[notify_of_update] as
+    // "Defaults to true". Assignments, pages, and discussions are all silent
+    // on a description-only PUT - their notification policies require
+    // points_possible to change, or this same parameter, which this app
+    // never sends on THOSE branches. Quizzes are the one exception, so this
+    // must be sent explicitly here or a bulk rewrite of N quizzes emails
+    // "the quiz has changed" to the whole roster N times - the only Canvas
+    // write in this file that reaches anyone outside the instructor's own
+    // browser. Do NOT "tidy" this onto the assignment or discussion branches
+    // above/below: they have no such default, so adding it there would be a
+    // no-op at best and a false signal to a future reader at worst.
+    params.append("quiz[notify_of_update]", "false");
+    return await writeJson<Record<string, unknown>>(`${base}/quizzes/${contentId}`, "PUT", ctx, params);
   }
   if (fields.title !== undefined) params.append("title", fields.title);
   if (description !== undefined) params.append("message", description);
-  if ([...params.keys()].length > 0) await writeJson(`${base}/discussion_topics/${contentId}`, "PUT", ctx, params);
+  if ([...params.keys()].length === 0) return undefined;
+  return await writeJson<Record<string, unknown>>(`${base}/discussion_topics/${contentId}`, "PUT", ctx, params);
 }
 
 /**

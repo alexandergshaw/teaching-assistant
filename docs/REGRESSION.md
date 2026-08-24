@@ -31934,3 +31934,112 @@ regex therefore left it alone; it guards a neighbouring case, not this one.
   because `descriptionToHtml`, CanvasSanitize and `api_user_content` each
   transform the value between what is sent and what is read back. Those belong
   to item G and are folded into its acceptance criteria, not into this fix.
+
+## 336. Foundations for the LLM command interface - and three Canvas write-path defects fixed ahead of the feature that would have multiplied them
+
+Contract: `docs/llm-command-interface-acceptance-criteria.md` section 10, the
+errata a design pass produced by reading `instructure/canvas-lms` master and
+this repo's own layers rather than the document's summary (entry 335 shipped
+the first thing it found). **The command interface itself is NOT built here.**
+This is its foundation wave plus the pre-existing defects it would have
+amplified, pushed separately so each is reviewable on its own.
+
+### The three Canvas write-path defects, all pre-existing, all fixed now
+
+1. **G6 - A BULK QUIZ DESCRIPTION REWRITE EMAILS EVERY STUDENT, AND NOTHING IN
+   THE APP MENTIONED IT.** `quizzes_api_controller.rb` documents
+   `quiz[notify_of_update]` as "Defaults to true", and this app never sent it.
+   Assignments, pages and discussions are all silent on a description-only PUT
+   (their notification policies require `points_possible` to change, or this
+   same parameter). Quizzes are the one exception. So today's already-shipped
+   `bulkSetDescription` across ten quizzes sends ten "the quiz has changed"
+   notifications to the whole roster - **the only Canvas write in this file
+   that reaches anyone outside the instructor's own browser.** Now sends
+   `false` explicitly, on the quiz branch only, appended AFTER the no-op
+   early-return so an empty call still makes zero fetches. The test pins the
+   ASYMMETRY - the quiz PUT has it, the assignment and discussion PUTs do not -
+   so the negative cannot pass vacuously, and the comment tells the next reader
+   not to "tidy" it onto the other two branches. Sabotage-checked.
+2. **G5 - A PAGE TITLE REWRITE FOLLOWED BY A RETRY SILENTLY CREATES A DUPLICATE
+   PAGE.** Three verified facts compose into it: `wiki_page.rb` declares
+   `acts_as_url :title, sync_url: true` so the slug follows the title
+   (`pages.ts` already knew); module items address pages BY SLUG
+   (`raw.page_url`); and `PUT /courses/:id/pages/:url` is an UPSERT, so a stale
+   slug does not 404 - it creates a page. `updatePage` now accepts an optional
+   `pageId` and addresses `page_id:<id>`, with the hazard written into the file
+   header so nobody simplifies it back.
+3. **G4 - `updateGradable` DISCARDED CANVAS'S RESPONSE**, returning
+   `Promise<void>`, so nothing could ever read back what actually landed - which
+   blocks any idempotency or verify step. Now returns the parsed response.
+   Purely additive: the existing caller ignores it and still compiles.
+
+### The foundations
+
+4. **ONE SHARED LLM-JSON PARSER, WHERE THERE WERE SIX COPIES AND NO SCHEMA
+   LIBRARY.** The reuse survey found `extractJsonObject` defined independently
+   six times (`grade/rubric.ts`, `grade/parsing.ts`, `grade/prompts.ts`,
+   `calendar-parser.ts`, `decks/sequence.ts` - byte-identical - plus
+   `app/actions/shared.ts` with a different signature), all of them naive
+   `indexOf("{")`/`lastIndexOf("}")`, which breaks on a stray brace in trailing
+   prose and on braces inside JSON string values, and none of which can extract
+   an array. `parseLlmJson` does real bracket-depth matching with string and
+   escape awareness, tries `unwrapDocumentFence` first, and returns a
+   discriminated result that never throws and never yields a partial fragment.
+   **The six existing call sites were deliberately NOT converted** - that is its
+   own chunk with its own regression risk, and mixing it into a feature's
+   foundation is how a "small refactor" takes down five unrelated flows.
+5. **THE ALLOWLIST IS OVER THE MODEL'S OUTPUT, NOT THE INSTRUCTOR'S TEXT, AND
+   THAT IS THE WHOLE SAFETY ARGUMENT (G10).** The AC says the command box is
+   never parsed AND that a request for an out-of-scope field must be named as
+   UNSUPPORTED. Taken literally those cannot both hold: if nothing parses the
+   box, only the model can classify a request as unsupported - which makes the
+   model both the judge of what it may do and the reporter of its own
+   violations. Resolved structurally: every proposal row names a target and a
+   field, and `canonicalizeField` allows only `title`, `description`/`body` and
+   `moduleName`, rejecting anything else BY CODE before it reaches the proposal.
+   The free text is still never parsed; the guarantee stops being a promise the
+   model makes about itself. Sabotage-checked by widening the allowlist to
+   admit `points`, which reddened exactly the two tests for that field.
+6. **THE MODULE-CREATION RULE WAS REUSED; THE FUNCTION WAS NOT (G8).**
+   `planBulkModuleCreation` expands a `{x}` template over a contiguous numeric
+   range and cannot express "create a module called Ethics in AI" - which is
+   what a free-text command produces. The reusable part is the RULE: a `Map`
+   keyed on `name.trim().toLowerCase()`, marking a match already-present. Same
+   one level down - `composeModuleTitle` REQUIRES a week number that a
+   command-invented module does not have, so titles pass through un-composed.
+7. **THE PROPOSAL CARRIES ITS OWN SELECTION SIGNATURE (G14).** The shipped
+   staleness answers do not transfer: `confirmArming` invalidates by
+   construction and `useCarryModulePattern` re-derives its plan on every render,
+   but this proposal contains MODEL OUTPUT keyed to specific object ids and
+   cannot be re-derived without another model call. So it pins the signature at
+   generation time and `reconcileCommandProposalWithSelection` reports which
+   rows survive a changed selection and which were dropped.
+8. **THE PROPOSAL GETS ITS OWN VOCABULARY, ON PURPOSE (G9).**
+   `ModuleContentResult` and `describeOrphans` describe what happened AFTER
+   Canvas was called; a proposal is a recommendation before it was touched, and
+   two shipped file headers had already settled that. `describeOrphans` also
+   physically cannot be imported by an action - it lives in a `"use client"`
+   hook, and a `"use server"` file may export only async functions.
+
+### Gates
+
+`npx eslint src` 0 errors (4 pre-existing warnings in untouched files);
+`npx tsc --noEmit` clean; full `vitest run` **662 files / 13356 tests** green,
+up from 13301 - 39 new in `llm-json.test.ts` + `command-proposal.test.ts`, plus
+the new `gradables.test.ts` / `pages.test.ts` (neither existed before);
+`npx next build` "Compiled successfully" and "Finished TypeScript".
+
+### Limits
+
+- **The feature does not exist yet.** No control, no group, no proposal UI, no
+  apply path. Nothing in this push is reachable from the app - the two new lib
+  modules have no production caller. That is deliberate, but it means the usual
+  warning applies with full force: a green suite here proves the pure functions
+  behave, and nothing about whether they will be wired up correctly.
+- **The six duplicate JSON extractors are still there.** Consolidating them is
+  its own chunk.
+- **The three unknowns needing a live Canvas remain open** (G17): whether a
+  module item reflects a renamed content object, whether a page retry really
+  duplicates, and whether AssignmentFreezer is enabled. Each has a safe default
+  recorded, and the write-path fixes above were made to hold regardless of the
+  answers.

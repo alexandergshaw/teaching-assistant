@@ -19,6 +19,7 @@ import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "./contentSourceG
 // concurrently-built module this file only ever calls, never inlines).
 import { importCourseExportFile, type ImportOutcome } from "./importCourseExportPipeline";
 import { ModuleCard } from "./modules/ModuleCard";
+import { buildBulkModulesSectionProps } from "./modules/buildBulkModulesSectionProps";
 import { buildModuleCardProps } from "./modules/buildModuleCardProps";
 import { useCartridgeToCanvas } from "./modules/useCartridgeToCanvas";
 import { useExportModuleAdditions } from "./modules/useExportModuleAdditions";
@@ -39,6 +40,7 @@ import { useAddModuleItem } from "./modules/useAddModuleItem";
 import { useBulkBarGroups } from "./modules/useBulkBarGroups";
 import { useBulkItemActions } from "./modules/useBulkItemActions";
 import { useBulkModuleActions } from "./modules/useBulkModuleActions";
+import { useCurrentEventsAssignments } from "./modules/useCurrentEventsAssignments";
 import { useDragReorder } from "./modules/useDragReorder";
 import { useInlineModuleEdits } from "./modules/useInlineModuleEdits";
 import { useLmsGeneration } from "./modules/useLmsGeneration";
@@ -446,6 +448,31 @@ export function ModulesView({
     reload
   );
 
+  // Current-events research assignment, one per selected module
+  // (docs/current-events-assignment-from-modules-acceptance-criteria.md,
+  // section 3b/D3-D6). Called HERE, never from BulkModulesSection - that
+  // section renders only while a module is selected and can be
+  // conditionally unmounted, a hook called from this view cannot be.
+  // `setOpBusy` is threaded through exactly like useBulkModuleActions/
+  // useBulkItemActions above, so this group's own busy state is the SAME
+  // shared `opBusy` those two groups already read (see
+  // useCurrentEventsAssignments.ts's own header - it holds no busy flag of
+  // its own) rather than an independent signal like "addToEach"'s
+  // bulkAiBusy. `selection.liveModuleIds` (not selection.selectedModules,
+  // a Set<string> of discriminated keys) is the same Set<number> view
+  // bulkModuleActions above already reads.
+  const currentEventsAssignments = useCurrentEventsAssignments(
+    courseUrl,
+    acronym,
+    exportCourseId,
+    provider,
+    modules,
+    selection.liveModuleIds,
+    setOpBusy,
+    setNote,
+    reload
+  );
+
   // The bulk bar's group open/closed state (docs/bulk-bar-reorganization-
   // acceptance-criteria.md, section 3b/D1/D3). Called EXACTLY ONCE here -
   // never from inside BulkBarGroup itself, which is instantiated once per
@@ -544,6 +571,21 @@ export function ModulesView({
     exportAdditions,
     addModuleItem,
     videoRepo,
+  });
+
+  // The BulkModulesSection prop object (everything except `facts`/
+  // `groupsState`, which stay bare identifiers at the render site below -
+  // see buildBulkModulesSectionProps.ts header comment for why a full spread
+  // cannot swallow those two). Extracted the same way itemRowProps,
+  // addItemRowProps and exportAdditionsProps above already are.
+  const bulkModulesSectionProps = buildBulkModulesSectionProps({
+    opBusy,
+    ctx,
+    bulkModuleActions,
+    targets,
+    ensureTargets,
+    rubricsHook,
+    onModuleQuestionsTrigger,
   });
 
   return (
@@ -696,50 +738,12 @@ export function ModulesView({
 
                 {selection.selectedModules.size > 0 && (
                   <BulkModulesSection
-                    opBusy={opBusy}
-                    sourceContext={ctx}
-                    bulkPublishModules={bulkModuleActions.bulkPublishModules}
-                    bulkDeleteModules={bulkModuleActions.bulkDeleteModules}
-                    confirmDeleteModules={bulkModuleActions.confirmDeleteModules}
-                    bulkAddType={bulkModuleActions.bulkAddType}
-                    setBulkAddType={bulkModuleActions.setBulkAddType}
-                    bulkAddPattern={bulkModuleActions.bulkAddPattern}
-                    setBulkAddPattern={bulkModuleActions.setBulkAddPattern}
-                    bulkAddSubType={bulkModuleActions.bulkAddSubType}
-                    setBulkAddSubType={bulkModuleActions.setBulkAddSubType}
-                    bulkAiBusy={bulkModuleActions.bulkAiBusy}
-                    bulkAddFileContent={bulkModuleActions.bulkAddFileContent}
-                    setBulkAddFileContent={bulkModuleActions.setBulkAddFileContent}
-                    bulkAddFileId={bulkModuleActions.bulkAddFileId}
-                    setBulkAddFileId={bulkModuleActions.setBulkAddFileId}
-                    bulkAddToModules={bulkModuleActions.bulkAddToModules}
-                    targets={targets}
-                    ensureTargets={ensureTargets}
-                    bulkAddFileFormat={bulkModuleActions.bulkAddFileFormat}
-                    setBulkAddFileFormat={bulkModuleActions.setBulkAddFileFormat}
-                    bulkFileOptions={bulkModuleActions.bulkFileOptions}
-                    bulkAddDue={bulkModuleActions.bulkAddDue}
-                    setBulkAddDue={bulkModuleActions.setBulkAddDue}
-                    bulkAddStaggerOffset={bulkModuleActions.bulkAddStaggerOffset}
-                    setBulkAddStaggerOffset={bulkModuleActions.setBulkAddStaggerOffset}
-                    bulkAddStaggerUnit={bulkModuleActions.bulkAddStaggerUnit}
-                    setBulkAddStaggerUnit={bulkModuleActions.setBulkAddStaggerUnit}
-                    bulkAddPoints={bulkModuleActions.bulkAddPoints}
-                    setBulkAddPoints={bulkModuleActions.setBulkAddPoints}
-                    bulkAddRubricId={bulkModuleActions.bulkAddRubricId}
-                    setBulkAddRubricId={bulkModuleActions.setBulkAddRubricId}
-                    rubrics={rubricsHook.rubrics}
-                    bulkAddDescription={bulkModuleActions.bulkAddDescription}
-                    setBulkAddDescription={bulkModuleActions.setBulkAddDescription}
-                    bulkAddQuestions={bulkModuleActions.bulkAddQuestions}
-                    setBulkAddQuestions={bulkModuleActions.setBulkAddQuestions}
-                    setBulkQuestionsOpen={bulkModuleActions.setBulkQuestionsOpen}
-                    onModuleQuestionsTrigger={onModuleQuestionsTrigger}
-                    bulkAiPrompt={bulkModuleActions.bulkAiPrompt}
-                    setBulkAiPrompt={bulkModuleActions.setBulkAiPrompt}
-                    bulkAiGenerate={bulkModuleActions.bulkAiGenerate}
+                    {...bulkModulesSectionProps}
                     facts={bulkBarFacts}
                     groupsState={bulkBarGroupsApi}
+                    confirmCurrentEvents={currentEventsAssignments.confirmCurrentEvents}
+                    currentEventsLabel={currentEventsAssignments.currentEventsLabel}
+                    runCurrentEventsAssignments={currentEventsAssignments.runCurrentEventsAssignments}
                   />
                 )}
 

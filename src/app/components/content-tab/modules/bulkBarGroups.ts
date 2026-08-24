@@ -149,13 +149,17 @@ export const TIER_RANK: Record<ConsequenceTier, number> = {
 export type BulkBarControlKind = "button" | "select" | "textField" | "checkbox";
 
 /**
- * The thirteen top-level groups this bar organizes into. Twelve map
+ * The fourteen top-level groups this bar organizes into. Twelve map
  * one-to-one onto a `.bulkLabel` heading in the six section files today
- * (AC2); the thirteenth, "head", is the bar's own count-and-Clear line
+ * (AC2); "head" is the bar's own count-and-Clear line
  * (`ModulesView.tsx`'s `bulkBarHead`, NOT a `.bulkLabel` span - see
  * `headGroup`'s own doc comment in ./bulkBarGroupCatalog.ts for why it is
  * still modeled: it is a real part of the bar's layout and AC0's own count
- * includes its one control, "Clear", in the 65).
+ * includes its one control, "Clear", in the 65); "currentEvents" is the
+ * fourteenth, added by docs/current-events-assignment-from-modules-
+ * acceptance-criteria.md section 3b/D5 as a NEW sibling of "addToEach" -
+ * deliberately not folded into "addToEach" itself, see that group's own
+ * comment in ./bulkBarGroupCatalog.ts for why.
  *
  * "addToEach" merges what is six separate conditionally-rendered `bulkRow`s
  * in `BulkModulesSection.tsx` today (the base row, File, Details, Body,
@@ -176,6 +180,7 @@ export type BulkBarGroupId =
   | "move"
   | "modules"
   | "addToEach"
+  | "currentEvents"
   | "generate"
   | "download"
   | "askAi"

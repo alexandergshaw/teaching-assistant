@@ -103,30 +103,104 @@ function toSectionExpr(catalogExpr: string): string {
   return catalogExpr.replace(/^f\.moduleCount > 0 && /, "").replace(/f\.bulkAddType/g, "bulkAddType");
 }
 
-describe("BulkModulesSection wraps its two owned groups in BulkBarGroup (D1/D5)", () => {
-  it("imports BulkBarGroup and looks up exactly the \"modules\" and \"addToEach\" ids from the shared catalog via groupById (step-10 review: groupById replaces the six local findGroup copies)", () => {
+describe("BulkModulesSection wraps its three owned groups in BulkBarGroup (D1/D5)", () => {
+  it("imports BulkBarGroup and looks up exactly the \"modules\", \"addToEach\" and \"currentEvents\" ids from the shared catalog via groupById (step-10 review: groupById replaces the six local findGroup copies)", () => {
     expect(code).toMatch(/import\s*\{\s*BulkBarGroup\s*\}\s*from\s*["']\.\/BulkBarGroup["']/);
     expect(code).toMatch(/groupById\(\s*["']modules["']\s*\)/);
     expect(code).toMatch(/groupById\(\s*["']addToEach["']\s*\)/);
+    expect(code).toMatch(/groupById\(\s*["']currentEvents["']\s*\)/);
   });
 
-  it("renders exactly two <BulkBarGroup> instances", () => {
+  it("renders exactly three <BulkBarGroup> instances (D7: this canary moved from two to three)", () => {
     const matches = [...code.matchAll(/<BulkBarGroup\b/g)];
-    expect(matches.length).toBe(2);
+    expect(matches.length).toBe(3);
   });
 
-  it("threads facts and groupsState as bare identifiers into both instances - never an inline arrow function", () => {
+  it("threads facts and groupsState as bare identifiers into all three instances - never an inline arrow function", () => {
     // The same hazard D4/trap-1 names for ModulesView's own render sites
     // (askAiSelection.wiring.test.ts:113 slices a tag with indexOf(">",
     // start); an arrow prop's own `>` would truncate that slice) applies
     // here too, one level down.
     const openTags = [...code.matchAll(/<BulkBarGroup group=\{[^}]+\}[^>]*>/g)];
-    expect(openTags.length).toBe(2);
+    expect(openTags.length).toBe(3);
     for (const [tag] of openTags) {
       expect(tag).toMatch(/facts=\{facts\}/);
       expect(tag).toMatch(/state=\{groupsState\}/);
       expect(tag).not.toMatch(/=\{\s*\([^)]*\)\s*=>/);
     }
+  });
+});
+
+describe("the currentEvents group (D5/D6/D8): a NEW sibling group, rendered after addToEach closes", () => {
+  it("SABOTAGE TARGET: the <BulkBarGroup group={CURRENT_EVENTS_GROUP}> tag starts strictly after addToEach's own closing </BulkBarGroup>", () => {
+    // D8's second trap: a group inserted BETWEEN "modules" and "addToEach"
+    // would land inside the two slices the tests above take from a group's
+    // open tag to the first </BulkBarGroup> that follows it, corrupting
+    // assertions unrelated to this feature. Pinning the ORDER, not just
+    // presence, is what would have caught that.
+    const addToEachStart = code.indexOf("<BulkBarGroup group={ADD_TO_EACH_GROUP}");
+    expect(addToEachStart, "addToEach group tag not found").toBeGreaterThan(-1);
+    const addToEachClose = code.indexOf("</BulkBarGroup>", addToEachStart);
+    expect(addToEachClose, "addToEach has no closing tag").toBeGreaterThan(-1);
+    const currentEventsStart = code.indexOf("<BulkBarGroup group={CURRENT_EVENTS_GROUP}");
+    expect(currentEventsStart, "currentEvents group tag not found").toBeGreaterThan(-1);
+    expect(currentEventsStart, "currentEvents must render after addToEach's own closing tag").toBeGreaterThan(addToEachClose);
+  });
+
+  it('SABOTAGE TARGET: the currentEvents group passes announceBusy={false} - its own busy state is the shared opBusy, not an independent signal', () => {
+    const start = code.indexOf("<BulkBarGroup group={CURRENT_EVENTS_GROUP}");
+    expect(start, "currentEvents group tag not found").toBeGreaterThan(-1);
+    const tagEnd = code.indexOf(">", start);
+    const tagText = code.slice(start, tagEnd + 1);
+    expect(tagText, "currentEvents must pass announceBusy={false}").toMatch(/announceBusy=\{false\}/);
+    expect(tagText, "currentEvents's runtime busy must be the bare opBusy identifier, never OR-ed").toMatch(/runtime=\{currentEventsRuntime\}/);
+  });
+
+  it("SABOTAGE TARGET: currentEventsRuntime.busy is the bare opBusy identifier, never OR-ed with a group-owned signal", () => {
+    const start = code.indexOf("const currentEventsRuntime");
+    expect(start, "currentEventsRuntime declaration not found").toBeGreaterThan(-1);
+    const end = code.indexOf("};", start);
+    const block = code.slice(start, end);
+    expect(block, "currentEventsRuntime.busy must be exactly opBusy").toMatch(/busy:\s*opBusy\s*,/);
+    expect(block, "currentEventsRuntime.busy must not be OR-ed with anything").not.toMatch(/opBusy\s*\|\|/);
+  });
+
+  it("SABOTAGE TARGET: useCurrentEventsAssignments is never called from this file - it is called once, from ModulesView", () => {
+    expect(code).not.toMatch(/useCurrentEventsAssignments\(/);
+  });
+
+  it("SABOTAGE TARGET: the three currentEvents props are declared REQUIRED (no `?`) on BulkModulesSectionProps, so omitting one fails tsc", () => {
+    const start = code.indexOf("export interface BulkModulesSectionProps");
+    expect(start, "BulkModulesSectionProps interface not found").toBeGreaterThan(-1);
+    const end = code.indexOf("\n}", start);
+    const block = code.slice(start, end);
+    expect(block).toMatch(/confirmCurrentEvents:\s*boolean;/);
+    expect(block).toMatch(/currentEventsLabel:\s*string;/);
+    expect(block).toMatch(/runCurrentEventsAssignments:\s*\(\)\s*=>\s*void;/);
+    // Negative check: none of the three is declared optional (a trailing `?`
+    // right before the colon would make the control silently unreachable if
+    // ever omitted at a call site rather than failing tsc - entry 328's own
+    // "hop that has shipped dead before").
+    expect(block).not.toMatch(/confirmCurrentEvents\?:/);
+    expect(block).not.toMatch(/currentEventsLabel\?:/);
+    expect(block).not.toMatch(/runCurrentEventsAssignments\?:/);
+  });
+
+  it("the button renders currentEventsLabel verbatim and wires onClick to runCurrentEventsAssignments, never a hand-written label", () => {
+    const start = code.indexOf("<BulkBarGroup group={CURRENT_EVENTS_GROUP}");
+    const end = code.indexOf("</BulkBarGroup>", start);
+    const block = code.slice(start, end);
+    expect(block).toMatch(/onClick=\{runCurrentEventsAssignments\}/);
+    expect(block).toContain("{currentEventsLabel}");
+  });
+
+  it("the armed banner is gated on confirmCurrentEvents and carries role=status aria-live=polite, mirroring the Delete banner's own treatment", () => {
+    const start = code.indexOf("<BulkBarGroup group={CURRENT_EVENTS_GROUP}");
+    const end = code.indexOf("</BulkBarGroup>", start);
+    const block = code.slice(start, end);
+    expect(block).toMatch(/confirmCurrentEvents\s*&&/);
+    expect(block).toMatch(/role="status"/);
+    expect(block).toMatch(/aria-live="polite"/);
   });
 });
 
@@ -366,6 +440,10 @@ describe("Step-10 finding 13 (confirmation review): groupById is called at RENDE
     const afterParams = code.slice(propsCloseIdx);
     expect(afterParams).toMatch(/const MODULES_GROUP = groupById\("modules"\);/);
     expect(afterParams).toMatch(/const ADD_TO_EACH_GROUP = groupById\("addToEach"\);/);
+    // D5: the third group's lookup follows the SAME render-time discipline -
+    // a module-scope call here would reproduce the exact import-time failure
+    // this whole describe block exists to prevent.
+    expect(afterParams).toMatch(/const CURRENT_EVENTS_GROUP = groupById\("currentEvents"\);/);
   });
 });
 

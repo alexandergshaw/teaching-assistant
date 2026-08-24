@@ -430,13 +430,14 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
 });
 
 describe("BULK_BAR_GROUPS shape", () => {
-  it("declares exactly the thirteen groups the acceptance criteria's D0 names", () => {
+  it("declares exactly the fourteen groups - the original D0 thirteen plus currentEvents (docs/current-events-assignment-from-modules-acceptance-criteria.md section 3b/D5)", () => {
     const ids = BULK_BAR_GROUPS.map((g) => g.id).sort();
     expect(ids).toEqual(
       [
         "addToEach",
         "askAi",
         "content",
+        "currentEvents",
         "download",
         "dueDates",
         "grading",
@@ -514,5 +515,97 @@ describe("AC11 (near-dead controls): the reported set is pinned by control id", 
     for (const id of EXPECTED_NEAR_DEAD_CONTROL_IDS) {
       expect(knownControlIds.has(id), `"${id}" is not a real control id in BULK_BAR_GROUPS`).toBe(true);
     }
+  });
+});
+
+// docs/current-events-assignment-from-modules-acceptance-criteria.md section
+// 3b/D5: a NEW group, sibling of "addToEach", not folded into it. Its one
+// control's `visible` is identical to the group's own `visible`, which makes
+// non-collapsibility a THEOREM of groupTier/mayCollapse rather than a fact
+// declared by hand - these tests pin that derivation, not just today's
+// output.
+describe("currentEvents group (docs/current-events-assignment-from-modules-acceptance-criteria.md section 3b/D5)", () => {
+  it("has exactly one control, moduleCurrentEventsButton, declared fan-out-write, persistKey null with a non-empty unpersistedReason", () => {
+    const group = findGroup("currentEvents");
+    expect(group.controls.map((c) => c.id)).toEqual(["moduleCurrentEventsButton"]);
+    const control = group.controls[0];
+    expect(control.tier).toBe("fan-out-write");
+    expect(control.persistKey).toBeNull();
+    expect(control.unpersistedReason ?? "").not.toBe("");
+  });
+
+  it("groupTier is fan-out-write whenever the group is visible, at any module count", () => {
+    const group = findGroup("currentEvents");
+    expect(groupTier(group, baseFacts({ moduleCount: 1 }))).toBe("fan-out-write");
+    expect(groupTier(group, baseFacts({ moduleCount: 5 }))).toBe("fan-out-write");
+  });
+
+  it("has a non-null, non-empty consequenceTag stating plainly what one click does (I5)", () => {
+    const group = findGroup("currentEvents");
+    expect(group.consequenceTag).not.toBeNull();
+    expect((group.consequenceTag ?? "").trim()).not.toBe("");
+  });
+
+  it("THEOREM, not a declaration: mayCollapse is false under every fact combination that renders the group, because its one control is visible whenever the group is", () => {
+    const group = findGroup("currentEvents");
+    const sweep: BulkBarFacts[] = [
+      baseFacts({ moduleCount: 1 }),
+      baseFacts({ moduleCount: 2, itemCount: 5 }),
+      baseFacts({ moduleCount: 10, bulkAddType: "Quiz" }),
+      baseFacts({ moduleCount: 1, coverageScanned: true, coveredCount: 3, creatableGapsCount: 2 }),
+      baseFacts({ moduleCount: 1, generationKindsCount: 10, offersDeck: true, offersScript: true, offersIntroDiscussion: true }),
+    ];
+    for (const facts of sweep) {
+      expect(mayCollapse(group, facts)).toBe(false);
+    }
+  });
+
+  it("disclosure:true but defaultOpen is moot - groupOpen returns true regardless of persistence, since mayCollapse never lets the persisted/default branches run", () => {
+    const group = findGroup("currentEvents");
+    const facts = baseFacts({ moduleCount: 1 });
+    expect(groupOpen(group, facts, idleRuntime, false)).toBe(true);
+    expect(groupOpen(group, facts, idleRuntime, undefined)).toBe(true);
+  });
+
+  // Sabotage: temporarily downgrade the control's own declared tier and
+  // confirm the group's derived tier AND mayCollapse both flip - proving the
+  // "THEOREM" test above is actually exercising groupTier/mayCollapse's
+  // reduction, not a hardcoded false this suite would never notice going
+  // stale. try/finally guards the shared BULK_BAR_GROUPS singleton per this
+  // file's own established technique (docs/REGRESSION.md entry 329's lesson:
+  // groupById/findControl hand back references into ONE shared module-level
+  // array, so a mid-test throw here would corrupt the catalog for every
+  // later test in this run).
+  it("sabotage: downgrading the control's tier to read-only makes the group collapsible, and restoring it makes it uncollapsible again", () => {
+    const control = findControl("moduleCurrentEventsButton");
+    const original = control.tier;
+    expect(original).toBe("fan-out-write");
+    try {
+      control.tier = "read-only";
+      const group = findGroup("currentEvents");
+      expect(groupTier(group, baseFacts({ moduleCount: 1 }))).toBe("read-only");
+      expect(mayCollapse(group, baseFacts({ moduleCount: 1 }))).toBe(true);
+    } finally {
+      control.tier = original;
+    }
+    const group = findGroup("currentEvents");
+    expect(groupTier(group, baseFacts({ moduleCount: 1 }))).toBe("fan-out-write");
+    expect(mayCollapse(group, baseFacts({ moduleCount: 1 }))).toBe(false);
+  });
+
+  // Sabotage: emptying the group's consequenceTag must trip I5 in
+  // auditGroupModel - proving the presence test above is pinned to a real
+  // invariant, not merely today's string.
+  it("sabotage: emptying the group's consequenceTag trips auditGroupModel's I5, and restoring it clears the violation", () => {
+    const group = findGroup("currentEvents");
+    const original = group.consequenceTag;
+    try {
+      group.consequenceTag = "";
+      const violations = auditGroupModel();
+      expect(violations.some((v) => v.startsWith("I5:") && v.includes("currentEvents"))).toBe(true);
+    } finally {
+      group.consequenceTag = original;
+    }
+    expect(auditGroupModel()).toEqual([]);
   });
 });

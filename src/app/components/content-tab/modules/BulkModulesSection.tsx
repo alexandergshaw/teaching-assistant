@@ -9,13 +9,16 @@ import { BulkBarGroup } from "./BulkBarGroup";
 import { groupById, type BulkBarFacts, type BulkBarGroupRuntime } from "./bulkBarGroups";
 import type { BulkBarGroupsApi } from "./useBulkBarGroups";
 
-// This section owns exactly two of the bulk bar's thirteen top-level groups
-// (docs/bulk-bar-reorganization-acceptance-criteria.md section 3b/D1/D5):
-// "modules" (Publish/Unpublish/Delete on whole modules) and "addToEach" (the
-// "Add to each" flow). The wrappers live HERE, never in ModulesView.tsx -
-// that keeps ModulesView's six section render tags byte-identical, which is
-// what saves visualizerCoverage.wiring.test.ts and askAiSelection.wiring.
-// test.ts (D5's own reasoning).
+// This section owns exactly three of the bulk bar's fourteen top-level
+// groups (docs/bulk-bar-reorganization-acceptance-criteria.md section
+// 3b/D1/D5, and docs/current-events-assignment-from-modules-acceptance-
+// criteria.md section 3b/D5 for the third): "modules" (Publish/Unpublish/
+// Delete on whole modules), "addToEach" (the "Add to each" flow), and
+// "currentEvents" (the one-click per-module current-events-assignment
+// fan-out). The wrappers live HERE, never in ModulesView.tsx - that keeps
+// ModulesView's six section render tags byte-identical, which is what saves
+// visualizerCoverage.wiring.test.ts and askAiSelection.wiring.test.ts (D5's
+// own reasoning).
 //
 // Step-10 finding (review round): the six section files each carried their
 // own near-identical `findGroup` copy - three different error message
@@ -123,6 +126,17 @@ export interface BulkModulesSectionProps {
   bulkAiPrompt: string;
   setBulkAiPrompt: (v: string) => void;
   bulkAiGenerate: () => void;
+  /** Current-events research assignment, one per selected module
+   * (docs/current-events-assignment-from-modules-acceptance-criteria.md,
+   * section 3b/D5-D8). All three come from useCurrentEventsAssignments,
+   * called ONCE by ModulesView (never from this section, which can be
+   * conditionally unmounted) and threaded down here as bare identifiers.
+   * REQUIRED, not optional (entry 328's "the hop that has shipped dead in
+   * this repo before"): omitting any of the three fails tsc rather than
+   * silently rendering a control whose click does nothing. */
+  confirmCurrentEvents: boolean;
+  currentEventsLabel: string;
+  runCurrentEventsAssignments: () => void;
 }
 
 // Bulk bar section shown when one or more modules are selected: whole-module
@@ -173,12 +187,23 @@ export function BulkModulesSection({
   bulkAiPrompt,
   setBulkAiPrompt,
   bulkAiGenerate,
+  confirmCurrentEvents,
+  currentEventsLabel,
+  runCurrentEventsAssignments,
 }: BulkModulesSectionProps) {
   // Called here, inside the component body, not at module scope (step-10
   // finding 13, confirmation review) - see this file's own header comment
   // for the failure mode that placement used to reproduce.
   const MODULES_GROUP = groupById("modules");
   const ADD_TO_EACH_GROUP = groupById("addToEach");
+  // D5: a NEW sibling group, not folded into "addToEach" - see
+  // bulkBarGroupCatalog.ts's own currentEventsGroup comment for why (a
+  // differently-shaped fan-out write needs its own consequenceTag, and
+  // addToEach's own controls are "one coherent flow, never usable
+  // independently", which this zero-input one-click generator is not part
+  // of). Looked up here for the same module-scope-vs-render-time reason as
+  // the two groups above.
+  const CURRENT_EVENTS_GROUP = groupById("currentEvents");
   const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
   // GATED AS ONE UNIT - same reasoning as BulkItemsSection: publish/delete
   // write to the selected modules directly, and "Add to each" (including its
@@ -202,6 +227,18 @@ export function BulkModulesSection({
   const addToEachRuntime: BulkBarGroupRuntime = {
     busy: bulkAiBusy,
     armed: false,
+    hasUnavailableReason: false,
+  };
+  // This group's own busy state is the shared opBusy (bare, never OR-ed with
+  // anything else - useCurrentEventsAssignments.ts's own header comment
+  // states it holds no busy flag of its own for exactly this reason), the
+  // same choice "modules" above makes and for the same reason: two rounds of
+  // the previous chunk were spent fixing multiple live regions announcing
+  // one shared fact, and announceBusy={false} below keeps the bar-level
+  // region the single announcer.
+  const currentEventsRuntime: BulkBarGroupRuntime = {
+    busy: opBusy,
+    armed: confirmCurrentEvents,
     hasUnavailableReason: false,
   };
   // This group keeps <BulkBarGroup>'s default announceBusy (unlike
@@ -598,6 +635,24 @@ export function BulkModulesSection({
                 : "Fills the description/body above with generated HTML; review it, then Add."}
             </span>
           </section>
+        )}
+      </BulkBarGroup>
+
+      {/* D8's second trap: this group renders strictly AFTER addToEach's own
+          closing tag above, never between "modules" and "addToEach" - two
+          tests above slice from a group's own open tag to the first
+          </BulkBarGroup> that follows it, so a group inserted between them
+          would land inside those slices and fail assertions unrelated to
+          this feature. announceBusy={false}: see currentEventsRuntime's own
+          comment above for why this group never opens a second live region. */}
+      <BulkBarGroup group={CURRENT_EVENTS_GROUP} facts={facts} runtime={currentEventsRuntime} state={groupsState} announceBusy={false}>
+        <Button variant="contained" size="small" disabled={opBusy} onClick={runCurrentEventsAssignments}>
+          {currentEventsLabel}
+        </Button>
+        {confirmCurrentEvents && (
+          <span role="status" aria-live="polite" className={styles.bulkHint}>
+            Click again to create these assignments in Canvas, one per selected module.
+          </span>
         )}
       </BulkBarGroup>
     </>

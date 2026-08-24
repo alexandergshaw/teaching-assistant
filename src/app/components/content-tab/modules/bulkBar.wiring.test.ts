@@ -90,7 +90,7 @@ const DECLARED_SECTION_ORDER: ReadonlyArray<{ tag: string; groupIds: readonly Bu
   { tag: "<DownloadSelectionSection", groupIds: ["download"] },
   { tag: "<AskAiSelectionSection", groupIds: ["askAi"] },
   { tag: "<VisualizerCoverageSection", groupIds: ["visualizerCoverage"] },
-  { tag: "<BulkModulesSection", groupIds: ["modules", "addToEach"] },
+  { tag: "<BulkModulesSection", groupIds: ["modules", "addToEach", "currentEvents"] },
   { tag: "<BulkItemsSection", groupIds: ["items", "content", "dueDates", "grading", "submissionType", "move"] },
 ];
 

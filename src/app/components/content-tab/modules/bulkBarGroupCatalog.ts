@@ -309,6 +309,54 @@ const addToEachGroup: BulkBarGroupDef = {
   ],
 };
 
+/**
+ * BulkModulesSection's "Current events assignment" group - docs/current-
+ * events-assignment-from-modules-acceptance-criteria.md section 3b/D5. A NEW
+ * sibling of `addToEach`, not folded into it, for four reasons D5 states:
+ * `consequenceTag` is per-group and `addToEach`'s already names exactly one
+ * write; `addToEach`'s own `bulkAddPoints`/`bulkAddRubricId` state outlives
+ * its field's visibility (the hidden-input hazard W3 names); `addToEach`'s
+ * own comment says its members are "one coherent flow, never usable
+ * independently", which a zero-input one-click generator is not part of; and
+ * canary hygiene - a separate group moves the group-count canary and leaves
+ * the `modules + addToEach = 15` visible-control canary alone, so nothing
+ * would otherwise prove the capability landed in the right bucket.
+ *
+ * The button is named "Create one per module", not "Current events" (W4):
+ * the Generate row already has a "Current events" button that produces an
+ * INSTRUCTOR research report at reversible-write tier, and two
+ * near-identically named controls with opposite consequences in one bar is
+ * exactly what this group model exists to prevent. The GROUP carries the
+ * noun; the BUTTON carries the verb.
+ *
+ * This group's tier is fan-out-write BY DERIVATION, not by declaration: its
+ * one control is visible whenever the group itself is (`visible` is
+ * identical on both), so `groupTier` always resolves to that control's own
+ * "fan-out-write" tier, which makes `mayCollapse` always false and
+ * `groupOpen` return true at its very first line - see bulkBarGroups.test.ts
+ * for the test that pins this as a theorem, not a declaration.
+ */
+const currentEventsGroup: BulkBarGroupDef = {
+  id: "currentEvents",
+  label: "Current events assignment",
+  disclosure: true,
+  defaultOpen: true,
+  consequenceTag:
+    "One click creates a new graded Canvas assignment inside EVERY selected module - one per module, each with its own generated prompt.",
+  visible: (f) => f.moduleCount > 0,
+  controls: [
+    {
+      id: "moduleCurrentEventsButton",
+      kind: "button",
+      label: "Create one per module",
+      tier: "fan-out-write",
+      visible: (f) => f.moduleCount > 0,
+      persistKey: null,
+      unpersistedReason: ONE_CLICK_UNPERSISTED,
+    },
+  ],
+};
+
 /** GenerateFromSelectionSection - never writes to CANVAS by itself (its own
  * header comment: "some kinds can be posted afterward as a separate,
  * explicit step"), but every kind button IS a reversible-write, not
@@ -487,12 +535,17 @@ const headGroup: BulkBarGroupDef = {
 };
 
 /**
- * All thirteen groups, in the bar's rendered order. ORDER HERE IS NOT THE
+ * All fourteen groups, in the bar's rendered order. ORDER HERE IS NOT THE
  * BAR'S DOM ORDER CONTRACT - `visualizerCoverage.wiring.test.ts:56` and
  * `askAiSelection.wiring.test.ts:46-76` pin the six section components'
  * render order directly in `ModulesView.tsx` (D2's correction: there are
  * two such ordering tests, not one), and this file has no opinion on that;
  * it is simply a convenient, readable order for the data itself.
+ * `currentEventsGroup` is placed immediately after `addToEachGroup` per
+ * docs/current-events-assignment-from-modules-acceptance-criteria.md
+ * section 3b/D8's second trap: two existing tests slice from a group's
+ * open tag to the first `</BulkBarGroup>`, so a group inserted BETWEEN
+ * `addToEach` and another group would land inside those slices.
  */
 export const BULK_BAR_GROUPS: BulkBarGroupDef[] = [
   headGroup,
@@ -504,6 +557,7 @@ export const BULK_BAR_GROUPS: BulkBarGroupDef[] = [
   moveGroup,
   modulesGroup,
   addToEachGroup,
+  currentEventsGroup,
   generateGroup,
   downloadGroup,
   askAiGroup,

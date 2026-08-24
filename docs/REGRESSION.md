@@ -30461,3 +30461,378 @@ FINALLY, NOTHING IN THIS CHUNK HAS BEEN RUN AGAINST A REAL CANVAS COURSE. No
 bulk write was issued; check 4's "nothing was rewired" proof is a mechanical
 comparison of source text and element counts against `f20f470`, not an observed
 request.
+
+## 330. A current-events research assignment created in EVERY selected module at once, with the title as the idempotency key and the deadline computed in the browser
+
+Acceptance criteria:
+`docs/current-events-assignment-from-modules-acceptance-criteria.md` - section
+3b is the FINAL contract and wins wherever it disagrees with sections 0-5 above
+it; section 0b re-anchored the whole chunk onto entry 329's group model, and
+D7b and D10 were added AFTER the step-10 review rather than folded away. Chunk
+B of the "two module-anchored graded items" group; chunk A is entry 328. The
+ask, verbatim (2026-08-23): "i need a button on the modules view that creates
+assignment(s) and puts them in the selected modules that has students research
+current events that relate to that module and submit a few paragraphs as their
+submission". A new bulk-bar group, "Current events assignment", whose single
+button "Create one per module" arms on the first click and on the second
+creates ONE unpublished, 20-point, `online_text_entry` Canvas assignment inside
+EVERY checkmarked module, each with its own generated prompt about that
+module's own topic. Eight agents in two waves, then a reviewer, a fixer round,
+a regression pass and one further fix.
+
+1. **ONE LLM CALL PER MODULE, NOT ONE CALL RETURNING N - AND THE ARGUMENT IS
+   FAILURE ISOLATION AND TRUNCATION, NOT COST.** `Promise.allSettled` over one
+   generator call per request. A single call returning an array of N prompts
+   fails as a UNIT: one HTTP 500, one rate-limit, one malformed envelope kills
+   all N at once and leaves NO per-module failure to report - precisely the
+   collapsed-error defect AC15 exists to prevent. Truncation points the same
+   way: fifteen modules at 300-500 words each is 7,000-10,000 output tokens
+   against the sibling generator's `maxOutputTokens: 1024`, and a truncated
+   array either fails to parse (all N lost) or silently drops its tail. Cost
+   was examined and is NOT the reason - only a few hundred shared input tokens
+   are duplicated per call, output tokens dominate identically either way, and
+   latency is a wash because `allSettled` costs one call's latency rather than
+   N. `requireOwner()` and the course-row resolve each run EXACTLY ONCE no
+   matter how many modules are selected; only the model calls fan out. TWO
+   PHASES, never interleaved: generate all concurrently, then write to Canvas
+   strictly sequentially (Canvas throttles), so `generationFailed` and
+   `canvasFailed` stay two genuinely separate lists all the way to the note.
+
+2. **THE TITLE IS CODE-DERIVED BECAUSE IT IS THE IDEMPOTENCY KEY, AND THAT IS A
+   DELIBERATE DIVERGENCE FROM THE SIBLING GENERATOR.** Entry 328's
+   `intro-discussion` takes the MODEL'S own title. This one cannot, and the
+   reason is mechanical: `currentEventsAssignmentTitle` is a pure function of
+   the module name alone, and the plan pre-checks that exact string, case- and
+   trim-insensitively, against the already-loaded module tree before spending
+   anything. A model-authored title differs between runs, so the pre-check
+   would never match and every re-run would duplicate every module that had
+   already succeeded. The generator therefore returns ONLY a body, never a
+   title. The match rule is entry 244's `planBulkModuleCreation` rule applied
+   one scope down - module names there, module ITEM titles here - and the
+   pre-check runs BEFORE any model call, so a re-run against a fully-created
+   selection costs zero tokens and zero writes and reports "N already existed
+   and were skipped". `planPostSteps` deliberately does NOT dedupe, and that
+   stays correct THERE: a post follows a preview and one explicit target, so
+   posting twice is a deliberate act. This control has no preview at all and
+   writes N objects per click.
+
+3. **THE DEADLINE IS COMPUTED IN THE BROWSER, BECAUSE `createGradable` APPENDS
+   `due_at` VERBATIM.** The AC's own reuse table named the wrong write function
+   (W1): `addContentToModuleDetailed` reaches `createGradable`, NOT
+   `createAssignment` - and the difference is load-bearing, because
+   `createAssignment` re-parses with `new Date(a.dueAt).toISOString()`
+   server-side while `createGradable` appends `assignment[due_at]` with no
+   re-normalisation whatever. `dueDateForWeek` builds a LOCAL wall-clock Date
+   with `setHours`; `.toISOString()` encodes the CALLING PROCESS's offset;
+   Vercel runs UTC. A server-side computation would therefore have shipped
+   every instructor's "11:59 PM" to Canvas as 23:59Z - four to eight hours
+   early across the Americas, with nothing in tsc, eslint, vitest or
+   `next build` able to see it, because every value involved stays a
+   syntactically valid Date and a syntactically valid ISO string throughout.
+   That defect shipped once already (entry 328 check 4). The fix here is
+   structural rather than vigilant: `readCourseDeadlineContextAction` returns
+   the two RAW column strings and nothing derived, and
+   `current-events-assignment-plan.ts` - a client-only pure leaf called only
+   from the browser hook - holds the ONE `.toISOString()` in the chunk.
+
+4. **THE SERVER ACTION IS STRUCTURALLY INCAPABLE OF COMPUTING A DEADLINE, AND
+   THE GUARD STRIPS COMMENTS AND CARRIES CANARIES IN BOTH DIRECTIONS.** Three
+   separate structures, not one: (a) `CurrentEventsGenerationRequest` carries
+   `moduleId`, `moduleName` and `itemTitles` and NO date field, so the
+   generation action is never told which week anything is and cannot compute
+   what it is never told; (b) the file directly imports neither
+   `@/lib/assignment-due-rule` nor the plan module; (c) the guard test reads
+   the file's own TEXT, runs it through a `stripComments` pass FIRST, and
+   asserts zero `.toISOString(` and zero of either import in what is left. The
+   comment-stripping is what makes the guard usable at all, because the file's
+   header comment NAMES all three forbidden strings while explaining why they
+   are forbidden - an unstripped scan flags the explanation. So the guard
+   carries a CANARY IN THE OTHER DIRECTION too: the RAW source must still
+   mention them, which fails loudly if someone deletes the rationale or if
+   `stripComments` quietly stops stripping. The wiring test generalises the
+   same scan across every `current-events-assignment*` action file found on
+   disk, with a positive canary asserting the plan module DOES contain
+   `.toISOString(` so the sweep cannot pass by finding nothing.
+
+5. **A NEW FOURTEENTH GROUP, NOT A MEMBER OF `addToEach`, AND ITS
+   NON-COLLAPSIBILITY IS A THEOREM RATHER THAN A DECLARATION.** Four reasons,
+   all properties of entry 329's model: `consequenceTag` is per-GROUP and
+   `addToEach`'s already names exactly one write; `addToEach`'s
+   `bulkAddPoints`/`bulkAddRubricId` state outlives its field's visibility, so
+   a user could get 50-point assignments from a field they cannot see;
+   `addToEach`'s own comment says its members are "one coherent flow, never
+   usable independently", which a zero-input one-click generator is not part
+   of; and canary hygiene - a separate group moves the 13->14 group canary and
+   leaves `modules + addToEach = 15` alone, whereas folding it in would have
+   moved the 15, moved no group canary, and proved nothing about which bucket
+   the capability landed in. The group's one control declares
+   `tier: "fan-out-write"` and its `visible` predicate is IDENTICAL to the
+   group's own, so `groupTier` always reduces to fan-out and `mayCollapse`
+   always returns false - derived, never declared. Pinned with two in-place
+   sabotages: downgrade the tier and the group becomes collapsible; empty the
+   `consequenceTag` and `auditGroupModel` raises I5 naming `currentEvents`.
+   Both wrapped in `try/finally`, because `groupById` hands back references
+   into ONE shared module-level array and a mid-test throw would corrupt the
+   catalog for every later test in the run.
+
+6. **THE BUTTON IS "Create one per module", NOT "Current events", AND THAT
+   RENAME IS A COLLISION FIX.** The Generate row already ships a
+   `Current events` button producing an INSTRUCTOR research report at
+   reversible-write tier. Two near-identically named controls in one bar with
+   opposite consequences - one writes a report you read, one writes a graded
+   assignment into every selected module - is exactly what entry 329's group
+   model exists to prevent. Resolved by splitting the words across the two
+   levels the model already has: the GROUP carries the noun, the BUTTON carries
+   the verb, and the `consequenceTag` states plainly that one click creates a
+   new graded assignment inside EVERY selected module.
+
+7. **THE CONFIRM STEP IS KEPT, THE PREVIEW MODAL IS NOT, AND THE ASYMMETRY WITH
+   ENTRY 328 IS DELIBERATE.** Chunk A creates ONE item an instructor will want
+   to read and edit first, so it gets a preview modal. This creates N routine,
+   structurally identical items, and N preview modals would be N confirmations
+   of one decision - so AC3 spends the clicks on arming instead. The arming is
+   `confirmArming.ts` reused byte-for-byte from `bulkDeleteModules`: the armed
+   state records WHAT IT WAS ARMED FOR, so any selection change invalidates it
+   by construction, with no effect to write and nothing to remember to reset -
+   which matters, because this repo's eslint rejects setState reached
+   synchronously from an effect.
+
+8. **THE MODEL IS FORBIDDEN TO STATE A DATE, A POINT VALUE OR A LENGTH, AND
+   THAT IS ENTRY 328'S DRIFT DEFECT ANSWERED AT THE SOURCE.** Entry 328's
+   shipped defect was two copies of one deadline drifting apart. Here the model
+   is never handed a date or a point value AT ALL - the request type has no
+   field for either (check 4) - so there is only ever one copy, authored by
+   `buildCurrentEventsRequirementsBlock` and appended after the model's prose.
+   That block returns PLAIN TEXT with no angle brackets, and the emptiness is
+   structural: `descriptionToHtml` takes a PASS-THROUGH branch whenever its
+   input matches `/<\/?[a-z][\s\S]*>/i` and injects the text as raw HTML, so
+   two contracts hang off one regex and the generator strips `<` and `>`
+   unconditionally as a backstop. When no deadline could be computed the whole
+   due-date SENTENCE is omitted rather than rendered as "This assignment is due
+   ." - which is why `describeCurrentEventsDeadline` returns an empty string
+   rather than a placeholder phrase.
+
+9. **THE RESTATEMENT STRIPPER WAS NARROWED BY THE REVIEW, AND IT NOW HAS
+   FALSE-POSITIVE TESTS AS WELL AS TRUE-POSITIVE ONES.** The first cut deleted
+   any line containing a grading word. That is wrong for this generator
+   specifically, because its paragraphs are FULL LINES rather than short
+   fragments, and the prompt legitimately uses those words in non-grading
+   senses. Verified against the real regexes, the first cut deleted "Identify 3
+   points of connection between the news item and the module", "Submit your
+   response along with the date the article was published" and "Your submitted
+   work should be based on an article published by a reputable outlet" - the
+   second of which is close to verbatim what the prompt ASKS THE MODEL TO
+   WRITE, so the backstop protecting against a duplicated deadline was silently
+   deleting AC9's mandatory citation requirement. Narrowed: a points figure
+   followed by a preposition is enumeration language and never a grading
+   statement, and a due/deadline/submit word only triggers deletion when it
+   CO-OCCURS with a real date signal - a weekday, a month name, a numeric date
+   or a clock time. The suite now pins BOTH directions, which it did not
+   before: four true positives and an explicit false-positive test asserting
+   the non-grading uses survive.
+
+10. **A GRAMMAR BUG IN STUDENT-FACING TEXT THAT NO TEST COULD SEE, AND THE TEST
+    THAT NOW SEES IT.** `CURRENT_EVENTS_RECENCY_WINDOW` was
+    `"the last 30 days"` with no leading preposition, interpolated at two sites
+    that need one - so the assignment description posted to Canvas on the
+    embedded provider read "Find one recent, real news item or development the
+    last 30 days that relates to this module's topic." BOTH test fixtures used
+    grammatical values ("in the last 30 days", "since the start of this term"),
+    a shape production never emitted - this repo's recorded
+    fixtures-must-match-emitted-shape failure, exactly. Fixed by moving the
+    preposition INTO the constant so all three consumers agree. The interesting
+    part is the test: two of the three new tests substitute the same live
+    binding on both sides of the assertion and are therefore tautological with
+    respect to the constant's own wording - they catch a consumer mis-threading
+    the value but NOT a regression in the text. The fixer noticed that
+    mid-work and added a fourth, structural test asserting the constant itself
+    matches `/^(?:in|since|from|during|over|throughout)\b/i`, which is the one
+    that actually pins the fact. Its sabotage confirmed the asymmetry: reverting
+    the constant reddened only the structural test.
+
+11. **THREE NO-DEADLINE REASONS, NOT TWO, AND THEY REACH THE INSTRUCTOR
+    SEPARATELY.** AC7 named two; there are three (W2). A course row that fails
+    to RESOLVE AT ALL is not "no start date" and sends the instructor to a
+    different screen. `readCourseDeadlineContextAction` returns `{ error }` for
+    that case and a normal success shape with a null start date for the other -
+    two distinct SHAPES, not one nullable field. None of the three aborts the
+    entry: the assignment is still created, just with no due date, and the note
+    names the module and the reason. The final note keeps FOUR outcomes apart -
+    created, skipped-existing, generation-failed, Canvas-failed - and appends
+    `describeOrphans`' clause VERBATIM. `kind` is "error" when anything failed
+    or when the orphan clause is non-empty; a re-run that is entirely skips is
+    a SUCCESS, because nothing needs fixing.
+
+12. **POINTS ARE A FIXED 20, AFTER BOTH OF AC8'S ALTERNATIVES WERE REJECTED AS
+    DEFECTIVE.** "Reuse `bulkAddPoints`" reads hook state whose FIELD is
+    conditionally unrendered - type 50, switch the Add-to-each type to Page,
+    the field vanishes, click here and get 50-point assignments from an
+    invisible input. "Otherwise null" ships a graded assignment worth zero.
+    `CURRENT_EVENTS_POINTS = 20` follows the `INTRO_DISCUSSION_POINTS`
+    precedent, and it is why AC5 is satisfied VACUOUSLY: this chunk adds no
+    textbox, select or checkbox at all, only a button. D7's claim that
+    `bulkActionsPersistence`'s `declared.length === 1` is the inverse canary
+    here is WRONG, and D7b says so in the AC rather than deleting it: that test
+    scopes to a fixed group-id set which does not include `currentEvents`, so
+    it can never see this group. Correctly unmoved; proves nothing here. What
+    DOES cover the new control is `auditGroupModel`'s I6, globally.
+
+13. **THE THREADING IS COMPILE-ENFORCED AND THE HOOK IS CALLED EXACTLY ONCE.**
+    The three new props are REQUIRED on `BulkModulesSectionProps` - no `?` - so
+    omitting one fails `tsc` rather than rendering a button whose click does
+    nothing, which is the hop that has shipped dead in this repo before (entry
+    328 check 11). A test pins the ABSENCE of the `?` as well as the presence
+    of the three. The hook is called ONCE, from `ModulesView`, never from the
+    section - a section renders only while a module is selected and can be
+    conditionally unmounted; a hook called from the view cannot be. It declares
+    exactly ONE `useState` and holds no busy flag of its own, driving the
+    caller's `setOpBusy` instead, so entry 329's one-fact-one-live-region rule
+    holds BY CONSTRUCTION: the group passes `announceBusy={false}` and its
+    runtime `busy` is the BARE `opBusy`, never OR-ed - the exact defective
+    expression 329's second fixer round removed.
+
+14. **THE EXPORT-ONLY SILENT DEAD CLICK, FOUND BY THE REGRESSION PASS AND FIXED
+    BEFORE THE PUSH.** The group's `visible` predicate reads
+    `facts.moduleCount`, which counts BOTH live and export module keys, while
+    the hook operates on `liveModuleIds`. So on a selection containing only
+    export-sourced modules the button rendered, the first click armed with the
+    nonsensical label "Create 0 assignments?", and the second click returned
+    before `setOpBusy` with NO NOTE AT ALL. That is worse than the pre-existing
+    D9 hazard it sits beside - `Add` and `Delete` at least fail loudly at
+    Canvas, whereas this said nothing whatever. Fixed at the ARMING step, which
+    is strictly earlier and costs one click instead of two: the first click now
+    refuses with "This action needs live Canvas modules to create assignments
+    in, and the current selection has none." The commit-time path keeps the
+    same SHARED note constant as defence in depth even though arming makes it
+    unreachable in normal flow - a silent `return` is the defect class this
+    loop exists to catch, and stating the reason on a should-not-run path costs
+    nothing. The underlying source-discrimination gap is NOT fixed: that is
+    D9's pre-existing, repo-wide hazard, identical for `Add` and `Delete`.
+
+15. **THE FOUR CANARIES D7 SAID TO MOVE MOVED AND THE SIX IT SAID NOT TO TOUCH
+    DID NOT - VERIFIED BY `git diff -U0`, NOT BY CLAIM.** Across the five
+    touched model and test files there are exactly ELEVEN deleted lines: four
+    doc-comment lines, five `describe(`/`it(` TITLE strings, and two authorized
+    canary values. Not one assertion was deleted or weakened. MOVED: the group
+    id list 13->14; `BulkModulesSection`'s "exactly two `<BulkBarGroup>`" ->
+    three, in both places it is counted; and `DECLARED_SECTION_ORDER`'s entry.
+    NOT MOVED, each still a real proof: `modules + addToEach = 15` visible
+    controls (this is what proves the control landed in a THIRD group rather
+    than being smuggled into `addToEach`); BulkItemsSection's 29; the four
+    `nearDead` ids; `declared.length === 1`;
+    `HEADLESS_SAFE_STEP_TYPES.size === 154`; and chunk A's kind lists.
+
+16. **REGRESSION SWEEP, EACH READ IN THE CURRENT SOURCE.** (a) `bulkAddToModules`
+    is untouched - `useBulkModuleActions.ts` is not in `git status --short` at
+    all, still 431 lines. This chunk reused its SHAPE and its `describeOrphans`
+    helper by import, and reused `addContentToModuleDetailed` and
+    `confirmArming.ts` unchanged; it rewrote none of them. (b) Entry 329's
+    group model is additive: the diff deletes four comment lines and nothing
+    else, so no existing control's tier, visibility, key or tag changed and no
+    existing group's DERIVED tier or `mayCollapse` can have moved. (c) Entry
+    236's "re-running creates nothing" doctrine and entry 244's match rule are
+    both honoured, one scope down; `bulk-module-plan.ts` itself is not in the
+    diff. (d) `moduleContentActions.ts`, `BulkBarGroup.tsx`,
+    `useBulkBarGroups.ts`, `buildBulkBarFacts.ts` and `page.module.css` are
+    none of them in the diff, so entry 329's CSS work, tolerant resolver and
+    `open`-gating guard are untouched. (e) Every chunk-A file is absent, so
+    entries 310-316 and 320-328's generation and post paths are untouched BY
+    CONSTRUCTION - the boundary section 0 drew between the two chunks held: B
+    needed nothing from A. (f) `ModulesView.tsx`'s six section render tags are
+    otherwise byte-identical, so the two ordering wiring tests are unaffected.
+
+17. **THE GATES, WITH REAL NUMBERS - AND THE BASELINE WAS RE-MEASURED FROM HEAD
+    RATHER THAN CARRIED FORWARD.** `npx vitest run`: **639 test files, 12767
+    tests, ALL passing.** The pre-chunk baseline was measured directly from
+    `1123a69` in a detached worktree rather than trusted from the AC: **634
+    files / 12654 tests**. The file count CLOSES - `git ls-tree -r 1123a69`
+    returns exactly 634 tracked `src/**/*.test.ts` and there are exactly 5 new
+    untracked ones. The test count closes too, measured per file: the five new
+    files report 94 alone, the three modified test files added 8 + 7 + 0, and
+    the final fixer round added 4 more. Of `bulkBarGroups.test.ts`'s +8, SEVEN
+    are new static `it(` blocks and the EIGHTH is DERIVED - an `it.each` over
+    the catalog itself gains one runtime case from the fourteenth group with
+    zero static change, the same shape entry 328 check 15 recorded, and the two
+    counts agreeing is itself proof the group landed in the catalog.
+    `npx tsc --noEmit`: clean, exit 0 - the gate that enforces the three
+    REQUIRED props. `npx eslint` over all touched files: exit 0, no warnings.
+    `next build`: "Compiled successfully"; the prerender tail fails locally
+    without Supabase keys, documented and expected, and it is the only gate
+    besides `use-server-exports.test.ts` that would catch a bad export from the
+    new `"use server"` file. `no-emojis.test.ts` green - never hand-rolled.
+    **`HEADLESS_SAFE_STEP_TYPES.size` DID NOT MOVE** - still 154, and
+    `src/lib/workflows/` is not in `git status --short`.
+
+18. **FILE SIZES - EVERY FILE UNDER THE 1000-LINE CEILING, AND ONE IS TWO LINES
+    FROM IT.** `ModulesView.tsx` **998**, up from 994 EVEN AFTER agent 1D's
+    dedicated extraction removed 40 prop lines into
+    `buildBulkModulesSectionProps.ts` - two imports, the hook-call block, the
+    props-build block and three threaded props consumed all of it and four
+    lines more. Also `BulkModulesSection.tsx` 660, `bulkBarGroups.ts` 589,
+    `bulkBarGroupCatalog.ts` 565, `current-events-assignment-generator.ts` 276,
+    `current-events-assignment.ts` 254, `useCurrentEventsAssignments.ts` 252,
+    `current-events-assignments.ts` 205, `current-events-assignment-plan.ts`
+    198, `useBulkModuleActions.ts` 431 (unchanged).
+
+**Limits.** NO CODE PATH IN THIS CHUNK HAS EVER BEEN RUN AGAINST A REAL CANVAS
+COURSE. No assignment has been created, no module item linked, no due date
+honoured or rejected, no `online_text_entry` submission accepted, no 20 points
+recorded. Every Canvas interaction is proven against mocked server actions
+only, and NO MODEL HAS EVER BEEN CALLED - every generator test stubs `callLlm`.
+NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - node-env, collecting only
+`src/**/*.test.ts` - and both touched UI files are `.tsx` client components.
+**EVERY UI, ARIA AND KEYBOARD CLAIM IN THIS ENTRY IS SOURCE-TEXT ONLY**, read
+with `readFileSync` and matched with regexes, one step weaker than exercising
+markup - as entries 323 through 329 recorded for the same technique. Nothing
+proves the button paints, that it is operable by keyboard, that the armed label
+change is announced, that the armed banner's `role="status"` region is spoken
+once rather than twice, or that a fourteenth group does not push the bar past
+its own 60vh scroll ceiling.
+AN ORPHANED ASSIGNMENT WILL DUPLICATE ON RE-RUN, AND THAT IS INHERENT TO THE
+IDEMPOTENCY KEY CHOSEN. The key is a module-ITEM title, checked against the
+loaded module tree. An `"orphaned"` result means the assignment WAS created in
+Canvas and only the module link failed - so no module item carries the title,
+the pre-check cannot see it, and the next run creates a second assignment with
+the same name. The run reports the orphan by name and content id so a human can
+find it, and deliberately does not auto-delete it (entry 258 check 11's
+reasoning applies unchanged), but nothing prevents the duplicate. A
+course-scoped assignment-title query would close this and was not built.
+THE `assignment-due-rule` GUARD IS A DIRECT-IMPORT SCAN, AND THE LIBRARY IS
+REACHABLE TRANSITIVELY. `current-events-assignments.ts` imports
+`@/lib/current-events-assignment`, which itself imports `assignment-due-rule.ts`
+for its weekday label arrays - so the module IS in the action's dependency
+graph. The real guarantee is narrower and should be cited as such: the request
+type has no date field, and the rule-PARSING functions are never imported into
+any server file, directly or transitively. Import-graph isolation is NOT what
+is being claimed; the file's own header says so, but a reader skimming the test
+titles could conclude otherwise.
+THE MODEL'S COMPLIANCE IS NOT PROVABLE, ONLY ITS INPUTS AND ONE FILTER. The
+narrowed stripper now has both true-positive AND false-positive tests, which is
+more than entry 328's had - but it cannot catch a PARAPHRASE. "Turn this in
+before the weekend wraps up", "keep it brief", "this one is worth a good chunk
+of your grade" all survive every pattern and can contradict the code-authored
+requirements block appended immediately below. The narrowing cuts both ways:
+excluding a points figure followed by a preposition preserves "3 points of
+connection" and would equally preserve a genuine "20 points for this
+assignment".
+THE MATCH RULE IS DUPLICATED, NOT SHARED. The plan re-implements
+`planBulkModuleCreation`'s `trim().toLowerCase()` comparison inline rather than
+importing it, and its doc comment claims the two are "byte-for-byte" the same.
+They are today, checked by hand. No test pins the agreement in either
+direction, so the claim can rot silently - the same overstated-cross-reference
+shape entry 329's Limits recorded for `useBulkItemActions.ts`.
+`ModulesView.tsx` SITS AT 998 OF 1000, AND THAT IS A PRECONDITION ON THE NEXT
+CHUNK, NOT A NOTE. Net headroom went from six lines to two, despite a dedicated
+extraction agent. Compressing comments to buy room is what section 0b
+explicitly forbids. **The next chunk that touches this file must open its wave
+1 with a real extraction** - the render block from `<BulkModulesSection>`
+through `<BulkItemsSection>`, or the hook-call cluster. D10 says so in the AC.
+FINALLY, A MEASUREMENT TRAP FOR WHOEVER RE-BASELINES NEXT. The pre-chunk
+numbers in check 17 came from a detached `git worktree` at `1123a69`, and that
+worktree reported TWO failures in `visualizer-selection.test.ts` which are NOT
+a defect at HEAD: `core.autocrlf` gives a fresh worktree CRLF line endings (46
+CR bytes in the first 3000 of that file, against 0 in the main tree), and that
+guard splits on `"\n"` and compares a line to `"}"`, so every line carries a
+trailing `\r` and the closing-brace search fails. The technique is sound and
+does not disturb the working tree, but any SOURCE-TEXT guard measured this way
+must be read with that artefact in mind.

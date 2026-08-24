@@ -99,9 +99,27 @@ export function startFrameRateSampling(
     }
     const el = video;
     const samples: number[] = [];
-    const windowStart = performance.now();
+    // Anchor the window on the FIRST FRAME's own timestamp, not on a separate
+    // performance.now() read taken at registration. Two reasons, one
+    // correctness and one testability:
+    //
+    // Correctness: registration-to-first-frame latency is not sampling time.
+    // A camera that takes 500ms to deliver its first frame used to get only
+    // 2500ms of real frames, and the shortfall read as a LOWER measured rate
+    // rather than as a shorter window - a spurious "warn" on a healthy camera.
+    // Anchoring here means the window always covers durationMs of actual
+    // frames, and a camera too slow to fill it settles via unknownTimer as
+    // genuinely unknown instead of reporting a wrong number confidently.
+    //
+    // Testability: rVFC timestamps come from the caller, so a second clock
+    // read here put the window on a DIFFERENT timeline from the samples and
+    // made the measured rate depend on real elapsed wall-clock time. That is
+    // what made avatar-script.test.ts flake only under full-suite load - see
+    // that file's note above the sampler tests.
+    let windowStart: number | null = null;
     const onFrame: VideoFrameRequestCallback = (now) => {
       if (cancelled) return;
+      if (windowStart === null) windowStart = now;
       samples.push(now);
       if (now - windowStart < durationMs) {
         activeRvfcHandle = el.requestVideoFrameCallback(onFrame);

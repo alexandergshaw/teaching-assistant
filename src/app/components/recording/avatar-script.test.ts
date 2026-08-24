@@ -323,7 +323,63 @@ function fakeTrack(frameRate?: number) {
   return { track, end: () => endedListener?.() };
 }
 
+// Frame timestamps for the sampler tests, as INTEGER milliseconds from an
+// explicit base rather than from performance.now().
+//
+// This is deliberate and load-bearing. These tests used to anchor on
+// `performance.now()` and space frames by `i * (1000 / fps)`. 1000/30 is not
+// exactly representable, and once the whole suite has been running for a
+// while performance.now() is large enough that the additions lose precision -
+// so a "30fps" stream measured out at 29.999999999999996, and
+// classifyAvatarFrameRate returns "ok" only at rate >= AVATAR_TARGET_FRAME_RATE.
+// The test sat exactly on that boundary, so a sub-picosecond float error
+// flipped it to "warn". It passed alone and failed under a full run, which is
+// the worst shape a test can have: it trains people to re-run until green.
+//
+// Integer stamps from base 0 are exact, so the measured rate is exact, and
+// `frames` chooses a count whose final stamp lands on a whole number of
+// milliseconds - which is what keeps the rate exact rather than merely close.
+// sampleWindow anchors on the first frame's own timestamp (see
+// frameRateSampler.ts), so no real clock enters the measurement at all.
+function frameStamps(fps: number, count: number, base = 0): number[] {
+  // Refuse a fractional base rather than trusting a comment to keep future
+  // callers off performance.now(). A whole-millisecond base keeps every stamp
+  // an exact integer, so `last - first` is exact and the measured rate is
+  // exact. A fractional base near 4e5 - which is what performance.now()
+  // returns once the suite has been running a while - is precisely what
+  // reintroduces the drift: the stamps stay valid-looking floats and only the
+  // final comparison against the classification boundary goes wrong.
+  if (!Number.isInteger(base)) {
+    throw new Error(
+      `frameStamps needs a whole-millisecond base, got ${base}. Do not anchor ` +
+        `frame timestamps on performance.now() - see the note above.`,
+    );
+  }
+  return Array.from({ length: count }, (_, i) => base + Math.round((i * 1000) / fps));
+}
+
 describe("frameRateSampler.startFrameRateSampling", () => {
+  it("frameStamps produces an exactly-representable rate (guards the tests below)", () => {
+    // If this ever goes red, the tests below are back on a float knife-edge
+    // and their pass/fail depends on how long the suite has been running.
+    for (const fps of [12, 30, 60]) {
+      const stamps = frameStamps(fps, 3 * fps + 1);
+      expect(stamps[stamps.length - 1] - stamps[0]).toBe(3000);
+      expect(avatarFrameRateFromSamples(stamps)).toBe(fps);
+      expect(stamps.every(Number.isInteger)).toBe(true);
+    }
+    // A fractional base is refused, not silently accepted. This is the shape
+    // of the original defect: performance.now() returns something like
+    // 403123.4567, and `base + i * (1000 / 30)` then rounds on every addition
+    // until a 30fps stream measures 29.999999999999996 and the inclusive
+    // "ok" boundary flips to "warn".
+    expect(() => frameStamps(30, 96, 403123.4567)).toThrow(/whole-millisecond base/);
+    // Proof the refusal is worth having, computed rather than asserted from
+    // memory: the float path really does miss the boundary at this magnitude.
+    const drifted = Array.from({ length: 96 }, (_, i) => 403123.4567 + i * (1000 / 30));
+    expect(avatarFrameRateFromSamples(drifted)).not.toBe(30);
+  });
+
   it("holds no state shared between two concurrent sessions (defect 1 regression)", () => {
     // The original bug: sampling state lived at the caller's level as
     // shared refs, so two overlapping measurements (e.g. a double-clicked
@@ -345,16 +401,18 @@ describe("frameRateSampler.startFrameRateSampling", () => {
       onUnknown: () => {},
     });
 
-    const start = performance.now();
-    // Session A: a slow ~12fps stream, past the sampling window.
-    for (let i = 0; i <= 40; i++) a.fire(start + i * (1000 / 12));
-    // Session B, interleaved with A above: a clean ~60fps stream.
-    for (let i = 0; i <= 190; i++) b.fire(start + i * (1000 / 60));
+    // Session A: a slow 12fps stream, past the sampling window.
+    for (const t of frameStamps(12, 41)) a.fire(t);
+    // Session B, interleaved with A above: a clean 60fps stream.
+    for (const t of frameStamps(60, 191)) b.fire(t);
 
     expect(verdictsA).toHaveLength(1);
     expect(verdictsB).toHaveLength(1);
-    expect(verdictsA[0].rate).toBeCloseTo(12, 0);
-    expect(verdictsB[0].rate).toBeCloseTo(60, 0);
+    // Exact, not toBeCloseTo: the stamps are integers from an explicit base,
+    // so a drifting figure here means the sampler mixed in another clock
+    // rather than that the arithmetic is merely imprecise.
+    expect(verdictsA[0].rate).toBe(12);
+    expect(verdictsB[0].rate).toBe(60);
     // Both sessions armed a real (non-fake-timer) mid-take recheck once
     // their first window settled - cancel to release those real timers
     // rather than leaking them past the end of this test.
@@ -369,10 +427,14 @@ describe("frameRateSampler.startFrameRateSampling", () => {
       onVerdict: (x) => verdicts.push(x),
       onUnknown: () => {},
     });
-    const start = performance.now();
-    for (let i = 0; i <= 95; i++) v.fire(start + i * (1000 / 30));
+    for (const t of frameStamps(30, 96)) v.fire(t);
     expect(verdicts.length).toBeGreaterThanOrEqual(1);
     expect(verdicts[0].source).toBe("measured");
+    // Exactly AVATAR_TARGET_FRAME_RATE, which is the interesting case: "ok"
+    // requires rate >= target, so this pins the inclusive boundary end to end
+    // rather than only in classifyAvatarFrameRate's own unit test. It can only
+    // be asserted honestly because the stamps make the rate exactly 30.
+    expect(verdicts[0].rate).toBe(AVATAR_TARGET_FRAME_RATE);
     expect(verdicts[0].status).toBe("ok");
     cancel(); // release the real mid-take recheck timer this armed
   });
@@ -454,17 +516,20 @@ describe("frameRateSampler.startFrameRateSampling", () => {
         onUnknown: () => {},
       });
 
-      const start = performance.now();
-      // First window: a clean 30fps stream.
-      for (let i = 0; i <= 95; i++) v.fire(start + i * (1000 / 30));
+      // First window: a clean 30fps stream. Integer stamps, same reason as
+      // frameStamps' own note - an exact-30 rate is the only way "ok" can be
+      // asserted at the inclusive boundary without depending on float luck.
+      for (const t of frameStamps(30, 96)) v.fire(t);
       expect(verdicts).toHaveLength(1);
+      expect(verdicts[0].rate).toBe(AVATAR_TARGET_FRAME_RATE);
       expect(verdicts[0].status).toBe("ok");
 
       vi.advanceTimersByTime(AVATAR_FRAME_RATE_RECHECK_DELAY_MS);
 
-      // Second window: the camera has degraded to ~12fps.
-      const secondStart = performance.now();
-      for (let i = 0; i <= 40; i++) v.fire(secondStart + i * (1000 / 12));
+      // Second window: the camera has degraded to 12fps. Each sampleWindow
+      // anchors on its OWN first frame, so this window needs no offset from
+      // the first - and asserting that is part of the point.
+      for (const t of frameStamps(12, 41)) v.fire(t);
 
       expect(verdicts).toHaveLength(2);
       expect(verdicts[1].status).toBe("block");

@@ -73,6 +73,7 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     coverageScanned: false,
     coveredCount: 0,
     creatableGapsCount: 0,
+    carryReviewOpen: false,
     ...overrides,
   };
 }
@@ -104,25 +105,26 @@ function toSectionExpr(catalogExpr: string): string {
 }
 
 describe("BulkModulesSection wraps its three owned groups in BulkBarGroup (D1/D5)", () => {
-  it("imports BulkBarGroup and looks up exactly the \"modules\", \"addToEach\" and \"currentEvents\" ids from the shared catalog via groupById (step-10 review: groupById replaces the six local findGroup copies)", () => {
+  it("imports BulkBarGroup and looks up exactly the \"modules\", \"addToEach\", \"currentEvents\" and \"carryPattern\" ids from the shared catalog via groupById (step-10 review: groupById replaces the six local findGroup copies)", () => {
     expect(code).toMatch(/import\s*\{\s*BulkBarGroup\s*\}\s*from\s*["']\.\/BulkBarGroup["']/);
     expect(code).toMatch(/groupById\(\s*["']modules["']\s*\)/);
     expect(code).toMatch(/groupById\(\s*["']addToEach["']\s*\)/);
     expect(code).toMatch(/groupById\(\s*["']currentEvents["']\s*\)/);
+    expect(code).toMatch(/groupById\(\s*["']carryPattern["']\s*\)/);
   });
 
-  it("renders exactly three <BulkBarGroup> instances (D7: this canary moved from two to three)", () => {
+  it("renders exactly four <BulkBarGroup> instances (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D: this canary moved from three to four)", () => {
     const matches = [...code.matchAll(/<BulkBarGroup\b/g)];
-    expect(matches.length).toBe(3);
+    expect(matches.length).toBe(4);
   });
 
-  it("threads facts and groupsState as bare identifiers into all three instances - never an inline arrow function", () => {
+  it("threads facts and groupsState as bare identifiers into all four instances - never an inline arrow function", () => {
     // The same hazard D4/trap-1 names for ModulesView's own render sites
     // (askAiSelection.wiring.test.ts:113 slices a tag with indexOf(">",
     // start); an arrow prop's own `>` would truncate that slice) applies
     // here too, one level down.
     const openTags = [...code.matchAll(/<BulkBarGroup group=\{[^}]+\}[^>]*>/g)];
-    expect(openTags.length).toBe(3);
+    expect(openTags.length).toBe(4);
     for (const [tag] of openTags) {
       expect(tag).toMatch(/facts=\{facts\}/);
       expect(tag).toMatch(/state=\{groupsState\}/);
@@ -444,6 +446,101 @@ describe("Step-10 finding 13 (confirmation review): groupById is called at RENDE
     // a module-scope call here would reproduce the exact import-time failure
     // this whole describe block exists to prevent.
     expect(afterParams).toMatch(/const CURRENT_EVENTS_GROUP = groupById\("currentEvents"\);/);
+    // Chunk D: the fourth group's lookup follows the same discipline too.
+    expect(afterParams).toMatch(/const CARRY_PATTERN_GROUP = groupById\("carryPattern"\);/);
+  });
+});
+
+describe("the carryPattern group (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D, D14/D17/D19): a NEW sibling group, rendered after currentEvents closes", () => {
+  it("SABOTAGE TARGET: the <BulkBarGroup group={CARRY_PATTERN_GROUP}> tag starts strictly after currentEvents's own closing </BulkBarGroup>", () => {
+    // Same ordering trap D8 names for currentEvents itself: a group inserted
+    // between two existing ones would land inside an earlier slice-from-
+    // open-tag-to-first-</BulkBarGroup> and corrupt an assertion unrelated
+    // to this feature. Pinning ORDER, not just presence, is what would catch
+    // that.
+    const currentEventsStart = code.indexOf("<BulkBarGroup group={CURRENT_EVENTS_GROUP}");
+    expect(currentEventsStart, "currentEvents group tag not found").toBeGreaterThan(-1);
+    const currentEventsClose = code.indexOf("</BulkBarGroup>", currentEventsStart);
+    expect(currentEventsClose, "currentEvents has no closing tag").toBeGreaterThan(-1);
+    const carryPatternStart = code.indexOf("<BulkBarGroup group={CARRY_PATTERN_GROUP}");
+    expect(carryPatternStart, "carryPattern group tag not found").toBeGreaterThan(-1);
+    expect(carryPatternStart, "carryPattern must render after currentEvents's own closing tag").toBeGreaterThan(currentEventsClose);
+  });
+
+  it("SABOTAGE TARGET: the six carryPattern props are declared REQUIRED (no `?`) on BulkModulesSectionProps, so omitting one fails tsc", () => {
+    const start = code.indexOf("export interface BulkModulesSectionProps");
+    expect(start, "BulkModulesSectionProps interface not found").toBeGreaterThan(-1);
+    const end = code.indexOf("\n}", start);
+    const block = code.slice(start, end);
+    expect(block).toMatch(/carryTemplateOptions:\s*CarryTemplateOption\[\];/);
+    expect(block).toMatch(/carrySourceModuleId:\s*number \| null;/);
+    expect(block).toMatch(/onCarrySourceModuleIdChange:\s*\(id:\s*number\)\s*=>\s*void;/);
+    expect(block).toMatch(/carryReviewBusy:\s*boolean;/);
+    expect(block).toMatch(/onReviewCarryPattern:\s*\(\)\s*=>\s*void;/);
+    expect(block).toMatch(/onCarryReviewTrigger:\s*\(trigger:\s*HTMLElement\)\s*=>\s*void;/);
+    // Negative check: none of the six is declared optional - entry 328's own
+    // "hop that has shipped dead before".
+    expect(block).not.toMatch(/carryTemplateOptions\?:/);
+    expect(block).not.toMatch(/carrySourceModuleId\?:/);
+    expect(block).not.toMatch(/onCarrySourceModuleIdChange\?:/);
+    expect(block).not.toMatch(/carryReviewBusy\?:/);
+    expect(block).not.toMatch(/onReviewCarryPattern\?:/);
+    expect(block).not.toMatch(/onCarryReviewTrigger\?:/);
+  });
+
+  it("useCarryModulePattern is never called from this file - it is called once, from useModulesViewOrchestration", () => {
+    expect(code).not.toMatch(/useCarryModulePattern\(/);
+  });
+
+  it("the Review button captures the click target via onCarryReviewTrigger before calling onReviewCarryPattern", () => {
+    const start = code.indexOf("<BulkBarGroup group={CARRY_PATTERN_GROUP}");
+    const end = code.indexOf("</BulkBarGroup>", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = code.slice(start, end);
+    expect(block).toMatch(/onCarryReviewTrigger\(e\.currentTarget\)/);
+    expect(block).toMatch(/onReviewCarryPattern\(\)/);
+  });
+
+  it("the template select is driven by carrySourceModuleId/onCarrySourceModuleIdChange and lists carryTemplateOptions", () => {
+    const start = code.indexOf("<BulkBarGroup group={CARRY_PATTERN_GROUP}");
+    const end = code.indexOf("</BulkBarGroup>", start);
+    const block = code.slice(start, end);
+    expect(block).toMatch(/value=\{carrySourceModuleId \?\? ""\}/);
+    expect(block).toMatch(/onCarrySourceModuleIdChange\(Number\(e\.target\.value\)\)/);
+    expect(block).toMatch(/carryTemplateOptions\.map/);
+  });
+
+  // Step-10 review, C3: this hint's own "order" claim ("Carries the template
+  // module's item types, order, points...") is only true if the Assignment
+  // write path actually threads position/indent through - it did not, as of
+  // section 5/D10's own header comment ("Threading position/indent through
+  // that action would need a signature change... reported as a follow-up").
+  // A sibling fixer landed that change in the same review round
+  // (canvas-modules.ts's createCourseAssignmentAction 5th argument,
+  // `moduleItemPlacement`), so the claim is verified TRUE here against the
+  // real source rather than assumed - see this suite's own header for why a
+  // source-text check is what a node suite can do. If a future change ever
+  // drops this threading, this test fails FIRST, before the copy silently
+  // goes back to overstating what Apply does.
+  it("C3: verifies the hint's 'order' claim against carry-module-pattern.ts's actual Assignment write path, rather than assuming it", () => {
+    const carryPatternPath = join(process.cwd(), "src/app/actions/carry-module-pattern.ts");
+    const carryCode = stripComments(readFileSync(carryPatternPath, "utf8"));
+    const start = carryCode.indexOf("async function applyAssignment");
+    expect(start, "applyAssignment not found in carry-module-pattern.ts").toBeGreaterThan(-1);
+    const end = carryCode.indexOf("\n}", start);
+    expect(end, "applyAssignment has no closing brace").toBeGreaterThan(start);
+    const block = carryCode.slice(start, end);
+    expect(block).toMatch(/createCourseAssignmentAction/);
+    expect(block).toMatch(/position:\s*sourceItem\.position/);
+    expect(block).toMatch(/indent:\s*sourceItem\.indent/);
+
+    // Given the fact above holds, the bar's own copy is entitled to claim
+    // order carries - confirm it still does.
+    const hintStart = code.indexOf("<BulkBarGroup group={CARRY_PATTERN_GROUP}");
+    const hintEnd = code.indexOf("</BulkBarGroup>", hintStart);
+    const hintBlock = code.slice(hintStart, hintEnd);
+    expect(hintBlock).toMatch(/\border\b/i);
   });
 });
 

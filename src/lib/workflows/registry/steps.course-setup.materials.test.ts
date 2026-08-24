@@ -30,6 +30,7 @@ import {
   createQuizQuestionAction,
   bulkUpdateAction,
   createModuleItemAction,
+  createCourseAssignmentAction,
   getFinalizedSyllabusAction,
   generateCourseSyllabusAction,
   createFinalizedSyllabusAction,
@@ -224,6 +225,50 @@ describe("starter-materials step - selected gate (Start-Here-module output famil
 
     expect(listCourseHubAction).toHaveBeenCalled();
     expect(result.summary.kind).toBe("list");
+  });
+});
+
+// Chunk D step-11 regression: createCourseAssignmentAction can succeed at
+// creating the GitHub Sign Up assignment but fail to link it into the
+// module (a success-shaped `{ addedToModule: false, linkError }`, no
+// `error` key). This step used to hard-code "; GitHub Sign Up added" onto
+// the course's summary line whenever `includeGithub` was set, with no check
+// at all on the result beyond `"error" in ghAssignment`. THE REGRESSION
+// test: the summary line must name the orphan by id and must never claim
+// "GitHub Sign Up added" when the link failed.
+describe("starter-materials step - GitHub Sign Up link-failure regression", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reports the orphan by id on the course summary line instead of 'GitHub Sign Up added'", async () => {
+    const tile = baseCourse({ syllabusId: "existing-syllabus" });
+    mockHappyPath(tile);
+    vi.mocked(getFinalizedSyllabusAction).mockResolvedValue({
+      syllabus: { ...savedSyllabusMeta, id: "existing-syllabus", content: "ZG9jeCBjb250ZW50" },
+    });
+    vi.mocked(createCourseAssignmentAction).mockResolvedValue({
+      id: 88,
+      name: "GitHub Sign Up",
+      htmlUrl: "https://canvas.example.edu/courses/1/assignments/88",
+      addedToModule: false,
+      linkError: "Module not found",
+    });
+
+    const result = await step.run(
+      { courses: tile.canvasUrl!, includeGithub: "1" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(createCourseAssignmentAction).toHaveBeenCalledTimes(1);
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      const line = result.summary.items[0];
+      expect(line).toContain("88");
+      expect(line).toContain("Module not found");
+      expect(line).not.toContain("GitHub Sign Up added");
+    }
   });
 });
 

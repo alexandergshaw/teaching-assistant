@@ -117,22 +117,97 @@ export async function createModuleItemAction(
   }
 }
 
-/** Create a Canvas assignment and optionally add it to a module. */
+/**
+ * Create a Canvas assignment and optionally add it to a module.
+ *
+ * C5 fix (docs/REGRESSION.md, chunk D step-10): create and link are now two
+ * separate try/catch scopes, not one. Previously a link failure AFTER a
+ * successful create threw up to this function's own outer catch, which
+ * discarded the newly-created assignment's id and returned a bare
+ * `{ error }` - indistinguishable from "nothing was created". Canvas HAD
+ * accepted the assignment; only the module link failed. Every caller that
+ * matches its idempotency check against module ITEM titles (this repo's
+ * carry-module-pattern.ts among them) could never see that orphan on a
+ * re-run and created a second copy of the same assignment, forever - Canvas
+ * has no undo for that duplicate. The fix: a link failure is now reported as
+ * `addedToModule: false` plus a `linkError` message, WITH the created
+ * assignment's real `id`/`name`/`htmlUrl` intact, so a caller that wants to
+ * (carry-module-pattern.ts does) can surface it as an "orphaned" outcome a
+ * human can find in Canvas - the same doctrine this repo already applies to
+ * every other create-then-link seam (moduleContentActions.ts's
+ * ModuleContentResult). Deliberately NOT auto-deleted on a link failure -
+ * same reasoning as every other orphan in this app (entry 258 check 11):
+ * a rollback delete is a second, unattended destructive write stacked on the
+ * first failure, can itself fail, and throws away real content with no
+ * chance for a human to reconsider.
+ *
+ * `addedToModule` keeps its original `boolean` type, so every existing
+ * caller keeps COMPILING unchanged - but `linkError` on an otherwise
+ * success-shaped return is new, and step-11's own regression pass found
+ * this was NOT behaviourally inert: five pre-existing callers tested only
+ * `"error" in result` and so started reporting success on an orphaned
+ * assignment the moment this function stopped folding a link failure into
+ * `{ error }`. Every one of those five (useAddModuleItem.ts,
+ * lms-generation-writers.ts's LIVE_CANVAS_WRITERS.createAssignment ->
+ * commit-execute.ts, steps.assignments-creation.ts,
+ * steps.lms-integrations.ts, steps.course-setup.materials.ts) was fixed in
+ * the same round to check `linkError`/`addedToModule` and surface the
+ * orphan's id rather than reporting a bare success - see each file's own
+ * comment at its call site. `useNewAssignmentForm.ts` was the only caller
+ * that already read `addedToModule` at all, but even it only varied its
+ * SUCCESS wording on it and still reported `kind: "success"` regardless -
+ * it was fixed too (assignmentCreateOutcome.ts's shared helper, used by it
+ * and useAddModuleItem.ts, is now the one place this invariant lives for
+ * both UI callers).
+ *
+ * C3 fix: `moduleItemPlacement` threads `position`/`indent` into the same
+ * module-item link call `createModuleItemAction`'s own callers already rely
+ * on (module-items.ts's `createModuleItem` only sends the Canvas
+ * `module_item[position]`/`module_item[indent]` params when
+ * `typeof x === "number"`), so an absent placement behaves exactly as before
+ * - Canvas appends to the end of the module with no indent. This is a new
+ * optional 5th parameter, appended after `acronym`, so no existing caller's
+ * call site needs to change.
+ */
 export async function createCourseAssignmentAction(
   courseUrl: string,
   fields: NewAssignment,
   moduleId: number | null,
-  acronym?: string
-): Promise<{ id: number; name: string; htmlUrl: string; addedToModule: boolean } | { error: string }> {
+  acronym?: string,
+  moduleItemPlacement?: { position?: number; indent?: number }
+): Promise<
+  | { id: number; name: string; htmlUrl: string; addedToModule: boolean; linkError?: string }
+  | { error: string }
+> {
   try {
     await requireOwner();
     const created = await createAssignment(courseUrl, fields, acronym);
     let addedToModule = false;
+    let linkError: string | undefined;
     if (moduleId !== null) {
-      await createModuleItem(courseUrl, moduleId, { type: "Assignment", contentId: created.id, title: created.name }, acronym);
-      addedToModule = true;
+      try {
+        await createModuleItem(
+          courseUrl,
+          moduleId,
+          {
+            type: "Assignment",
+            contentId: created.id,
+            title: created.name,
+            position: moduleItemPlacement?.position,
+            indent: moduleItemPlacement?.indent,
+          },
+          acronym
+        );
+        addedToModule = true;
+      } catch (err) {
+        // The assignment above already exists in Canvas - only the module
+        // link failed. Report it WITH the id rather than letting this
+        // propagate to the outer catch, which would discard it (see this
+        // function's own header comment).
+        linkError = err instanceof Error ? err.message : "Could not add the assignment to the module.";
+      }
     }
-    return { ...created, addedToModule };
+    return linkError !== undefined ? { ...created, addedToModule, linkError } : { ...created, addedToModule };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not create the assignment." };
   }

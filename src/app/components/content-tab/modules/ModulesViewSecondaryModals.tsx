@@ -12,9 +12,11 @@ import { OfficeEditorModal } from "../OfficeEditorModal";
 import { RenameModulesModal } from "../RenameModulesModal";
 import { RubricBuilderModal } from "../RubricBuilderModal";
 import { SchedulerModal } from "../SchedulerModal";
+import { CarryModulePatternReviewModal } from "./CarryModulePatternReviewModal";
 import { CartridgeToCanvasModal } from "./CartridgeToCanvasModal";
 import type { UseBulkItemActionsReturn } from "./useBulkItemActions";
 import type { UseBulkModuleActionsReturn } from "./useBulkModuleActions";
+import type { UseCarryModulePatternReturn } from "./useCarryModulePattern";
 import type { UseCartridgeToCanvasReturn } from "./useCartridgeToCanvas";
 import type { UseModulesViewDialogsReturn } from "./useModulesViewDialogs";
 import type { UseRubricsReturn } from "./useRubrics";
@@ -40,6 +42,13 @@ export interface ModulesViewSecondaryModalsProps {
   cartridgeUpload: UseCartridgeToCanvasReturn;
   cartridgeUploadTriggerRef: RefObject<HTMLElement | null>;
   onCloseCartridgeUpload: () => void;
+  /** "Carry pattern forward" review modal (docs/carry-module-pattern-
+   * forward-acceptance-criteria.md, chunk D, D19) - renders at ModulesView
+   * root, same as every other modal in this file, rather than inside the
+   * bulk bar that opens it (see CarryModulePatternReviewModal.tsx's own
+   * header comment for why the bar cannot host it). */
+  carryModulePattern: UseCarryModulePatternReturn;
+  carryReviewTriggerRef: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -67,9 +76,29 @@ export function ModulesViewSecondaryModals({
   cartridgeUpload,
   cartridgeUploadTriggerRef,
   onCloseCartridgeUpload,
+  carryModulePattern,
+  carryReviewTriggerRef,
 }: ModulesViewSecondaryModalsProps) {
   return (
     <>
+      {carryModulePattern.reviewVisible && carryModulePattern.template && carryModulePattern.plan && (
+        <CarryModulePatternReviewModal
+          template={carryModulePattern.template}
+          plan={carryModulePattern.plan}
+          reviewRows={carryModulePattern.reviewRows}
+          checkpointRefusedItems={carryModulePattern.checkpointRefusedItems}
+          excludedItemIds={carryModulePattern.excludedItemIds}
+          onToggleExcludedItem={carryModulePattern.onToggleExcludedItem}
+          authoredPatterns={carryModulePattern.authoredPatterns}
+          onAuthoredPatternChange={carryModulePattern.onAuthoredPatternChange}
+          applyBusy={carryModulePattern.applyBusy}
+          onApply={carryModulePattern.onApply}
+          onClose={carryModulePattern.closeReview}
+          restoreFocusRef={carryReviewTriggerRef}
+          fallbackFocusRefs={[dialogs.headerFallbackRef]}
+        />
+      )}
+
       {cartridgeUploadOpen && (
         <CartridgeToCanvasModal
           cartridge={cartridgeUpload}

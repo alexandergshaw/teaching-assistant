@@ -60,6 +60,7 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     coverageScanned: false,
     coveredCount: 0,
     creatableGapsCount: 0,
+    carryReviewOpen: false,
     ...overrides,
   };
 }
@@ -406,6 +407,7 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
     baseFacts({ itemCount: 1, coverageScanned: false }),
     baseFacts({ itemCount: 1, coverageScanned: true, coveredCount: 3 }),
     baseFacts({ itemCount: 1, coverageScanned: true, creatableGapsCount: 2 }),
+    baseFacts({ moduleCount: 1, carryReviewOpen: true }),
   ];
 
   function observedMaxTier(group: BulkBarGroupDef): ConsequenceTier {
@@ -430,12 +432,13 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
 });
 
 describe("BULK_BAR_GROUPS shape", () => {
-  it("declares exactly the fourteen groups - the original D0 thirteen plus currentEvents (docs/current-events-assignment-from-modules-acceptance-criteria.md section 3b/D5)", () => {
+  it("declares exactly the fifteen groups - the original D0 thirteen plus currentEvents (docs/current-events-assignment-from-modules-acceptance-criteria.md section 3b/D5) plus carryPattern (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D)", () => {
     const ids = BULK_BAR_GROUPS.map((g) => g.id).sort();
     expect(ids).toEqual(
       [
         "addToEach",
         "askAi",
+        "carryPattern",
         "content",
         "currentEvents",
         "download",
@@ -603,6 +606,125 @@ describe("currentEvents group (docs/current-events-assignment-from-modules-accep
       group.consequenceTag = "";
       const violations = auditGroupModel();
       expect(violations.some((v) => v.startsWith("I5:") && v.includes("currentEvents"))).toBe(true);
+    } finally {
+      group.consequenceTag = original;
+    }
+    expect(auditGroupModel()).toEqual([]);
+  });
+});
+
+// docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D, D17 -
+// THE POINT OF THIS GROUP. Unlike currentEvents (whose one control is
+// visible whenever the group is, so groupTier is unconditionally
+// fan-out-write), carryApplyButton lives inside a review modal and is
+// visible ONLY while that modal is open (facts.carryReviewOpen). So the
+// group's derived tier is a genuine function of a fact that toggles at
+// runtime, the same shape visualizerCoverage's own tests already pin for a
+// scan - proven here as a THEOREM over the real catalog, not asserted as a
+// declaration, with an in-place sabotage that reproduces D17's exact hazard
+// (declaring the apply control invisible to the derivation) and confirms the
+// real declaration is what prevents it.
+describe("carryPattern group (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D, D14/D17/D19)", () => {
+  it("has exactly the three contracted controls with their contracted tiers", () => {
+    const group = findGroup("carryPattern");
+    expect(group.controls.map((c) => c.id)).toEqual([
+      "carryTemplateSelect",
+      "carryReviewButton",
+      "carryApplyButton",
+    ]);
+    expect(findControl("carryTemplateSelect").tier).toBe("read-only");
+    expect(findControl("carryReviewButton").tier).toBe("read-only");
+    expect(findControl("carryApplyButton").tier).toBe("fan-out-write");
+  });
+
+  it("every control declares persistKey: null with a non-empty unpersistedReason (I6)", () => {
+    const group = findGroup("carryPattern");
+    for (const control of group.controls) {
+      expect(control.persistKey).toBeNull();
+      expect(control.unpersistedReason ?? "").not.toBe("");
+    }
+  });
+
+  it("carryTemplateSelect's unpersistedReason cites the postModuleChoice/AC10 precedent by name, not a reinvented rationale", () => {
+    const reason = findControl("carryTemplateSelect").unpersistedReason ?? "";
+    expect(reason).toMatch(/postModuleChoice/);
+    expect(reason).toMatch(/AC10/);
+    expect(reason).toMatch(/current/i);
+    expect(reason).toMatch(/selection/i);
+  });
+
+  it("THEOREM: groupTier is read-only while carryReviewOpen is false, and fan-out-write once it is true, at any module count", () => {
+    const group = findGroup("carryPattern");
+    expect(groupTier(group, baseFacts({ moduleCount: 1, carryReviewOpen: false }))).toBe("read-only");
+    expect(groupTier(group, baseFacts({ moduleCount: 5, carryReviewOpen: false }))).toBe("read-only");
+    expect(groupTier(group, baseFacts({ moduleCount: 1, carryReviewOpen: true }))).toBe("fan-out-write");
+    expect(groupTier(group, baseFacts({ moduleCount: 5, carryReviewOpen: true }))).toBe("fan-out-write");
+  });
+
+  it("THEOREM: mayCollapse is true while the review is closed and false once it is open", () => {
+    const group = findGroup("carryPattern");
+    expect(mayCollapse(group, baseFacts({ moduleCount: 1, carryReviewOpen: false }))).toBe(true);
+    expect(mayCollapse(group, baseFacts({ moduleCount: 1, carryReviewOpen: true }))).toBe(false);
+  });
+
+  it("has a non-null, non-empty consequenceTag naming the fan-out write (I5)", () => {
+    const group = findGroup("carryPattern");
+    expect(group.consequenceTag).not.toBeNull();
+    expect((group.consequenceTag ?? "").trim()).not.toBe("");
+  });
+
+  // Step-10 review, C11: the tag used to claim Apply performs "creating and,
+  // where offered, overwriting items" - no path offers an overwrite.
+  // carry-module-pattern.ts's apply action returns "overwrite-not-
+  // implemented" for an "overwrite" decision, and useCarryModulePattern.ts
+  // hardcodes onExisting: "skip", so nothing ever reaches an overwrite.
+  // Pin the FACT (no overwrite claim), never the exact sentence.
+  it("C11: the consequenceTag does not claim an overwrite capability that no path offers", () => {
+    const group = findGroup("carryPattern");
+    expect(group.consequenceTag ?? "").not.toMatch(/overwrit/i);
+  });
+
+  // SABOTAGE, in the shape docs/REGRESSION.md entry 330 check 5 describes:
+  // reproduce D17's exact hazard in place (declare the apply control
+  // invisible to the derivation, as if `visible: () => false` had shipped),
+  // confirm the group would then lie about its own safety (stays read-only
+  // and collapsible EVEN WHILE the review modal is genuinely open), then
+  // restore and confirm the real declaration does not have that hole.
+  // try/finally because groupById/findControl hand back references into ONE
+  // shared module-level array (BULK_BAR_GROUPS) and a mid-test throw would
+  // corrupt the catalog for every later test in this run.
+  it("SABOTAGE: an apply control invisible to the derivation makes the group lie about safety while the review is open, and the real declaration does not", () => {
+    const control = findControl("carryApplyButton");
+    const original = control.visible;
+    const openFacts = baseFacts({ moduleCount: 1, carryReviewOpen: true });
+    try {
+      control.visible = () => false;
+      const group = findGroup("carryPattern");
+      // The bug D17 warns about: even with the review genuinely open, the
+      // group derives read-only and stays collapsible, because its one
+      // fan-out-write control is (falsely) never a visible member.
+      expect(groupTier(group, openFacts)).toBe("read-only");
+      expect(mayCollapse(group, openFacts)).toBe(true);
+    } finally {
+      control.visible = original;
+    }
+    const group = findGroup("carryPattern");
+    expect(groupTier(group, openFacts)).toBe("fan-out-write");
+    expect(mayCollapse(group, openFacts)).toBe(false);
+  });
+
+  // Second sabotage, entry 330 check 5's other half: emptying the
+  // consequenceTag must trip I5 regardless of carryReviewOpen, since I5's
+  // own maxPossibleTier ignores visibility entirely and looks at every
+  // control's DECLARED tier - proving the tag requirement does not depend on
+  // the review modal happening to be open when the audit runs.
+  it("sabotage: emptying the group's consequenceTag trips auditGroupModel's I5, and restoring it clears the violation", () => {
+    const group = findGroup("carryPattern");
+    const original = group.consequenceTag;
+    try {
+      group.consequenceTag = "";
+      const violations = auditGroupModel();
+      expect(violations.some((v) => v.startsWith("I5:") && v.includes("carryPattern"))).toBe(true);
     } finally {
       group.consequenceTag = original;
     }

@@ -1,4 +1,5 @@
-// The bulk bar's 13 group literals, extracted from ./bulkBarGroups.ts to
+// The bulk bar's group literals (15 as of docs/carry-module-pattern-forward-
+// acceptance-criteria.md, chunk D), extracted from ./bulkBarGroups.ts to
 // keep that file under this repo's 1000-line ceiling - a STRUCTURAL split
 // only, no behaviour change, same discipline lmsGenerationKindHelpers.ts's
 // own header describes: "each piece re-exported so every existing import
@@ -357,6 +358,141 @@ const currentEventsGroup: BulkBarGroupDef = {
   ],
 };
 
+/**
+ * "Carry pattern forward" - docs/carry-module-pattern-forward-acceptance-
+ * criteria.md, chunk D (sections 5 and 6 are the contract; section 6 wins
+ * over section 5 wherever they disagree). Carries one module's item shape -
+ * type, order/nesting, points, submission types, the relative due date, and
+ * rubric ASSOCIATION - onto N other modules, regenerating each item's body
+ * per target rather than copying it verbatim. A new sibling group, not
+ * folded into `addToEach` or `currentEvents`, for the same canary-hygiene
+ * reason currentEvents was its own group (see that group's own comment
+ * above): this group's `consequenceTag` names exactly the one write IT can
+ * perform, and folding it into an existing group would move that group's
+ * own canaries instead of a new, dedicated one.
+ *
+ * D14: the TEMPLATE (source) module is chosen by `carryTemplateSelect`, a
+ * plain select in the bar, seeded to the lowest-numbered selected module -
+ * not a "use as template" button on the module row, which would escape
+ * `pruneSelectionForModules` and repeat the exact shape of lie entry 329
+ * point 3 records (a control whose visual state is not the state it
+ * writes). With exactly one module selected there are no targets and the
+ * group refuses with that reason stated (a runtime concern, owned by the
+ * hook wiring this group up - out of this file's own scope, which is
+ * declaring the control, not arming it); with zero the group is not visible
+ * at all, matching every other module-scoped group's own `visible` here.
+ *
+ * D16: the target list is DELIBERATELY NOT pre-filtered to exclude the
+ * source here or anywhere in this file. module-pattern-plan.ts's own
+ * `excludedSourceTargetId` guard is what enforces the exclusion, and
+ * filtering the source out of the UI list a second time would mean that
+ * guard never runs in production, decaying into dead code exercised only by
+ * its own unit test - the reachability lesson this repo has already
+ * recorded once.
+ *
+ * D17 IS WHY THIS GROUP EXISTS AS DATA AT ALL, NOT MERELY AS THREE BUTTONS.
+ * `carryApplyButton` - the group's actual fan-out write - lives INSIDE the
+ * review modal (D19: it renders at ModulesView root via
+ * ModulesViewSecondaryModals.tsx, because `.bulkBarBody`'s own
+ * `max-height: min(60vh, 640px)` ceiling, entry 329's own space fix, cannot
+ * host a targets-by-items grid), not in the bar itself. If that control were
+ * declared `visible: () => false`, or simply omitted from this group's
+ * `controls` array, it would never be a VISIBLE member of this group under
+ * ANY facts - `groupTier`'s reduction (bulkBarGroups.ts) only ever looks at
+ * `control.visible(facts)`-true controls - so the group's DERIVED tier would
+ * stay `read-only` forever, `mayCollapse` would return `true` forever, and
+ * the bar would offer a false sense of safety for the single most
+ * destructive path it contains. The fix: `carryApplyButton` declares
+ * `visible: (f) => f.carryReviewOpen`, so the group's derived tier is
+ * `read-only` while the review is closed and rises to `fan-out-write` the
+ * instant it opens, tracking REACHABILITY of the write rather than mere
+ * presence of a module selection - see bulkBarGroups.test.ts for the theorem
+ * this is pinned as (with an in-place sabotage), not merely a declaration
+ * that happens to be true today.
+ *
+ * THE SAME HOLE ALREADY EXISTS, SHIPPED, IN THE GENERATE GROUP BELOW - found
+ * by reading, per this chunk's own brief, and NOT fixed here: it is a
+ * pre-existing defect in entry 329's own model, out of this chunk's scope,
+ * and correcting it would move canaries this chunk has no business moving.
+ * `GeneratedPreviewModal.tsx`'s own "Post to Canvas" button (that file,
+ * around line 705, gated on `offersPost`) writes directly to Canvas but is
+ * not declared anywhere in `generateGroup` below - it is invisible to
+ * `groupTier`'s reduction over that group's controls, so `generateGroup`'s
+ * derived tier tops out at "reversible-write" (the ten kind buttons) even
+ * though clicking "Post to Canvas", reachable from the very artifact those
+ * buttons produce, writes to Canvas immediately with no confirmation step
+ * this model's own audit is aware of.
+ */
+const carryPatternGroup: BulkBarGroupDef = {
+  id: "carryPattern",
+  label: "Carry pattern forward",
+  disclosure: true,
+  defaultOpen: true,
+  // Step-10 review, C11: the previous wording ("creating and, where offered,
+  // overwriting items") advertised an overwrite capability that does not
+  // exist on any path - carry-module-pattern.ts's apply action returns
+  // "overwrite-not-implemented" for an "overwrite" decision, and
+  // useCarryModulePattern.ts hardcodes `onExisting: "skip"`, so nothing ever
+  // OFFERS an overwrite for this control to perform. A consequence tag that
+  // overstates what a control does is worse than one that understates it -
+  // this is the one always-visible sentence telling the instructor what
+  // Apply does. Drop the overwrite clause entirely rather than soften it to
+  // "may overwrite in future" or similar; state only what is true today.
+  consequenceTag:
+    "Apply performs a fan-out write - creating items across every target module chosen in the review - reachable only from inside that review, not from the bar itself.",
+  visible: (f) => f.moduleCount > 0,
+  controls: [
+    {
+      id: "carryTemplateSelect",
+      kind: "select",
+      label: "Use this module as the template",
+      tier: "read-only",
+      visible: (f) => f.moduleCount > 0,
+      persistKey: null,
+      // Follows the postModuleChoice precedent exactly, cited rather than
+      // reinvented: lmsGenerationModuleTarget.ts's own "NO NEW `ta-`
+      // LOCALSTORAGE KEY FOR THE POST TARGET" comment (AC10) states this
+      // reasoning for a select with the same shape - its only correct value
+      // is a function of the CURRENT selection, not something to persist. A
+      // value restored from a previous session would look like a real
+      // template choice while actually naming a module from a selection
+      // that no longer exists, which is the exact stale-but-answered-
+      // looking default that precedent's own AC6 exists to reject.
+      unpersistedReason:
+        "Follows the postModuleChoice precedent (lmsGenerationModuleTarget.ts's own \"NO NEW ta- LOCALSTORAGE KEY FOR THE POST TARGET\" comment, AC10): this select's only correct value is a function of the CURRENT module selection (seeded to the lowest-numbered selected module), not something to persist. A value restored from a previous session would look like a real template choice while naming a module from a selection that no longer exists.",
+    },
+    {
+      id: "carryReviewButton",
+      kind: "button",
+      label: "Review carry plan",
+      tier: "read-only",
+      // Opens the review modal (D19) and writes nothing itself - the plan it
+      // shows is derived with useMemo (D21), not committed until
+      // carryApplyButton, inside that same modal, is clicked.
+      visible: (f) => f.moduleCount > 0,
+      persistKey: null,
+      unpersistedReason: MODAL_OPENER_UNPERSISTED,
+    },
+    {
+      id: "carryApplyButton",
+      kind: "button",
+      label: "Apply",
+      tier: "fan-out-write",
+      // D17 - THE control this whole group's design exists to get right.
+      // Visible only while the review modal that hosts it is open. Do not
+      // change this to `f.moduleCount > 0` (or any predicate true whenever
+      // the GROUP itself is visible): that would make this control a
+      // permanent, unconditional member of `groupTier`'s reduction and
+      // defeats the reason it is gated on `carryReviewOpen` at all - see
+      // this group's own header comment above for the failure this
+      // predicate exists to prevent.
+      visible: (f) => f.carryReviewOpen,
+      persistKey: null,
+      unpersistedReason: ONE_CLICK_UNPERSISTED,
+    },
+  ],
+};
+
 /** GenerateFromSelectionSection - never writes to CANVAS by itself (its own
  * header comment: "some kinds can be posted afterward as a separate,
  * explicit step"), but every kind button IS a reversible-write, not
@@ -535,7 +671,7 @@ const headGroup: BulkBarGroupDef = {
 };
 
 /**
- * All fourteen groups, in the bar's rendered order. ORDER HERE IS NOT THE
+ * All fifteen groups, in the bar's rendered order. ORDER HERE IS NOT THE
  * BAR'S DOM ORDER CONTRACT - `visualizerCoverage.wiring.test.ts:56` and
  * `askAiSelection.wiring.test.ts:46-76` pin the six section components'
  * render order directly in `ModulesView.tsx` (D2's correction: there are
@@ -546,6 +682,10 @@ const headGroup: BulkBarGroupDef = {
  * section 3b/D8's second trap: two existing tests slice from a group's
  * open tag to the first `</BulkBarGroup>`, so a group inserted BETWEEN
  * `addToEach` and another group would land inside those slices.
+ * `carryPatternGroup` is placed immediately after `currentEventsGroup`, for
+ * the same reason - both are module-scoped action groups, and appending
+ * rather than inserting keeps every existing slice-from-open-tag test's
+ * target group exactly where it already was.
  */
 export const BULK_BAR_GROUPS: BulkBarGroupDef[] = [
   headGroup,
@@ -558,6 +698,7 @@ export const BULK_BAR_GROUPS: BulkBarGroupDef[] = [
   modulesGroup,
   addToEachGroup,
   currentEventsGroup,
+  carryPatternGroup,
   generateGroup,
   downloadGroup,
   askAiGroup,

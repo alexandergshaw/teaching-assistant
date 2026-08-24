@@ -266,6 +266,35 @@ describe("summarizePostOutcome", () => {
     expect(summary.text).not.toMatch(/^failed/i);
   });
 
+  // Chunk D step-11 regression: create-assignment has no separate link-*
+  // step of its own (createCourseAssignmentAction links in the same write
+  // that creates it), so its "created but not linked" signal travels on the
+  // content outcome's own `linkFailed` flag instead of a failed link-*
+  // outcome. Before this fix that case fell through to the plain "every
+  // step done" -> "success" branch, silently reporting a full success for
+  // an assignment that never landed in the module. THE REGRESSION test:
+  // this must be "partial", must name the assignment, and must never say
+  // "success".
+  it("partial: an assignment created but not linked (linkFailed on the content outcome itself) is reported as partial, never success", () => {
+    const outcomes: PostStepOutcome[] = [
+      {
+        step: {
+          step: "create-assignment",
+          fields: { name: "Essay 1", description: "d", pointsPossible: null, dueAt: "", submissionType: "none", published: false },
+        },
+        status: "done",
+        linkFailed: true,
+        detail: "assignment id 77: module not found",
+      },
+    ];
+    const summary = summarizePostOutcome(outcomes);
+    expect(summary.status).toBe("partial");
+    expect(summary.text).toContain("Essay 1");
+    expect(summary.text.toLowerCase()).toContain("not linked");
+    expect(summary.text).toContain("77");
+    expect(summary.status).not.toBe("success");
+  });
+
   // SABOTAGE TARGET: a quiz whose questions partly failed must be partial,
   // and must name how many landed - not just "some failed".
   it("partial: a quiz whose questions partly failed names how many landed", () => {

@@ -163,6 +163,37 @@ describe("executePostPlanSteps", () => {
       expect(writers.createAssignment).toHaveBeenCalledWith(COURSE_URL, fields, MODULE_ID, undefined);
     });
 
+    // Chunk D step-11 regression: createCourseAssignmentAction (canvas-
+    // modules.ts) can succeed at creating the assignment but fail to link it
+    // into the module - a SUCCESS-SHAPED return (`addedToModule: false`,
+    // `linkError` set, no `error` key). Before this fix this case fell
+    // through to the plain `{ step, status: "done" }` branch, which
+    // summarizePostOutcome (commit-plan.ts) renders as an unqualified
+    // success - exactly the false-positive step-11 found across every other
+    // "error" in result-only caller. This is the test that would have
+    // caught it: the outcome must be flagged `linkFailed: true` with the
+    // assignment's id in `detail`, never a bare "done".
+    it("create-assignment succeeds but the module link fails: reported done+linkFailed, with the orphan id, never a bare done", async () => {
+      const writers = makeWriters({
+        createAssignment: vi.fn(async () => ({ id: 77, addedToModule: false, linkError: "Module not found" })),
+      });
+      const fields = {
+        name: "Assignment",
+        description: "d",
+        pointsPossible: null,
+        dueAt: "",
+        submissionType: "online_text_entry",
+        published: false,
+      };
+      const steps: PostPlanStep[] = [{ step: "create-assignment", fields }];
+
+      const outcomes = await executePostPlanSteps(COURSE_URL, MODULE_ID, steps, writers);
+
+      expect(outcomes).toEqual([
+        { step: steps[0], status: "done", linkFailed: true, detail: "assignment id 77: Module not found" },
+      ]);
+    });
+
     it("create-assignment failure is reported failed", async () => {
       const writers = makeWriters({ createAssignment: vi.fn(async () => ({ error: "quota" })) });
       const steps: PostPlanStep[] = [

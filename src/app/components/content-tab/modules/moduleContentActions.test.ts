@@ -132,6 +132,158 @@ describe("addContentToModuleDetailed - SubHeader has no create-then-link seam (n
   });
 });
 
+// D10 (carry-module-pattern-forward-acceptance-criteria.md, section 5): a
+// template module's item ORDER (position) and NESTING (indent) are part of
+// "the pattern" and used to be silently dropped by every one of the four
+// createModuleItemAction call sites in moduleContentActions.ts (SubHeader,
+// File-link, Page, Assignment/Quiz/Discussion). AddContentOpts now carries
+// both as optional fields, threaded through unfiltered. The backward-
+// compatibility guarantee is that an omitted opts.position/opts.indent must
+// reach createModuleItemAction as `undefined`, never as a coerced 0 or 1 -
+// module-items.ts's createModuleItem only appends the Canvas
+// module_item[position]/module_item[indent] params when
+// `typeof x === "number"`, so `undefined` here means the HTTP param is never
+// sent at all and Canvas keeps appending to the end of the module exactly as
+// every pre-existing caller already relies on. That guard lives in
+// module-items.ts, outside this file's ownership, so it is read-verified
+// rather than re-tested here; what this suite pins is the boundary this file
+// owns - the shape of the object handed to createModuleItemAction.
+describe("addContentToModuleDetailed - position/indent pass-through (D10)", () => {
+  it("SubHeader: position/indent are forwarded to createModuleItemAction when present", async () => {
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "SubHeader", 5, "Week 1", { position: 3, indent: 1 });
+
+    expect(mockedCreateModuleItemAction).toHaveBeenCalledWith(
+      "course",
+      5,
+      expect.objectContaining({ type: "SubHeader", title: "Week 1", position: 3, indent: 1 }),
+      "acr"
+    );
+  });
+
+  it("SubHeader: absent opts -> position/indent reach createModuleItemAction as undefined, not 0", async () => {
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "SubHeader", 5, "Week 1", {});
+
+    const item = mockedCreateModuleItemAction.mock.calls[0][2];
+    expect(item.position).toBeUndefined();
+    expect(item.indent).toBeUndefined();
+  });
+
+  it("File (link existing): position/indent are forwarded when present", async () => {
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "File", 5, "Handout", {
+      fileId: 77,
+      position: 2,
+      indent: 0,
+    });
+
+    expect(mockedCreateModuleItemAction).toHaveBeenCalledWith(
+      "course",
+      5,
+      expect.objectContaining({ type: "File", contentId: 77, position: 2, indent: 0 }),
+      "acr"
+    );
+  });
+
+  it("File (link existing): absent opts -> position/indent are undefined, no accidental default", async () => {
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "File", 5, "Handout", { fileId: 77 });
+
+    const item = mockedCreateModuleItemAction.mock.calls[0][2];
+    expect(item.position).toBeUndefined();
+    expect(item.indent).toBeUndefined();
+  });
+
+  // C4 (step-10 fixer round): linking an EXISTING file used to omit `title`
+  // entirely, so Canvas named the module item after the FILE, not after the
+  // resolved title this call was given. AC8's idempotency key is the module
+  // ITEM title, so a re-run's skip check never matched and the same file was
+  // linked into the module again on every apply - Canvas has no undo for
+  // that. Sabotage-checkable: delete `title: name` from the File-link branch
+  // and this goes red, because `item.title` becomes `undefined` instead of
+  // the resolved title.
+  it("File (link existing): the resolved title is sent as the module item's own title, not left to Canvas's file-name default", async () => {
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "File", 5, "Week 3 Handout", { fileId: 77 });
+
+    expect(mockedCreateModuleItemAction).toHaveBeenCalledWith(
+      "course",
+      5,
+      expect.objectContaining({ type: "File", contentId: 77, title: "Week 3 Handout" }),
+      "acr"
+    );
+  });
+
+  it("Page: position/indent are forwarded when present", async () => {
+    mockedCreatePageAction.mockResolvedValue({
+      page: { pageId: 404, url: "week-1", title: "Week 1", body: "", published: false, updatedAt: null },
+    });
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "Page", 5, "Week 1", { position: 1, indent: 2 });
+
+    expect(mockedCreateModuleItemAction).toHaveBeenCalledWith(
+      "course",
+      5,
+      expect.objectContaining({ type: "Page", pageUrl: "week-1", position: 1, indent: 2 }),
+      "acr"
+    );
+  });
+
+  it("Page: absent opts -> position/indent are undefined", async () => {
+    mockedCreatePageAction.mockResolvedValue({
+      page: { pageId: 404, url: "week-1", title: "Week 1", body: "", published: false, updatedAt: null },
+    });
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "Page", 5, "Week 1", {});
+
+    const item = mockedCreateModuleItemAction.mock.calls[0][2];
+    expect(item.position).toBeUndefined();
+    expect(item.indent).toBeUndefined();
+  });
+
+  it("Assignment/Quiz/Discussion: position/indent are forwarded when present", async () => {
+    mockedCreateGradableAction.mockResolvedValue({ id: 909 });
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "Assignment", 5, "HW 1", { position: 4, indent: 0 });
+
+    expect(mockedCreateModuleItemAction).toHaveBeenCalledWith(
+      "course",
+      5,
+      expect.objectContaining({ type: "Assignment", contentId: 909, position: 4, indent: 0 }),
+      "acr"
+    );
+  });
+
+  it("Assignment/Quiz/Discussion: absent opts -> position/indent reach createModuleItemAction as undefined - " +
+    "the backward-compatibility guarantee that a bulk add never reorders an existing module", async () => {
+    mockedCreateGradableAction.mockResolvedValue({ id: 909 });
+    mockedCreateModuleItemAction.mockResolvedValue({ ok: true });
+
+    await addContentToModuleDetailed("course", "acr", "Assignment", 5, "HW 1", {});
+
+    const item = mockedCreateModuleItemAction.mock.calls[0][2];
+    expect(item.position).toBeUndefined();
+    expect(item.indent).toBeUndefined();
+    // Also confirm no opts argument at all (the plain two-arg legacy call
+    // shape) behaves identically - opts itself is optional.
+    mockedCreateModuleItemAction.mockClear();
+    mockedCreateGradableAction.mockResolvedValue({ id: 910 });
+    await addContentToModuleDetailed("course", "acr", "Assignment", 5, "HW 2");
+    const item2 = mockedCreateModuleItemAction.mock.calls[0][2];
+    expect(item2.position).toBeUndefined();
+    expect(item2.indent).toBeUndefined();
+  });
+});
+
 // describeOrphans (useBulkModuleActions.ts) is the pure helper that turns the
 // "orphaned" outcomes collected from a bulkAddToModules run into the note
 // clause an instructor actually reads. It has no React/DOM dependency, so

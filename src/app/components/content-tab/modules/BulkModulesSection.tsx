@@ -8,6 +8,7 @@ import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from ".
 import { BulkBarGroup } from "./BulkBarGroup";
 import { groupById, type BulkBarFacts, type BulkBarGroupRuntime } from "./bulkBarGroups";
 import type { BulkBarGroupsApi } from "./useBulkBarGroups";
+import type { CarryTemplateOption } from "./useCarryModulePattern";
 
 // This section owns exactly three of the bulk bar's fourteen top-level
 // groups (docs/bulk-bar-reorganization-acceptance-criteria.md section
@@ -137,6 +138,24 @@ export interface BulkModulesSectionProps {
   confirmCurrentEvents: boolean;
   currentEventsLabel: string;
   runCurrentEventsAssignments: () => void;
+  /** "Carry pattern forward" (docs/carry-module-pattern-forward-acceptance-
+   * criteria.md, chunk D, D14/D19/D20/D21). All six come from
+   * useCarryModulePattern, called ONCE by ModulesView (via
+   * useModulesViewOrchestration.ts - never from this section, which can be
+   * conditionally unmounted) and threaded down here as bare identifiers,
+   * exactly like the three currentEvents props above. REQUIRED, not
+   * optional, for the same reason those three are (entry 328's "the hop
+   * that has shipped dead in this repo before"): omitting any of these
+   * fails tsc rather than silently rendering a control whose click does
+   * nothing. The review modal itself (and `carryApplyButton`, the group's
+   * actual fan-out write) render at ModulesView root, not here - see
+   * bulkBarGroupCatalog.ts's own carryPatternGroup comment (D17/D19). */
+  carryTemplateOptions: CarryTemplateOption[];
+  carrySourceModuleId: number | null;
+  onCarrySourceModuleIdChange: (id: number) => void;
+  carryReviewBusy: boolean;
+  onReviewCarryPattern: () => void;
+  onCarryReviewTrigger: (trigger: HTMLElement) => void;
 }
 
 // Bulk bar section shown when one or more modules are selected: whole-module
@@ -190,6 +209,12 @@ export function BulkModulesSection({
   confirmCurrentEvents,
   currentEventsLabel,
   runCurrentEventsAssignments,
+  carryTemplateOptions,
+  carrySourceModuleId,
+  onCarrySourceModuleIdChange,
+  carryReviewBusy,
+  onReviewCarryPattern,
+  onCarryReviewTrigger,
 }: BulkModulesSectionProps) {
   // Called here, inside the component body, not at module scope (step-10
   // finding 13, confirmation review) - see this file's own header comment
@@ -204,6 +229,12 @@ export function BulkModulesSection({
   // of). Looked up here for the same module-scope-vs-render-time reason as
   // the two groups above.
   const CURRENT_EVENTS_GROUP = groupById("currentEvents");
+  // D14/D17/D19: the fourth module-scoped group this section owns. Its own
+  // fan-out write (carryApplyButton) is declared `visible` only while the
+  // review modal is open (bulkBarGroupCatalog.ts's own carryPatternGroup
+  // comment) and is never rendered here - only the review-modal OPENER
+  // (carryReviewButton) and the template select live in the bar itself.
+  const CARRY_PATTERN_GROUP = groupById("carryPattern");
   const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
   // GATED AS ONE UNIT - same reasoning as BulkItemsSection: publish/delete
   // write to the selected modules directly, and "Add to each" (including its
@@ -239,6 +270,19 @@ export function BulkModulesSection({
   const currentEventsRuntime: BulkBarGroupRuntime = {
     busy: opBusy,
     armed: confirmCurrentEvents,
+    hasUnavailableReason: false,
+  };
+  // This group's own busy signal is `carryReviewBusy` (the template-read
+  // fetch, D21's "arm the read" step) - not the shared `opBusy`, which this
+  // group's own write (carryApplyButton) never touches from here since that
+  // control lives inside the review modal, not this section. Kept at the
+  // default `announceBusy` (unlike "modules"/"currentEvents" above): this
+  // signal is not shared with any other group in the bar, so its own live
+  // announcement is not a duplicate of the bar-level opBusy region - the
+  // same reasoning "addToEach"'s own bulkAiBusy comment gives.
+  const carryPatternRuntime: BulkBarGroupRuntime = {
+    busy: carryReviewBusy,
+    armed: false,
     hasUnavailableReason: false,
   };
   // This group keeps <BulkBarGroup>'s default announceBusy (unlike
@@ -654,6 +698,52 @@ export function BulkModulesSection({
             Click again to create these assignments in Canvas, one per selected module.
           </span>
         )}
+      </BulkBarGroup>
+
+      {/* D14/D19: placed strictly after currentEvents's own closing tag - the
+          same slice-from-open-tag-to-first-</BulkBarGroup> ordering trap D8
+          names for currentEvents itself applies here too, so this group is
+          appended, never inserted between two existing ones. The review
+          modal (and carryApplyButton, the group's real write) render at
+          ModulesView root - see bulkBarGroupCatalog.ts's own carryPatternGroup
+          comment (D17/D19) for why only the opener lives in the bar. */}
+      <BulkBarGroup group={CARRY_PATTERN_GROUP} facts={facts} runtime={carryPatternRuntime} state={groupsState}>
+        <div className={styles.bulkRow}>
+          <TextField
+            select
+            size="small"
+            sx={{ minWidth: 200 }}
+            value={carrySourceModuleId ?? ""}
+            onChange={(e) => onCarrySourceModuleIdChange(Number(e.target.value))}
+            aria-label="Use this module as the template"
+            disabled={carryTemplateOptions.length === 0}
+          >
+            {carryTemplateOptions.length === 0 ? (
+              <MenuItem value="">No modules selected</MenuItem>
+            ) : (
+              carryTemplateOptions.map((o) => (
+                <MenuItem key={o.id} value={o.id}>
+                  {o.name}
+                </MenuItem>
+              ))
+            )}
+          </TextField>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={opBusy || carryReviewBusy}
+            onClick={(e) => {
+              onCarryReviewTrigger(e.currentTarget);
+              onReviewCarryPattern();
+            }}
+          >
+            {carryReviewBusy ? "Reading module..." : "Review carry plan"}
+          </Button>
+          <span className={styles.bulkHint}>
+            Carries the template module&apos;s item types, order, points, submission types and relative due dates onto every other selected
+            module, with each item&apos;s body regenerated for its own module. Nothing is written until reviewed and applied.
+          </span>
+        </div>
       </BulkBarGroup>
     </>
   );

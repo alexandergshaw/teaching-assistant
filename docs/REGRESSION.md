@@ -30836,3 +30836,398 @@ guard splits on `"\n"` and compares a line to `"}"`, so every line carries a
 trailing `\r` and the closing-brace search fails. The technique is sound and
 does not disturb the working tree, but any SOURCE-TEXT guard measured this way
 must be read with that artefact in mind.
+
+## 331. Carrying one module's pattern forward into N others - a plan the instructor edits before anything is written, and the create-then-link seam it forced open across six shipped callers
+
+Acceptance criteria:
+`docs/carry-module-pattern-forward-acceptance-criteria.md` - **section 6 is the
+final contract and wins over section 5, which in turn wins over sections 0-4**;
+nothing wrong above was deleted, exactly as chunk B's D7b was left standing.
+Chunk D of the Modules-view backlog (chunk A is entry 328, chunk B entry 330,
+the bulk-bar reorg entry 329). The ask, verbatim (2026-08-23): "i also need a
+way to select a module and the items within and then have one of the bulk
+actions be to carry the pattern/format of the assignments, etc in this module
+forward to a list of other modules I select". A fifteenth bulk-bar group whose
+Review button reads one selected module as a TEMPLATE, infers a re-renderable
+name pattern from each item's title, transposes each deadline into the target
+module's own week, and renders a per-source-item proposal the instructor edits
+before a single Canvas write happens. Two waves, a reviewer round that produced
+thirteen findings, a regression pass that produced four more, two fixer rounds
+after that, and a final verification that produced two more.
+
+1. **THE PATTERN SCHEME WAS DECIDED BY A MEASURED ROUND TRIP, NOT BY TASTE, AND
+   THE MISSING PRIMITIVE WAS DIGIT WIDTH.** Inference must produce a pattern
+   that, re-rendered for the SOURCE module's own week, reproduces the source
+   title byte-for-byte - anything less cannot be an idempotency key (AC8).
+   Against real fixture titles, scheme B (`{x}`, zero-pad to 2) failed 20 of 29:
+   "Week 5 Homework" comes back "Week 05 Homework", and "Module 007 Lab" LOSES A
+   DIGIT. Scheme C cannot represent an item title at all. Scheme A's `{n}` plus
+   a RECORDED WIDTH round-trips 31 of 31. Width is the whole difference, and its
+   virtue is that it infers the course's own padding convention from the
+   course's own data instead of imposing a fourth scheme on a repo that already
+   has three incompatible ones and five module-number extractors (D1). None was
+   added.
+
+2. **THE DISAMBIGUATION RULE IS VALUE EQUALITY AGAINST A KNOWN ANCHOR, WHICH IS
+   WHAT LETS INFERENCE SKIP THE QUESTION THAT SANK BOTH EXISTING EXTRACTORS.**
+   Tokenise a digit run if and only if its NUMERIC VALUE equals
+   `extractModuleNumber(sourceModule.name)`; leave every other run literal;
+   record the width of the first tokenised run; match GLOBALLY, because "Module
+   3: Week 3 Reading" needs both. "Whether Chapter counts as a module word" -
+   the question `fillNamePattern` and `extractModuleNumber` answer differently -
+   never has to be asked, because the source module's own number is already
+   known. "Reading 2 for Week 3" in Module 3 keeps the 2 and tokenises the 3.
+
+3. **AN UNNUMBERED TITLE IS A FOURTH DECISION VALUE, NOT A SILENT PASS - AND THE
+   AC's ORIGINAL FRAMING UNDERSTATED THE FAILURE.** The danger was never "later
+   targets silently get nothing". On the FIRST run each target's by-title check
+   runs against its OWN items, none of which hold the title, so every target
+   says CREATE and the instructor ends up with N modules each holding an
+   identically named "Final Project" - and the run LOOKS like it worked. So
+   `"blocked-unnumbered"` joins create/skip/overwrite, costs no model call (the
+   check is on titles alone, earlier than AC7's pre-check), and is listed with
+   its reason in full. Rejected: carrying verbatim (the outcome above);
+   appending the target number (invents a convention the instructor never wrote,
+   in their live course); letting the model name it (AC8 forbids it - a model
+   title differs between runs, the skip check never matches, every re-run
+   duplicates). One affordance, because it is the minimum-click resolution: a
+   blocked row carries an inline pattern field pre-filled with the source title,
+   and typing `{n}` once unblocks that row deterministically for every target.
+
+4. **THE PROPOSAL GROUPS BY SOURCE ITEM, NOT BY TARGET MODULE, AND THAT IS A
+   CONSEQUENCE OF WHERE THE ERRORS LIVE.** A D3b false positive - a number that
+   COINCIDENTALLY equals the module number, so "Chapter 12 Discussion" in Module
+   12 renders "Chapter 03 Discussion" in Module 3 - is a property of the ITEM and
+   is uniform across every target. Per-target grouping would show the same error
+   N times and offer N places to fix it. Per-item grouping shows it once, next to
+   the pattern text that caused it, with one checkbox that removes it everywhere.
+   It also turns D4b's "one message, not twelve" from an aspiration into the
+   natural rendering. No regex fixes D3b - "chapter 12 because it is module 12"
+   versus "chapter 12 because the book has twelve chapters" is not decidable from
+   the title - so **the proposal is load-bearing, not a courtesy.**
+
+5. **THE APPLY CONTROL IS DECLARED WITH `visible: (f) => f.carryReviewOpen`, AND
+   THE ALTERNATIVE WOULD HAVE MADE THE AUDIT ASSERT THE OPPOSITE OF THE TRUTH.**
+   AC1 assumed declaring Apply at `fan-out-write` makes the group
+   non-collapsible. It does not, when Apply lives inside a modal: the tier is
+   derived from VISIBLE members, a control in a modal is not one, so the derived
+   tier stays `read-only`, `mayCollapse` returns true, and `auditGroupModel`'s I5
+   stops requiring a `consequenceTag` - the audit would then assert, in
+   perpetuity, that the most destructive path in the bar is safe.
+   `bulkBarGroupCatalog.ts:489` gates the control on `carryReviewOpen` instead,
+   so the group's tier rises exactly when the destructive path becomes reachable.
+   `bulkBarGroups.test.ts:656-667` proves this as a THEOREM over the real catalog
+   at two module counts, and `:673-694` reproduces D17's exact hazard in place
+   (`control.visible = () => false`, try/finally because `groupById` hands back
+   references into one shared module-level array), confirms the group would then
+   lie about its own safety while the review is genuinely open, restores, and
+   confirms the real declaration does not have that hole. **The shipped Generate
+   group has this hole today** - its "Post to Canvas" lives in
+   `GeneratedPreviewModal` and is invisible to the derivation. That is a
+   pre-existing defect in entry 329's model, recorded here and not inherited.
+
+6. **ROLES LIVE BESIDE THE SELECTION AS A KEY RE-RESOLVED EVERY RENDER, NOT AS A
+   FIELD IN THE SHARED SETS.** Adding a role to the shared item/module Sets
+   changes every other bulk action's data; the two concrete failures are Delete
+   acting on the wrong set once a role partitions it, and a dangling template key
+   surviving `pruneSelectionForModules` and then being read against a module that
+   no longer exists. Re-resolving through `selectedModules` on every render (the
+   `useVisualizerCoverage` idiom) makes a stale key impossible rather than merely
+   unlikely. The source is chosen by a SELECT in the bar seeded to the
+   lowest-numbered selected module, reusing `postModuleOptionsFrom` /
+   `defaultPostModuleChoiceFrom` and its documented no-persist exemption -
+   rejected: a "use as template" button on the module row, which does not remove
+   the exclusion ambiguity, escapes `pruneSelectionForModules`, and repeats the
+   shape of lie entry 329 point 3 records.
+
+7. **THE UI DELIBERATELY DOES NOT PRE-FILTER THE SOURCE OUT OF THE TARGET LIST,
+   SO THE BUILDER'S GUARD RUNS ON EVERY REAL INVOCATION.**
+   `buildModulePatternPlan` already enforces the exclusion and records
+   `excludedSourceTargetId`. Had the UI also filtered, that guard would never run
+   in production and would decay into dead code exercised only by its own unit
+   test. The modal renders what the plan says it excluded. This is the
+   reachability lesson already on the record here: a guarantee that is never
+   exercised is not a guarantee.
+
+8. **BOTH HALVES OF THE DEADLINE TRANSPOSITION RUN IN THE BROWSER, AND A
+   SERVER-SIDE DECOMPOSITION WOULD HAVE FLIPPED THE WEEKDAY.** Measured on the
+   actual instant `dueDateForWeek` produces for a Thursday 23:59 rule in week 3
+   of a term starting 2026-01-12: local getters read `thu 23:59`, UTC getters
+   read `fri 05:59`. A server-side decomposition of an Americas instructor's
+   "Thursday 11:59 PM" yields Friday 5:59 AM, and recomposition then puts every
+   carried item in every target on a Friday morning. This is entry 328's defect
+   in mirror image - that was a UTC COMPOSITION bug, this would be a UTC
+   DECOMPOSITION bug - and it is equally invisible to tsc, eslint, vitest and
+   next build, because every intermediate stays a valid Date and a valid ISO
+   string. DST is safe only because `dueDateForWeek` calls `setHours` LAST
+   (`assignment-due-rule.ts:141`, after the `setDate` walk at `:128/:132/:136`),
+   so the wall clock is stamped after DST re-resolves; the tempting
+   `n * 7 * 86400000` alternative lands on Friday 00:59, off by a day AND an
+   hour. Do not reorder those calls. An item with NO `dueAt` is not blocked - it
+   falls back to the course's own `assignmentDueRule` for the TARGET week, and if
+   neither exists it still carries with no due date and the plan says so per item.
+
+9. **THE READER IS `mapModuleItem` MERGED WITH `getGradable`, BECAUSE
+   `getGradable` ALONE WOULD HAVE SHIPPED EVERY CARRIED ITEM WORTH ZERO POINTS.**
+   `getGradable` reads exactly four fields - title, description, rubricId,
+   submissionTypes. It does NOT read `points_possible`, `due_at` or `published`,
+   all three of which AC3 promises to carry. Those come from `mapModuleItem`,
+   which the loaded module tree already holds FOR FREE. The reuse table's
+   `getGradable` row invited exactly the implementation that would have zeroed
+   the points on every carried item in every target, at no visible cost to any
+   gate.
+
+10. **THE ASSIGNMENT WRITE PATH IS THE RICHER ONE, DISCLOSURE IS PER KIND, AND
+    C6's `published` IS CARRIED FOR EXACTLY ONE KIND.**
+    `addContentToModuleDetailed` reaches `createGradable`, which writes none of
+    the six write-only fields for any kind and cannot write `submission_types`
+    for Quizzes or Discussions - so "not carried" there is a hard limit of the
+    write path, not a UI choice. Assignments go through
+    `createCourseAssignmentAction` instead (D7), the only path that can honour
+    submission types, points, due date and publish state together. `published`
+    therefore carries for Assignments and is disclosed as NOT carried for every
+    other kind (`module-template.ts:195-202`) - Quiz, Discussion, Page, File and
+    SubHeader all land at Canvas's own default publish state. C10 split the one
+    constant that was named for six fields but held eight:
+    `WRITE_ONLY_NO_READER` is now exactly six and
+    `READABLE_ELSEWHERE_BUT_NOT_HERE` exactly two, because `grading_type` and
+    `omit_from_final_grade` ARE read today, in `src/lib/canvas/auto-zero.ts`.
+
+11. **C8 - THE BAR'S CONSEQUENCE TIER AND THE MODAL'S MOUNT GATE NOW READ ONE
+    FIELD, AND THE REDUNDANCY THAT REMAINS CAN ONLY FAIL SAFE.** A selection
+    change mid-fetch reseeds `sourceModuleId`, which changes `templateSig` and
+    can null out `template` and therefore `plan` while `reviewOpen` is still true
+    from the click that started the fetch - nothing else ever resets
+    `reviewOpen`. The bar would then keep asserting a destructive path is
+    reachable when the modal can no longer mount to offer it. Fixed by extracting
+    the predicate as a pure, independently-testable function
+    (`useCarryModulePattern.ts:400-402`), exposing its one value on the hook, and
+    wiring BOTH consumers to that field: `ModulesView.tsx:289` and
+    `ModulesViewSecondaryModals.tsx:84`. The modal's gate still ANDs
+    `&& template && plan` after `reviewVisible` - that is TypeScript narrowing,
+    not a second opinion, and because `reviewVisible` already implies both, the
+    modal's condition is exactly equal to the bar's and can only ever be
+    narrower, never wider. Drift in the unsafe direction (bar says
+    destructive-reachable, modal not mounted) is structurally impossible. Locked
+    by source-text canaries in BOTH directions: one requires the `reviewVisible`
+    wiring and one FORBIDS the bare `reviewOpen` one.
+
+12. **C5 - CREATE AND LINK BECAME TWO FAILURE DOMAINS, AND THAT CHANGE REACHED
+    SIX SHIPPED CALLERS, NOT FIVE.** `createCourseAssignmentAction` previously
+    wrapped create and link in one try/catch, so a link failure AFTER a
+    successful create threw to the outer catch, which discarded the new
+    assignment's id and returned a bare `{ error }` - indistinguishable from
+    "nothing was created", while Canvas held a real assignment nobody could find.
+    It now nests the link in its own catch (`canvas-modules.ts:186-208`) and
+    returns `{...created, addedToModule: false, linkError }` with the real id
+    intact, which `carry-module-pattern.ts:439-445` turns into a genuine
+    `"orphaned"` outcome. Never auto-deleted: entry 258 check 11's reasoning
+    applies unchanged - a rollback delete is a second unattended destructive
+    write stacked on the first failure, can itself fail, and throws away real
+    content with no chance for a human to reconsider. **The return type stayed
+    compile-compatible, and that is precisely why it was not behaviourally
+    inert:** every caller testing only `"error" in result` started reporting
+    SUCCESS on an orphan the moment the function stopped folding link failures
+    into `{ error }`. The regression pass counted five such callers and was
+    WRONG - `useNewAssignmentForm.ts` read `addedToModule` but only varied its
+    SUCCESS WORDING on it and still returned `kind: "success"` regardless, so it
+    was a sixth. All six are fixed, two of them through one new shared pure
+    helper (`assignmentCreateOutcome.ts:41-53`) so the invariant lives in exactly
+    one place for both UI callers.
+
+13. **THE DISCRIMINATOR IS `linkError !== undefined`, NOT `!addedToModule`, AND
+    THE DIFFERENCE IS A LEGITIMATE NO-OP.** `addedToModule` is ALSO false when
+    the caller passed no `moduleId` at all - `useNewAssignmentForm.ts`'s "no
+    module selected" case, which is a legitimate choice, not a failure. The
+    action only ever sets `linkError` inside the catch around an ATTEMPTED link,
+    so it is the only reliable "a link was tried and failed" signal. The one
+    place that reads `addedToModule` instead is `commit-execute.ts:190`, and it
+    is equivalent there because it is guarded by `moduleId !== null` in the same
+    expression - and deliberately so: a `CanvasWriters` implementation that does
+    not report `addedToModule` at all leaves it `undefined`, which is not
+    `false`, so every non-live writer keeps its previous behaviour exactly.
+
+14. **THE LMS-GENERATION POST PATH NEEDED A NEW SIGNAL BECAUSE ASSIGNMENT
+    LINKING HAS NO STEP OF ITS OWN.** Pages, quizzes and discussions each get a
+    separate `link-*` `PostPlanStep`, so a failed link is already a failed step
+    and `summarizePostOutcome` already renders the honest "created but not linked
+    - find it in Canvas" partial. `create-assignment` links inside its ONE write,
+    so that failure had nowhere to travel and fell through to a bare `"done"` -
+    an unqualified success for an assignment that never landed. `PostStepOutcome`
+    gains `linkFailed?: boolean` (`commit-plan.ts:291`), set at
+    `commit-execute.ts:190-197` with the assignment's id in `detail`, and consumed
+    by the SAME orphan branch the other three kinds already use. Two consequences
+    were checked rather than assumed: `linkFailed` is `undefined` for every
+    non-assignment outcome, so that branch's condition is unchanged for them; and
+    the new `failedLink?.detail ?? contentOutcome.detail` fallback can never fire,
+    because every one of the eight `status: "failed"` pushes in
+    `commit-execute.ts` supplies a non-undefined `detail`. That matters
+    specifically because a "done" `create-discussion` outcome legitimately carries
+    AC14g's classic-fallback reason in `detail`, and the fallback would otherwise
+    have rendered that reason as if it were a link error.
+
+15. **THE STRONGEST REGRESSION EVIDENCE IS AN ORACLE, NOT A READING: THE ENTIRE
+    PRE-CHUNK SUITE PASSES AGAINST THE NEW SHIPPED SOURCE.** The C5 change
+    reaches the LMS-generation post path and three workflow registry step files -
+    areas covered by entries 310-316 and 320-328, for which entry 330's
+    "untouched by construction" argument no longer holds. So the six shipped
+    files it touched (`canvas-modules.ts`, `commit-execute.ts`, `commit-plan.ts`
+    and the three `steps.*.ts`) were copied into a detached worktree at HEAD
+    `15b1f47` and **the baseline's own 12,768 assertions - every one written
+    before this chunk existed - were re-run against them: 639 files, 12768 tests,
+    all passing.** No frozen expectation moved. Read-verified on top of that,
+    because no test encodes them: `lms-generation-writers.ts` is NOT in the diff
+    at all (a fixer's report that it touched the file was WRONG - the fix landed
+    one layer down, and `LIVE_CANVAS_WRITERS.createAssignment` remains a bare
+    pass-through whose widened return the declared `CanvasWriters` type now
+    admits); the three step files' `type:` keys are byte-identical in count and
+    content; `HEADLESS_SAFE_STEP_TYPES.size` is still **154**; and
+    `commit-plan.ts`'s title-matching logic that entry 324 check 4 turns on is
+    nowhere near a hunk.
+
+16. **A COMPLETENESS GUARD THAT COVERED 8 OF 10 STATUSES, FOUND BY EXECUTABLE
+    PROBE RATHER THAN BY READING IT.** F2's defect was that
+    `describeCarryApplyOutcome` named nine of the ten statuses
+    `applyModulePatternCarryAction` can return, so an instructor whose template
+    held an LTI assignment read "N items created" with that item silently absent.
+    The fix added the branch AND a guard that derives the expected set from the
+    action's own union declaration - but the guard ended the block at
+    `src.indexOf(";\n", start)`, and the first `;\n` in that file falls INSIDE
+    the multi-line `orphaned` member. It therefore derived only the eight
+    single-line statuses; `orphaned` and `success` were invisible, **and so was
+    any new member appended at the union's natural end - the one position a
+    tenth status would actually be added at.** The guard protected zero percent
+    of the position it existed to protect, while reporting green. Caught by
+    replicating the extraction in node and appending a fake tenth member, not by
+    re-reading the code. Now terminated by BRACE DEPTH (`useCarryModulePattern.
+    test.ts`), with a canary asserting the derived set contains `orphaned` and
+    `success` - both in multi-line members, `success` last - so a truncation
+    fails loudly in the direction that actually failed. Sabotage: relaxing the
+    depth condition to `>= 0` restores the original bug and reddens the guard
+    (1 failed, exit 1); restored, 33 pass.
+
+17. **THE CANARIES D14/D17/D19 SAID TO MOVE MOVED, THE SIX SAID NOT TO DID NOT,
+    AND NOT ONE ASSERTION WAS DELETED OR WEAKENED - VERIFIED BY `git diff -U0`.**
+    Across every modified test file there are exactly EIGHT deleted non-comment
+    lines: five `it(` TITLE strings and three canary values, every one replaced
+    by a strictly larger number. MOVED: the group id list 14 -> 15;
+    `<BulkBarGroup>` instances 3 -> 4, in both places they are counted;
+    `DIALOG_SITES.length` 42 -> 43 and `ADOPTING_PATHS.size` 28 -> 29, the pair
+    that together prove the new modal adopted `ModalShell` from birth rather than
+    landing on an allowlist. NOT MOVED, each still a real proof:
+    `modules + addToEach = 15` visible controls (this is what proves the control
+    landed in a FIFTEENTH group rather than being smuggled into an existing one);
+    BulkItemsSection's 29; the four `nearDead` ids; `declared.length === 1`;
+    `HEADLESS_SAFE_STEP_TYPES.size === 154`; and every chunk-A and chunk-B kind
+    list.
+
+18. **THE GATES, WITH REAL NUMBERS - AND THE BASELINE WAS MEASURED FROM HEAD,
+    NOT CARRIED FORWARD.** `npx vitest run`: **649 test files, 13025 tests, all
+    passing.** The pre-chunk baseline was measured directly from `15b1f47` in a
+    detached worktree created with `git -c core.autocrlf=false worktree add
+    --detach` at a SHORT path - both flags load-bearing, the first because a
+    fresh worktree otherwise gets CRLF and any source-text guard splitting on
+    `"\n"` fails spuriously (entry 330's own measurement trap, now disarmed
+    rather than explained away), the second because this repo holds a
+    95-character test filename that aborts a deep checkout with "Filename too
+    long". Baseline: **639 files / 12768 tests.** Both deltas close
+    arithmetically and per file: FILES +10, all new and untracked; TESTS +257,
+    attributed 227 to those ten files and 30 across ten modified ones, with two
+    modified files at +0 because they gained only a fixture field or a canary
+    bump. **No file lost a single test.** `npx tsc --noEmit`: clean, exit 0.
+    `npx eslint` over all touched source files: 0 errors. `next build`:
+    **"Compiled successfully"**; the prerender tail fails for want of Supabase
+    keys, documented and expected. `no-emojis.test.ts`,
+    `use-server-exports.test.ts` and `headless.test.ts` all green. Every touched
+    TS/TSX file is under 1000 lines, largest `BulkModulesSection.tsx` at 750 and
+    `ModulesView.tsx` at **749 - down from 998**, because the extraction D20
+    demanded actually landed as `useModulesViewOrchestration.ts`, reversing entry
+    330's standing precondition on that file.
+
+**Limits.** NO CODE PATH IN THIS CHUNK HAS EVER BEEN RUN AGAINST A REAL CANVAS
+COURSE. No module has been read as a template, no pattern inferred from a real
+title, no assignment created, no module item linked, no rubric associated, no
+deadline honoured or rejected. Every Canvas interaction is proven against mocked
+server actions only, and **NO MODEL HAS EVER BEEN CALLED** - every generator test
+stubs `callLlm`. NO COMPONENT IS EVER RENDERED BY THIS REPO'S VITEST - node-env,
+collecting only `src/**/*.test.ts` - so **EVERY UI, ARIA AND KEYBOARD CLAIM IN
+THIS ENTRY IS SOURCE-TEXT ONLY**, read with `readFileSync` and matched with
+regexes. Nothing proves the review modal paints, that its seventy-row grid
+scrolls, that the per-row checkbox is operable by keyboard, that focus returns to
+the Review button on close, or that a fifteenth group does not push the bar past
+its own 60vh ceiling.
+D3b's FALSE POSITIVES ARE REAL AND ARE MITIGATED ONLY BY A MODAL NO TEST RENDERS.
+A number that coincidentally equals the module number is tokenised, and
+collisions are structurally WORST in low-numbered modules, where small ordinals
+("Essay 1", "Lab 2") are most likely to collide - and Module 1 is both the worst
+case and the module an instructor is most likely to pick as the template, because
+it is the one they built first. The entire mitigation is that the proposal lists
+the resolved title and pattern per row so the instructor can deselect it. That
+mitigation is a `.tsx` file. The rows it renders are proven only by reading its
+source.
+"CARRY THIS MODULE FORWARD" MEANS "EVERYTHING EXCEPT DISCUSSIONS", AND WILL UNTIL
+A CHECKPOINT READ EXISTS. C7 was closed by disclosure, not detection: the
+graded-discussion checkpoints structure is written via GraphQL and NOTHING in
+`src` reads any of it back, so every Discussion is marked `checkpointsUnknown`
+and refused before an instructor sees it. Four code paths are consequently DEAD
+IN PRODUCTION, exercised only by their own unit tests - the "carries normally"
+branch of the apply action, `"Discussion"` in `GENERATABLE_KINDS`, the Discussion
+arm of `applyGradableViaDetailed`, and `DISCUSSION_WRITE_GAPS`. **One qualifier
+the documentation omits:** the flag is set at `module-template.ts:364`, INSIDE
+`if (isGradableKind(item.type) && typeof item.contentId === "number")`. A
+Discussion module item with a null `contentId` gets `false`, is not refused, is
+write-supported (`isCarryWriteSupportedKind` checks `contentId` only for `File`),
+and would carry forward as a plain discussion with no disclosure at all. Canvas
+always supplies `content_id` for a Discussion item, so this is not believed
+reachable - but "unconditional" is one word too strong, and three of the four
+dead paths become live in that case.
+AN ORPHANED ASSIGNMENT STILL DUPLICATES ON RE-RUN, IN BOTH FEATURES, AND THIS
+CHUNK DID NOT FIX THAT. Entry 330's Limits recorded it for the current-events
+assignment; it is identical here and in `steps.lms-integrations.ts`, whose
+`existingAssignmentTitles` set is scanned from module ITEMS. An orphan carries no
+module item, so no re-run can see it, so a re-run creates a second copy.
+Withholding an orphaned title from that in-run set does NOT change that - the set
+is rebuilt from Canvas every run - it only makes the in-run set agree with what
+the next run's scan will actually produce, and the code comment now says exactly
+that rather than claiming a fix. What every path now does is report the orphan by
+ID so a human can find it. A course-scoped assignment-title query would close it
+properly and was not built.
+C6's `published` IS CARRIED, BUT FOR EXACTLY ONE KIND. Only Assignments reach
+`createCourseAssignmentAction`; Quizzes, Discussions, Pages, Files and SubHeaders
+go through `addContentToModuleDetailed`, whose `AddContentOpts` has no
+`published` member, so they land at Canvas's own default publish state no matter
+what the template item said. Disclosed per kind in the plan, never silently
+dropped - but "the pattern carries forward" is, for four of six kinds, one field
+short of what an instructor would assume. The bar's own hint is flatter still,
+and an instructor who reads it and clicks Apply without reading each row's "not
+carried" line has been over-promised at the level the bar speaks.
+THE SERVER TRUSTS A CLIENT-COMPUTED PLAN, BY DESIGN. `applyModulePatternCarryAction`
+receives the whole `ModulePatternPlan` from the browser and writes what it says,
+re-deriving only the per-kind write-support check (via the SHARED
+`isCarryWriteSupportedKind`, imported rather than re-spelled, so the review and
+the apply step cannot drift about which kinds are writable) and the checkpoint
+refusal. Resolved titles, decisions and transposed deadlines are accepted as
+given. That is deliberate - D5 requires the deadline arithmetic to happen in the
+browser, and re-deriving it server-side is the exact bug that design prevents -
+but it means a malformed or tampered plan writes malformed content, nothing
+between the modal and Canvas would object, and nothing revalidates the plan
+against a freshly-read module tree at apply time, so a plan built minutes earlier
+acts on stale `existingItems`.
+THIS GENERATOR HAS NO RESTATEMENT STRIPPER, UNLIKE CHUNK B's. Chunk B narrowed a
+pattern-based strip of model-authored deadlines and point values and gave it both
+true-positive and false-positive tests. This file has only the prompt instruction
+and `stripModelUrls`, and says so in its own header. A model that ignores "do not
+state a specific due date, deadline, or point value" puts a wrong number into the
+body of every carried item in every target module, directly contradicting the
+structured `due_at` and `points_possible` Canvas carries beside it, and nothing
+in the pipeline catches it. Chunk B's Limits already record that even ITS
+stripper cannot catch a paraphrase; here there is nothing to paraphrase around.
+FINALLY, ON TRUSTING FIXER REPORTS. One fixer reported touching
+`lms-generation-writers.ts`; that file is not in `git status --short` and its
+`createAssignment` writer is unchanged. The same fixer reported its
+`existingAssignmentTitles` change as fixing a duplicate-forever bug; the bug is
+real and the change does not fix it. Both were caught by DIFFING rather than by
+reading the report - the same gate this project already records for implementer
+subagents, applied one round later. And the F2 guard in check 16 was caught only
+by EXECUTING its extraction against a synthetic new member; reading it looked
+fine. A verification that reads a guard is weaker than one that runs it.

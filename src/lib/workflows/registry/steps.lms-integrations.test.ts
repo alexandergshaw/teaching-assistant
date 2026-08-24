@@ -303,3 +303,51 @@ describe("integrate-source-into-lms: Canvas-only LMS-target guard", () => {
     });
   });
 });
+
+// Chunk D step-11 regression: createCourseAssignmentAction can succeed at
+// creating the assignment but fail to link it into the module (a
+// success-shaped `{ addedToModule: false, linkError }`, no `error` key).
+// This step only ever checked `!("error" in assignmentResult)`, so it used
+// to report "Created assignment ..." as if the link had happened, and would
+// count the orphan into `existingAssignmentTitles` idempotency tracking
+// alongside genuinely-linked ones. THE REGRESSION test: the summary must
+// name the orphan by id and must never claim the assignment was (plainly)
+// created without qualification.
+describe("integrate-source-into-lms: assignment link-failure regression", () => {
+  it("reports the orphan by id when the module link fails, instead of a bare 'Created assignment' line", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({
+      courses: [baseCourse({ id: "tile-1", lms: "canvas", canvasUrl: CANVAS_URL })],
+    });
+    vi.mocked(listCourseContentAction).mockResolvedValue({
+      courseName: "Test Course",
+      modules: [canvasModule({ id: 10, name: "Module 01" })],
+      pages: [],
+    });
+    vi.mocked(createPageAction).mockResolvedValue({
+      page: { pageId: 1, url: "week-1-page", title: "Week 1 page", body: "", published: true, updatedAt: null },
+    });
+    vi.mocked(createCourseAssignmentAction).mockResolvedValue({
+      id: 91,
+      name: "Complete Chapter 1 exercises",
+      htmlUrl: "https://canvas.example.edu/courses/1/assignments/91",
+      addedToModule: false,
+      linkError: "Module not found",
+    });
+
+    const result = await step.run(
+      { hubCourse: "tile-1", schedule: SCHEDULE, sourceMaterial: SOURCE_MATERIAL, sourceUrl: "" },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(result.outputs).toEqual({ pagesCreated: 1, assignmentsCreated: 1 });
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      const assignmentLine = result.summary.items.find((line) => line.includes("Chapter 1 exercises"));
+      expect(assignmentLine).toBeDefined();
+      expect(assignmentLine).toContain("91");
+      expect(assignmentLine).toContain("Module not found");
+      expect(assignmentLine).not.toMatch(/^Week \d+: Created assignment "Complete Chapter 1 exercises"$/);
+    }
+  });
+});

@@ -161,6 +161,61 @@ describe("lms-assignments step", () => {
       expect(result.summary.label).not.toContain("deadlines set to");
     }
   });
+
+  // Chunk D step-11 regression: createCourseAssignmentAction can succeed at
+  // creating the assignment but fail to link it into the module (a
+  // success-shaped `{ addedToModule: false, linkError }`, no `error` key).
+  // This step only ever checked `"error" in created`, so it used to report
+  // "Week 01 Deliverable -> Module 01" as if the link had happened. THE
+  // REGRESSION test: the orphan's id must appear in the summary, the line
+  // must never claim the module link succeeded, and the step must keep
+  // creating the remaining modules' assignments (unlike a genuine create
+  // failure, which still throws and aborts the whole step).
+  it("reports the orphan by id (never a bare success line) when the module link fails, and keeps going for the remaining modules", async () => {
+    const tile = baseCourse({ id: "course-1" });
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [tile] });
+
+    vi.mocked(createCourseAssignmentAction)
+      .mockResolvedValueOnce({
+        id: 77,
+        name: "Week 01 Deliverable",
+        htmlUrl: "https://canvas.example.edu/courses/1/assignments/77",
+        addedToModule: false,
+        linkError: "Module not found",
+      })
+      .mockResolvedValueOnce({
+        id: 78,
+        name: "Week 02 Deliverable",
+        htmlUrl: "https://canvas.example.edu/courses/1/assignments/78",
+        addedToModule: true,
+      });
+
+    const modules: EnsuredModule[] = [
+      { week: 1, id: 10, name: "Module 01" },
+      { week: 2, id: 11, name: "Module 02" },
+    ];
+
+    const result = await step.run(
+      {
+        course: "https://canvas.example.edu/courses/1",
+        modules,
+        schedule: [],
+        repo: "org/repo",
+        hubCourse: "course-1",
+      },
+      testHelpers(),
+      () => {}
+    );
+
+    expect(createCourseAssignmentAction).toHaveBeenCalledTimes(2);
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      expect(result.summary.items[0]).not.toMatch(/->/);
+      expect(result.summary.items[0]).toContain("77");
+      expect(result.summary.items[0]).toContain("Module not found");
+      expect(result.summary.items[1]).toContain("Week 02 Deliverable -> Module 02");
+    }
+  });
 });
 
 // Canvas-only LMS-target guard (lms-target-guard.ts): lms-assignments calls

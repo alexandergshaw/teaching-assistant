@@ -375,6 +375,13 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
             throw new Error(item.error);
           }
 
+          // Reported on the course's final summary line below via `ghNote`
+          // rather than a hard-coded "GitHub Sign Up added" - chunk D
+          // step-11 regression: createCourseAssignmentAction can create the
+          // assignment but fail to link it into the module (a success-
+          // shaped result, no `error` key), and the old hard-coded text
+          // would have claimed it was added regardless.
+          let ghNote = "";
           if (includeGh) {
             const ghAssignment = await createCourseAssignmentAction(
               url,
@@ -393,6 +400,10 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
             if ("error" in ghAssignment) {
               throw new Error(ghAssignment.error);
             }
+            ghNote =
+              ghAssignment.linkError !== undefined
+                ? `; GitHub Sign Up created (id ${ghAssignment.id}) but not added to the module - ${ghAssignment.linkError} - find it in Canvas`
+                : "; GitHub Sign Up added";
           }
 
           // Common Resources import after the built-ins; a failed item
@@ -499,9 +510,7 @@ export const courseSetupMaterialsSteps: StepDefinition[] = [
           }
 
           lines.push(
-            `${tile?.name ?? url}: Start Here ready (${syllabusNote}; quiz ${dueNote}${
-              includeGh ? "; GitHub Sign Up added" : ""
-            }${
+            `${tile?.name ?? url}: Start Here ready (${syllabusNote}; quiz ${dueNote}${ghNote}${
               commonItems.length
                 ? `; ${commonAdded} common resource(s) added`
                 : ""

@@ -5060,6 +5060,71 @@ a.instFieldValue:hover {
   border-color: var(--danger-border);
 }
 
+/* Danger-tone twin of .bulkGroupTag usable standalone, wherever a badge
+   needs the danger treatment .bulkGroupDanger .bulkGroupTag already gives
+   an element nested INSIDE a bulk-bar group container. CarryModulePattern
+   ReviewModal.tsx's rows are not inside one (the modal renders at
+   ModulesView root, D19), so that nested selector never reaches them; this
+   is the same colors, just reachable without the ancestor. */
+.bulkGroupTagDanger {
+  color: var(--danger);
+  background: var(--danger-surface);
+  border-color: var(--danger-border);
+}
+
+/* CarryModulePatternReviewModal.tsx (D18/D19): composes with .bulkRow for
+   the shared divider-between-rows and row padding, only switching the row
+   to a column so a checkbox+title line can sit above an indented detail
+   block - the single-line .bulkRow every other bulk-bar section uses never
+   needs this. */
+.bulkRowStacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/* The indented detail block under one of that modal's review rows - the
+   resolved pattern/example, the create/skip/blocked counts, or the {n}
+   override field for a blocked row. */
+.carryReviewDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 28px;
+}
+
+/* Row-list container for that modal - same reset-list shape .fileList/
+   .lessonSlideList already use elsewhere in this file for a flex-column
+   list of cards, kept as its own class because callers there render
+   different row markup, not this modal's bulkRow rows. */
+.carryReviewList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Groups a labelled block - a small-caps .bulkLabel heading plus its list -
+   with breathing room below it, e.g. that modal's "Refused (not included)"
+   group above the per-item rows. */
+.carrySection {
+  margin: 0 0 10px;
+}
+
+/* That modal's Cancel/Apply footer row. Joins the previewHeader/previewMeta/
+   previewContent/previewCloseButton family every Tier-1 modal in this tab
+   already shares (this file's own "Course/knowledge preview" section
+   above), for a future preview-style modal's own footer to reuse rather
+   than re-inlining this layout again. */
+.previewFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 0;
+}
+
 /* ── Course-content toolbar ───────────────────────────────────────────────────
    A single quiet bar of grouped actions (Select / Files / Modules / Rubrics above
    the modules, and Copy / Refresh in the header). Groups are separated by hairline

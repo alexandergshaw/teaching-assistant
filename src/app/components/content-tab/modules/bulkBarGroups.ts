@@ -149,7 +149,7 @@ export const TIER_RANK: Record<ConsequenceTier, number> = {
 export type BulkBarControlKind = "button" | "select" | "textField" | "checkbox";
 
 /**
- * The fourteen top-level groups this bar organizes into. Twelve map
+ * The fifteen top-level groups this bar organizes into. Twelve map
  * one-to-one onto a `.bulkLabel` heading in the six section files today
  * (AC2); "head" is the bar's own count-and-Clear line
  * (`ModulesView.tsx`'s `bulkBarHead`, NOT a `.bulkLabel` span - see
@@ -159,7 +159,16 @@ export type BulkBarControlKind = "button" | "select" | "textField" | "checkbox";
  * fourteenth, added by docs/current-events-assignment-from-modules-
  * acceptance-criteria.md section 3b/D5 as a NEW sibling of "addToEach" -
  * deliberately not folded into "addToEach" itself, see that group's own
- * comment in ./bulkBarGroupCatalog.ts for why.
+ * comment in ./bulkBarGroupCatalog.ts for why; "carryPattern" is the
+ * fifteenth, added by docs/carry-module-pattern-forward-acceptance-
+ * criteria.md (chunk D) - carries one module's item shape onto N other
+ * modules, regenerating each item's body per target. Also a new sibling
+ * group, for the same canary-hygiene reason currentEvents was: its own
+ * `consequenceTag` names exactly the one write this group can perform, and
+ * folding it into an existing group would move that group's own canaries
+ * instead of this one's - see ./bulkBarGroupCatalog.ts's own comment on
+ * `carryPatternGroup` for the fuller rationale, including the D17 hazard
+ * this group's `carryApplyButton` is declared to avoid.
  *
  * "addToEach" merges what is six separate conditionally-rendered `bulkRow`s
  * in `BulkModulesSection.tsx` today (the base row, File, Details, Body,
@@ -181,6 +190,7 @@ export type BulkBarGroupId =
   | "modules"
   | "addToEach"
   | "currentEvents"
+  | "carryPattern"
   | "generate"
   | "download"
   | "askAi"
@@ -262,6 +272,20 @@ export interface BulkBarFacts {
    * routing (a scan whose every gap is "not creatable" must never offer
    * "Create 0 pages"). */
   creatableGapsCount: number;
+  /** Whether the "carry pattern forward" review modal (D19 - it renders at
+   * ModulesView root via ModulesViewSecondaryModals.tsx, not inside the bar)
+   * is currently open. THE ONE FACT THIS CHUNK ADDS, and it is load-bearing:
+   * `carryApplyButton` - the group's actual fan-out write - lives INSIDE
+   * that modal, not in the bar itself, so its own `visible` predicate reads
+   * this fact rather than `moduleCount` (see `carryPatternGroup`'s own
+   * comment in ./bulkBarGroupCatalog.ts, D17). That is what makes the
+   * group's derived tier track REACHABILITY of the write - read-only while
+   * the review is closed, fan-out-write the instant it opens - rather than
+   * a tier that is either permanently understated (the write control never
+   * counted) or permanently overstated (declared fan-out-write but visible
+   * whenever the group is, which would force the group open and show its
+   * consequence tag even when nothing destructive is currently reachable). */
+  carryReviewOpen: boolean;
 }
 
 /** Per-group runtime state `groupOpen` needs, supplied by the group's OWN
@@ -473,6 +497,12 @@ const MINIMAL_AUDIT_FACTS: BulkBarFacts = {
   coverageScanned: false,
   coveredCount: 0,
   creatableGapsCount: 0,
+  // false: the review modal is not open the moment the group first becomes
+  // visible, so carryApplyButton is not yet a visible member and this group
+  // is correctly read-only at this minimal snapshot, exactly like
+  // visualizerCoverage before a scan - see that field's own comment in this
+  // file's BulkBarFacts interface.
+  carryReviewOpen: false,
 };
 
 /**

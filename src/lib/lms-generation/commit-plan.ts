@@ -279,6 +279,16 @@ export interface PostStepOutcome {
    * fallback from being silent, so the reason travels here rather than being
    * dropped. */
   detail?: string;
+  /** Present (and `true`) on a "done" `create-assignment` outcome whose
+   * module link failed even though the assignment itself was created.
+   * Assignment linking has no separate PostPlanStep of its own - it is
+   * embedded in the one `createAssignment` write, unlike page/quiz/
+   * discussion's separate `link-*` step - so this flag is how that same
+   * "created but not linked" signal reaches summarizePostOutcome (chunk D
+   * step-11 regression fix; see commit-execute.ts's "create-assignment"
+   * case). `detail` on the same outcome carries the assignment's id and any
+   * Canvas error message. */
+  linkFailed?: boolean;
 }
 
 export interface PostSummary {
@@ -369,14 +379,19 @@ export function summarizePostOutcome(outcomes: PostStepOutcome[]): PostSummary {
 
   const linkOutcomes = outcomes.filter((o) => isLinkStep(o.step));
   const failedLink = linkOutcomes.find((o) => o.status === "failed");
-  if (failedLink) {
+  // create-assignment has no separate link-* step of its own (the module
+  // link is embedded in its one write) - its own `linkFailed` flag on the
+  // content outcome itself carries the identical "created but not linked"
+  // signal a failed link-* step carries for page/quiz/discussion.
+  if (failedLink || contentOutcome.linkFailed) {
     // The orphan case: created in Canvas, but not linked into the module -
     // it is invisible in the module tree but absolutely does exist. Naming
     // it here is what stops an instructor from creating a duplicate.
-    const detail = failedLink.detail ? ` (${failedLink.detail})` : "";
+    const detail = failedLink?.detail ?? contentOutcome.detail;
+    const detailText = detail ? ` (${detail})` : "";
     return {
       status: "partial",
-      text: `${created} was created but not linked into the module${detail} - find it in Canvas.`,
+      text: `${created} was created but not linked into the module${detailText} - find it in Canvas.`,
     };
   }
 

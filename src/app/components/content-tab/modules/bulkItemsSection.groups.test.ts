@@ -87,6 +87,7 @@ function itemsSelectedFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts
     coverageScanned: false,
     coveredCount: 0,
     creatableGapsCount: 0,
+    carryReviewOpen: false,
     ...overrides,
   };
 }

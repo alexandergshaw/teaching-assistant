@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import type {
@@ -8,21 +7,10 @@ import type {
   CanvasModule,
 } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
-import type { RepoModuleMappingModule } from "@/lib/repo-module-mapping";
 import styles from "../../page.module.css";
-import { canvasModulesToDisplay, cartridgeModulesToDisplay, type DisplayModule, type DisplayModuleItem } from "./display-module-tree";
 import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "./contentSourceGating";
-// AC7-AC10 (docs/modules-cartridge-import-upload-acceptance-criteria.md):
-// the SAME import-into-this-app pipeline ImportCourseExportControl.tsx runs,
-// extracted so this view and that control share one implementation rather
-// than two - see importCourseExportPipeline.ts's own header (a SEPARATE,
-// concurrently-built module this file only ever calls, never inlines).
-import { importCourseExportFile, type ImportOutcome } from "./importCourseExportPipeline";
 import { ModuleCard } from "./modules/ModuleCard";
 import { buildBulkModulesSectionProps } from "./modules/buildBulkModulesSectionProps";
-import { buildModuleCardProps } from "./modules/buildModuleCardProps";
-import { useCartridgeToCanvas } from "./modules/useCartridgeToCanvas";
-import { useExportModuleAdditions } from "./modules/useExportModuleAdditions";
 import { AskAiSelectionSection } from "./modules/AskAiSelectionSection";
 import { BulkBarHead } from "./modules/BulkBarHead";
 import { BulkItemsSection } from "./modules/BulkItemsSection";
@@ -36,24 +24,11 @@ import { ModulesHeaderBar } from "./modules/ModulesHeaderBar";
 import { ModulesViewSecondaryModals } from "./modules/ModulesViewSecondaryModals";
 import { NewAssignmentGate } from "./modules/NewAssignmentGate";
 import { RepoFoldersSection } from "./modules/RepoFoldersSection";
-import { useAddModuleItem } from "./modules/useAddModuleItem";
 import { useBulkBarGroups } from "./modules/useBulkBarGroups";
-import { useBulkItemActions } from "./modules/useBulkItemActions";
-import { useBulkModuleActions } from "./modules/useBulkModuleActions";
-import { useCurrentEventsAssignments } from "./modules/useCurrentEventsAssignments";
-import { useDragReorder } from "./modules/useDragReorder";
-import { useInlineModuleEdits } from "./modules/useInlineModuleEdits";
-import { useLmsGeneration } from "./modules/useLmsGeneration";
-import { useLmsSyllabusButtons } from "./modules/useLmsSyllabusButtons";
-import { useModuleSelection } from "./modules/useModuleSelection";
-import { useModulesViewDialogs } from "./modules/useModulesViewDialogs";
-import { useNewAssignmentForm } from "./modules/useNewAssignmentForm";
-import { useRepoPairing } from "./modules/useRepoPairing";
+import { useModulesViewOrchestration } from "./modules/useModulesViewOrchestration";
 import { useRubrics } from "./modules/useRubrics";
 import { useSelectionChatContext } from "./modules/useSelectionChatContext";
 import { useSelectionDownload } from "./modules/useSelectionDownload";
-import { useStickyHeaderResize } from "./modules/useStickyHeaderResize";
-import { useVideoRepoPickers } from "./modules/useVideoRepoPickers";
 import { useVisualizerCoverage } from "./modules/useVisualizerCoverage";
 import { VisualizerCoverageSection } from "./modules/VisualizerCoverageSection";
 
@@ -135,132 +110,83 @@ export function ModulesView({
   canCopy: boolean;
 }) {
   const ctx = sourceContext ?? LIVE_CONTENT_SOURCE;
-  // The module tree actually rendered below - built from whichever source is
-  // active (display-module-tree.ts converts either without fabricating a
-  // single Canvas-only field). `modules`/`exportModules` themselves stay
-  // exactly as ContentTab fills them (live-only / export-only respectively -
-  // see that component's `loadContent`), so this is the one place the two
-  // are reconciled into one tree for rendering.
-  // Add items to modules on an export-only course (docs/export-module-
-  // additions-acceptance-criteria.md AC10) - one hook call, mirroring
-  // useRepoPairing below; see that hook's own header for the activation gate.
-  // M12 (docs/module-intro-video-script-acceptance-criteria.md, finding 15):
-  // `acronym` is threaded through here too, mirroring useRepoPairing below -
-  // both hooks already accept it (see each one's own header comment), it was
-  // simply never passed from here yet, which left it dead for every
-  // host-less courseUrl (the only shape CoursePicker.tsx/LmsCell.tsx emit).
-  const exportAdditions = useExportModuleAdditions(courseUrl, exportCourseId, exportModules, acronym);
-  const displayModules: DisplayModule[] = useMemo(
-    () =>
-      ctx.source === "export"
-        ? cartridgeModulesToDisplay(exportModules ?? [], exportAdditions.active)
-        : canvasModulesToDisplay(modules),
-    [ctx.source, exportModules, modules, exportAdditions.active]
-  );
   const [provider] = useLlmProvider();
   const { supabase, user } = useSupabase();
-
-  // Repo pairing in Modules (docs/repo-pairing-in-modules-acceptance-
-  // criteria.md AC1-AC4, AC9, AC10). `useRepoPairing` needs "the modules
-  // currently on screen" (AC3) - the same `displayModules[]` above, reduced
-  // to the minimal {id, name} shape repo-module-mapping.ts's pure matcher
-  // needs (RepoModuleMappingModule) rather than the richer DisplayModule -
-  // this works identically whether the active source is live Canvas or a
-  // stored export, since a DisplayModule's `.id` (live) or `.identifier`
-  // (export) is all a folder-to-module pairing or override ever names. A
-  // module with neither is excluded rather than given a fabricated key -
-  // display-module-tree.ts's own "never fabricate a value" discipline,
-  // applied here.
-  const repoMappingModules: RepoModuleMappingModule[] = useMemo(
-    () =>
-      displayModules
-        .filter((m) => m.id != null || m.identifier != null)
-        .map((m) => ({ id: (m.id ?? m.identifier) as string | number, name: m.name })),
-    [displayModules]
-  );
-  // Durable repo-to-module associations
-  // (docs/durable-repo-module-associations-acceptance-criteria.md): identity
-  // is the course_hub ROW ID, not `courseUrl` (blank for every
-  // export-sourced course) - `exportCourseId` is threaded through exactly
-  // like it already is into useLmsGeneration/useSelectionDownload below, so
-  // useRepoPairing can resolve the same row either way
-  // (resolveLmsCourseRowAction for a live course, resolveLmsCourseRowByIdAction
-  // for an export one).
-  // M12: `acronym` - see useRepoPairing.ts's own header comment on this
-  // fourth argument for the collision it closes. Was accepted by the hook
-  // already but never actually passed from here - see this file's own
-  // useLmsGeneration comment below for the fuller story of why that made the
-  // mechanism dead end to end.
-  const repoPairing = useRepoPairing(courseUrl, exportCourseId, repoMappingModules, acronym);
-
-  // Resizable sticky header, module/item search + selection, rubrics, and the
-  // single-item CRUD helpers (including the shared `run` write-and-reconcile
-  // helper other hooks below reuse for their own one-off writes). The fourth
-  // argument (AC6) is `repoPairing.repoModuleRefs` - null until a paired
-  // repo's tree has actually loaded, which is exactly the "nothing to
-  // confirm/refute a repo key against yet" signal pruneSelectionForModules's
-  // own doc comment describes, so a repo selection is never swept before its
-  // tree arrives.
-  const { headerBodyRef, headerHeight, setHeaderHeight, onResizeStart } = useStickyHeaderResize();
-  const selection = useModuleSelection(modules, setNote, exportModules, repoPairing.repoModuleRefs);
+  // useRubrics stays as a DIRECT call here (never moved into
+  // useModulesViewOrchestration below) because useRubrics.test.ts reads this
+  // exact call site's argument list as TEXT out of ModulesView.tsx.
   const rubricsHook = useRubrics(courseUrl, acronym, setNote);
-  const edits = useInlineModuleEdits(courseUrl, acronym, modules, setModules, setBusy, setNote, reload);
-  const dragReorder = useDragReorder(
-    modules,
-    setModules,
-    selection.selected,
-    selection.setSelected,
+
+  // Everything else this view used to call directly - useExportModuleAdditions,
+  // the display-tree memo, repo pairing, the sticky header, selection, the
+  // per-item edit/drag/add-item/syllabus/generation hooks, the cartridge
+  // import/upload state, the bulk-action hooks, the current-events hook, the
+  // dialogs hook and the two prop-builders that consume them - moved into
+  // useModulesViewOrchestration.ts once this file crossed the repo's
+  // 1000-line ceiling (docs/carry-module-pattern-forward-acceptance-
+  // criteria.md's Gates section). See that file's own header comment for
+  // exactly which five hook calls stay here instead (their argument lists are
+  // read as source text by their own wiring tests) and why nothing else
+  // needed to.
+  const {
+    exportAdditions,
+    displayModules,
+    repoMappingModules,
+    repoPairing,
+    headerBodyRef,
+    headerHeight,
+    setHeaderHeight,
+    onResizeStart,
+    selection,
+    edits,
+    dragReorder,
+    newAssignmentForm,
+    syllabusButtons,
+    lmsGeneration,
+    cartridgeUploadOpen,
+    setCartridgeUploadOpen,
+    cartridgeUploadTriggerRef,
+    onCartridgeUploadTrigger,
+    cartridgeUpload,
+    onCloseCartridgeUpload,
+    importCartridgeFileInputRef,
+    importCartridgeBusy,
+    handleImportCartridgeFileChange,
+    opBusy,
+    bulkModuleActions,
+    bulkItemActions,
+    currentEventsAssignments,
+    carryModulePattern,
+    carryReviewTriggerRef,
+    onCarryReviewTrigger,
+    courseBase,
+    displayModuleMatches,
+    displayItemVisible,
+    dialogs,
+    itemRowProps,
+    addItemRowProps,
+    exportAdditionsProps,
+  } = useModulesViewOrchestration({
     courseUrl,
-    acronym,
-    setBusy,
-    setNote,
-    reload,
-    edits.run
-  );
-  const newAssignmentForm = useNewAssignmentForm(courseUrl, acronym, modules, edits.run, reload, setNote);
-  const videoRepo = useVideoRepoPickers(courseUrl, acronym, user, supabase, setNote, reload);
-  const addModuleItem = useAddModuleItem(courseUrl, acronym, provider, setBusy, setNote, reload, edits.run);
-  const syllabusButtons = useLmsSyllabusButtons(courseUrl, acronym, provider, modules, setNote, setBusy, reload);
-  // "Generate from selection" (chunk 1: anticipated Q&A, current events;
-  // chunk 3b: four more kinds that also POST to Canvas). GENERATE/REFINE stay
-  // off the outer `busy`/`reload` for every kind - neither ever writes to
-  // Canvas - but POST (chunk 3b, posting kinds only) now holds `busy` and
-  // calls `reload()` for the duration of its own Canvas write, the same as
-  // every other write in this tab; see useLmsGeneration.ts's own header
-  // comment for the full rationale.
-  //
-  // M12 (docs/module-intro-video-script-acceptance-criteria.md, finding 15):
-  // `acronym` IS now threaded through (the prior comment here - "No
-  // `acronym`... resolve institution routing from the DB course row
-  // themselves" - was true only for a full `https://` Canvas URL; a
-  // host-less `courseUrl`, the ONLY shape CoursePicker.tsx/LmsCell.tsx ever
-  // emit, has no host for the DB row lookup to key off at all once M11/M12
-  // stopped `hostOf` inventing a pseudo-host from the path. Without an
-  // acronym, findCourseForCanvasUrl now returns FALSE by design for that
-  // shape, so this was silently dead - see this hook's own `acronym`
-  // parameter doc comment for exactly which calls it now reaches, and which
-  // two (refine/saveEdit's own WRITE, not their post-write version re-fetch)
-  // it still does not.
-  const lmsGeneration = useLmsGeneration(
-    courseUrl,
-    provider,
-    selection.selectedMaterialItems,
-    selection.selectedModules,
-    modules,
-    setNote,
-    setBusy,
-    reload,
-    exportModules,
-    // AC1 defect fix: threaded through exactly the way `exportCourseId` is
-    // already threaded into `useSelectionDownload` below - see this file's
-    // own `exportCourseId` prop doc comment. `ctx` (AC3) is what lets
-    // `post` refuse a Canvas write for an export selection with the SAME
-    // gateOperation("courseWrite") wording NewAssignmentPanel's own gate
-    // below already uses.
     exportCourseId,
+    acronym,
+    modules,
+    exportModules,
     ctx,
-    acronym
-  );
+    setModules,
+    reload,
+    setNote,
+    setBusy,
+    busy,
+    targets,
+    courseName,
+    onEditPage,
+    onPageEditorTrigger,
+    provider,
+    supabase,
+    user,
+    rubricsHook,
+  });
 
   // "Download" (docs/lms-selection-export-download-acceptance-criteria.md) -
   // a course export (.imscc) and/or a plain zip of just the current
@@ -331,148 +257,6 @@ export function ModulesView({
     ctx
   );
 
-  // ── Cartridge: import (into this app) + upload (to the live Canvas
-  // course) - docs/modules-cartridge-import-upload-acceptance-criteria.md.
-  // ModulesHeaderBar's new "Cartridge" group (AC1) triggers both; this view
-  // owns every bit of state either destination needs (per this feature's own
-  // file assignment), because neither can render a modal/dialog from inside
-  // the sticky header (AC6) and "Import cartridge" needs no modal at all
-  // (AC3 - it's a one-click file pick, exactly like syllabusTemplateFileInputRef
-  // above).
-
-  // AC15: CartridgeToCanvasModal's open/close boolean + trigger ref. NOT part
-  // of useModulesViewDialogs.ts (a concurrent chunk owns that file) - kept
-  // local here instead, mirroring that hook's own capture-alongside-the-
-  // setter shape for every other dialog in this view.
-  const [cartridgeUploadOpen, setCartridgeUploadOpen] = useState(false);
-  const cartridgeUploadTriggerRef = useRef<HTMLElement | null>(null);
-  const onCartridgeUploadTrigger = (trigger: HTMLElement) => {
-    cartridgeUploadTriggerRef.current = trigger;
-  };
-  // AC14: the whole phase machine lives in this one hook instance - it
-  // outlives the modal's own mount (the modal only renders while
-  // `cartridgeUploadOpen`), which is exactly what lets `close()` below stop
-  // an in-flight poll via an explicit cancelled flag rather than relying on
-  // an unmount to do it implicitly.
-  const cartridgeUpload = useCartridgeToCanvas(courseUrl, acronym, courseName, ctx, supabase, setNote, reload);
-  const onCloseCartridgeUpload = () => {
-    cartridgeUpload.close();
-    setCartridgeUploadOpen(false);
-  };
-
-  // AC1/AC3: "Import cartridge" - opens the device file picker directly (no
-  // intermediate modal), then runs the SAME pipeline
-  // ImportCourseExportControl.tsx already ran (AC7/AC8), extracted into
-  // importCourseExportPipeline.ts so the two callers share one
-  // implementation. `importCartridgeBusy` drives the button's own label
-  // swap in ModulesHeaderBar (AC5's native-`disabled` carve-out for a
-  // transient busy state).
-  const importCartridgeFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [importCartridgeBusy, setImportCartridgeBusy] = useState<"" | "parsing" | "uploading">("");
-
-  const importOutcomeMessage = (outcome: ImportOutcome): string =>
-    outcome.kind === "created"
-      ? `Created a new course "${outcome.courseName}" and imported the export into it.`
-      : outcome.kind === "stamped"
-        ? `Attached the export to your existing course "${outcome.courseName}" and linked its Canvas URL.`
-        : `Attached the export to your existing course "${outcome.courseName}".`;
-
-  const handleImportCartridgeFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = e.target.files?.[0] ?? null;
-    e.target.value = "";
-    if (!picked) return;
-    if (!user) {
-      setNote({ kind: "error", text: "You must be logged in." });
-      return;
-    }
-    // setState-in-effect idiom (this repo's own convention): an inline
-    // async IIFE, setState only after each await - this handler is not an
-    // effect, but the same rule applies to any async work kicked off from an
-    // event handler that keeps setting state after awaits.
-    void (async () => {
-      try {
-        const outcome = await importCourseExportFile(supabase, user.id, picked, (phase) => setImportCartridgeBusy(phase));
-        setNote({ kind: "success", text: importOutcomeMessage(outcome) });
-        // AC10: reload only when the row this import landed on IS the row
-        // currently on screen - the export-selection identifier this view
-        // already carries (`exportCourseId`). A live-Canvas view has no
-        // course_hub row id threaded into it to compare against (ContentTab's
-        // `courseId` is the CANVAS numeric course id, not a course_hub row),
-        // so this can only ever fire true for an export-sourced view - which
-        // is also the only case where staying silent would leave the
-        // instructor staring at stale content, since a live view never
-        // renders course_hub row content in the first place.
-        if (exportCourseId && outcome.courseId === exportCourseId) reload();
-      } catch (err) {
-        setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not import the export." });
-      } finally {
-        setImportCartridgeBusy("");
-      }
-    })();
-  };
-
-  // Shared busy flag for the bulk toolbar (module-level and item-level ops
-  // both disable the same buttons while a batch write is in flight).
-  const [opBusy, setOpBusy] = useState(false);
-  const bulkModuleActions = useBulkModuleActions(
-    courseUrl,
-    acronym,
-    provider,
-    modules,
-    // useBulkModuleActions is Canvas-write-only (publish/delete/add-to-
-    // module) and predates useModuleSelection's discriminated module-key
-    // scheme (liveModuleKey/exportModuleKey) - it still speaks a plain
-    // Set<number> of live Canvas module ids, which selection.liveModuleIds/
-    // setLiveModuleIds provide as a derived, backward-compatible view over
-    // the hook's real Set<string> state (see useModuleSelection.ts's own
-    // doc comment on UseModuleSelectionReturn).
-    selection.liveModuleIds,
-    selection.setLiveModuleIds,
-    targets,
-    setOpBusy,
-    setNote,
-    reload
-  );
-  const bulkItemActions = useBulkItemActions(
-    courseUrl,
-    acronym,
-    modules,
-    selection.selected,
-    selection.selectedItems,
-    selection.clearSelection,
-    rubricsHook.rubrics,
-    rubricsHook.setRubricBuilder,
-    opBusy,
-    setOpBusy,
-    setNote,
-    reload
-  );
-
-  // Current-events research assignment, one per selected module
-  // (docs/current-events-assignment-from-modules-acceptance-criteria.md,
-  // section 3b/D3-D6). Called HERE, never from BulkModulesSection - that
-  // section renders only while a module is selected and can be
-  // conditionally unmounted, a hook called from this view cannot be.
-  // `setOpBusy` is threaded through exactly like useBulkModuleActions/
-  // useBulkItemActions above, so this group's own busy state is the SAME
-  // shared `opBusy` those two groups already read (see
-  // useCurrentEventsAssignments.ts's own header - it holds no busy flag of
-  // its own) rather than an independent signal like "addToEach"'s
-  // bulkAiBusy. `selection.liveModuleIds` (not selection.selectedModules,
-  // a Set<string> of discriminated keys) is the same Set<number> view
-  // bulkModuleActions above already reads.
-  const currentEventsAssignments = useCurrentEventsAssignments(
-    courseUrl,
-    acronym,
-    exportCourseId,
-    provider,
-    modules,
-    selection.liveModuleIds,
-    setOpBusy,
-    setNote,
-    reload
-  );
-
   // The bulk bar's group open/closed state (docs/bulk-bar-reorganization-
   // acceptance-criteria.md, section 3b/D1/D3). Called EXACTLY ONCE here -
   // never from inside BulkBarGroup itself, which is instantiated once per
@@ -497,41 +281,30 @@ export function ModulesView({
     rubricsHook,
     lmsGeneration,
     visualizerCoverage,
+    // C8: reviewVisible (not the bare reviewOpen flag) - see
+    // useCarryModulePattern.ts's isCarryReviewVisible for why. A selection
+    // change mid-fetch can null out the hook's template/plan while
+    // reviewOpen is still true; the bar's consequence tier must drop with
+    // it, exactly in step with the modal that offers the way out.
+    carryReviewOpen: carryModulePattern.reviewVisible,
   });
 
-  // The course's base URL (".../courses/123"), used to build "Open on Canvas" links.
-  const courseBase = courseUrl.replace(/(\/courses\/\d+).*$/, "$1");
-
-  // Display-tree equivalents of selection.moduleMatches/itemVisible
-  // (useModuleSelection.ts, unchanged by this file): that hook's own
-  // versions are typed against the live CanvasModule/CanvasModuleItem it
-  // scans, so they cannot be called with `displayModules`' mixed-source
-  // DisplayModule/DisplayModuleItem entries. Same search-matching logic,
-  // read from whichever fields either source's display item actually has
-  // (`name`/`items[].title` - both always present, live or export).
-  const displayModuleMatches = (m: DisplayModule): boolean =>
-    !selection.moduleSearchLc ||
-    m.name.toLowerCase().includes(selection.moduleSearchLc) ||
-    m.items.some((it) => it.title.toLowerCase().includes(selection.moduleSearchLc));
-  const displayItemVisible = (m: DisplayModule, it: DisplayModuleItem): boolean =>
-    !selection.moduleSearchLc ||
-    m.name.toLowerCase().includes(selection.moduleSearchLc) ||
-    it.title.toLowerCase().includes(selection.moduleSearchLc);
-
-  // Every dialog this component opens (open/close state, focus-restoration
-  // refs, and the two capture-then-act handlers openFilePreview/
-  // openGeneratedPreview) - extracted into useModulesViewDialogs.ts (see
-  // that hook's own header comment for the full focus-restoration
-  // rationale this used to carry inline here).
-  const dialogs = useModulesViewDialogs(courseUrl, acronym, lmsGeneration.generate);
+  // courseBase, displayModuleMatches, displayItemVisible, dialogs and
+  // itemRowProps/addItemRowProps/exportAdditionsProps all now come out of
+  // useModulesViewOrchestration above - only the destructure of `dialogs`
+  // itself stays inline here, since every field below is read directly by
+  // this file's own JSX.
+  // setEditingFile/setPreviewAssignment/onOfficeEditorTrigger/
+  // onPreviewAssignmentTrigger/openFilePreview are read only by
+  // buildModuleCardProps now (moved into useModulesViewOrchestration above,
+  // consuming `dialogs.xxx` directly) - not re-destructured here since this
+  // file's own JSX no longer references them by these bare names.
   const {
     setScheduleOpen,
     setBulkUploadOpen,
     setBulkCreateOpen,
     setRenameOpen,
     setEditingItem,
-    setEditingFile,
-    setPreviewAssignment,
     onSchedulerTrigger,
     onBulkUploadTrigger,
     onBulkCreateTrigger,
@@ -540,38 +313,11 @@ export function ModulesView({
     onModuleQuestionsTrigger,
     onItemQuestionsTrigger,
     onGradableEditorTrigger,
-    onOfficeEditorTrigger,
-    onPreviewAssignmentTrigger,
     openGeneratedPreview,
     generatedPreviewTriggerRef,
-    openFilePreview,
     headerFallbackRef,
     modulesListFallbackRef,
   } = dialogs;
-
-  // Props shared by every item row / "Add item" row / export-addition row,
-  // in every module - built in buildModuleCardProps.ts (module/item-specific
-  // values are supplied by ModuleCard itself).
-  const { itemRowProps, addItemRowProps, exportAdditionsProps } = buildModuleCardProps({
-    busy,
-    ctx,
-    provider,
-    dragReorder,
-    selection,
-    edits,
-    onEditPage,
-    onPageEditorTrigger,
-    setPreviewAssignment,
-    setEditingItem,
-    openFilePreview,
-    setEditingFile,
-    onPreviewAssignmentTrigger,
-    onGradableEditorTrigger,
-    onOfficeEditorTrigger,
-    exportAdditions,
-    addModuleItem,
-    videoRepo,
-  });
 
   // The BulkModulesSection prop object (everything except `facts`/
   // `groupsState`, which stay bare identifiers at the render site below -
@@ -744,6 +490,12 @@ export function ModulesView({
                     confirmCurrentEvents={currentEventsAssignments.confirmCurrentEvents}
                     currentEventsLabel={currentEventsAssignments.currentEventsLabel}
                     runCurrentEventsAssignments={currentEventsAssignments.runCurrentEventsAssignments}
+                    carryTemplateOptions={carryModulePattern.templateOptions}
+                    carrySourceModuleId={carryModulePattern.sourceModuleId}
+                    onCarrySourceModuleIdChange={carryModulePattern.setSourceModuleId}
+                    carryReviewBusy={carryModulePattern.reviewBusy}
+                    onReviewCarryPattern={carryModulePattern.onReviewCarryPattern}
+                    onCarryReviewTrigger={onCarryReviewTrigger}
                   />
                 )}
 
@@ -957,6 +709,8 @@ export function ModulesView({
         cartridgeUpload={cartridgeUpload}
         cartridgeUploadTriggerRef={cartridgeUploadTriggerRef}
         onCloseCartridgeUpload={onCloseCartridgeUpload}
+        carryModulePattern={carryModulePattern}
+        carryReviewTriggerRef={carryReviewTriggerRef}
       />
 
       {lmsGeneration.preview && (
@@ -993,6 +747,3 @@ export function ModulesView({
     </div>
   );
 }
-
-
-// ── Tab shell ───────────────────────────────────────────────────────────────-

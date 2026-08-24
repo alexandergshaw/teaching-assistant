@@ -200,6 +200,21 @@ export const assignmentCreationSteps: StepDefinition[] = [
           throw new Error(created.error);
         }
 
+        // Chunk D step-11 regression: createCourseAssignmentAction can
+        // succeed at creating the assignment but fail to link it into the
+        // module (a success-shaped `{ addedToModule: false, linkError }`,
+        // not an `{ error }`). The assignment is real and unattended, so
+        // this reports the orphan by id (REGRESSION.md entry 258 check 11)
+        // rather than the "-> <module>" success line, and keeps going
+        // instead of throwing (unlike a genuine create failure) so the
+        // remaining modules in this run still get their assignments.
+        if (created.linkError !== undefined) {
+          lines.push(
+            `${name}: created (assignment id ${created.id}) but NOT added to ${m.name} - ${created.linkError} - find it in Canvas.`
+          );
+          continue;
+        }
+
         lines.push(`${name} -> ${m.name}${dueDateStr}`);
       }
 

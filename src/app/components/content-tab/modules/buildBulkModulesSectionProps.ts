@@ -42,7 +42,23 @@ export function buildBulkModulesSectionProps({
   // header comment, which already named this chunk's D8 before those three
   // concrete prop names existed) - excluded here for the same reason, not a
   // change to this function's own logic or argument list.
-  "facts" | "groupsState" | "confirmCurrentEvents" | "currentEventsLabel" | "runCurrentEventsAssignments"
+  //
+  // Chunk D (docs/carry-module-pattern-forward-acceptance-criteria.md, D14/
+  // D19/D20/D21) adds six more REQUIRED props for the "carryPattern" group,
+  // all from a NEW hook (useCarryModulePattern) this function's own argument
+  // list does not accept - threaded the same way, as bare identifiers at the
+  // ModulesView.tsx render site, for the identical reason.
+  | "facts"
+  | "groupsState"
+  | "confirmCurrentEvents"
+  | "currentEventsLabel"
+  | "runCurrentEventsAssignments"
+  | "carryTemplateOptions"
+  | "carrySourceModuleId"
+  | "onCarrySourceModuleIdChange"
+  | "carryReviewBusy"
+  | "onReviewCarryPattern"
+  | "onCarryReviewTrigger"
 > {
   return {
     opBusy,

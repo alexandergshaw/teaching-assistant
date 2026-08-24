@@ -14,6 +14,16 @@ export interface BuildBulkBarFactsArgs {
   rubricsHook: UseRubricsReturn;
   lmsGeneration: UseLmsGenerationReturn;
   visualizerCoverage: UseVisualizerCoverageReturn;
+  /** Whether the "carry pattern forward" review modal is currently open
+   * (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D,
+   * D17/D19) - a plain boolean rather than a wrapped hook-return type,
+   * because unlike this function's other arguments it names exactly one
+   * fact and nothing else this file needs from whatever owns that modal's
+   * open/closed state. See BulkBarFacts.carryReviewOpen's own doc comment
+   * (bulkBarGroups.ts) for why this fact exists at all: it is what lets
+   * `carryApplyButton` - the fan-out write living inside that modal, not in
+   * the bar - be a correctly-gated member of `groupTier`'s reduction. */
+  carryReviewOpen: boolean;
 }
 
 /**
@@ -34,6 +44,7 @@ export function buildBulkBarFacts({
   rubricsHook,
   lmsGeneration,
   visualizerCoverage,
+  carryReviewOpen,
 }: BuildBulkBarFactsArgs): BulkBarFacts {
   // BulkItemsSection's own single-item branch (AC11/D1's
   // singleItemEditKind): "gradable" for a single Assignment/Quiz/Discussion
@@ -67,5 +78,6 @@ export function buildBulkBarFacts({
     coverageScanned: visualizerCoverage.coverage !== null,
     coveredCount: visualizerCoverage.coverage?.covered.length ?? 0,
     creatableGapsCount: visualizerCoverage.coverage ? conceptsForCreate(visualizerCoverage.coverage).length : 0,
+    carryReviewOpen,
   };
 }

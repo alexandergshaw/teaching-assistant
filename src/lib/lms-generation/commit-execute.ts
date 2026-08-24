@@ -78,7 +78,10 @@ export interface CanvasWriters {
     fields: NewAssignment,
     moduleId: number | null,
     acronym?: string
-  ) => Promise<{ id: number } | CanvasWriteError>;
+  ) => Promise<
+    | { id: number; addedToModule?: boolean; linkError?: string }
+    | CanvasWriteError
+  >;
   createQuiz: (
     courseUrl: string,
     fields: { title: string; description: string },
@@ -170,6 +173,28 @@ export async function executePostPlanSteps(
         if ("error" in res) {
           outcomes.push({ step, status: "failed", detail: res.error });
           return outcomes;
+        }
+        // Assignment linking is embedded in ONE Canvas write here (unlike
+        // page/quiz/discussion, which get a separate link-* PostPlanStep) -
+        // createCourseAssignmentAction's own `moduleId` parameter does both.
+        // Chunk D step-11 regression: that write can succeed at creating the
+        // assignment but fail to link it (`addedToModule: false` +
+        // `linkError`, still no `error` key), and this case used to report a
+        // bare "done" for that - the overall post then read as a full
+        // success even though the assignment never landed in the module.
+        // `linkFailed` carries the same "created but not linked" signal
+        // isLinkStep's separate failed step carries for the other kinds, so
+        // summarizePostOutcome (commit-plan.ts) renders it as the same
+        // honest "partial - find it in Canvas" orphan case, by id, never a
+        // silent success.
+        if (moduleId !== null && res.addedToModule === false) {
+          outcomes.push({
+            step,
+            status: "done",
+            linkFailed: true,
+            detail: res.linkError ? `assignment id ${res.id}: ${res.linkError}` : `assignment id ${res.id}`,
+          });
+          break;
         }
         outcomes.push({ step, status: "done" });
         break;

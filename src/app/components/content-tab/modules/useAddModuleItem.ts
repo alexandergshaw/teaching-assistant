@@ -8,6 +8,7 @@ import { createCourseAssignmentAction, createModuleItemAction, generateDocumentT
 import { slidesToText, uploadFileToModule } from "../utils";
 import { addContentToModuleDetailed } from "./moduleContentActions";
 import { describeOrphans } from "./useBulkModuleActions";
+import { describeAssignmentCreateOutcome } from "./assignmentCreateOutcome";
 
 const NEW_ASG_DEFAULT = { name: "", points: "100", due: "", stype: "online_text_entry", publish: true };
 
@@ -132,8 +133,9 @@ export function useAddModuleItem(
         acronym
       );
       setBusy(false);
-      if ("error" in r) { setNote({ kind: "error", text: r.error }); return; }
-      setNote({ kind: "success", text: `Created "${r.name}" in ${m.name}.` });
+      const outcome = describeAssignmentCreateOutcome(r, (res) => `Created "${res.name}" in ${m.name}.`);
+      setNote(outcome);
+      if ("error" in r) return;
       setNewAsg((p) => ({ ...p, [m.id]: { ...NEW_ASG_DEFAULT } }));
       reload();
       return;

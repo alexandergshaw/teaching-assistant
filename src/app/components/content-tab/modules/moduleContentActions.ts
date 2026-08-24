@@ -22,6 +22,16 @@ type AddContentOpts = {
   fileContent?: string;
   fileFormat?: "docx" | "pptx";
   submissionType?: string;
+  // Item order and nesting within the module (G4 / D10). Both are genuinely
+  // optional: when absent, no module_item[position] / module_item[indent]
+  // parameter is sent at all (module-items.ts's createModuleItem guards each
+  // with `typeof x === "number"`), so Canvas falls back to its own default
+  // (append to the end, no indent) exactly as every pre-existing caller of
+  // addContentToModule/addContentToModuleDetailed already relies on. Do NOT
+  // default either to 0 or 1 here - a wrong default would silently reorder
+  // every existing caller's module on every add.
+  position?: number;
+  indent?: number;
 };
 
 // Outcome of one addContentToModuleDetailed attempt. A plain discriminated
@@ -97,7 +107,12 @@ export async function addContentToModuleDetailed(
     if (type === "SubHeader") {
       // No separate create step - the module item itself IS the content, so
       // a failure here has nothing left over to orphan.
-      const r = await createModuleItemAction(courseUrl, moduleId, { type: "SubHeader", title: name }, acronym);
+      const r = await createModuleItemAction(
+        courseUrl,
+        moduleId,
+        { type: "SubHeader", title: name, position: opts?.position, indent: opts?.indent },
+        acronym
+      );
       return "error" in r ? { status: "failed" } : { status: "success" };
     }
     if (type === "File") {
@@ -135,7 +150,25 @@ export async function addContentToModuleDetailed(
       if (opts?.fileId != null) {
         // Linking an EXISTING file - nothing new is created here, so a
         // failure has nothing to orphan either.
-        const r = await createModuleItemAction(courseUrl, moduleId, { type: "File", contentId: opts.fileId }, acronym);
+        //
+        // C4 fix: `title` MUST be sent here. Every other branch below either
+        // has no separate content object (SubHeader) or created that object
+        // itself with `title: name` (Page/Assignment/Quiz/Discussion), so
+        // Canvas's own "module item defaults to the title of the item it
+        // references" behavior already yields `name`. An EXISTING file is
+        // the one case where the referenced object's own name predates this
+        // call and has nothing to do with `name` - omitting `title` let
+        // Canvas name the module item after the FILE instead. The plan's
+        // skip check (AC8) compares the resolved title against module ITEM
+        // titles, so a re-run never matched and linked the same file again
+        // on every apply, once per run, forever - Canvas has no undo for
+        // that link.
+        const r = await createModuleItemAction(
+          courseUrl,
+          moduleId,
+          { type: "File", contentId: opts.fileId, title: name, position: opts?.position, indent: opts?.indent },
+          acronym
+        );
         return "error" in r ? { status: "failed" } : { status: "success" };
       }
       return { status: "failed" };
@@ -147,7 +180,20 @@ export async function addContentToModuleDetailed(
         acronym
       );
       if ("error" in created) return { status: "failed" };
-      const linked = await createModuleItemAction(courseUrl, moduleId, { type: "Page", pageUrl: created.page.url }, acronym);
+      // No `title` here - checked as part of C4 and deliberately left out.
+      // The page was just created above with `title: name`, and Canvas
+      // titles a Page module item after the page it references when no
+      // title is supplied (the same convention every other Page-linking
+      // call site in this codebase relies on - see
+      // src/lib/lms-generation/commit-execute.ts:163 and its siblings).
+      // Unlike the File-link branch above, there is no pre-existing object
+      // whose own name could disagree with `name`.
+      const linked = await createModuleItemAction(
+        courseUrl,
+        moduleId,
+        { type: "Page", pageUrl: created.page.url, position: opts?.position, indent: opts?.indent },
+        acronym
+      );
       if ("error" in linked) {
         return { status: "orphaned", kind: "Page", title: name, contentId: created.page.pageId };
       }
@@ -162,7 +208,16 @@ export async function addContentToModuleDetailed(
     if (opts?.submissionType && type === "Assignment") fields.submissionType = opts.submissionType;
     const created = await createGradableAction(courseUrl, type as GradableKind, fields, acronym);
     if ("error" in created) return { status: "failed" };
-    const linked = await createModuleItemAction(courseUrl, moduleId, { type, contentId: created.id }, acronym);
+    // No `title` here either, for the same reason as the Page branch above:
+    // `fields.title = name` was already sent when the assignment/quiz/
+    // discussion was created, so Canvas's own object already has the right
+    // name and the module item inherits it. Checked as part of C4.
+    const linked = await createModuleItemAction(
+      courseUrl,
+      moduleId,
+      { type, contentId: created.id, position: opts?.position, indent: opts?.indent },
+      acronym
+    );
     if ("error" in linked) {
       return { status: "orphaned", kind: type, title: name, contentId: created.id };
     }

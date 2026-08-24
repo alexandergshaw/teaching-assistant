@@ -295,15 +295,38 @@ export const lmsIntegrationsSteps: StepDefinition[] = [
               moduleId
             );
 
-            if (!("error" in assignmentResult)) {
+            if ("error" in assignmentResult) {
+              summaryItems.push(
+                `Week ${weekPlan.week}: Could not create assignment (${assignmentResult.error})`
+              );
+            } else if (assignmentResult.linkError !== undefined) {
+              // Chunk D step-11 regression: createCourseAssignmentAction can
+              // create the assignment but fail to link it into the module -
+              // a success-shaped result with no `error` key.
+              //
+              // It IS counted as created, because it was: the assignment
+              // exists in Canvas and the run should not claim otherwise. What
+              // it is not is LINKED, and the summary line below says exactly
+              // that and names the id so a human can find the orphan.
+              //
+              // Deliberately NOT added to `existingAssignmentTitles`. That
+              // set is rebuilt from module ITEMS on every run (see the scan
+              // above), and an orphan has no module item - so omitting it
+              // here only makes the in-run set agree with what the next run's
+              // scan will actually produce. NOTE that this does NOT stop a
+              // re-run from creating a second copy: nothing can see the
+              // orphan by title, which is the same gap REGRESSION entry 330
+              // records for the current-events assignment. A course-scoped
+              // assignment-title query would close it; it was not built.
+              assignmentsCreated += 1;
+              summaryItems.push(
+                `Week ${weekPlan.week}: Created assignment "${assignmentTitle}" (id ${assignmentResult.id}) but could not add it to the module (${assignmentResult.linkError}) - find it in Canvas`
+              );
+            } else {
               assignmentsCreated += 1;
               existingAssignmentTitles.add(normalizedAssignmentTitle);
               summaryItems.push(
                 `Week ${weekPlan.week}: Created assignment "${assignmentTitle}"`
-              );
-            } else {
-              summaryItems.push(
-                `Week ${weekPlan.week}: Could not create assignment (${assignmentResult.error})`
               );
             }
           } catch (err) {

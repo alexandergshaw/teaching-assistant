@@ -5,6 +5,7 @@ import { useState } from "react";
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import { createCourseAssignmentAction, createModuleAction, draftAssignmentDescriptionAction } from "../../../actions";
+import { describeAssignmentCreateOutcome } from "./assignmentCreateOutcome";
 
 export interface UseNewAssignmentFormReturn {
   newModuleName: string;
@@ -118,11 +119,14 @@ export function useNewAssignmentForm(
       acronym
     );
     setNaBusy(false);
+    const outcome = describeAssignmentCreateOutcome(
+      r,
+      (res) => `Created "${res.name}"${res.addedToModule ? " and added it to the module" : ""}.`
+    );
+    setNote(outcome);
     if ("error" in r) {
-      setNote({ kind: "error", text: r.error });
       return;
     }
-    setNote({ kind: "success", text: `Created "${r.name}"${r.addedToModule ? " and added it to the module" : ""}.` });
     setShowNewAssignment(false);
     setNaName("");
     setNaDescription("");

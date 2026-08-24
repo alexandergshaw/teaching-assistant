@@ -21,6 +21,7 @@
 
 import type { RubricCriterionInput } from "@/lib/canvas-modules";
 import type { RubricRow } from "@/app/utils/rubric";
+import { RUBRIC_TIER_PERCENTS } from "@/lib/grade/rubric-tiers";
 
 // ---------------------------------------------------------------------------
 // AC1: the point-agnostic spec model (criteria as PERCENTAGES).
@@ -143,7 +144,13 @@ function parsePercentValue(weight: string): number {
  *  wording), so a rubric still materialises with a sane rating ladder rather
  *  than refusing outright over presentation-only text - unlike the area-sum
  *  check above, a rating-tier label is not the invariant AC1b protects. */
-const DEFAULT_TIER_PERCENTS = [100, 75, 50];
+// Re-exported from the one place the prompt itself renders from, rather than
+// restated here. This file used to carry its own [100, 75, 50] literal that
+// happened to match generateRubric's prompt; the `lms-rubric` workflow step
+// carried a DIFFERENT literal (100/50/0) that did not, and nothing could
+// notice because neither list knew about the other. See
+// ./grade/rubric-tiers.ts for the defect that produced.
+const DEFAULT_TIER_PERCENTS = RUBRIC_TIER_PERCENTS;
 
 function buildRatingsFromSubcategories(
   subcategories: RubricRow["subcategories"]

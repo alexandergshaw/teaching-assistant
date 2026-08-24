@@ -27,6 +27,7 @@ import { generateEmbeddedRubricText } from "@/lib/embedded-grader/rubric";
 import { resolveCourseKind } from "@/lib/course-kind";
 import type { GeneratedCourseFile } from "@/lib/workflows/types";
 import { parseGeneratedRubric } from "@/app/utils/rubric";
+import { rubricRatingsForPoints } from "@/lib/grade/rubric-tiers";
 import type { RubricCriterionInput } from "@/lib/canvas-modules";
 import { courseProgressStatus } from "@/lib/week-numbering";
 import { rubricMaterialSteps } from "./steps.rubrics.materials";
@@ -160,11 +161,26 @@ export const rubricSteps: StepDefinition[] = [
               ...row.subcategories.map((s) => `${s.label}: ${s.description}`),
             ].join("\n"),
             points: pointsValue,
-            ratings: [
-              { description: "Full marks", points: pointsValue },
-              { description: "Partial credit", points: Math.round(pointsValue / 2) },
-              { description: "No marks", points: 0 },
-            ],
+            // Was a hard-coded "Full marks" / "Partial credit" (half) / "No
+            // marks" (zero) ladder, which disagreed with the rubric text this
+            // very step had just generated. generateRubric's prompt asks the
+            // model for three tiers at 100 / 75 / 50 percent and names them
+            // Excellent / Meets Expectations / Needs Improvement; Canvas was
+            // then given 100 / 50 / 0 under different names. The document and
+            // the scoring disagreed while looking like one artifact - on a
+            // 25-point criterion, 6.25 points per criterion between what the
+            // rubric said and what it awarded, and invisible to anyone
+            // reading it because the labels in the text came from the same
+            // generated prose that promised the other numbers.
+            //
+            // Now built from the model's OWN subcategory labels, so the
+            // scoring matches the words next to it, and from the shared
+            // RUBRIC_DEDUCTION_TIERS the prompt itself renders from whenever a
+            // label carries no percentage. See ../../grade/rubric-tiers.ts.
+            ratings: rubricRatingsForPoints(
+              pointsValue,
+              row.subcategories.map((s) => s.label)
+            ),
           };
         });
 

@@ -4,6 +4,7 @@ import { generateEmbeddedRubricText } from "../embedded-grader/rubric";
 import { courseKindContract, type CourseKind } from "../course-kind";
 import { normalizeAreaName, buildSystemPrompt, buildChecklistPrompt, buildFileNameConventionPrompt, buildSampleAnswerPrompt, parseChecklistResponse, defaultFullCreditChecklist, normalizeStudentDisplay, normalizeCitationFileName } from "./prompts";
 import { normalizeGeminiError } from "./parsing";
+import { rubricTierPromptLines } from "./rubric-tiers";
 import type { RubricCriterion, InferredFileNameLookup, InferredFileNameParts } from "./types";
 
 export function extractRubricCriteria(rubric: string): RubricCriterion[] {
@@ -195,9 +196,7 @@ The rubric text must:
 - Weight ALL areas equally: divide 100% evenly across the number of areas you choose (e.g. 4 areas = 25% each). Every area must have the same percentage as every other.
 - Start each area on its own line: "[Area Name] ([Percentage]%): [Brief description of what this area covers]"
 - Immediately under each area, include exactly three subcategory lines, each indented with two spaces, using these fixed deduction tiers:
-  "  Excellent (100% — no deductions): [Specific criteria for full credit]"
-  "  Meets Expectations (75% — 25% deducted): [What is missing or partially done that causes the deduction]"
-  "  Needs Improvement (50% — 50% deducted): [Significant deficiencies that reduce the score by half]"
+${rubricTierPromptLines()}
 - Be specific and actionable, not generic.
 - Use plain prose only, no markdown.
 - Do not include text outside the JSON object.

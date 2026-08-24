@@ -161,3 +161,98 @@ No emojis; ASCII only in comments. 1000-line ceiling counted with
 touching it.** Migrations auto-apply via GitHub Actions on push to main;
 verify the run, never instruct a manual apply.
 Baseline entering this chunk: 634 test files / 12654 tests, all passing.
+
+---
+
+## Post-design corrections - THIS SECTION IS THE FINAL CONTRACT
+
+Written 2026-08-24 after a design pass that read Canvas's own source
+(`instructure/canvas-lms` master) and this repo's scheduler machinery rather
+than reasoning from the summary above. It found twelve errata. **Where this
+disagrees with anything above, this wins.** Nothing above is deleted - the
+wrong claims stay as a record.
+
+**F1. THE PREMISE IS PARTLY WRONG, AND THE CONCLUSION SURVIVES ANYWAY.** The
+document above claims a discussion with a future post date is genuinely hidden.
+It is not: `published?` returns false for `workflow_state == "post_delayed"`
+**only when `is_announcement`**, and `low_level_locked_for?` folds
+`delayed_post_at` into the same branch as `unlock_at`. So an ordinary discussion
+with a future post date is **LISTED AND LOCKED, not hidden** - which is exactly
+why this repo's weekly-announcement scheduler looks like a precedent for this
+feature and is not one. The natively-invisible set is **ONE type (Page)**, and
+even that is gated on an account feature flag whose off-state produces
+PERMANENT SILENT INVISIBILITY - the docs also say a future publish date
+unpublishes an already-published page. So the owner's "students see nothing
+until release" still requires an app-side scheduler; the argument for it is
+just different, and stronger, than the one written above.
+
+**F2. DO NOT REUSE `workflow_schedules`. REUSE ITS TRANSPORT AND ITS IDIOMS.**
+Three disqualifying reasons: its claim function ADVANCES OR DISABLES the row,
+which is wrong for a one-shot release; N targets in a `field_values` jsonb blob
+makes "crashed after publishing 3 of 10" unrepresentable, and that state is the
+whole problem; and becoming a workflow inherits the `isHeadlessSafeWorkflow`
+gate, which **SILENTLY SKIPS** - a release that never happens and never says so
+is the exact failure this feature exists to prevent. Build a new table keyed on
+`course_url` (not a `course_hub` foreign key - `resolveCourse` needs only URL
+plus acronym), and reuse the existing CAS and stale-sweep idioms rather than
+inventing concurrency control. **Run releases FIRST in the existing cron route,
+under their own sub-budget**, or a long workflow run eats the 60-second cap and
+releases silently miss their window.
+
+**F3. THE 15-MINUTE FLOOR IS A CHOICE, NOT A CONSTRAINT, AND THE REPO BEING
+PUBLIC MATTERS.** Worst-case lateness is 14m59s plus GitHub's own scheduling
+lag. GitHub's minimum cron interval is FIVE minutes, so the non-goal above
+("no sub-15-minute precision") is a decision we are making, not a platform
+limit - say so rather than implying otherwise. And this repository is PUBLIC,
+which means **GitHub's 60-day auto-disable of scheduled workflows on inactive
+repos DOES apply** - a quiet summer disables the scheduler, and nothing in the
+current design would notice.
+
+**F4. THE MOST SURPRISING BEHAVIOUR IN THE FEATURE IS NOT IN THE DOCUMENT AT
+ALL.** Delivering "students see nothing until release" requires **UNPUBLISHING
+anything already published, immediately at commit time** - otherwise scheduling
+a release for next Monday leaves this week's content visible until then, which
+is the opposite of what was asked. And Canvas CAN REFUSE: a quiz's
+`can_unpublish?` is false once it has student submissions. The document frames
+refusal as a scheduled-unpublish problem; it actually bites the scheduled-
+PUBLISH flow, at commit, before anything is scheduled. Decide and state what
+happens when the hide is refused - refuse the whole schedule, or schedule it
+and warn - and make it visible at the moment the instructor commits.
+
+**F5. THE SILENT-FAILURE HOLE IS NOT THE ONE THE DOCUMENT NAMES.** With an
+EMPTY due list the cron route performs **zero database writes**, so a dead cron
+and a quiet one are indistinguishable from the outside - and `last_run_status`
+is per-row state written only by a tick that actually ran, so it can never
+report the tick that never happened. Fix with three cheap pieces: a one-row
+HEARTBEAT the tick always writes even with nothing to do, client-side overdue
+detection that compares the heartbeat against now when the app opens, and
+fire-on-open so a missed release lands the moment someone looks. This is the
+"content never publishes and the instructor finds out from a student complaint"
+failure, and the existing nav badge does not cover it.
+
+**F6. TIER IS `fan-out-write`, NOT `destructive`.** The shipped model reserves
+`destructive` for the four already-armed writes; `Publish` and `Unpublish` are
+`fan-out-write`, which ALREADY gives never-collapses plus a mandatory
+consequence tag. Arm the control anyway - arming and tier are independent
+decisions, and this one both unpublishes existing content (F4) and schedules a
+future change.
+
+**F7. THE PERSISTENCE CLAIM IS CONTRADICTED BY THE CATALOG.** The requirement
+above that the date control persist is wrong for this bar: `itemsDueDate`, an
+IDENTICAL `datetime-local` in the same bulk bar, is `persistKey: null` with a
+written `ITEM_TYPE_UNPERSISTED` reason. Follow the neighbour, and cite it, so
+`auditGroupModel`'s I6 is satisfied by precedent rather than by a new rationale.
+
+**F8. THE GATE NOTE IS STALE IN TWO WAYS.** `ModulesView.tsx` lives at
+`src/app/components/content-tab/`, not in `modules/`, and it measures **732**
+lines, not 998 - the orchestration extraction landed in chunk D.
+
+**F9. THE THREE HIGHEST-RISK UNKNOWNS, RANKED, EACH WITH ITS EXPERIMENT.**
+(1) Does an item published inside an UNPUBLISHED module actually become visible
+to students? This decides the entire target set - whether releases operate on
+items, modules, or both - and it is ten minutes in Student View. (2) Does the
+Actions cron fire reliably for this repo? **Ship the heartbeat from F5 ALONE
+first** - it is a genuinely shippable increment that answers the question with
+real data before any of the rest is built. (3) What does Canvas actually return
+when it refuses to unpublish a quiz with submissions? Fifteen minutes with
+curl, and it decides F4's wording.

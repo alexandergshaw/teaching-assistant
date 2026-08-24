@@ -256,3 +256,48 @@ first** - it is a genuinely shippable increment that answers the question with
 real data before any of the rest is built. (3) What does Canvas actually return
 when it refuses to unpublish a quiz with submissions? Fifteen minutes with
 curl, and it decides F4's wording.
+
+## F10. The target-set decision - taken 2026-08-24, by the repo owner
+
+F9's first unknown (does an item published inside an UNPUBLISHED module become
+visible to students?) is **still unrun**. Asked to choose between waiting for
+the experiment and building without it, the owner chose to build: **releases
+target BOTH the module and its items.**
+
+**Why that is safe under either answer, and it is the only assumption that
+is.** The two directions this feature needs are "after release, students can
+see it" and "before release, students cannot". Targeting both is the superset
+in each direction: publishing the module AND its items guarantees visibility
+whichever level actually controls it, and unpublishing both guarantees
+invisibility the same way. A narrower target set is only correct if the
+experiment says so; a wider one is correct regardless.
+
+**What it costs, stated plainly:** more writes per release than may be
+necessary, against a live course. If the experiment is later run and shows one
+level governs visibility on its own, the other level's writes can be dropped -
+that is a REMOVAL, made with confidence, which is exactly the shape F9 said its
+experiments would buy. Until then the extra writes are the price of not
+guessing.
+
+**Consequences that follow immediately:**
+
+- A selected module contributes the module target AND one target per item it
+  holds. A selected item contributes itself. An item that is both selected
+  directly and held by a selected module is ONE target, not two - dedupe on
+  (kind, id).
+- `module_id` is now known at schedule time for every item target, so it is
+  stored on the row. This closes the follow-up REGRESSION entry 339 recorded:
+  the runner no longer needs a `listModules` call to find an item's owning
+  module.
+- F4's unpublish-at-commit hides both levels too.
+
+**F4's refusal question, decided here.** Canvas can refuse to unpublish a quiz
+that has student submissions (`can_unpublish?` is false). The choice F4 left
+open was "refuse the whole schedule" or "schedule it and warn". Neither: the
+refusal is surfaced **before the instructor commits**, in a review step that
+lists per target whether it can be hidden - matching the draft/review/commit
+idiom every comparable control in this app already uses (entries 331, 337). A
+target Canvas will refuse to hide is shown as such, so committing is an
+informed act rather than a warning read after the fact. The release itself is
+still scheduled for a refused target: publishing later is harmless and the
+instructor may simply accept that one item stays visible in the meantime.

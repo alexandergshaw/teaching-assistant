@@ -20,6 +20,15 @@
 // fence opens a code block INSIDE the document, never the document itself.
 const DOCUMENT_FENCE_OPEN = /^```(?:markdown|md|text|txt)?[ \t]*\r?\n/i;
 
+// The same rule for a call site whose DOCUMENT is html - a page body being
+// rewritten, where the model routinely answers with ```html ... ```. `html`
+// cannot simply join the list above: for a markdown document, an opening
+// ```html fence means a code block INSIDE the document (a tutorial showing
+// markup), which is exactly the case the list is drawn to exclude. The tag is
+// document-ish or code-ish depending on what the caller asked for, so the
+// caller picks the pattern rather than one shared list guessing.
+const HTML_DOCUMENT_FENCE_OPEN = /^```(?:html|markdown|md|text|txt)?[ \t]*\r?\n/i;
+
 /**
  * Strip a code fence that wraps the ENTIRE response, and only that.
  *
@@ -28,6 +37,25 @@ const DOCUMENT_FENCE_OPEN = /^```(?:markdown|md|text|txt)?[ \t]*\r?\n/i;
  * at the top of a document; being too eager destroys the document.
  */
 export function unwrapDocumentFence(text: string): string {
+  return unwrapFence(text, DOCUMENT_FENCE_OPEN);
+}
+
+/**
+ * `unwrapDocumentFence` for a call site whose document IS html - currently
+ * `revisePageWithAiAction`, which rewrites a live Canvas page body.
+ *
+ * Split out rather than folded into the shared tag list because the two
+ * answers genuinely differ: ```html opening a MARKDOWN document is a code
+ * block inside it (and unwrapping there is the catastrophic behaviour this
+ * module exists to prevent), while ```html opening an HTML document is the
+ * wrapper. Same conservative contract otherwise: it returns the text
+ * unchanged, never a fragment of it, unless a fence wraps the WHOLE response.
+ */
+export function unwrapHtmlDocumentFence(text: string): string {
+  return unwrapFence(text, HTML_DOCUMENT_FENCE_OPEN);
+}
+
+function unwrapFence(text: string, openPattern: RegExp): string {
   const trimmed = text.trim();
 
   // A wrapper must close at the very end. A document that merely ENDS with a
@@ -35,7 +63,7 @@ export function unwrapDocumentFence(text: string): string {
   // opening check below is what distinguishes them.
   if (!trimmed.startsWith("```") || !trimmed.endsWith("```")) return trimmed;
 
-  const opening = trimmed.match(DOCUMENT_FENCE_OPEN);
+  const opening = trimmed.match(openPattern);
   if (!opening) return trimmed;
 
   const body = trimmed.slice(opening[0].length, trimmed.length - "```".length);

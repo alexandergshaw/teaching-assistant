@@ -31843,3 +31843,94 @@ stopping at the known env-dependent prerender tail.
 - **The heartbeat proves the tick RAN, not that it did the right thing.** A
   per-schedule failure still lives on that schedule's own row; this row only
   carries a top-level throw.
+
+## 335. The one AI rewrite that writes over a live Canvas page still had the catastrophic fence regex
+
+Found by the adversarial design pass on
+`docs/llm-command-interface-acceptance-criteria.md` (backlog item G), which was
+asked to verify that document's premises against real code rather than reason
+from its summary. It found a live, currently-reachable, data-destroying bug in
+already-shipped code, so that got fixed and pushed on its own before any of G
+was built - the same "ship the increment that removes a real defect first" move
+entry 334 made.
+
+### The bug
+
+`src/lib/llm-fence.ts` exists because the obvious fence-stripping regex is
+catastrophically wrong, and its header records what that cost: an unanchored,
+non-greedy `/```(?:markdown|md|text)?\s*([\s\S]*?)```/i` on a document that
+merely CONTAINS a code block matches from that inner fence to its close and
+throws away everything else. "An entire 16-week set of Project Management class
+openers came out as bare Python fragments with every word of prose gone."
+
+Every prose-generating action was converted to `unwrapDocumentFence` when that
+was found. **`revisePageWithAiAction` was not** - it still carried its own copy
+of the bad regex at `llm-tools.ts:171`, in a file that already imported
+`unwrapDocumentFence` at line 4 and used it correctly at line 236.
+
+Which is the worst possible one to miss. Every other converted call site
+produces a DRAFT the instructor reviews. This one's output is written straight
+back over an existing Canvas page body by `PageEditorModal` via
+`updatePageAction` - so the failure is not a bad draft, it is an overwrite. And
+per this chunk's own design pass, an assignment and a discussion have no
+reachable revert path in Canvas at all.
+
+### The fix, and the second bug the obvious fix would have introduced
+
+The recommendation was a one-line swap to `unwrapDocumentFence`. **That would
+have been wrong**, and the check that caught it was reading
+`DOCUMENT_FENCE_OPEN` rather than trusting the name: it accepts a bare fence or
+`markdown`/`md`/`text`/`txt` and nothing else. A page revision is HTML and the
+model routinely answers in ```html - which that pattern does not match, so the
+swap would have left a literal "```html" line at the top of the body and
+written THAT to the live page. A different silent corruption, shipped as a bug
+fix.
+
+So `html` needed to be an accepted document tag - but it cannot simply join the
+shared list, because that same tag means the opposite thing for the markdown
+callers: a ```html fence opening a MARKDOWN document is a code block inside it
+(a tutorial showing markup), which is exactly what the list is drawn to
+exclude. The tag is document-ish or code-ish depending on what the caller
+asked for. Hence `unwrapHtmlDocumentFence`, sharing the whole conservative
+implementation through a private `unwrapFence(text, openPattern)` and differing
+only in which opening tags count as a wrapper. Existing callers are byte-for-byte
+unaffected.
+
+### Why the tests are the interesting part
+
+Seven new tests, and the load-bearing one is not the regression - it is
+`unwrapDocumentFence(wrapped) === wrapped` asserted in the SAME test that
+asserts `unwrapHtmlDocumentFence(wrapped) === "<p>Hello</p>"`. That pair is
+what pins the distinction between the two functions and what would have caught
+the naive swap. A test that only checked the new function would have passed
+against the wrong fix.
+
+Sabotage-checked by restoring the old regex behaviour in the new function:
+three tests went red, including "does not swallow the document when the
+response merely ENDS with a code block" - the exact shape that destroyed the
+16 openers. Stated honestly: the `PAGE_WITH_CODE_SAMPLE` fixture does NOT go
+red under that sabotage, because it contains no backticks at all and the old
+regex therefore left it alone; it guards a neighbouring case, not this one.
+
+### Gates
+
+`npx eslint` clean on all three touched files; `npx tsc --noEmit` clean; full
+`vitest run` 658 files / 13301 tests green (18 in `llm-fence.test.ts`, up from
+11).
+
+### Limits
+
+- **This fixes the fence, not the fan-out.** `revisePageWithAiAction` remains a
+  single-page action; nothing here builds the command interface.
+- **Nothing renders in a test**, so `PageEditorModal`'s use of the returned
+  HTML is unverified by the suite - the trace from action to `updatePageAction`
+  is from reading.
+- **The other findings from that design pass are recorded but NOT fixed**: a
+  bulk quiz description rewrite emails the whole roster by default
+  (`quiz[notify_of_update]` defaults to true and this repo never sends it), a
+  page title rewrite followed by a retry can create a duplicate page because
+  `PUT .../pages/:url` is an upsert and module items address pages by slug, and
+  the idempotency rule in that AC cannot be implemented by string comparison
+  because `descriptionToHtml`, CanvasSanitize and `api_user_content` each
+  transform the value between what is sent and what is read back. Those belong
+  to item G and are folded into its acceptance criteria, not into this fix.

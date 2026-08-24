@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { unwrapDocumentFence } from "./llm-fence";
+import { unwrapDocumentFence, unwrapHtmlDocumentFence } from "./llm-fence";
 
 // The exact shape that shipped 16 broken class openers: a real document whose
 // warm-up section contains a Python code block.
@@ -98,5 +98,65 @@ describe("unwrapDocumentFence", () => {
   it("is idempotent", () => {
     const once = unwrapDocumentFence("```markdown\n# Title\n```");
     expect(unwrapDocumentFence(once)).toBe(once);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// unwrapHtmlDocumentFence - the variant for a call site whose document IS html
+// (revisePageWithAiAction, which rewrites a live Canvas page body). That call
+// site carried the catastrophic unanchored regex long after every sibling in
+// its own file had been converted; these tests pin the fixed behaviour and,
+// crucially, the case a plain unwrapDocumentFence swap would have broken.
+
+// A real page body whose content includes a markup example - the html-shaped
+// equivalent of the 16-broken-openers case above.
+const PAGE_WITH_CODE_SAMPLE = `<h2>Week 3: Semantic HTML</h2>
+<p>Read the article, then study the example below.</p>
+<pre><code>&lt;article&gt;&lt;h1&gt;Title&lt;/h1&gt;&lt;/article&gt;</code></pre>
+<p>Submit your answers in the discussion.</p>`;
+
+describe("unwrapHtmlDocumentFence", () => {
+  // The whole point of the variant: an html page body wrapped in ```html must
+  // actually be unwrapped. unwrapDocumentFence does NOT accept the html tag,
+  // so swapping it in at that call site would have written a literal
+  // "```html" line into the live page body - a different bug, quietly
+  // shipped. This test is the one that catches that mistake.
+  it("unwraps a whole-response html fence, which unwrapDocumentFence deliberately does not", () => {
+    const wrapped = "```html\n<p>Hello</p>\n```";
+    expect(unwrapHtmlDocumentFence(wrapped)).toBe("<p>Hello</p>");
+    expect(unwrapDocumentFence(wrapped)).toBe(wrapped);
+  });
+
+  it("unwraps a bare whole-response fence too", () => {
+    expect(unwrapHtmlDocumentFence("```\n<p>Hello</p>\n```")).toBe("<p>Hello</p>");
+  });
+
+  // THE REGRESSION. The old regex was unanchored and non-greedy, so a page
+  // that merely CONTAINS a fenced sample matched from that inner fence to its
+  // close and discarded every surrounding paragraph - and this call site
+  // writes its result straight over the existing Canvas page.
+  it("returns an unfenced page containing a markup sample completely unchanged", () => {
+    expect(unwrapHtmlDocumentFence(PAGE_WITH_CODE_SAMPLE)).toBe(PAGE_WITH_CODE_SAMPLE);
+  });
+
+  it("does not swallow the document when the response merely ENDS with a code block", () => {
+    const text = "<p>Intro paragraph.</p>\n\n```\n<b>sample</b>\n```";
+    expect(unwrapHtmlDocumentFence(text)).toContain("Intro paragraph.");
+  });
+
+  it("keeps the whole document when a fence opens it with a programming language tag", () => {
+    // An opening ```python means a code block, never the document itself.
+    const text = "```python\nprint(1)\n```";
+    expect(unwrapHtmlDocumentFence(text)).toBe(text);
+  });
+
+  it("never returns an empty string for a malformed empty fence", () => {
+    expect(unwrapHtmlDocumentFence("```html\n\n```")).not.toBe("");
+  });
+
+  it("is idempotent", () => {
+    const once = unwrapHtmlDocumentFence("```html\n<p>Hello</p>\n```");
+    expect(unwrapHtmlDocumentFence(once)).toBe(once);
   });
 });

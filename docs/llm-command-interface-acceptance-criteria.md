@@ -162,3 +162,127 @@ No emojis; ASCII only in comments. 1000-line ceiling via
 `@(Get-Content path).Count`. **`ModulesView.tsx` is at 998 - it MUST be split
 before this chunk touches it.** Measure the test baseline at dispatch; a
 carried-forward number has caused two corrections already.
+
+## 9. Reuse survey - vetted, 2026-08-24
+
+Every entry below was confirmed by opening the file and reading the export, not
+inferred from its name or from another document's claim about it. The headline:
+**the Canvas write path for everything section 3 puts in scope already exists
+and is already exposed as tested server actions.** The new code in this chunk is
+the proposal model, the model-to-proposal parser, and the control - not the
+writing.
+
+### Already exists, must be reused
+
+**The writes (zero new Canvas-layer code for in-scope fields).**
+- `updateGradable` (`src/lib/canvas-modules/gradables.ts:48`), exposed as
+  `updateGradableAction` (`src/app/actions/canvas-files-bulk.ts:510`) - title
+  and body for assignment, quiz and discussion alike.
+- `updatePage` (`src/lib/canvas-modules/pages.ts:43`), exposed as
+  `updatePageAction` (`canvas-files-bulk.ts:437`).
+- `updateModule` (`src/lib/canvas-modules/modules.ts:80`), exposed as
+  `updateModuleAction` (`src/app/actions/canvas-modules.ts:73`).
+- `updateModuleItem` (`src/lib/canvas-modules/module-items.ts:38`), exposed as
+  `updateModuleItemAction` (`canvas-modules.ts:230`).
+- `createCourseAssignmentAction` (`canvas-modules.ts:172`) creates AND links in
+  one call, returning `{addedToModule, linkError?}` - two failure domains, so a
+  real assignment id survives a failed module link (entry 331 check 12).
+- `createModule` (`modules.ts:49`) / `createModuleAction`.
+- The reads that make a diff possible: `getGradable` (`gradables.ts:13`),
+  `getPage` (`pages.ts:23`), and the already-loaded module tree.
+
+**The bulk bar's group model.** `BulkBarGroupDef` /
+`BulkBarControlDef` (`src/app/components/content-tab/modules/bulkBarGroups.ts:378`
+and `:338`), the 15 group literals in `bulkBarGroupCatalog.ts:771`, and
+`auditGroupModel`'s eight invariants (`bulkBarGroups.ts:576`). A group's tier is
+DERIVED - `groupTier` (`:406`) takes the max over currently-visible controls -
+never declared. Declaring a control `fan-out-write` or `destructive` already
+buys three things for free: the group can never collapse (`mayCollapse`, `:436`,
+forcing `groupOpen` true at `:456`), invariant I5 forces a non-empty
+`consequenceTag`, and I3 forbids `defaultOpen: false`.
+
+**The review-modal-before-writing stack** - the load-bearing precedent, and the
+one to copy structurally:
+- `useCarryModulePattern.ts` orchestrates fetch, plan and apply, arming the read
+  and never fetching from an effect.
+- `buildModulePatternPlan` (`src/lib/module-pattern-plan.ts:393`) is PURE - it
+  takes read state plus the instructor's edits and returns a plan whose rows
+  each carry a decision enum and their own blocked reason. No Canvas call.
+- `buildCarryReviewRows` (`useCarryModulePattern.ts:287`) collapses the plan into
+  rendered rows, exported so a node-env test can exercise it directly.
+- `CarryModulePatternReviewModal.tsx` is a THIN RENDERER - it recomputes
+  nothing - reusing `ModalShell` and the tab's own
+  `previewHeader`/`previewMeta`/`previewContent` classes.
+- `CarryModulePatternApplyOutcome` (`src/app/actions/carry-module-pattern.ts:301`)
+  is a ten-variant per-object discriminated union, summarised by
+  `describeCarryApplyOutcome`, which itself reuses `describeOrphans` /
+  `OrphanNote` from `useBulkModuleActions.ts:30`. Section 5's "reuse the existing
+  vocabulary" means THIS vocabulary.
+- `confirmArming.ts` (`selectionSignature`, `isConfirmArmed`) is the two-click
+  arming primitive - reusable directly, though it is an arming tool and not a
+  diff tool.
+
+**Selection.** `useModuleSelection.ts` already provides `selected: Set<string>`
+(discriminated `live:`/`export:`/`repo:` keys), `selectedModules`,
+`liveModuleIds`, `selectedItems()` and `selectedMaterialItems()`. A bulk hook
+receives the raw key set plus a resolver and calls it itself - see
+`useBulkItemActions`'s signature (`useBulkItemActions.ts:113`). No new selection
+primitive is needed, and per entry 331's D15 any per-object ROLE this feature
+needs must live beside the selection and be re-resolved every render, never
+added as a field on the shared Sets.
+
+**The D17 visibility rule, which this control must follow or repeat a hole
+already shipped twice.** `carryApplyButton` is declared
+`visible: (f) => f.carryReviewOpen` (`bulkBarGroupCatalog.ts:509`) so the group
+sits at `read-only` until the review modal opens and rises to `fan-out-write`
+the instant it does. The command box's Apply must be gated the same way - on
+"is the write actually reachable right now", never on "is something selected",
+which would leave the group permanently destructive. `isCarryReviewVisible`
+(`useCarryModulePattern.ts:381`) is the shape of the predicate that both the
+modal mount and the bar fact must read, because a selection change mid-fetch can
+null the plan while `reviewOpen` is still true. The Generate row's
+`generatePostReachable` (`bulkBarGroups.ts:289`) had this exact hole and was
+patched after the fact - a cautionary precedent, not a model.
+
+### Does not exist - must be built
+
+1. **The proposal type.** Nothing in the repo represents a heterogeneous set of
+   MODIFY/CREATE/UNSUPPORTED rows over arbitrary selected Canvas objects.
+   `ModulePatternPlan` is the nearest shape but is template-and-target
+   specific. Mirror its per-row decision/reason structure; do not try to reuse
+   the type.
+2. **A validated model-to-structured-proposal path, and this is the sharp
+   edge.** There is NO shared "ask for JSON and validate it" helper. There are
+   at least six independently defined local `extractJsonObject` functions
+   (`src/lib/grade/rubric.ts:31`, `grade/parsing.ts:16`, `grade/prompts.ts:3`,
+   `calendar-parser.ts:130`, `decks/sequence.ts:439`, and `app/actions/shared.ts:162`
+   - the last with a DIFFERENT signature from the others), no schema-validation
+   library anywhere (no `zod` in `package.json` or `src`), and the two closest
+   generator precedents deliberately avoid JSON entirely: both
+   `generateCarryModulePatternBody` (`carry-module-pattern.ts:239`) and
+   `generateCurrentEventsAssignmentForModule` return PLAIN TEXT with
+   hand-written backstops. So this feature needs a real multi-row structured
+   reply where the codebase has only ever hand-parsed single fields. Write ONE
+   shared parser, not a seventh copy. Note that section 9's "the box is never
+   parsed" rule is about the instructor's INPUT; the model's REPLY still needs
+   validation, and nothing here validates it today.
+3. **The unsupported-field classifier** (section 3b: points, due dates,
+   submission type, rubric and publish state must be NAMED when a command asks
+   for one, never silently dropped). Nothing classifies free-text intent
+   against a forbidden-field list. Must be a pure function per section 7.
+4. **The control's own group declaration** - a new sibling group, following the
+   `currentEvents` / `carryPattern` precedent of adding a group rather than
+   moving another group's canaries.
+5. **The wiring from an LLM-authored module-creation intent into
+   `planBulkModuleCreation`** (`src/lib/bulk-module-plan.ts:151`) and
+   `composeModuleTitle` (`src/lib/module-title.ts:140`). Both exist and are
+   vetted; the wiring does not.
+6. **Threading `ModuleContentResult` / `describeOrphans` through a free-text
+   command's outcome** - integration code, not a new vocabulary.
+
+### The one number worth re-measuring at dispatch
+
+Do not carry a `ModulesView.tsx` line count forward from any earlier document.
+Three AC docs carried three different stale counts (969/994/998) before
+`1b235a3` corrected them, and entry 333 records the same class of mistake in a
+sibling view. Measure it in the dispatch turn.

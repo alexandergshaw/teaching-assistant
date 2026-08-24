@@ -1,7 +1,7 @@
 "use server";
 
 import type { SelectionChatMessage, ScheduleWeekPlan } from "../actions-types";
-import { unwrapDocumentFence } from "@/lib/llm-fence";
+import { unwrapDocumentFence, unwrapHtmlDocumentFence } from "@/lib/llm-fence";
 import { generateRubric } from "@/lib/grade";
 import { scaffoldDocument } from "@/lib/embedded/docs";
 import { scaffoldCopilotPrompt } from "@/lib/embedded/course";
@@ -166,10 +166,16 @@ Requirements:
       return { error: `Revision failed: HTTP ${result.status} — ${result.body.slice(0, 200)}` };
     }
 
-    // Strip a stray ```html ... ``` fence if the model wraps the output.
-    let revised = result.text.trim();
-    const fenced = revised.match(/```(?:html)?\s*([\s\S]*?)```/i);
-    if (fenced) revised = fenced[1].trim();
+    // Strip a stray ```html ... ``` fence ONLY when it wraps the whole
+    // response. This used to be the unanchored, non-greedy regex
+    // src/lib/llm-fence.ts's header calls catastrophically wrong: on a
+    // revision that merely CONTAINS a code block it matched from that inner
+    // fence to its closing fence and threw away everything else. Every other
+    // prose-generating action in this file was converted to
+    // unwrapDocumentFence when that was found; this one - the ONLY function in
+    // the repo whose output is written back over an existing Canvas page body,
+    // where the damage is an overwrite rather than a bad draft - was missed.
+    const revised = unwrapHtmlDocumentFence(result.text);
     if (!revised) {
       return { error: "The model returned an empty revision." };
     }

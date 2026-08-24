@@ -222,12 +222,13 @@ describe("inventory sanity - the scan is not vacuous", () => {
   // running THIS scan, not copied from entry 273's count of a different
   // thing under a different definition.
   it("pins the total dialog-site count this scan derives from the tree", () => {
-    // 43, not 42, as of the carry-module-pattern-forward chunk (chunk D):
-    // CarryModulePatternReviewModal.tsx is one new dialog site. It adopts
-    // ModalShell from birth, so it lands in ADOPTING_PATHS below rather than
-    // on any non-adopting allowlist - both numbers therefore move by exactly
+    // 44, not 43, as of the LLM command interface chunk (item G):
+    // CommandProposalModal.tsx is one new dialog site, on the same terms
+    // CarryModulePatternReviewModal.tsx was added on one chunk earlier - it
+    // adopts ModalShell from birth, so it lands in ADOPTING_PATHS below
+    // rather than on any non-adopting allowlist, both numbers move by exactly
     // one, and the subtraction that follows is unchanged.
-    expect(DIALOG_SITES.length).toBe(43);
+    expect(DIALOG_SITES.length).toBe(44);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -258,7 +259,12 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // later. A NEW dialog that did not adopt would have had to be named on
     // one of the three allowlists instead; that it simply increments this
     // number is the check that it did the right thing.
-    expect(ADOPTING_PATHS.size).toBe(29);
+    // 30 as of the LLM command interface chunk (item G) - the twenty-nine
+    // described above plus CommandProposalModal.tsx, which likewise adopts
+    // ModalShell from birth. That it simply increments this number, rather
+    // than needing a name on one of the three allowlists, IS the check that
+    // the new dialog did the right thing.
+    expect(ADOPTING_PATHS.size).toBe(30);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

@@ -33,17 +33,22 @@
 // G11 - ITEM KIND GUARD.
 // -------------------------------------------------------------------------
 // A module holds eight item kinds; AC3 names four (Assignment/Quiz/
-// Discussion/Page). `isCarryWriteSupportedKind` (module-pattern-plan.ts:346)
-// already states, per kind, whether any write path this app has wired can
-// touch it - re-exported there for exactly this "what can this app write"
-// question, not re-spelled here. A "modify" row whose target item's kind
-// fails that predicate is rejected UNSUPPORTED, naming the kind, the same way
-// a rejected field is. (New Quiz detection - `isNewQuiz` lives on `BulkItem`,
-// which the Modules-view selection this feature reads from does not carry -
-// is explicitly OUT of this file's scope per G11's own text: it is a
-// selection-resolution question for the caller that builds
-// `CommandProposalContext.items`, not a classification question this pure
-// function can answer from an item's kind string alone.)
+// Discussion/Page). `commandCanWriteItemKind` / `commandWriteUnsupportedReason`
+// (command-write-support.ts) are the shared "can the command interface write
+// this kind" predicate/reason pair - shared with the apply path so the two
+// cannot drift the way this file's PREVIOUS guard,
+// `isCarryWriteSupportedKind` (module-pattern-plan.ts:346), drifted from the
+// apply path's `routeItemKind`: that predicate answers a DIFFERENT question
+// ("can carry-forward CREATE this kind"), so it returned true for a
+// SubHeader and for a File with a contentId, and both were proposed as
+// writable "modify" rows only to be refused at write time. A "modify" row
+// whose target item's kind fails `commandCanWriteItemKind` is rejected
+// UNSUPPORTED, naming the kind via `commandWriteUnsupportedReason`, the same
+// way a rejected field is. `isNewQuiz` on `CommandProposalItemInfo` is threaded
+// straight into both functions; `null` (not yet resolved) is treated as
+// ordinary per command-write-support.ts's own doc comment - see that file for
+// why refusing every unresolved Assignment would be worse than the rare
+// New-Quiz miss it guards against.
 //
 // G8 - MODULE CREATION IS A DEDUPE RULE, NOT `planBulkModuleCreation`.
 // -------------------------------------------------------------------------
@@ -98,7 +103,7 @@
 // selection drift (see `reconcileCommandProposalWithSelection`'s own
 // comment) - it is not keyed to anything in the selection to begin with.
 
-import { isCarryWriteSupportedKind } from "./module-pattern-plan";
+import { commandCanWriteItemKind, commandWriteUnsupportedReason } from "./command-write-support";
 import { selectionSignature } from "@/app/components/content-tab/modules/confirmArming";
 
 /** The three outcomes a row can land on, plus "already-present" for G8's
@@ -159,13 +164,16 @@ export interface CommandProposalModuleInfo {
  * `description` is the CURRENTLY KNOWN value, if the caller already read it
  * (AC3's `getGradable`/`getPage`) - null when not read, which this file
  * treats as "unknown", never as "empty"; it is passed straight through to
- * `currentValue` either way. `contentId` matches
- * `isCarryWriteSupportedKind`'s second parameter exactly (null for a File
- * with no linked content). */
+ * `currentValue` either way. `contentId` and `isNewQuiz` feed
+ * `commandCanWriteItemKind` / `commandWriteUnsupportedReason`
+ * (command-write-support.ts) exactly - `isNewQuiz: null` means the caller has
+ * not resolved the flag, which that module's own doc comment says to treat as
+ * ordinary rather than refused. */
 export interface CommandProposalItemInfo {
   id: number;
   itemType: string;
   contentId: number | null;
+  isNewQuiz: boolean | null;
   title: string;
   description: string | null;
   selectionKey: string;
@@ -234,28 +242,61 @@ function unsupportedRow(target: CommandProposalTarget | null, field: string | nu
   return { target, field, currentValue: null, proposedValue: null, decision: "unsupported", reason };
 }
 
+/** Resolve `row`'s target against `context` independent of whether its field
+ * or kind will turn out to be writable. Resolving the target FIRST (rather
+ * than only on the "modify" success path) is the fix for the bug where a
+ * field-rejected row - AC3b's own example, "make Week 1 Homework worth 20
+ * points" - discarded a perfectly resolvable target and fell back to
+ * rendering "(new module)" as its headline. `null` here means the id
+ * genuinely does not resolve against the selection, which is the only case
+ * that should still produce a null target on an unsupported row. */
+function resolveModifyTarget(row: RawCommandProposalModifyRow, context: CommandProposalContext): CommandProposalTarget | null {
+  if (row.targetKind === "module") {
+    const targetModule = context.modules.find((m) => m.id === row.targetId);
+    if (!targetModule) return null;
+    return { kind: "module", id: targetModule.id, displayName: targetModule.name, selectionKey: targetModule.selectionKey };
+  }
+  const item = context.items.find((i) => i.id === row.targetId);
+  if (!item) return null;
+  return { kind: "item", id: item.id, displayName: item.title, selectionKey: item.selectionKey };
+}
+
 function classifyModifyRow(row: RawCommandProposalModifyRow, context: CommandProposalContext): CommandProposalRow {
+  // Resolve the target before deciding anything about the field or kind, so
+  // every unsupported outcome below can name a real target when one exists
+  // instead of discarding it (the defect this function used to have - see
+  // `resolveModifyTarget`'s comment).
+  const target = resolveModifyTarget(row, context);
+
   const canonical = canonicalizeField(row.field);
   if (canonical === null) {
     // G10's central case: a field outside {title, description|body,
     // moduleName}. The raw string is kept verbatim in `field` so the reason
-    // names exactly what the model asked for, not a normalized guess at it.
+    // names exactly what the model asked for, not a normalized guess at it -
+    // and the resolved target (if any) is carried through rather than
+    // nulled, so the row names WHAT was targeted, not just why it failed.
     return unsupportedRow(
-      null,
+      target,
       row.field,
       `The field "${row.field}" is not one this app can write (allowed: title, description, moduleName).`
     );
   }
 
+  if (target === null) {
+    return unsupportedRow(
+      null,
+      canonical,
+      row.targetKind === "module"
+        ? `No selected module with id ${row.targetId} was found.`
+        : `No selected item with id ${row.targetId} was found.`
+    );
+  }
+
   if (row.targetKind === "module") {
-    const targetModule = context.modules.find((m) => m.id === row.targetId);
-    if (!targetModule) {
-      return unsupportedRow(null, canonical, `No selected module with id ${row.targetId} was found.`);
-    }
-    const target: CommandProposalTarget = { kind: "module", id: targetModule.id, displayName: targetModule.name, selectionKey: targetModule.selectionKey };
     if (!isFieldValidForTargetKind("module", canonical)) {
       return unsupportedRow(target, canonical, `The field "${canonical}" cannot be applied to a module.`);
     }
+    const targetModule = context.modules.find((m) => m.id === row.targetId)!;
     return {
       target,
       field: canonical,
@@ -267,18 +308,16 @@ function classifyModifyRow(row: RawCommandProposalModifyRow, context: CommandPro
   }
 
   // targetKind === "item"
-  const item = context.items.find((i) => i.id === row.targetId);
-  if (!item) {
-    return unsupportedRow(null, canonical, `No selected item with id ${row.targetId} was found.`);
-  }
-  const target: CommandProposalTarget = { kind: "item", id: item.id, displayName: item.title, selectionKey: item.selectionKey };
   if (!isFieldValidForTargetKind("item", canonical)) {
     return unsupportedRow(target, canonical, `The field "${canonical}" cannot be applied to an item.`);
   }
-  // G11: the kind guard, reusing isCarryWriteSupportedKind rather than
-  // re-spelling it.
-  if (!isCarryWriteSupportedKind(item.itemType, item.contentId)) {
-    return unsupportedRow(target, canonical, `Items of kind "${item.itemType}" cannot be written by this app.`);
+  const item = context.items.find((i) => i.id === row.targetId)!;
+  // G11 / DEFECT 2: the kind guard, sourced from command-write-support.ts's
+  // shared predicate so this classifier and the apply path cannot drift
+  // apart again (see this file's header for the SubHeader/File incident that
+  // motivated the shared module).
+  if (!commandCanWriteItemKind(item.itemType, item.isNewQuiz)) {
+    return unsupportedRow(target, canonical, commandWriteUnsupportedReason(item.itemType, item.isNewQuiz));
   }
 
   const currentValue = canonical === "title" ? item.title : item.description;
@@ -292,18 +331,23 @@ function classifyModifyRow(row: RawCommandProposalModifyRow, context: CommandPro
   };
 }
 
-function classifyCreateModuleRow(row: RawCommandProposalCreateModuleRow, byNormalizedName: Map<string, CommandProposalModuleInfo>): CommandProposalRow {
+function classifyCreateModuleRow(
+  row: RawCommandProposalCreateModuleRow,
+  byNormalizedName: Map<string, CommandProposalModuleInfo>,
+  createdInThisProposal: Set<string>
+): CommandProposalRow {
   const trimmedName = row.moduleName.trim();
   if (!trimmedName) {
     return unsupportedRow(null, "moduleName", "A created module needs a non-empty name.");
   }
+  const normalized = trimmedName.toLowerCase();
 
   // G8: the steps.lms-modules.ts:92 / bulk-module-plan.ts dedupe rule,
   // restated identically - Canvas offers no idempotency key for module
   // creation, so a case/trim-insensitive name match against the existing
   // modules is the only defense against a re-applied proposal duplicating
   // every module it already created.
-  const existing = byNormalizedName.get(trimmedName.toLowerCase());
+  const existing = byNormalizedName.get(normalized);
   if (existing) {
     const target: CommandProposalTarget = { kind: "module", id: existing.id, displayName: existing.name, selectionKey: existing.selectionKey };
     return {
@@ -316,8 +360,28 @@ function classifyCreateModuleRow(row: RawCommandProposalCreateModuleRow, byNorma
     };
   }
 
+  // DEFECT 4a: `byNormalizedName` only ever held EXISTING modules, so two
+  // occurrences of the same new name within one proposal (a model emitting
+  // "Ethics in AI" twice) both classified "create" and would produce two real
+  // Canvas modules on apply. `createdInThisProposal` accumulates names as
+  // this row-by-row classification proceeds, using the identical
+  // trim/lowercase normalization as the existing-module map above - never a
+  // second spelling of it - so the second occurrence lands here instead of
+  // falling through to "create".
+  if (createdInThisProposal.has(normalized)) {
+    return {
+      target: null,
+      field: "moduleName",
+      currentValue: null,
+      proposedValue: trimmedName,
+      decision: "already-present",
+      reason: `A module named "${trimmedName}" is already being created by an earlier row in this same proposal; this row will not create a duplicate.`,
+    };
+  }
+
   // No existing target yet - `composeModuleTitle` is deliberately NOT called
   // here (see this file's header, G8): the name passes through un-composed.
+  createdInThisProposal.add(normalized);
   return {
     target: null,
     field: "moduleName",
@@ -340,8 +404,14 @@ export function classifyCommandProposalRows(rawRows: RawCommandProposalRow[], co
   for (const candidateModule of context.modules) {
     byNormalizedName.set(candidateModule.name.trim().toLowerCase(), candidateModule);
   }
+  // DEFECT 4a: names created earlier IN THIS SAME CALL accumulate here as
+  // rows are classified, so a duplicate create-module name later in the same
+  // batch is caught even though it was never in `context.modules`.
+  const createdInThisProposal = new Set<string>();
 
-  return rawRows.map((row) => (row.kind === "modify" ? classifyModifyRow(row, context) : classifyCreateModuleRow(row, byNormalizedName)));
+  return rawRows.map((row) =>
+    row.kind === "modify" ? classifyModifyRow(row, context) : classifyCreateModuleRow(row, byNormalizedName, createdInThisProposal)
+  );
 }
 
 /**

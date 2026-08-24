@@ -32043,3 +32043,153 @@ the new `gradables.test.ts` / `pages.test.ts` (neither existed before);
   duplicates, and whether AssignmentFreezer is enabled. Each has a safe default
   recorded, and the write-path fixes above were made to hold regardless of the
   answers.
+
+## 337. The LLM command interface - a proposal the instructor edits before anything is rewritten in a live course
+
+Acceptance criteria: `docs/llm-command-interface-acceptance-criteria.md`,
+whose section 10 is the final contract (entry 336 shipped its foundations,
+entry 335 the live bug its design pass found on the way). Backlog item G, the
+last of the 2026-08-23 Modules-view list, and the highest-consequence control
+in the app: the only one that rewrites content students are already reading.
+
+### What shipped
+
+A command box in the bulk bar (16th group, `commandInterface`), a proposal the
+instructor reviews row by row with a per-row opt-out, and an apply that fans
+out from the browser marking each row as it lands. Selected modules and items
+can have their title, description/body or module name rewritten; new modules
+can be created. Nothing else - and "nothing else" is enforced by code, not by
+the prompt.
+
+### The two things that make it safe, and neither is the confirm dialog
+
+1. **THE ALLOWLIST RUNS OVER THE MODEL'S OUTPUT, NOT THE INSTRUCTOR'S TEXT.**
+   The AC required both "the command box is never parsed" and "a request for an
+   out-of-scope field is NAMED as unsupported". Taken literally those cannot
+   both hold: if nothing parses the box, only the model can classify a request
+   as unsupported - making it both the judge of what it may do and the reporter
+   of its own violations. Resolved structurally (G10): every proposal row names
+   a target and a field, and `canonicalizeField` admits only `title`,
+   `description`/`body` and `moduleName`. Anything else is rejected before it
+   can reach the proposal. The free text is still never parsed; the guarantee
+   stops being a promise the model makes about itself. The apply path re-checks
+   by calling the SAME exported classifier with a synthetic context rather than
+   re-spelling the rule - so a hand-crafted row cannot take a second path.
+2. **THE APPLY BUTTON IS GATED ON `commandProposalOpen`, WHICH IS WHAT MAKES
+   THE BAR'S TIER TRUE.** `groupTier` reduces only over controls whose
+   `visible(facts)` is true, so an Apply button living inside a modal is
+   invisible to that reduction: the group would sit at read-only, stay
+   collapsible, and invariant I5 would stop demanding a consequence tag - the
+   audit asserting in perpetuity that the bar's most dangerous path is safe.
+   That is the defect entry 331 point 5 already paid for. Pinned both ways, and
+   a sabotage test proves an invisible Apply makes the group falsely read safe.
+
+### Ten defects found by verification, most severe first
+
+3. **THE APPLY PATH WAS A REQUEST STORM, AND ITS OWN COMMENT SAID OTHERWISE.**
+   Every row called `listModules` to recover the item's type/contentId/pageUrl.
+   `listModules` is not one request: it fetches the module list, then issues one
+   fetch PER MODULE concurrently. At four concurrent rows on a fifteen-module
+   course that is roughly 64 simultaneous reads before a single write - and
+   `fetchAll`/`getPage`/`getGradable` all use bare `fetch`, so only writes get
+   `fetchWithThrottleRetry`. Canvas 403s, rows fail HAVING NEVER ATTEMPTED A
+   WRITE, and the instructor clicks Apply again into the same storm. The
+   concurrency constant's comment claimed "each row costs at least one read plus
+   one write", which was the false premise that hid it. **The browser already
+   held the module tree**, so the read was always avoidable: the resolved
+   `itemRef` is now passed in, and the real cost is at most two calls per row.
+4. **A SUBHEADER WAS OFFERED AS A WRITABLE CHANGE.** The classifier guarded
+   kinds with `isCarryWriteSupportedKind`, which answers a DIFFERENT feature's
+   question ("can carry-forward create this kind") and returns true for a
+   SubHeader and for a File with a contentId. So a SubHeader classified as
+   `modify`, rendered with a ticked opt-in box, a byte preview and a "no
+   reachable undo" warning, counted toward "N changes ready to apply" - and was
+   refused only at write time. The fix is a predicate in its own module that
+   NEITHER caller owns (`command-write-support.ts`), because the two spellings
+   drifting is exactly how this happened.
+5. **A NEW QUIZ WOULD HAVE REPORTED SUCCESS AND CHANGED NOTHING VISIBLE.** A New
+   Quiz appears in a module as an `Assignment` (quiz_lti), so it routed to the
+   gradable path, `updateGradable` wrote `assignment[description]`, Canvas
+   returned 200, and the text landed on a field the New Quizzes UI never
+   displays. The worst shape a failure can take here - a silent no-op reported
+   as success. Now refused by name. The flag is resolved ONCE PER PROPOSAL via
+   one course-level fetch, skipped entirely when nothing selected is an
+   Assignment, and degrades to "unknown, treat as ordinary" on failure.
+6. **EVERY FIELD-REJECTED ROW RENDERED HEADED "(new module)".** The classifier
+   discarded the resolved target when rejecting a field, and the modal's
+   fallback chain landed on that literal string - so "make Week 1 Homework worth
+   20 points", the exact case the AC designs for, named the field but replaced
+   the object with a label reading as a module creation.
+7. **G4's IDEMPOTENCY RULE WAS NEVER IMPLEMENTED**, and the plumbing built for
+   it was left unused: `updateGradable` had been changed to return Canvas's
+   response with a comment citing G4, and nothing read it. Now compares a
+   normalized form before writing and returns a distinct "already matches,
+   nothing written" outcome. Normalization is documented for what it CANNOT
+   catch and biased toward re-issuing rather than silently skipping. This
+   matters most for pages: every redundant write creates another revision,
+   polluting the one native undo path that exists.
+8. **A TITLE RENAME MIGHT NOT HAVE APPEARED IN THE VIEW.** The tree renders the
+   ContentTag's title, which has its own write path. G17's experiment is still
+   unrun, so its stated safe default - write both - is now implemented, and
+   commented so whoever runs the experiment can remove one write with
+   confidence rather than by guess.
+9. **DUPLICATE MODULE CREATION INSIDE ONE PROPOSAL.** The dedupe map was built
+   from existing modules only and never accumulated names as it classified, so a
+   model emitting the same name twice created two real modules. The existing
+   test only covered two DIFFERENT names.
+10. **TWO COPIES OF THE BYTES-SENT TRANSFORM WITH NOTHING TO CATCH DRIFT.**
+    Byte-identical when checked, but `descriptionToHtml` was private, so nothing
+    could ever detect divergence - and G13 requires the preview to be the exact
+    bytes sent, so a drift would make the preview a lie about a live write while
+    every gate stayed green. Now one exported implementation. **And the fixer
+    caught the trap:** consolidating two implementations makes a parity test a
+    tautology, so frozen-literal oracles in BOTH test files are the real guard -
+    the "refactors disarm tests" lesson, applied without being told.
+11. The `moduleName` preview did not match the bytes sent, because
+    `updateModule` trims and the preview did not.
+
+### A deviation from a brief that was right
+
+An implementer was told to home the controls in `BulkModulesSection` or its
+items sibling, verified that both mount only for their own selection type, and
+refused - either would have made the box unreachable for the other selection,
+the "capability ships dead with every gate green" failure this repo tracks. It
+created `CommandInterfaceSection.tsx` on the `download`/`askAi`/
+`visualizerCoverage` precedent instead, and noticed that adding a group to
+either section would also have broken their exact-group-count tests.
+Reachability was then traced end to end in verification: the section mounts
+inside the bulk bar body OUTSIDE both selection-gated blocks, and both the
+module-only and item-only paths pass every guard down to the write.
+
+### Gates
+
+`npx eslint src` 0 errors (4 pre-existing warnings in untouched files);
+`npx tsc --noEmit` clean; full `vitest run` **663 files / 13426 tests** green,
+up from 13301; `npx next build` "Compiled successfully" and "Finished
+TypeScript". `ModulesView.tsx` is 811 lines against the 1000 cap. A dialog-site
+count canary (`modalAdoption.wiring.test.ts`) had to be bumped in this commit -
+and WHICH number moved is the check: `CommandProposalModal` adopts `ModalShell`
+from birth, so it incremented the adopting count rather than needing a name on
+a non-adopting allowlist.
+
+### Limits - read before trusting this in a live course
+
+- **NOTHING IN THIS FEATURE HAS EVER TOUCHED A REAL CANVAS.** vitest is
+  node-env and renders no component; the action is `"use server"` with no test.
+  Every claim about what Canvas does on write is read from its source, not
+  observed. The three G17 experiments remain unrun and are the repo owner's:
+  whether a renamed content object updates its module item's title, whether a
+  page retry duplicates the page, and whether AssignmentFreezer is enabled.
+- **The pre-image is downloadable, not persisted.** G1 calls it "the only undo
+  those types will ever have"; it lives in React state, is wiped by the next
+  proposal or a reload, and survives only if the instructor downloads the CSV
+  or JSON. That is the doc's stated minimum bar and no more.
+- **The proposal shows markup, not a diff.** There is still no diff renderer in
+  this repo. A ten-row description rewrite is ten pairs of HTML blobs; the
+  per-row opt-out is what makes review load-bearing, not the rendering.
+- **A hand-crafted row can name an item outside the current selection** but
+  inside the same course: the server has no selection to check against. Scope
+  is `requireOwner()` plus the course, and it is the instructor's own course.
+- **The unsupported-field list is the model's honesty plus our allowlist.** A
+  request we refuse is named; a request the model silently declines to make is
+  invisible to us.

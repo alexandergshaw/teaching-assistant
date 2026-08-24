@@ -14,10 +14,12 @@ import { RubricBuilderModal } from "../RubricBuilderModal";
 import { SchedulerModal } from "../SchedulerModal";
 import { CarryModulePatternReviewModal } from "./CarryModulePatternReviewModal";
 import { CartridgeToCanvasModal } from "./CartridgeToCanvasModal";
+import { CommandProposalModal } from "./CommandProposalModal";
 import type { UseBulkItemActionsReturn } from "./useBulkItemActions";
 import type { UseBulkModuleActionsReturn } from "./useBulkModuleActions";
 import type { UseCarryModulePatternReturn } from "./useCarryModulePattern";
 import type { UseCartridgeToCanvasReturn } from "./useCartridgeToCanvas";
+import type { UseCommandInterfaceReturn } from "./useCommandInterface";
 import type { UseModulesViewDialogsReturn } from "./useModulesViewDialogs";
 import type { UseRubricsReturn } from "./useRubrics";
 
@@ -49,6 +51,14 @@ export interface ModulesViewSecondaryModalsProps {
    * header comment for why the bar cannot host it). */
   carryModulePattern: UseCarryModulePatternReturn;
   carryReviewTriggerRef: RefObject<HTMLElement | null>;
+  /** The bulk-bar command box's proposal review modal
+   * (docs/llm-command-interface-acceptance-criteria.md, section 10) - renders
+   * at ModulesView root, same as every other modal in this file, rather than
+   * inside the bulk bar that opens it (see CommandProposalModal.tsx's own
+   * header comment, which mirrors CarryModulePatternReviewModal.tsx's for why
+   * the bar cannot host it). */
+  commandInterface: UseCommandInterfaceReturn;
+  commandInterfaceTriggerRef: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -78,6 +88,8 @@ export function ModulesViewSecondaryModals({
   onCloseCartridgeUpload,
   carryModulePattern,
   carryReviewTriggerRef,
+  commandInterface,
+  commandInterfaceTriggerRef,
 }: ModulesViewSecondaryModalsProps) {
   return (
     <>
@@ -95,6 +107,14 @@ export function ModulesViewSecondaryModals({
           onApply={carryModulePattern.onApply}
           onClose={carryModulePattern.closeReview}
           restoreFocusRef={carryReviewTriggerRef}
+          fallbackFocusRefs={[dialogs.headerFallbackRef]}
+        />
+      )}
+
+      {commandInterface.reviewVisible && (
+        <CommandProposalModal
+          commandInterface={commandInterface}
+          restoreFocusRef={commandInterfaceTriggerRef}
           fallbackFocusRefs={[dialogs.headerFallbackRef]}
         />
       )}

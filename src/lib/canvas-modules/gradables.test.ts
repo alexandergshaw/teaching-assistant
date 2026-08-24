@@ -15,7 +15,7 @@
 // No gradables.test.ts existed before this change (checked via Glob before
 // writing this file).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { updateGradable } from "./gradables";
+import { updateGradable, descriptionToHtml } from "./gradables";
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -146,5 +146,42 @@ describe("updateGradable: G4 - returns Canvas's parsed response (additive, calle
 
     await expect(updateGradable(COURSE_URL, "Assignment", 42, { title: "Essay 1" }, "MCC")).resolves.not.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// DEFECT 9 fix (docs/llm-command-interface-acceptance-criteria.md section 10,
+// G13): descriptionToHtml is now exported so command-apply-outcome.ts's
+// plainTextToPageHtml can delegate to it instead of restating an
+// independent, driftable copy. These are the direct unit tests on the
+// exported function itself; command-apply-outcome.test.ts additionally
+// asserts actual cross-file parity between the two names.
+describe("descriptionToHtml - the one plain-text-to-HTML conversion updateGradable and the page-write path both rely on", () => {
+  it("returns plain text unchanged when it has no special characters or newlines", () => {
+    expect(descriptionToHtml("Read chapter 3 before class.")).toBe("Read chapter 3 before class.");
+  });
+
+  it("escapes HTML-special characters", () => {
+    expect(descriptionToHtml("A < B & C > D")).toBe("A &lt; B &amp; C &gt; D");
+  });
+
+  it("converts LF newlines to <br> tags", () => {
+    expect(descriptionToHtml("Line one\nLine two")).toBe("Line one<br>\nLine two");
+  });
+
+  it("converts CRLF newlines to <br> tags the same way as LF", () => {
+    expect(descriptionToHtml("Line one\r\nLine two")).toBe(descriptionToHtml("Line one\nLine two"));
+  });
+
+  it("passes text that already looks like HTML through unchanged", () => {
+    const html = "<p>Already HTML</p>";
+    expect(descriptionToHtml(html)).toBe(html);
+  });
+
+  it("returns whitespace-only text unchanged", () => {
+    expect(descriptionToHtml("   ")).toBe("   ");
+  });
+
+  it("returns empty text unchanged", () => {
+    expect(descriptionToHtml("")).toBe("");
   });
 });

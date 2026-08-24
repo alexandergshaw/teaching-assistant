@@ -2,7 +2,7 @@
 // (docs/llm-command-interface-acceptance-criteria.md - section 10 is the
 // FINAL CONTRACT; this file's brief is G8, G9, G10, G11, G14).
 //
-// Sabotage check performed by hand against the real source file (not
+// Sabotage checks performed by hand against the real source file (not
 // committed as broken code - restored, and the restore proven with a diff
 // against a byte-for-byte backup taken BEFORE the sabotage edit; see the
 // final report for the exact commands and their output):
@@ -12,9 +12,21 @@
 //      (the row was classified "modify" with `field: "title"` instead of
 //      "unsupported" with `field: "points"`) and "is case- and
 //      whitespace-insensitive on the field name without widening the allowed
-//      set" (its "POINTS" row also came back "modify"). The other 22 tests in
+//      set" (its "POINTS" row also came back "modify"). The other tests in
 //      this file stayed green. Restored from the backup, diffed clean, suite
 //      green again.
+//   2. DEFECT 2 fix (command-write-support.ts's commandCanWriteItemKind):
+//      temporarily reverted the import and the guard in classifyModifyRow
+//      back to the old `isCarryWriteSupportedKind` (module-pattern-plan.ts) -
+//      reddened the two DEFECT 2 tests below ('refuses a SubHeader item ...'
+//      and 'refuses a File item WITH linked content ...'), both of which now
+//      classified "modify" instead of "unsupported" because that predicate
+//      answers "can carry-forward CREATE this kind", not "can the command
+//      interface write this kind". Every other test in this file, including
+//      the paired positive ("accepts an Assignment"), stayed green - proving
+//      the guard change is what those two tests catch, not a broader
+//      classification bug. Restored from the backup, diffed clean, suite
+//      green again. See the final report for the exact commands and output.
 //
 // Every assertion below is on DECISION, FIELD NAME, and ROW MEMBERSHIP -
 // never on the exact wording of a `reason` string, per this project's
@@ -37,6 +49,7 @@ const assignmentItem = {
   id: 101,
   itemType: "Assignment",
   contentId: 501,
+  isNewQuiz: null,
   title: "Week 1 Homework",
   description: "Original description.",
   selectionKey: "live:item:101",
@@ -46,6 +59,7 @@ const externalUrlItem = {
   id: 102,
   itemType: "ExternalUrl",
   contentId: null,
+  isNewQuiz: null,
   title: "Course Syllabus Link",
   description: null,
   selectionKey: "live:item:102",
@@ -55,9 +69,34 @@ const fileItemNoContent = {
   id: 103,
   itemType: "File",
   contentId: null,
+  isNewQuiz: null,
   title: "Handout",
   description: null,
   selectionKey: "live:item:103",
+};
+
+// DEFECT 2 fixtures: both of these were misclassified "modify" by the old
+// `isCarryWriteSupportedKind` guard, because that predicate answers "can
+// carry-forward CREATE this kind", not "can the command interface WRITE this
+// kind" - see command-write-support.ts's header for the incident.
+const subHeaderItem = {
+  id: 104,
+  itemType: "SubHeader",
+  contentId: null,
+  isNewQuiz: null,
+  title: "Week 1",
+  description: null,
+  selectionKey: "live:item:104",
+};
+
+const fileItemWithContent = {
+  id: 105,
+  itemType: "File",
+  contentId: 601,
+  isNewQuiz: null,
+  title: "Syllabus.pdf",
+  description: null,
+  selectionKey: "live:item:105",
 };
 
 const moduleOne = { id: 201, name: "Module 01", selectionKey: "live:module:201" };
@@ -80,6 +119,25 @@ describe("classifyCommandProposalRows - G10 allowlist over the model's structure
       expect(rows[0].reason as string).toContain(forbidden);
     });
   }
+
+  // DEFECT 3: a field-rejected row used to null out the target even when
+  // `context` could resolve it (`unsupportedRow(null, ...)` at the old
+  // call site), so AC3b's own example - "make Week 1 Homework worth 20
+  // points" - rendered a row headed "(new module)" instead of naming the
+  // assignment it actually targeted. The row must carry the resolved target
+  // AND keep the raw field name verbatim.
+  it("DEFECT 3: a field-rejected row carries the RESOLVED target through, and still names the raw field verbatim", () => {
+    const rawRows: RawCommandProposalRow[] = [
+      { kind: "modify", targetKind: "item", targetId: assignmentItem.id, field: "points", proposedValue: "20" },
+    ];
+    const rows = classifyCommandProposalRows(rawRows, { modules: [], items: [assignmentItem] });
+
+    expect(rows[0].decision).toBe("unsupported");
+    expect(rows[0].field).toBe("points");
+    expect(rows[0].target).not.toBeNull();
+    expect(rows[0].target?.id).toBe(assignmentItem.id);
+    expect(rows[0].target?.kind).toBe("item");
+  });
 
   it("accepts the three allowed fields (title, description, moduleName) as modify rows", () => {
     const rawRows: RawCommandProposalRow[] = [
@@ -125,14 +183,14 @@ describe("classifyCommandProposalRows - G10 allowlist over the model's structure
 });
 
 describe("classifyCommandProposalRows - G11 item-kind guard", () => {
-  it("refuses a kind this app cannot write (ExternalUrl), naming the reason, reusing isCarryWriteSupportedKind", () => {
+  it("refuses a kind this app cannot write (ExternalUrl), naming the reason via command-write-support.ts", () => {
     const rawRows: RawCommandProposalRow[] = [
       { kind: "modify", targetKind: "item", targetId: externalUrlItem.id, field: "title", proposedValue: "New" },
     ];
     const rows = classifyCommandProposalRows(rawRows, { modules: [], items: [externalUrlItem] });
     expect(rows[0].decision).toBe("unsupported");
     expect(rows[0].reason).not.toBeNull();
-    expect(rows[0].reason as string).toContain("ExternalUrl");
+    expect(rows[0].reason as string).toContain("external link");
   });
 
   it("refuses a File item with no linked content (contentId null)", () => {
@@ -149,6 +207,33 @@ describe("classifyCommandProposalRows - G11 item-kind guard", () => {
     ];
     const rows = classifyCommandProposalRows(rawRows, { modules: [], items: [assignmentItem] });
     expect(rows[0].decision).toBe("modify");
+  });
+
+  // DEFECT 2: the classifier used to guard item kinds with
+  // `isCarryWriteSupportedKind`, which answers "can carry-forward CREATE this
+  // kind" rather than "can the command interface WRITE this kind" - so a
+  // SubHeader and a File with a contentId both classified "modify" and were
+  // only refused at write time. These two are paired against the Assignment
+  // positive above so the fix cannot pass by rejecting everything.
+
+  it("DEFECT 2: refuses a SubHeader item (has no title/description this app can write), naming a reason", () => {
+    const rawRows: RawCommandProposalRow[] = [
+      { kind: "modify", targetKind: "item", targetId: subHeaderItem.id, field: "title", proposedValue: "New" },
+    ];
+    const rows = classifyCommandProposalRows(rawRows, { modules: [], items: [subHeaderItem] });
+    expect(rows[0].decision).toBe("unsupported");
+    expect(rows[0].reason).not.toBeNull();
+    expect(rows[0].reason as string).toContain("text header");
+  });
+
+  it("DEFECT 2: refuses a File item WITH linked content (contentId non-null), naming a reason", () => {
+    const rawRows: RawCommandProposalRow[] = [
+      { kind: "modify", targetKind: "item", targetId: fileItemWithContent.id, field: "description", proposedValue: "New" },
+    ];
+    const rows = classifyCommandProposalRows(rawRows, { modules: [], items: [fileItemWithContent] });
+    expect(rows[0].decision).toBe("unsupported");
+    expect(rows[0].reason).not.toBeNull();
+    expect(rows[0].reason as string).toContain("file's contents");
   });
 });
 
@@ -187,6 +272,35 @@ describe("classifyCommandProposalRows - G8 module-creation dedupe", () => {
     ];
     const rows = classifyCommandProposalRows(rawRows, { modules: [], items: [] });
     expect(rows.map((r) => r.decision)).toEqual(["create", "create"]);
+  });
+
+  // DEFECT 4a: `byNormalizedName` used to be built from `context.modules`
+  // ONLY and never gained entries for names created earlier in the same
+  // classification pass, so a model emitting "Ethics in AI" twice in one
+  // batch produced two "create" rows - and, on apply, two real Canvas
+  // modules. Exactly one row may end up "create"; the duplicate must be
+  // classified as something that cannot itself create a module.
+  it("DEFECT 4a: two identical create-module names in ONE batch produce exactly one creating row", () => {
+    const rawRows: RawCommandProposalRow[] = [
+      { kind: "create-module", moduleName: "Ethics in AI" },
+      { kind: "create-module", moduleName: "Ethics in AI" },
+    ];
+    const rows = classifyCommandProposalRows(rawRows, { modules: [], items: [] });
+
+    const creating = rows.filter((r) => r.decision === "create");
+    expect(creating).toHaveLength(1);
+    expect(rows[0].decision).toBe("create");
+    expect(rows[1].decision).not.toBe("create");
+  });
+
+  it("DEFECT 4a: the duplicate-in-batch name is caught even with different casing/whitespace", () => {
+    const rawRows: RawCommandProposalRow[] = [
+      { kind: "create-module", moduleName: "Ethics in AI" },
+      { kind: "create-module", moduleName: "  ethics IN ai  " },
+    ];
+    const rows = classifyCommandProposalRows(rawRows, { modules: [], items: [] });
+
+    expect(rows.filter((r) => r.decision === "create")).toHaveLength(1);
   });
 });
 

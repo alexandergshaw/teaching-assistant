@@ -1,5 +1,5 @@
-// The bulk bar's group literals (15 as of docs/carry-module-pattern-forward-
-// acceptance-criteria.md, chunk D), extracted from ./bulkBarGroups.ts to
+// The bulk bar's group literals (16 as of docs/llm-command-interface-
+// acceptance-criteria.md section 10, chunk G), extracted from ./bulkBarGroups.ts to
 // keep that file under this repo's 1000-line ceiling - a STRUCTURAL split
 // only, no behaviour change, same discipline lmsGenerationKindHelpers.ts's
 // own header describes: "each piece re-exported so every existing import
@@ -526,6 +526,138 @@ const carryPatternGroup: BulkBarGroupDef = {
   ],
 };
 
+/**
+ * The command interface - docs/llm-command-interface-acceptance-criteria.md
+ * section 10, THE FINAL CONTRACT (sections 1-9 record an earlier design pass
+ * G1-G17 correct; where this comment disagrees with anything in sections
+ * 1-9, section 10 wins). One free-text box, submitted as a COMMAND to a
+ * model that proposes rewriting titles/descriptions-or-bodies/module names
+ * on the CURRENT selection, or creating new modules - reviewed in a modal
+ * before anything reaches Canvas, per this repo's draft/review/commit rule.
+ *
+ * G7 - THE TIER, AND WHY THIS GROUP EXISTS AS DATA AT ALL, NOT MERELY AS
+ * THREE CONTROLS. Two separate mistakes G7 exists to prevent, both already
+ * paid for once each in this bar's history:
+ *
+ * 1. The tier is `fan-out-write`, NOT `destructive`. `destructive`
+ *    (./bulkBarGroups.ts's own header comment) is reserved for the four
+ *    writes that already carry a two-click confirm-arm in their owning hook
+ *    (item delete, module delete, visualizer link, visualizer create). This
+ *    control carries no confirm-arm of its own - its safeguard is the
+ *    proposal review, not a second click - so it is `fan-out-write`, the
+ *    same tier as `carryApplyButton`, its nearest analogue (an LLM-driven,
+ *    multi-object Canvas write behind a review modal). `fan-out-write`
+ *    already buys never-collapses plus a mandatory `consequenceTag` (I3/I5
+ *    below); arming a control with a two-click confirm is a decision
+ *    independent of its tier, not a consequence of declaring one.
+ * 2. Never-collapse and the consequence tag do NOT follow merely from
+ *    declaring `commandApplyButton`'s tier `fan-out-write` - believing that
+ *    is REGRESSION entry 331 point 5's defect, and it would repeat here
+ *    against the highest-consequence control this bar has ever added.
+ *    `groupTier` (./bulkBarGroups.ts) reduces over controls whose
+ *    `visible(facts)` is true; `commandApplyButton` renders INSIDE the
+ *    proposal review modal (D19's own precedent: `.bulkBarBody`'s
+ *    max-height ceiling cannot host a per-object review), not in the bar
+ *    itself, so an unconditionally-visible declaration would never be seen
+ *    by that reduction - the group would sit at `read-only`, stay
+ *    collapsible, and `auditGroupModel`'s I5 would stop requiring a
+ *    `consequenceTag`, asserting in perpetuity that this bar's most
+ *    dangerous path is safe. The fix, copied exactly from
+ *    `carryApplyButton` (D17 above): declare a dedicated fact,
+ *    `commandProposalOpen` (BulkBarFacts, ./bulkBarGroups.ts), and gate
+ *    `commandApplyButton` on it. The group's derived tier is then
+ *    `read-only`/`reversible-write` while the review is closed and rises to
+ *    `fan-out-write` the instant it opens, tracking REACHABILITY of the
+ *    write rather than mere presence of a selection.
+ *
+ * G15 - AVAILABILITY AND PERSISTENCE.
+ * - Availability: visible whenever anything is selected - a module alone,
+ *   an item alone, or any mix - matching `download`/`askAi`/
+ *   `visualizerCoverage`'s own `visible: (f) => f.moduleCount > 0 ||
+ *   f.itemCount > 0`. Section 10's G15 corrects section 2's AC2, which
+ *   framed this as exposing a NEW asymmetry; it is established precedent,
+ *   not a new one.
+ * - Persistence: `commandBox` is `persistKey: null`, deliberately
+ *   CONTRADICTING section 8's AC8 (which asked for a `ta-`-prefixed
+ *   persisted key) - section 10 overrides section 8 where they disagree, and
+ *   this is one of the places they do. Do not "fix" this back to a
+ *   persisted key. Every other free-text compose field in this bar
+ *   (`itemsDescriptionText`, `moduleAddAiPrompt`, `moduleAddBody`, ...) is
+ *   already `persistKey: null` under `COMPOSE_FIELD_UNPERSISTED` -
+ *   "carrying it across a reload risks silently reapplying old text to a
+ *   different selection" - and that reasoning is STRONGER here than for any
+ *   of them: those fields feed the NEXT click's compose buffer, but this one
+ *   is submitted as a COMMAND that a model turns directly into a live
+ *   Canvas write. Reapplying stale text to a different selection would not
+ *   just misinform a draft, it would misdirect an actual rewrite of
+ *   existing course content.
+ *
+ * The `consequenceTag` states G1's re-verified fact rather than this
+ * document's earlier, wrong "no undo in Canvas" claim: a page rewrite is
+ * fully revertible from Canvas's own page history (`simply_versioned`,
+ * unlimited), while an assignment, quiz or discussion rewrite has no
+ * reachable undo at all - the inverse of what "no undo" would suggest, and
+ * the reason the tag names the one type that is safer than the other three
+ * rather than treating all rewrites as equally dangerous.
+ */
+const commandInterfaceGroup: BulkBarGroupDef = {
+  id: "commandInterface",
+  label: "Command",
+  disclosure: true,
+  defaultOpen: true,
+  consequenceTag:
+    "Apply rewrites titles, descriptions/bodies and module names directly in Canvas from text this app's model authored, and can create new modules - reachable only from inside the proposal review, not from the bar itself. A page rewrite can be reverted from Canvas's own page history; an assignment, quiz or discussion rewrite cannot.",
+  visible: (f) => f.moduleCount > 0 || f.itemCount > 0,
+  controls: [
+    {
+      id: "commandBox",
+      kind: "textField",
+      label: "Command",
+      tier: "read-only",
+      // The box itself writes nothing - typing into it touches nothing
+      // beyond this device. It becomes consequential only once submitted,
+      // which is what commandReview/commandApply below are for.
+      visible: (f) => f.moduleCount > 0 || f.itemCount > 0,
+      persistKey: null,
+      unpersistedReason:
+        COMPOSE_FIELD_UNPERSISTED +
+        " Stronger here than for itemsDescriptionText/moduleAddAiPrompt/moduleAddBody: the text this box holds is submitted as a COMMAND that a model turns directly into a Canvas write, so silently reapplying stale text to a different selection would not just misinform the next generation, it would misdirect a live rewrite of existing course content. See this group's own header comment (G15) for why section 10 overrides section 8's AC8 on this exact point.",
+    },
+    {
+      id: "commandReview",
+      kind: "button",
+      label: "Review proposal",
+      // A real, scoped, reversible write - it calls a model to turn the
+      // command into a structured proposal and spends quota, the same
+      // distinction moduleAddAiGenerate's own comment draws - but reaches
+      // no further than that model call and the review modal it opens;
+      // nothing commits to Canvas until commandApply, below, is clicked.
+      tier: "reversible-write",
+      visible: (f) => f.moduleCount > 0 || f.itemCount > 0,
+      persistKey: null,
+      unpersistedReason: MODAL_OPENER_UNPERSISTED,
+    },
+    {
+      id: "commandApply",
+      kind: "button",
+      label: "Apply",
+      tier: "fan-out-write",
+      // G7 - THE control this whole group's design exists to get right.
+      // Visible only while the proposal review modal that hosts it is open.
+      // Do not change this to `f.moduleCount > 0 || f.itemCount > 0` (or any
+      // predicate true whenever the GROUP itself is visible): that would
+      // make this control a permanent, unconditional member of `groupTier`'s
+      // reduction and defeats the reason it is gated on
+      // `commandProposalOpen` at all - see this group's own header comment
+      // above (G7) for the failure this predicate exists to prevent, and
+      // carryApplyButton above for the precedent this declaration copies.
+      visible: (f) => f.commandProposalOpen,
+      persistKey: null,
+      unpersistedReason: ONE_CLICK_UNPERSISTED,
+    },
+  ],
+};
+
 /** GenerateFromSelectionSection - never writes to CANVAS by itself (its own
  * header comment: "some kinds can be posted afterward as a separate,
  * explicit step"), but every kind button IS a reversible-write, not
@@ -752,7 +884,7 @@ const headGroup: BulkBarGroupDef = {
 };
 
 /**
- * All fifteen groups, in the bar's rendered order. ORDER HERE IS NOT THE
+ * All sixteen groups, in the bar's rendered order. ORDER HERE IS NOT THE
  * BAR'S DOM ORDER CONTRACT - `visualizerCoverage.wiring.test.ts:56` and
  * `askAiSelection.wiring.test.ts:46-76` pin the six section components'
  * render order directly in `ModulesView.tsx` (D2's correction: there are
@@ -766,7 +898,13 @@ const headGroup: BulkBarGroupDef = {
  * `carryPatternGroup` is placed immediately after `currentEventsGroup`, for
  * the same reason - both are module-scoped action groups, and appending
  * rather than inserting keeps every existing slice-from-open-tag test's
- * target group exactly where it already was.
+ * target group exactly where it already was. `commandInterfaceGroup` is
+ * appended LAST, after `visualizerCoverageGroup`, for the same reason again:
+ * it is not module-scoped only (visible for a module OR item selection, like
+ * `download`/`askAi`/`visualizerCoverage`), so there is no existing sibling
+ * pair it belongs beside, and appending at the very end cannot land inside
+ * any existing slice-from-open-tag test's target range no matter which
+ * group that test targets.
  */
 export const BULK_BAR_GROUPS: BulkBarGroupDef[] = [
   headGroup,
@@ -784,4 +922,5 @@ export const BULK_BAR_GROUPS: BulkBarGroupDef[] = [
   downloadGroup,
   askAiGroup,
   visualizerCoverageGroup,
+  commandInterfaceGroup,
 ];

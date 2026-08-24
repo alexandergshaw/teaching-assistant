@@ -83,6 +83,11 @@ function buildFacts(
     lmsGeneration: fakeLmsGeneration(post),
     visualizerCoverage: fakeVisualizerCoverage(),
     carryReviewOpen,
+    // The one missing field docs/llm-command-interface-acceptance-criteria.md
+    // section 10 (G7) adds - see this function's own new-argument comment.
+    // Not this file's own contract to cover further; carryModulePatternOpen's
+    // describe block above is the template a future chunk can copy for it.
+    commandProposalOpen: false,
   });
 }
 

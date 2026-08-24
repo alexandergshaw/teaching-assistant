@@ -75,6 +75,10 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     creatableGapsCount: 0,
     carryReviewOpen: false,
     generatePostReachable: false,
+    // docs/llm-command-interface-acceptance-criteria.md section 10 (G7): the
+    // one field this chunk added to BulkBarFacts - see that section's own
+    // commandInterfaceGroup comment in bulkBarGroupCatalog.ts.
+    commandProposalOpen: false,
     ...overrides,
   };
 }

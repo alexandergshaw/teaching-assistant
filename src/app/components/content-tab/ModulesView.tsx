@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import type {
@@ -17,6 +18,8 @@ import { BulkItemsSection } from "./modules/BulkItemsSection";
 import { BulkModulesSection } from "./modules/BulkModulesSection";
 import type { BulkBarFacts } from "./modules/bulkBarGroups";
 import { buildBulkBarFacts } from "./modules/buildBulkBarFacts";
+import { CommandInterfaceSection } from "./modules/CommandInterfaceSection";
+import { useCommandInterface } from "./modules/useCommandInterface";
 import { DownloadSelectionSection } from "./modules/DownloadSelectionSection";
 import { GeneratedPreviewModal } from "./modules/GeneratedPreviewModal";
 import { GenerateFromSelectionSection } from "./modules/GenerateFromSelectionSection";
@@ -188,6 +191,37 @@ export function ModulesView({
     rubricsHook,
   });
 
+  // The bulk-bar command box (docs/llm-command-interface-acceptance-
+  // criteria.md, section 10 - THE FINAL CONTRACT). Called as a DIRECT call
+  // here, not folded into useModulesViewOrchestration.ts - that file is owned
+  // and concurrently edited by a sibling wave, and this chunk's own brief
+  // restricts it to this file, the hook itself, the modal, the secondary-
+  // modals mount, one bulk-bar section component and three test files (never
+  // useModulesViewOrchestration.ts) - the same "stays a direct call site"
+  // reasoning this file's own comment above gives for useRubrics. Reads
+  // `selection` from the orchestration hook (already destructured above);
+  // `commandInterfaceTriggerRef`/`onCommandInterfaceTrigger` below are this
+  // file's own focus-restoration pair for the review modal (the modal-focus-
+  // restoration pattern every other opener in this file already follows -
+  // see ModulesViewSecondaryModals.tsx's own restoreFocusRef props).
+  const commandInterface = useCommandInterface(
+    courseUrl,
+    acronym,
+    provider,
+    modules,
+    selection.selectedItems,
+    selection.selected,
+    selection.selectedModules,
+    selection.liveModuleIds,
+    setBusy,
+    setNote,
+    reload
+  );
+  const commandInterfaceTriggerRef = useRef<HTMLElement | null>(null);
+  const onCommandInterfaceTrigger = (trigger: HTMLElement) => {
+    commandInterfaceTriggerRef.current = trigger;
+  };
+
   // "Download" (docs/lms-selection-export-download-acceptance-criteria.md) -
   // a course export (.imscc) and/or a plain zip of just the current
   // selection. A READ, never a write (AC8/AC10): it owns its own busy state
@@ -287,6 +321,13 @@ export function ModulesView({
     // reviewOpen is still true; the bar's consequence tier must drop with
     // it, exactly in step with the modal that offers the way out.
     carryReviewOpen: carryModulePattern.reviewVisible,
+    // G7 (docs/llm-command-interface-acceptance-criteria.md section 10):
+    // reviewVisible, not the bare reviewOpen flag - same reasoning as
+    // carryReviewOpen just above, via useCommandInterface.ts's own
+    // isCommandReviewVisible. This is what lets commandApplyButton (living
+    // inside CommandProposalModal.tsx, never in the bar itself) be a
+    // correctly-gated member of groupTier's reduction.
+    commandProposalOpen: commandInterface.reviewVisible,
   });
 
   // courseBase, displayModuleMatches, displayItemVisible, dialogs and
@@ -478,6 +519,23 @@ export function ModulesView({
                   createUnavailableReason={visualizerCoverage.createUnavailableReason}
                   linkArmed={visualizerCoverage.linkArmed}
                   createArmed={visualizerCoverage.createArmed}
+                  facts={bulkBarFacts}
+                  groupsState={bulkBarGroupsApi}
+                />
+
+                {/* The command box (docs/llm-command-interface-acceptance-
+                    criteria.md, section 10, AC2/G15): visible whenever ANY
+                    selection exists - module alone, item alone, or a mix -
+                    matching Generate/Download/Ask AI/Coverage's own
+                    unconditional placement here, never nested inside the
+                    module- or item-gated blocks below. See
+                    CommandInterfaceSection.tsx's own header for why. */}
+                <CommandInterfaceSection
+                  commandText={commandInterface.commandText}
+                  setCommandText={commandInterface.setCommandText}
+                  generateBusy={commandInterface.generateBusy}
+                  onReviewCommand={commandInterface.onReviewCommand}
+                  onCommandInterfaceTrigger={onCommandInterfaceTrigger}
                   facts={bulkBarFacts}
                   groupsState={bulkBarGroupsApi}
                 />
@@ -713,6 +771,8 @@ export function ModulesView({
         onCloseCartridgeUpload={onCloseCartridgeUpload}
         carryModulePattern={carryModulePattern}
         carryReviewTriggerRef={carryReviewTriggerRef}
+        commandInterface={commandInterface}
+        commandInterfaceTriggerRef={commandInterfaceTriggerRef}
       />
 
       {lmsGeneration.preview && (

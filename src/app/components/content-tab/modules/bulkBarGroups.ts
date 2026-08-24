@@ -149,7 +149,7 @@ export const TIER_RANK: Record<ConsequenceTier, number> = {
 export type BulkBarControlKind = "button" | "select" | "textField" | "checkbox";
 
 /**
- * The fifteen top-level groups this bar organizes into. Twelve map
+ * The sixteen top-level groups this bar organizes into. Twelve map
  * one-to-one onto a `.bulkLabel` heading in the six section files today
  * (AC2); "head" is the bar's own count-and-Clear line
  * (`ModulesView.tsx`'s `bulkBarHead`, NOT a `.bulkLabel` span - see
@@ -169,6 +169,23 @@ export type BulkBarControlKind = "button" | "select" | "textField" | "checkbox";
  * instead of this one's - see ./bulkBarGroupCatalog.ts's own comment on
  * `carryPatternGroup` for the fuller rationale, including the D17 hazard
  * this group's `carryApplyButton` is declared to avoid.
+ *
+ * "commandInterface" is the sixteenth, added by docs/llm-command-interface-
+ * acceptance-criteria.md section 10 (the FINAL contract; G7/G15 govern this
+ * group specifically). It holds the free-text command box and the two
+ * buttons that turn a typed instruction into a reviewed, then applied,
+ * Canvas write across the current selection - an LLM-driven rewrite of
+ * EXISTING content (titles, descriptions/bodies, module names) or new
+ * modules, not a new artifact the way Generate's kind buttons are. Its own
+ * `commandApplyButton` lives inside the proposal review modal, not the bar,
+ * so it is declared on the same `carryReviewOpen`-shaped fact
+ * (`commandProposalOpen`, see `BulkBarFacts` below) for the exact reason
+ * `carryApplyButton` is: without it, `groupTier`'s visible-controls
+ * reduction cannot see the group's one fan-out write, and the group would
+ * sit at read-only forever - REGRESSION entry 331 point 5's defect, repeated
+ * against a control this document's own G7 names as the highest-consequence
+ * path this bar has ever added. See ./bulkBarGroupCatalog.ts's own comment
+ * on `commandInterfaceGroup` for the fuller rationale.
  *
  * "addToEach" merges what is six separate conditionally-rendered `bulkRow`s
  * in `BulkModulesSection.tsx` today (the base row, File, Details, Body,
@@ -194,7 +211,8 @@ export type BulkBarGroupId =
   | "generate"
   | "download"
   | "askAi"
-  | "visualizerCoverage";
+  | "visualizerCoverage"
+  | "commandInterface";
 
 /**
  * The facts a visibility/tier decision needs. Plain data only - no
@@ -309,6 +327,30 @@ export interface BulkBarFacts {
    * "something write-ish exists somewhere in this feature".
    */
   generatePostReachable: boolean;
+  /**
+   * Whether the command interface's proposal review modal is currently
+   * open (docs/llm-command-interface-acceptance-criteria.md section 10,
+   * G7) - the exact same shape as `carryReviewOpen` above, and it exists
+   * for the exact same reason. `commandApplyButton` - this bar's one
+   * LLM-authored, multi-object Canvas write - lives INSIDE that modal, not
+   * in the bar itself, so it is declared `visible: (f) =>
+   * f.commandProposalOpen` rather than any predicate that is true whenever
+   * the group itself is visible. Without this fact, `groupTier`'s
+   * reduction (only ever looking at `control.visible(facts)`-true
+   * controls) could never see `commandApplyButton`, the group's derived
+   * tier would stay `read-only` forever, `mayCollapse` would return `true`
+   * forever, and `auditGroupModel`'s I5 would stop requiring a
+   * `consequenceTag` on the single most consequence-laden path this bar
+   * has ever added - REGRESSION entry 331 point 5's defect, verbatim,
+   * against a higher-stakes control. Never-collapse and the consequence tag
+   * do NOT follow merely from declaring `commandApplyButton`'s tier
+   * `fan-out-write`; they follow only from this fact making that
+   * declaration reachable by the derivation. See
+   * ./bulkBarGroupCatalog.ts's own comment on `commandInterfaceGroup` for
+   * the fuller rationale, and `carryReviewOpen` above for the precedent
+   * this fact copies.
+   */
+  commandProposalOpen: boolean;
 }
 
 /** Per-group runtime state `groupOpen` needs, supplied by the group's OWN
@@ -532,6 +574,13 @@ const MINIMAL_AUDIT_FACTS: BulkBarFacts = {
   // then. Setting either true here would make I3 demand `defaultOpen: true`
   // for a tier neither group reaches until a modal opens.
   generatePostReachable: false,
+  // False for the same reason `carryReviewOpen` is: the proposal review
+  // modal is not open the moment the command interface group first becomes
+  // visible, so `commandApplyButton` is not yet a visible member and this
+  // group is correctly read-only (from `commandBox`'s tier) plus
+  // reversible-write (from `commandReview`'s model call) at this minimal
+  // snapshot - never fan-out-write until the modal actually opens.
+  commandProposalOpen: false,
 };
 
 /**

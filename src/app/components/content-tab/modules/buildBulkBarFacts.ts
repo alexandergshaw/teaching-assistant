@@ -24,6 +24,15 @@ export interface BuildBulkBarFactsArgs {
    * `carryApplyButton` - the fan-out write living inside that modal, not in
    * the bar - be a correctly-gated member of `groupTier`'s reduction. */
   carryReviewOpen: boolean;
+  /** Whether the command interface's proposal review modal is currently
+   * open (docs/llm-command-interface-acceptance-criteria.md section 10,
+   * G7) - copies `carryReviewOpen`'s shape exactly, for the same reason:
+   * `commandApplyButton`, the group's actual fan-out write, lives inside
+   * that modal rather than the bar, so this fact is what lets it be a
+   * correctly-gated member of `groupTier`'s reduction. See
+   * BulkBarFacts.commandProposalOpen's own doc comment (bulkBarGroups.ts)
+   * for the fuller rationale. */
+  commandProposalOpen: boolean;
 }
 
 /**
@@ -63,6 +72,7 @@ export function buildBulkBarFacts({
   lmsGeneration,
   visualizerCoverage,
   carryReviewOpen,
+  commandProposalOpen,
 }: BuildBulkBarFactsArgs): BulkBarFacts {
   // BulkItemsSection's own single-item branch (AC11/D1's
   // singleItemEditKind): "gradable" for a single Assignment/Quiz/Discussion
@@ -98,5 +108,6 @@ export function buildBulkBarFacts({
     creatableGapsCount: visualizerCoverage.coverage ? conceptsForCreate(visualizerCoverage.coverage).length : 0,
     carryReviewOpen,
     generatePostReachable: generatePostReachableFrom(lmsGeneration),
+    commandProposalOpen,
   };
 }

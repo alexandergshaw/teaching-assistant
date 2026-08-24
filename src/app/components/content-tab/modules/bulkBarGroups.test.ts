@@ -62,6 +62,7 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     creatableGapsCount: 0,
     carryReviewOpen: false,
     generatePostReachable: false,
+    commandProposalOpen: false,
     ...overrides,
   };
 }
@@ -425,6 +426,12 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
     // precise shape of the defect being fixed: a sweep that cannot see a
     // modal-hosted control asserts the group is safe, in green.
     baseFacts({ itemCount: 1, generationKindsCount: 10, generatePostReachable: true }),
+    // Same correction again, for commandInterface's own modal-hosted write:
+    // without this entry the sweep never observes commandApplyButton (every
+    // other entry leaves commandProposalOpen false), observedMaxTier reports
+    // reversible-write from commandReview alone, and this test would demand a
+    // null consequenceTag on the group G7 exists specifically to keep tagged.
+    baseFacts({ itemCount: 1, commandProposalOpen: true }),
   ];
 
   function observedMaxTier(group: BulkBarGroupDef): ConsequenceTier {
@@ -449,13 +456,14 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
 });
 
 describe("BULK_BAR_GROUPS shape", () => {
-  it("declares exactly the fifteen groups - the original D0 thirteen plus currentEvents (docs/current-events-assignment-from-modules-acceptance-criteria.md section 3b/D5) plus carryPattern (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D)", () => {
+  it("declares exactly the sixteen groups - the original D0 thirteen plus currentEvents (docs/current-events-assignment-from-modules-acceptance-criteria.md section 3b/D5) plus carryPattern (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D) plus commandInterface (docs/llm-command-interface-acceptance-criteria.md section 10, chunk G)", () => {
     const ids = BULK_BAR_GROUPS.map((g) => g.id).sort();
     expect(ids).toEqual(
       [
         "addToEach",
         "askAi",
         "carryPattern",
+        "commandInterface",
         "content",
         "currentEvents",
         "download",
@@ -832,6 +840,124 @@ describe("generate group: the modal-hosted Post to Canvas write (D17's shape, ap
       group.consequenceTag = "";
       const violations = auditGroupModel();
       expect(violations.some((v) => v.startsWith("I5:") && v.includes("generate"))).toBe(true);
+    } finally {
+      group.consequenceTag = original;
+    }
+    expect(auditGroupModel()).toEqual([]);
+  });
+});
+
+// docs/llm-command-interface-acceptance-criteria.md section 10 (THE FINAL
+// CONTRACT), G7 - THE SAME D17 SHAPE AGAIN, applied to the highest-
+// consequence control this bar has ever declared. commandApplyButton lives
+// inside the proposal review modal, not the bar, and is visible only while
+// facts.commandProposalOpen is true - the exact reason to distrust "the
+// tier follows automatically from declaring fan-out-write" (REGRESSION
+// entry 331 point 5's defect) is proven here as a theorem over the real
+// catalog, not asserted as a declaration: the group's derived tier must
+// RISE to fan-out-write when the review is open and sit at read-only (or, as
+// here, reversible-write from commandReview's own model call) when it is
+// not.
+describe("commandInterface group (docs/llm-command-interface-acceptance-criteria.md section 10, G7/G15)", () => {
+  it("has exactly the three contracted controls with their contracted tiers", () => {
+    const group = findGroup("commandInterface");
+    expect(group.controls.map((c) => c.id)).toEqual(["commandBox", "commandReview", "commandApply"]);
+    expect(findControl("commandBox").tier).toBe("read-only");
+    expect(findControl("commandReview").tier).toBe("reversible-write");
+    expect(findControl("commandApply").tier).toBe("fan-out-write");
+  });
+
+  it("is visible whenever anything is selected - a module alone, an item alone, or any mix (G15: established precedent, not a new asymmetry)", () => {
+    const group = findGroup("commandInterface");
+    expect(group.visible(baseFacts({ moduleCount: 1, itemCount: 0 }))).toBe(true);
+    expect(group.visible(baseFacts({ moduleCount: 0, itemCount: 1 }))).toBe(true);
+    expect(group.visible(baseFacts({ moduleCount: 1, itemCount: 3 }))).toBe(true);
+    expect(group.visible(baseFacts({ moduleCount: 0, itemCount: 0 }))).toBe(false);
+  });
+
+  it("every control declares persistKey: null with a non-empty unpersistedReason (I6)", () => {
+    const group = findGroup("commandInterface");
+    for (const control of group.controls) {
+      expect(control.persistKey).toBeNull();
+      expect(control.unpersistedReason ?? "").not.toBe("");
+    }
+  });
+
+  // G15: AC8 (section 8) asked for a persisted key on this box; section 10
+  // overrides it. Pin that the override is actually recorded, not merely
+  // that the field happens to be null today.
+  it("commandBox's unpersistedReason states this is stronger than its compose-field neighbours because the reapplied text reaches Canvas", () => {
+    const reason = findControl("commandBox").unpersistedReason ?? "";
+    expect(reason).toMatch(/canvas/i);
+    expect(reason).toMatch(/stronger/i);
+  });
+
+  it("THEOREM: groupTier is reversible-write while commandProposalOpen is false, and fan-out-write once it is true, at any selection", () => {
+    const group = findGroup("commandInterface");
+    expect(groupTier(group, baseFacts({ itemCount: 1, commandProposalOpen: false }))).toBe("reversible-write");
+    expect(groupTier(group, baseFacts({ moduleCount: 5, commandProposalOpen: false }))).toBe("reversible-write");
+    expect(groupTier(group, baseFacts({ itemCount: 1, commandProposalOpen: true }))).toBe("fan-out-write");
+    expect(groupTier(group, baseFacts({ moduleCount: 5, commandProposalOpen: true }))).toBe("fan-out-write");
+  });
+
+  it("THEOREM: mayCollapse is true while the proposal review is closed and false once it is open", () => {
+    const group = findGroup("commandInterface");
+    expect(mayCollapse(group, baseFacts({ itemCount: 1, commandProposalOpen: false }))).toBe(true);
+    expect(mayCollapse(group, baseFacts({ itemCount: 1, commandProposalOpen: true }))).toBe(false);
+  });
+
+  it("has a non-null, non-empty consequenceTag naming the fan-out write and, per G1, which object types Canvas can and cannot revert", () => {
+    const group = findGroup("commandInterface");
+    expect(group.consequenceTag).not.toBeNull();
+    expect((group.consequenceTag ?? "").trim()).not.toBe("");
+    expect(group.consequenceTag ?? "").toMatch(/page/i);
+  });
+
+  // G7's own tier correction: destructive is reserved for the four writes
+  // that already carry a two-click confirm-arm (confirmArming.ts); this
+  // control carries no confirm-arm of its own, so it must not be declared at
+  // that tier no matter how consequential its write is.
+  it("G7: commandApply is fan-out-write, not destructive - it carries no confirm-arm of its own", () => {
+    expect(findControl("commandApply").tier).toBe("fan-out-write");
+    expect(findControl("commandApply").tier).not.toBe("destructive");
+  });
+
+  // SABOTAGE, entry 331 point 5's exact shape, reproduced against this
+  // group. try/finally because findGroup/findControl hand back references
+  // into ONE shared module-level array (BULK_BAR_GROUPS) and a mid-test
+  // throw would corrupt the catalog for every later test in this run.
+  it("SABOTAGE: an apply control invisible to the derivation makes the group lie about safety while the proposal review is open, and the real declaration does not", () => {
+    const control = findControl("commandApply");
+    const original = control.visible;
+    const openFacts = baseFacts({ itemCount: 1, commandProposalOpen: true });
+    try {
+      control.visible = () => false;
+      const group = findGroup("commandInterface");
+      // The bug G7 warns about: even with the review genuinely open, the
+      // group derives no higher than reversible-write and stays collapsible,
+      // because its one fan-out-write control is (falsely) never a visible
+      // member.
+      expect(groupTier(group, openFacts)).toBe("reversible-write");
+      expect(mayCollapse(group, openFacts)).toBe(true);
+    } finally {
+      control.visible = original;
+    }
+    const group = findGroup("commandInterface");
+    expect(groupTier(group, openFacts)).toBe("fan-out-write");
+    expect(mayCollapse(group, openFacts)).toBe(false);
+  });
+
+  // Second sabotage, the same shape applied to I5: emptying the
+  // consequenceTag must trip the audit regardless of commandProposalOpen,
+  // since I5's own maxPossibleTier ignores visibility entirely and looks at
+  // every control's DECLARED tier.
+  it("sabotage: emptying the group's consequenceTag trips auditGroupModel's I5, and restoring it clears the violation", () => {
+    const group = findGroup("commandInterface");
+    const original = group.consequenceTag;
+    try {
+      group.consequenceTag = "";
+      const violations = auditGroupModel();
+      expect(violations.some((v) => v.startsWith("I5:") && v.includes("commandInterface"))).toBe(true);
     } finally {
       group.consequenceTag = original;
     }

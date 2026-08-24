@@ -2,7 +2,17 @@ import { canvasError, resolveCourse } from "../canvas-core";
 import { writeJson } from "./fetch-helpers";
 import type { GradableKind, GradableDetail } from "./types";
 
-function descriptionToHtml(text: string): string {
+// Exported (DEFECT 9 fix, docs/llm-command-interface-acceptance-criteria.md
+// section 10 G13): command-apply-outcome.ts's plainTextToPageHtml used to
+// restate this same conversion byte-for-byte as an independent, private
+// copy, because this function was not exported and a "use server" file may
+// export only async functions (so it could not live there either). Nothing
+// enforced the two copies staying identical, and G13 requires the proposal
+// preview to show the EXACT bytes that will be sent - a drift here would
+// have made that preview a lie about a live Canvas write while every gate
+// stayed green. plainTextToPageHtml now delegates to this export instead of
+// re-implementing it.
+export function descriptionToHtml(text: string): string {
   if (text.trim() === "") return text;
   if (/<\/?[a-z][\s\S]*>/i.test(text)) return text;
   const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

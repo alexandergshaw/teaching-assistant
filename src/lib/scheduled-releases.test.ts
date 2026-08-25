@@ -300,6 +300,7 @@ const SAMPLE_ROW = {
   course_acronym: "EX",
   target_kind: "module_item",
   target_id: 456,
+  module_id: 789,
   release_at: "2026-08-25T09:00:00.000Z",
   status: "pending",
   claimed_at: null,
@@ -320,7 +321,7 @@ describe("row mapping (via listDueScheduledReleases)", () => {
         userId: SAMPLE_ROW.user_id,
         courseUrl: SAMPLE_ROW.course_url,
         courseAcronym: "EX",
-        target: { kind: "module_item", id: 456 },
+        target: { kind: "module_item", id: 456, moduleId: 789 },
         releaseAt: SAMPLE_ROW.release_at,
         status: "pending",
         claimedAt: null,
@@ -548,6 +549,42 @@ describe("scheduleRelease", () => {
 const MIGRATION_PATH = join(process.cwd(), "supabase/migrations/20261008000000_scheduled_releases.sql");
 const migrationSql = readFileSync(MIGRATION_PATH, "utf8");
 
+// A table's columns are the UNION of every migration that touched it, not just
+// its create-table. F10 added module_id in a SECOND migration (the target-set
+// question entry 338 deliberately left open was still open when the first one
+// was written), and reading only the create-table would have made this guard
+// reject a column that genuinely exists - a false alarm is as corrosive to a
+// guard's credibility as a miss, because the next person "fixes" it by
+// deleting the assertion.
+const ALTER_MIGRATION_PATH = join(
+  process.cwd(),
+  "supabase/migrations/20261009000000_scheduled_releases_module_id.sql"
+);
+const alterMigrationSql = readFileSync(ALTER_MIGRATION_PATH, "utf8");
+
+/** Columns introduced by `alter table ... add column [if not exists] <name>`. */
+function extractAddedColumns(sql: string, tableName: string): string[] {
+  // String.raw, not a plain template literal: in a template literal `\s` is
+  // simply `s`, so the pattern silently became `alters+tables+...` and matched
+  // nothing. The canary above is what caught that - a guard whose extractor
+  // finds nothing passes every "is this key a real column" check vacuously.
+  const pattern = new RegExp(
+    String.raw`alter\s+table\s+(?:if\s+exists\s+)?public\.${tableName}\s+add\s+column\s+(?:if\s+not\s+exists\s+)?([a-z_][a-z0-9_]*)`,
+    "gi"
+  );
+  const found: string[] = [];
+  for (const match of sql.matchAll(pattern)) found.push(match[1]);
+  return found;
+}
+
+/** Every column the table has after all its migrations have run. */
+function allScheduledReleaseColumns(): string[] {
+  return [
+    ...extractCreateTableColumns(migrationSql, "scheduled_releases"),
+    ...extractAddedColumns(alterMigrationSql, "scheduled_releases"),
+  ];
+}
+
 function extractCreateTableColumns(sql: string, tableName: string): string[] {
   const startMarker = `create table if not exists public.${tableName} (`;
   const start = sql.indexOf(startMarker);
@@ -594,8 +631,22 @@ describe("extractCreateTableColumns matches the real scheduled_releases migratio
   });
 });
 
+describe("extractAddedColumns finds the second migration's column", () => {
+  // Canary: without this, an extractor that matched NOTHING would make the
+  // union silently equal the create-table alone, and the guard below would
+  // start rejecting module_id again - or, worse, a future added column would
+  // go unguarded while the suite stayed green.
+  it("finds module_id in the alter-table migration", () => {
+    expect(extractAddedColumns(alterMigrationSql, "scheduled_releases")).toContain("module_id");
+  });
+
+  it("does not invent columns for a table the migration does not touch", () => {
+    expect(extractAddedColumns(alterMigrationSql, "cron_heartbeat")).toEqual([]);
+  });
+});
+
 describe("every write payload key is a real migration column", () => {
-  const columns = extractCreateTableColumns(migrationSql, "scheduled_releases");
+  const columns = allScheduledReleaseColumns();
 
   function assertKeysAreColumns(payload: Record<string, unknown> | undefined) {
     expect(payload).toBeDefined();

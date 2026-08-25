@@ -1,13 +1,29 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mocked so the "normal path makes NO module-listing call" tests (F10's
+// whole point - REGRESSION entry 339's own follow-up, closed by the
+// acceptance criteria doc's F10) can assert listModules is never reached,
+// and so the pre-F10 fallback test can assert it IS reached when a row has
+// no moduleId. Every other test in this file injects its own `publish` fake
+// and never touches this mock at all.
+vi.mock("@/lib/canvas-modules", () => ({
+  listModules: vi.fn(),
+  updateModule: vi.fn(),
+  updateModuleItem: vi.fn(),
+}));
+
 import {
   canStartRelease,
   classifyReleaseFailure,
   releaseSubBudgetDeadlineMs,
   summarizeReleaseResults,
   runDueReleases,
+  publishReleaseTarget,
   RELEASE_SUB_BUDGET_MS,
   type ReleaseRunResult,
+  type ReleaseWithModuleId,
 } from "./release-runner";
+import { listModules, updateModule, updateModuleItem } from "@/lib/canvas-modules";
 import type { ScheduledRelease } from "./scheduled-releases";
 
 // Fixed reference instant so every test pins `now` explicitly, matching
@@ -15,7 +31,7 @@ import type { ScheduledRelease } from "./scheduled-releases";
 const NOW = new Date("2026-08-24T12:00:00.000Z");
 const NOW_MS = NOW.getTime();
 
-function makeRelease(overrides: Partial<ScheduledRelease> = {}): ScheduledRelease {
+function makeRelease(overrides: Partial<ReleaseWithModuleId> = {}): ScheduledRelease {
   return {
     id: "release-1",
     userId: "user-1",
@@ -32,6 +48,13 @@ function makeRelease(overrides: Partial<ScheduledRelease> = {}): ScheduledReleas
     updatedAt: new Date(NOW_MS - 60_000).toISOString(),
     ...overrides,
   };
+}
+
+/** Same as makeRelease, but typed to also carry `moduleId` - for the
+ * publishReleaseTarget/default-publish tests below, which are the only ones
+ * that care about it. */
+function makeReleaseWithModuleId(overrides: Partial<ReleaseWithModuleId> = {}): ReleaseWithModuleId {
+  return { ...makeRelease(overrides), moduleId: overrides.moduleId };
 }
 
 // ---------------------------------------------------------------------------
@@ -338,3 +361,91 @@ describe("runDueReleases", () => {
     expect(summary.due).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// publishReleaseTarget - F10's whole point: a module_item target with a known
+// moduleId must publish DIRECTLY, with no Canvas read to find its owning
+// module. This is the property REGRESSION entry 339's own "follow-up this
+// creates" section named and F10 closed - a test that only checked the
+// happy publish result would not notice the extra read coming back, so these
+// assert directly on the mocked listModules spy's call count.
+
+describe("publishReleaseTarget", () => {
+  beforeEachClearMocks();
+
+  it("a module target publishes by id directly - no module lookup regardless of moduleId", async () => {
+    await publishReleaseTarget("https://canvas.example.edu/courses/1", null, { kind: "module", id: 42 });
+    expect(updateModule).toHaveBeenCalledWith("https://canvas.example.edu/courses/1", 42, { published: true }, undefined);
+    expect(listModules).not.toHaveBeenCalled();
+  });
+
+  it("THE NORMAL PATH: a module_item target with a known moduleId publishes directly and makes NO module-listing call", async () => {
+    await publishReleaseTarget("https://canvas.example.edu/courses/1", "ABC", { kind: "module_item", id: 7 }, 900);
+    expect(updateModuleItem).toHaveBeenCalledWith(
+      "https://canvas.example.edu/courses/1",
+      900,
+      7,
+      { published: true },
+      "ABC"
+    );
+    expect(listModules).not.toHaveBeenCalled();
+  });
+
+  it("THE FALLBACK PATH: a module_item target with NO moduleId (a pre-F10 row) falls back to listModules to find its owning module", async () => {
+    vi.mocked(listModules).mockResolvedValue([
+      { id: 900, name: "Week 1", position: 1, published: true, itemsCount: 1, items: [{ id: 7 } as never] },
+    ] as never);
+
+    await publishReleaseTarget("https://canvas.example.edu/courses/1", null, { kind: "module_item", id: 7 }, null);
+
+    expect(listModules).toHaveBeenCalledTimes(1);
+    expect(updateModuleItem).toHaveBeenCalledWith("https://canvas.example.edu/courses/1", 900, 7, { published: true }, undefined);
+  });
+
+  it("the fallback throws when no module contains the item", async () => {
+    vi.mocked(listModules).mockResolvedValue([]);
+    await expect(
+      publishReleaseTarget("https://canvas.example.edu/courses/1", null, { kind: "module_item", id: 7 })
+    ).rejects.toThrow(/was not found in any module/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runDueReleases' DEFAULT publish wiring - proves moduleId actually flows
+// from the due row through to publishReleaseTarget when no `publish` override
+// is injected (every other runDueReleases test above injects its own
+// `publish` fake and so never exercises this wiring at all).
+
+describe("runDueReleases default publish wiring", () => {
+  beforeEachClearMocks();
+
+  it("passes the due row's moduleId through to the real publish path, making no module-listing call", async () => {
+    const r1 = makeReleaseWithModuleId({ id: "r1", target: { kind: "module_item", id: 7 }, moduleId: 900 });
+    const claim = vi.fn().mockResolvedValue(true);
+    const markDone = vi.fn().mockResolvedValue(undefined);
+    const markFailed = vi.fn();
+
+    const { summary } = await runDueReleases({
+      due: [r1],
+      deadlineMs: NOW_MS + 60_000,
+      clock: () => NOW,
+      claim,
+      markDone,
+      markFailed,
+      // No `publish` override - exercises the real default, which calls the
+      // (mocked) canvas-modules functions.
+    });
+
+    expect(updateModuleItem).toHaveBeenCalledWith(r1.courseUrl, 900, 7, { published: true }, undefined);
+    expect(listModules).not.toHaveBeenCalled();
+    expect(summary).toEqual({ due: 1, attempted: 1, released: 1, failed: 0, skipped: 0, notStarted: 0 });
+  });
+});
+
+function beforeEachClearMocks() {
+  beforeEach(() => {
+    vi.mocked(listModules).mockReset();
+    vi.mocked(updateModule).mockReset().mockResolvedValue(undefined);
+    vi.mocked(updateModuleItem).mockReset().mockResolvedValue(undefined);
+  });
+}

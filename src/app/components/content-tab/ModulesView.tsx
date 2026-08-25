@@ -27,6 +27,8 @@ import { ModulesHeaderBar } from "./modules/ModulesHeaderBar";
 import { ModulesViewSecondaryModals } from "./modules/ModulesViewSecondaryModals";
 import { NewAssignmentGate } from "./modules/NewAssignmentGate";
 import { RepoFoldersSection } from "./modules/RepoFoldersSection";
+import { ScheduledReleaseSection } from "./modules/ScheduledReleaseSection";
+import { useScheduledRelease } from "./modules/useScheduledRelease";
 import { useBulkBarGroups } from "./modules/useBulkBarGroups";
 import { useModulesViewOrchestration } from "./modules/useModulesViewOrchestration";
 import { useRubrics } from "./modules/useRubrics";
@@ -222,6 +224,33 @@ export function ModulesView({
     commandInterfaceTriggerRef.current = trigger;
   };
 
+  // "Scheduled release" (docs/scheduled-publishing-from-modules-acceptance-
+  // criteria.md, F6/F7/F10 - THE FINAL CONTRACT). Called as a DIRECT call
+  // here, the same "stays a direct call site" reasoning this file's own
+  // comment above gives for useRubrics/useCommandInterface - this chunk's
+  // own brief restricts it to this file, the hook itself, the review modal,
+  // the secondary-modals mount, one bulk-bar section component and three
+  // test files (never useModulesViewOrchestration.ts). Reads `selection`
+  // from the orchestration hook (already destructured above);
+  // `scheduledReleaseTriggerRef`/`onScheduledReleaseTrigger` below are this
+  // file's own focus-restoration pair for the review modal.
+  const scheduledRelease = useScheduledRelease(
+    courseUrl,
+    acronym,
+    modules,
+    selection.selectedItems,
+    selection.selected,
+    selection.selectedModules,
+    selection.liveModuleIds,
+    setBusy,
+    setNote,
+    reload
+  );
+  const scheduledReleaseTriggerRef = useRef<HTMLElement | null>(null);
+  const onScheduledReleaseTrigger = (trigger: HTMLElement) => {
+    scheduledReleaseTriggerRef.current = trigger;
+  };
+
   // "Download" (docs/lms-selection-export-download-acceptance-criteria.md) -
   // a course export (.imscc) and/or a plain zip of just the current
   // selection. A READ, never a write (AC8/AC10): it owns its own busy state
@@ -328,6 +357,13 @@ export function ModulesView({
     // inside CommandProposalModal.tsx, never in the bar itself) be a
     // correctly-gated member of groupTier's reduction.
     commandProposalOpen: commandInterface.reviewVisible,
+    // F6 (docs/scheduled-publishing-from-modules-acceptance-criteria.md):
+    // reviewVisible, not the bare reviewOpen flag - same reasoning as
+    // carryReviewOpen/commandProposalOpen just above, via
+    // useScheduledRelease.ts's own isReleaseReviewVisible. This is what lets
+    // releaseCommit (living inside ReleaseReviewModal.tsx, never in the bar
+    // itself) be a correctly-gated member of groupTier's reduction.
+    releaseReviewOpen: scheduledRelease.reviewVisible,
   });
 
   // courseBase, displayModuleMatches, displayItemVisible, dialogs and
@@ -536,6 +572,24 @@ export function ModulesView({
                   generateBusy={commandInterface.generateBusy}
                   onReviewCommand={commandInterface.onReviewCommand}
                   onCommandInterfaceTrigger={onCommandInterfaceTrigger}
+                  facts={bulkBarFacts}
+                  groupsState={bulkBarGroupsApi}
+                />
+
+                {/* Scheduled release (docs/scheduled-publishing-from-modules-
+                    acceptance-criteria.md, F6/F7/F10): visible whenever ANY
+                    selection exists - module alone, item alone, or a mix -
+                    matching Generate/Download/Ask AI/Coverage/Command's own
+                    unconditional placement here, never nested inside the
+                    module- or item-gated blocks below. See
+                    ScheduledReleaseSection.tsx's own header for why. */}
+                <ScheduledReleaseSection
+                  releaseDate={scheduledRelease.releaseDate}
+                  setReleaseDate={scheduledRelease.setReleaseDate}
+                  dateValidation={scheduledRelease.dateValidation}
+                  reviewBusy={scheduledRelease.reviewBusy}
+                  onReviewRelease={scheduledRelease.onReviewRelease}
+                  onScheduledReleaseTrigger={onScheduledReleaseTrigger}
                   facts={bulkBarFacts}
                   groupsState={bulkBarGroupsApi}
                 />
@@ -773,6 +827,8 @@ export function ModulesView({
         carryReviewTriggerRef={carryReviewTriggerRef}
         commandInterface={commandInterface}
         commandInterfaceTriggerRef={commandInterfaceTriggerRef}
+        scheduledRelease={scheduledRelease}
+        scheduledReleaseTriggerRef={scheduledReleaseTriggerRef}
       />
 
       {lmsGeneration.preview && (

@@ -149,7 +149,7 @@ export const TIER_RANK: Record<ConsequenceTier, number> = {
 export type BulkBarControlKind = "button" | "select" | "textField" | "checkbox";
 
 /**
- * The sixteen top-level groups this bar organizes into. Twelve map
+ * The seventeen top-level groups this bar organizes into. Twelve map
  * one-to-one onto a `.bulkLabel` heading in the six section files today
  * (AC2); "head" is the bar's own count-and-Clear line
  * (`ModulesView.tsx`'s `bulkBarHead`, NOT a `.bulkLabel` span - see
@@ -187,6 +187,28 @@ export type BulkBarControlKind = "button" | "select" | "textField" | "checkbox";
  * path this bar has ever added. See ./bulkBarGroupCatalog.ts's own comment
  * on `commandInterfaceGroup` for the fuller rationale.
  *
+ * "scheduledRelease" is the seventeenth, added by docs/scheduled-publishing-
+ * from-modules-acceptance-criteria.md (F6/F7/F10, the FINAL contract for
+ * that document). A datetime input plus a two-step draft/review/commit flow
+ * that schedules the selected modules AND their items (F10: releases target
+ * BOTH levels, the superset that is safe under either answer to F9's still-
+ * unrun visibility experiment) to become published at a future instant, and
+ * - per F4/F10 - UNPUBLISHES them from Canvas immediately at commit time, so
+ * students lose access now and regain it only when the release fires. Its
+ * own `releaseCommit` lives inside the review modal, not the bar, so
+ * it is declared on the same `carryReviewOpen`-shaped fact
+ * (`releaseReviewOpen`, see `BulkBarFacts` below) for the exact reason
+ * `carryApplyButton` and `commandApplyButton` are: without it, `groupTier`'s
+ * visible-controls reduction cannot see the group's one fan-out write, and
+ * the group would sit at read-only forever, `mayCollapse` would return true
+ * forever, and `auditGroupModel`'s I5 would stop requiring a consequenceTag
+ * on a path whose most surprising behaviour (the immediate hide) is
+ * precisely what an instructor needs to see before clicking - REGRESSION
+ * entry 331 point 5's defect, recorded a third time (entry 337 was the
+ * second) against a control this document's own F6 flags explicitly. See
+ * ./bulkBarGroupCatalog.ts's own comment on `scheduledReleaseGroup` for the
+ * fuller rationale.
+ *
  * "addToEach" merges what is six separate conditionally-rendered `bulkRow`s
  * in `BulkModulesSection.tsx` today (the base row, File, Details, Body,
  * Questions, AI) into ONE group with nested `moduleAdd*` members - see that
@@ -212,7 +234,8 @@ export type BulkBarGroupId =
   | "download"
   | "askAi"
   | "visualizerCoverage"
-  | "commandInterface";
+  | "commandInterface"
+  | "scheduledRelease";
 
 /**
  * The facts a visibility/tier decision needs. Plain data only - no
@@ -351,6 +374,41 @@ export interface BulkBarFacts {
    * this fact copies.
    */
   commandProposalOpen: boolean;
+  /**
+   * Whether the scheduled-release review modal is currently open
+   * (docs/scheduled-publishing-from-modules-acceptance-criteria.md, F6/F7/
+   * F10) - the exact same shape as `carryReviewOpen` and
+   * `commandProposalOpen` above, and it exists for the exact same reason.
+   * `releaseCommit` - this group's one fan-out write, and the one that
+   * unpublishes the selected modules AND their items from Canvas
+   * IMMEDIATELY at commit time (F4/F10) - lives INSIDE that review modal,
+   * not in the bar itself, so it is declared `visible: (f) =>
+   * f.releaseReviewOpen` rather than any predicate that is true whenever the
+   * group itself is visible. Without this fact, `groupTier`'s reduction
+   * (only ever looking at `control.visible(facts)`-true controls) could
+   * never see `releaseCommit`, the group's derived tier would stay at
+   * whatever `releaseDate`/`releaseReview` top out at (read-only:
+   * see `scheduledReleaseGroup`'s own comment in ./bulkBarGroupCatalog.ts for
+   * why neither of those two escalates it), `mayCollapse` would return
+   * `true` forever, and `auditGroupModel`'s I5 would stop requiring a
+   * `consequenceTag` - asserting in perpetuity that a control which hides an
+   * instructor's live content from students the instant it is clicked is
+   * safe to collapse and unlabeled. This is REGRESSION entry 331 point 5's
+   * defect for the THIRD time (entry 337 was the second); F6 names it
+   * directly as the reason this group's tier must be DERIVED rather than
+   * declared. See ./bulkBarGroupCatalog.ts's own comment on
+   * `scheduledReleaseGroup` for the fuller rationale, and `carryReviewOpen`
+   * above for the precedent this fact copies verbatim.
+   *
+   * NOTE, per F6: this fact governs TIER only. Whether `releaseCommit`
+   * is additionally two-click confirm-armed (F6 says to arm it anyway) is a
+   * decision for the sibling hook that owns this group's runtime state
+   * (confirmArming.ts's idiom), entirely independent of this fact and of the
+   * control's declared `tier`. Arming a control does not change what tier it
+   * is declared at, and declaring a tier does not arm a control - conflating
+   * the two is exactly the mistake F6 was written to head off.
+   */
+  releaseReviewOpen: boolean;
 }
 
 /** Per-group runtime state `groupOpen` needs, supplied by the group's OWN
@@ -581,6 +639,13 @@ const MINIMAL_AUDIT_FACTS: BulkBarFacts = {
   // reversible-write (from `commandReview`'s model call) at this minimal
   // snapshot - never fan-out-write until the modal actually opens.
   commandProposalOpen: false,
+  // False for the same reason `carryReviewOpen`/`commandProposalOpen` are:
+  // the release review modal is not open the moment the scheduledRelease
+  // group first becomes visible, so `releaseCommit` is not yet a
+  // visible member and this group is correctly read-only at this minimal
+  // snapshot (from `releaseDate`/`releaseReview`'s own tiers) -
+  // never fan-out-write until the modal actually opens.
+  releaseReviewOpen: false,
 };
 
 /**

@@ -33,16 +33,40 @@ import { listModules, updateModule, updateModuleItem } from "@/lib/canvas-module
 import type { ReleaseTargetRef, ScheduledRelease } from "@/lib/scheduled-releases";
 
 // ---------------------------------------------------------------------------
+// F10 follow-up (REGRESSION entry 339's own "the follow-up this creates"
+// section, closed by docs/scheduled-publishing-from-modules-acceptance-
+// criteria.md's F10): module_id is now known at SCHEDULE time for every
+// module_item target, so the commit path (src/app/actions/scheduled-
+// releases.ts) stores it on the row and this file no longer needs to ask
+// Canvas which module owns an item.
+//
+// `ScheduledRelease` itself (scheduled-releases.ts) is owned by a different
+// slice of this feature and is not part of this file's edit set, so this is
+// a STRUCTURAL widening rather than a change to that type: any object that
+// already satisfies `ScheduledRelease` also satisfies `ReleaseWithModuleId`
+// (the extra field is optional), so every existing caller keeps compiling
+// unchanged, and the moment scheduled-releases.ts's own row type grows a real
+// `moduleId` field, callers here pick it up with no further change.
+export type ReleaseWithModuleId = ScheduledRelease & {
+  /** The item's owning module id, when the row was written by the F10-aware
+   * commit path. Undefined/null for a row written before that column existed
+   * (or, in principle, for a module target - which never needs it). */
+  moduleId?: number | null;
+};
+
+// ---------------------------------------------------------------------------
 // Constants
 
 /**
  * How much of the tick's existing budget the release phase gets, carved from
- * the front (see releaseSubBudgetDeadlineMs). A release is one Canvas write
- * (an item target costs a second, read-only listModules call to resolve its
- * owning module - see publishReleaseTarget), much cheaper than a full
- * workflow run, so this is deliberately a small slice of the ~50s the route
- * already reserves ahead of the 60s maxDuration cap - the workflow loop must
- * still get the great majority of that window.
+ * the front (see releaseSubBudgetDeadlineMs). A release is one Canvas write -
+ * an item target no longer costs a second, read-only listModules call to
+ * resolve its owning module, since F10 made module_id known at schedule time
+ * (see publishReleaseTarget's own doc comment for the fallback that still
+ * exists for pre-F10 rows) - much cheaper than a full workflow run, so this
+ * is deliberately a small slice of the ~50s the route already reserves ahead
+ * of the 60s maxDuration cap - the workflow loop must still get the great
+ * majority of that window.
  */
 export const RELEASE_SUB_BUDGET_MS = 15_000;
 
@@ -163,14 +187,18 @@ export function summarizeReleaseResults(results: ReleaseRunResult[], notStarted:
  * by id (module[published]=true). A module_item target additionally needs
  * the id of the module that CONTAINS it: Canvas exposes no "update this
  * module item" endpoint keyed on the item's id alone, only
- * PUT /courses/:course_id/modules/:module_id/items/:id - and
- * scheduled_releases deliberately does not store that module id (see the
- * migration header: the target reference is a generic (kind, id) pair
- * because F9's first unknown, whether items even need their own target
- * separate from their module, was still open when that table was designed).
- * Resolved here via listModules - already covers "which module owns this
- * item" (mapModuleItem sets CanvasModuleItem.moduleId) - rather than adding a
- * new Canvas wrapper, per this file's brief.
+ * PUT /courses/:course_id/modules/:module_id/items/:id.
+ *
+ * F10 CLOSED THE FOLLOW-UP REGRESSION ENTRY 339 RECORDED: module_id is now
+ * known at SCHEDULE time for every module_item target (the commit path
+ * stores it on the row), so `moduleId` is used DIRECTLY here - no Canvas read
+ * at all - whenever the caller has it. THE listModules LOOKUP BELOW IS A
+ * FALLBACK ONLY, kept for a row written before the module_id column existed
+ * (entry 338/339's rows, or any row a future bug writes without it), and it
+ * must never run on the normal path - see release-runner.test.ts's
+ * "the normal path makes no module-listing call" test, which is the one that
+ * actually proves this (a test that only checks the happy publish result
+ * would not notice the extra read coming back).
  *
  * Throws (does not swallow) on any failure - a Canvas write refusal, or the
  * target no longer existing - so the caller's per-target try/catch is what
@@ -179,13 +207,20 @@ export function summarizeReleaseResults(results: ReleaseRunResult[], notStarted:
 export async function publishReleaseTarget(
   courseUrl: string,
   courseAcronym: string | null,
-  target: ReleaseTargetRef
+  target: ReleaseTargetRef,
+  moduleId?: number | null
 ): Promise<void> {
   const code = courseAcronym ?? undefined;
   if (target.kind === "module") {
     await updateModule(courseUrl, target.id, { published: true }, code);
     return;
   }
+  if (typeof moduleId === "number") {
+    await updateModuleItem(courseUrl, moduleId, target.id, { published: true }, code);
+    return;
+  }
+  // FALLBACK for a pre-F10 row with no module_id - never taken on the normal
+  // path (see this function's own doc comment above).
   const modules = await listModules(courseUrl, code);
   const owningModule = modules.find((m) => m.items.some((item) => item.id === target.id));
   if (!owningModule) {
@@ -211,9 +246,11 @@ export interface ReleaseRunnerDeps {
   markDone: (id: string, now: Date) => Promise<void>;
   /** markScheduledReleaseFailed, bound to a supabase client. */
   markFailed: (id: string, now: Date, detail: string) => Promise<void>;
-  /** Defaults to publishReleaseTarget (a real Canvas write). Overridable so
-   * tests exercise the loop's decisions without touching the network. */
-  publish?: (release: ScheduledRelease) => Promise<void>;
+  /** Defaults to publishReleaseTarget (a real Canvas write), passing
+   * `release.moduleId` through so the normal path never triggers that
+   * function's own listModules fallback. Overridable so tests exercise the
+   * loop's decisions without touching the network. */
+  publish?: (release: ReleaseWithModuleId) => Promise<void>;
   /** Defaults to `() => new Date()`. Read once per target attempted, so
    * tests can pin an exact, possibly-scripted sequence of instants instead
    * of faking global timers. */
@@ -224,7 +261,7 @@ export interface RunDueReleasesParams extends ReleaseRunnerDeps {
   /** Already fetched via listDueScheduledReleases (soonest release_at
    * first) - this function does not re-derive "due", only what to do with
    * an already-due list under a budget. */
-  due: ScheduledRelease[];
+  due: ReleaseWithModuleId[];
   /** From releaseSubBudgetDeadlineMs. */
   deadlineMs: number;
 }
@@ -251,7 +288,10 @@ export interface RunDueReleasesResult {
  */
 export async function runDueReleases(params: RunDueReleasesParams): Promise<RunDueReleasesResult> {
   const clock = params.clock ?? (() => new Date());
-  const publish = params.publish ?? ((release: ScheduledRelease) => publishReleaseTarget(release.courseUrl, release.courseAcronym, release.target));
+  const publish =
+    params.publish ??
+    ((release: ReleaseWithModuleId) =>
+      publishReleaseTarget(release.courseUrl, release.courseAcronym, release.target, release.moduleId ?? null));
 
   const results: ReleaseRunResult[] = [];
   let notStarted = 0;

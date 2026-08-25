@@ -33,6 +33,16 @@ export interface BuildBulkBarFactsArgs {
    * BulkBarFacts.commandProposalOpen's own doc comment (bulkBarGroups.ts)
    * for the fuller rationale. */
   commandProposalOpen: boolean;
+  /** Whether the scheduled-release review modal is currently open
+   * (docs/scheduled-publishing-from-modules-acceptance-criteria.md, F6/F7/
+   * F10) - copies `carryReviewOpen`'s and `commandProposalOpen`'s shape
+   * exactly, for the same reason: `releaseCommit`, the group's actual
+   * fan-out write (and the one that unpublishes the selection from Canvas
+   * IMMEDIATELY at commit time, per F4/F10), lives inside that modal rather
+   * than the bar, so this fact is what lets it be a correctly-gated member
+   * of `groupTier`'s reduction. See BulkBarFacts.releaseReviewOpen's own doc
+   * comment (bulkBarGroups.ts) for the fuller rationale. */
+  releaseReviewOpen: boolean;
 }
 
 /**
@@ -73,6 +83,7 @@ export function buildBulkBarFacts({
   visualizerCoverage,
   carryReviewOpen,
   commandProposalOpen,
+  releaseReviewOpen,
 }: BuildBulkBarFactsArgs): BulkBarFacts {
   // BulkItemsSection's own single-item branch (AC11/D1's
   // singleItemEditKind): "gradable" for a single Assignment/Quiz/Discussion
@@ -109,5 +120,6 @@ export function buildBulkBarFacts({
     carryReviewOpen,
     generatePostReachable: generatePostReachableFrom(lmsGeneration),
     commandProposalOpen,
+    releaseReviewOpen,
   };
 }

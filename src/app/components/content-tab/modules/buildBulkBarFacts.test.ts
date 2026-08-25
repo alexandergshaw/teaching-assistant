@@ -88,6 +88,12 @@ function buildFacts(
     // Not this file's own contract to cover further; carryModulePatternOpen's
     // describe block above is the template a future chunk can copy for it.
     commandProposalOpen: false,
+    // docs/scheduled-publishing-from-modules-acceptance-criteria.md (F6/F7/
+    // F10): the one field that chunk adds to BuildBulkBarFactsArgs - see
+    // BulkBarFacts.releaseReviewOpen's own doc comment (bulkBarGroups.ts).
+    // Not this file's own contract to cover further, same posture as
+    // commandProposalOpen just above.
+    releaseReviewOpen: false,
   });
 }
 

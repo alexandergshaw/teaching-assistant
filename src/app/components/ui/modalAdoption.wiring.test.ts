@@ -228,7 +228,12 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // adopts ModalShell from birth, so it lands in ADOPTING_PATHS below
     // rather than on any non-adopting allowlist, both numbers move by exactly
     // one, and the subtraction that follows is unchanged.
-    expect(DIALOG_SITES.length).toBe(44);
+    //
+    // 45, not 44, as of the scheduled-publishing-from-modules chunk (F6/F7/
+    // F10): ReleaseReviewModal.tsx is one more new dialog site, on the same
+    // terms as CommandProposalModal.tsx/CarryModulePatternReviewModal.tsx
+    // before it - it adopts ModalShell from birth too.
+    expect(DIALOG_SITES.length).toBe(45);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -264,7 +269,11 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // ModalShell from birth. That it simply increments this number, rather
     // than needing a name on one of the three allowlists, IS the check that
     // the new dialog did the right thing.
-    expect(ADOPTING_PATHS.size).toBe(30);
+    // 31 as of the scheduled-publishing-from-modules chunk (F6/F7/F10) - the
+    // thirty described above plus ReleaseReviewModal.tsx, which likewise
+    // adopts ModalShell from birth rather than needing a name on one of the
+    // three allowlists.
+    expect(ADOPTING_PATHS.size).toBe(31);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

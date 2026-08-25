@@ -53,6 +53,28 @@ export interface ReleaseTargetRef {
   kind: ReleaseTargetKind;
   /** Canvas's own id for the module or module item. */
   id: number;
+  /**
+   * The module that OWNS this target, for a `module_item`; null for a
+   * `module` target (which owns itself) and for rows written before F10.
+   *
+   * Stored rather than looked up because F10's "target both" decision makes
+   * it known at SCHEDULE time, which closes the follow-up REGRESSION entry
+   * 339 recorded: without it the runner pays a `listModules` call per item
+   * target just to discover the owning module, and `listModules` is one
+   * request PER MODULE.
+   *
+   * It is written by `scheduleRelease` in the SAME insert/update as the rest
+   * of the row, deliberately - not as a follow-up patch. A separate patch
+   * would mean a rare failure on it marks the target "failed" to the
+   * instructor even though the row was already written and WILL fire, and
+   * misreporting a scheduled write as failed is exactly the confusion this
+   * feature exists to remove. One write, one truth.
+   *
+   * Optional on the TYPE (not on the column) so a caller holding the richer
+   * `ReleaseTargetRef` from release-plan.ts can pass it straight through,
+   * and an older caller that never knew about it still compiles.
+   */
+  moduleId?: number | null;
 }
 
 export type ReleaseStatus = "pending" | "claimed" | "done" | "failed";
@@ -216,7 +238,14 @@ function mapScheduledRelease(row: Record<string, unknown>): ScheduledRelease {
     userId: String(row.user_id ?? ""),
     courseUrl: String(row.course_url ?? ""),
     courseAcronym: optionalString(row.course_acronym),
-    target: { kind: mapTargetKind(row.target_kind), id: Number(row.target_id ?? 0) },
+    target: {
+      kind: mapTargetKind(row.target_kind),
+      id: Number(row.target_id ?? 0),
+      // null for a module target, and for any item row written before the
+      // module_id column existed - the runner's documented fallback covers
+      // that case rather than this mapper inventing a value.
+      moduleId: row.module_id === null || row.module_id === undefined ? null : Number(row.module_id),
+    },
     releaseAt: String(row.release_at ?? ""),
     status: mapStatus(row.status),
     claimedAt: optionalString(row.claimed_at),
@@ -276,6 +305,12 @@ export async function scheduleRelease(
       .update({
         release_at: input.releaseAt,
         course_acronym: input.courseAcronym,
+        // Written here, in the SAME update as release_at - see
+        // ReleaseTargetRef.moduleId's comment for why this is not a
+        // follow-up patch. A reschedule of an existing pending row also
+        // refreshes it, so a row written before F10 gains its module id the
+        // next time the instructor touches it.
+        module_id: input.target.moduleId ?? null,
         updated_at: nowIso,
       })
       .eq("user_id", userId)
@@ -296,6 +331,7 @@ export async function scheduleRelease(
         course_acronym: input.courseAcronym,
         target_kind: input.target.kind,
         target_id: input.target.id,
+        module_id: input.target.moduleId ?? null,
         release_at: input.releaseAt,
         status: "pending",
       })

@@ -15,6 +15,7 @@ import { SchedulerModal } from "../SchedulerModal";
 import { CarryModulePatternReviewModal } from "./CarryModulePatternReviewModal";
 import { CartridgeToCanvasModal } from "./CartridgeToCanvasModal";
 import { CommandProposalModal } from "./CommandProposalModal";
+import { ReleaseReviewModal } from "./ReleaseReviewModal";
 import type { UseBulkItemActionsReturn } from "./useBulkItemActions";
 import type { UseBulkModuleActionsReturn } from "./useBulkModuleActions";
 import type { UseCarryModulePatternReturn } from "./useCarryModulePattern";
@@ -22,6 +23,7 @@ import type { UseCartridgeToCanvasReturn } from "./useCartridgeToCanvas";
 import type { UseCommandInterfaceReturn } from "./useCommandInterface";
 import type { UseModulesViewDialogsReturn } from "./useModulesViewDialogs";
 import type { UseRubricsReturn } from "./useRubrics";
+import type { UseScheduledReleaseReturn } from "./useScheduledRelease";
 
 export interface ModulesViewSecondaryModalsProps {
   courseUrl: string;
@@ -59,6 +61,14 @@ export interface ModulesViewSecondaryModalsProps {
    * the bar cannot host it). */
   commandInterface: UseCommandInterfaceReturn;
   commandInterfaceTriggerRef: RefObject<HTMLElement | null>;
+  /** The bulk-bar "Scheduled release" group's review modal
+   * (docs/scheduled-publishing-from-modules-acceptance-criteria.md, F6/F7/
+   * F10) - renders at ModulesView root, same as every other modal in this
+   * file, rather than inside the bulk bar that opens it (see
+   * ReleaseReviewModal.tsx's own header comment, which mirrors
+   * CommandProposalModal.tsx's for why the bar cannot host it). */
+  scheduledRelease: UseScheduledReleaseReturn;
+  scheduledReleaseTriggerRef: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -90,6 +100,8 @@ export function ModulesViewSecondaryModals({
   carryReviewTriggerRef,
   commandInterface,
   commandInterfaceTriggerRef,
+  scheduledRelease,
+  scheduledReleaseTriggerRef,
 }: ModulesViewSecondaryModalsProps) {
   return (
     <>
@@ -115,6 +127,14 @@ export function ModulesViewSecondaryModals({
         <CommandProposalModal
           commandInterface={commandInterface}
           restoreFocusRef={commandInterfaceTriggerRef}
+          fallbackFocusRefs={[dialogs.headerFallbackRef]}
+        />
+      )}
+
+      {scheduledRelease.reviewVisible && (
+        <ReleaseReviewModal
+          scheduledRelease={scheduledRelease}
+          restoreFocusRef={scheduledReleaseTriggerRef}
           fallbackFocusRefs={[dialogs.headerFallbackRef]}
         />
       )}

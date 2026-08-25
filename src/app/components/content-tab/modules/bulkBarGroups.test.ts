@@ -63,6 +63,7 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     carryReviewOpen: false,
     generatePostReachable: false,
     commandProposalOpen: false,
+    releaseReviewOpen: false,
     ...overrides,
   };
 }
@@ -432,6 +433,13 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
     // reversible-write from commandReview alone, and this test would demand a
     // null consequenceTag on the group G7 exists specifically to keep tagged.
     baseFacts({ itemCount: 1, commandProposalOpen: true }),
+    // Same correction a third time, for scheduledRelease's own modal-hosted
+    // write: without this entry the sweep never observes releaseCommit
+    // (every other entry leaves releaseReviewOpen false), observedMaxTier
+    // reports read-only from releaseDate/releaseReview alone, and this test
+    // would demand a null consequenceTag on the group F6 exists specifically
+    // to keep tagged.
+    baseFacts({ itemCount: 1, releaseReviewOpen: true }),
   ];
 
   function observedMaxTier(group: BulkBarGroupDef): ConsequenceTier {
@@ -456,7 +464,7 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
 });
 
 describe("BULK_BAR_GROUPS shape", () => {
-  it("declares exactly the sixteen groups - the original D0 thirteen plus currentEvents (docs/current-events-assignment-from-modules-acceptance-criteria.md section 3b/D5) plus carryPattern (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D) plus commandInterface (docs/llm-command-interface-acceptance-criteria.md section 10, chunk G)", () => {
+  it("declares exactly the seventeen groups - the original D0 thirteen plus currentEvents (docs/current-events-assignment-from-modules-acceptance-criteria.md section 3b/D5) plus carryPattern (docs/carry-module-pattern-forward-acceptance-criteria.md, chunk D) plus commandInterface (docs/llm-command-interface-acceptance-criteria.md section 10, chunk G) plus scheduledRelease (docs/scheduled-publishing-from-modules-acceptance-criteria.md, F6/F7/F10)", () => {
     const ids = BULK_BAR_GROUPS.map((g) => g.id).sort();
     expect(ids).toEqual(
       [
@@ -474,6 +482,7 @@ describe("BULK_BAR_GROUPS shape", () => {
         "items",
         "modules",
         "move",
+        "scheduledRelease",
         "submissionType",
         "visualizerCoverage",
       ].sort(),
@@ -958,6 +967,128 @@ describe("commandInterface group (docs/llm-command-interface-acceptance-criteria
       group.consequenceTag = "";
       const violations = auditGroupModel();
       expect(violations.some((v) => v.startsWith("I5:") && v.includes("commandInterface"))).toBe(true);
+    } finally {
+      group.consequenceTag = original;
+    }
+    expect(auditGroupModel()).toEqual([]);
+  });
+});
+
+// docs/scheduled-publishing-from-modules-acceptance-criteria.md, F6/F7/F10
+// (the "Post-design corrections" section is THE FINAL CONTRACT). Mirrors the
+// commandInterface describe block immediately above, control for control:
+// this group is the same D17/G7 shape (a fan-out write reachable only from
+// inside a review modal), so "the group's tier follows automatically from
+// declaring fan-out-write" (REGRESSION entry 331 point 5's defect, paid for
+// once already at entry 337) is proven here as a theorem over the real
+// catalog too, not asserted as a declaration.
+describe("scheduledRelease group (docs/scheduled-publishing-from-modules-acceptance-criteria.md, F6/F7/F10)", () => {
+  it("has exactly the three contracted controls with their contracted tiers", () => {
+    const group = findGroup("scheduledRelease");
+    expect(group.controls.map((c) => c.id)).toEqual(["releaseDate", "releaseReview", "releaseCommit"]);
+    expect(findControl("releaseDate").tier).toBe("read-only");
+    expect(findControl("releaseReview").tier).toBe("read-only");
+    expect(findControl("releaseCommit").tier).toBe("fan-out-write");
+  });
+
+  it("is visible whenever anything is selected - a module alone, an item alone, or any mix (matches download/askAi/visualizerCoverage/commandInterface)", () => {
+    const group = findGroup("scheduledRelease");
+    expect(group.visible(baseFacts({ moduleCount: 1, itemCount: 0 }))).toBe(true);
+    expect(group.visible(baseFacts({ moduleCount: 0, itemCount: 1 }))).toBe(true);
+    expect(group.visible(baseFacts({ moduleCount: 1, itemCount: 3 }))).toBe(true);
+    expect(group.visible(baseFacts({ moduleCount: 0, itemCount: 0 }))).toBe(false);
+  });
+
+  it("every control declares persistKey: null with a non-empty unpersistedReason (I6)", () => {
+    const group = findGroup("scheduledRelease");
+    for (const control of group.controls) {
+      expect(control.persistKey).toBeNull();
+      expect(control.unpersistedReason ?? "").not.toBe("");
+    }
+  });
+
+  // F7: the earlier, more general AC9 in the same document asked every new
+  // textbox/select to persist. F7 explicitly overrides that by citing the
+  // neighbour, itemsDueDate - an IDENTICAL datetime-local control already in
+  // this bar, also persistKey: null. Pin that releaseDate's own reason
+  // actually names that neighbour and the overriding section, not merely
+  // that the field happens to be null today.
+  it("releaseDate's unpersistedReason cites itemsDueDate as precedent and F7 as the override of this document's own AC9", () => {
+    const reason = findControl("releaseDate").unpersistedReason ?? "";
+    expect(reason).toMatch(/itemsDueDate/);
+    expect(reason).toMatch(/F7/);
+  });
+
+  it("THEOREM: groupTier is read-only while releaseReviewOpen is false, and fan-out-write once it is true, at any selection", () => {
+    const group = findGroup("scheduledRelease");
+    expect(groupTier(group, baseFacts({ itemCount: 1, releaseReviewOpen: false }))).toBe("read-only");
+    expect(groupTier(group, baseFacts({ moduleCount: 5, releaseReviewOpen: false }))).toBe("read-only");
+    expect(groupTier(group, baseFacts({ itemCount: 1, releaseReviewOpen: true }))).toBe("fan-out-write");
+    expect(groupTier(group, baseFacts({ moduleCount: 5, releaseReviewOpen: true }))).toBe("fan-out-write");
+  });
+
+  it("THEOREM: mayCollapse is true while the release review is closed and false once it is open", () => {
+    const group = findGroup("scheduledRelease");
+    expect(mayCollapse(group, baseFacts({ itemCount: 1, releaseReviewOpen: false }))).toBe(true);
+    expect(mayCollapse(group, baseFacts({ itemCount: 1, releaseReviewOpen: true }))).toBe(false);
+  });
+
+  it("has a non-null, non-empty consequenceTag naming the immediate unpublish (F4/F10) - the most surprising behaviour in the feature", () => {
+    const group = findGroup("scheduledRelease");
+    expect(group.consequenceTag).not.toBeNull();
+    expect((group.consequenceTag ?? "").trim()).not.toBe("");
+    expect(group.consequenceTag ?? "").toMatch(/unpublish/i);
+    expect(group.consequenceTag ?? "").toMatch(/immediately/i);
+  });
+
+  // F6's own tier correction: destructive is reserved for the four writes
+  // that already carry a two-click confirm-arm (confirmArming.ts); F6 says
+  // to arm this control anyway, but arming and tier are independent
+  // decisions, so it must not be declared destructive merely because it is
+  // (or should be) armed.
+  it("F6: releaseCommit is fan-out-write, not destructive - arming it is a decision independent of its tier", () => {
+    expect(findControl("releaseCommit").tier).toBe("fan-out-write");
+    expect(findControl("releaseCommit").tier).not.toBe("destructive");
+  });
+
+  // SABOTAGE, entry 331 point 5's exact shape, reproduced against this group
+  // for the third time (commandInterface's own block above reproduced it for
+  // the second). try/finally because findGroup/findControl hand back
+  // references into ONE shared module-level array (BULK_BAR_GROUPS) and a
+  // mid-test throw would corrupt the catalog for every later test in this
+  // run.
+  it("SABOTAGE: a commit control invisible to the derivation makes the group lie about safety while the release review is open, and the real declaration does not", () => {
+    const control = findControl("releaseCommit");
+    const original = control.visible;
+    const openFacts = baseFacts({ itemCount: 1, releaseReviewOpen: true });
+    try {
+      control.visible = () => false;
+      const group = findGroup("scheduledRelease");
+      // The bug F6 warns about: even with the review genuinely open, the
+      // group derives no higher than read-only and stays collapsible,
+      // because its one fan-out-write control is (falsely) never a visible
+      // member.
+      expect(groupTier(group, openFacts)).toBe("read-only");
+      expect(mayCollapse(group, openFacts)).toBe(true);
+    } finally {
+      control.visible = original;
+    }
+    const group = findGroup("scheduledRelease");
+    expect(groupTier(group, openFacts)).toBe("fan-out-write");
+    expect(mayCollapse(group, openFacts)).toBe(false);
+  });
+
+  // Second sabotage, the same shape applied to I5: emptying the
+  // consequenceTag must trip the audit regardless of releaseReviewOpen,
+  // since I5's own maxPossibleTier ignores visibility entirely and looks at
+  // every control's DECLARED tier.
+  it("sabotage: emptying the group's consequenceTag trips auditGroupModel's I5, and restoring it clears the violation", () => {
+    const group = findGroup("scheduledRelease");
+    const original = group.consequenceTag;
+    try {
+      group.consequenceTag = "";
+      const violations = auditGroupModel();
+      expect(violations.some((v) => v.startsWith("I5:") && v.includes("scheduledRelease"))).toBe(true);
     } finally {
       group.consequenceTag = original;
     }

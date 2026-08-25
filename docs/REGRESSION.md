@@ -32333,3 +32333,116 @@ boundary tests and nothing else.
   same unanswered F9 question about item-vs-module visibility.
 - **The publish path has never run against a real Canvas.** vitest is node-env;
   every Canvas interaction here is stubbed.
+
+## 340. Scheduled publishing, part three: the control, the review, and the commit that hides content immediately
+
+Contract: `docs/scheduled-publishing-from-modules-acceptance-criteria.md` F1-F9
+plus **F10**, the target-set decision the repo owner took on 2026-08-24 when
+asked whether to wait for F9's Student View experiment or build without it.
+Entries 338 and 339 shipped the durable rows and the runner; this is the half
+an instructor can actually reach. Scheduled publishing is now end to end.
+
+### F10, and why "both" is not a hedge
+
+Releases target **both the module and its items**. That is not splitting the
+difference - it is the only assumption that is correct under EITHER answer to
+F9's open question. The feature needs two guarantees: after release students
+can see it, before release they cannot. Publishing both levels delivers the
+first whichever level governs visibility; unpublishing both delivers the
+second the same way. A narrower target set is right only if the experiment
+says so; a wider one is right regardless. The cost is extra writes against a
+live course, and if the experiment is ever run the surplus can be REMOVED with
+confidence - exactly the kind of purchase F9 said its experiments would make.
+
+### What shipped
+
+The 17th bulk-bar group (`scheduledRelease`: a datetime field, a review
+button, and a Commit button living inside the review modal), a plan built from
+the selection, and a commit that unpublishes now and schedules the release.
+
+1. **THE COMMIT'S MOST SURPRISING BEHAVIOUR IS STATED WHERE IT IS DECIDED.**
+   Delivering "students see nothing until release" means unpublishing content
+   that is visible RIGHT NOW, at the moment the instructor commits - not at
+   the release instant. F4 called this the feature's most surprising behaviour
+   and it is; so it is in the group's consequence tag (always visible, never a
+   tooltip) AND restated at the point of commit inside the modal.
+2. **F4's REFUSAL IS SHOWN BEFORE THE COMMIT, NOT WARNED ABOUT AFTER.** Canvas
+   refuses to unpublish a quiz that has student submissions
+   (`can_unpublish?` false). F4 left the choice open between refusing the whole
+   schedule and scheduling-with-a-warning; F10 takes neither. The review lists
+   per target whether it can be hidden, so committing is an informed act - the
+   draft/review/commit idiom entries 331 and 337 already established. A refused
+   target is still scheduled, because publishing it later is harmless and the
+   instructor may simply accept it staying visible meanwhile.
+3. **`unknown` IS ITS OWN HIDE-STATE AND NEVER COLLAPSES INTO `hideable`.** A
+   target whose unpublishability could not be read is not assumed safe. This
+   repo has the scar: entry 332's C4 recorded a guard that degraded open on a
+   fetch failure and silently disabled itself.
+4. **THE DEDUPE THAT MATTERS.** With "both", an item can arrive twice - once
+   directly selected, once via its selected module. It must be ONE target. The
+   pure module keeps dedupe as a separately removable function precisely so
+   the sabotage check is a genuine one-line removal, and it is: removing it
+   reddens exactly that overlap test.
+5. **THE TIER THEOREM, THIRD TIME.** `releaseCommit` is gated
+   `visible: (f) => f.releaseReviewOpen` because `groupTier` reduces only over
+   VISIBLE controls - an ungated Commit inside a modal leaves the audit
+   asserting the bar's most dangerous path is safe. Pinned both ways with a
+   sabotage test, as for `commandApply` (entry 337) and `carryApplyButton`
+   (entry 331). Tier is `fan-out-write`, not `destructive`, per F6: arming is a
+   separate decision and the control is armed anyway.
+
+### The follow-up entry 339 recorded, closed - and the wart that came with it
+
+F10 makes an item's owning module known at SCHEDULE time, so `module_id` is now
+stored on the row and **the runner no longer pays a `listModules` call per item
+target** (that call is one request PER MODULE - the same shape as entry 337's
+defect 1). A test pins that the normal path makes zero module-listing calls;
+one that only checked the result would not notice the read creeping back.
+
+**The wart, and why it was not shipped.** Because `scheduleRelease` sat outside
+the implementing agent's file set, `module_id` was first written as a SECOND
+update after the row was created - and a failure on that patch marked the
+target **failed** even though its row was already written and WOULD still fire.
+Misreporting a scheduled write as failed is precisely the confusion this
+feature exists to remove, so the durable layer took the field instead: one
+write, one truth. The patch helper and its guard were deleted, and the
+migration-column coverage MOVED rather than vanishing - to `scheduleRelease`'s
+own payload guard.
+
+6. **THAT GUARD THEN CAUGHT THE CHANGE, CORRECTLY, AND HAD TO BE TAUGHT
+   SOMETHING TRUE.** Entry 338's guard read only the create-table migration, so
+   a column added by a LATER migration read as "not a real column". The fix is
+   not to weaken it: a table's columns are the UNION of every migration that
+   touched it, so it now reads both. **And the new extractor was itself wrong
+   on the first attempt** - a backslash-s inside a template literal is just an
+   "s", so the pattern silently matched nothing, which would have made the
+   union equal the create-table alone and every payload check vacuous. Its own
+   canary caught it. A guard whose extractor finds nothing passes everything.
+
+### Gates
+
+`npx eslint src` 0 errors (the same 4 pre-existing warnings in untouched
+files); `npx tsc --noEmit` clean; full `vitest run` **13558 tests** green, up
+from 13500 at dispatch; `npx next build` "Compiled successfully" and "Finished
+TypeScript". `ModulesView.tsx` is 867 lines against the 1000 cap. The
+dialog-site canary was bumped in-commit for `ReleaseReviewModal` (44 to 45,
+adopting 30 to 31) - and WHICH count moved is the check: it adopts `ModalShell`
+from birth rather than needing a name on a non-adopting allowlist.
+
+### Limits - read before trusting this against a live course
+
+- **NOTHING IN THIS FEATURE HAS RUN AGAINST A REAL CANVAS.** vitest is
+  node-env, renders no component, and every Canvas call here is stubbed. The
+  unpublish-at-commit path, the `unpublishable` read, and the release write are
+  all read from Canvas's source, not observed.
+- **F9's three experiments remain unrun**, and F10 is a decision taken in their
+  absence, recorded as such. The first would let the surplus writes be removed;
+  the second decides whether the page-slug hazard is real; the third whether
+  AssignmentFreezer can refuse a write outright.
+- **A release is only as reliable as the cron**, which entry 334 now makes
+  observable - and which has been confirmed firing. A release scheduled inside
+  the current tick's window still waits for the next tick; worst-case lateness
+  is one interval plus GitHub's own scheduling lag.
+- **There is no UI yet for viewing or cancelling a scheduled release.** The
+  rows exist and the runner will fire them; nothing lists them, and nothing
+  un-schedules one short of the release arriving.

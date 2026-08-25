@@ -79,6 +79,10 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     // one field this chunk added to BulkBarFacts - see that section's own
     // commandInterfaceGroup comment in bulkBarGroupCatalog.ts.
     commandProposalOpen: false,
+    // docs/scheduled-publishing-from-modules-acceptance-criteria.md (F6/F7/
+    // F10): the one field that chunk added to BulkBarFacts - see that
+    // section's own scheduledReleaseGroup comment in bulkBarGroupCatalog.ts.
+    releaseReviewOpen: false,
     ...overrides,
   };
 }

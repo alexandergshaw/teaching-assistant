@@ -21,6 +21,7 @@ import {
   resolveTileCurrentWeek,
 } from "@/lib/workflows/registry-helpers";
 import type { GradingRunEntry } from "@/lib/grade";
+import { buildRepoGradingLogEntry, buildRepoGradingRunLog, type RepoGradingRunLog } from "@/lib/repo-grading-log";
 import { courseProgressStatus } from "@/lib/week-numbering";
 import { requireInstitution } from "@/lib/institution-resolution";
 import {
@@ -289,7 +290,16 @@ export const gradingRepoSteps: StepDefinition[] = [
         pointsPossible: null,
       };
       const draftSummary = `${r.fullName} - Grade a repository: graded ${r.run.results.length} repo(s)`;
-      const saveResult = await saveRepoGradingDraft({ entry, summary: draftSummary, helpers });
+      // R1.2: one repo attempted here (the bound Repository input) - one
+      // entry, in the same at-most-one-repo shape gradeOrgRepos/gradeTileRepos
+      // build many of.
+      const firstResult = r.run.results[0];
+      const repoGradingLog: RepoGradingRunLog = buildRepoGradingRunLog([
+        firstResult
+          ? buildRepoGradingLogEntry({ repo: r.fullName, outcome: "graded", score: firstResult.totalScore, at: new Date().toISOString() })
+          : buildRepoGradingLogEntry({ repo: r.fullName, outcome: "failed", reason: "no result returned", at: new Date().toISOString() }),
+      ]);
+      const saveResult = await saveRepoGradingDraft({ entry, summary: draftSummary, helpers, repoGradingLog });
 
       // AC4: a failed save never discards the grading itself - the score and
       // feedback are still returned, with the failure surfaced as a warning

@@ -22,6 +22,7 @@ import type {
   RubricAreaResult,
   SubmittedFileInfo,
 } from "./grade";
+import { coerceRepoGradingRunLog, type RepoGradingRunLog } from "./repo-grading-log";
 
 export type GradingDraftStatus = "pending" | "reviewed";
 
@@ -29,6 +30,13 @@ export type GradingDraftSource = "repos" | "lms" | "cartridge";
 
 export interface GradingDraftPayload {
   runs: GradingRunEntry[];
+  /** R1.2/R1.3 (docs/repo-grading-records-acceptance-criteria.md): the
+   * per-repo attempt record for a repo-grading run (grade-repo,
+   * batch-grade-repos-to-draft), written onto the SAME draft the run
+   * already saves - never a second row, never a follow-up patch. Optional
+   * and absent on every draft not produced by those step types, and on any
+   * draft saved before this field existed. */
+  repoGradingLog?: RepoGradingRunLog;
 }
 
 export interface GradingDraft {
@@ -165,7 +173,8 @@ export function coerceGradingDraftPayload(raw: unknown): GradingDraftPayload {
   const runs = Array.isArray(o.runs)
     ? o.runs.map(coerceRunEntry).filter((r): r is GradingRunEntry => r !== null)
     : [];
-  return { runs };
+  const repoGradingLog = coerceRepoGradingRunLog(o.repoGradingLog);
+  return repoGradingLog ? { runs, repoGradingLog } : { runs };
 }
 
 /** Explicit row -> domain mapper, mirroring mapSchedule in

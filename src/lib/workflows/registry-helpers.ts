@@ -63,6 +63,24 @@ export interface StepRunHelpers {
   workflowId?: string;
   workflowName?: string;
   workflowRunId?: string;
+  /**
+   * True only when this step is running UNATTENDED - the cron loop, with the
+   * app closed and nobody to read a result note.
+   *
+   * It exists because no other field could answer the question. `saveRunReport`
+   * used to be the de-facto tell (only the cron builder set it), and since the
+   * D6 change the attended builder sets it too whenever a session is present -
+   * so inferring from it would now be wrong in exactly the case that matters.
+   * `workflowId`/`workflowName`/`workflowRunId` are set identically by both
+   * builders.
+   *
+   * Steps must NOT use this to change what they DO. It is for deciding whether
+   * an outcome needs to be left somewhere a human will find later: an attended
+   * run can put a note on screen, an unattended one has only what it persists.
+   * See docs/repo-grading-records-acceptance-criteria.md R1.4, the first
+   * consumer.
+   */
+  unattended?: boolean;
 }
 
 export type StepRunSummary =

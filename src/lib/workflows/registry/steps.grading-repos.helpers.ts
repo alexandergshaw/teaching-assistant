@@ -32,6 +32,28 @@ import {
 import type { GradingRunEntry, GradeResult } from "@/lib/grade";
 import type { Course } from "@/lib/supabase/courses";
 import { courseProgressStatus, type CourseProgressStatus } from "@/lib/week-numbering";
+import {
+  buildRepoGradingLogEntry,
+  buildRepoGradingReportMarkdown,
+  buildRepoGradingRunLog,
+  repoGradingLogFileName,
+  type RepoGradingLogEntry,
+  type RepoGradingRunLog,
+} from "@/lib/repo-grading-log";
+
+// R1 (docs/repo-grading-records-acceptance-criteria.md): a per-repo time
+// budget for gradeTileRepos/gradeOrgRepos's own loops, so a batch that would
+// otherwise run long enough to hit the unattended cron function's hard
+// ~60-second cap (see docs/AGENTS.md/CLAUDE.md's "Vercel Hobby... maxDuration
+// cap 60s") instead stops itself early, WHILE THE PROCESS IS STILL ALIVE TO
+// SAVE WHAT IT HAS - a hard kill saves nothing at all, which is the actual
+// failure mode this budget exists to avoid. 45s leaves real headroom under
+// the cap for the draft save, the run-report save, and the rest of the
+// step's own bookkeeping after the loop returns. Checked once per repo
+// (never mid-repo), so a single very slow grading call can still overrun it
+// slightly - the goal is bounding the NUMBER of additional repos attempted
+// after the budget is spent, not a hard deadline to the millisecond.
+const REPO_GRADING_TIME_BUDGET_MS = 45_000;
 
 // Grades one already-loaded, already-week-resolved course tile's student
 // repos and saves the draft - the shared core of both batch-grade-repos-to-draft
@@ -51,7 +73,7 @@ export async function gradeTileRepos(opts: {
   pointsPossibleRaw: string;
   helpers: StepRunHelpers;
   onProgress: (msg: string) => void;
-}): Promise<{ draftId: string; graded: number; moduleName: string; summaryText: string }> {
+}): Promise<{ draftId: string; graded: number; moduleName: string; summaryText: string; repoGradingLog: RepoGradingRunLog }> {
   const { tile, rawWeek, status, instrRepoRef, userRubric, assignmentUrl, pointsPossibleRaw, helpers, onProgress } = opts;
 
   // Step 2: Get student repos.
@@ -113,12 +135,33 @@ export async function gradeTileRepos(opts: {
 
   const results: GradeResult[] = [];
   const notes: string[] = [];
+  // R1.2: one log entry per repo ATTEMPTED, carrying the same reason text
+  // already pushed to `notes` above - never a second, differently-worded
+  // account of the same skip/failure.
+  const logEntries: RepoGradingLogEntry[] = [];
+  // R1.5: the run must say when it stopped short rather than let a shorter
+  // entry list silently read as "there were none".
+  let truncated = false;
+  const notReached: string[] = [];
   // Cache rubrics by README content to avoid redundant LLM calls.
   const rubricCache = new Map<string, string>();
+  const startedAt = Date.now();
 
   for (let i = 0; i < students.length; i++) {
     const student = students[i];
     const label = student.student || student.repo;
+
+    // R1.4/R1.5: bail out before starting another repo once this step's own
+    // time budget is spent, so the process is still alive to save the draft
+    // (and the unattended report) covering everything attempted so far,
+    // instead of being hard-killed by the cron function's own cap with
+    // nothing persisted at all.
+    if (Date.now() - startedAt > REPO_GRADING_TIME_BUDGET_MS) {
+      truncated = true;
+      notReached.push(...students.slice(i).map((s) => s.repo));
+      break;
+    }
+
     try {
       // Try per-student folder grading: find the week folder in the student repo.
       let folderPath = "";
@@ -130,6 +173,9 @@ export async function gradeTileRepos(opts: {
         const treeRes = await getRepoTreeAction(student.repo);
         if ("error" in treeRes) {
           notes.push(`${label}: ${treeRes.error}`);
+          logEntries.push(
+            buildRepoGradingLogEntry({ repo: student.repo, outcome: "skipped", reason: treeRes.error, at: new Date().toISOString() })
+          );
           continue;
         }
         // Find the first top-level folder matching the week pattern.
@@ -140,7 +186,9 @@ export async function gradeTileRepos(opts: {
         }
         const matched = [...topFolders].find((seg) => weekRe.test(seg));
         if (!matched) {
-          notes.push(`${label}: no folder matching week ${wk}`);
+          const reason = `no folder matching week ${wk}`;
+          notes.push(`${label}: ${reason}`);
+          logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "skipped", reason, at: new Date().toISOString() }));
           continue;
         }
         folderPath = matched;
@@ -189,7 +237,9 @@ export async function gradeTileRepos(opts: {
       }
 
       if (!folderRubric && !folderInstructions) {
-        notes.push(`${label}: no rubric or instructions available`);
+        const reason = "no rubric or instructions available";
+        notes.push(`${label}: ${reason}`);
+        logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "skipped", reason, at: new Date().toISOString() }));
         continue;
       }
 
@@ -206,24 +256,32 @@ export async function gradeTileRepos(opts: {
 
       if ("error" in r) {
         notes.push(`${label}: ${r.error}`);
+        logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "failed", reason: r.error, at: new Date().toISOString() }));
         continue;
       }
 
       const gr = r.run.results[0];
       if (!gr) {
-        notes.push(`${label}: no result returned`);
+        const reason = "no result returned";
+        notes.push(`${label}: ${reason}`);
+        logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "failed", reason, at: new Date().toISOString() }));
         continue;
       }
 
       gr.student = student.student || gr.student;
       gr.userId = student.canvasUserId && /^\d+$/.test(student.canvasUserId) ? Number(student.canvasUserId) : undefined;
       results.push(gr);
-    } catch (err) {
-      notes.push(
-        `${label}: ${err instanceof Error ? err.message : String(err)}`
+      logEntries.push(
+        buildRepoGradingLogEntry({ repo: student.repo, outcome: "graded", score: gr.totalScore, at: new Date().toISOString() })
       );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      notes.push(`${label}: ${reason}`);
+      logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "failed", reason, at: new Date().toISOString() }));
     }
   }
+
+  const repoGradingLog: RepoGradingRunLog = buildRepoGradingRunLog(logEntries, { truncated, notReached });
 
   // Step 7: Assemble GradingRunEntry and save the draft.
   const rubricAreaNames = results[0]?.rubricAreas.map((a) => a.area) ?? [];
@@ -238,7 +296,16 @@ export async function gradeTileRepos(opts: {
   };
 
   const summary = `${tile.name} - ${moduleName}: graded ${results.length} repo(s)`;
-  const saveRes = await saveGradingDraftAction(summary, { runs: [entry] }, helpers.workflowId, helpers.workflowName, "repos");
+  // R1.3: the log rides on this SAME write - never a second row, never a
+  // follow-up patch. If this save fails, the log goes with it (nothing to
+  // attach it to), which is correct.
+  const saveRes = await saveGradingDraftAction(
+    summary,
+    { runs: [entry], repoGradingLog },
+    helpers.workflowId,
+    helpers.workflowName,
+    "repos"
+  );
   if ("error" in saveRes) throw new Error(saveRes.error);
 
   return {
@@ -246,6 +313,7 @@ export async function gradeTileRepos(opts: {
     graded: results.length,
     moduleName,
     summaryText: `${summary}.${notes.length ? ` (${notes.join("; ")})` : ""}`,
+    repoGradingLog,
   };
 }
 
@@ -336,13 +404,47 @@ function sameGradeResults(a: GradeResult[], b: GradeResult[]): boolean {
  * re-run guard above (AC3) and never throwing on a failed save (AC4) - a
  * failure comes back as `saveError` so the caller can surface it in its
  * summary while still reporting the grading it completed. Writes nothing
- * when nothing was graded (AC5). */
+ * when nothing was graded (AC5).
+ *
+ * R1.3: `repoGradingLog`, when given, rides on this exact write (never a
+ * second row, never a follow-up patch) - so it is dropped along with
+ * everything else on AC5's empty-run early return and on the AC3 skip path
+ * (an unchanged re-run does not get a new/updated log, matching "never a
+ * follow-up patch"). */
 export async function saveRepoGradingDraft(opts: {
   entry: GradingRunEntry;
   summary: string;
   helpers: StepRunHelpers;
+  repoGradingLog?: RepoGradingRunLog;
 }): Promise<{ draftId: string; saveError?: string }> {
-  const { entry, summary, helpers } = opts;
+  const { entry, summary, helpers, repoGradingLog } = opts;
+
+  // R1.4: an UNATTENDED run also leaves a Markdown report, and it is written
+  // HERE - above every early return below - because the run this exists for is
+  // precisely the one those returns discard. A cron batch where every repo was
+  // skipped produces no draft (the AC5 return), so without this it leaves no
+  // trace at all, and "nothing happened" is indistinguishable from "it never
+  // ran". An attended run does not need it: someone is looking at the result
+  // note.
+  //
+  // Best-effort and never fatal: a failed report must not cost the instructor
+  // the draft that follows it. `saveRunReport` is optional on StepRunHelpers
+  // and absent in some attended contexts, hence the guard.
+  if (helpers.unattended && repoGradingLog && helpers.saveRunReport) {
+    try {
+      // The stamp comes from the run's own first entry, not a fresh clock
+      // read, so the filename and the report body agree about when this ran
+      // even if the write itself is slow.
+      const title = helpers.workflowName ?? "Repo grading";
+      const generatedAt = repoGradingLog.entries[0]?.at ?? "";
+      await helpers.saveRunReport(
+        repoGradingLogFileName(title, "md", generatedAt),
+        buildRepoGradingReportMarkdown(repoGradingLog, { title, generatedAt })
+      );
+    } catch (err) {
+      console.error("Failed to save the unattended repo-grading report:", err);
+    }
+  }
 
   if (entry.run.results.length === 0) {
     // AC5: a run that graded nothing writes nothing.
@@ -354,7 +456,13 @@ export async function saveRepoGradingDraft(opts: {
     return { draftId: guard.draftId };
   }
 
-  const saveRes = await saveGradingDraftAction(summary, { runs: [entry] }, helpers.workflowId, helpers.workflowName, "repos");
+  const saveRes = await saveGradingDraftAction(
+    summary,
+    { runs: [entry], ...(repoGradingLog ? { repoGradingLog } : {}) },
+    helpers.workflowId,
+    helpers.workflowName,
+    "repos"
+  );
   if ("error" in saveRes) {
     return { draftId: "", saveError: saveRes.error };
   }
@@ -478,9 +586,22 @@ export async function gradeOrgRepos(opts: {
   // entry rather than one draft per repo.
   const results: GradeResult[] = [];
   let graded = 0;
+  // R1.2/R1.5: same per-repo attempt record and truncation tracking as
+  // gradeTileRepos above - see that function's own comments.
+  const logEntries: RepoGradingLogEntry[] = [];
+  let truncated = false;
+  const notReached: string[] = [];
+  const startedAt = Date.now();
 
   for (let i = 0; i < reposRes.repos.length; i++) {
     const fullName = reposRes.repos[i].fullName;
+
+    if (Date.now() - startedAt > REPO_GRADING_TIME_BUDGET_MS) {
+      truncated = true;
+      notReached.push(...reposRes.repos.slice(i).map((r) => r.fullName));
+      break;
+    }
+
     try {
       onProgress(`Grading ${i + 1}/${reposRes.repos.length}: ${fullName}...`);
 
@@ -489,9 +610,9 @@ export async function gradeOrgRepos(opts: {
       if (!repoInstructions) {
         const readmeRes = await resolveReadmeInstructions(fullName, branch, folder);
         if ("error" in readmeRes) {
-          notes.push(
-            `${fullName}: the Assignment instructions input resolved to empty and no usable README was found (tried ${readmeRes.tried.join(", ")})`
-          );
+          const reason = `the Assignment instructions input resolved to empty and no usable README was found (tried ${readmeRes.tried.join(", ")})`;
+          notes.push(`${fullName}: ${reason}`);
+          logEntries.push(buildRepoGradingLogEntry({ repo: fullName, outcome: "skipped", reason, at: new Date().toISOString() }));
           continue;
         }
         repoInstructions = readmeRes.text;
@@ -501,17 +622,23 @@ export async function gradeOrgRepos(opts: {
       const r = await gradeRepoAction(fullName, repoInstructions, rubric, helpers.provider, branch, folder);
       if ("error" in r) {
         notes.push(`${fullName}: ${r.error}`);
+        logEntries.push(buildRepoGradingLogEntry({ repo: fullName, outcome: "failed", reason: r.error, at: new Date().toISOString() }));
         continue;
       }
       const gr = r.run.results[0];
       if (!gr) {
-        notes.push(`${fullName}: no result returned`);
+        const reason = "no result returned";
+        notes.push(`${fullName}: ${reason}`);
+        logEntries.push(buildRepoGradingLogEntry({ repo: fullName, outcome: "failed", reason, at: new Date().toISOString() }));
         continue;
       }
 
       graded += 1;
       results.push(gr);
       notes.push(`${fullName}: graded${gr.totalScore ? ` - ${gr.totalScore}` : ""}${instructionsSourceNote}`);
+      logEntries.push(
+        buildRepoGradingLogEntry({ repo: fullName, outcome: "graded", score: gr.totalScore, at: new Date().toISOString() })
+      );
 
       const block: string[] = [`${fullName}${instructionsSourceNote}`];
       if (gr.totalScore) block.push(`Total Score: ${gr.totalScore}`);
@@ -524,9 +651,13 @@ export async function gradeOrgRepos(opts: {
       // Per-repo isolation (AC1.3): one repo that cannot be read/graded (a
       // private/deleted repo, a transient GitHub error, ...) is recorded as a
       // note and the loop moves on to the next repo - it never aborts the run.
-      notes.push(`${fullName}: ${err instanceof Error ? err.message : "failed"}`);
+      const reason = err instanceof Error ? err.message : "failed";
+      notes.push(`${fullName}: ${reason}`);
+      logEntries.push(buildRepoGradingLogEntry({ repo: fullName, outcome: "failed", reason, at: new Date().toISOString() }));
     }
   }
+
+  const repoGradingLog: RepoGradingRunLog = buildRepoGradingRunLog(logEntries, { truncated, notReached });
 
   const gradeSummary = summaryBlocks.join("\n\n").trim();
   const label = `Graded ${graded}/${reposRes.repos.length} repo(s) in ${org}.`;
@@ -545,7 +676,7 @@ export async function gradeOrgRepos(opts: {
     pointsPossible: null,
   };
   const draftSummary = `${tile.name} - Grade a repository: graded ${results.length} repo(s)`;
-  const saveResult = await saveRepoGradingDraft({ entry, summary: draftSummary, helpers });
+  const saveResult = await saveRepoGradingDraft({ entry, summary: draftSummary, helpers, repoGradingLog });
 
   // AC4: a failed save never discards the grading itself - it's surfaced as
   // an extra note alongside every per-repo result already gathered above.

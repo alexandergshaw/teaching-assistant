@@ -190,5 +190,11 @@ export function buildAttendedStepHelpers(opts: {
     workflowId,
     workflowName,
     workflowRunId,
+    // Stated explicitly rather than omitted: an absent flag reads as "nobody
+    // decided", and this builder has decided - a browser is open and the run's
+    // outcome is shown on screen. Note `saveRunReport` can no longer stand in
+    // for this distinction, because since D6 this builder sets it too whenever
+    // a session is present.
+    unattended: false,
   };
 }

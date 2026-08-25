@@ -7,10 +7,17 @@ import styles from "../../../page.module.css";
 import type { RubricBuilderTarget } from "./useRubrics";
 import type { BulkRubricGenerateReport } from "./useBulkItemActions";
 import { describeRubricGenerateNote } from "./bulkRubricGenerateSummary";
+import { EMPTY_RUBRIC_RUN_LOG, type RubricRunLogEntry } from "@/lib/rubric-run-log";
+import RubricRunLogPanel from "./RubricRunLogPanel";
 import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "../contentSourceGating";
 import { BulkBarGroup } from "./BulkBarGroup";
 import { groupById, type BulkBarFacts, type BulkBarGroupRuntime } from "./bulkBarGroups";
 import type { BulkBarGroupsApi } from "./useBulkBarGroups";
+
+// Module-level, not recreated per render: the default for `clearRubricRunLog`
+// when a caller (today, only ModulesView.tsx) does not yet pass one - see
+// that prop's own doc comment on BulkItemsSectionProps.
+function NOOP_CLEAR_RUBRIC_RUN_LOG(): void {}
 
 // This section owns six of the bar's thirteen groups (docs/bulk-bar-
 // reorganization-acceptance-criteria.md, section 3b/D5): "items", "content",
@@ -129,6 +136,24 @@ export interface BulkItemsSectionProps {
    * already follows). */
   bulkGenerateAndAssociateRubric: () => void;
   bulkRubricGenerateReport: BulkRubricGenerateReport | null;
+  /** docs/rubric-bulk-log-acceptance-criteria.md - the downloadable,
+   * per-course record of every run's per-target outcomes and orphan
+   * rubrics. Rendered by RubricRunLogPanel.tsx, inline with the control
+   * that produces it (B4 item 9). Optional (unlike
+   * bulkGenerateAndAssociateRubric/bulkRubricGenerateReport above),
+   * defaulted below - same "existing call sites are unaffected" shape as
+   * `sourceContext` at the top of this interface, since this file's own
+   * caller (ModulesView.tsx) is outside this chunk's file set.
+   *
+   * BOTH ARE NOW PASSED by that caller. Being optional is what made this
+   * dangerous: unwired, the panel compiles, passes tsc, eslint, the full
+   * suite and `next build`, and renders NOTHING forever, because it returns
+   * null on an empty log. That is this repo's recurring "ships dead with
+   * every gate green" failure, and no gate here can catch it - vitest is
+   * node-env and renders no component. If a second caller of this section
+   * ever appears, it must pass these too. */
+  rubricRunLog?: readonly RubricRunLogEntry[];
+  clearRubricRunLog?: () => void;
   setRubricBuilder: React.Dispatch<React.SetStateAction<RubricBuilderTarget | null>>;
   /** Same capture-alongside-the-existing-setter shape as
    * onGradableEditorTrigger above - RubricBuilderModal's four openers (this
@@ -205,6 +230,8 @@ export function BulkItemsSection({
   bulkRubric,
   bulkGenerateAndAssociateRubric,
   bulkRubricGenerateReport,
+  rubricRunLog = EMPTY_RUBRIC_RUN_LOG,
+  clearRubricRunLog = NOOP_CLEAR_RUBRIC_RUN_LOG,
   setRubricBuilder,
   onRubricBuilderTrigger,
   openRubricBuilder,
@@ -554,6 +581,13 @@ export function BulkItemsSection({
             </span>
           )}
         </div>
+        {/* docs/rubric-bulk-log-acceptance-criteria.md B4 item 9: rendered
+            inline with the control that produced it, in this same group -
+            the durable counterpart to the ABOVE report, which does not
+            survive past the next run or a reload. Recomputes nothing of its
+            own; every decision (counts, recent entries, CSV/JSON text, the
+            filename) already lives in src/lib/rubric-run-log.ts. */}
+        <RubricRunLogPanel log={rubricRunLog} onClear={clearRubricRunLog} />
       </BulkBarGroup>
       <BulkBarGroup group={groupById("submissionType")} facts={facts} runtime={staticRuntime(opBusy)} state={groupsState} announceBusy={false}>
         <div className={styles.bulkRow}>

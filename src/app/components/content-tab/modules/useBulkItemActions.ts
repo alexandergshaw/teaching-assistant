@@ -37,6 +37,12 @@ import {
 } from "./bulkRubricGenerateSummary";
 import { planModuleShiftMoves, planMoveToModulePositions } from "./bulkItemModulePlacementPlan";
 import { computeSelectedGradables, groupIdsByKind } from "./bulkItemSelectionQueries";
+import {
+  appendRubricRunLogEntries,
+  buildRubricRunLogEntries,
+  type RubricRunLogEntry,
+} from "@/lib/rubric-run-log";
+import { loadRubricRunLog, persistRubricRunLog } from "./rubricRunLogStore";
 
 // docs/rubric-bulk-action-acceptance-criteria.md, chunk H, agent 2B's slice
 // (AC4/AC5): "Generate & associate rubric" is the grading group's own new
@@ -86,6 +92,11 @@ export interface UseBulkItemActionsReturn {
   setBulkRubricId: (v: number | "") => void;
   bulkRubricGenerateReport: BulkRubricGenerateReport | null;
   bulkGenerateAndAssociateRubric: () => void;
+  /** docs/rubric-bulk-log-acceptance-criteria.md - the durable, per-course
+   * record `bulkRubricGenerateReport` above does not survive past the next
+   * run or a reload. See RubricRunLogPanel.tsx, the only renderer. */
+  rubricRunLog: readonly RubricRunLogEntry[];
+  clearRubricRunLog: () => void;
   bulkSubType: string;
   setBulkSubType: (v: string) => void;
   confirmDeleteContent: boolean;
@@ -170,6 +181,38 @@ export function useBulkItemActions(
   // below) so a stale report from a previous, different selection can never
   // be mistaken for the current run's outcome.
   const [bulkRubricGenerateReport, setBulkRubricGenerateReport] = useState<BulkRubricGenerateReport | null>(null);
+
+  // docs/rubric-bulk-log-acceptance-criteria.md (B1/B2): unlike the report
+  // above, this DOES persist - it is the durable record of every run's
+  // per-target outcomes and orphan rubrics, which the report (and the note
+  // built from it) does not survive past the next run or a reload. Restored
+  // per COURSE, matching entry 333's RepoGradesLogPanel precedent
+  // (src/app/components/repo-grades/index.tsx): `rubricRunLogLoadedFor`
+  // records which course's slice is currently loaded into `rubricRunLog`,
+  // and the render-phase branch below keeps the two in lockstep whenever
+  // `courseUrl` changes - the same guard that file's own comment explains is
+  // required to stop the persist effect below from firing with the
+  // pre-restore `[]` and overwriting a course's real stored log before its
+  // restore has even run.
+  const [rubricRunLog, setRubricRunLog] = useState<RubricRunLogEntry[]>([]);
+  const [rubricRunLogLoadedFor, setRubricRunLogLoadedFor] = useState<string | null>(null);
+  if (courseUrl !== rubricRunLogLoadedFor) {
+    setRubricRunLogLoadedFor(courseUrl);
+    setRubricRunLog(loadRubricRunLog(courseUrl));
+  }
+
+  // Appending happens inside the setState updater (pure array math, safe to
+  // re-run) rather than at each call site, matching entry 333's own
+  // reasoning: two "Generate & associate rubric" runs could in principle
+  // overlap (a second click before the first's async work resolves), and
+  // each resolves holding a closure over whatever `rubricRunLog` was at ITS
+  // own render - computing `next` there and persisting that would let the
+  // slower run's persist clobber the faster run's already-appended entries.
+  useEffect(() => {
+    if (rubricRunLogLoadedFor !== courseUrl) return;
+    persistRubricRunLog(courseUrl, rubricRunLog);
+  }, [rubricRunLog, courseUrl, rubricRunLogLoadedFor]);
+
   const [bulkSubType, setBulkSubType] = useState("");
   // Two-click "Confirm delete" arming for the item selection. `selected` is
   // already the raw item-key Set (moduleId:itemId, the same shape `itemKey`
@@ -518,6 +561,29 @@ export function useBulkItemActions(
     void runBulkSummary(() => bulkAssociateRubricAction(courseUrl, Number(bulkRubricId), ids, acronym), "Rubric associated");
   };
 
+  // docs/rubric-bulk-log-acceptance-criteria.md B1.2 - THE CORE INSTRUCTION:
+  // builds the log from the exact SAME `outcomes`/`orphans` arrays the
+  // caller already passed to `summarizeRubricGenerateOutcomes` (never a
+  // second classification of what happened), plus whatever run-level
+  // `actionError`/`generationFailedReason` that same call site is reporting.
+  // Appends inside the `setRubricRunLog` updater, matching the reasoning on
+  // the effect above.
+  const recordRubricRunLog = (
+    outcomes: RubricTargetOutcome[],
+    orphans: BulkRubricGenerateReport["orphans"],
+    runLevel: { actionError?: string; generationFailedReason?: string }
+  ) => {
+    const entries = buildRubricRunLogEntries(outcomes, orphans, runLevel, new Date().toISOString());
+    if (entries.length === 0) return;
+    setRubricRunLog((prev) => appendRubricRunLogEntries(prev, entries));
+  };
+
+  // docs/rubric-bulk-log-acceptance-criteria.md B3 item 8: clears this
+  // course's persisted run log. The confirm itself lives in
+  // RubricRunLogPanel.tsx, which calls this only after the user has already
+  // confirmed, naming the count - this function does not confirm again.
+  const clearRubricRunLog = () => setRubricRunLog([]);
+
   // docs/rubric-bulk-action-acceptance-criteria.md AC1/AC4/AC5: generate ONE
   // point-agnostic rubric spec and associate it to every ELIGIBLE selected
   // item, creating one Canvas rubric per distinct point total. Every item is
@@ -653,6 +719,7 @@ export function useBulkItemActions(
         };
         setBulkRubricGenerateReport(report);
         setNote(describeRubricGenerateNote(report));
+        recordRubricRunLog(detailFetchFailures, [], { actionError: result.error });
         return;
       }
       if (result.phase === "generation-failed") {
@@ -662,6 +729,7 @@ export function useBulkItemActions(
         };
         setBulkRubricGenerateReport(report);
         setNote(describeRubricGenerateNote(report));
+        recordRubricRunLog(detailFetchFailures, [], { generationFailedReason: result.reason });
         return;
       }
 
@@ -675,6 +743,11 @@ export function useBulkItemActions(
       );
       setBulkRubricGenerateReport(report);
       setNote(describeRubricGenerateNote(report));
+      // docs/rubric-bulk-log-acceptance-criteria.md B1.2: the SAME two
+      // arrays just passed to summarizeRubricGenerateOutcomes above, not a
+      // second read of `report` - the log and the instructor-facing report
+      // are built from one shared source of truth, not from each other.
+      recordRubricRunLog([...detailFetchFailures, ...result.result.outcomes], result.result.orphans, {});
       reload();
     })();
   };
@@ -858,6 +931,7 @@ export function useBulkItemActions(
     bulkItemsQuestionsOpen, setBulkItemsQuestionsOpen, descSharedState,
     bulkPoints, setBulkPoints, bulkRubricId, setBulkRubricId,
     bulkRubricGenerateReport, bulkGenerateAndAssociateRubric,
+    rubricRunLog, clearRubricRunLog,
     bulkSubType, setBulkSubType,
     confirmDeleteContent,
     bulkPublish, bulkSetDue, bulkShiftDue, bulkStaggerDue, bulkShiftModules, bulkMoveToModule,

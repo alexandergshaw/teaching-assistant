@@ -26,6 +26,11 @@ import { normalizeGradingFolder, describeGradingFolder } from "@/lib/github-grad
 import { assignmentFoldersFromTree } from "@/lib/repo-assignment-folders";
 import { useLmsAssignmentPull } from "./github-grading/useLmsAssignmentPull";
 import LmsAssignmentPullSection from "./github-grading/LmsAssignmentPullSection";
+import {
+  describeRestoredGithubGradingRun,
+  loadStoredGithubGradingRun,
+  persistGithubGradingRun,
+} from "@/lib/github-grading-run-store";
 
 type GradingRun = NonNullable<GradeActionState["run"]>;
 
@@ -108,7 +113,21 @@ export default function GithubGradingPanel() {
   const [setupTemplate, setSetupTemplate] = useState("python");
   const [setupCommand, setSetupCommand] = useState("");
   const [setupNote, setSetupNote] = useState<string | null>(null);
-  const [run, setRun] = useState<GradingRun | null>(null);
+  // R2.2 (docs/repo-grading-records-acceptance-criteria.md): the last
+  // completed run persists under a `ta-` key exactly like the queue above
+  // (QUEUE_KEY) does, and is restored here on mount - a single synchronous
+  // read, matching the queue's own useState-initializer shape rather than an
+  // effect (no setState-after-await needed for a value that is already known
+  // at first render). `restoredGithubGradingRun` is read once and only used
+  // to seed the states below; the live `run`/`lastGradedFolder`/`gradedAt`
+  // triple is what the rest of this component reads and updates from here on.
+  const [restoredGithubGradingRun] = useState(() => loadStoredGithubGradingRun());
+  const [run, setRun] = useState<GradingRun | null>(restoredGithubGradingRun?.run ?? null);
+  const [gradedAt, setGradedAt] = useState<string | null>(restoredGithubGradingRun?.gradedAt ?? null);
+  // R2.5: true only until the next successful grading pass - flips false the
+  // moment a fresh run replaces it, so the "restored" banner never lingers
+  // on results the instructor just produced themselves.
+  const [runIsRestored, setRunIsRestored] = useState<boolean>(restoredGithubGradingRun !== null);
   const [busy, setBusy] = useState<"" | "rubric" | "grade" | "setup">("");
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -154,7 +173,9 @@ export default function GithubGradingPanel() {
   // reader looking at a finished run's results always sees what that run was
   // actually scoped to (AC A5), even if the folder box has since been edited
   // for the next run.
-  const [lastGradedFolder, setLastGradedFolder] = useState<string | null>(null);
+  const [lastGradedFolder, setLastGradedFolder] = useState<string | null>(
+    restoredGithubGradingRun?.lastGradedFolder ?? null
+  );
 
   // Explicit only (AC A3): reads ONE queued repo's tree (the first queued
   // row - the same "first repo" precedent the Rubric field's own placeholder
@@ -289,12 +310,23 @@ export default function GithubGradingPanel() {
       setError(r.error);
       return;
     }
+    const gradedAtIso = new Date().toISOString();
     setRun(r.run);
     setRubric(r.rubric);
     // AC A5: captured separately from the live `gradingFolder` control so
     // these results always show what THIS run actually covered, even if the
     // folder box is edited afterward for the next run.
     setLastGradedFolder(gradingFolder);
+    setGradedAt(gradedAtIso);
+    // R2.5: this run was just produced, not restored - any earlier restored
+    // banner must disappear now that it has been superseded.
+    setRunIsRestored(false);
+    // R2.2/R2.4: persist under the ta- key so a reload (or switching tabs and
+    // back) does not discard the model spend that just produced these scores
+    // and comments. Best-effort: a quota failure inside this call loses
+    // persistence for this one run only - the results above are already in
+    // React state regardless.
+    persistGithubGradingRun({ run: r.run, gradedAt: gradedAtIso, lastGradedFolder: gradingFolder });
   };
 
   // Poll a dispatched run until it completes.
@@ -649,7 +681,24 @@ export default function GithubGradingPanel() {
           <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", margin: "0 0 8px" }}>
             {describeGradingFolder(normalizeGradingFolder(lastGradedFolder ?? ""))}
           </p>
-          <GradingResults run={run} canvasUrl="" copiedKey={copiedKey} onCopy={onCopy} onOpenPreview={() => {}} />
+          <GradingResults
+            run={run}
+            canvasUrl=""
+            copiedKey={copiedKey}
+            onCopy={onCopy}
+            onOpenPreview={() => {}}
+            banner={
+              // R2.5: a restored run must be obviously restored, not passed
+              // off as fresh - an instructor who cannot tell the difference
+              // may act on stale scores elsewhere believing they just
+              // produced them.
+              runIsRestored && gradedAt ? (
+                <p role="status" className={styles.fieldHint} style={{ margin: "0 0 10px" }}>
+                  {describeRestoredGithubGradingRun(gradedAt)}
+                </p>
+              ) : undefined
+            }
+          />
         </div>
       )}
     </>

@@ -159,5 +159,10 @@ export function buildServerStepRunHelpers(opts: {
     workflowId,
     workflowName,
     workflowRunId,
+    // This builder is the cron loop's, and only the cron loop's - the app is
+    // closed and no result note will ever be read. Nothing else may set this
+    // true. See StepRunHelpers.unattended for why no existing field could
+    // stand in for it.
+    unattended: true,
   };
 }

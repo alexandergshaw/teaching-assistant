@@ -32540,3 +32540,123 @@ from 13558; `npx next build` "Compiled successfully" and "Finished TypeScript".
 - **The list is capped** at RELEASE_LIST_LIMIT rows, ordered by release
   instant. A course with more scheduled targets than that will not show them
   all, and nothing paginates yet.
+
+## 342. Records for the three remaining grading writes - and three DIFFERENT gaps that would have got the same wrong fix
+
+Contracts: `docs/repo-grading-records-acceptance-criteria.md` (R1, R2) and
+`docs/rubric-bulk-log-acceptance-criteria.md` (B1-B5). Entry 333 gave the Repo
+Grades view a downloadable log; this closes the same class of hole on every
+other surface that grades or writes rubrics - **but the three gaps were not the
+same gap, and the survey that established that is the reason this entry is not
+three copies of entry 333.**
+
+| Surface | The actual gap | The fix |
+| --- | --- | --- |
+| `grade-repo` / `batch-grade-repos-to-draft` (attended AND cron) | a draft exists, but nothing records what did NOT make it in | per-repo run log on the draft, plus an unattended report file |
+| Grading tab -> "Grade from: GitHub Repo" | **already downloadable**; the run dies on reload | persist the run, do not add a log |
+| "Generate & associate rubric" | per-item outcomes exist for one render and are discarded | a persisted, downloadable run log |
+
+1. **THE GITHUB PANEL NEEDED NO LOG AT ALL, AND ASSUMING OTHERWISE WOULD HAVE
+   BUILT THE WRONG THING.** `GradingResults` has had an Export CSV button all
+   along (`GradingResults.tsx:558`), and it works for that path. What fails is
+   that the run is React state: a reload discards every score and comment AND
+   the only chance to export them, after the instructor has already paid the
+   model cost per repo. So the fix is persistence, not a record - the panel
+   already persisted its QUEUE (`ta-github-grading-queue`) and not its RESULTS,
+   which is the asymmetry that gave it away. **The implementer then reused
+   `stripGradingRunForDraft`** - the exact stripper `saveGradingDraftAction`
+   already uses for the DB - rather than writing a second one, so "what gets
+   stripped" keeps one definition. It also rejects the WHOLE run if any single
+   result is structurally invalid, on the reasoning that a run which looks
+   complete but is quietly missing a student is worse than no run.
+2. **THE WORKFLOW PATH'S DRAFT IS NOT A RECORD OF THE RUN.** A draft lists what
+   produced a grade. It cannot answer the question an unattended batch actually
+   raises: what did not make it in. A cron run over 30 repos that grades 22
+   lands a draft of 22 and says nothing about the other 8 - **and the reasons
+   already existed in the code and were being thrown away** (no matching
+   folder, no binding, a fetch failure, a model error). The log is built from
+   those same reason strings, not from new prose.
+3. **THE RUN THAT MOST NEEDS A TRACE IS THE ONE THAT PRODUCES NO DRAFT.** A
+   cron batch where every repo was skipped hits the "graded nothing writes
+   nothing" early return, so without R1.4 it leaves NOTHING - and "nothing
+   happened" is indistinguishable from "it never ran". The Markdown report is
+   therefore written ABOVE that early return, best-effort, so a failed report
+   never costs the run its draft.
+4. **THAT REQUIRED A NEW FLAG, AND THE IMPLEMENTER WAS RIGHT TO REFUSE TO FAKE
+   ONE.** Asked to write the report only on unattended runs, it found that
+   nothing on `StepRunHelpers` distinguishes attended from unattended:
+   `saveRunReport` was the old de-facto tell, and since the D6 change the
+   ATTENDED builder sets it too - so inferring from it would now be wrong in
+   exactly the case that matters. It reported that instead of inventing a flag
+   that would sometimes lie. `unattended` was then added properly: set `true`
+   only by the cron builder, explicitly `false` (not omitted) by the attended
+   one, because an absent flag reads as "nobody decided". Pinned by a PAIR of
+   tests - "writes it when unattended" alone would still pass if the gate were
+   ignored and reports were written always. Sabotage-checked: removing the gate
+   reddens exactly the attended test.
+5. **THE RUBRIC LOG IS BUILT FROM THE SAME OUTCOMES THE SUMMARISER CONSUMES.**
+   Entry 332 records `summarizeRubricGenerateOutcomes` as "the ONE function
+   that decides whether AC4's three outcomes stay distinct". A log built from a
+   second classification of the same events is how the log and the note drift
+   into disagreeing about what happened, so it reads `status`/`reason` straight
+   through. The three failure kinds stay distinct - whole-action error,
+   generation failure (NO Canvas write was attempted, so eligibility is
+   unknown, not "ineligible"), and per-item failure - each pinned with a paired
+   positive so none can pass vacuously. Sabotage-checked by merging two.
+6. **ORPHAN RUBRICS ARE THE ACTIONABLE ROW.** A rubric created in Canvas and
+   then not associated is a real object this feature left behind. It now
+   appears in the log BY ID. Cleaning them up is deliberately NOT built (B5):
+   a delete path into live Canvas rubrics is its own consequence-tier decision
+   and must not ride in behind a logging change.
+
+### The reachability catch, which no gate could have made
+
+7. **THE RUBRIC PANEL WOULD HAVE SHIPPED DEAD.** Its two props are OPTIONAL on
+   `BulkItemsSection`, and `ModulesView.tsx` - outside that chunk's file set -
+   never passed them. Unwired, the panel compiles, passes tsc, eslint, all
+   13721 tests and `next build`, and renders NOTHING forever, because it
+   returns null on an empty log. **The implementer flagged it rather than
+   quietly shipping it**, and it was wired at the single call site. The props
+   stay optional (widening them would touch every existing caller), so the
+   interface now carries the warning next to them: no gate here can catch this,
+   because vitest is node-env and renders no component.
+
+### A scope extension taken by an implementer, accepted, and recorded rather than buried
+
+8. **A 45-SECOND STEP BUDGET WAS ADDED, AGAINST AN EXPLICIT "THIS CHUNK ONLY
+   RECORDS" INSTRUCTION.** It is defensible and was kept: `deadlineMs` exists
+   on the runner (`server-runner.ts`) but is only checked BETWEEN steps and is
+   never threaded into one, so a single 30-repo grading step can be hard-killed
+   at the 60-second cap - losing the draft AND the log. R1.5 asks the record to
+   distinguish "attempted these" from "never reached the rest", and you cannot
+   report truncation if you are killed mid-loop. **But it changes when grading
+   stops**, which is a behaviour change, and 45s is a hardcoded guess where a
+   real deadline exists one layer up. **Follow-up: thread the runner's
+   `deadlineMs` into `StepRunHelpers` and honour it, instead of a constant.**
+
+### Gates
+
+`npx eslint src` 0 errors (the same 4 pre-existing warnings in untouched
+files - the count briefly read 11 mid-wave from sibling agents' in-progress
+files and was re-verified against the finished tree, not assumed); `npx tsc
+--noEmit` clean; full `vitest run` **673 files / 13721 tests** green, up from
+13639 at dispatch; `npx next build` "Compiled successfully" and "Finished
+TypeScript".
+
+### Limits
+
+- **The rubric log renders only while items are selected**, because it lives
+  with the control that produces it. That is a real discoverability limit,
+  accepted because the alternative - a new top-level surface, or a catalog
+  control with its own audit and count-pinned tests - is more change than a
+  record justifies. It is not "always reachable"; do not describe it as such.
+- **The unattended report has never been observed in production.** Its write
+  path is tested with a stubbed `saveRunReport`; no real cron run has produced
+  one yet. The next scheduled repo-grading run is the first real test.
+- **None of these records survive a different browser.** The GitHub panel's run
+  and the rubric log are localStorage, per browser, like entry 333's. Only the
+  workflow path's log is server-side, on the draft row.
+- **Orphan rubrics are named, not cleaned** (B5), and the rubric log's cap
+  means a long-running course eventually drops its oldest entries - including,
+  in principle, an orphan nobody cleaned up.
+

@@ -141,6 +141,22 @@ function LiteralEditor({
       />
     );
   }
+  if (type === "time") {
+    // A dedicated branch, not folded into "date" above: a preset ("Fixed
+    // value") for a time input needs its own native <input type="time">, not
+    // a date picker - the two render entirely different controls even
+    // though both special-case the same way relative to every OTHER type
+    // here (docs/announcement-post-time-acceptance-criteria.md T1.3).
+    return (
+      <TextField
+        type="time"
+        size="small"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        sx={sx}
+      />
+    );
+  }
   if (type === "repo") {
     return (
       <div style={{ flex: 1, minWidth: 200 }}>

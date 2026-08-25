@@ -57,6 +57,21 @@ export interface AnnouncementSlot {
 export interface PostTime {
   hour: number;
   minute: number;
+  /** True only when `raw` was NON-BLANK and did not parse as a valid 24-hour
+   * "HH:MM" time - i.e. this PostTime fell back to the default silently
+   * unless the caller checks this flag (docs/announcement-post-time-
+   * acceptance-criteria.md T2). Blank input is never `invalid`: leaving the
+   * optional "Post time" field empty is the documented, intended way to get
+   * the default, not a mistake to report. Optional (rather than always
+   * required on every hand-built PostTime literal) so existing call sites
+   * that construct a PostTime directly - e.g.
+   * buildAnnouncementSchedule(..., { hour, minute }) in this file's own test
+   * suite - keep compiling unchanged; parsePostTime itself always sets it
+   * explicitly, on every return path. ADDED to the shape rather than
+   * replacing anything: every existing caller that only destructures
+   * `{ hour, minute }` (formatPostTimeLabel, buildAnnouncementSchedule) is
+   * unaffected. */
+  invalid?: boolean;
 }
 
 /**
@@ -68,12 +83,26 @@ export interface PostTime {
  * announcements.ts's own startDateInvalid handling): to the same state as
  * "nothing was given," never a thrown error over a scheduling feature that
  * should keep working.
+ *
+ * The fallback is silent ONLY when `raw` is blank - PostTime.invalid is
+ * false there, since an empty optional field is the documented default, not
+ * a defect. Whenever `raw` is non-blank but fails to parse, `invalid` is
+ * true: the value still degrades to the default (never a thrown error, per
+ * the paragraph above), but the caller now has what it needs to report that
+ * degradation instead of it passing for a deliberate 8:00 AM the instructor
+ * never actually chose (the whole defect docs/announcement-post-time-
+ * acceptance-criteria.md exists to close). This function's own strict
+ * "HH:MM" contract is unchanged by that addition - see T3 in that document:
+ * a time picker (RuntimeFieldInput.tsx's new "time" field type) removes the
+ * ordinary need to accept anything looser, it does not license guessing at
+ * "9.30" or "9:30am" here.
  */
 export function parsePostTime(raw: string | undefined | null): PostTime {
   const trimmed = (raw ?? "").trim();
+  if (!trimmed) return { hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE, invalid: false };
   const match = trimmed.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
-  if (!match) return { hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE };
-  return { hour: Number(match[1]), minute: Number(match[2]) };
+  if (!match) return { hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE, invalid: true };
+  return { hour: Number(match[1]), minute: Number(match[2]), invalid: false };
 }
 
 /**

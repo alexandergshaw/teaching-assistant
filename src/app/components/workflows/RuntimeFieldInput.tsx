@@ -443,6 +443,31 @@ export function RuntimeFieldInput({
         )}
       </FieldShell>
     );
+  } else if (field.type === "time") {
+    // Mirrors the "date" branch immediately above byte for byte (same
+    // slotProps/aria-describedby shape - docs/announcement-post-time-
+    // acceptance-criteria.md T1): a native <input type="time"> makes the
+    // emitted value unambiguous 24-hour "HH:MM" by construction, the same
+    // way "date" already makes its own value unambiguous "YYYY-MM-DD" -
+    // never a free-text field an instructor has to guess a format for.
+    return (
+      <FieldShell field={field}>
+        {({ id, required, "aria-describedby": ariaDescribedBy }) => (
+          <TextField
+            id={id}
+            required={required}
+            type="time"
+            fullWidth
+            value={value}
+            onChange={(e) =>
+              onChange(e.target.value)
+            }
+            size="small"
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { "aria-describedby": ariaDescribedBy } }}
+          />
+        )}
+      </FieldShell>
+    );
   } else if (TEMPLATE_PICKER_TYPES.has(field.type)) {
     return <TemplateFieldInput field={field} value={value} onChange={onChange} options={options} uploads={uploads} />;
   } else if (field.type === "boolean") {

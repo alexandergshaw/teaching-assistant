@@ -383,6 +383,97 @@ describe("schedule-weekly-announcements-for-term", () => {
     expect(result.summary.kind).toBe("list");
   });
 
+  // docs/announcement-post-time-acceptance-criteria.md T2: a present-but-
+  // unparseable "Post time" must still fall back to the default (never
+  // throw - scheduleWeeklyAnnouncementsAction is still called with the raw
+  // string UNCHANGED, since parsing/reporting happens in the step layer,
+  // not by altering what is handed downstream) but must say so in the run's
+  // own report, not stay quiet about it.
+  it("reports (but does not throw on) a present-but-unparseable Post time, and still passes the raw value through unchanged", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+    vi.mocked(scheduleWeeklyAnnouncementsAction).mockResolvedValue({
+      result: {
+        weeks: [],
+        createdCount: 1,
+        resolvedCreatedCount: 0,
+        rescheduledCount: 0,
+        alreadyPresentCount: 0,
+        skippedPastCount: 0,
+        failedCount: 0,
+        stoppedEarly: false,
+        report: "Week 1: created - Scheduled for Jan 5.",
+        lines: ["Week 1: created - Scheduled for Jan 5."],
+      },
+    });
+
+    const result = await step.run(
+      {
+        hubCourse: "course-1",
+        weekday: "1",
+        postTime: "9:30am",
+        title: "Week {week}",
+        message: "Hello week {week}",
+      },
+      testHelpers(),
+      noop
+    );
+
+    // The invalid raw string still reaches the downstream action UNCHANGED -
+    // this step only ADDS reporting, it never rewrites or blocks the value.
+    expect(scheduleWeeklyAnnouncementsAction).toHaveBeenCalledWith(
+      "course-1",
+      "https://canvas.example.edu/courses/123",
+      "MCC",
+      "2026-01-05",
+      15,
+      1,
+      "9:30am",
+      "Week {week}",
+      "Hello week {week}",
+      undefined,
+      { drafts: [] }
+    );
+    expect(result.outputs.report).toContain('"Post time" value "9:30am"');
+    expect(result.outputs.report).toContain("08:00");
+    expect(result.outputs.report).toContain("Week 1: created");
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      expect(result.summary.items[0]).toContain('"Post time" value "9:30am"');
+    }
+  });
+
+  it("does NOT report anything when Post time is left blank (the documented default, not a mistake)", async () => {
+    vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
+    vi.mocked(scheduleWeeklyAnnouncementsAction).mockResolvedValue({
+      result: {
+        weeks: [],
+        createdCount: 1,
+        resolvedCreatedCount: 0,
+        rescheduledCount: 0,
+        alreadyPresentCount: 0,
+        skippedPastCount: 0,
+        failedCount: 0,
+        stoppedEarly: false,
+        report: "Week 1: created - Scheduled for Jan 5.",
+        lines: ["Week 1: created - Scheduled for Jan 5."],
+      },
+    });
+
+    const result = await step.run(
+      {
+        hubCourse: "course-1",
+        weekday: "1",
+        title: "Week {week}",
+        message: "Hello week {week}",
+      },
+      testHelpers(),
+      noop
+    );
+
+    expect(result.outputs.report).toBe("Week 1: created - Scheduled for Jan 5.");
+    expect(result.outputs.report).not.toContain("Post time");
+  });
+
   it("throws the action's error message when it fails", async () => {
     vi.mocked(listCourseHubAction).mockResolvedValue({ courses: [baseCourse()] });
     vi.mocked(scheduleWeeklyAnnouncementsAction).mockResolvedValue({ error: "Canvas rejected the request." });

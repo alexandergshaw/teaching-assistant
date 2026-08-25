@@ -32918,3 +32918,85 @@ assertion and proved the restore byte-identical.
   type, size, or the cap) that entry 344 added to the digest. Only the boolean
   "something was truncated" is shown, on any surface.
 
+
+## 346. The announcement post time is a real control - the input was never missing, its value was being silently discarded
+
+Contract: `docs/announcement-post-time-acceptance-criteria.md`. The owner's
+report (2026-08-25): *"the time for the announcement scheduler should be
+something i can specify via the ui"*.
+
+**The control existed and was correctly bound.** `postTime` ("Post time
+(optional)") is an input on `schedule-weekly-announcements-for-term`, bound as
+a runtime field in the `SCHEDULE_WEEKLY_ANNOUNCEMENTS` preset - so this was not
+the "unbound inputs are silently skipped" trap, and not a missing field.
+
+1. **IT WAS FREE TEXT WHOSE VALUE WAS THROWN AWAY UNLESS IT WAS EXACTLY 24-HOUR
+   `HH:MM`.** `parsePostTime` matched `/^([01]?\d|2[0-3]):([0-5]\d)$/` and
+   returned the 8:00 AM default for anything else - no error, no warning,
+   nothing in the run's output. So `9:30am`, `09:30 AM`, `9.30`, or a stray
+   trailing space scheduled **an entire term of announcements at 8:00 AM**, and
+   nothing said so. From the instructor's side that is indistinguishable from
+   "I cannot set the time", which is exactly how it was reported.
+2. **THE SILENCE WAS DELIBERATE, AND THAT IS THE INSTRUCTIVE PART.** The
+   function's own comment argued an invalid value should degrade "to the same
+   state as 'nothing was given,' never a thrown error over a scheduling feature
+   that should keep working." Right about not throwing; wrong about not
+   speaking. A fallback the user cannot see is not a fallback, it is a wrong
+   answer delivered confidently - the same shape as entry 344's truncation and
+   entry 332's C4 guard that degraded open.
+3. **THE FIX IS A WIDGET, NOT A BETTER PARSER.** The run form gained a `time`
+   field type rendering a native time input, and `postTime` uses it - so the
+   emitted value is unambiguous `HH:MM` BY CONSTRUCTION rather than by the
+   instructor guessing a format from help text. The parser was deliberately NOT
+   made lenient: a picker removes the need to guess at `9.30`, it does not
+   license guessing at it.
+4. **BLANK STILL MEANS 8:00 AM; WRONG NOW SPEAKS.** `PostTime` gained an
+   `invalid` flag so the two cases stop being the same case, and the step
+   prepends a note to its report at ALL SIX of its return sites - the
+   Canvas-only skip, the cartridge-sourced package, package-only delivery, the
+   normal completion, and both branches of `deliver === "both"`. Five of six
+   would have been a bug that only appears on the paths nobody tests by hand.
+   The raw value still travels to the action unchanged.
+5. **THE BUILDER'S TWO TYPE SWITCHES WERE BOTH CONSIDERED, AND ANSWERED
+   DIFFERENTLY.** `LiteralEditor` got a dedicated `time` branch (a preset time
+   needs a time input, not a date picker). `InputBindingRow`'s
+   "Reference Class Tile" branch deliberately did NOT gain `time`: that option
+   resolves a field ON the course tile - its start date, its Canvas URL, its
+   institution - and a tile has no time-of-day field to reference. Falling
+   through to the literal branch is the correct answer, and it is now commented
+   as a decision rather than left looking like an omission.
+
+### A deviation, flagged rather than absorbed
+
+6. `WorkflowValueType` is a CLOSED union, and `StepInputSpec.type` /
+   `RuntimeField.type` are typed against it - so `type: "time"` could not
+   compile without adding it there, outside the briefed file set. Mechanical
+   and unavoidable; `"time"` was also added to `LITERAL_CAPABLE_TYPES` so a
+   preset can still hard-set a fixed time, which was possible while the field
+   was `type: "text"` and would otherwise have been silently lost.
+
+### Gates
+
+`npx eslint src` 0 errors (the same 4 pre-existing warnings in untouched
+files); `npx tsc --noEmit` clean; full `vitest run` **679 files / 13788 tests**
+green, up from 13785; `npx next build` "Compiled successfully" and "Finished
+TypeScript". Sabotage-checked: forcing `parsePostTime` to always report valid
+reddens exactly the two "reports invalid" tests while the "blank stays silent"
+test correctly stays green, and the restore was proved byte-identical.
+
+### Limits
+
+- **THE NEW FIELD TYPE'S RENDERING IS NOT COVERED BY ANY TEST.** vitest here is
+  node-env and renders no component, so the native `input type="time"`, its
+  `aria-describedby` wiring and MUI's slot handling were verified by READING
+  and by line-for-line comparison against the working `date` branch. No browser
+  check was performed. If the picker does not appear, no gate in this repo
+  would have caught it.
+- **Only this one field uses the new type.** Any other step wanting a time is
+  still free text with the same silent-discard behaviour, because
+  `parsePostTime` is specific to announcements.
+- **The invalid-value note lands in the run report**, which an unattended run
+  writes and an attended one shows - but nothing validates as you type; the
+  picker is what prevents the bad value, and the note is the backstop for a
+  value that arrives some other way (a preset literal, an older saved run).
+

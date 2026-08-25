@@ -32,6 +32,7 @@ export type WorkflowValueType =
   | "longtext"
   | "number"
   | "date"
+  | "time"
   | "repo"
   | "lmsCourse"
   | "lmsCourseList"
@@ -66,6 +67,7 @@ export const LITERAL_CAPABLE_TYPES: ReadonlySet<string> = new Set([
   "longtext",
   "number",
   "date",
+  "time",
   "repo",
   "boolean",
   "hubCourse",

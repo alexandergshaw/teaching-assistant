@@ -160,6 +160,13 @@ function InputBindingRow({
   if (input.type === "lmsCourse" || input.type === "date" || input.type === "institution") {
     options.push({ value: "classtile", label: "Reference Class Tile" });
   }
+  // "time" is deliberately NOT added alongside "date" here (docs/
+  // announcement-post-time-acceptance-criteria.md T1.3): "Reference Class
+  // Tile" resolves at run time to a FIELD ON THE COURSE TILE - its start
+  // date, its Canvas URL, its institution - and a course tile has no
+  // "time of day" field for a time input to reference. Falling through to
+  // the generic literal branch below (LiteralEditor's own new "time" case)
+  // is therefore the correct behavior, not an oversight.
 
   const isClassRepoRef =
     currentSource === "literal" && currentLiteralValue.trim().startsWith("@class-repo");

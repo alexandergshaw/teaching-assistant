@@ -116,26 +116,70 @@ describe("formatWeekOutcomeReport", () => {
 });
 
 describe("parsePostTime", () => {
-  it("parses a valid 24-hour HH:MM time", () => {
-    expect(parsePostTime("09:30")).toEqual({ hour: 9, minute: 30 });
-    expect(parsePostTime("23:59")).toEqual({ hour: 23, minute: 59 });
-    expect(parsePostTime("00:00")).toEqual({ hour: 0, minute: 0 });
+  // docs/announcement-post-time-acceptance-criteria.md T2: every valid parse
+  // and every blank fallback is explicitly `invalid: false` - only a
+  // present-but-unparseable value ever sets `invalid: true`. Asserted via
+  // toEqual (a full object match, not toMatchObject) so a future change that
+  // adds `invalid: true` somewhere it should not be fails these too, not
+  // just the dedicated "reports" describe block below.
+  it("parses a valid 24-hour HH:MM time, including the 00:00 and 23:59 boundaries", () => {
+    expect(parsePostTime("09:30")).toEqual({ hour: 9, minute: 30, invalid: false });
+    expect(parsePostTime("23:59")).toEqual({ hour: 23, minute: 59, invalid: false });
+    expect(parsePostTime("00:00")).toEqual({ hour: 0, minute: 0, invalid: false });
   });
 
   it("tolerates a single-digit hour", () => {
-    expect(parsePostTime("9:05")).toEqual({ hour: 9, minute: 5 });
+    expect(parsePostTime("9:05")).toEqual({ hour: 9, minute: 5, invalid: false });
   });
 
-  it("falls back to the default post time (8:00 AM) when blank", () => {
-    expect(parsePostTime("")).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE });
-    expect(parsePostTime(null)).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE });
-    expect(parsePostTime(undefined)).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE });
+  it("falls back to the default post time (8:00 AM) when blank, WITHOUT being reported as invalid", () => {
+    // T2 item 4: blank is the documented, intended way to get the default -
+    // never a defect, so `invalid` must be false here, not merely "falsy" -
+    // toEqual (not toMatchObject) is what actually pins that down.
+    expect(parsePostTime("")).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE, invalid: false });
+    expect(parsePostTime(null)).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE, invalid: false });
+    expect(parsePostTime(undefined)).toEqual({
+      hour: DEFAULT_POST_HOUR,
+      minute: DEFAULT_POST_MINUTE,
+      invalid: false,
+    });
+    // Whitespace-only also counts as blank (trimmed to "" before the blank
+    // check), not as a present-but-invalid value.
+    expect(parsePostTime("   ")).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE, invalid: false });
   });
 
-  it("falls back to the default post time for an unparseable value, rather than throwing", () => {
-    expect(parsePostTime("not a time")).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE });
-    expect(parsePostTime("25:00")).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE });
-    expect(parsePostTime("12:60")).toEqual({ hour: DEFAULT_POST_HOUR, minute: DEFAULT_POST_MINUTE });
+  it("falls back to the default post time for an unparseable value, rather than throwing, AND reports it as invalid", () => {
+    // T3 item 8: the strict HH:MM contract is unchanged - a time picker
+    // removes the need for lenient parsing, it does not license guessing at
+    // any of these. Each of these is present (non-blank) and malformed, so
+    // each must come back `invalid: true` - this is the "present-but-
+    // unparseable -> default AND reported" half of T2 item 5.
+    const cases = [
+      "not a time",
+      "25:00",
+      "12:60",
+      "24:00", // out of 24-hour range even though each digit alone is valid
+      "9.30", // a period, not a colon - what docs/announcement-post-time-acceptance-criteria.md's own diagnosis names as one of today's silent failures
+      "9:30am", // a 12-hour suffix - the OTHER example that diagnosis names
+      "09:30 AM",
+      "09: 30", // whitespace INSIDE the HH:MM structure - not the same as the
+      // surrounding whitespace the next test shows is fine to trim
+    ];
+    for (const raw of cases) {
+      expect(parsePostTime(raw)).toEqual({
+        hour: DEFAULT_POST_HOUR,
+        minute: DEFAULT_POST_MINUTE,
+        invalid: true,
+      });
+    }
+  });
+
+  it("trims ordinary surrounding whitespace around an otherwise-valid time without reporting it as invalid", () => {
+    // Only whitespace INSIDE the HH:MM structure (the "09: 30" case above) is
+    // invalid - whitespace merely surrounding an otherwise-valid value is not
+    // a mistake worth reporting, matching this function's pre-existing trim
+    // behavior.
+    expect(parsePostTime("  09:30  ")).toEqual({ hour: 9, minute: 30, invalid: false });
   });
 });
 

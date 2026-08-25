@@ -80,7 +80,7 @@ import { resolveLmsFromTile, isCanvasLms, canvasOnlySkipText } from "@/lib/workf
 import { parseCartridgeBlob, detectAppGeneratedCartridge } from "@/lib/cartridge-import";
 import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
 import { buildAnnouncementZip } from "@/lib/announcement-package-zip";
-import { resolveAnnouncementEmailCopy } from "@/lib/announcement-schedule";
+import { resolveAnnouncementEmailCopy, parsePostTime } from "@/lib/announcement-schedule";
 import {
   resolvePackageStartDate,
   resolvePackageWeekCount,
@@ -166,6 +166,35 @@ type WeeklyAnnouncementDraft = {
   note?: string;
   defer?: boolean;
 };
+
+// T2 (docs/announcement-post-time-acceptance-criteria.md): blank still means
+// the documented 8:00 AM default and must never be reported as a problem -
+// parsePostTime's own `invalid` flag already makes that distinction (false
+// for blank, true only for a present-but-unparseable value), so this just
+// turns a true flag into one report line. Returns null for blank AND for a
+// value that parsed - both cases mean nothing needs saying. `raw` is passed
+// through as originally typed (never re-trimmed here) so the reported value
+// matches what the instructor actually entered.
+function postTimeInvalidWarning(raw: string): string | null {
+  const parsed = parsePostTime(raw);
+  if (!parsed.invalid) return null;
+  const hh = String(parsed.hour).padStart(2, "0");
+  const mm = String(parsed.minute).padStart(2, "0");
+  return `Note: the "Post time" value "${raw}" is not a valid 24-hour HH:MM time - this run used the default ${hh}:${mm} instead.`;
+}
+
+// Prepends postTimeInvalidWarning's note (when there is one) to a report
+// string / report-line list, so every one of this step's several return
+// sites can apply it the same way without repeating the null check. A null
+// warning returns its inputs completely unchanged - the ordinary case, since
+// the T1 time picker makes an invalid value nearly unreachable from the run
+// form itself.
+function prependWarningToReport(report: string, warning: string | null): string {
+  return warning ? `${warning}\n${report}` : report;
+}
+function prependWarningToLines(lines: string[], warning: string | null): string[] {
+  return warning ? [warning, ...lines] : lines;
+}
 
 // Shared bit of context every package call site (the uploaded-package
 // source, and the live-source "package"/"both" paths) needs to derive from
@@ -333,6 +362,7 @@ async function runCartridgeSourcedPackage(
   }
   const weekday = Number.parseInt(weekdayRaw, 10);
   const postTime = String(values.postTime ?? "").trim();
+  const postTimeWarning = postTimeInvalidWarning(postTime);
   const title = String(values.title ?? "").trim();
   const message = String(values.message ?? "").trim();
   const extraNotes = String(values.extraNotes ?? "").trim() || undefined;
@@ -436,17 +466,18 @@ async function runCartridgeSourcedPackage(
     overrideNote,
   });
 
+  const reportLines = prependWarningToLines(packaged.reportLines, postTimeWarning);
   return {
     outputs: {
       // AC7 item 43: never implies anything was scheduled.
       scheduledCount: 0,
-      report: packaged.reportLines.join("\n"),
+      report: reportLines.join("\n"),
       ...packaged.outputs,
     },
     summary: {
       kind: "list",
       label: `${packaged.packagedCount} week(s) packaged from the uploaded package`,
-      items: packaged.reportLines,
+      items: reportLines,
     },
   };
 }
@@ -502,9 +533,13 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
       {
         key: "postTime",
         label: "Post time (optional)",
-        type: "text",
+        // T1 (docs/announcement-post-time-acceptance-criteria.md): a native
+        // time picker, not free text - the emitted value is unambiguous
+        // "HH:MM" by construction, so this step no longer needs to teach a
+        // format the widget itself now enforces (see the help text below).
+        type: "time",
         required: false,
-        help: '24-hour "HH:MM", e.g. "09:30" for a class that meets at 9:30am. Leave blank to post at 8:00 AM.',
+        help: "Leave blank to post at 8:00 AM.",
       },
       {
         key: "draftFrom",
@@ -640,6 +675,10 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
       }
       const weekday = Number.parseInt(weekdayRaw, 10);
       const postTime = String(values.postTime ?? "").trim();
+      // T2 (docs/announcement-post-time-acceptance-criteria.md): computed
+      // once, applied at every return site below - null on every ordinary
+      // run (blank, or a valid HH:MM the T1 time picker already guarantees).
+      const postTimeWarning = postTimeInvalidWarning(postTime);
 
       const title = String(values.title ?? "").trim();
       const message = String(values.message ?? "").trim();
@@ -698,7 +737,7 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
       // serve.
       const tileLms = await resolveLmsFromTile(tile, helpers);
       if (!isCanvasLms(tileLms)) {
-        const text = canvasOnlySkipText(tileLms);
+        const text = prependWarningToReport(canvasOnlySkipText(tileLms), postTimeWarning);
         return {
           outputs: { scheduledCount: 0, report: text },
           summary: { kind: "text", text },
@@ -745,16 +784,17 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
           values,
           helpers,
         });
+        const reportLines = prependWarningToLines(packaged.reportLines, postTimeWarning);
         return {
           outputs: {
             scheduledCount: 0,
-            report: packaged.reportLines.join("\n"),
+            report: reportLines.join("\n"),
             ...packaged.outputs,
           },
           summary: {
             kind: "list",
             label: `${packaged.packagedCount} week(s) packaged`,
-            items: packaged.reportLines,
+            items: reportLines,
           },
         };
       }
@@ -870,16 +910,18 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
         // feature existed (AC2 item 12) - reached whenever `deliver` is its
         // default "" (or, degrading the same way every other unrecognized
         // stored value in this step does, anything other than "package" or
-        // "both").
+        // "both") - EXCEPT for the postTimeWarning prefix (T2), which is
+        // null (so this stays byte-identical) whenever postTime is blank or
+        // valid, i.e. on every run the frozen AC2-item-12 test below covers.
         return {
           outputs: {
             scheduledCount,
-            report: run.report,
+            report: prependWarningToReport(run.report, postTimeWarning),
           },
           summary: {
             kind: "list",
             label: `${scheduledCount + run.rescheduledCount} week(s) updated in Canvas${run.stoppedEarly ? " - stopped early on the time budget, re-run to finish" : ""}`,
-            items: run.lines,
+            items: prependWarningToLines(run.lines, postTimeWarning),
           },
         };
       }
@@ -911,13 +953,13 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
         return {
           outputs: {
             scheduledCount,
-            report: `${run.report}\n${packaged.reportLines.join("\n")}`,
+            report: prependWarningToReport(`${run.report}\n${packaged.reportLines.join("\n")}`, postTimeWarning),
             ...packaged.outputs,
           },
           summary: {
             kind: "list",
             label: `${scheduledCount + run.rescheduledCount} week(s) updated in Canvas, ${packaged.packagedCount} week(s) packaged${run.stoppedEarly ? " - stopped early on the time budget, re-run to finish" : ""}`,
-            items: [...run.lines, ...packaged.reportLines],
+            items: prependWarningToLines([...run.lines, ...packaged.reportLines], postTimeWarning),
           },
         };
       } catch (err) {
@@ -926,12 +968,12 @@ export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
         return {
           outputs: {
             scheduledCount,
-            report: `${run.report}\n${note}`,
+            report: prependWarningToReport(`${run.report}\n${note}`, postTimeWarning),
           },
           summary: {
             kind: "list",
             label: `${scheduledCount + run.rescheduledCount} week(s) updated in Canvas${run.stoppedEarly ? " - stopped early on the time budget, re-run to finish" : ""}`,
-            items: [...run.lines, note],
+            items: prependWarningToLines([...run.lines, note], postTimeWarning),
           },
         };
       }

@@ -104,6 +104,22 @@ export interface ReleasePlanRow {
   target: ReleaseTargetRef;
   hideState: ReleaseHideState;
   reason: string | null;
+  /**
+   * F11.2: whether this target was PUBLISHED when the plan read it - the raw
+   * fact, carried as a first-class field rather than re-derived from
+   * `hideState`.
+   *
+   * It cannot be re-derived, which is the point: "published, but we could not
+   * read whether Canvas will let us unpublish it" classifies as `unknown`,
+   * and so does "we could not read the published state at all". Those two
+   * collapse in `hideState` and must not collapse here, because cancel uses
+   * this field to decide whether to RESTORE visibility (F11.1) - and
+   * restoring something the instructor never had visible is its own defect.
+   *
+   * null means genuinely unknown, and cancel must then decline to restore and
+   * say so rather than guess.
+   */
+  wasPublished: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +290,13 @@ export interface ReleasePlanRowInput {
 /** Classify one target into its reviewable row. */
 export function planReleaseRow(input: ReleasePlanRowInput): ReleasePlanRow {
   const hideState = classifyReleaseHideState(input.facts);
-  return { target: input.target, hideState, reason: describeReleaseHideState(hideState, input.target) };
+  return {
+    target: input.target,
+    hideState,
+    reason: describeReleaseHideState(hideState, input.target),
+    // Straight from the facts, NOT from hideState - see the field's comment.
+    wasPublished: input.facts.published,
+  };
 }
 
 /** Classify every target into its reviewable row, preserving input order

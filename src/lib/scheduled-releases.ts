@@ -38,6 +38,17 @@
 // sweep SHAPE (a value-based compare-and-set, a cutoff-based stale query, a
 // capped recovery-attempts counter) without reusing its claim semantics,
 // which are wrong for a one-shot row (F2).
+//
+// CANCELLING (F11, supabase/migrations/20261010000000_scheduled_releases
+// _cancel.sql): pending -> cancelled is a second terminal transition, added
+// alongside pending -> claimed rather than replacing it, and reached by the
+// exact same CAS idiom claimScheduledRelease already uses - see
+// cancelScheduledRelease below. Because committing a release unpublishes its
+// targets IMMEDIATELY (F4), cancelling must be able to restore that published
+// state rather than leaving everything hidden forever; the `was_published`
+// column records the fact the commit observed so the restore acts on it
+// rather than a guess, and a NULL there (a row written before this column
+// existed) must never be treated as false.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
@@ -77,9 +88,9 @@ export interface ReleaseTargetRef {
   moduleId?: number | null;
 }
 
-export type ReleaseStatus = "pending" | "claimed" | "done" | "failed";
+export type ReleaseStatus = "pending" | "claimed" | "done" | "failed" | "cancelled";
 
-const VALID_STATUSES = new Set<ReleaseStatus>(["pending", "claimed", "done", "failed"]);
+const VALID_STATUSES = new Set<ReleaseStatus>(["pending", "claimed", "done", "failed", "cancelled"]);
 
 export interface ScheduledRelease {
   id: string;
@@ -95,6 +106,17 @@ export interface ScheduledRelease {
   /** Absolute UTC instant to release at (ISO 8601), computed in the browser
    * (AC4) and stored as-is; nothing in this file re-derives it. */
   releaseAt: string;
+  /**
+   * The published state the commit found for this target, at the moment it
+   * unpublished it (F4, F11.2) - `true` if it was visible and this row's
+   * commit hid it, `false` if it was already hidden and nothing changed.
+   * `null` means the row was written before this column existed and there is
+   * no recorded fact to restore from; a cancel of such a row must skip the
+   * restore attempt and say so explicitly. NEVER read `null` as `false` - the
+   * whole point of persisting this at commit time (F11.1) is that a cancel
+   * acts on fact, not assumption.
+   */
+  wasPublished: boolean | null;
   status: ReleaseStatus;
   /** Set while status === "claimed"; null otherwise, including after a stale
    * sweep re-arms the row back to "pending". */
@@ -232,6 +254,14 @@ function optionalString(raw: unknown): string | null {
   return raw === null || raw === undefined ? null : String(raw);
 }
 
+/** Tri-state boolean mapper for was_published: `null`/`undefined` (including
+ * a row written before the column existed) stays `null`, never collapsing to
+ * `false` - see ScheduledRelease.wasPublished's comment for why that
+ * distinction is load-bearing for F11's restore-on-cancel. */
+function optionalBoolean(raw: unknown): boolean | null {
+  return raw === null || raw === undefined ? null : Boolean(raw);
+}
+
 function mapScheduledRelease(row: Record<string, unknown>): ScheduledRelease {
   return {
     id: String(row.id ?? ""),
@@ -247,6 +277,7 @@ function mapScheduledRelease(row: Record<string, unknown>): ScheduledRelease {
       moduleId: row.module_id === null || row.module_id === undefined ? null : Number(row.module_id),
     },
     releaseAt: String(row.release_at ?? ""),
+    wasPublished: optionalBoolean(row.was_published),
     status: mapStatus(row.status),
     claimedAt: optionalString(row.claimed_at),
     recoveryAttempts: Number(row.recovery_attempts ?? 0),
@@ -278,6 +309,15 @@ export interface ScheduleReleaseInput {
   target: ReleaseTargetRef;
   /** Absolute UTC instant (ISO 8601), computed in the browser - see AC4. */
   releaseAt: string;
+  /**
+   * The published state the commit found for this target, per F11.2 - `true`
+   * if the commit unpublished something that was visible, `false` if it was
+   * already hidden. Optional (not every caller has run F4's unpublish step
+   * yet) and defaults to `null` - a row with no recorded fact - never to
+   * `false`, which would tell a later cancel it is safe to skip a restore
+   * that may in fact be owed.
+   */
+  wasPublished?: boolean | null;
 }
 
 /**
@@ -311,6 +351,12 @@ export async function scheduleRelease(
         // refreshes it, so a row written before F10 gains its module id the
         // next time the instructor touches it.
         module_id: input.target.moduleId ?? null,
+        // Same reasoning, same rule (F11.2, ScheduleReleaseInput.wasPublished's
+        // comment): written in this ONE update, never a follow-up patch - a
+        // second write that fails would mark an already-committed row
+        // "failed" even though it was written and will still fire (entry 340
+        // in docs/REGRESSION.md records exactly this mistake for module_id).
+        was_published: input.wasPublished ?? null,
         updated_at: nowIso,
       })
       .eq("user_id", userId)
@@ -333,6 +379,7 @@ export async function scheduleRelease(
         target_id: input.target.id,
         module_id: input.target.moduleId ?? null,
         release_at: input.releaseAt,
+        was_published: input.wasPublished ?? null,
         status: "pending",
       })
       .select("*")
@@ -368,6 +415,39 @@ export async function listDueScheduledReleases(
   return ((data ?? []) as Record<string, unknown>[]).map(mapScheduledRelease);
 }
 
+/** Cap on rows returned by listScheduledReleasesForUser. Unlike
+ * workflow_schedules (one row per schedule, updated in place forever), this
+ * table accumulates a permanent 'done'/'failed'/'cancelled' row every time a
+ * target is released, fails, or is called off (F11.3's audit-trail
+ * reasoning) - so a user list here, unlike listWorkflowSchedules, genuinely
+ * needs a cap to stay boundedly sized as history grows. */
+export const RELEASE_LIST_LIMIT = 200;
+
+/**
+ * All of one instructor's scheduled releases - EVERY status, not pending
+ * only. F11.3 keeps 'cancelled' rows (rather than deleting them) precisely so
+ * "what did I call off, and when" stays answerable; a list that filtered them
+ * back out would silently defeat the reason they were kept. Ordered by
+ * release_at ascending, the same convention listWorkflowSchedules already
+ * uses for next_run_at - release_at is this table's direct analog of "when
+ * does/did this happen", so a pending row's instant reads as "coming up" and
+ * a terminal row's the same field reads as "when it happened", both sorted on
+ * one shared timeline rather than the list being split by status.
+ */
+export async function listScheduledReleasesForUser(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  limit: number = RELEASE_LIST_LIMIT
+): Promise<ScheduledRelease[]> {
+  const { data, error } = await table(supabase)
+    .select("*")
+    .eq("user_id", userId)
+    .order("release_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Record<string, unknown>[]).map(mapScheduledRelease);
+}
+
 /**
  * Atomically claim a due row before acting on it: the update is conditioned
  * on status still being "pending" AND release_at still holding its read
@@ -394,6 +474,79 @@ export async function claimScheduledRelease(
     .select("id");
   if (error) throw new Error(error.message);
   return Array.isArray(data) && data.length > 0;
+}
+
+/** Result of `cancelScheduledRelease` - shaped so the caller can tell a real
+ * cancel from a lost race without a second round trip of its own. */
+export interface CancelScheduledReleaseResult {
+  /** True only when this call performed the pending -> cancelled transition. */
+  cancelled: boolean;
+  /**
+   * On success (`cancelled: true`), the row as it now stands - `cancelled`,
+   * with `wasPublished` intact so the caller can decide whether a restore is
+   * owed (F11.1/F11.2). On a lost race (`cancelled: false`), the row's
+   * CURRENT state read fresh right after the CAS failed, so the caller can
+   * say honestly which way the race was lost - "it is running right now"
+   * (`status: "claimed"`) or "it already ran" (`status: "done"` or
+   * `"failed"`) or "it was already cancelled" - per F11.3, rather than a bare
+   * failure that looks like nothing happened. `null` only when no row with
+   * this id exists for this user at all.
+   */
+  release: ScheduledRelease | null;
+}
+
+/**
+ * Cancel a pending release: a compare-and-set from "pending" to "cancelled",
+ * following claimScheduledRelease's CAS shape EXACTLY (same
+ * update-conditioned-on-id-and-status, .select, check-the-row-count pattern)
+ * rather than inventing a second idiom for the same problem. Per F11.3 this
+ * is deliberately NOT a delete: 'cancelled' is a new terminal status, kept so
+ * "what did I call off, and when" stays answerable.
+ *
+ * Scoped to `userId` in the CAS itself (unlike claimScheduledRelease, which
+ * is server-only and reached with a service-role client that already bypasses
+ * per-user scoping) because this is a browser-facing action - an instructor
+ * cancelling must never be able to affect a row that is not theirs, and RLS
+ * ("Users update own scheduled_releases") backstops this even if a caller
+ * forgets.
+ *
+ * A row already claimed, done, failed, or cancelled loses the CAS (zero rows
+ * matched); rather than returning a bare false, this re-reads the row so the
+ * caller can report what actually happened instead of "nothing happened".
+ */
+export async function cancelScheduledRelease(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  id: string,
+  now: Date
+): Promise<CancelScheduledReleaseResult> {
+  const { data, error } = await table(supabase)
+    .update({
+      status: "cancelled",
+      updated_at: now.toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .select("*");
+  if (error) throw new Error(error.message);
+  if (Array.isArray(data) && data.length > 0) {
+    return { cancelled: true, release: mapScheduledRelease(data[0] as Record<string, unknown>) };
+  }
+
+  // Lost the race (or the row simply is not this user's) - read the row
+  // fresh so the caller can report which honestly, per F11.3, instead of a
+  // bare failure that reads as "nothing happened".
+  const { data: current, error: readError } = await table(supabase)
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (readError) throw new Error(readError.message);
+  return {
+    cancelled: false,
+    release: current ? mapScheduledRelease(current as Record<string, unknown>) : null,
+  };
 }
 
 /** Mark a claimed row done: terminal success. CAS'd on status still being

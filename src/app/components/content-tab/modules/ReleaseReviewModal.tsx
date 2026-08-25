@@ -129,7 +129,9 @@ export function ReleaseReviewModal({ scheduledRelease, restoreFocusRef, fallback
       <div className={styles.previewFooter}>
         {commitArmed && (
           <span role="status" aria-live="polite" className={styles.bulkHint}>
-            Click &quot;Confirm commit&quot; again to unpublish the targets above from Canvas immediately. This cannot be undone from here.
+            Click &quot;Confirm commit&quot; again to unpublish the targets above from Canvas immediately. This cannot be undone from
+            here - to cancel a committed release later and restore its visibility, use the Scheduled releases panel in the
+            Automations hub.
           </span>
         )}
         <Button variant="outlined" size="small" onClick={closeReview} disabled={commitBusy}>

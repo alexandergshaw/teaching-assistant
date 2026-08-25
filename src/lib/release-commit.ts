@@ -12,6 +12,14 @@
 // mirrors this codebase's release-runner.ts / scheduled-releases.ts split
 // (pure decisions in one file, thin I/O wrappers in another).
 //
+// F11.2 ADDS ONE MORE RESPONSIBILITY TO buildCommitRowInput: carrying the
+// target's pre-commit `published` fact (already read by the plan step)
+// through to the row, so a later cancel can restore on fact rather than
+// guess. See CommitRowInput.wasPublished's own comment for the full
+// reasoning; it is not a fourth "decision" in the numbered list below so much
+// as the same shaping responsibility buildCommitRowInput already had, widened
+// by one field.
+//
 // -----------------------------------------------------------------------
 // F10's THREE COMMIT-TIME DECISIONS THIS FILE OWNS
 // -----------------------------------------------------------------------
@@ -72,10 +80,16 @@ import type { ReleaseTargetRef } from "@/lib/release-plan";
  * `reconcileReleasePlanWithSelection` keys its own dedupe/lookup on), so
  * reusing it here rather than re-deriving a (kind, id) string keeps this
  * file's notion of "the same target" identical to release-plan.ts's.
+ *
+ * Generic (rather than fixed to `ReleaseTargetRef`) so a caller that widens
+ * the target shape with extra per-call fields - e.g.
+ * commitScheduledReleaseAction attaching F11.2's `wasPublished` alongside
+ * each target - keeps those fields through the dedupe instead of losing them
+ * to a narrower return type.
  */
-export function selectCommitTargets(targets: readonly ReleaseTargetRef[]): ReleaseTargetRef[] {
+export function selectCommitTargets<T extends { selectionKey: string }>(targets: readonly T[]): T[] {
   const seen = new Set<string>();
-  const deduped: ReleaseTargetRef[] = [];
+  const deduped: T[] = [];
   for (const target of targets) {
     if (seen.has(target.selectionKey)) continue;
     seen.add(target.selectionKey);
@@ -180,13 +194,25 @@ export interface CommitRowInput {
    * identity (F10), and travels in scheduleRelease's own single write. */
   target: { kind: ReleaseTargetRef["kind"]; id: number; moduleId: number | null };
   releaseAt: string;
+  /**
+   * F11.2: the published state the plan already read for this target, BEFORE
+   * commit unpublishes it - carried straight through to scheduleRelease's own
+   * single write (same reasoning as moduleId's own comment above: a separate
+   * follow-up write risks misreporting a scheduled row as failed). `null`
+   * only for a target the plan could not read the published fact for
+   * (release-plan.ts's ReleaseHideFacts.published === null, hide-state
+   * "unknown") - cancel must treat that as "cannot say", never guess, so it
+   * is threaded through as-is rather than coerced to a boolean here.
+   */
+  wasPublished: boolean | null;
 }
 
 export function buildCommitRowInput(
   target: ReleaseTargetRef,
   releaseAt: string,
   courseUrl: string,
-  courseAcronym: string | null
+  courseAcronym: string | null,
+  wasPublished: boolean | null
 ): CommitRowInput {
   return {
     courseUrl,
@@ -201,6 +227,8 @@ export function buildCommitRowInput(
     // truth.
     target: { kind: target.kind, id: target.id, moduleId: target.moduleId ?? null },
     releaseAt,
+    // wasPublished travels the same way, for the same reason (F11.2).
+    wasPublished,
   };
 }
 

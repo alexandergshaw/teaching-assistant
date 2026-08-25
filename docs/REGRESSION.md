@@ -32446,3 +32446,97 @@ from birth rather than needing a name on a non-adopting allowlist.
 - **There is no UI yet for viewing or cancelling a scheduled release.** The
   rows exist and the runner will fire them; nothing lists them, and nothing
   un-schedules one short of the release arriving.
+
+## 341. Cancelling a scheduled release - and why "cancel" had to mean "put it back"
+
+Contract: `docs/scheduled-publishing-from-modules-acceptance-criteria.md`
+section **F11**, written for this chunk. Entry 340 shipped the commit and
+closed with an explicit gap: rows existed and would fire, but nothing listed
+them and nothing could call one off.
+
+### The trap this chunk exists to avoid
+
+Committing a release UNPUBLISHES the selection immediately (F4). So the obvious
+cancel - delete the row - leaves every target hidden **permanently**, with no
+scheduled event coming to reveal it. The instructor's word for that button is
+"cancel", their model of it is undo, and delivering silent indefinite
+invisibility against that word is the worst thing this feature could do.
+
+**So cancel restores the published state the commit changed**, and says so on
+the button, in the confirm, and in the result. It is the inverse of commit,
+not a row deletion. A target the commit found ALREADY hidden is left alone -
+restoring it would publish something the instructor never had visible.
+
+### The decisions that follow
+
+1. **THE COMMIT MUST PERSIST WHAT IT CHANGED, OR CANCEL IS GUESSING (F11.2).**
+   `was_published` is written on the row at commit time, from the fact the plan
+   already read. Same lesson entry 337's G1 forced on the command interface:
+   capture what you overwrote AT the moment you overwrite it, because nothing
+   else can recover it later. A row written before the column existed carries
+   null, and is cancelled WITHOUT a restore, saying so - never guessing.
+2. **`wasPublished` IS A FACT ON THE PLAN ROW, NOT A DERIVATION OF
+   `hideState`, AND THAT DISTINCTION IS LOAD-BEARING.** It first arrived
+   bolted onto the action's return type as a widened field, which TypeScript
+   erased at the boundary - so the hook could not read it and the commit call
+   site broke. Fixing it by making the row carry the field surfaced the real
+   reason it must: `hideState` CANNOT reconstruct it. "Published, but we could
+   not read whether Canvas will let us unpublish it" classifies as `unknown`,
+   and so does "we could not read the published state at all" - two states
+   that must never collapse, because one means restore and the other means
+   decline. Sabotage-checked by implementing the derivation a future reader
+   would reach for: it reddens exactly the test written to forbid it.
+3. **CANCEL IS A COMPARE-AND-SET ON `pending`, NOT A DELETE (F11.3).** A row
+   the cron has claimed is mid-flight and cancelling it would race the
+   publish. On a lost race the durable layer RE-READS the row so the result can
+   say which race was lost - already running, already done, already cancelled -
+   rather than a bare failure. `cancelled` is a new terminal status, kept
+   rather than deleted, so "what did I call off, and when" stays answerable.
+4. **A FAILED RESTORE IS NOT A FAILED CANCEL.** If the CAS succeeds and the
+   re-publish then fails, the row IS cancelled - reporting otherwise would tell
+   the instructor their release is still coming when it is not. The two are
+   reported separately, and the test for it is sabotage-checked, because it is
+   exactly the assertion that can be written so it passes either behaviour.
+   Entry 340 records the same defect shape in the module_id patch.
+5. **A CANCELLED ROW CAN NEVER BE DUE, AND CAN NEVER BE SWEPT AS STALE.** A new
+   terminal status leaking into the due query would publish something the
+   instructor explicitly called off - the worst outcome available here. Both
+   properties have their own named test on top of the status matrices, each
+   sabotage-checked separately with a byte-identical restore.
+6. **THE THREE CANCEL OUTCOMES RENDER DISTINCTLY.** cancelled-and-restored,
+   cancelled-without-restore (with its reason), and could-not-cancel.
+   Collapsing them would hide the only thing the instructor is actually asking:
+   is my content visible again. A test pins that the three never share a tone.
+7. **A PENDING RELEASE PAST ITS INSTANT IS "WAITING FOR THE NEXT TICK", NOT
+   LATE (F11.5).** The cron fires on an interval; a release scheduled inside
+   the current window waits by design. Wording it as late would train the
+   instructor to distrust a scheduler that is working.
+8. **THE CONTROL THAT CREATES A RELEASE SAYS WHERE TO CANCEL IT (F11.4).** The
+   panel lives in the Automations hub - the view that already answers "what
+   runs automatically", and which entry 334 gave the scheduler's health line -
+   and the Modules commit hint points there. `ModulesView.tsx` is also at 867
+   lines against a 1000 cap; this did not belong there.
+
+### Gates
+
+`npx eslint src` 0 errors (the same 4 pre-existing warnings in untouched
+files); `npx tsc --noEmit` clean; full `vitest run` **13639 tests** green, up
+from 13558; `npx next build` "Compiled successfully" and "Finished TypeScript".
+
+### Limits
+
+- **NOTHING HERE HAS RUN AGAINST A REAL CANVAS.** vitest is node-env and
+  renders no component; the restore write, like every other Canvas call in this
+  feature, is stubbed. The panel's markup, its confirm, and its three result
+  states are unverified by the suite - the logic behind them is pure and
+  tested, the rendering is not.
+- **Cancel restores VISIBILITY, not everything.** If the instructor changed a
+  target's publish state by hand between commit and cancel, the restore
+  overwrites that with what the commit recorded. It is an undo of the commit,
+  not a merge.
+- **A row written before `was_published` existed cannot be restored** - it is
+  cancelled and says so. There should be none in practice (the column arrived
+  one chunk after the commit), but the code does not assume that.
+- **The list is capped** at RELEASE_LIST_LIMIT rows, ordered by release
+  instant. A course with more scheduled targets than that will not show them
+  all, and nothing paginates yet.

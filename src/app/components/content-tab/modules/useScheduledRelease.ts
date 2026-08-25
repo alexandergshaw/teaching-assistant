@@ -352,7 +352,11 @@ export function useScheduledRelease(
     }
     setCommitArmedFor(null);
 
-    const targets = reconciliation.applicableRows.map((row) => row.target);
+    // F11.2: the commit persists what it hid, so cancel can later RESTORE on
+    // fact rather than guess (F11.1). The published state travels with the
+    // target from the plan row that read it - never re-derived from
+    // hideState, which cannot tell "published but unreadable" from "unknown".
+    const targets = reconciliation.applicableRows.map((row) => ({ ...row.target, wasPublished: row.wasPublished }));
     const droppedCount = reconciliation.droppedRows.length;
 
     void (async () => {

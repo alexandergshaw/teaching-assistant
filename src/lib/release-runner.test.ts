@@ -43,6 +43,12 @@ function makeRelease(overrides: Partial<ReleaseWithModuleId> = {}): ScheduledRel
     claimedAt: null,
     recoveryAttempts: 0,
     lastError: null,
+    // F11: the published state the commit found and hid, so a later cancel can
+    // restore on fact. The fixture defaults it to null - "we do not know" -
+    // rather than false, because null is what a row written before that
+    // column existed actually carries, and the runner must behave the same
+    // either way (it publishes; only cancel reads this field).
+    wasPublished: null,
     completedAt: null,
     createdAt: new Date(NOW_MS - 60_000).toISOString(),
     updatedAt: new Date(NOW_MS - 60_000).toISOString(),

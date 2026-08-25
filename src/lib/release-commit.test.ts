@@ -136,11 +136,12 @@ describe("summarizeCommitResults", () => {
 describe("buildCommitRowInput", () => {
   it("keeps the target's IDENTITY (kind, id, moduleId) and drops its display text", () => {
     const target = makeTarget({ kind: "module", id: 42, moduleId: null, displayName: "Week 1", selectionKey: "module:42" });
-    expect(buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC")).toEqual({
+    expect(buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC", true)).toEqual({
       courseUrl: "https://canvas.example.edu/courses/1",
       courseAcronym: "ABC",
       target: { kind: "module", id: 42, moduleId: null },
       releaseAt: "2026-09-01T13:00:00.000Z",
+      wasPublished: true,
     });
   });
 
@@ -150,20 +151,45 @@ describe("buildCommitRowInput", () => {
   // lookup and the only symptom would be a slower tick.
   it("carries an item target's owning moduleId through to the row", () => {
     const target = makeTarget({ kind: "module_item", id: 501, moduleId: 42, displayName: "Reading", selectionKey: "live:42:501" });
-    const row = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC");
+    const row = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC", true);
     expect(row.target).toEqual({ kind: "module_item", id: 501, moduleId: 42 });
   });
 
   it("drops displayName and selectionKey - the row stores identity, not UI text", () => {
     const target = makeTarget({ kind: "module_item", id: 501, moduleId: 42, displayName: "Reading", selectionKey: "live:42:501" });
-    const row = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC");
+    const row = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC", true);
     expect(Object.keys(row.target).sort()).toEqual(["id", "kind", "moduleId"]);
   });
 
   it("a null course acronym is passed through, not coerced to undefined", () => {
     const target = makeTarget();
-    const result = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", null);
+    const result = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", null, true);
     expect(result.courseAcronym).toBeNull();
+  });
+
+  // F11.2: cancel can only restore on FACT, never a guess, so the row must
+  // carry the exact pre-commit published state the plan already read for
+  // this target - including the two non-true cases, which mean different
+  // things to a future cancel (false: nothing to restore; null: the plan
+  // could not tell, so cancel must not pretend it can).
+  describe("wasPublished (F11.2 - what cancel will restore on)", () => {
+    it("carries wasPublished: true through unchanged", () => {
+      const target = makeTarget();
+      const row = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC", true);
+      expect(row.wasPublished).toBe(true);
+    });
+
+    it("carries wasPublished: false through unchanged - already hidden, nothing to restore", () => {
+      const target = makeTarget();
+      const row = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC", false);
+      expect(row.wasPublished).toBe(false);
+    });
+
+    it("carries wasPublished: null through unchanged - unknown must never be coerced to a guess", () => {
+      const target = makeTarget();
+      const row = buildCommitRowInput(target, "2026-09-01T13:00:00.000Z", "https://canvas.example.edu/courses/1", "ABC", null);
+      expect(row.wasPublished).toBeNull();
+    });
   });
 });
 

@@ -54,6 +54,14 @@
 // against - see that file's own header, "two sibling agents ... code
 // directly against these."
 //
+// TWO MORE ACTIONS, F11 (cancel and list): cancelScheduledReleaseAction is
+// the honest inverse of commit - see its own doc comment below for why
+// cancelling must RESTORE the published state commit changed, per F11.1 -
+// and listScheduledReleasesAction is the Automations hub's read (F11.4).
+// Every DECISION behind cancel (which outcome it produced, whether a restore
+// should be attempted, how the result reads) lives in src/lib/release-
+// cancel.ts, mirroring release-commit.ts's own split for the commit half.
+//
 // scheduled-releases.ts (the durable layer - row shape, state machine,
 // scheduleRelease/listDueScheduledReleases/...) IS ALSO NOT EDITED BY THIS
 // FILE. Its own migration-column guard test
@@ -70,7 +78,13 @@ import { requireOwner } from "@/lib/supabase/auth";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
-import { scheduleRelease } from "@/lib/scheduled-releases";
+import {
+  scheduleRelease,
+  cancelScheduledRelease,
+  listScheduledReleasesForUser,
+  type ReleaseTargetRef as ScheduledReleaseTargetRef,
+  type ScheduledRelease,
+} from "@/lib/scheduled-releases";
 import { listModules, updateModule, updateModuleItem, type CanvasModule, type CanvasModuleItem } from "@/lib/canvas-modules";
 import { fetchAll } from "@/lib/canvas-modules/fetch-helpers";
 import { resolveCourse } from "@/lib/canvas-core";
@@ -91,6 +105,14 @@ import {
   type CommitTargetOutcome,
   type CommitSummary,
 } from "@/lib/release-commit";
+import {
+  couldNotCancelOutcome,
+  shouldAttemptRestore,
+  cancelledWithoutRestoreOutcome,
+  cancelledAndRestoredOutcome,
+  cancelledButRestoreFailedOutcome,
+  type CancelReleaseResult,
+} from "@/lib/release-cancel";
 
 // ---------------------------------------------------------------------------
 // Plan (read-only).
@@ -192,6 +214,17 @@ function buildHideFacts(
  * requested; the module tree and the unpublishable maps are each read at
  * most once for the whole call.
  */
+/**
+ * F11.2: the plan already reads each target's published state to classify
+ * hide-ability - this is the exact fact a future cancel needs to restore on,
+ * so the plan action hands it back alongside each row rather than making
+ * commit re-derive it from hideState (which would be lossy: "unknown" covers
+ * both "published state itself unreadable" AND "published=true but
+ * canUnpublish unreadable" - the latter case DOES know published was true,
+ * and collapsing it through hideState would silently discard that fact).
+ * Kept as an inline return-type widening (not a named exported type) because
+ * this is a "use server" file and may export only async functions.
+ */
 export async function planScheduledReleaseAction(input: {
   courseUrl: string;
   code?: string;
@@ -217,7 +250,15 @@ export async function planScheduledReleaseAction(input: {
       facts: buildHideFacts(target, moduleById, itemById, unpublishable),
     }));
 
-    return { rows: buildReleasePlanRows(rowInputs) };
+    const rows = buildReleasePlanRows(rowInputs);
+    // Same order as rowInputs (buildReleasePlanRows/planReleaseRow is a plain
+    // .map), so zipping by index is safe.
+    // No widening: ReleasePlanRow carries `wasPublished` as a first-class
+    // field (F11.2), set by planReleaseRow from the same facts hideState is
+    // classified from. It used to be bolted on here, which type-erased at the
+    // boundary and left the caller unable to read it - the seam that broke the
+    // commit call site.
+    return { rows };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not build the release plan." };
   }
@@ -259,7 +300,8 @@ async function commitOneTarget(
   code: string | undefined,
   courseAcronym: string | null,
   releaseAt: string,
-  target: ReleaseTargetRef
+  target: ReleaseTargetRef,
+  wasPublished: boolean | null
 ): Promise<void> {
   try {
     await unpublishTargetNow(courseUrl, code, target);
@@ -270,8 +312,12 @@ async function commitOneTarget(
     describeUnpublishOutcome(unpublishErr);
   }
 
-  const rowInput = buildCommitRowInput(target, releaseAt, courseUrl, courseAcronym);
-  // One write: scheduleRelease carries module_id in its own insert/update.
+  // F11.2: wasPublished is the pre-commit published fact the plan already
+  // read for this target - carried through so a later cancel can restore on
+  // fact, never a guess.
+  const rowInput = buildCommitRowInput(target, releaseAt, courseUrl, courseAcronym, wasPublished);
+  // One write: scheduleRelease carries module_id (and wasPublished) in its
+  // own insert/update.
   await scheduleRelease(supabase, userId, rowInput);
 }
 
@@ -287,7 +333,13 @@ export async function commitScheduledReleaseAction(input: {
   courseUrl: string;
   code?: string;
   releaseAt: string;
-  targets: ReleaseTargetRef[];
+  // F11.2: each target carries the pre-commit published fact the plan
+  // already read for it (planScheduledReleaseAction's own widened row -
+  // `wasPublished`), so this action can persist it on the row rather than
+  // re-reading Canvas or guessing. `wasPublished` is a plain field alongside
+  // release-plan.ts's ReleaseTargetRef rather than a change to that shared
+  // type, since release-plan.ts is a sibling file this action never edits.
+  targets: Array<ReleaseTargetRef & { wasPublished: boolean | null }>;
 }): Promise<CommitSummary | { error: string }> {
   try {
     const user = await requireOwner();
@@ -306,7 +358,16 @@ export async function commitScheduledReleaseAction(input: {
     const outcomes: CommitTargetOutcome[] = [];
     for (const target of targets) {
       try {
-        await commitOneTarget(supabase, user.id, input.courseUrl, input.code, courseAcronym, input.releaseAt, target);
+        await commitOneTarget(
+          supabase,
+          user.id,
+          input.courseUrl,
+          input.code,
+          courseAcronym,
+          input.releaseAt,
+          target,
+          target.wasPublished
+        );
         outcomes.push({ selectionKey: target.selectionKey, status: "committed" });
       } catch (err) {
         outcomes.push({ selectionKey: target.selectionKey, status: "failed", reason: classifyCommitFailure(err) });
@@ -316,5 +377,114 @@ export async function commitScheduledReleaseAction(input: {
     return summarizeCommitResults(outcomes);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not commit the scheduled release(s)." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cancel (F11). The honest inverse of commit: cancelling a pending release
+// RESTORES the published state commit changed (F11.1), never merely deletes
+// the row. Every DECISION here - which outcome a cancel produced, whether a
+// restore should be attempted, how the result reads - lives in
+// src/lib/release-cancel.ts and is imported, not re-decided inline; this
+// action is the thin I/O driver around those pure functions, mirroring
+// commitScheduledReleaseAction's own split against release-commit.ts.
+
+/**
+ * Restore one target's visibility on Canvas (the inverse of
+ * unpublishTargetNow above). Reuses updateModule/updateModuleItem - no new
+ * Canvas wrappers. Never called unless shouldAttemptRestore(wasPublished) is
+ * true (F11.2) - a caller that skips that check is not this function's
+ * problem to guard against a second time.
+ */
+async function restoreTargetNow(courseUrl: string, code: string | undefined, target: ScheduledReleaseTargetRef): Promise<void> {
+  if (target.kind === "module") {
+    await updateModule(courseUrl, target.id, { published: true }, code);
+    return;
+  }
+  if (typeof target.moduleId !== "number") {
+    throw new Error("This item's owning module is unknown, so its visibility could not be restored.");
+  }
+  await updateModuleItem(courseUrl, target.moduleId, target.id, { published: true }, code);
+}
+
+/**
+ * F11: cancel a pending scheduled release. Returns `CancelReleaseResult`
+ * DIRECTLY - never a `{ error: string }` alternative - because the
+ * consuming panel (ScheduledReleasesPanel.tsx's `handleCancel`, via
+ * scheduledReleasesPanelLogic.ts's `describeCancelOutcome`) calls this with
+ * no separate error branch. Every failure mode this action can hit (a lost
+ * CAS race, a row that does not exist, an unexpected exception) is therefore
+ * modeled as the "could-not-cancel" case with an honest `reason`.
+ *
+ * ORDER MATTERS, and it is deliberate: (1) CAS pending -> cancelled via
+ * cancelScheduledRelease FIRST - its own result carries the row (with
+ * target/course/wasPublished) on success, and the row's CURRENT state on a
+ * lost race, so there is no separate read needed before it, and NEVER a
+ * restore attempt against a row this call did not win the race for; (2) only
+ * once the CAS is won, decide whether to restore (shouldAttemptRestore over
+ * the row's persisted wasPublished - `null` means "written before this
+ * column existed", cancelled WITHOUT a restore attempt, and said so, never
+ * guessed).
+ *
+ * A restore failure AFTER a successful cancel is reported as its OWN outcome
+ * (cancelledButRestoreFailedOutcome - `status: "cancelled-without-restore"`,
+ * the failure folded into `reason`), never as "could-not-cancel" - the row IS
+ * cancelled at that point, and entry 340 already recorded why conflating an
+ * unrelated write's failure with the write that gates the outcome is a real
+ * defect, not a nicety.
+ */
+export async function cancelScheduledReleaseAction(input: { id: string }): Promise<CancelReleaseResult> {
+  try {
+    const user = await requireOwner();
+    const supabase = await createServerSupabaseClient();
+    const now = new Date();
+
+    const result = await cancelScheduledRelease(supabase, user.id, input.id, now);
+    if (!result.cancelled || !result.release) {
+      // F11.3: a lost race (already claimed, or already terminal), or no
+      // such row at all - reported honestly via the row's own current
+      // status (or null if it does not exist), never a silent no-op.
+      return couldNotCancelOutcome(result.release?.status ?? null);
+    }
+
+    const release: ScheduledRelease = result.release;
+    if (!shouldAttemptRestore(release.wasPublished)) {
+      // F11.2: wasPublished false (nothing to restore) or null (cannot tell,
+      // never guess) - the row is cancelled either way, without an attempt.
+      return cancelledWithoutRestoreOutcome(release.wasPublished);
+    }
+
+    try {
+      await restoreTargetNow(release.courseUrl, release.courseAcronym ?? undefined, release.target);
+      return cancelledAndRestoredOutcome();
+    } catch (restoreErr) {
+      // The cancel already succeeded (the CAS was won above) - a restore
+      // failure here must never be reported as a failed cancel.
+      return cancelledButRestoreFailedOutcome(classifyCommitFailure(restoreErr));
+    }
+  } catch (err) {
+    // An unexpected exception (auth failure, database error) - still modeled
+    // as "could-not-cancel" rather than a separate error shape, per this
+    // function's own doc comment.
+    return { status: "could-not-cancel", reason: err instanceof Error ? err.message : "Could not cancel the scheduled release." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// List (F11.4/F11.5): the Automations hub's read of every scheduled release
+// this instructor owns. Returns the raw rows - ScheduledReleasesPanel.tsx and
+// its scheduledReleasesPanelLogic.ts (sibling UI files, written concurrently)
+// derive every displayed fact (target label, course label, locale-formatted
+// instant, status text, restore preview) directly from `ScheduledRelease`'s
+// own fields via their own pure functions, so this action is a thin
+// pass-through - no separate row-shaping type to keep in sync with theirs.
+export async function listScheduledReleasesAction(): Promise<{ releases: ScheduledRelease[] } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = await createServerSupabaseClient();
+    const releases = await listScheduledReleasesForUser(supabase, user.id);
+    return { releases };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not load scheduled releases." };
   }
 }

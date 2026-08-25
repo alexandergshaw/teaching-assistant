@@ -25,6 +25,7 @@ import {
   classifyReleaseHideState,
   describeReleaseHideState,
   buildReleasePlanRows,
+  planReleaseRow,
   summarizeReleasePlan,
   buildReleasePlan,
   reconcileReleasePlanWithSelection,
@@ -196,9 +197,53 @@ describe("buildReleasePlanRows / summarizeReleasePlan", () => {
 // ---------------------------------------------------------------------------
 // Staleness / reconcile
 
+// F11.2: wasPublished is a FACT the row carries, not a derivation of
+// hideState. These two tests exist because the obvious "just read hideState"
+// shortcut is wrong in a way that only shows up at cancel time - and cancel
+// uses this field to decide whether to restore visibility (F11.1). Restoring
+// something the instructor never had visible is its own defect, so the field
+// must not be reconstructable from a classification that loses the
+// distinction.
+describe("planReleaseRow carries wasPublished as a fact, not a derivation", () => {
+  it("a PUBLISHED target whose unpublishability could not be read classifies unknown, yet records wasPublished true", () => {
+    const row = planReleaseRow({
+      target: targetRef({ id: 7, selectionKey: "live:item:7" }),
+      facts: { published: true, canUnpublish: null },
+    });
+    // The classification loses the published fact here...
+    expect(row.hideState).toBe("unknown");
+    // ...and the field keeps it. Deriving wasPublished from hideState would
+    // have produced null, and cancel would then decline to restore content
+    // that WAS visible before the commit hid it.
+    expect(row.wasPublished).toBe(true);
+  });
+
+  it("a target whose published state could not be read at all records null, never false", () => {
+    const row = planReleaseRow({
+      target: targetRef({ id: 8, selectionKey: "live:item:8" }),
+      facts: { published: null, canUnpublish: null },
+    });
+    expect(row.hideState).toBe("unknown");
+    // null and false are different answers: false means "we know it was
+    // hidden" (cancel correctly leaves it hidden), null means "we do not
+    // know" (cancel must decline and say so). Collapsing them would make
+    // cancel silently claim certainty it never had.
+    expect(row.wasPublished).toBeNull();
+  });
+
+  it("an already-hidden target records wasPublished false, so cancel leaves it hidden", () => {
+    const row = planReleaseRow({
+      target: targetRef({ id: 9, selectionKey: "live:item:9" }),
+      facts: { published: false, canUnpublish: true },
+    });
+    expect(row.hideState).toBe("already-hidden");
+    expect(row.wasPublished).toBe(false);
+  });
+});
+
 describe("reconcileReleasePlanWithSelection", () => {
   it("reports selectionChanged=false and every row applicable when the selection has not moved", () => {
-    const rows = [{ target: targetRef({ selectionKey: "live:item:1" }), hideState: "hideable" as const, reason: null }];
+    const rows = [{ target: targetRef({ selectionKey: "live:item:1" }), hideState: "hideable" as const, reason: null, wasPublished: true }];
     const plan = buildReleasePlan(rows, ["live:item:1"]);
     const result = reconcileReleasePlanWithSelection(plan, ["live:item:1"]);
     expect(result.selectionChanged).toBe(false);
@@ -207,8 +252,8 @@ describe("reconcileReleasePlanWithSelection", () => {
   });
 
   it("drops a row whose target left the selection, and keeps a row whose target is still selected", () => {
-    const rowA = { target: targetRef({ id: 1, selectionKey: "live:item:1" }), hideState: "hideable" as const, reason: null };
-    const rowB = { target: targetRef({ id: 2, selectionKey: "live:item:2" }), hideState: "hideable" as const, reason: null };
+    const rowA = { target: targetRef({ id: 1, selectionKey: "live:item:1" }), hideState: "hideable" as const, reason: null, wasPublished: true };
+    const rowB = { target: targetRef({ id: 2, selectionKey: "live:item:2" }), hideState: "hideable" as const, reason: null, wasPublished: true };
     const plan = buildReleasePlan([rowA, rowB], ["live:item:1", "live:item:2"]);
 
     // Item 2 is deselected; item 1 remains.
@@ -219,7 +264,7 @@ describe("reconcileReleasePlanWithSelection", () => {
   });
 
   it("is order-independent - the same selection re-expressed in a different order is not a change", () => {
-    const rows = [{ target: targetRef({ selectionKey: "live:item:1" }), hideState: "hideable" as const, reason: null }];
+    const rows = [{ target: targetRef({ selectionKey: "live:item:1" }), hideState: "hideable" as const, reason: null, wasPublished: true }];
     const plan = buildReleasePlan(rows, ["live:item:1", "live:item:2"]);
     const result = reconcileReleasePlanWithSelection(plan, ["live:item:2", "live:item:1"]);
     expect(result.selectionChanged).toBe(false);

@@ -16,6 +16,7 @@ import {
 import { needsAttention } from "./automation-inventory-logic";
 import { ScheduleRow, TriggerRow } from "./AutomationRow";
 import { CronHeartbeatStatus } from "./CronHeartbeatStatus";
+import { ScheduledReleasesPanel } from "./ScheduledReleasesPanel";
 import styles from "../../page.module.css";
 import tableStyles from "./AutomationsTable.module.css";
 
@@ -139,6 +140,11 @@ export function AutomationsPanel({
         <p className={styles.fieldHint} style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
           Open a workflow in the Workflows tab and use the Automate panel to add schedules or triggers.
         </p>
+        {/* F11.4: scheduled releases are an independent concern from
+            workflow schedules/triggers - a course with zero of the latter
+            can still have releases pending from the Modules view, so this
+            mounts here too rather than only in the populated branch below. */}
+        <ScheduledReleasesPanel />
       </div>
     );
   }
@@ -178,6 +184,12 @@ export function AutomationsPanel({
           top, ahead of the per-row "Needs attention" summary below (which is
           about individual schedules/triggers, not the cron process itself). */}
       <CronHeartbeatStatus />
+
+      {/* F11.4: the Automations hub is where a release, once committed from
+          the Modules view, is seen and cancelled - see
+          ScheduledReleasesPanel.tsx's own header for why every decision it
+          renders lives in scheduledReleasesPanelLogic.ts instead. */}
+      <ScheduledReleasesPanel />
 
       {anyNeedsAttention && (
         <div>

@@ -9,7 +9,9 @@ import {
   isUniqueViolationError,
   scheduleRelease,
   listDueScheduledReleases,
+  listScheduledReleasesForUser,
   claimScheduledRelease,
+  cancelScheduledRelease,
   markScheduledReleaseDone,
   markScheduledReleaseFailed,
   listStaleClaimedScheduledReleases,
@@ -17,6 +19,7 @@ import {
   STALE_CLAIM_MS,
   MAX_RECOVERY_ATTEMPTS,
   RELEASE_DUE_BATCH_LIMIT,
+  RELEASE_LIST_LIMIT,
   type ReleaseStatus,
   type ScheduledRelease,
 } from "./scheduled-releases";
@@ -51,12 +54,25 @@ describe("isReleaseDue", () => {
     expect(isReleaseDue({ status: "pending", releaseAt: msAgo(1) }, NOW)).toBe(true);
   });
 
-  it.each<ReleaseStatus>(["claimed", "done", "failed"])(
+  it.each<ReleaseStatus>(["claimed", "done", "failed", "cancelled"])(
     "a %s row is never due, even with an overdue releaseAt",
     (status) => {
       expect(isReleaseDue({ status, releaseAt: msAgo(60_000) }, NOW)).toBe(false);
     }
   );
+
+  // Dedicated, named test (rather than relying only on the it.each above) for
+  // the one property this whole chunk exists to guarantee: a cancelled row
+  // must never be selected as due. A new terminal status silently leaking
+  // into the due query would publish something the instructor explicitly
+  // called off - the worst outcome F11 can produce. Sabotage-checked by hand:
+  // temporarily changing isReleaseDue's guard from `row.status !== "pending"`
+  // to also accept "cancelled" reddens exactly this test, and restoring the
+  // guard (diffed byte-for-byte against a pre-sabotage backup) turns it green
+  // again with no other change to the file.
+  it("SABOTAGE-CHECKED: a cancelled row is never due, even overdue", () => {
+    expect(isReleaseDue({ status: "cancelled", releaseAt: msAgo(60_000) }, NOW)).toBe(false);
+  });
 
   it("an unparseable releaseAt is not due", () => {
     expect(isReleaseDue({ status: "pending", releaseAt: "not-a-timestamp" }, NOW)).toBe(false);
@@ -133,6 +149,14 @@ describe("selectDueScheduledReleases", () => {
     expect(secondPass).toHaveLength(6);
     expect(secondPass.map((r) => r.id)).toEqual(["target-4", "target-5", "target-6", "target-7", "target-8", "target-9"]);
   });
+
+  it("excludes a cancelled row even though it is overdue - cancelling a release must never leave it selectable", () => {
+    const rows: Row[] = [
+      { id: "cancelled-but-overdue", status: "cancelled", releaseAt: msAgo(60_000) },
+      { id: "still-pending", status: "pending", releaseAt: msAgo(1_000) },
+    ];
+    expect(selectDueScheduledReleases(rows, NOW).map((r) => r.id)).toEqual(["still-pending"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -151,8 +175,20 @@ describe("isClaimStale", () => {
     expect(isClaimStale({ status: "claimed", claimedAt: msAgo(STALE_CLAIM_MS - 1) }, NOW)).toBe(false);
   });
 
-  it.each<ReleaseStatus>(["pending", "done", "failed"])("a %s row is never stale, regardless of claimedAt", (status) => {
+  it.each<ReleaseStatus>(["pending", "done", "failed", "cancelled"])("a %s row is never stale, regardless of claimedAt", (status) => {
     expect(isClaimStale({ status, claimedAt: msAgo(STALE_CLAIM_MS * 10) }, NOW)).toBe(false);
+  });
+
+  // Named separately from the it.each above for the same reason as
+  // isReleaseDue's sabotage-checked test: this is the property that keeps a
+  // cancelled row from ever being swept as an abandoned claim (it cannot be
+  // "claimed" and "cancelled" at once, but a regression that widened the
+  // status guard could still let this slip through). Sabotage-checked the
+  // same way: temporarily widening isClaimStale's `row.status !== "claimed"`
+  // guard reddens exactly this test; restoring it (diffed against the
+  // pre-sabotage backup) turns it green again with no other change.
+  it("SABOTAGE-CHECKED: a cancelled row is never swept as a stale claim, even with a stale claimedAt", () => {
+    expect(isClaimStale({ status: "cancelled", claimedAt: msAgo(STALE_CLAIM_MS * 10) }, NOW)).toBe(false);
   });
 
   it("a claimed row with a null claimedAt is not stale (defensive - should not occur in practice)", () => {
@@ -259,6 +295,9 @@ class RecordingQueryBuilder {
   single() {
     return this.record("single", []);
   }
+  maybeSingle() {
+    return this.record("maybeSingle", []);
+  }
   then(
     onResolve: (value: StubResult) => unknown,
     onReject?: (reason: unknown) => unknown
@@ -302,6 +341,7 @@ const SAMPLE_ROW = {
   target_id: 456,
   module_id: 789,
   release_at: "2026-08-25T09:00:00.000Z",
+  was_published: true,
   status: "pending",
   claimed_at: null,
   recovery_attempts: 0,
@@ -323,6 +363,7 @@ describe("row mapping (via listDueScheduledReleases)", () => {
         courseAcronym: "EX",
         target: { kind: "module_item", id: 456, moduleId: 789 },
         releaseAt: SAMPLE_ROW.release_at,
+        wasPublished: true,
         status: "pending",
         claimedAt: null,
         recoveryAttempts: 0,
@@ -356,6 +397,37 @@ describe("row mapping (via listDueScheduledReleases)", () => {
     const { client } = createStub({ data: [{ ...SAMPLE_ROW, course_acronym: null }], error: null });
     const rows = await listDueScheduledReleases(client as SupabaseClient, NOW);
     expect(rows[0].courseAcronym).toBeNull();
+  });
+
+  // wasPublished round-tripping (F11.2). The NULL case is the load-bearing
+  // one: a row written before this column existed must stay `null` all the
+  // way through the mapper, never silently collapsing to `false` - a cancel
+  // reading `false` would skip a restore that may in fact be owed.
+  it("was_published: true maps to wasPublished: true", async () => {
+    const { client } = createStub({ data: [{ ...SAMPLE_ROW, was_published: true }], error: null });
+    const rows = await listDueScheduledReleases(client as SupabaseClient, NOW);
+    expect(rows[0].wasPublished).toBe(true);
+  });
+
+  it("was_published: false maps to wasPublished: false", async () => {
+    const { client } = createStub({ data: [{ ...SAMPLE_ROW, was_published: false }], error: null });
+    const rows = await listDueScheduledReleases(client as SupabaseClient, NOW);
+    expect(rows[0].wasPublished).toBe(false);
+  });
+
+  it("was_published: null (a row written before the column existed) stays null - NEVER becomes false", async () => {
+    const { client } = createStub({ data: [{ ...SAMPLE_ROW, was_published: null }], error: null });
+    const rows = await listDueScheduledReleases(client as SupabaseClient, NOW);
+    expect(rows[0].wasPublished).toBeNull();
+    expect(rows[0].wasPublished).not.toBe(false);
+  });
+
+  it("a missing was_published key (not just null) also stays null, not false", async () => {
+    const row = { ...SAMPLE_ROW } as Record<string, unknown>;
+    delete row.was_published;
+    const { client } = createStub({ data: [row], error: null });
+    const rows = await listDueScheduledReleases(client as SupabaseClient, NOW);
+    expect(rows[0].wasPublished).toBeNull();
   });
 
   it("throws when the select reports an error", async () => {
@@ -536,6 +608,132 @@ describe("scheduleRelease", () => {
     const { client } = createStub({ data: null, error: new Error("connection reset") });
     await expect(scheduleRelease(client as SupabaseClient, "user-1", input)).rejects.toThrow("connection reset");
   });
+
+  // F11.2: was_published is written in the SAME update/insert as everything
+  // else - never a follow-up patch (entry 340 in docs/REGRESSION.md records
+  // why: a failure on a second write would mark an already-written,
+  // will-still-fire row "failed").
+  it("writes was_published in the update payload when rescheduling an existing pending row", async () => {
+    const { client, builders } = createStub({ data: [SAMPLE_ROW], error: null });
+    await scheduleRelease(client as SupabaseClient, "user-1", { ...input, wasPublished: true });
+    const updateCall = builders[0].calls.find((c) => c.method === "update");
+    expect(updateCall?.args[0]).toMatchObject({ was_published: true });
+  });
+
+  it("writes was_published in the insert payload for a brand-new target", async () => {
+    const { client, builders } = createSequentialStub([
+      { data: [], error: null },
+      { data: SAMPLE_ROW, error: null },
+    ]);
+    await scheduleRelease(client as SupabaseClient, "user-1", { ...input, wasPublished: false });
+    const insertCall = builders[1].calls.find((c) => c.method === "insert");
+    expect(insertCall?.args[0]).toMatchObject({ was_published: false });
+  });
+
+  it("defaults was_published to null, not false, when the caller omits it", async () => {
+    const { client, builders } = createStub({ data: [SAMPLE_ROW], error: null });
+    await scheduleRelease(client as SupabaseClient, "user-1", input);
+    const updateCall = builders[0].calls.find((c) => c.method === "update");
+    expect(updateCall?.args[0]).toMatchObject({ was_published: null });
+  });
+});
+
+describe("listScheduledReleasesForUser", () => {
+  it("scopes to the user, orders by release_at ascending, and applies the default limit", async () => {
+    const { client, builders } = createStub({ data: [], error: null });
+    await listScheduledReleasesForUser(client as SupabaseClient, "user-1");
+    const calls = builders[0].calls;
+    expect(calls).toContainEqual({ method: "eq", args: ["user_id", "user-1"] });
+    expect(calls).toContainEqual({ method: "order", args: ["release_at", { ascending: true }] });
+    expect(calls).toContainEqual({ method: "limit", args: [RELEASE_LIST_LIMIT] });
+  });
+
+  it("does NOT filter by status - terminal rows (including cancelled) are included so 'what did I call off' stays answerable", async () => {
+    const { client, builders } = createStub({ data: [], error: null });
+    await listScheduledReleasesForUser(client as SupabaseClient, "user-1");
+    const statusFilter = builders[0].calls.find((c) => c.method === "eq" && c.args[0] === "status");
+    expect(statusFilter).toBeUndefined();
+  });
+
+  it("maps a cancelled row through like any other status", async () => {
+    const { client } = createStub({ data: [{ ...SAMPLE_ROW, status: "cancelled" }], error: null });
+    const rows = await listScheduledReleasesForUser(client as SupabaseClient, "user-1");
+    expect(rows[0].status).toBe("cancelled");
+  });
+
+  it("respects a custom limit", async () => {
+    const { client, builders } = createStub({ data: [], error: null });
+    await listScheduledReleasesForUser(client as SupabaseClient, "user-1", 10);
+    expect(builders[0].calls).toContainEqual({ method: "limit", args: [10] });
+  });
+});
+
+describe("cancelScheduledRelease", () => {
+  it("CAS success: transitions a pending row to cancelled and returns it", async () => {
+    const cancelledRow = { ...SAMPLE_ROW, status: "cancelled" };
+    const { client, builders } = createStub({ data: [cancelledRow], error: null });
+    const result = await cancelScheduledRelease(client as SupabaseClient, "user-1", SAMPLE_ROW.id, NOW);
+    expect(result.cancelled).toBe(true);
+    expect(result.release?.status).toBe("cancelled");
+    const updateCall = builders[0].calls.find((c) => c.method === "update");
+    expect(updateCall?.args[0]).toMatchObject({ status: "cancelled" });
+    expect(builders[0].calls).toContainEqual({ method: "eq", args: ["id", SAMPLE_ROW.id] });
+    expect(builders[0].calls).toContainEqual({ method: "eq", args: ["user_id", "user-1"] });
+    expect(builders[0].calls).toContainEqual({ method: "eq", args: ["status", "pending"] });
+    // Only the update statement ran - the CAS succeeded on the first try, so
+    // no follow-up read was needed.
+    expect(builders).toHaveLength(1);
+  });
+
+  it("CAS failure: a row already claimed (running right now) refuses the cancel and says which", async () => {
+    const claimedRow = { ...SAMPLE_ROW, status: "claimed" };
+    const { client, builders } = createSequentialStub([
+      { data: [], error: null }, // CAS: no pending row matched
+      { data: claimedRow, error: null }, // re-read: it is claimed
+    ]);
+    const result = await cancelScheduledRelease(client as SupabaseClient, "user-1", SAMPLE_ROW.id, NOW);
+    expect(result.cancelled).toBe(false);
+    expect(result.release?.status).toBe("claimed");
+    expect(builders).toHaveLength(2);
+  });
+
+  it("CAS failure: a row that already ran reports done, not a bare failure", async () => {
+    const doneRow = { ...SAMPLE_ROW, status: "done" };
+    const { client } = createSequentialStub([
+      { data: [], error: null },
+      { data: doneRow, error: null },
+    ]);
+    const result = await cancelScheduledRelease(client as SupabaseClient, "user-1", SAMPLE_ROW.id, NOW);
+    expect(result.cancelled).toBe(false);
+    expect(result.release?.status).toBe("done");
+  });
+
+  it("CAS failure: no row at all for this id/user - release is null, not thrown", async () => {
+    const { client } = createSequentialStub([
+      { data: [], error: null },
+      { data: null, error: null },
+    ]);
+    const result = await cancelScheduledRelease(client as SupabaseClient, "user-1", "no-such-id", NOW);
+    expect(result.cancelled).toBe(false);
+    expect(result.release).toBeNull();
+  });
+
+  it("throws when the CAS update itself errors", async () => {
+    const { client } = createStub({ data: null, error: new Error("db down") });
+    await expect(cancelScheduledRelease(client as SupabaseClient, "user-1", SAMPLE_ROW.id, NOW)).rejects.toThrow(
+      "db down"
+    );
+  });
+
+  it("throws when the follow-up read errors", async () => {
+    const { client } = createSequentialStub([
+      { data: [], error: null },
+      { data: null, error: new Error("read failed") },
+    ]);
+    await expect(cancelScheduledRelease(client as SupabaseClient, "user-1", SAMPLE_ROW.id, NOW)).rejects.toThrow(
+      "read failed"
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -562,6 +760,17 @@ const ALTER_MIGRATION_PATH = join(
 );
 const alterMigrationSql = readFileSync(ALTER_MIGRATION_PATH, "utf8");
 
+// F11 (this chunk) added a THIRD migration touching this table -
+// was_published, alongside the status CHECK constraint's drop/recreate (which
+// adds no column, so it needs no extractor entry). Same reasoning as the
+// module_id migration above: the union must include this file too, or this
+// guard would reject a column that genuinely exists.
+const CANCEL_MIGRATION_PATH = join(
+  process.cwd(),
+  "supabase/migrations/20261010000000_scheduled_releases_cancel.sql"
+);
+const cancelMigrationSql = readFileSync(CANCEL_MIGRATION_PATH, "utf8");
+
 /** Columns introduced by `alter table ... add column [if not exists] <name>`. */
 function extractAddedColumns(sql: string, tableName: string): string[] {
   // String.raw, not a plain template literal: in a template literal `\s` is
@@ -582,6 +791,7 @@ function allScheduledReleaseColumns(): string[] {
   return [
     ...extractCreateTableColumns(migrationSql, "scheduled_releases"),
     ...extractAddedColumns(alterMigrationSql, "scheduled_releases"),
+    ...extractAddedColumns(cancelMigrationSql, "scheduled_releases"),
   ];
 }
 
@@ -645,6 +855,20 @@ describe("extractAddedColumns finds the second migration's column", () => {
   });
 });
 
+describe("extractAddedColumns finds the third (F11 cancel) migration's column", () => {
+  // Same canary as the module_id migration above, for the same reason: an
+  // extractor that silently matched nothing here would make the union drop
+  // back to the first two migrations, and was_published would start reading
+  // as "not a real column" even though it genuinely is one.
+  it("finds was_published in the cancel migration", () => {
+    expect(extractAddedColumns(cancelMigrationSql, "scheduled_releases")).toContain("was_published");
+  });
+
+  it("does not invent columns for a table the cancel migration does not touch", () => {
+    expect(extractAddedColumns(cancelMigrationSql, "cron_heartbeat")).toEqual([]);
+  });
+});
+
 describe("every write payload key is a real migration column", () => {
   const columns = allScheduledReleaseColumns();
 
@@ -704,6 +928,12 @@ describe("every write payload key is a real migration column", () => {
   it("recoverStaleScheduledRelease's update payload (exhausted branch)", async () => {
     const { client, builders } = createStub({ data: [], error: null });
     await recoverStaleScheduledRelease(client as SupabaseClient, { id: "r1", recoveryAttempts: MAX_RECOVERY_ATTEMPTS }, NOW);
+    assertKeysAreColumns(builders[0].calls.find((c) => c.method === "update")?.args[0] as Record<string, unknown>);
+  });
+
+  it("cancelScheduledRelease's CAS update payload", async () => {
+    const { client, builders } = createStub({ data: [{ ...SAMPLE_ROW, status: "cancelled" }], error: null });
+    await cancelScheduledRelease(client as SupabaseClient, "user-1", SAMPLE_ROW.id, NOW);
     assertKeysAreColumns(builders[0].calls.find((c) => c.method === "update")?.args[0] as Record<string, unknown>);
   });
 });

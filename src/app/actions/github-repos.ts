@@ -620,12 +620,20 @@ export async function gradeRepoAction(
   provider: LlmProvider = "gemini",
   branch?: string,
   pathPrefix?: string
-): Promise<{ run: GradingRun; rubric: string; fullName: string } | { error: string }> {
+): Promise<
+  | { run: GradingRun; rubric: string; fullName: string; digestTruncated?: boolean }
+  | { error: string }
+> {
   try {
     await requireOwner();
     const parsed = parseRepoRef(repoRef);
     if (!parsed) return { error: "Enter a repository as owner/name or a github.com URL." };
     const digest = await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, branch);
+    // `digest.truncated` used to be read (fileCount/text) and dropped right
+    // here - the one signal that the ingest budget cut off part of the repo
+    // before grading ever saw it. Both return branches below now carry it
+    // through as `digestTruncated` instead of discarding it.
+    const digestTruncated = digest.truncated;
     const instructions = assignmentInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
 
     // Embedded Deterministic Engine: grade the repo in-process against the
@@ -638,7 +646,7 @@ export async function gradeRepoAction(
       // Grow the rubric bank from human-authored rubrics (fire-and-forget).
       if (rubric.trim()) void rememberRubric(instructions, rubric);
       const run = gradeEntriesEmbedded([repoDigestToEmbeddedEntry(digest)], builtRubric);
-      return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName };
+      return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName, digestTruncated };
     }
 
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${digest.text}`, provider));
@@ -649,7 +657,7 @@ export async function gradeRepoAction(
       submittedFiles: [],
     };
     const run = await gradeEntries([entry], instructions, effectiveRubric, provider);
-    return { run, rubric: effectiveRubric, fullName: digest.fullName };
+    return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repository." };
   }

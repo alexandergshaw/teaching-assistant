@@ -1,19 +1,80 @@
 // Codebase digest for LLM analysis (course/rubric generation, grading).
 
 import { getRepo } from "./github.repos";
-import { getRepoTree, getFileText } from "./github.files";
+import { getRepoTreeWithMeta, getFileText, type RepoTreeEntry } from "./github.files";
 import { ghFetch } from "./github.repos";
 
-// Text/code file extensions worth feeding to a model.
+// Text/code file extensions worth feeding to a model. Broad on purpose - a
+// student submission can be written in almost anything - but deliberately
+// stops short of images, archives, binaries, lockfiles, minified bundles and
+// source maps (C3.9 boundary): "all code" is not "all bytes".
 const TEXT_EXT = new Set([
-  "md", "mdx", "txt", "rst", "js", "ts", "tsx", "jsx", "mjs", "cjs", "py", "java", "c", "cc", "cpp", "h", "hpp",
-  "cs", "go", "rb", "php", "rs", "swift", "kt", "scala", "html", "css", "scss", "sass", "vue", "svelte", "json",
-  "yml", "yaml", "toml", "sql", "sh", "bash", "r", "ipynb", "dockerfile",
+  // Docs / markup
+  "md", "mdx", "txt", "rst", "tex", "xml",
+  // JS/TS family
+  "js", "ts", "tsx", "jsx", "mjs", "cjs",
+  // General-purpose languages
+  "py", "java", "c", "cc", "cpp", "cxx", "h", "hpp", "cs", "go", "rb", "php", "rs",
+  "swift", "kt", "kts", "scala", "groovy", "dart", "lua", "pl", "pm", "r", "jl",
+  "hs", "lhs", "ml", "mli", "clj", "cljs", "cljc", "ex", "exs", "erl", "zig", "nim",
+  "fs", "fsx", "vb", "m", "mm", "el", "asm", "s",
+  // Shell / scripting
+  "sh", "bash", "zsh", "bat", "cmd", "ps1", "psm1",
+  // Web
+  "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
+  // Data / config (text, not binary)
+  "json", "jsonc", "yml", "yaml", "toml", "ini", "cfg", "conf", "properties",
+  "sql", "graphql", "gql", "proto", "gradle", "cmake",
+  // Notebooks
+  "ipynb",
+  // Named without a leading dot elsewhere in this file (dockerfile has no
+  // extension in practice, but keep the literal in case a repo names it
+  // "Dockerfile.ext")
+  "dockerfile",
 ]);
-const SKIP_DIR = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|vendor|venv|\.venv|__pycache__|coverage|\.idea|\.vscode|target)(\/|$)/;
-const SKIP_FILE = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|\.min\.(js|css)$|\.map$)/;
 
-const fileExt = (path: string): string => path.split(".").pop()?.toLowerCase() ?? "";
+// Directories a repo's own tooling generates or vendors - never source the
+// student wrote, and often huge (node_modules, build output, venvs). Kept
+// current even inside a chosen folder (C3.10): a student who commits
+// node_modules must not be able to evict their own source through the byte
+// budget.
+const SKIP_DIR =
+  /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|vendor|venv|\.venv|__pycache__|coverage|\.idea|\.vscode|target|bin|obj|\.pytest_cache|\.mypy_cache|\.tox|\.gradle)(\/|$)/;
+
+// Lockfiles and compiled/minified/sourcemap output: technically text, but
+// never something worth putting in a grading prompt.
+const SKIP_FILE = /(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|composer\.lock|Gemfile\.lock|\.min\.(js|css)$|\.map$)/i;
+
+// Filenames with no extension that are still clearly text/source, matched by
+// basename only (case-insensitive).
+const NO_EXT_ALLOW = /^(readme|dockerfile|makefile|license|licence|procfile|rakefile|gemfile|vagrantfile|jenkinsfile|changelog|notice|authors|contributors)$/i;
+
+/**
+ * The extension of a path, lowercased, considering only the BASENAME. A file
+ * with no dot in its basename (or a dotfile like ".env", where the only dot
+ * is the leading one) has no extension - it does not inherit a dot from a
+ * parent directory (e.g. "my.project/main" has no extension, not "project/main").
+ */
+function fileExt(path: string): string {
+  const base = path.split("/").pop() ?? path;
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return base.slice(dot + 1).toLowerCase();
+}
+
+/**
+ * Whether a path is worth digesting as source text. Extensionless files are
+ * included only when they are a well-known project file (README, LICENSE,
+ * Procfile, ...) or carry the executable bit (mode "100755") - a strong,
+ * cheap signal that an extensionless file is a script rather than a stray
+ * binary or data file, without needing to fetch its content first.
+ */
+function isTextCandidate(path: string, mode?: string): boolean {
+  const ext = fileExt(path);
+  if (ext) return TEXT_EXT.has(ext);
+  const base = (path.split("/").pop() ?? path).toLowerCase();
+  return NO_EXT_ALLOW.test(base) || mode === "100755";
+}
 
 // Read order: README first, then docs, then source — so the digest leads with intent.
 function pathRank(path: string): number {
@@ -30,6 +91,18 @@ export interface RepoFile {
   content: string;
 }
 
+/** Counts of every reason a candidate file did not make it into the digest. */
+export interface RepoDigestSkipCounts {
+  /** Excluded by the extension allowlist, filename denylist, or SKIP_DIR - not something the digest treats as source. */
+  type: number;
+  /** Blob size at or above the per-blob fetch ceiling - too large to ever pull in. */
+  size: number;
+  /** Matched every filter, but pushed out by the file-count or total-byte budget. */
+  budget: number;
+  /** Passed every filter, but the GitHub fetch for the file's content threw. */
+  fetchError: number;
+}
+
 export interface RepoDigest {
   fullName: string;
   description: string;
@@ -43,67 +116,211 @@ export interface RepoDigest {
    * concatenated digest.
    */
   files: RepoFile[];
+  /**
+   * True only when a `pathPrefix` was given and it matched no blob anywhere in
+   * the repo tree (the folder does not exist at this ref, or is empty). This is
+   * its own outcome, distinct from "the folder had one small file" - a caller
+   * must report it rather than silently grading a near-empty digest as if the
+   * student's code had been reviewed (C2 item 6).
+   */
+  // The three fields below are optional in the TYPE only so existing mocks/
+  // fixtures elsewhere that build a RepoDigest literal (e.g. tests stubbing
+  // ingestRepoAction) do not all need updating for this addition - ingestRepo
+  // itself always populates every one of them at runtime.
+  prefixMatchedNothing?: boolean;
+  /** Counts of every reason a candidate file did not make it into {@link files}. */
+  skipped?: RepoDigestSkipCounts;
+  /**
+   * True when GitHub's own recursive tree listing was truncated (see
+   * RepoTreeResult in github.files.ts). When true, `prefixMatchedNothing`
+   * should be read with caution - the folder may exist past the point
+   * GitHub's listing cut off, not actually be absent.
+   */
+  treeTruncated?: boolean;
+}
+
+// ── Ingest budgets ──────────────────────────────────────────────────────────
+//
+// These numbers were sized for "digest a whole repo for background context"
+// (rubric generation from a reference repo, course materials, etc.) - the
+// digest is a sample, not the graded artifact, so staying small is correct.
+//
+// When the caller names a folder (`pathPrefix`), that folder IS the grading
+// scope, not a sample of it - applying the whole-repo caps there silently
+// discards the very thing the instructor scoped to. SCOPED_BUDGET raises all
+// four numbers for that case:
+//   - maxFiles 40 -> 200: a real assignment folder (excluding node_modules
+//     etc., which SKIP_DIR still removes) realistically runs from a handful
+//     of files to a couple hundred; 200 lets a normal submission through
+//     uncut while still bounding a pathological one.
+//   - maxBytes 220,000 -> 900,000: several times the size of a typical
+//     assignment folder's source, so a normal submission fits with headroom,
+//     while a run does not become unbounded (C1 item 3 - caps still exist).
+//   - perFileBytes 8,000 -> 40,000: most individual source files are well
+//     under 40 KB, so a scoped digest can usually include a file WHOLE
+//     instead of an 8 KB fragment, without letting one huge generated file
+//     eat the entire budget.
+//   - maxBlobBytes (the "never even fetch it" ceiling) 60,000 -> 400,000: kept
+//     above maxBytes/perFileBytes headroom so the fetch ceiling is never the
+//     tightest constraint; anything still too large to fetch at that size is
+//     overwhelmingly a generated/vendored artifact, not code to grade.
+// The unprefixed defaults are UNCHANGED - other callers (ingestRepoAction,
+// rubric sourcing from a reference repo, course materials) depend on them.
+export const DEFAULT_BUDGET = { maxFiles: 40, maxBytes: 220_000, perFileBytes: 8_000, maxBlobBytes: 60_000 } as const;
+export const SCOPED_BUDGET = { maxFiles: 200, maxBytes: 900_000, perFileBytes: 40_000, maxBlobBytes: 400_000 } as const;
+
+export interface SelectDigestFilesOpts {
+  maxFiles: number;
+  maxBytes: number;
+  perFileBytes: number;
+  maxBlobBytes: number;
+  pathPrefix?: string;
+}
+
+export interface DigestSelection {
+  /** Files chosen for the digest, in read order, already within the file-count/byte budget. */
+  selected: RepoTreeEntry[];
+  /** True only when `pathPrefix` was given and matched no blob anywhere in the tree. */
+  prefixMatchedNothing: boolean;
+  skipped: { type: number; size: number; budget: number };
+}
+
+/**
+ * Pure selection logic: given a repo tree and budget, decide which blobs make
+ * it into the digest and why the rest did not. No network access, so this is
+ * unit-testable directly against hand-built trees.
+ *
+ * Prefix matching is case-insensitive, anchored at the path root, and a
+ * trailing slash is enforced before comparing (so "week1" cannot match
+ * "week10") - this must stay exact per C4 item 11; do not make it fuzzy. If
+ * the prefix matches nothing at all, that is reported via
+ * `prefixMatchedNothing` rather than guessed at or silently treated as "no
+ * prefix".
+ */
+export function selectDigestFiles(tree: RepoTreeEntry[], opts: SelectDigestFilesOpts): DigestSelection {
+  const prefix = opts.pathPrefix
+    ? (opts.pathPrefix.endsWith("/") ? opts.pathPrefix : `${opts.pathPrefix}/`).toLowerCase()
+    : "";
+  const scoped = !!prefix;
+
+  const blobsInScope = tree.filter((t) => t.type === "blob" && (!scoped || t.path.toLowerCase().startsWith(prefix)));
+
+  if (scoped && blobsInScope.length === 0) {
+    return { selected: [], prefixMatchedNothing: true, skipped: { type: 0, size: 0, budget: 0 } };
+  }
+
+  const skipped = { type: 0, size: 0, budget: 0 };
+  const candidates: RepoTreeEntry[] = [];
+  for (const t of blobsInScope) {
+    if (t.size <= 0) continue; // empty file: nothing to feed the model, not a meaningful exclusion to report
+    if (t.size >= opts.maxBlobBytes) {
+      skipped.size += 1;
+      continue;
+    }
+    if (SKIP_DIR.test(t.path) || SKIP_FILE.test(t.path) || !isTextCandidate(t.path, t.mode)) {
+      skipped.type += 1;
+      continue;
+    }
+    candidates.push(t);
+  }
+  candidates.sort((a, b) => pathRank(a.path) - pathRank(b.path) || a.path.localeCompare(b.path));
+
+  const selected: RepoTreeEntry[] = [];
+  let used = 0;
+  let count = 0;
+  for (const c of candidates) {
+    if (count >= opts.maxFiles || used >= opts.maxBytes) {
+      skipped.budget += 1;
+      continue; // keep counting the rest - each remaining candidate was also cut by the cap
+    }
+    const sliceLen = Math.min(opts.perFileBytes, opts.maxBytes - used, c.size);
+    selected.push(c);
+    used += sliceLen;
+    count += 1;
+  }
+
+  return { selected, prefixMatchedNothing: false, skipped };
 }
 
 /**
  * Build a bounded text digest of a repo (README + selected source files) for the
  * LLM. Skips binaries, dependencies, and lockfiles, and caps file count + bytes
- * so a large repo never blows the token budget.
+ * so a large repo never blows the token budget. When `pathPrefix` is given the
+ * budget is raised to match a folder-scoped grading run - see SCOPED_BUDGET.
  */
 export async function ingestRepo(
   owner: string,
   repo: string,
-  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number; pathPrefix?: string } = {},
+  opts: { maxFiles?: number; maxBytes?: number; perFileBytes?: number; maxBlobBytes?: number; pathPrefix?: string } = {},
   ref?: string
 ): Promise<RepoDigest> {
-  const maxFiles = opts.maxFiles ?? 40;
-  const maxBytes = opts.maxBytes ?? 220_000;
-  const perFileBytes = opts.perFileBytes ?? 8_000;
-  const prefix = opts.pathPrefix
-    ? (opts.pathPrefix.endsWith("/") ? opts.pathPrefix : `${opts.pathPrefix}/`).toLowerCase()
-    : "";
+  const budget = opts.pathPrefix ? SCOPED_BUDGET : DEFAULT_BUDGET;
+  const maxFiles = opts.maxFiles ?? budget.maxFiles;
+  const maxBytes = opts.maxBytes ?? budget.maxBytes;
+  const perFileBytes = opts.perFileBytes ?? budget.perFileBytes;
+  const maxBlobBytes = opts.maxBlobBytes ?? budget.maxBlobBytes;
 
   const info = await getRepo(owner, repo);
   const branch = ref || info.defaultBranch;
-  const tree = await getRepoTree(owner, repo, branch);
-  const candidates = tree
-    .filter(
-      (t) =>
-        t.type === "blob" &&
-        t.size > 0 &&
-        t.size < 60_000 &&
-        (!prefix || t.path.toLowerCase().startsWith(prefix)) &&
-        !SKIP_DIR.test(t.path) &&
-        !SKIP_FILE.test(t.path) &&
-        (TEXT_EXT.has(fileExt(t.path)) || /(^|\/)(readme|dockerfile|makefile)$/i.test(t.path.toLowerCase()))
-    )
-    .sort((a, b) => pathRank(a.path) - pathRank(b.path) || a.path.localeCompare(b.path));
+  const { entries: tree, truncated: treeTruncated } = await getRepoTreeWithMeta(owner, repo, branch);
 
-  const parts: string[] = [`# Repository: ${info.fullName}${info.description ? `\n\n${info.description}` : ""}`];
+  const selection = selectDigestFiles(tree, { maxFiles, maxBytes, perFileBytes, maxBlobBytes, pathPrefix: opts.pathPrefix });
+  const header = `# Repository: ${info.fullName}${info.description ? `\n\n${info.description}` : ""}`;
+
+  if (selection.prefixMatchedNothing) {
+    return {
+      fullName: info.fullName,
+      description: info.description,
+      fileCount: 0,
+      text: header,
+      truncated: treeTruncated,
+      files: [],
+      prefixMatchedNothing: true,
+      skipped: { type: 0, size: 0, budget: 0, fetchError: 0 },
+      treeTruncated,
+    };
+  }
+
+  const parts: string[] = [header];
   const files: RepoFile[] = [];
   let used = 0;
   let count = 0;
-  let truncated = false;
-  for (const f of candidates) {
-    if (count >= maxFiles || used >= maxBytes) {
-      truncated = true;
-      break;
-    }
+  let fetchErrorCount = 0;
+  // The selection already respects the budget; `truncated` starts true if the
+  // size ceiling or the count/byte cap already excluded anything, so that a
+  // fetch that happens to fail below does not mask exclusions that already
+  // happened above (C2 item 4/5 - the flag must reflect everything dropped).
+  let truncated = selection.skipped.size > 0 || selection.skipped.budget > 0 || treeTruncated;
+
+  for (const f of selection.selected) {
     let body: string;
     try {
       body = await getFileText(owner, repo, f.path, branch);
     } catch {
+      fetchErrorCount += 1;
+      truncated = true;
       continue;
     }
-    const budget = Math.min(perFileBytes, maxBytes - used);
-    const slice = body.slice(0, budget);
+    const perFileBudget = Math.min(perFileBytes, maxBytes - used);
+    const slice = body.slice(0, perFileBudget);
     if (slice.length < body.length) truncated = true;
     parts.push(`\n\n--- FILE: ${f.path} ---\n${slice}`);
     files.push({ path: f.path, content: slice });
     used += slice.length;
     count += 1;
   }
-  return { fullName: info.fullName, description: info.description, fileCount: count, text: parts.join(""), truncated, files };
+
+  return {
+    fullName: info.fullName,
+    description: info.description,
+    fileCount: count,
+    text: parts.join(""),
+    truncated,
+    files,
+    prefixMatchedNothing: false,
+    skipped: { type: selection.skipped.type, size: selection.skipped.size, budget: selection.skipped.budget, fetchError: fetchErrorCount },
+    treeTruncated,
+  };
 }
 
 /** Download a repo as a zip archive (GitHub's zipball) at `ref` / default branch. */

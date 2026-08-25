@@ -4,13 +4,27 @@ import { getMimeType } from "./constants";
 
 const MAX_PREVIEW_CHARS = 16000;
 
-export function truncateSubmission(content: string, maxChars: number): string {
+/**
+ * Cut a merged submission down to `maxChars` if it exceeds that cap. Mirrors
+ * the `{ text, truncated }` shape of {@link toPreviewContent} below so callers
+ * can tell whether truncation happened without re-deriving it from string
+ * lengths - the caller is expected to surface `truncated` back to the
+ * instructor (see GradeResult.submissionTruncated in ./types) rather than
+ * relying solely on the note appended to `text`, which only the model sees.
+ */
+export function truncateSubmission(
+  content: string,
+  maxChars: number
+): { text: string; truncated: boolean } {
   if (content.length <= maxChars) {
-    return content;
+    return { text: content, truncated: false };
   }
 
   const omitted = content.length - maxChars;
-  return `${content.slice(0, maxChars)}\n\n[Truncated ${omitted} characters to stay within configured grading limits.]`;
+  return {
+    text: `${content.slice(0, maxChars)}\n\n[Truncated ${omitted} characters to stay within configured grading limits.]`,
+    truncated: true,
+  };
 }
 
 export function sleep(ms: number): Promise<void> {

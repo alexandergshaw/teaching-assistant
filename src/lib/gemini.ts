@@ -1,7 +1,40 @@
 const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
 const DEFAULT_MAX_OUTPUT_TOKENS = 700;
 const DEFAULT_MAX_SUBMISSIONS = 5;
-const DEFAULT_MAX_CHARS_PER_SUBMISSION = 12000;
+
+/**
+ * gemini-3.1-flash-lite (the default model above) has a 1,048,576-token input
+ * context window and prices input at roughly $0.125-$0.25 per million tokens
+ * (Google AI Studio / OpenRouter, 2026). The previous default here, 12,000
+ * characters (~3,000 tokens), was sized as if the model's window were tiny -
+ * it silently discarded up to ~95% of a folder-scoped repo digest before the
+ * model ever saw it (see docs/folder-scoped-grading-completeness-acceptance-
+ * criteria.md, C1.2), with the only trace being a sentence buried in the
+ * prompt text.
+ *
+ * 400,000 characters (~100,000 tokens at ~4 chars/token) is chosen instead:
+ *   - It is under 10% of the real 1,048,576-token window, leaving generous
+ *     headroom for the system prompt, rubric criteria, image parts, and the
+ *     model's own completion budget (up to 65,536 output tokens) without
+ *     risking a request that exceeds the context window outright (a run that
+ *     dies from an oversized request grades nothing - C1.3).
+ *   - It comfortably fits a normal assignment folder: even the raised,
+ *     folder-scoped ingest budget in github.digest.ts (raised for C1.1, but
+ *     nowhere near 400,000 characters for a single assignment folder) will
+ *     rarely be truncated further here - this cap exists as a backstop, not
+ *     the primary limiter.
+ *   - Cost stays trivial: ~100,000 input tokens per submission at ~$0.25/M
+ *     tokens is about $0.025 in the worst case (a submission that fills the
+ *     entire cap); at the default cap of 5 submissions per run
+ *     (DEFAULT_MAX_SUBMISSIONS) that is at most roughly $0.125 for a whole
+ *     grading run, and typical submissions are far smaller than the cap, so
+ *     real-world cost is usually a small fraction of that.
+ *
+ * GRADE_MAX_CHARS_PER_SUBMISSION still overrides this for anyone who needs a
+ * different value, and parsePositiveInt still enforces a minimum of 1 - a cap
+ * always exists, it is just no longer the dominant bottleneck.
+ */
+const DEFAULT_MAX_CHARS_PER_SUBMISSION = 400000;
 const DEFAULT_INTER_REQUEST_DELAY_MS = 1200;
 const DEFAULT_MIN_OUTPUT_TOKENS = 512;
 const VALID_THINKING_LEVELS = new Set(["minimal", "low", "medium", "high"]);

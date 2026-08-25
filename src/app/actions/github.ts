@@ -600,7 +600,7 @@ export async function gradeReposAction(
   rubric: string,
   provider: LlmProvider = "gemini",
   gradingFolder?: string
-): Promise<{ run: GradingRun; rubric: string } | { error: string }> {
+): Promise<{ run: GradingRun; rubric: string; truncatedRepos?: string[] } | { error: string }> {
   try {
     await requireOwner();
     // One common folder scopes every repo in the queue for this run (AC A2),
@@ -616,6 +616,15 @@ export async function gradeReposAction(
     if (digests.length === 0) return { error: "No valid repositories to grade." };
     const instructions = assignmentInstructions.trim() || "Evaluate each student's repository.";
 
+    // `digest.truncated` used to be read (fileCount/text) and dropped right
+    // here for every repo in the queue - the one signal that the ingest
+    // budget cut off part of a repo before grading ever saw it. Surfaced
+    // below (both return branches) as the labels/full names of the repos it
+    // happened to, rather than a single flag that would hide which student.
+    const truncatedRepos = digests
+      .filter(({ digest }) => digest.truncated)
+      .map(({ label, digest }) => label?.trim() || digest.fullName);
+
     // Embedded Deterministic Engine: grade each repo in-process against the
     // supplied rubric, or one generated from the instructions. No model call.
     if (provider === "embedded") {
@@ -629,7 +638,7 @@ export async function gradeReposAction(
         digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label)),
         builtRubric
       );
-      return { run, rubric: renderRubricText(builtRubric) };
+      return { run, rubric: renderRubricText(builtRubric), truncatedRepos };
     }
 
     const entries: StudentSubmissionEntry[] = digests.map(({ label, digest }) => ({
@@ -640,7 +649,7 @@ export async function gradeReposAction(
     }));
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${entries[0].content}`, provider));
     const run = await gradeEntries(entries, instructions, effectiveRubric, provider);
-    return { run, rubric: effectiveRubric };
+    return { run, rubric: effectiveRubric, truncatedRepos };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repositories." };
   }

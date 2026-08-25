@@ -32718,3 +32718,111 @@ proved byte-identical.
 - **The reserve is itself a constant** (8s), chosen to cover a draft save plus
   a report write. It has not been measured against a real slow save.
 
+
+## 344. A named grading folder now actually reaches the grader - six silent cuts, and the biggest was 95%
+
+Contract: `docs/folder-scoped-grading-completeness-acceptance-criteria.md`.
+The owner's report, verbatim (2026-08-25): *"any time i'm grading the repos of
+students and specifying a specific folder, all code within that folder should
+get pulled into the grader."* They were right, and a survey of the whole path
+from the folder input to the prompt text found why.
+
+**The folder match itself was never the problem.** It is a case-insensitive
+prefix on the full path, anchored at the root with a forced trailing slash (so
+`week1` cannot match `week10`), it recurses to any depth, and `SKIP_DIR`
+correctly excludes `node_modules` even inside the chosen folder. Everything
+after the match was the problem.
+
+### The six cuts, all invisible
+
+1. **12,000 CHARACTERS, APPLIED TO THE WHOLE MERGED SUBMISSION, IMMEDIATELY
+   BEFORE THE MODEL CALL.** `ingestRepo` assembles up to 220,000 bytes from the
+   chosen folder and `gradeStudentEntries` then cut it to ~3,000 tokens. Up to
+   95% of a scoped folder discarded, and the only trace was a sentence INSIDE
+   the prompt that no instructor ever sees. Raised to 400,000 characters
+   (~100,000 tokens, under 10% of the default model's context), with the cost
+   reasoning written next to the constant: this is a per-student prompt, so a
+   bigger cap is a bigger bill, and the number is chosen to fit a normal folder
+   comfortably rather than to be as large as possible.
+   `GRADE_MAX_CHARS_PER_SUBMISSION` still overrides it, and a cap still EXISTS -
+   a request so large it fails grades nothing, which is worse than a truncated
+   one.
+2. **THE INGEST BUDGET DID NOT KNOW A FOLDER HAD BEEN NAMED.** 40 files,
+   220,000 bytes, an 8,000-byte slice per file and a 60,000-byte "never even
+   fetch it" ceiling - numbers chosen for digesting a WHOLE repo as background
+   context, applied unchanged to a folder the instructor had explicitly scoped
+   to. A named folder now gets `SCOPED_BUDGET` (200 files, 900,000 bytes,
+   40,000 per file, 400,000 fetch ceiling), each number justified inline. **The
+   unprefixed defaults are untouched**, because other callers - rubric
+   sourcing, course materials, `ingestRepoAction` - genuinely do want a sample.
+3. **A FILE WITH NO EXTENSION COULD NEVER MATCH.** `fileExt` split the FULL
+   PATH on ".", so a file with no dot returned the entire path string and could
+   not equal a short entry like `js`. That is why only literal
+   README/Dockerfile/Makefile survived, via a separate regex - `LICENSE`,
+   `Procfile`, and every extensionless script were dropped. Fixed to read the
+   basename, which also fixes a dotted DIRECTORY (`my.project/main` was
+   inheriting `project` as its extension).
+4. **The allowlist was too narrow** for "all code" - grown from ~35 to ~85
+   extensions. It stays an ALLOWLIST, so images, archives and binaries are
+   excluded by omission rather than by an enumeration that will always lag.
+5. **A blob at or above the fetch ceiling, and any file beyond the count/byte
+   cap**, were dropped with no count.
+6. **A FILE WHOSE FETCH THREW WAS SWALLOWED** by a bare `catch { continue }` -
+   no error, no count, and it did not even set `truncated`.
+
+### The boundary, kept deliberately
+
+"All code" is not "all bytes". Lockfiles, minified bundles, source maps,
+images, archives and binaries stay out, and `SKIP_DIR` still removes
+`node_modules`, `.git`, build output and vendor directories **even inside the
+chosen folder** - a student who commits `node_modules` must not evict their own
+source through the byte budget. The prefix match's semantics are unchanged: a
+folder that matches nothing is REPORTED (`prefixMatchedNothing`), never guessed
+at, because a student who nested their folder one level deeper produced a
+silent near-empty digest and now produces a distinguishable outcome.
+
+### The reachability catch, which is the half that would have gone unnoticed
+
+7. **THE FLAGS WERE RETURNED AND STILL NOT SHOWN.** Both agents did what was
+   asked: skip counts by reason, `prefixMatchedNothing`, `treeTruncated`,
+   `digestTruncated` un-discarded at last (the actions had been COMPUTING it
+   and dropping it before returning), and `submissionTruncated` threaded out of
+   the grading engine. **Nothing rendered any of it.** A grep for every new
+   field across `src/app/components` found no consumer - so the instructor
+   would still have seen nothing, and the "never silently again" requirement
+   would have been met only on paper. `digestTruncated` and
+   `submissionTruncated` are now surfaced in the Repo Grades view: as a visible
+   note, and in the activity log (entry 333) so the fact survives the note and
+   travels in the CSV. They are reported SEPARATELY rather than merged into one
+   "truncated", because they are different cuts at different layers and a
+   reader chasing missing code needs to know which budget to raise.
+
+### Gates
+
+`npx eslint src` 0 errors (the same 4 pre-existing warnings in untouched
+files); `npx tsc --noEmit` clean; full `vitest run` **678 files / 13754 tests**
+green, up from 13726; `npx next build` "Compiled successfully" and "Finished
+TypeScript". Sabotage-checked on both halves: removing the `SKIP_DIR` check
+reddens the "node_modules inside the chosen folder" test, and removing
+`submissionTruncated` from the result pushes reddens three of the four new
+engine tests while the output-semantics test correctly stays green.
+
+### Limits
+
+- **The raise costs money, per student, and that is the trade.** One model call
+  per submission (`engine.ts:109/127`), so 400,000 characters is per student,
+  not multiplied across a batch - roughly $0.01-0.03 each at the CAP, and the
+  cap only binds when there is genuinely more code to read. A full class is
+  cents, not dollars, but it is not free and it was 33x cheaper when it was
+  also 33x less complete.
+- **The other two grading surfaces still do not DISPLAY the flags.**
+  `gradeReposAction` returns `truncatedRepos` and the workflow steps carry the
+  digest, but neither the Grading tab's GitHub panel nor the drafted-grades
+  path renders any of it. Only the Repo Grades view - the one the owner's
+  report was about - shows it today.
+- **Nothing here was run against a real repo.** The filtering is pure and
+  tested directly; the fetch path, the GitHub tree-truncation flag and the real
+  token cost of a 400,000-character prompt are all unexercised outside stubs.
+- **`maxBlobBytes` is a git-reported size**, so a file whose reported size and
+  fetched length disagree is still bounded only by the per-file slice.
+

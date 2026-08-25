@@ -13,15 +13,37 @@ export interface RepoTreeEntry {
   mode?: string;
 }
 
-/** The full recursive file tree of a repo at `ref` (default branch when omitted). */
-export async function getRepoTree(owner: string, repo: string, ref?: string): Promise<RepoTreeEntry[]> {
+export interface RepoTreeResult {
+  entries: RepoTreeEntry[];
+  /**
+   * True when GitHub's own recursive listing was truncated (the API caps how
+   * many entries / how many bytes a single recursive tree response returns).
+   * When true, `entries` is an incomplete view of the repo - a path that
+   * appears to match nothing among `entries` may simply live past the cutoff,
+   * not actually be absent. Rare in practice (it only kicks in on very large
+   * repos), but worth carrying through rather than silently treating an
+   * incomplete listing as the whole truth.
+   */
+  truncated: boolean;
+}
+
+/** The full recursive file tree of a repo at `ref` (default branch when omitted),
+ *  plus whether GitHub's own listing was truncated. */
+export async function getRepoTreeWithMeta(owner: string, repo: string, ref?: string): Promise<RepoTreeResult> {
   const branch = ref || (await getRepo(owner, repo)).defaultBranch;
-  const data = await ghJson<{ tree?: Array<{ path?: string; type?: string; size?: number; sha?: string; mode?: string }> }>(
-    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
-  );
-  return (data.tree ?? [])
+  const data = await ghJson<{
+    tree?: Array<{ path?: string; type?: string; size?: number; sha?: string; mode?: string }>;
+    truncated?: boolean;
+  }>(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
+  const entries = (data.tree ?? [])
     .filter((t): t is { path: string; type: "blob" | "tree"; size?: number; sha?: string; mode?: string } => !!t.path && (t.type === "blob" || t.type === "tree"))
     .map((t) => ({ path: t.path, type: t.type, size: t.size ?? 0, sha: t.sha ?? "", mode: t.mode }));
+  return { entries, truncated: !!data.truncated };
+}
+
+/** The full recursive file tree of a repo at `ref` (default branch when omitted). */
+export async function getRepoTree(owner: string, repo: string, ref?: string): Promise<RepoTreeEntry[]> {
+  return (await getRepoTreeWithMeta(owner, repo, ref)).entries;
 }
 
 /** Read one file's text content (raw). */

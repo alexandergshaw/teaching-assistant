@@ -397,12 +397,33 @@ export default function RepoGradesTab() {
     // so a later "why is this score what it is" question can tell an AI
     // result from a hand-typed one even after the instructor has edited the
     // cell (the same distinction repoGradeScoreWasEdited makes at post time).
+    // docs/folder-scoped-grading-completeness-acceptance-criteria.md C2: the
+    // grading path used to COMPUTE whether the submission was cut and then
+    // throw both flags away, so an instructor could not tell "the model read
+    // my whole folder" from "it read the first fraction of it". Both are now
+    // returned, and this is where they become visible - in the log that is
+    // already this view's durable, downloadable record (entry 333), so the
+    // fact survives the note and travels in the CSV.
+    //
+    // `digestTruncated` means the INGEST hit a cap collecting the folder;
+    // `submissionTruncated` means the assembled text was cut again before the
+    // model saw it. They are different cuts at different layers, so they are
+    // named separately rather than merged into one "truncated" - a reader
+    // chasing missing code needs to know WHICH budget to raise.
+    const cuts: string[] = [];
+    if (result.digestTruncated) cuts.push("some folder files were left out of the digest");
+    if (first?.submissionTruncated) cuts.push("the submission text was truncated before grading");
+    const detail = cuts.length > 0 ? `Graded by ${provider} - ${cuts.join("; ")}` : `Graded by ${provider}`;
+    if (cuts.length > 0) {
+      setPostSummary(`${row.repo} / ${column.folder}: graded, but ${cuts.join("; ")}.`);
+    }
+
     recordLog([
       buildLogEntry("grade-succeeded", {
         repo: row.repo,
         folder: column.folder,
         score: first?.totalScore ?? "",
-        detail: `Graded by ${provider}`,
+        detail,
       }),
     ]);
   };

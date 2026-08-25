@@ -42,6 +42,13 @@ export interface GradeResult {
   // can be defended to a student (which code, at which commit, was read).
   gradedRepo?: string | null;
   gradedRef?: string | null;
+  // True when this submission's merged content exceeded the per-submission
+  // character cap (GRADE_MAX_CHARS_PER_SUBMISSION / getGeminiMaxCharsPerSubmission
+  // in ../gemini) and was cut down before being sent to the model - see
+  // truncateSubmission in ./utils. Previously this fact only existed as a
+  // sentence inside the prompt text that no instructor ever saw; this field
+  // lets a UI say "this submission was truncated" instead.
+  submissionTruncated?: boolean;
 }
 
 export interface GradingRun {

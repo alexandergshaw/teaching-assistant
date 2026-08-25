@@ -301,3 +301,49 @@ target Canvas will refuse to hide is shown as such, so committing is an
 informed act rather than a warning read after the fact. The release itself is
 still scheduled for a refused target: publishing later is harmless and the
 instructor may simply accept that one item stays visible in the meantime.
+
+## F11. Cancelling a scheduled release - the requirement F4 created and never named
+
+Entry 340 shipped the commit; nothing could see or call off a release once
+made. This section is that gap's contract.
+
+**F11.1 - THE TRAP, AND WHY CANCEL MUST RESTORE.** Committing a release
+UNPUBLISHES the selected content immediately (F4). So a cancel that merely
+deletes the row leaves every target hidden - permanently, with no scheduled
+event coming to reveal it. The instructor's mental model of "cancel" is
+undo, and delivering "your content is now invisible forever, silently" against
+that word is the single worst thing this feature could do.
+
+**Therefore cancelling RESTORES the published state the commit changed**, and
+says so at the point of cancelling. It is the honest inverse of commit, not a
+row deletion. A target the commit found already unpublished is left alone -
+restoring it would publish something the instructor never had visible.
+
+**F11.2 - THAT REQUIRES REMEMBERING WHAT WE CHANGED.** The plan already reads
+each target's `published` state to classify hide-ability; the commit must
+persist it (`was_published`) so cancel can act on fact rather than assumption.
+This is the same lesson G1 forced in the command interface: capture what you
+overwrote, at the moment you overwrite it, because nothing else can recover it
+later. A row with `was_published` null - written before this section existed -
+must be cancelled WITHOUT a restore attempt and must say so, never guess.
+
+**F11.3 - CANCEL IS A COMPARE-AND-SET ON `pending`, NOT A DELETE.** A row the
+cron has already claimed is mid-flight; cancelling it would race the publish.
+Cancel therefore transitions `pending -> cancelled` via the same CAS idiom the
+claim uses, and a lost race reports honestly that the release already ran
+rather than silently doing nothing. `cancelled` is a new terminal status, kept
+rather than deleted so "what did I call off, and when" remains answerable -
+the same reasoning entry 333 applied to the gradebook audit trail.
+
+**F11.4 - WHERE IT LIVES.** The Automations hub - the view that already answers
+"what runs automatically", and which entry 334 gave the scheduler's own health
+line. Releases are created in the Modules view but they are not a Modules
+concern once made; and `ModulesView.tsx` is at 867 lines against a 1000 cap.
+The commit result in the Modules review names where to go, so the control that
+creates a release tells the instructor where to cancel it.
+
+**F11.5 - WHAT THE LIST MUST SHOW.** Per row: the target, the course, the
+release instant in the reader's own locale, the status, and whether cancelling
+will restore visibility. A pending release whose instant has already passed but
+which has not yet fired is NOT an error - it is waiting for the next tick, and
+must read that way rather than as "late".

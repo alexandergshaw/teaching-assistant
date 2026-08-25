@@ -27,6 +27,21 @@
 // formatting/aggregation decision (entry shape, counts, the CSV/JSON
 // serialisation, the Markdown report body) lives in this module rather than
 // in the step's own run() closures.
+//
+// Entry 344 raised the folder-scoped ingest budget and had `gradeRepoAction`
+// return `digestTruncated` - whether the ingest hit its cap collecting a
+// repo's chosen folder - but the workflow grading paths called it per repo
+// and dropped that flag on the floor. `RepoGradingLogEntry.digestTruncated`
+// below is where it now lands: a repo whose digest was truncated is still
+// `outcome: "graded"` (it produced a score), so this is carried as its own
+// fact rather than a fourth outcome or text stuffed into `reason` (whose
+// meaning R1.2 fixes as "the reason for anything that is NOT graded"). It is
+// also kept distinct from `RepoGradingRunLog.truncated` below - THAT means
+// the run itself stopped before reaching every repo; `digestTruncated` means
+// one already-graded repo's own folder was read incompletely. Conflating
+// either pair (as entry 344 notes for `digestTruncated` vs
+// `submissionTruncated` one layer down) tells a reader to raise the wrong
+// budget.
 
 import { escapeCsvValue } from "@/lib/course-tasks-view-csv";
 
@@ -51,6 +66,27 @@ export interface RepoGradingLogEntry {
   score: string;
   /** ISO 8601, supplied by the caller - see this file's header. */
   at: string;
+  /** Entry 344 raised the folder-scoped ingest budget and had `gradeRepoAction`
+   * return `digestTruncated` - true when the ingest hit its size/file/byte cap
+   * while collecting this repo's chosen folder, so what reached the model was
+   * a PARTIAL read of that folder, not the whole thing. That is a fact about
+   * THIS repo's read, not about the run - deliberately its own boolean field,
+   * never folded into `reason` (whose meaning is fixed by R1.2 as "the reason
+   * for anything that is NOT graded": a truncated-but-graded repo has no
+   * reason, it has a score AND this flag) and never merged into the run-level
+   * `truncated` on RepoGradingRunLog below (that one means "the run stopped
+   * before reaching every repo"; this one means "this repo's own folder was
+   * read incompletely"). Entry 344 makes exactly this same distinction for
+   * `digestTruncated` vs `submissionTruncated` at the Repo Grades view layer -
+   * merging either pair would point an instructor at the wrong budget to
+   * raise. A truncated repo is still `outcome: "graded"` - it produced a
+   * score - so the outcome enum stays exactly R1.2's three values; this flag
+   * is what lets a reader tell "graded completely" from "graded on partial
+   * input". Always present (never undefined) for the same column-stability
+   * reason as `reason`/`score` above; `false` when not attempted through
+   * `gradeRepoAction` at all (a skip before grading ever started) or when the
+   * ingest was not truncated. */
+  digestTruncated: boolean;
 }
 
 /** The whole run's record: every repo attempted, plus R1.5's distinction
@@ -91,6 +127,7 @@ export function buildRepoGradingLogEntry(opts: {
   reason?: string;
   score?: string;
   at: string;
+  digestTruncated?: boolean;
 }): RepoGradingLogEntry {
   return {
     repo: opts.repo,
@@ -98,6 +135,7 @@ export function buildRepoGradingLogEntry(opts: {
     reason: opts.reason ?? "",
     score: opts.score ?? "",
     at: opts.at,
+    digestTruncated: opts.digestTruncated ?? false,
   };
 }
 
@@ -128,6 +166,13 @@ export interface RepoGradingRunLogSummary {
   failed: number;
   notReachedCount: number;
   truncated: boolean;
+  /** How many of the GRADED entries were graded on a truncated digest - see
+   * `digestTruncated` on RepoGradingLogEntry above. Counted only over
+   * `outcome: "graded"` entries because this is what buildRepoGradingReportMarkdown
+   * reports as "graded on partial input"; a skipped/failed repo was never
+   * graded at all, so it does not belong in this count even on the rare path
+   * where the ingest ran and was truncated before grading itself failed. */
+  digestTruncatedGraded: number;
 }
 
 /** The counts a report/UI would show. Mirrors summarizeRepoGradeLog's
@@ -138,10 +183,16 @@ export function summarizeRepoGradingRunLog(log: RepoGradingRunLog): RepoGradingR
   let graded = 0;
   let skipped = 0;
   let failed = 0;
+  let digestTruncatedGraded = 0;
   for (const entry of log.entries) {
-    if (entry.outcome === "graded") graded += 1;
-    else if (entry.outcome === "skipped") skipped += 1;
-    else failed += 1;
+    if (entry.outcome === "graded") {
+      graded += 1;
+      if (entry.digestTruncated) digestTruncatedGraded += 1;
+    } else if (entry.outcome === "skipped") {
+      skipped += 1;
+    } else {
+      failed += 1;
+    }
   }
   return {
     attempted: log.attempted,
@@ -150,10 +201,11 @@ export function summarizeRepoGradingRunLog(log: RepoGradingRunLog): RepoGradingR
     failed,
     notReachedCount: log.notReached.length,
     truncated: log.truncated,
+    digestTruncatedGraded,
   };
 }
 
-const CSV_HEADER = ["Repo", "Outcome", "Reason", "Score", "At"];
+const CSV_HEADER = ["Repo", "Outcome", "Reason", "Score", "Digest truncated", "At"];
 
 /**
  * R1.6's CSV, built here (not in the download-button component) so the
@@ -167,12 +219,25 @@ const CSV_HEADER = ["Repo", "Outcome", "Reason", "Score", "At"];
  * documents (a different, UI-local formatter - see this file's header),
  * and REGRESSION entry 267 check 4 / entry 333's own reuse of the same
  * escaper. Rows are joined with \r\n, matching both of those.
+ *
+ * "Digest truncated" is "Yes"/"No" (never a bare boolean), matching this
+ * codebase's existing boolean-CSV-column convention (e.g. AutomationRow.tsx's
+ * "Unattended" column) rather than inventing a new true/false spelling. A
+ * not-reached row gets "" here, same as its other N/A columns - the run never
+ * reached that repo, so there is no ingest result to report on.
  */
 export function formatRepoGradingLogCsv(log: RepoGradingRunLog): string {
   const rows = [CSV_HEADER.map(escapeCsvValue).join(",")];
   for (const entry of log.entries) {
     rows.push(
-      [entry.repo, REPO_GRADING_OUTCOME_LABELS[entry.outcome], entry.reason, entry.score, entry.at]
+      [
+        entry.repo,
+        REPO_GRADING_OUTCOME_LABELS[entry.outcome],
+        entry.reason,
+        entry.score,
+        entry.digestTruncated ? "Yes" : "No",
+        entry.at,
+      ]
         .map(escapeCsvValue)
         .join(",")
     );
@@ -180,7 +245,7 @@ export function formatRepoGradingLogCsv(log: RepoGradingRunLog): string {
   if (log.truncated) {
     for (const repo of log.notReached) {
       rows.push(
-        [repo, "Not reached", "The run ended before reaching this repo.", "", ""].map(escapeCsvValue).join(",")
+        [repo, "Not reached", "The run ended before reaching this repo.", "", "", ""].map(escapeCsvValue).join(",")
       );
     }
   }
@@ -215,9 +280,22 @@ export function formatRepoGradingLogJson(
  * (every repo skipped) still leaves a trace, which is precisely the run a
  * `grading_drafts` row cannot represent (R1.1). Built here, pure, so vitest
  * can reach the exact wording without going through saveRecordingFile at
- * all. Lists every attempted entry (outcome, reason, score), then - only
- * when truncated - a trailing section naming every not-reached repo, so
- * silence about the remainder never reads as "there were none" (R1.5).
+ * all. Lists every attempted entry (outcome, reason, score, and - per
+ * entry 344's "keep the two truncations distinct" - whether THIS repo's own
+ * digest was truncated), then - only when truncated - a trailing section
+ * naming every not-reached repo, so silence about the remainder never reads
+ * as "there were none" (R1.5).
+ *
+ * Two different cuts can both apply to one run, and this deliberately never
+ * merges them: `log.truncated`/`notReached` says the RUN stopped short (some
+ * repos were never attempted at all); a per-entry `digestTruncated` says a
+ * repo THAT WAS graded was graded on a partial read of its folder. Reporting
+ * them as one fact would point an instructor at the wrong budget to raise -
+ * exactly the mistake entry 344 documents for `digestTruncated` vs
+ * `submissionTruncated` at the layer below this one. The partial-input count
+ * line is emitted only when it is non-zero, so a complete run's report never
+ * grows a line that says nothing (silence there is the correct, true
+ * statement "everything was complete").
  */
 export function buildRepoGradingReportMarkdown(
   log: RepoGradingRunLog,
@@ -230,12 +308,20 @@ export function buildRepoGradingReportMarkdown(
     `Generated ${meta.generatedAt}`,
     "",
     `Attempted ${summary.attempted} repo(s): ${summary.graded} graded, ${summary.skipped} skipped, ${summary.failed} failed.`,
-    "",
   ];
+
+  if (summary.digestTruncatedGraded > 0) {
+    lines.push(
+      `${summary.digestTruncatedGraded} of the graded repo(s) were graded on partial input - their folder digest hit the ingest cap.`
+    );
+  }
+
+  lines.push("");
 
   for (const entry of log.entries) {
     const parts = [`**${entry.repo}**: ${REPO_GRADING_OUTCOME_LABELS[entry.outcome]}`];
     if (entry.score) parts.push(`score ${entry.score}`);
+    if (entry.digestTruncated) parts.push("partial input - folder digest truncated");
     if (entry.reason) parts.push(entry.reason);
     lines.push(`- ${parts.join(" - ")}`);
   }
@@ -312,6 +398,7 @@ function coerceEntry(raw: unknown): RepoGradingLogEntry | null {
     reason: typeof o.reason === "string" ? o.reason : "",
     score: typeof o.score === "string" ? o.score : "",
     at: typeof o.at === "string" ? o.at : "",
+    digestTruncated: !!o.digestTruncated,
   };
 }
 

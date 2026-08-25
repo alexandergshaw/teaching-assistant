@@ -160,7 +160,12 @@ export async function gradeTileRepos(opts: {
   const notes: string[] = [];
   // R1.2: one log entry per repo ATTEMPTED, carrying the same reason text
   // already pushed to `notes` above - never a second, differently-worded
-  // account of the same skip/failure.
+  // account of the same skip/failure. Every entry that reaches `gradeRepoAction`
+  // also carries that call's `digestTruncated` (entry 344) - whether the
+  // ingest hit its cap collecting the repo's folder - onto the entry itself,
+  // which used to be computed and thrown away here entirely; see
+  // repo-grading-log.ts's header for why that stays a separate field rather
+  // than folded into `reason` or into the run-level `truncated` below.
   const logEntries: RepoGradingLogEntry[] = [];
   // R1.5: the run must say when it stopped short rather than let a shorter
   // entry list silently read as "there were none".
@@ -287,7 +292,15 @@ export async function gradeTileRepos(opts: {
       if (!gr) {
         const reason = "no result returned";
         notes.push(`${label}: ${reason}`);
-        logEntries.push(buildRepoGradingLogEntry({ repo: student.repo, outcome: "failed", reason, at: new Date().toISOString() }));
+        logEntries.push(
+          buildRepoGradingLogEntry({
+            repo: student.repo,
+            outcome: "failed",
+            reason,
+            at: new Date().toISOString(),
+            digestTruncated: r.digestTruncated,
+          })
+        );
         continue;
       }
 
@@ -295,7 +308,13 @@ export async function gradeTileRepos(opts: {
       gr.userId = student.canvasUserId && /^\d+$/.test(student.canvasUserId) ? Number(student.canvasUserId) : undefined;
       results.push(gr);
       logEntries.push(
-        buildRepoGradingLogEntry({ repo: student.repo, outcome: "graded", score: gr.totalScore, at: new Date().toISOString() })
+        buildRepoGradingLogEntry({
+          repo: student.repo,
+          outcome: "graded",
+          score: gr.totalScore,
+          at: new Date().toISOString(),
+          digestTruncated: r.digestTruncated,
+        })
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -652,7 +671,15 @@ export async function gradeOrgRepos(opts: {
       if (!gr) {
         const reason = "no result returned";
         notes.push(`${fullName}: ${reason}`);
-        logEntries.push(buildRepoGradingLogEntry({ repo: fullName, outcome: "failed", reason, at: new Date().toISOString() }));
+        logEntries.push(
+          buildRepoGradingLogEntry({
+            repo: fullName,
+            outcome: "failed",
+            reason,
+            at: new Date().toISOString(),
+            digestTruncated: r.digestTruncated,
+          })
+        );
         continue;
       }
 
@@ -660,7 +687,13 @@ export async function gradeOrgRepos(opts: {
       results.push(gr);
       notes.push(`${fullName}: graded${gr.totalScore ? ` - ${gr.totalScore}` : ""}${instructionsSourceNote}`);
       logEntries.push(
-        buildRepoGradingLogEntry({ repo: fullName, outcome: "graded", score: gr.totalScore, at: new Date().toISOString() })
+        buildRepoGradingLogEntry({
+          repo: fullName,
+          outcome: "graded",
+          score: gr.totalScore,
+          at: new Date().toISOString(),
+          digestTruncated: r.digestTruncated,
+        })
       );
 
       const block: string[] = [`${fullName}${instructionsSourceNote}`];

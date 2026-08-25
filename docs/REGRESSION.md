@@ -32826,3 +32826,95 @@ engine tests while the output-semantics test correctly stays green.
 - **`maxBlobBytes` is a git-reported size**, so a file whose reported size and
   fetched length disagree is still bounded only by the per-file slice.
 
+
+## 345. The other two grading surfaces report their cuts - and a log that had been shipped dead since entry 342
+
+Entry 344 fixed folder-scoped grading completeness and closed with an explicit
+outstanding item: the flags were surfaced in the Repo Grades view only, while
+"the Grading tab's GitHub panel returns `truncatedRepos` and does not render
+any of it" and the workflow path carried the digest without showing anything.
+This closes both - and found a third, worse thing on the way.
+
+### The dead artifact
+
+1. **THE WORKFLOW GRADING LOG HAD NEVER BEEN REACHABLE.** Entry 342 built a
+   per-repo run log and attached it to the `grading_drafts` row; R1.6 of its
+   contract required it downloadable from Drafted Grades. **That half was
+   specified and never built.** A grep for `repoGradingLog` across
+   `src/app/components` returned NOTHING - the log had been written on every
+   run since, and no human could open it. Every gate stayed green throughout,
+   because vitest here is node-env and renders no component, so nothing could
+   have caught it but looking.
+2. **THE REACHABILITY CHECK CAME BEFORE THE UI, AND IT MATTERED.** The brief
+   required proving the log actually reaches the browser before building
+   anything against it. It does - `DraftedGradesTab` loads drafts directly
+   through the browser Supabase client, and `coerceGradingDraftPayload` /
+   `coerceRepoGradingRunLog` preserve it. **But the sibling server actions
+   `listPendingGradingDraftsAction` and `getGradingDraftAction` DO strip the
+   payload.** The tab does not use them on this path, so it is not a live bug -
+   it is a loaded gun: anything that later switches to those actions loses the
+   log again, silently, and the panel would render nothing with no error.
+
+### The two surfaces
+
+3. **THE GITHUB PANEL NAMES THE REPOS, AND RENDERS NOTHING WHEN NOTHING WAS
+   CUT.** A count ("2 repos truncated") sends the instructor hunting; the names
+   do not. And a permanent "0 truncated" line trains people to ignore the row
+   on the day it matters, so the notice exists only when there is something to
+   say. The two facts stay separate - the ingest hit a cap collecting the
+   folder, versus the assembled text was cut before the model saw it - because
+   they are different budgets and a reader chasing missing code needs to know
+   which one to raise.
+4. **A RESTORED RUN THAT LOST ITS WARNING WOULD BE WORSE THAN NO PERSISTENCE.**
+   `truncatedRepos` is a REQUIRED field on the stored run, so a blob written
+   before the field existed restores as "no run" rather than as "nothing was
+   truncated" - it cannot know, so it refuses to claim. The same posture as
+   `unknown` never collapsing into `hideable` (entry 340) and a guard that
+   cannot verify refusing rather than assuming (entry 332's C4).
+5. **`submissionTruncated` SURVIVES THE SHARED STRIP BY RE-ATTACHMENT, AND THE
+   INDEX-PAIRING WAS VERIFIED, NOT ASSUMED.** `stripGradingRunForDraft` is an
+   allowlist that predates the field and drops it, so the store re-attaches it
+   by pairing against the unstripped input. That is only safe if the strip
+   preserves order and length one-to-one - it does (`results.map(...)`,
+   `grading-review-rows.ts:53`), checked directly, because a mismatch there
+   would tell the instructor the WRONG student's submission was truncated.
+
+### The workflow log
+
+6. **`digestTruncated` IS ITS OWN FIELD, NOT A `reason`.** A truncated repo is
+   still `graded` - it produced a score - and R1.2 fixes `reason`'s meaning as
+   "why this is NOT graded". Folding the flag in there would have broken that
+   contract and made a graded repo look skipped. The outcome enum is untouched;
+   the CSV gains a column.
+7. **THE TWO TRUNCATIONS NEVER MERGE.** The RUN was cut short (repos never
+   attempted) and THIS REPO was read partially are separate facts, kept
+   separate in the summary counts, the CSV and the Markdown report. Merging
+   them would tell an instructor to raise the wrong budget - the same reasoning
+   entry 344 applied to the two grading-side cuts.
+8. **The report says how many repos were graded on partial input, and only when
+   there were any.** Silence on a run where several were partial reads as
+   "everything was complete".
+
+### Gates
+
+`npx eslint src` 0 errors (the same 4 pre-existing warnings in untouched
+files); `npx tsc --noEmit` clean; full `vitest run` **679 files / 13785 tests**
+green, up from 13754; `npx next build` "Compiled successfully" and "Finished
+TypeScript". All three implementers sabotage-checked their own load-bearing
+assertion and proved the restore byte-identical.
+
+### Limits
+
+- **The Drafted Grades panel shows run-level aggregates only**, not a per-entry
+  table - deliberately, since the per-repo field was landing concurrently and a
+  hardcoded column list would have omitted it. Per-repo detail is in the CSV
+  and JSON downloads.
+- **The strip-on-the-server-action path is still a trap** (item 2). It is not
+  wired today and nothing warns you if you wire it tomorrow.
+- **None of this has run against a real repo or a real cron tick.** The
+  formatters and decisions are pure and tested; the rendering, the downloads
+  and the unattended report remain unexercised outside stubs.
+- **Nothing surfaces the ingest's per-reason skip COUNTS** (files dropped for
+  type, size, or the cap) that entry 344 added to the digest. Only the boolean
+  "something was truncated" is shown, on any surface.
+

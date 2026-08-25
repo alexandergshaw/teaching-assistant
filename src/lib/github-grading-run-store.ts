@@ -31,6 +31,16 @@ const RUN_KEY = "ta-github-grading-run";
 export interface StoredGithubGradingRun {
   gradedAt: string;
   lastGradedFolder: string;
+  // C2 (docs/folder-scoped-grading-completeness-acceptance-criteria.md):
+  // which queued repos had their folder ingest hit a cap this run. Persisted
+  // deliberately, not dropped - a restored run that silently lost this fact
+  // would tell the instructor their submission was complete when it was not,
+  // the exact defect entry 344 exists to remove. Required (not optional) like
+  // rubricAreaNames/fullCreditChecklist below: a blob saved before this field
+  // existed cannot say whether anything was truncated, so it is treated as
+  // untrustworthy and restores as "no run" rather than as a run that silently
+  // claims nothing was cut.
+  truncatedRepos: string[];
   run: GradingRun;
 }
 
@@ -54,12 +64,29 @@ export function serializeGithubGradingRun(input: {
   run: GradingRun;
   gradedAt: string;
   lastGradedFolder: string;
+  truncatedRepos: string[];
 }): string {
   const stripped = stripGradingRunForDraft(input.run);
+  // stripGradeResultForDraft (grading-review-rows.ts, shared with
+  // grading_drafts) is an explicit allowlist that predates
+  // `submissionTruncated` (docs/folder-scoped-grading-completeness-acceptance
+  // -criteria.md C2) and drops it along with the file-bytes fields it exists
+  // to strip. Re-attached here by index-pairing against the untouched input -
+  // not because the shared strip is wrong for its own callers, but because a
+  // restored run silently missing its truncation warning would tell the
+  // instructor their submission was complete when it was not, the same
+  // defect this whole feature exists to remove. The value re-attached is a
+  // single boolean already computed server-side, never any of the raw
+  // bytes/preview text the R2.4 strip exists to keep out of localStorage.
+  const resultsWithTruncation = stripped.results.map((result, i) => ({
+    ...result,
+    submissionTruncated: input.run.results[i]?.submissionTruncated,
+  }));
   const stored: StoredGithubGradingRun = {
     gradedAt: input.gradedAt,
     lastGradedFolder: input.lastGradedFolder,
-    run: stripped,
+    truncatedRepos: input.truncatedRepos,
+    run: { ...stripped, results: resultsWithTruncation },
   };
   return JSON.stringify(stored);
 }
@@ -134,6 +161,11 @@ function parseGradeResult(raw: unknown): GradeResult | null {
   const userId = typeof raw.userId === "number" ? raw.userId : undefined;
   const gradedRepo = parseNullableString(raw.gradedRepo);
   const gradedRef = parseNullableString(raw.gradedRef);
+  // C2: optional like userId/gradedRepo/gradedRef above - absent (older
+  // stored run, or a result the field was never set on) or wrong-typed
+  // degrades to undefined rather than invalidating the whole run, since this
+  // one flag being unreadable does not make the rest of the result untrustworthy.
+  const submissionTruncated = typeof raw.submissionTruncated === "boolean" ? raw.submissionTruncated : undefined;
 
   return {
     student: raw.student,
@@ -148,6 +180,7 @@ function parseGradeResult(raw: unknown): GradeResult | null {
     userId,
     gradedRepo,
     gradedRef,
+    submissionTruncated,
   };
 }
 
@@ -187,9 +220,14 @@ export function parseStoredGithubGradingRun(raw: string | null): StoredGithubGra
   if (!isPlainObject(parsed)) return null;
   if (typeof parsed.gradedAt !== "string") return null;
   if (typeof parsed.lastGradedFolder !== "string") return null;
+  // Required, like rubricAreaNames/fullCreditChecklist below - see the
+  // interface's doc comment for why a blob predating this field is treated
+  // as untrustworthy rather than defaulting to "nothing was truncated".
+  const truncatedRepos = parseStringArray(parsed.truncatedRepos);
+  if (truncatedRepos === null) return null;
   const run = parseGradingRun(parsed.run);
   if (run === null) return null;
-  return { gradedAt: parsed.gradedAt, lastGradedFolder: parsed.lastGradedFolder, run };
+  return { gradedAt: parsed.gradedAt, lastGradedFolder: parsed.lastGradedFolder, truncatedRepos, run };
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +252,7 @@ export function persistGithubGradingRun(input: {
   run: GradingRun;
   gradedAt: string;
   lastGradedFolder: string;
+  truncatedRepos: string[];
 }): void {
   if (typeof window === "undefined") return;
   try {
@@ -239,4 +278,52 @@ export function describeRestoredGithubGradingRun(gradedAtIso: string): string {
   const parsed = new Date(gradedAtIso);
   const when = Number.isNaN(parsed.getTime()) ? gradedAtIso : parsed.toLocaleString();
   return `Restored from your last run, graded ${when}. Re-grade to refresh these results.`;
+}
+
+// ---------------------------------------------------------------------------
+// C2 (docs/folder-scoped-grading-completeness-acceptance-criteria.md) - the
+// "reachability catch" entry 344 closed for the Repo Grades view but left
+// open for this panel: `gradeReposAction` returns `truncatedRepos` (repos
+// whose folder ingest hit a file/byte cap) and each `GradeResult` carries
+// `submissionTruncated` (the assembled text was cut again, before the model
+// ever saw it) - both computed, both returned, neither rendered here. Kept
+// as a pure helper (not inline JSX) because vitest is node-env and renders
+// no component: the wording, which repos/students get named, and whether to
+// render anything at all must all be directly testable.
+//
+// Reported as two SEPARATE facts, never merged into one "truncated" line -
+// they are different cuts at different layers (the ingest cap vs. the
+// pre-prompt assembly cap), and an instructor chasing missing code needs to
+// know which budget to raise.
+
+export interface GithubGradingTruncationNotice {
+  /** Set only when at least one repo's folder ingest hit a cap. */
+  ingestMessage: string | null;
+  /** Set only when at least one result's assembled text was cut before the model saw it. */
+  submissionMessage: string | null;
+}
+
+/**
+ * Builds the truncation notice for a completed run, or null when nothing was
+ * truncated. Deliberately returns null rather than a "0 truncated" message:
+ * a permanent all-clear line trains readers to ignore the one row where it
+ * matters.
+ */
+export function describeGithubGradingTruncation(
+  results: Array<Pick<GradeResult, "student" | "submissionTruncated">>,
+  truncatedRepos: string[]
+): GithubGradingTruncationNotice | null {
+  const repos = truncatedRepos.map((name) => name.trim()).filter((name) => name.length > 0);
+  const students = results.filter((r) => r.submissionTruncated === true).map((r) => r.student);
+  if (repos.length === 0 && students.length === 0) return null;
+  return {
+    ingestMessage:
+      repos.length > 0
+        ? `Folder ingest hit its cap and left files out for ${repos.length} repo${repos.length === 1 ? "" : "s"}: ${repos.join(", ")}.`
+        : null,
+    submissionMessage:
+      students.length > 0
+        ? `The assembled submission text was cut before grading for ${students.length} student${students.length === 1 ? "" : "s"}: ${students.join(", ")}.`
+        : null,
+  };
 }

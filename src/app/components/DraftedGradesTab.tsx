@@ -15,6 +15,7 @@ import TabShell from "./TabShell";
 import CommentEditModal from "./drafted-grades/CommentEditModal";
 import SubmissionCodePanel from "./drafted-grades/SubmissionCodePanel";
 import AssignmentChecklistPanel from "./drafted-grades/AssignmentChecklistPanel";
+import RepoGradingLogPanel from "./drafted-grades/RepoGradingLogPanel";
 import { buildAssignmentChecklistSections, applyDerivedChecklist } from "@/lib/grading-draft-checklist";
 import {
   buildDraftSections,
@@ -489,6 +490,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           </>
                         )}
                       </div>
+                      <RepoGradingLogPanel draft={draft} />
                     </div>
                     <div className={styles.draftSectionActions}>
                       {editingDraftId === draft.id ? (

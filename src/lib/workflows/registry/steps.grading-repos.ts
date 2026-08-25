@@ -292,12 +292,26 @@ export const gradingRepoSteps: StepDefinition[] = [
       const draftSummary = `${r.fullName} - Grade a repository: graded ${r.run.results.length} repo(s)`;
       // R1.2: one repo attempted here (the bound Repository input) - one
       // entry, in the same at-most-one-repo shape gradeOrgRepos/gradeTileRepos
-      // build many of.
+      // build many of. `digestTruncated` (entry 344) rides along either way -
+      // it is a fact about this call's ingest, independent of whether a
+      // result came back.
       const firstResult = r.run.results[0];
       const repoGradingLog: RepoGradingRunLog = buildRepoGradingRunLog([
         firstResult
-          ? buildRepoGradingLogEntry({ repo: r.fullName, outcome: "graded", score: firstResult.totalScore, at: new Date().toISOString() })
-          : buildRepoGradingLogEntry({ repo: r.fullName, outcome: "failed", reason: "no result returned", at: new Date().toISOString() }),
+          ? buildRepoGradingLogEntry({
+              repo: r.fullName,
+              outcome: "graded",
+              score: firstResult.totalScore,
+              at: new Date().toISOString(),
+              digestTruncated: r.digestTruncated,
+            })
+          : buildRepoGradingLogEntry({
+              repo: r.fullName,
+              outcome: "failed",
+              reason: "no result returned",
+              at: new Date().toISOString(),
+              digestTruncated: r.digestTruncated,
+            }),
       ]);
       const saveResult = await saveRepoGradingDraft({ entry, summary: draftSummary, helpers, repoGradingLog });
 

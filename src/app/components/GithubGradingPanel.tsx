@@ -27,6 +27,7 @@ import { assignmentFoldersFromTree } from "@/lib/repo-assignment-folders";
 import { useLmsAssignmentPull } from "./github-grading/useLmsAssignmentPull";
 import LmsAssignmentPullSection from "./github-grading/LmsAssignmentPullSection";
 import {
+  describeGithubGradingTruncation,
   describeRestoredGithubGradingRun,
   loadStoredGithubGradingRun,
   persistGithubGradingRun,
@@ -124,6 +125,11 @@ export default function GithubGradingPanel() {
   const [restoredGithubGradingRun] = useState(() => loadStoredGithubGradingRun());
   const [run, setRun] = useState<GradingRun | null>(restoredGithubGradingRun?.run ?? null);
   const [gradedAt, setGradedAt] = useState<string | null>(restoredGithubGradingRun?.gradedAt ?? null);
+  // docs/folder-scoped-grading-completeness-acceptance-criteria.md C2: the
+  // repos (by label/full name) whose folder ingest hit a cap during the last
+  // run - persisted alongside the run itself (see github-grading-run-store.ts)
+  // so a restored run does not silently drop this warning.
+  const [truncatedRepos, setTruncatedRepos] = useState<string[]>(restoredGithubGradingRun?.truncatedRepos ?? []);
   // R2.5: true only until the next successful grading pass - flips false the
   // moment a fresh run replaces it, so the "restored" banner never lingers
   // on results the instructor just produced themselves.
@@ -296,6 +302,7 @@ export default function GithubGradingPanel() {
     setBusy("grade");
     setError(null);
     setRun(null);
+    setTruncatedRepos([]);
     // AC A1/A2: one common folder scopes every repo in the queue for this
     // run. Blank reproduces today's whole-repo read exactly.
     const r = await gradeReposAction(
@@ -311,6 +318,7 @@ export default function GithubGradingPanel() {
       return;
     }
     const gradedAtIso = new Date().toISOString();
+    const runTruncatedRepos = r.truncatedRepos ?? [];
     setRun(r.run);
     setRubric(r.rubric);
     // AC A5: captured separately from the live `gradingFolder` control so
@@ -318,6 +326,9 @@ export default function GithubGradingPanel() {
     // folder box is edited afterward for the next run.
     setLastGradedFolder(gradingFolder);
     setGradedAt(gradedAtIso);
+    // C2: which repos, if any, had their folder ingest hit a cap this run -
+    // rendered below near the results (describeGithubGradingTruncation).
+    setTruncatedRepos(runTruncatedRepos);
     // R2.5: this run was just produced, not restored - any earlier restored
     // banner must disappear now that it has been superseded.
     setRunIsRestored(false);
@@ -325,8 +336,14 @@ export default function GithubGradingPanel() {
     // back) does not discard the model spend that just produced these scores
     // and comments. Best-effort: a quota failure inside this call loses
     // persistence for this one run only - the results above are already in
-    // React state regardless.
-    persistGithubGradingRun({ run: r.run, gradedAt: gradedAtIso, lastGradedFolder: gradingFolder });
+    // React state regardless. truncatedRepos travels with it (C2) so a
+    // restored run does not silently claim nothing was cut.
+    persistGithubGradingRun({
+      run: r.run,
+      gradedAt: gradedAtIso,
+      lastGradedFolder: gradingFolder,
+      truncatedRepos: runTruncatedRepos,
+    });
   };
 
   // Poll a dispatched run until it completes.
@@ -681,6 +698,26 @@ export default function GithubGradingPanel() {
           <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", margin: "0 0 8px" }}>
             {describeGradingFolder(normalizeGradingFolder(lastGradedFolder ?? ""))}
           </p>
+          {/* C2: named separately, never merged - see describeGithubGradingTruncation.
+              Renders nothing when nothing was truncated. */}
+          {(() => {
+            const notice = describeGithubGradingTruncation(run.results, truncatedRepos);
+            if (!notice) return null;
+            return (
+              <div style={{ margin: "0 0 10px" }}>
+                {notice.ingestMessage && (
+                  <p role="status" className={styles.fieldHint} style={{ margin: "0 0 4px" }}>
+                    {notice.ingestMessage}
+                  </p>
+                )}
+                {notice.submissionMessage && (
+                  <p role="status" className={styles.fieldHint} style={{ margin: 0 }}>
+                    {notice.submissionMessage}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
           <GradingResults
             run={run}
             canvasUrl=""

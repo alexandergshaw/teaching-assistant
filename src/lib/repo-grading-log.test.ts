@@ -13,9 +13,24 @@ import {
 
 const AT = "2026-08-24T15:04:05.123Z";
 
-function entriesFor(students: Array<{ repo: string; outcome: RepoGradingLogEntry["outcome"]; reason?: string; score?: string }>) {
+function entriesFor(
+  students: Array<{
+    repo: string;
+    outcome: RepoGradingLogEntry["outcome"];
+    reason?: string;
+    score?: string;
+    digestTruncated?: boolean;
+  }>
+) {
   return students.map((s) =>
-    buildRepoGradingLogEntry({ repo: s.repo, outcome: s.outcome, reason: s.reason, score: s.score, at: AT })
+    buildRepoGradingLogEntry({
+      repo: s.repo,
+      outcome: s.outcome,
+      reason: s.reason,
+      score: s.score,
+      at: AT,
+      digestTruncated: s.digestTruncated,
+    })
   );
 }
 
@@ -36,6 +51,104 @@ describe("buildRepoGradingLogEntry", () => {
     });
     expect(entry.reason).toBe("no folder matching week 3");
     expect(entry.score).toBe("");
+  });
+
+  // Entry 344: gradeRepoAction returns digestTruncated - whether the ingest
+  // hit its cap collecting this repo's folder - and it used to be dropped
+  // entirely on the floor by every workflow grading path.
+  it("defaults digestTruncated to false when not given", () => {
+    const entry = buildRepoGradingLogEntry({ repo: "org/alice", outcome: "graded", at: AT });
+    expect(entry.digestTruncated).toBe(false);
+  });
+
+  it("carries digestTruncated:true through when given", () => {
+    const entry = buildRepoGradingLogEntry({ repo: "org/alice", outcome: "graded", at: AT, digestTruncated: true });
+    expect(entry.digestTruncated).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Entry 344 gap: a graded repo's own digest can be truncated (the folder
+// ingest hit its cap) - a fact distinct from the outcome. This is NOT a
+// fourth outcome and NOT text stuffed into `reason` (whose meaning R1.2 fixes
+// as "the reason for anything that is NOT graded").
+// ---------------------------------------------------------------------------
+describe("digestTruncated - graded-but-truncated stays distinguishable from graded", () => {
+  it("a graded-but-truncated repo keeps outcome \"graded\" while carrying the truncation fact", () => {
+    const entry = buildRepoGradingLogEntry({
+      repo: "org/alice",
+      outcome: "graded",
+      score: "9/10",
+      at: AT,
+      digestTruncated: true,
+    });
+    expect(entry.outcome).toBe("graded");
+    expect(entry.score).toBe("9/10");
+    expect(entry.digestTruncated).toBe(true);
+    // The outcome enum itself is untouched - still exactly the three R1.2
+    // values, never a fourth "graded-partial" kind.
+    expect(["graded", "skipped", "failed"]).toContain(entry.outcome);
+  });
+
+  // SABOTAGE CHECK: this test was manually broken by making
+  // buildRepoGradingLogEntry ignore its digestTruncated option (always
+  // returning false), confirmed to turn this test red, then restored to the
+  // version in this file with no other change - diffed against a backup of
+  // repo-grading-log.ts taken before any edit in this chunk, with `git diff
+  // --no-index` against that backup showing no difference after the restore.
+  it("distinguishes a graded-but-truncated repo from a graded-and-complete one with the same outcome and score", () => {
+    const complete = buildRepoGradingLogEntry({ repo: "org/alice", outcome: "graded", score: "9/10", at: AT });
+    const truncated = buildRepoGradingLogEntry({
+      repo: "org/bob",
+      outcome: "graded",
+      score: "9/10",
+      at: AT,
+      digestTruncated: true,
+    });
+    expect(complete.outcome).toBe(truncated.outcome);
+    expect(complete.score).toBe(truncated.score);
+    expect(complete.digestTruncated).toBe(false);
+    expect(truncated.digestTruncated).toBe(true);
+    expect(complete.digestTruncated).not.toBe(truncated.digestTruncated);
+  });
+
+  it("summarizeRepoGradingRunLog counts only truncated GRADED entries, not skipped/failed ones", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([
+        { repo: "org/alice", outcome: "graded", digestTruncated: true },
+        { repo: "org/bob", outcome: "graded", digestTruncated: false },
+        { repo: "org/carol", outcome: "skipped", reason: "no folder", digestTruncated: true },
+        { repo: "org/dave", outcome: "failed", reason: "no result returned", digestTruncated: true },
+      ])
+    );
+    const summary = summarizeRepoGradingRunLog(log);
+    expect(summary.digestTruncatedGraded).toBe(1);
+    expect(summary.graded).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The run-level truncation (RepoGradingRunLog.truncated/notReached, R1.5) and
+// the per-repo digestTruncated must coexist - neither one can crowd the other
+// out of the same run's record.
+// ---------------------------------------------------------------------------
+describe("run-level truncation and per-repo digestTruncated coexist", () => {
+  it("a run that stopped short AND graded a repo on partial input carries both facts, neither lost", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([{ repo: "org/alice", outcome: "graded", score: "9/10", digestTruncated: true }]),
+      { truncated: true, notReached: ["org/bob"] }
+    );
+
+    // The run-level fact.
+    expect(log.truncated).toBe(true);
+    expect(log.notReached).toEqual(["org/bob"]);
+    // The per-repo fact, on the one entry that was actually attempted.
+    expect(log.entries[0].digestTruncated).toBe(true);
+
+    const summary = summarizeRepoGradingRunLog(log);
+    expect(summary.truncated).toBe(true);
+    expect(summary.notReachedCount).toBe(1);
+    expect(summary.digestTruncatedGraded).toBe(1);
   });
 });
 
@@ -122,6 +235,7 @@ describe("summarizeRepoGradingRunLog", () => {
       failed: 1,
       notReachedCount: 1,
       truncated: true,
+      digestTruncatedGraded: 0,
     });
   });
 
@@ -134,6 +248,7 @@ describe("summarizeRepoGradingRunLog", () => {
       failed: 0,
       notReachedCount: 0,
       truncated: false,
+      digestTruncatedGraded: 0,
     });
   });
 });
@@ -153,10 +268,22 @@ describe("formatRepoGradingLogCsv", () => {
     const csv = formatRepoGradingLogCsv(log);
     const rows = csv.split("\r\n");
 
-    expect(rows[0]).toBe("Repo,Outcome,Reason,Score,At");
-    expect(rows[1]).toBe(`org/alice,Graded,,9/10,${AT}`);
-    expect(rows[2]).toBe(`org/bob,Skipped,no folder matching week 3,,${AT}`);
+    expect(rows[0]).toBe("Repo,Outcome,Reason,Score,Digest truncated,At");
+    expect(rows[1]).toBe(`org/alice,Graded,,9/10,No,${AT}`);
+    expect(rows[2]).toBe(`org/bob,Skipped,no folder matching week 3,,No,${AT}`);
     expect(rows).toHaveLength(3);
+  });
+
+  // Entry 344's per-repo fact: a graded repo whose ingest hit its folder cap
+  // must be distinguishable in the exported CSV, not just in memory.
+  it("marks a graded-but-truncated repo's row with Digest truncated = Yes", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([{ repo: "org/alice", outcome: "graded", score: "9/10", digestTruncated: true }])
+    );
+    const csv = formatRepoGradingLogCsv(log);
+    const rows = csv.split("\r\n");
+
+    expect(rows[1]).toBe(`org/alice,Graded,,9/10,Yes,${AT}`);
   });
 
   it("escapes a reason containing a comma, a double quote, and a newline", () => {
@@ -169,7 +296,7 @@ describe("formatRepoGradingLogCsv", () => {
     // the embedded \r\n inside the quoted field must not be mistaken for a
     // row separator by a naive split, so assert on the raw string.
     expect(csv).toContain('"failed, ""bad"" input\nsecond line"');
-    expect(rows[0]).toBe("Repo,Outcome,Reason,Score,At");
+    expect(rows[0]).toBe("Repo,Outcome,Reason,Score,Digest truncated,At");
   });
 
   it("appends a not-reached row per remaining repo when the run was truncated", () => {
@@ -181,8 +308,8 @@ describe("formatRepoGradingLogCsv", () => {
     const rows = csv.split("\r\n");
 
     expect(rows).toHaveLength(4);
-    expect(rows[2]).toBe("org/bob,Not reached,The run ended before reaching this repo.,,");
-    expect(rows[3]).toBe("org/carol,Not reached,The run ended before reaching this repo.,,");
+    expect(rows[2]).toBe("org/bob,Not reached,The run ended before reaching this repo.,,,");
+    expect(rows[3]).toBe("org/carol,Not reached,The run ended before reaching this repo.,,,");
   });
 
   it("adds no not-reached rows when the run was not truncated, even if notReached were somehow set", () => {
@@ -270,6 +397,51 @@ describe("buildRepoGradingReportMarkdown", () => {
     const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
     expect(md).not.toContain("ended before reaching");
   });
+
+  // Entry 344's per-repo fact, reaching the one place an instructor with no
+  // one watching an unattended run would actually see it.
+  it("mentions how many repos were graded on partial input when at least one was", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([
+        { repo: "org/alice", outcome: "graded", score: "9/10", digestTruncated: true },
+        { repo: "org/bob", outcome: "graded", score: "8/10" },
+      ])
+    );
+    const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
+
+    expect(md).toContain("1 of the graded repo(s) were graded on partial input");
+    expect(md).toContain("**org/alice**: Graded - score 9/10 - partial input - folder digest truncated");
+    // The complete repo's own line must not pick up the same note.
+    expect(md).toContain("**org/bob**: Graded - score 8/10");
+    expect(md).not.toContain("**org/bob**: Graded - score 8/10 - partial input");
+  });
+
+  // TESTS requirement: silence when absent - a report must never invent a
+  // partial-input line for a run where nothing was truncated.
+  it("does not invent a partial-input line when no repo was graded on partial input", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([{ repo: "org/alice", outcome: "graded", score: "9/10", digestTruncated: false }])
+    );
+    const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
+
+    expect(md).not.toContain("graded on partial input");
+    expect(md).not.toContain("partial input - folder digest truncated");
+  });
+
+  // The two truncations (run-level and per-repo) must both surface, and
+  // distinctly - never merged into one statement that would point an
+  // instructor at the wrong budget to raise.
+  it("reports the run-level truncation and the per-repo digest truncation as separate, both-present facts", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([{ repo: "org/alice", outcome: "graded", score: "9/10", digestTruncated: true }]),
+      { truncated: true, notReached: ["org/bob"] }
+    );
+    const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
+
+    expect(md).toContain("1 of the graded repo(s) were graded on partial input");
+    expect(md).toContain("The run ended before reaching 1 more repo(s):");
+    expect(md).toContain("- org/bob");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -328,5 +500,16 @@ describe("coerceRepoGradingRunLog", () => {
   it("filters non-string entries out of notReached", () => {
     const coerced = coerceRepoGradingRunLog({ notReached: ["org/alice", 42, null, "org/bob"] });
     expect(coerced?.notReached).toEqual(["org/alice", "org/bob"]);
+  });
+
+  it("coerces digestTruncated to a real boolean and defaults it to false when absent", () => {
+    const coerced = coerceRepoGradingRunLog({
+      entries: [
+        { repo: "org/alice", outcome: "graded", reason: "", score: "9/10", at: AT, digestTruncated: true },
+        { repo: "org/bob", outcome: "graded", reason: "", score: "8/10", at: AT },
+      ],
+    });
+    expect(coerced?.entries[0].digestTruncated).toBe(true);
+    expect(coerced?.entries[1].digestTruncated).toBe(false);
   });
 });

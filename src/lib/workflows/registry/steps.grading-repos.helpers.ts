@@ -41,19 +41,42 @@ import {
   type RepoGradingRunLog,
 } from "@/lib/repo-grading-log";
 
-// R1 (docs/repo-grading-records-acceptance-criteria.md): a per-repo time
-// budget for gradeTileRepos/gradeOrgRepos's own loops, so a batch that would
-// otherwise run long enough to hit the unattended cron function's hard
-// ~60-second cap (see docs/AGENTS.md/CLAUDE.md's "Vercel Hobby... maxDuration
-// cap 60s") instead stops itself early, WHILE THE PROCESS IS STILL ALIVE TO
-// SAVE WHAT IT HAS - a hard kill saves nothing at all, which is the actual
-// failure mode this budget exists to avoid. 45s leaves real headroom under
-// the cap for the draft save, the run-report save, and the rest of the
-// step's own bookkeeping after the loop returns. Checked once per repo
-// (never mid-repo), so a single very slow grading call can still overrun it
-// slightly - the goal is bounding the NUMBER of additional repos attempted
-// after the budget is spent, not a hard deadline to the millisecond.
-const REPO_GRADING_TIME_BUDGET_MS = 45_000;
+// R1 (docs/repo-grading-records-acceptance-criteria.md): gradeTileRepos and
+// gradeOrgRepos loop internally, so they must stop themselves before the
+// platform kills them - a hard kill saves NOTHING, not even the record of what
+// was managed, which is the actual failure this bounding exists to avoid.
+//
+// The bound is the RUN'S OWN DEADLINE when there is one. It arrives on
+// `helpers.deadlineMs`, threaded down by `runWorkflowUnattended` from the same
+// value it already enforces between steps (`server-runner.ts`) - which is the
+// cron route's `now + 50s` inside a 60-second cap. This replaced a hardcoded
+// 45s: guessing a duration when the caller knows the real instant means the
+// guess is wrong in both directions - too generous if the run started late
+// (releases run first, under their own sub-budget), and needlessly mean if the
+// cap is ever raised.
+//
+// SAVE_RESERVE_MS is subtracted because stopping AT the deadline leaves no
+// time to persist anything, which would recreate the exact problem: the loop
+// must end while the process is still alive to write the draft and the
+// unattended report.
+const SAVE_RESERVE_MS = 8_000;
+
+// Used ONLY when no deadline was threaded - an attended run, or a caller that
+// predates the field. It is a bound, not a schedule: absent a known deadline,
+// an unbounded loop is the one option that is definitely wrong.
+const FALLBACK_BUDGET_MS = 45_000;
+
+/**
+ * The instant these loops stop starting new repos. Pure and exported so the
+ * decision is testable without a workflow, a clock, or a Canvas call.
+ *
+ * Checked once per repo, never mid-repo, so a single very slow grading call
+ * can still overrun slightly - the goal is bounding how many MORE repos are
+ * attempted once time is short, not millisecond precision.
+ */
+export function repoGradingStopAt(deadlineMs: number | undefined, startedAt: number): number {
+  return deadlineMs !== undefined ? deadlineMs - SAVE_RESERVE_MS : startedAt + FALLBACK_BUDGET_MS;
+}
 
 // Grades one already-loaded, already-week-resolved course tile's student
 // repos and saves the draft - the shared core of both batch-grade-repos-to-draft
@@ -145,7 +168,7 @@ export async function gradeTileRepos(opts: {
   const notReached: string[] = [];
   // Cache rubrics by README content to avoid redundant LLM calls.
   const rubricCache = new Map<string, string>();
-  const startedAt = Date.now();
+  const stopAt = repoGradingStopAt(helpers.deadlineMs, Date.now());
 
   for (let i = 0; i < students.length; i++) {
     const student = students[i];
@@ -156,7 +179,7 @@ export async function gradeTileRepos(opts: {
     // (and the unattended report) covering everything attempted so far,
     // instead of being hard-killed by the cron function's own cap with
     // nothing persisted at all.
-    if (Date.now() - startedAt > REPO_GRADING_TIME_BUDGET_MS) {
+    if (Date.now() >= stopAt) {
       truncated = true;
       notReached.push(...students.slice(i).map((s) => s.repo));
       break;
@@ -591,12 +614,12 @@ export async function gradeOrgRepos(opts: {
   const logEntries: RepoGradingLogEntry[] = [];
   let truncated = false;
   const notReached: string[] = [];
-  const startedAt = Date.now();
+  const stopAt = repoGradingStopAt(helpers.deadlineMs, Date.now());
 
   for (let i = 0; i < reposRes.repos.length; i++) {
     const fullName = reposRes.repos[i].fullName;
 
-    if (Date.now() - startedAt > REPO_GRADING_TIME_BUDGET_MS) {
+    if (Date.now() >= stopAt) {
       truncated = true;
       notReached.push(...reposRes.repos.slice(i).map((r) => r.fullName));
       break;

@@ -32660,3 +32660,61 @@ TypeScript".
   means a long-running course eventually drops its oldest entries - including,
   in principle, an orphan nobody cleaned up.
 
+
+## 343. The grading loop's bound is the run's real deadline, not a guessed constant
+
+Entry 342 recorded this as an explicit follow-up: a 45-second budget had been
+hardcoded into `gradeTileRepos`/`gradeOrgRepos`, "a hardcoded guess where a
+real deadline exists one layer up". This threads the real one.
+
+1. **THE RUNNER ALREADY KNEW, AND NEVER TOLD THE STEP.**
+   `runWorkflowUnattended` takes `deadlineMs` and enforces it - but only
+   BETWEEN steps and fan-out groups. A step grading thirty repos is ONE step,
+   so those checks never get a turn while it runs. It is threaded onto
+   `StepRunHelpers` now, at the single place that knows it, by rebinding
+   `helpers` in the runner rather than adding a second variable - so the scoped
+   copies built for each fan-out group carry it too, without every site
+   remembering to spread it in.
+2. **WHY THE CONSTANT WAS WRONG IN BOTH DIRECTIONS, NOT JUST IMPRECISE.**
+   Releases now run FIRST in the cron tick under their own sub-budget (entry
+   339), so a grading step can START with only a few seconds of the window
+   left. A 45s budget measured from the step's own start would sail straight
+   past the run deadline and be hard-killed - losing the draft, the run log and
+   the unattended report together, which is the one outcome all of entry 342
+   exists to prevent. A threaded deadline is an ABSOLUTE instant, so a
+   late-starting step correctly gets less. The test pins exactly this: the same
+   stop instant regardless of when the step began.
+3. **IT STOPS BEFORE THE DEADLINE, NOT AT IT.** `SAVE_RESERVE_MS` is
+   subtracted, because ending exactly at the deadline leaves no time to persist
+   anything - which would recreate the failure in a subtler form: a loop that
+   correctly decided to stop, and still saved nothing.
+4. **ABSENT MEANS "UNKNOWN", NOT "UNLIMITED".** An attended run threads no
+   deadline, and falls back to a bounded budget measured from its own start.
+   Documented as a bound rather than a schedule: without a known deadline, an
+   unbounded loop is the one option that is definitely wrong.
+5. **THE DECISION IS A PURE EXPORTED FUNCTION** (`repoGradingStopAt`), so it is
+   testable without a workflow, a clock or a Canvas call - the only way it
+   could be tested at all here, since vitest is node-env and these loops are
+   otherwise reachable only through a real run.
+
+### Gates
+
+`npx eslint src` 0 errors (the same 4 pre-existing warnings in untouched
+files); `npx tsc --noEmit` clean; full `vitest run` **674 files / 13726 tests**
+green, up from 13721; `npx next build` "Compiled successfully" and "Finished
+TypeScript". Sabotage-checked: reverting to the hardcoded budget reddens
+exactly the three tests that encode the change - the late-start case, the
+already-passed deadline, and "the threaded deadline wins" - and the restore was
+proved byte-identical.
+
+### Limits
+
+- **Only the two repo-grading loops honour it.** Every other step that loops
+  internally still has no bound; `deadlineMs` is now available to them, and
+  none of them consult it.
+- **Checked once per repo, never mid-repo**, so one very slow grading call can
+  still overrun the stop instant. The reserve absorbs a normal overrun; it is
+  not a hard guarantee.
+- **The reserve is itself a constant** (8s), chosen to cover a draft save plus
+  a report write. It has not been measured against a real slow save.
+

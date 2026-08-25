@@ -81,6 +81,20 @@ export interface StepRunHelpers {
    * consumer.
    */
   unattended?: boolean;
+  /**
+   * Absolute epoch-ms instant after which this run should stop starting new
+   * work - the SAME deadline `runWorkflowUnattended` already enforces between
+   * steps, threaded down so a step that loops internally can enforce it too.
+   *
+   * A step grading thirty repos is one step: the runner's between-steps checks
+   * never get a turn, so without this the platform kills it mid-loop and
+   * everything it had - including its record of what it managed - is lost.
+   *
+   * Absent means no deadline is known (an attended run), NOT "unlimited time".
+   * A step that loops should still bound itself in that case; see
+   * `repoGradingStopAt` for the shape.
+   */
+  deadlineMs?: number;
 }
 
 export type StepRunSummary =

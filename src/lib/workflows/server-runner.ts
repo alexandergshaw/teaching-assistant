@@ -382,7 +382,20 @@ export async function runWorkflowUnattended(opts: {
    * per-step logging (e.g. in tests that do not set up a run-log context). */
   runLog?: RunLogContext;
 }): Promise<WorkflowRunSummary> {
-  const { def, helpers } = opts;
+  const { def } = opts;
+  // The run's deadline is threaded ONTO the helpers here, at the one place
+  // that knows it, so a step which loops internally can stop itself before the
+  // platform kills it. The checks at the three `opts.deadlineMs` sites below
+  // only fire BETWEEN steps and fan-out groups, which is no help to a single
+  // step grading thirty repos: that step gets hard-killed mid-loop and loses
+  // everything it had, including its own record of what it managed.
+  //
+  // Rebinding `helpers` (rather than adding a second variable) is deliberate -
+  // every downstream use, including the scoped copies built for fan-out
+  // groups, then carries the deadline without each site having to remember to
+  // spread it in.
+  const helpers: StepRunHelpers =
+    opts.deadlineMs !== undefined ? { ...opts.helpers, deadlineMs: opts.deadlineMs } : opts.helpers;
   const stepLookup = opts.stepLookup ?? getStepDefinition;
 
   let ok: boolean;

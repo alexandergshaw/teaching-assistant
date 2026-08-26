@@ -33163,3 +33163,228 @@ Concrete, reachable, irreversible: a 100-point assignment with an attached rubri
 - `maxDepth` 2 is a silent cutoff: `assignments/unit1/module_01` offers only `assignments/unit1`, with nothing saying so.
 - The per-cell Grade path still drops `gradeRepoAction`'s 7th argument, so it ignores the README toggle while the UI says otherwise.
 - Nested folder labels keep only the last segment plus an indent, so two folders with the same leaf name and equal counts render identically.
+
+## 352. BASELINE (pre-change): how the Repo Grades view decides which rubric to grade against
+
+(Numbered 352, not 351: entry 350 item 3 already forward-references "entry
+351's follow-up work" for the assignment-picker empty-state fix, commit
+103f0bd, which is shipped but not yet written up here.)
+
+Recorded 2026-08-26, BEFORE the rubric-picker work
+(`docs/repo-grades-rubric-picker-acceptance-criteria.md`) touches any of it.
+This entry exists so the picker can be proved not to have changed any of the
+behaviour below for a course whose instructor never opens it. Every claim was
+read off the files named, not inferred.
+
+**One rubric string, global to the view, for every column.**
+`RepoGradesUiState.rubric` (`repoGradesUiState.ts:100`) is a single string
+loaded from the `ta-repo-grades-rubric` key (`:54`, `:200`) and written back
+on every state change (`:215`). It is NOT per course and NOT per column -
+`repoGradesUiState.ts:46-52`'s own comment records that as a deliberate
+choice ("a single persisted pair matches how `ta-llm-provider` persists ONE
+global provider choice"). Switching courses therefore carries the previous
+course's rubric text over, by design.
+
+**Its only input is a free-text textarea.** `RepoGradesControls.tsx:267-272`,
+`id="repo-grades-rubric"`, labelled "Rubric (optional - generated from the
+instructions if left blank)", placeholder "Paste a grading rubric, or leave
+blank to generate one from the instructions above." There is no picker, no
+list, and no import control of any kind on this surface.
+
+**Both grading paths read that one string.** `index.tsx:639` passes
+`rubric: uiState.rubric` into `useRepoGradesGradingActions`, and `:694-695`
+passes the same value plus its setter into `RepoGradesControls`. The per-cell
+path calls `gradeRepoAction(row.repo, instructions, rubric, provider,
+undefined, column.folder)` (`useRepoGradesGradingActions.ts:182`); the bulk
+path calls it with a `rubricArg` (`useRepoGradesBulkGrade.ts:162`) that is
+either that same string or the run's established shared rubric.
+
+**Blank means "the model invents one".** `gradeRepoAction` resolves
+`rubric.trim() || (await generateRubric(...))`
+(`src/app/actions/github-repos.ts:680`), and for the embedded provider feeds
+the field into `buildEmbeddedRubric` instead (`:670`). A blank field
+therefore produces a rubric derived from the assignment instructions plus
+that repo's own digest.
+
+**The bulk run already forces one rubric per run - the per-cell path does
+not.** `useRepoGradesBulkGrade.ts:234-248` runs a sequential prologue
+(`establishSharedRubric`, `:99-115`) whenever the field is blank: targets are
+graded one at a time until one succeeds, and that call's returned
+`result.rubric` becomes every remaining target's `rubric` argument, so the
+`rubric.trim() || generateRubric(...)` branch fires once per run rather than
+once per repo. Nothing persists that established rubric, so a retry of a
+partial run generates a SECOND one (recorded as still-open under entry 350).
+The per-cell Grade button has no such prologue at all: each cell graded from
+a blank field gets its own generated rubric, with its own invented point
+total.
+
+**What is logged.** Both paths append `Rubric used: <text>` to the activity
+log's free-text `detail` ONLY when the field was blank
+(`useRepoGradesGradingActions.ts:235`, `useRepoGradesBulkGrade.ts:204`) - an
+instructor-typed rubric is deliberately not repeated on every graded cell.
+Nothing records WHERE a rubric came from, because today there is only one
+possible origin.
+
+**Both feeds the picker will use are reachable but unused, today.**
+- The course row's stored export is ALREADY loaded by this page:
+  `useRepoGradesData.ts:447` calls `readExportCourseContentById`, `:461`
+  holds the result, `:471` flattens `exportContent.modules` into the
+  assignment picker's options. `ExportCourseContent.rubrics`
+  (`src/lib/lms-export-source/types.ts:73`) is populated on that same object
+  and read by nothing in the folder.
+- The live Canvas rubric sources are not touched at all. A grep of
+  `src/app/components/repo-grades/` for `.rubrics`, `fetchCanvasMetaAction`,
+  `listRubrics`, and `formatRubric` returns zero matches. `listRubrics`
+  (`src/lib/canvas-modules/rubrics.ts`) and `fetchCanvasMetaAction`
+  (`src/app/actions/grading.ts:79`) both exist and are used by other
+  surfaces.
+
+**Three facts an adversarial review found this baseline had failed to pin -
+each breakable with no test going red.**
+- The rubric and instructions fields are gated behind
+  `showRowDependentFields` in `RepoGradesControls.tsx`; the rubric box is not
+  unconditionally on screen, and a change to that gate can hide the control
+  without failing anything.
+- The per-cell path passes SIX of `gradeRepoAction`'s seven arguments
+  (`useRepoGradesGradingActions.ts:182`), omitting `useReadmeInstructions`,
+  while the bulk path passes all seven (`useRepoGradesBulkGrade.ts:162`). The
+  README checkbox is therefore honoured by "Grade all" and silently ignored
+  by the per-cell "Grade" button today. This is a real, shipped defect, not a
+  design choice.
+- The activity log's `detail` string is assembled by joining non-empty parts
+  with `" | "` in a fixed order - README note, then rubric note, then
+  feedback note (`useRepoGradesBulkGrade.ts:206`;
+  `useRepoGradesGradingActions.ts:237-243` uses the same join with the
+  provider note first). Anything parsing that log depends on the separator
+  and the order.
+- The prologue's gate (`useRepoGradesBulkGrade.ts:236`) and the log's
+  `Rubric used` gate (`:204`) are the SAME expression - `rubric.trim() === ""`
+  - on the SAME variable. They are two behaviours with one condition, and
+  changing one without the other is the most likely way to half-break this
+  area.
+
+**Posting is unaffected by any of this except through `rubricAreas`.**
+`postCanvasGrades` (`src/lib/canvas/grades.ts:58-96`) maps each area name onto
+the live assignment's OWN rubric criterion ids. Two corrections an adversarial
+review made to an earlier draft of this entry, both of which matter:
+
+- It is NOT an all-or-nothing fallback. It `continue`s past each unmatched
+  area and posts a PARTIAL breakdown covering only the areas whose names
+  matched (`:86-96`) - the same defect class entry 350a exists to prevent.
+  It returns only `{posted, failures}`, so no caller can learn that areas
+  were dropped.
+- In practice `rubricAreas` are not posted from this page AT ALL today, for
+  any rubric. `resolvePostScore` marks EVERY fraction-shaped score
+  `rescaled: true` with no `possible === pointsPossible` short-circuit
+  (`repoGradePostScore.ts:81-83`), and `gradeRepoAction` never passes
+  `pointsPossible` (`github-repos.ts:687`), so every fresh grade is
+  fraction-shaped and entry 350a's rule suppresses the breakdown before name
+  matching is ever reached. Any future claim that "the breakdown was dropped
+  because criterion names differ" is wrong until that changes.
+
+## 353. The Repo Grades view stops inventing rubrics it could have read - a picker fed by the live LMS and by the course row's own export
+
+Acceptance criteria: `docs/repo-grades-rubric-picker-acceptance-criteria.md`
+(81 items, six review passes). Baseline of the replaced behaviour: entry 352.
+
+The instructor's question was whether the repo page could have "a rubric
+picker that feeds the grading of the assignments ... fed by the live lms
+connection or the course export in the course row". It could: the consumer
+was already a single string (`gradeRepoAction`'s third argument), and BOTH
+feeds were already reachable - the export was being loaded by this very page
+and its `.rubrics` discarded (`useRepoGradesData.ts:461`), while the live
+Canvas rubric list had a shipped action nobody on this surface called.
+
+### What shipped
+
+A `Rubric source` select in `RepoGradesControls.tsx` between the instructions
+and rubric fields - a plain `<select>` with native `<optgroup>` (nothing in
+this folder imports MUI), offering: generate from the instructions (the
+unchanged default), the mapped assignment's own Canvas rubric, each live
+course rubric, each export rubric marked `(from export)`, and type-my-own.
+The rubric textarea became a DERIVED value showing exactly what will be
+graded against, read-only for a picked source. New pure modules:
+`src/lib/rubric-render.ts`, `repoGradesRubricSource.ts`,
+`repoGradesRubricCache.ts`; new hook `useRepoGradesRubricSource.ts` owning
+the one `resolveRubricForColumn` BOTH grading paths call.
+
+### The five defects the review passes caught before they shipped
+
+1. **It would have been dead for "Grade all".** The bulk path receives only a
+   folder string and `BulkGradeTarget` is `{repo, folder}`, so it could not
+   reach `column.assignmentId`. The picker would have worked per cell and
+   silently done nothing for a whole column, with every gate green.
+   `handleGradeColumn` now looks the column up and resolves once per run.
+2. **The prologue would have overridden the picked rubric.** The
+   shared-rubric prologue gated on the PAGE-LEVEL rubric string
+   (old `:236`). Under the `assignment` source that string is meaningless,
+   so a run would either grade against note text or regenerate its own
+   rubric for every target. The gate is now `resolved.text.trim() === ""`
+   (`:278`). The log's `Rubric used` gate was the SAME expression on the SAME
+   variable; both moved, and one guard fails if either had not.
+3. **The obvious renderer silently corrupts data.** `formatRubric` reads
+   snake_case `long_description`; the live rubric detail is camelCase
+   `longDescription`. Structurally assignable, so it compiles, runs, and
+   drops every long description - and it cannot be client-side at all
+   (it reaches canvas-core, which reads Canvas tokens from env). Three
+   independent passes reached this. One camelCase renderer now serves live
+   and export; `formatRubric` stays confined to the server-side assignment
+   path.
+4. **A zero-points rubric would have blanked a whole column.** A cartridge
+   criterion's `points` defaults to 0 on missing XML
+   (`cartridge-import.ts:199`) and the field is a non-optional `number`, so
+   absence is undetectable. All-zero renders valid text, parses fine, and
+   makes `deriveTotalScore` return `""` (`parsing.ts:188-190`) - every cell
+   silently unpostable. `rubricHasUsablePoints` refuses such a rubric with a
+   stated reason.
+5. **The export half shipped dead in the first pass.** `index.tsx` hardcoded
+   `exportRubrics: []` because the hook holding the export content never
+   returned it. Half the original request, absent, with 695 test files
+   green. Caught by tracing control-to-code, not by any gate. This is the
+   third occurrence of that failure class in this project.
+
+### Fixed in passing, recorded separately
+
+The per-cell `gradeRepoAction` call passed SIX of seven positional arguments
+(`useRepoGradesGradingActions.ts`), so the README-instructions checkbox was
+honoured by "Grade all" and silently ignored by the per-cell "Grade". It now
+passes all seven. This is a pre-existing defect baselined in entry 352, not
+a consequence of the picker.
+
+### Decided, not missed
+
+`rememberRubric` (`github-repos.ts:675`) now receives picked rubric text
+under the embedded provider. Left deliberately: the bank exists to collect
+human-authored rubrics, upserts by content fingerprint with
+`ignoreDuplicates: true`, and an instructor's own Canvas or export rubric is
+exactly what it is for. The alternative was widening a signature across five
+call sites, two in the workflow registry, for a risk the code does not
+support.
+
+### Honesty rules held
+
+An export carries no rubric-to-assignment association, so export rubrics are
+offered as a course-level list and never presented as a given assignment's
+rubric. A lookup failure never blocks grading - it degrades to a generated
+rubric and says why. An account-level rubric can be listed but not readable
+(`getRubric` is course-scoped), which is modelled as a real state rather
+than an option that silently always fails.
+
+### Gates
+
+`npx tsc --noEmit` clean; `npx eslint src/app/components/repo-grades` 0
+errors (1 pre-existing unrelated warning at
+`repoGradesSliceA.guards.test.ts:83`); `npx vitest run` 696 files / 14201
+tests passing, up from the pre-feature baseline of 691 / 14042. Every
+source-reading guard in `repoGradesRubricPicker.wiring.test.ts` is paired
+with a canary asserting the detector fires on a known-bad literal, so an
+inert guard fails the suite.
+
+### Limits
+
+No test renders any component (vitest is node-env, collecting only
+`src/**/*.test.ts`), so the picker's markup, labels, keyboard behaviour and
+`<optgroup>` structure are verified by reading only. The SpeedGrader
+breakdown remains unposted from this page for every source - see entry 352's
+closing note for why that is a rescaling consequence, not a criterion-name
+one.

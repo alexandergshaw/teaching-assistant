@@ -74,6 +74,8 @@ import {
 } from "./repoGradesCellEdits";
 import RepoGradesGrid from "./RepoGradesGrid";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
+import { useRepoGradesRubricSource } from "./useRepoGradesRubricSource";
+import { lmsRenderSourcesFor } from "@/lib/courses-table-helpers";
 import gridStyles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 
@@ -137,6 +139,10 @@ export default function RepoGradesTab() {
     assignmentOptions,
     exportAssignmentsLoading,
     exportAssignmentsError,
+    // The course's stored-export rubric list - the rubric picker's `export`
+    // source below. Already loaded by useRepoGradesData for assignmentOptions'
+    // export half; this is the same load, not a second fetch.
+    exportRubrics,
   } = useRepoGradesData(uiState.courseId, uiState.orgPrefix);
 
   // THE BUG THIS WAVE FIXES: the course tile already carries a student-to-
@@ -615,6 +621,30 @@ export default function RepoGradesTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanError]);
 
+  // Rubric picker (docs/repo-grades-rubric-picker-acceptance-criteria.md) -
+  // ONE hook instance, shared by RepoGradesControls' picker below and every
+  // grading call in useRepoGradesGradingActions (item 16: two grading paths
+  // must never resolve a rubric two different ways). `lmsRenderSourcesFor`
+  // is the SAME live/export availability gate useRepoGradesData.ts already
+  // uses for its own export-assignments load - reused here, not re-derived,
+  // so this reads no state useRepoGradesData does not already compute from
+  // `course` alone. `exportRubrics` is useRepoGradesData's own already-loaded
+  // export content's rubric list (no second fetch); `onAnnounce` routes this
+  // feature's one announcement channel (UX notes 3.3) through the SAME
+  // action-outcome region LinkUsernamesPanel/RepoGradesLogPanel already use
+  // below, not a new live region.
+  const lmsSources = course ? lmsRenderSourcesFor(course) : { live: false, export: false };
+  const rubricSource = useRepoGradesRubricSource({
+    courseId: uiState.courseId,
+    course,
+    exportRubrics,
+    exportAvailable: lmsSources.export,
+    exportLoading: exportAssignmentsLoading,
+    exportError: exportAssignmentsError,
+    liveAvailable: lmsSources.live,
+    onAnnounce: setPostSummary,
+  });
+
   // AC4 items 20-21 and AC5 (docs/repo-grades-view-acceptance-criteria.md):
   // per-cell score/comment edits, on-demand and bulk grading, and posting to
   // the live Canvas gradebook. Extracted into this hook once this file hit
@@ -636,7 +666,8 @@ export default function RepoGradesTab() {
     setCellEdits,
     selected,
     instructions: uiState.instructions,
-    rubric: uiState.rubric,
+    resolveRubricForColumn: rubricSource.resolveRubricForColumn,
+    columns: columnsWithMapping,
     useReadmeInstructions: uiState.useReadmeInstructions,
     bulkSelectionOnly: uiState.bulkSelectionOnly,
     courseId: uiState.courseId,
@@ -691,8 +722,17 @@ export default function RepoGradesTab() {
         folderDropNotice={folderDropNotice}
         instructions={uiState.instructions}
         onInstructionsChange={(value) => setUiState((prev) => ({ ...prev, instructions: value }))}
-        rubric={uiState.rubric}
-        onRubricChange={(value) => setUiState((prev) => ({ ...prev, rubric: value }))}
+        rubricSourceValue={rubricSource.value}
+        rubricSourceOptions={rubricSource.options}
+        onRubricSourceChange={rubricSource.onChange}
+        rubricTextareaValue={rubricSource.textareaValue}
+        rubricTextareaReadOnly={rubricSource.textareaReadOnly}
+        rubricResolving={rubricSource.resolving}
+        onRubricTextChange={rubricSource.onManualTextChange}
+        onRestoreManualRubric={rubricSource.restoreManualText}
+        rubricStaleNote={rubricSource.staleChoiceNote}
+        rubricLiveHint={rubricSource.liveRubricHint}
+        rubricExportHint={rubricSource.exportRubricHint}
         useReadmeInstructions={uiState.useReadmeInstructions}
         onUseReadmeInstructionsChange={(value) => setUiState((prev) => ({ ...prev, useReadmeInstructions: value }))}
         bulkSelectionOnly={uiState.bulkSelectionOnly}
@@ -824,6 +864,7 @@ export default function RepoGradesTab() {
           onPostOneCell={handlePostOneCell}
           columnPosting={columnPosting}
           onGradeColumn={handleGradeColumn}
+          describeColumnRubric={rubricSource.describeColumn}
           bulkRunningFolder={bulkRunningFolder}
           bulkProgress={bulkProgress}
           bulkSelectionOnly={uiState.bulkSelectionOnly}

@@ -47,12 +47,32 @@ import {
   type BulkGradePlan,
   type BulkGradeTarget,
 } from "./repoGradesBulkGrade";
+// Type-only: ResolvedRubric is useRepoGradesRubricSource.ts's own return
+// shape (docs/repo-grades-rubric-picker-acceptance-criteria.md). runBulkGrade
+// below takes ONE already-resolved rubric for the whole run - the caller
+// (useRepoGradesGradingActions.ts's handleGradeColumn) resolves it once, via
+// the SAME shared resolveRubricForColumn a per-cell grade uses, before this
+// hook ever sees it. This file does not import or call the resolver itself.
+import type { ResolvedRubric } from "./useRepoGradesRubricSource";
+
+/** AC item 64/76 - the sibling of useRepoGradesGradingActions.ts's own
+ * describeResolvedRubricForLog (duplicated rather than shared: this wave's
+ * three-agent split gives each hook file to a different owner, so a shared
+ * helper module is out of scope here - see that file's own copy for the full
+ * rationale, identical in both). `generate` keeps the existing full-text
+ * `Rubric used:` line; every other source logs its SOURCE and IDENTITY
+ * instead, plus `failureReason` when the resolver set one. */
+function describeResolvedRubricForLog(resolved: ResolvedRubric, generatedRubricText: string): string {
+  if (resolved.source === "generate") return `Rubric used: ${generatedRubricText}`;
+  const identity = resolved.identity ? ` "${resolved.identity}"` : "";
+  const failure = resolved.failureReason ? ` - ${resolved.failureReason}` : "";
+  return `Rubric source: ${resolved.source}${identity}${failure}`;
+}
 
 export interface UseRepoGradesBulkGradeParams {
   /** Grading provider, from the view's existing useLlmProvider(). */
   provider: LlmProvider;
   instructions: string;
-  rubric: string;
   useReadmeInstructions: boolean;
   /** Writes one cell's edit - index.tsx's setCellEdits wrapper. Called with
    * the same field shape handleGradeCell already writes. */
@@ -120,7 +140,11 @@ export interface UseRepoGradesBulkGradeResult {
   runningFolder: string | null;
   /** "7 of 24" style progress for the running folder, or null. */
   progress: { done: number; total: number } | null;
-  runBulkGrade: (plan: BulkGradePlan) => Promise<void>;
+  /** AC item 50 - the hook's own `rubric` param is REMOVED; the caller
+   * resolves ONE rubric for the whole run (the same shared resolver a
+   * per-cell grade uses) and hands the result straight in here, once, before
+   * the run starts. */
+  runBulkGrade: (plan: BulkGradePlan, resolved: ResolvedRubric) => Promise<void>;
 }
 
 /**
@@ -133,11 +157,11 @@ export interface UseRepoGradesBulkGradeResult {
  * second column's run once the first finishes.
  */
 export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): UseRepoGradesBulkGradeResult {
-  const { provider, instructions, rubric, useReadmeInstructions, onCellUpdate, onOutcomes, onAnnounce } = params;
+  const { provider, instructions, useReadmeInstructions, onCellUpdate, onOutcomes, onAnnounce } = params;
   const [runningFolder, setRunningFolder] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const runBulkGrade = async (plan: BulkGradePlan): Promise<void> => {
+  const runBulkGrade = async (plan: BulkGradePlan, resolved: ResolvedRubric): Promise<void> => {
     // Guard against a second concurrent run - see this function's own header
     // comment above for why this is a refusal, not a queue.
     if (runningFolder !== null) return;
@@ -186,22 +210,22 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // `detail` on success names the README path actually used (or a
       // missing-README fallback note - never silent about which repos fell
       // back to the typed instructions vs. read a per-folder README), plus
-      // U12.50's capture of `result.rubric`/`first.feedback` (see
+      // U12.50/AC item 64's capture of `result.rubric`/`first.feedback` (see
       // useRepoGradesGradingActions.ts's handleGradeCell for why the log's
       // free-text `detail` is where both land: neither is discarded, and
       // there is no per-cell UI slot for either without extending
-      // RepoGradeCellEdit, out of this wave's file set). The rubric is only
-      // worth naming here when it was GENERATED (rubricArg came from
-      // `sharedRubric` below, not the instructor's own typed field) - an
-      // instructor-typed rubric is already visible in the textarea and
-      // repeating it on every one of a run's graded cells would bloat the
-      // log for no new information.
+      // RepoGradeCellEdit, out of this wave's file set). `describeResolvedRubricForLog`
+      // reads the RUN's own `resolved` (this run's shared, picked rubric),
+      // never `rubricArg` - `rubricArg` is per-ATTEMPT (a prologue attempt
+      // can differ from the eventual `sharedRubric`), but the log must
+      // describe what the instructor actually picked for this run, which
+      // never changes mid-run.
       const readmeNote = result.readmeMissing
         ? "no README found in this folder - graded from the typed instructions instead"
         : result.readmePath
           ? `graded from ${result.readmePath}`
           : "";
-      const rubricNote = rubric.trim() === "" ? `Rubric used: ${result.rubric}` : "";
+      const rubricNote = describeResolvedRubricForLog(resolved, result.rubric);
       const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
       const detail = [readmeNote, rubricNote, feedbackNote].filter((part) => part !== "").join(" | ");
       outcomes.push({ repo: target.repo, folder: target.folder, status: "graded", score, detail });
@@ -227,17 +251,35 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
     // effectiveRubric it used, so once one succeeds, every remaining target
     // reuses that EXACT text as its own `rubric` argument, never triggering
     // gradeRepoAction's `rubric.trim() || generateRubric(...)` branch again
-    // for the rest of this run. When the instructor DID type a rubric,
-    // `sharedRubric` is simply that text from the start and nothing here
-    // changes - every target already agreed on one rubric with no setup
-    // needed.
-    let sharedRubric = rubric;
+    // for the rest of this run.
+    //
+    // AC item 72 (docs/repo-grades-rubric-picker-acceptance-criteria.md) -
+    // THE CRITICAL FIX, singled out by the adversarial pass as the worst
+    // remaining defect in the whole feature: this gate used to test the
+    // PAGE-LEVEL rubric string (the old `rubric` hook param, removed
+    // entirely - baseline docs/REGRESSION.md entry 352). Under the
+    // `assignment` picker source the page-level string was always meaningless
+    // (never fed to grading at all once the resolver existed), so testing it
+    // here would have done one of two wrong things: graded against stray note
+    // text, or fired this prologue and silently OVERWRITTEN the instructor's
+    // picked rubric with a generated one for the entire run. The gate now
+    // tests `resolved.text` - the RESOLVED rubric for the column actually
+    // being graded, from the SAME resolveRubricForColumn call handleGradeCell
+    // uses (item 16) - so a picked, non-blank rubric always skips this
+    // prologue and grades every target against the real thing, while a
+    // `generate` choice (still blank `resolved.text`) runs this prologue
+    // exactly as before. AC item 76: this is one of the two gates that used
+    // to be the SAME expression on the SAME variable as the log's `Rubric
+    // used` gate above (AC item 64 changed that one); a guard in
+    // repoGradesRubricPicker.wiring.test.ts pins that both moved off the old
+    // page-level string.
+    let sharedRubric = resolved.text;
     let cursor = 0;
-    if (rubric.trim() === "" && targets.length > 0) {
+    if (resolved.text.trim() === "" && targets.length > 0) {
       const prologue = await establishSharedRubric(
         targets,
-        rubric,
-        (target) => gradeOneTarget(target, rubric),
+        resolved.text,
+        (target) => gradeOneTarget(target, resolved.text),
         () => {
           done += 1;
           setProgress({ done, total: targets.length });

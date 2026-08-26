@@ -411,3 +411,164 @@ export function persistFolderSelection(courseId: string, folder: string): void {
     // best-effort persistence only, matching persistRepoGradesUiState above.
   }
 }
+
+// ---------------------------------------------------------------------------
+// Per-course rubric picker choice
+// (docs/repo-grades-rubric-picker-acceptance-criteria.md item 19, overridden
+// by item 46). Item 46: "ONE key, not two" - the source AND the chosen
+// rubric's identity are carried together in a SINGLE persisted value. Two
+// separate keys (one for source, one for identity) can desync - a course
+// switch, a partial write, or a hand-edited blob could leave a `live` source
+// paired with a DIFFERENT course's rubric id - which is precisely the
+// wrong-rubric failure this whole feature exists to prevent (item 73).
+//
+// A course's choice is encoded as a single string, "<source>:<identity>":
+//   - source is one of RUBRIC_SOURCE_KINDS below.
+//   - identity is empty for "generate" (nothing to identify) and
+//     "assignment" (resolved PER COLUMN at grade time, not once for the whole
+//     page - repoGradesRubricCache.ts owns that per-column resolution, this
+//     module only remembers which SOURCE was chosen) and "manual" (its TEXT
+//     is a separate per-course value, see RUBRIC_MANUAL_TEXT_KEY below - not
+//     part of this encoding). identity is the chosen live Canvas rubric's id
+//     for "live", and the chosen export rubric's disambiguated identity
+//     (item 47: title, duplicates broken by occurrence index, e.g.
+//     "1:Grading Rubric") for "export".
+//
+// decodeRepoGradeRubricChoice splits on the FIRST colon only (indexOf, not a
+// naive whole-string `split`), so an identity that itself contains a colon -
+// an export rubric TITLED with one, or an occurrence-index identity like
+// "2:Section 3: Grading" - is preserved intact rather than truncated at the
+// wrong point. This is the exact hazard repoGradesAssignmentSources.ts's
+// EXPORT_VALUE_PREFIX comment already names for this page's sibling
+// assignment picker; encodeRepoGradeRubricChoice/decodeRepoGradeRubricChoice
+// below are the only code in this app that knows this shape.
+
+const RUBRIC_SOURCE_KEY = "ta-repo-grades-rubric-source";
+// Item 73 (withdraws item 20): the manual rubric TEXT must also become per
+// course. The pre-existing global RUBRIC_KEY above is left untouched exactly
+// as the brief requires - a mid-typing reload still loses nothing - but it is
+// no longer what the `manual` source restores; this second, PER-COURSE key
+// is, so course B can never show course A's typed rubric with nothing on
+// screen saying so.
+const RUBRIC_MANUAL_TEXT_KEY = "ta-repo-grades-rubric-manual-text";
+
+const RUBRIC_SOURCE_KINDS = ["generate", "assignment", "live", "export", "manual"] as const;
+
+export type RepoGradeRubricSourceKind = (typeof RUBRIC_SOURCE_KINDS)[number];
+
+function isRubricSourceKind(value: string): value is RepoGradeRubricSourceKind {
+  return (RUBRIC_SOURCE_KINDS as readonly string[]).includes(value);
+}
+
+/** One course's rubric-picker choice: which source, and (for `live`/`export`)
+ * which rubric within that source. See the module comment above for what
+ * `identity` holds per source. */
+export interface RepoGradeRubricChoice {
+  source: RepoGradeRubricSourceKind;
+  identity: string;
+}
+
+/** The choice a course that has never touched the picker gets - `generate`,
+ * matching item 4's "byte-for-byte today's behaviour" default. */
+export function defaultRepoGradeRubricChoice(): RepoGradeRubricChoice {
+  return { source: "generate", identity: "" };
+}
+
+/** Encodes a choice as the single string persisted per course - see the
+ * module comment above for the shape and why the split is first-colon-only. */
+export function encodeRepoGradeRubricChoice(choice: RepoGradeRubricChoice): string {
+  return `${choice.source}:${choice.identity}`;
+}
+
+/** Decodes a persisted choice string back into its source and identity.
+ * Never trusts its input: a missing colon or an unrecognised source name both
+ * degrade to defaultRepoGradeRubricChoice() rather than throwing or
+ * fabricating a source that does not exist - the same "never trust stored
+ * data" posture parseRepoGradeAssignmentValue (repoGradesAssignmentSources.ts)
+ * already takes for this page's sibling picker.
+ *
+ * This function does NOT check whether `identity` still names a rubric that
+ * exists (a deleted export, a removed Canvas rubric) - item 21's "degrades to
+ * generate with a visible note" needs the CURRENT live/export option lists to
+ * check against, which this pure storage module never has; that check is the
+ * caller's job, against the options it loaded. */
+export function decodeRepoGradeRubricChoice(value: string): RepoGradeRubricChoice {
+  const separatorIndex = value.indexOf(":");
+  if (separatorIndex === -1) return defaultRepoGradeRubricChoice();
+  const source = value.slice(0, separatorIndex);
+  const identity = value.slice(separatorIndex + 1);
+  if (!isRubricSourceKind(source)) return defaultRepoGradeRubricChoice();
+  return { source, identity };
+}
+
+// Both RUBRIC_SOURCE_KEY and RUBRIC_MANUAL_TEXT_KEY store a plain
+// Record<courseId, string> - the identical shape parseFolderByCourse already
+// parses above, just for a different key. Kept as its own named function
+// (rather than reusing parseFolderByCourse directly under a name that talks
+// about folders) so this section's comments and behaviour stay
+// self-contained, matching how parseAssignmentMapByCourse/parseLogByCourse/
+// parseFolderByCourse are each their own function despite sharing the same
+// "never trust stored data" shape.
+function parseRubricStringByCourse(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const result: Record<string, string> = {};
+    for (const [courseId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === "string") result[courseId] = value;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+/** Reads `courseId`'s persisted rubric-picker choice, decoded and validated -
+ * never trusts stored data: a blank courseId, nothing stored, malformed JSON,
+ * or a malformed/unrecognised encoded value all read as
+ * defaultRepoGradeRubricChoice(). */
+export function loadRepoGradeRubricChoice(courseId: string): RepoGradeRubricChoice {
+  if (typeof window === "undefined" || !courseId) return defaultRepoGradeRubricChoice();
+  const byCourse = parseRubricStringByCourse(localStorage.getItem(RUBRIC_SOURCE_KEY));
+  const stored = byCourse[courseId];
+  return stored === undefined ? defaultRepoGradeRubricChoice() : decodeRepoGradeRubricChoice(stored);
+}
+
+/** Writes `courseId`'s rubric-picker choice, preserving every OTHER course's
+ * choice untouched - the exact shape loadFolderSelection/persistFolderSelection
+ * use above. A blank courseId is a no-op, matching every other per-course
+ * pair in this file. */
+export function persistRepoGradeRubricChoice(courseId: string, choice: RepoGradeRubricChoice): void {
+  if (typeof window === "undefined" || !courseId) return;
+  try {
+    const byCourse = parseRubricStringByCourse(localStorage.getItem(RUBRIC_SOURCE_KEY));
+    byCourse[courseId] = encodeRepoGradeRubricChoice(choice);
+    localStorage.setItem(RUBRIC_SOURCE_KEY, JSON.stringify(byCourse));
+  } catch {
+    // best-effort persistence only, matching persistRepoGradesUiState above.
+  }
+}
+
+/** Reads `courseId`'s persisted MANUAL rubric text (item 73) - "" when
+ * nothing is stored yet or courseId is blank. Deliberately separate from the
+ * pre-existing global RUBRIC_KEY, which is left untouched by this feature -
+ * see the module comment above. */
+export function loadRepoGradeManualRubricText(courseId: string): string {
+  if (typeof window === "undefined" || !courseId) return "";
+  const byCourse = parseRubricStringByCourse(localStorage.getItem(RUBRIC_MANUAL_TEXT_KEY));
+  return byCourse[courseId] ?? "";
+}
+
+/** Writes `courseId`'s manual rubric text, preserving every OTHER course's
+ * text untouched. Best-effort, matching persistFolderSelection above. */
+export function persistRepoGradeManualRubricText(courseId: string, text: string): void {
+  if (typeof window === "undefined" || !courseId) return;
+  try {
+    const byCourse = parseRubricStringByCourse(localStorage.getItem(RUBRIC_MANUAL_TEXT_KEY));
+    byCourse[courseId] = text;
+    localStorage.setItem(RUBRIC_MANUAL_TEXT_KEY, JSON.stringify(byCourse));
+  } catch {
+    // best-effort persistence only, matching persistRepoGradesUiState above.
+  }
+}

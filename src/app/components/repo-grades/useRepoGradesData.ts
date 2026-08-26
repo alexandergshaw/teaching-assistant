@@ -209,6 +209,19 @@ export interface UseRepoGradesDataResult {
    * there is nothing to report as an error).
    */
   exportAssignmentsError: string | null;
+  /**
+   * The course's stored export's rubric list (`ExportCourseContent.rubrics`,
+   * a `CartridgeRubric[]`) - the rubric picker's `export` source (docs/repo-
+   * grades-rubric-picker-acceptance-criteria.md). This is the SAME
+   * `exportContent` load that already feeds `assignmentOptions`' export half
+   * above, not a second fetch - `.rubrics` is simply the field that load was
+   * not yet returning. Always an array, never `undefined`, even when there is
+   * no export at all (`exportContent` is `null`): `ExportCourseContent.rubrics`
+   * is itself always an array by its own doc comment (lms-export-source/
+   * types.ts), and `exportContent?.rubrics ?? []` degrades a missing export
+   * to that same empty array rather than needing a separate guard.
+   */
+  exportRubrics: ExportCourseContent["rubrics"];
   /** Manually re-runs the org scan for the current course/prefix (e.g. a
    * "Refresh" button after the instructor pushes new repos). */
   reloadScan: () => void;
@@ -645,6 +658,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     assignmentOptions,
     exportAssignmentsLoading,
     exportAssignmentsError,
+    exportRubrics: exportContent?.rubrics ?? [],
     reloadScan,
     acceptBinding,
     liveLinkBlockedReason,

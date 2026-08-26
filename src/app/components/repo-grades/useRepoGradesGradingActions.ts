@@ -50,6 +50,34 @@ import {
 } from "./repoGradesPosting";
 import { buildBulkGradePlan, type BulkGradeOutcome } from "./repoGradesBulkGrade";
 import { useRepoGradesBulkGrade } from "./useRepoGradesBulkGrade";
+// Type-only: ResolvedRubric is useRepoGradesRubricSource.ts's own return
+// shape (docs/repo-grades-rubric-picker-acceptance-criteria.md). This file
+// never resolves a rubric itself - both grading paths below call the ONE
+// shared `resolveRubricForColumn` the caller (index.tsx) passes in, which is
+// the sole guarantee (item 16) that a per-cell grade and a bulk column grade
+// can never disagree about which rubric a column uses.
+import type { ResolvedRubric } from "./useRepoGradesRubricSource";
+
+/** AC item 64/76: both grading paths' log `detail` used to gate a
+ * `Rubric used: <text>` line on the page-level rubric field being blank
+ * (baseline docs/REGRESSION.md entry 352). That field no longer exists here
+ * - `ResolvedRubric` replaces it - so the gate becomes source-aware instead
+ * of blank-aware: `generate` (the field was left blank, exactly today's
+ * behaviour) still logs the full generated text, because that text is the
+ * only place it is ever visible. Every OTHER source (`assignment`, `live`,
+ * `export`, `manual`) is already visible elsewhere (the textarea, or the
+ * column header's rubric description) - repeating its full text on every
+ * graded cell would bloat the log for no new information, so this logs only
+ * WHICH source and WHICH rubric were used, matching the "only show if it
+ * adds something" rule this file already applies to `feedbackNote` below.
+ * `failureReason` is appended whenever the resolver set one (AC item 13: a
+ * lookup failure never blocks grading, but it must never be silent either). */
+function describeResolvedRubricForLog(resolved: ResolvedRubric, generatedRubricText: string): string {
+  if (resolved.source === "generate") return `Rubric used: ${generatedRubricText}`;
+  const identity = resolved.identity ? ` "${resolved.identity}"` : "";
+  const failure = resolved.failureReason ? ` - ${resolved.failureReason}` : "";
+  return `Rubric source: ${resolved.source}${identity}${failure}`;
+}
 
 /** buildRepoGradeRows always emits a cell with score "" - the live score
  * lives in `cellEdits`. buildBulkGradePlan reads `cell.score` as its
@@ -73,7 +101,20 @@ export interface UseRepoGradesGradingActionsParams {
   /** The checked repo ids (index.tsx's `selected`). */
   selected: ReadonlySet<string>;
   instructions: string;
-  rubric: string;
+  /** The shared resolver both grading paths use (item 16) -
+   * useRepoGradesRubricSource.ts's `resolveRubricForColumn`, passed straight
+   * through from index.tsx's hook call. Replaces the old page-level
+   * `rubric: string` param entirely; neither this hook nor its bulk-grade
+   * sibling reads a page-level rubric string anymore. */
+  resolveRubricForColumn: (assignmentId: string | null) => Promise<ResolvedRubric>;
+  /** AC item 50 - the FULL, mapping-applied column list (index.tsx's
+   * `columnsWithMapping`, never the folder-scoped `displayedColumns`), so
+   * handleGradeColumn can look up ANY folder's `assignmentId` by name even
+   * when the grid is currently scoped to a different folder. Without this
+   * the bulk path could not reach a column's assignment mapping at all - see
+   * handleGradeColumn's own comment below for why that is exactly the
+   * reachability failure this project has shipped before. */
+  columns: readonly RepoGradeColumn[];
   useReadmeInstructions: boolean;
   bulkSelectionOnly: boolean;
   /** index.tsx's uiState.courseId. Used only to reset `columnPosting` back
@@ -127,7 +168,8 @@ export function useRepoGradesGradingActions(
     setCellEdits,
     selected,
     instructions,
-    rubric,
+    resolveRubricForColumn,
+    columns,
     useReadmeInstructions,
     bulkSelectionOnly,
     courseId,
@@ -179,7 +221,31 @@ export function useRepoGradesGradingActions(
     // not to exist.
     if (cell.status !== "ungraded") return;
     setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: true, gradeError: null }));
-    const result = await gradeRepoAction(row.repo, instructions, rubric, provider, undefined, column.folder);
+    // AC item 16: the ONE shared resolver - never re-derive a rubric string
+    // from uiState here. `resolveRubricForColumn` never throws (its own
+    // contract) and always resolves, so this call never needs a try/catch of
+    // its own.
+    const resolved = await resolveRubricForColumn(column.assignmentId);
+    // AC item 57/71 (docs/repo-grades-rubric-picker-acceptance-criteria.md) -
+    // a PRE-EXISTING defect, fixed here because this call is already being
+    // rewritten to thread the resolved rubric through, not a claim of the
+    // picker feature itself: this call used to pass only SIX of
+    // gradeRepoAction's seven positional arguments (docs/REGRESSION.md entry
+    // 352), omitting `useReadmeInstructions` entirely, so the README
+    // checkbox was honoured by "Grade all" (useRepoGradesBulkGrade.ts's own
+    // call already passed it) and silently ignored by this per-cell "Grade"
+    // button. All seven are passed below - gradeRepoAction's own signature
+    // is untouched (src/app/actions/github-repos.ts:617-624 already declares
+    // seven parameters), so this needed no eighth positional argument.
+    const result = await gradeRepoAction(
+      row.repo,
+      instructions,
+      resolved.text,
+      provider,
+      undefined,
+      column.folder,
+      useReadmeInstructions
+    );
     if ("error" in result) {
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
       // L1 item 2. A grading failure otherwise leaves only a per-cell error
@@ -232,7 +298,7 @@ export function useRepoGradesGradingActions(
     // would bloat the log for no new information. `feedback` is only logged
     // when it differs from `overallComment` (the same "only show if it adds
     // something" rule DraftedGradesTab.tsx:663 already applies to the two).
-    const rubricNote = rubric.trim() === "" ? `Rubric used: ${result.rubric}` : "";
+    const rubricNote = describeResolvedRubricForLog(resolved, result.rubric);
     const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
     const detail = [
       cuts.length > 0 ? `Graded by ${provider} - ${cuts.join("; ")}` : `Graded by ${provider}`,
@@ -509,7 +575,6 @@ export function useRepoGradesGradingActions(
   const { runningFolder: bulkRunningFolder, progress: bulkProgress, runBulkGrade } = useRepoGradesBulkGrade({
     provider,
     instructions,
-    rubric,
     useReadmeInstructions,
     onCellUpdate: handleBulkCellUpdate,
     onOutcomes: handleBulkOutcomes,
@@ -518,14 +583,31 @@ export function useRepoGradesGradingActions(
 
   // withLiveScores (not raw `rows`) - see its header comment above. An empty
   // plan announces its skip reasons instead of firing a no-op batch call.
-  const handleGradeColumn = (folder: string) => {
+  //
+  // AC item 50 - THE reachability seam this feature would otherwise ship
+  // half-dead through (docs/repo-grades-rubric-picker-acceptance-criteria.md).
+  // Before this wave, this function received only `folder` (a plain string)
+  // and had no `columns` array to search, so it could never learn that
+  // column's `assignmentId` - an `assignment`-source rubric picked for a
+  // "Grade all" run would have had nothing to resolve against, silently
+  // grading the whole column against a generated rubric instead of the one
+  // the instructor picked, with every other gate green. `columns` (the FULL,
+  // mapping-applied list - see this hook's params doc comment on why not the
+  // folder-scoped displayed one) closes that: the SAME assignmentId
+  // handleGradeCell would use for a cell in this column is what gets
+  // resolved here, once, for the whole run - not per repo, matching
+  // establishSharedRubric's own "one rubric per run" rule in the sibling
+  // hook.
+  const handleGradeColumn = async (folder: string) => {
     const plan = buildBulkGradePlan({ rows: withLiveScores(rows, cellEdits), folder, selected, selectionOnly: bulkSelectionOnly });
     if (plan.targets.length === 0) {
       const reasons = plan.skipped.length > 0 ? plan.skipped.map((s) => `${s.repo}: ${s.reason}`).join("; ") : "no repos have this folder.";
       setPostSummary(`${folder}: nothing to grade - ${reasons}`);
       return;
     }
-    void runBulkGrade(plan);
+    const column = columns.find((c) => c.folder === folder) ?? { folder, assignmentId: null };
+    const resolved = await resolveRubricForColumn(column.assignmentId);
+    void runBulkGrade(plan, resolved);
   };
 
   return {

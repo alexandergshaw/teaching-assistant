@@ -30,6 +30,7 @@ import {
   type ExportAssignmentOption,
 } from "@/lib/lms-export-source/export-assignments";
 import { repoGradeAssignmentUrl } from "../repo-grades/repoGradesPosting";
+import { renderPickedRubricText } from "@/lib/rubric-render";
 import {
   loadGithubGradingUiState,
   persistGithubGradingUiState,
@@ -40,30 +41,17 @@ import type { Course } from "@/lib/supabase/courses";
 import type { CanvasAssignmentBrief } from "@/lib/canvas";
 import type { CartridgeRubric } from "@/lib/cartridge-import-shared";
 
-/**
- * Render an export cartridge's rubric (AC B5) as the same kind of plain
- * rubric text a pasted/generated rubric already is, so it drops straight
- * into the existing Rubric textarea. Deliberately a local, non-exported
- * helper (this feature's file set is UI-only - see the acceptance-criteria
- * doc's file list) rather than a new src/lib/** module: it is a thin
- * field-name adapter over CartridgeRubricCriterion/CartridgeRubricRating
- * (cartridge-import-shared.ts), structurally the same shape
- * src/lib/canvas/metadata.ts's formatRubric already renders for a Canvas
- * rubric, just with camelCase field names instead of Canvas's snake_case.
- */
-function cartridgeRubricToText(rubric: CartridgeRubric): string {
-  const lines: string[] = [];
-  for (const criterion of rubric.criteria) {
-    const points = typeof criterion.points === "number" ? ` (${criterion.points} pts)` : "";
-    const detail = (criterion.longDescription ?? "").trim();
-    lines.push(`${criterion.description}${points}: ${detail || criterion.description}`);
-    for (const rating of criterion.ratings) {
-      const ratingPoints = typeof rating.points === "number" ? ` (${rating.points} pts)` : "";
-      if (rating.description.trim()) lines.push(`  ${rating.description}${ratingPoints}`);
-    }
-  }
-  return lines.join("\n");
-}
+// AC B5's export-cartridge-rubric-to-text rendering used to live here as a
+// private, untested `cartridgeRubricToText` helper. The repo-grades rubric
+// picker feature (docs/repo-grades-rubric-picker-acceptance-criteria.md item
+// 59) needed the identical rendering for a second input shape (RubricDetail,
+// a live Canvas rubric), so it was extracted to src/lib/rubric-render.ts,
+// exported as `renderPickedRubricText`, and widened to a structural
+// parameter type that accepts both shapes without importing either concrete
+// type - see that module's header comment for the full rationale (why not
+// formatRubric, why not the two trap renderers). This call site is
+// unchanged in behavior: `CartridgeRubric` structurally satisfies the new
+// function's `RenderableRubric` parameter.
 
 export interface UseLmsAssignmentPullParams {
   /** GithubGradingPanel.tsx's current instructions box value - read-only here, used only to decide whether a pull needs a "replace?" confirm(). */
@@ -348,7 +336,7 @@ export function useLmsAssignmentPull({
     if (rubric.trim() && !window.confirm("Replace the current rubric with this export rubric?")) {
       return;
     }
-    setRubric(cartridgeRubricToText(found));
+    setRubric(renderPickedRubricText(found));
     setExportRubricNote(`Using "${found.title}" from the export - a course-level rubric, not one the export associates with this assignment specifically.`);
   };
 

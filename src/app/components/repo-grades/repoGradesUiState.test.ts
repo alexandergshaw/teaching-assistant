@@ -7,14 +7,22 @@
 // typeof window/localStorage are both "undefined" under plain Node here).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  decodeRepoGradeRubricChoice,
+  defaultRepoGradeRubricChoice,
+  encodeRepoGradeRubricChoice,
   loadAssignmentMapping,
+  loadRepoGradeManualRubricText,
+  loadRepoGradeRubricChoice,
   loadRepoGradesUiState,
   loadSelectedRepoIds,
   persistAssignmentMapping,
   loadRepoGradeLog,
   persistRepoGradeLog,
+  persistRepoGradeManualRubricText,
+  persistRepoGradeRubricChoice,
   persistRepoGradesUiState,
   persistSelectedRepoIds,
+  type RepoGradeRubricChoice,
 } from "./repoGradesUiState";
 import type { RepoGradeLogEntry } from "./repoGradesLog";
 import { DEFAULT_REPO_GRADE_SORT } from "./repoGradesRows";
@@ -421,5 +429,201 @@ describe("loadRepoGradeLog / persistRepoGradeLog", () => {
     delete (globalThis as { window?: unknown }).window;
     expect(loadRepoGradeLog("course-1")).toEqual([]);
     expect(() => persistRepoGradeLog("course-1", [logEntry()])).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rubric picker persistence
+// (docs/repo-grades-rubric-picker-acceptance-criteria.md items 19/46/73).
+// encodeRepoGradeRubricChoice/decodeRepoGradeRubricChoice carry the source
+// AND the chosen rubric's identity together in one value (item 46); the
+// separator's first-colon-only split (item 73's underlying hazard) is what
+// keeps an identity containing a colon intact rather than truncated.
+
+describe("encodeRepoGradeRubricChoice / decodeRepoGradeRubricChoice", () => {
+  it("round-trips every source kind through encode then decode", () => {
+    const choices: RepoGradeRubricChoice[] = [
+      { source: "generate", identity: "" },
+      { source: "assignment", identity: "" },
+      { source: "live", identity: "9001" },
+      { source: "export", identity: "1:Grading Rubric" },
+      { source: "manual", identity: "" },
+    ];
+    for (const choice of choices) {
+      expect(decodeRepoGradeRubricChoice(encodeRepoGradeRubricChoice(choice))).toEqual(choice);
+    }
+  });
+
+  it("preserves an identity containing the separator character (a naive limited split(\":\", 2) would truncate this - the canary for that exact bug)", () => {
+    const choice: RepoGradeRubricChoice = { source: "export", identity: "2:Section 3: Grading Rubric" };
+    const encoded = encodeRepoGradeRubricChoice(choice);
+    // Prove the canary can actually catch the bug: JS's String.split with a
+    // limit still splits on EVERY separator first and only then truncates the
+    // result array, so a naive `value.split(":", 2)[1]` implementation would
+    // read the identity as just "2" - silently dropping everything after the
+    // second colon. The real decoder must NOT reproduce that truncation.
+    expect(encoded.split(":", 2)[1]).toBe("2");
+    expect(decodeRepoGradeRubricChoice(encoded).identity).not.toBe("2");
+    expect(decodeRepoGradeRubricChoice(encoded)).toEqual(choice);
+  });
+
+  it("preserves an identity that is itself just a bare colon", () => {
+    const choice: RepoGradeRubricChoice = { source: "export", identity: ":" };
+    expect(decodeRepoGradeRubricChoice(encodeRepoGradeRubricChoice(choice))).toEqual(choice);
+  });
+
+  it("degrades a value with no colon at all to the default choice (never trusts stored data)", () => {
+    expect(decodeRepoGradeRubricChoice("garbage")).toEqual(defaultRepoGradeRubricChoice());
+  });
+
+  it("degrades a value naming an unrecognised source to the default choice", () => {
+    expect(decodeRepoGradeRubricChoice("workflow-step:123")).toEqual(defaultRepoGradeRubricChoice());
+  });
+
+  it("degrades an empty string to the default choice", () => {
+    expect(decodeRepoGradeRubricChoice("")).toEqual(defaultRepoGradeRubricChoice());
+  });
+});
+
+describe("loadRepoGradeRubricChoice / persistRepoGradeRubricChoice", () => {
+  it("returns the default (generate, empty identity) when nothing is stored - byte-for-byte today's behaviour (item 4)", () => {
+    expect(loadRepoGradeRubricChoice("course-1")).toEqual(defaultRepoGradeRubricChoice());
+  });
+
+  it("returns the default for a blank course id", () => {
+    expect(loadRepoGradeRubricChoice("")).toEqual(defaultRepoGradeRubricChoice());
+  });
+
+  it("round-trips one course's choice through persist then load", () => {
+    persistRepoGradeRubricChoice("course-1", { source: "live", identity: "9001" });
+    expect(loadRepoGradeRubricChoice("course-1")).toEqual({ source: "live", identity: "9001" });
+  });
+
+  it("round-trips an export choice whose identity contains a colon", () => {
+    persistRepoGradeRubricChoice("course-1", { source: "export", identity: "2:Section 3: Grading Rubric" });
+    expect(loadRepoGradeRubricChoice("course-1")).toEqual({ source: "export", identity: "2:Section 3: Grading Rubric" });
+  });
+
+  it("keeps a DIFFERENT course's choice completely separate", () => {
+    persistRepoGradeRubricChoice("course-1", { source: "live", identity: "9001" });
+    persistRepoGradeRubricChoice("course-2", { source: "export", identity: "1:Rubric A" });
+    expect(loadRepoGradeRubricChoice("course-1")).toEqual({ source: "live", identity: "9001" });
+    expect(loadRepoGradeRubricChoice("course-2")).toEqual({ source: "export", identity: "1:Rubric A" });
+  });
+
+  it("writing one course's choice does not disturb another already-stored course's choice", () => {
+    persistRepoGradeRubricChoice("course-1", { source: "live", identity: "9001" });
+    persistRepoGradeRubricChoice("course-2", { source: "manual", identity: "" });
+    persistRepoGradeRubricChoice("course-1", { source: "assignment", identity: "" });
+    expect(loadRepoGradeRubricChoice("course-2")).toEqual({ source: "manual", identity: "" });
+  });
+
+  it("returns the default for malformed JSON", () => {
+    fakeStorage.setItem("ta-repo-grades-rubric-source", "{not json");
+    expect(loadRepoGradeRubricChoice("course-1")).toEqual(defaultRepoGradeRubricChoice());
+  });
+
+  it("returns the default when the stored value is valid JSON but not an object", () => {
+    fakeStorage.setItem("ta-repo-grades-rubric-source", JSON.stringify(["not", "an", "object"]));
+    expect(loadRepoGradeRubricChoice("course-1")).toEqual(defaultRepoGradeRubricChoice());
+  });
+
+  it("ignores a course entry whose stored value is not a string", () => {
+    fakeStorage.setItem("ta-repo-grades-rubric-source", JSON.stringify({ "course-1": { source: "live", identity: "9001" } }));
+    expect(loadRepoGradeRubricChoice("course-1")).toEqual(defaultRepoGradeRubricChoice());
+  });
+
+  it("does nothing when persisting with window undefined", () => {
+    delete (globalThis as { window?: unknown }).window;
+    expect(() => persistRepoGradeRubricChoice("course-1", { source: "live", identity: "9001" })).not.toThrow();
+    expect(fakeStorage.getItem("ta-repo-grades-rubric-source")).toBeNull();
+  });
+
+  it("returns the default when window is undefined", () => {
+    delete (globalThis as { window?: unknown }).window;
+    expect(loadRepoGradeRubricChoice("course-1")).toEqual(defaultRepoGradeRubricChoice());
+  });
+
+  it("swallows a localStorage write failure rather than throwing", () => {
+    fakeStorage.throwOnSet = true;
+    expect(() => persistRepoGradeRubricChoice("course-1", { source: "live", identity: "9001" })).not.toThrow();
+  });
+});
+
+describe("loadRepoGradeManualRubricText / persistRepoGradeManualRubricText (item 73)", () => {
+  it("returns \"\" when nothing is stored", () => {
+    expect(loadRepoGradeManualRubricText("course-1")).toBe("");
+  });
+
+  it("returns \"\" for a blank course id", () => {
+    expect(loadRepoGradeManualRubricText("")).toBe("");
+  });
+
+  it("round-trips one course's manual rubric text through persist then load", () => {
+    persistRepoGradeManualRubricText("course-1", "5 pts: has a README");
+    expect(loadRepoGradeManualRubricText("course-1")).toBe("5 pts: has a README");
+  });
+
+  it("one course's manual rubric text never appears under another course - the exact defect item 73 closes", () => {
+    persistRepoGradeManualRubricText("course-1", "Course 1's own typed rubric");
+    persistRepoGradeManualRubricText("course-2", "Course 2's own typed rubric");
+    expect(loadRepoGradeManualRubricText("course-1")).toBe("Course 1's own typed rubric");
+    expect(loadRepoGradeManualRubricText("course-2")).toBe("Course 2's own typed rubric");
+    expect(loadRepoGradeManualRubricText("course-2")).not.toBe(loadRepoGradeManualRubricText("course-1"));
+  });
+
+  it("writing one course's text does not disturb another already-stored course's text", () => {
+    persistRepoGradeManualRubricText("course-1", "first");
+    persistRepoGradeManualRubricText("course-2", "second");
+    persistRepoGradeManualRubricText("course-1", "first, edited");
+    expect(loadRepoGradeManualRubricText("course-2")).toBe("second");
+  });
+
+  it("is stored separately from the pre-existing global ta-repo-grades-rubric key", () => {
+    persistRepoGradesUiState({
+      courseId: "",
+      orgPrefix: "",
+      sort: DEFAULT_REPO_GRADE_SORT,
+      instructions: "",
+      rubric: "the global rubric text",
+      linkAssignmentId: "",
+      linkSource: "roster",
+      useReadmeInstructions: true,
+      bulkSelectionOnly: false,
+    });
+    persistRepoGradeManualRubricText("course-1", "the per-course rubric text");
+    expect(fakeStorage.getItem("ta-repo-grades-rubric")).toBe("the global rubric text");
+    expect(loadRepoGradeManualRubricText("course-1")).toBe("the per-course rubric text");
+  });
+
+  it("returns \"\" for malformed JSON", () => {
+    fakeStorage.setItem("ta-repo-grades-rubric-manual-text", "{not json");
+    expect(loadRepoGradeManualRubricText("course-1")).toBe("");
+  });
+
+  it("returns \"\" when the stored value is valid JSON but not an object", () => {
+    fakeStorage.setItem("ta-repo-grades-rubric-manual-text", JSON.stringify(["not", "an", "object"]));
+    expect(loadRepoGradeManualRubricText("course-1")).toBe("");
+  });
+
+  it("ignores a course entry whose stored value is not a string", () => {
+    fakeStorage.setItem("ta-repo-grades-rubric-manual-text", JSON.stringify({ "course-1": 12345 }));
+    expect(loadRepoGradeManualRubricText("course-1")).toBe("");
+  });
+
+  it("does nothing when persisting with window undefined", () => {
+    delete (globalThis as { window?: unknown }).window;
+    expect(() => persistRepoGradeManualRubricText("course-1", "text")).not.toThrow();
+    expect(fakeStorage.getItem("ta-repo-grades-rubric-manual-text")).toBeNull();
+  });
+
+  it("returns \"\" when window is undefined", () => {
+    delete (globalThis as { window?: unknown }).window;
+    expect(loadRepoGradeManualRubricText("course-1")).toBe("");
+  });
+
+  it("swallows a localStorage write failure rather than throwing", () => {
+    fakeStorage.throwOnSet = true;
+    expect(() => persistRepoGradeManualRubricText("course-1", "text")).not.toThrow();
   });
 });

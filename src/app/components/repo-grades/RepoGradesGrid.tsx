@@ -25,6 +25,18 @@
 // (AC5 item 28). AC5 item 32: once a column has been posted at least once,
 // its button relabels to "Re-post" rather than disappearing, so the UI never
 // implies posting is safely reversible or idempotent (it is neither).
+//
+// The rubric picker (docs/repo-grades-rubric-picker-acceptance-criteria.md,
+// item 44) adds one more line to that header: a `<span>` naming which rubric
+// this column will actually be graded against, sitting directly above the
+// Grade and Post buttons so that fact is visible before either irreversible
+// click, not only in the log afterwards. The string comes from
+// `describeColumnRubric`, a prop threaded straight from index.tsx's
+// `useRepoGradesRubricSource` hook call - this file calls that function once
+// per column (it is pure and reads only an in-memory cache, never a
+// network) and hands the resulting STRING to `ColumnHeaderControls`, which
+// never calls it itself. Same "render what a pure function decided, resolve
+// nothing here" posture as the rest of this file.
 import RepoBindingControl from "./RepoBindingControl";
 import RepoGradeCellControl from "./RepoGradeCellControl";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
@@ -118,6 +130,16 @@ export interface RepoGradesGridProps {
    * with a more specific reason (e.g. a folder-scoped view where no scanned
    * repo has that folder) when index.tsx has one to give. */
   emptyStateMessage?: string;
+  /** AC item 44 (docs/repo-grades-rubric-picker-acceptance-criteria.md) -
+   * `useRepoGradesRubricSource.ts`'s own `describeColumn(assignmentId)`,
+   * passed straight through from index.tsx. Pure and synchronous per that
+   * hook's contract - it reads the per-column resolved-rubric cache and
+   * never fetches - so calling it once per column below, on every render,
+   * can never trigger a network call. This component calls it per column
+   * and hands `ColumnHeaderControls` the resulting STRING (its own
+   * `rubricDescription` prop), never the function itself, so that
+   * subcomponent stays a pure renderer with nothing left to resolve. */
+  describeColumnRubric: (assignmentId: string | null) => string;
 }
 
 const CELL_STATUS_TEXT: Record<RepoGradeCellStatus, string> = {
@@ -153,6 +175,7 @@ function ColumnHeaderControls({
   bulkProgress,
   bulkSelectionOnly,
   scanTruncated,
+  rubricDescription,
 }: {
   column: RepoGradeColumn;
   rows: RepoGradeRow[];
@@ -167,6 +190,12 @@ function ColumnHeaderControls({
   bulkProgress: { done: number; total: number } | null;
   bulkSelectionOnly: boolean;
   scanTruncated: boolean;
+  /** AC item 44 - already-resolved text naming which rubric this column
+   * grades against right now, computed by the caller from
+   * `describeColumnRubric(column.assignmentId)`. This component only
+   * renders it - see this file's `RepoGradesGridProps.describeColumnRubric`
+   * doc comment for why the call happens one level up. */
+  rubricDescription: string;
 }) {
   // Scoped exactly as index.tsx's post handler scopes it - see this file's
   // header comment on AC5 item 28. Counting every row while a selection
@@ -233,6 +262,15 @@ function ColumnHeaderControls({
           </option>
         ))}
       </select>
+      {/* AC item 44 - which rubric this column will actually be graded
+          against, for EVERY source, sitting directly above the two
+          dangerous buttons that consume it so an instructor can see it
+          BEFORE clicking Grade or Post rather than only in the log
+          afterwards. Reuses `styles.postReason`, already this grid's "small
+          muted explanatory line inside a header cell" primitive (see the
+          identical class on the not-yet-postable reason in
+          RepoGradeCellControl.tsx). */}
+      <span className={styles.postReason}>{rubricDescription}</span>
       <button
         type="button"
         className={pageStyles.linkButton}
@@ -280,6 +318,7 @@ export default function RepoGradesGrid({
   bulkSelectionOnly,
   scanTruncated,
   emptyStateMessage,
+  describeColumnRubric,
 }: RepoGradesGridProps) {
   if (rows.length === 0) {
     return (
@@ -327,6 +366,7 @@ export default function RepoGradesGrid({
                   bulkProgress={bulkProgress}
                   bulkSelectionOnly={bulkSelectionOnly}
                   scanTruncated={scanTruncated}
+                  rubricDescription={describeColumnRubric(column.assignmentId)}
                 />
               </th>
             ))}

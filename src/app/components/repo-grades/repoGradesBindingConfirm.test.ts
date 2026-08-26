@@ -32,6 +32,7 @@
 // (see the standing lesson about consolidations turning tests tautological).
 import { describe, expect, it } from "vitest";
 import {
+  confirmableBindingSummary,
   describeBlockedConfirmations,
   isConfirmableCandidate,
   partitionConfirmableBindings,
@@ -159,6 +160,17 @@ describe("partitionConfirmableBindings", () => {
   });
 });
 
+describe("partitionConfirmableBindings emits a normalized id for the write", () => {
+  it("hands the caller a trimmed Canvas user id, so no padded id reaches the course record", () => {
+    // applyRepoGradeBinding stores canvasUserId verbatim, so if the module
+    // hands back " 41 " that is what lands in the saved binding. The caller
+    // needs a sanctioned normalized value rather than being left to trim.
+    const result = partitionConfirmableBindings([suggestedRow("org/d", " 41 ")]);
+    expect(result.confirmable).toHaveLength(1);
+    expect(result.confirmable[0].canvasUserId).toBe("41");
+  });
+});
+
 describe("describeBlockedConfirmations", () => {
   it("says nothing when nothing was blocked", () => {
     expect(describeBlockedConfirmations([])).toBe("");
@@ -178,5 +190,66 @@ describe("describeBlockedConfirmations", () => {
   it("mentions the Canvas user id as the missing thing, so the instructor knows what to fix", () => {
     const blocked = [{ repo: "org/b", candidate: { canvasUserId: "", name: "x" }, reason: "no Canvas user id" }];
     expect(describeBlockedConfirmations(blocked).toLowerCase()).toContain("canvas");
+  });
+
+  it("surfaces BOTH distinct reasons when a batch is blocked for two different causes", () => {
+    // U9.37 requires the batch state "how many it excluded AND WHY". Without
+    // this, partitionConfirmableBindings can compute two reasons and
+    // describeBlockedConfirmations can throw them away - which is what a
+    // `${n} blocked` template literal would do, and it would pass every other
+    // assertion in this block.
+    const blocked = [
+      { repo: "org/a", candidate: undefined, reason: "no candidate" },
+      { repo: "org/b", candidate: { canvasUserId: "", name: "x" }, reason: "no Canvas user id" },
+    ];
+    const sentence = describeBlockedConfirmations(blocked).toLowerCase();
+    const distinctReasons = new Set(blocked.map((entry) => entry.reason));
+
+    for (const reason of distinctReasons) {
+      const head = reason.toLowerCase().split(" ").slice(-3).join(" ");
+      expect(sentence).toContain(head);
+    }
+  });
+});
+
+describe("confirmableBindingSummary - what the batch button must be labelled from", () => {
+  // THE DEFECT THIS EXISTS FOR, found by the peer audit of the first draft of
+  // these tests: an implementer can drop the partition into the confirm
+  // handler, leave the button label driven by `suggestedCount`, and ship a
+  // screen where the instructor sees "Confirm all 11 suggested bindings",
+  // clicks it, gets `confirmSuggestedBindings([])` -> "No bindings to
+  // confirm." painted in red, and is no better off than before. Every other
+  // test in this file would have been green.
+  //
+  // The button's label and the payload must come from the same number.
+  it("reports zero confirmable in the instructor's actual state", () => {
+    const rows = Array.from({ length: 11 }, (_, i) => suggestedRow(`org/repo-${i}`, ""));
+    const summary = confirmableBindingSummary(rows);
+
+    expect(summary.confirmable).toBe(0);
+    expect(summary.blocked).toBe(11);
+  });
+
+  it("reports a count that matches what the partition would actually send", () => {
+    const rows = [suggestedRow("org/a", ""), suggestedRow("org/b", "90210"), suggestedRow("org/d", " 41 ")];
+    const summary = confirmableBindingSummary(rows);
+    const partitioned = partitionConfirmableBindings(rows);
+
+    expect(summary.confirmable).toBe(partitioned.confirmable.length);
+    expect(summary.blocked).toBe(partitioned.blocked.length);
+  });
+
+  it("carries the explanation when nothing is confirmable, so the surface can say why", () => {
+    const rows = Array.from({ length: 11 }, (_, i) => suggestedRow(`org/repo-${i}`, ""));
+    const summary = confirmableBindingSummary(rows);
+
+    expect(summary.blockedDetail.toLowerCase()).toContain("canvas");
+    expect(summary.blockedDetail).toContain("11");
+  });
+
+  it("has no explanation to give when everything is confirmable", () => {
+    const summary = confirmableBindingSummary([suggestedRow("org/b", "90210")]);
+    expect(summary.blocked).toBe(0);
+    expect(summary.blockedDetail).toBe("");
   });
 });

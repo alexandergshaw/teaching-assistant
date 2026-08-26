@@ -370,10 +370,19 @@ it. U0c is the single highest value-per-risk change in this work item.*
 26. Restated as inspectable facts rather than "reads as one surface":
     26a. the view has exactly one container frame, not three (same as
          U0c); [SRC]
-    26b. the grid adopts the shared table shell
-         (courses/CoursesTable.module.css:78-138) rather than repo-grades'
-         divergent `border-collapse: collapse`, no zebra, non-uppercase
-         headers (repo-grades.module.css:18-42); [CSS]
+    26b. **DECIDED BY THE OWNER, 2026-08-26: the table shell follows
+         `tasks/TasksGrid.module.css`, NOT `courses/CoursesTable.module.css`
+         - "tasksgrid, it's a wide matrix."** This resolves the contradiction
+         between an earlier draft of this criterion and section 2b. It means
+         the grid KEEPS no-zebra and sentence-case headers, which TasksGrid
+         records as deliberate divergences from CoursesTable
+         (tasks/TasksGrid.module.css:291-295 - zebra collides with
+         hover/focus/crosshair states; :313-315 - all-caps destroys the
+         word-shape scanning a wide header row depends on). What converges is
+         the shell mechanics: a bounded `max-height` scroller with
+         `overflow: auto` so the sticky header actually engages (today
+         `.gridWrap` has no height, so `position: sticky; top: 0` is inert -
+         section 6), and a frozen identity column. [CSS]
     26c. one badge family, not two - today `.ghBadge*` (borderless,
          page.module.css:1414-1483) and the binding badges (bordered,
          repo-grades.module.css:60-143) coexist in one view; [CSS]
@@ -2030,11 +2039,11 @@ invent them:
    `ColumnHeaderControls` assertions when U3.13 relocates the post control).
    U7.31 says report, not edit - but never says whether red blocks the push,
    and U7.32's gate does not run vitest.
-5. **CoursesTable or TasksGrid as the table shell.** U6.26b mandates
-   CoursesTable; section 2b says TasksGrid is the correct analogue because
-   its no-zebra and sentence-case-header divergences were deliberate. This is
-   the single largest visual decision in the work item and it is answered
-   twice, oppositely.
+5. ~~CoursesTable or TasksGrid as the table shell.~~ **RESOLVED by the owner,
+   2026-08-26: TasksGrid - "tasksgrid, it's a wide matrix."** No zebra,
+   sentence-case headers; what converges is the shell mechanics (a bounded
+   `max-height` scroller so the sticky header actually engages, and a frozen
+   identity column). See U6.26b.
 6. **What happens at 720px** - move the 700px breakpoint, lower the
    220/190/170 min-width floors, or restate U3.12.
 7. **How U8.35's confirm, U2.9c's acknowledgement and U9.38b's disable

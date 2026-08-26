@@ -238,7 +238,15 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // (Task 2): grading-results/SubmittedFilesPanel.tsx is one more new
     // dialog site, on the same terms as ReleaseReviewModal.tsx before it - it
     // adopts ModalShell from birth too.
-    expect(DIALOG_SITES.length).toBe(46);
+    //
+    // 47, not 46, as of the GradingResults.tsx line-budget extraction chunk:
+    // grading-results/FeedbackExpandModal.tsx is one more new dialog site, on
+    // the same terms as SubmittedFilesPanel.tsx before it - the per-box
+    // "expand feedback" modal MOVED out of GradingResults.tsx into its own
+    // file, and it adopts ModalShell from birth (it always rendered via
+    // ModalShell, even before the move - the move only changed which file's
+    // source the scan sees that import in).
+    expect(DIALOG_SITES.length).toBe(47);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -282,7 +290,12 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // - the thirty-one described above plus SubmittedFilesPanel.tsx, which
     // likewise adopts ModalShell from birth rather than needing a name on
     // one of the three allowlists.
-    expect(ADOPTING_PATHS.size).toBe(32);
+    // 33 as of the GradingResults.tsx line-budget extraction chunk - the
+    // thirty-two described above plus grading-results/FeedbackExpandModal.tsx,
+    // which likewise adopts ModalShell from birth (see DIALOG_SITES.length's
+    // comment above for why "from birth" still applies to code that moved
+    // rather than being newly written).
+    expect(ADOPTING_PATHS.size).toBe(33);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

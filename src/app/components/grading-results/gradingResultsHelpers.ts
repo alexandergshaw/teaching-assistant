@@ -15,7 +15,10 @@
 //
 // Owns: the run/row type aliases the rest of the grading-results feature
 // builds on (GradingRun, GradeRow), the results-table sort model (SortColumn,
-// SortDirection, DEFAULT_SORT, sortColumnKey, compareText), the editable-row
+// SortDirection, DEFAULT_SORT, sortColumnKey, compareText, sortGradeRows -
+// the last one added when the sort state/handlers moved to their own hook,
+// useResultsSort.ts, and this pure comparator moved here alongside it), the
+// editable-row
 // model (AreaEdit, RowEdit, seedEdits, recomputeTotal) and its numeric-parsing
 // support (parseEarnedPoints, parseScoreValue, parseDenominator,
 // formatPoints), the row-level feedback text formatter (formatFeedback), and
@@ -112,6 +115,65 @@ export function parseScoreValue(value: string): number | null {
   if (!match) return null;
   const parsed = Number.parseFloat(match[0]);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+// Moved out of GradingResults.tsx (originally the `sortedResults` useMemo
+// body, :407-449) alongside useResultsSort.ts, its stateful counterpart in
+// this same folder - pure MOVE, not a rewrite. Given a run's results and the
+// current sort state, returns a NEW sorted array (never mutates `results`,
+// matching the pre-move code's `const results = [...runResults]`). Ties
+// always fall back to the student name (last line before the return), so a
+// column with duplicate values (e.g. two students both scoring "8/10") still
+// sorts deterministically rather than depending on the input's original
+// order. This is genuinely pure - no React, no closures over component
+// state - which is what makes it separable from useResultsSort.ts's
+// useState/useMemo wiring and testable with frozen-literal fixtures (see
+// gradingResultsHelpers.test.ts's "sortGradeRows" describe block).
+export function sortGradeRows(
+  runResults: readonly GradeRow[],
+  sortState: { column: SortColumn; direction: SortDirection }
+): GradeRow[] {
+  const directionMultiplier = sortState.direction === "asc" ? 1 : -1;
+  const results = [...runResults];
+
+  results.sort((a, b) => {
+    const column = sortState.column;
+    let comparison = 0;
+
+    if (column.kind === "student") comparison = compareText(a.student, b.student);
+    if (column.kind === "files") {
+      comparison = compareText(
+        a.submittedFiles.map((f) => f.name).join(", "),
+        b.submittedFiles.map((f) => f.name).join(", ")
+      );
+    }
+    if (column.kind === "rubric") {
+      const aArea = a.rubricAreas.find((area) => area.area === column.area);
+      const bArea = b.rubricAreas.find((area) => area.area === column.area);
+      const aNum = parseScoreValue(aArea?.score ?? "");
+      const bNum = parseScoreValue(bArea?.score ?? "");
+      if (aNum !== null && bNum !== null) {
+        comparison = aNum - bNum;
+      } else {
+        comparison = compareText(aArea?.score ?? "", bArea?.score ?? "");
+      }
+    }
+    if (column.kind === "total") {
+      const aNum = parseScoreValue(a.totalScore);
+      const bNum = parseScoreValue(b.totalScore);
+      if (aNum !== null && bNum !== null) {
+        comparison = aNum - bNum;
+      } else {
+        comparison = compareText(a.totalScore, b.totalScore);
+      }
+    }
+    if (column.kind === "overall") comparison = compareText(a.overallComment, b.overallComment);
+    if (comparison === 0) comparison = compareText(a.student, b.student);
+
+    return comparison * directionMultiplier;
+  });
+
+  return results;
 }
 
 // Editable grade, overall comment, and per-criterion scores per student

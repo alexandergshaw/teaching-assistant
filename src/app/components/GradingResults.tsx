@@ -11,28 +11,26 @@ import type { CodeRunResult } from "@/lib/code-runner";
 import { ModalShell } from "./ui/ModalShell";
 import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
 import SubmittedFilesPanel from "./grading-results/SubmittedFilesPanel";
+import { CopyIcon, EyeIcon, DownloadIcon } from "./grading-results/icons";
+import { useResultsSort } from "./grading-results/useResultsSort";
+import { ResultsTableHeaderRow } from "./grading-results/ResultsTableHeaderRow";
+import { FeedbackExpandModal } from "./grading-results/FeedbackExpandModal";
 import styles from "../page.module.css";
 import {
-  DEFAULT_SORT,
-  FEEDBACK_FIELD_META,
   applyFeedbackFieldEdit,
   blankRowEdit,
   buildCsvContent,
-  compareText,
   defaultRowEdit,
   filesColumnEmptyLabel,
   loadGradingResultsEdits,
   persistGradingResultsEdits,
   parseEarnedPoints,
-  parseScoreValue,
   recomputeTotal,
-  sortColumnKey,
   type AreaEdit,
   type FeedbackField,
   type GradeRow,
   type GradingRun,
   type RowEdit,
-  type SortColumn,
 } from "./grading-results/gradingResultsHelpers";
 // docs/rubric-criteria-breakdown-acceptance-criteria.md B1/B2: the SAME
 // tested helpers Repo Grades already uses to show a per-criterion percentage
@@ -45,42 +43,19 @@ import {
 // import other repo-grades helpers the same way.
 import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeScoreDisplay";
 
-// ── Icons ──────────────────────────────────────────────────────────────────
-
-function CopyIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path d="M7 3.5A2.5 2.5 0 0 1 9.5 1h6A2.5 2.5 0 0 1 18 3.5v8A2.5 2.5 0 0 1 15.5 14h-6A2.5 2.5 0 0 1 7 11.5v-8Zm2.5-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-6Z" />
-      <path d="M2 7.5A2.5 2.5 0 0 1 4.5 5h.75a.75.75 0 0 1 0 1.5H4.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-.75a.75.75 0 0 1 1.5 0v.75A2.5 2.5 0 0 1 10.5 18h-6A2.5 2.5 0 0 1 2 15.5v-8Z" />
-    </svg>
-  );
-}
-
-function EyeIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
-      <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41ZM14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" clipRule="evenodd" />
-    </svg>
-  );
-}
-
-function DownloadIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-      <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-    </svg>
-  );
-}
-
-// ExpandIcon moved to grading-results/RowFeedbackBoxes.tsx (duplicated, not
-// imported - see that file's header comment for why) once the single
-// "Overall feedback" expand button became three per-box expand buttons.
+// CopyIcon/EyeIcon/DownloadIcon moved to ./grading-results/icons.tsx (this
+// file's line-budget extraction). ExpandIcon moved to
+// grading-results/RowFeedbackBoxes.tsx (duplicated, not imported - see that
+// file's header comment for why) once the single "Overall feedback" expand
+// button became three per-box expand buttons.
 
 // Sort helpers, seedEdits, recomputeTotal, buildCsvContent, and their pure
 // support functions moved to ./grading-results/gradingResultsHelpers.ts (see
-// that file's header comment for the full inventory and why).
+// that file's header comment for the full inventory and why). The sort
+// STATE/handlers (sortState, sortedResults, handleSort, sortLabel) later
+// moved again, to ./grading-results/useResultsSort.ts, and the <thead> row
+// that reads them moved to ./grading-results/ResultsTableHeaderRow.tsx - both
+// part of this file's line-budget extraction.
 
 type PostState = { status: "idle" | "posting" | "posted" | "error"; message?: string };
 
@@ -160,7 +135,6 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
   const [postSummary, setPostSummary] = useState("");
   const [posting, setPosting] = useState(false);
-  const [sortState, setSortState] = useState(DEFAULT_SORT);
   // Which student + which of the three feedback boxes is expanded, or null.
   const [expandedBox, setExpandedBox] = useState<{ student: string; field: FeedbackField } | null>(null);
   const [codeRuns, setCodeRuns] = useState<Record<string, CodeRunResult | null>>({});
@@ -404,67 +378,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       ? `${run.speedGraderUrl}&student_id=${userId}`
       : null;
 
-  const sortedResults = useMemo(() => {
-    const directionMultiplier = sortState.direction === "asc" ? 1 : -1;
-    const results = [...run.results];
-
-    results.sort((a, b) => {
-      const column = sortState.column;
-      let comparison = 0;
-
-      if (column.kind === "student") comparison = compareText(a.student, b.student);
-      if (column.kind === "files") {
-        comparison = compareText(
-          a.submittedFiles.map((f) => f.name).join(", "),
-          b.submittedFiles.map((f) => f.name).join(", ")
-        );
-      }
-      if (column.kind === "rubric") {
-        const aArea = a.rubricAreas.find((area) => area.area === column.area);
-        const bArea = b.rubricAreas.find((area) => area.area === column.area);
-        const aNum = parseScoreValue(aArea?.score ?? "");
-        const bNum = parseScoreValue(bArea?.score ?? "");
-        if (aNum !== null && bNum !== null) {
-          comparison = aNum - bNum;
-        } else {
-          comparison = compareText(aArea?.score ?? "", bArea?.score ?? "");
-        }
-      }
-      if (column.kind === "total") {
-        const aNum = parseScoreValue(a.totalScore);
-        const bNum = parseScoreValue(b.totalScore);
-        if (aNum !== null && bNum !== null) {
-          comparison = aNum - bNum;
-        } else {
-          comparison = compareText(a.totalScore, b.totalScore);
-        }
-      }
-      if (column.kind === "overall") comparison = compareText(a.overallComment, b.overallComment);
-      if (comparison === 0) comparison = compareText(a.student, b.student);
-
-      return comparison * directionMultiplier;
-    });
-
-    return results;
-  }, [run, sortState]);
-
-  const handleSort = (column: SortColumn) => {
-    const nextKey = sortColumnKey(column);
-    const currentKey = sortColumnKey(sortState.column);
-    if (nextKey === currentKey) {
-      setSortState((current) => ({
-        ...current,
-        direction: current.direction === "asc" ? "desc" : "asc",
-      }));
-      return;
-    }
-    setSortState({ column, direction: "asc" });
-  };
-
-  const sortLabel = (column: SortColumn) => {
-    if (sortColumnKey(column) !== sortColumnKey(sortState.column)) return "↕";
-    return sortState.direction === "asc" ? "↑" : "↓";
-  };
+  // Sort state, the derived sorted row list, and the handlers that read/write
+  // them - see ./grading-results/useResultsSort.ts's own header comment for
+  // why this is a pure relocation, not a behaviour change.
+  const { sortedResults, handleSort, sortLabel } = useResultsSort(run);
 
   const handleDownloadFile = (
     name: string,
@@ -557,40 +474,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       <div className={styles.matrixWrap}>
         <table className={styles.matrix}>
           <thead>
-            <tr>
-              <th>
-                <Button variant="text" size="small" onClick={() => handleSort({ kind: "student" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
-                  Student <span>{sortLabel({ kind: "student" })}</span>
-                </Button>
-              </th>
-              <th>
-                <Button variant="text" size="small" onClick={() => handleSort({ kind: "files" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
-                  Files <span>{sortLabel({ kind: "files" })}</span>
-                </Button>
-              </th>
-              {run.rubricAreaNames.map((area) => (
-                <th key={area}>
-                  <Button
-                    variant="text"
-                    size="small"
-                    onClick={() => handleSort({ kind: "rubric", area })}
-                    sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}
-                  >
-                    {area} <span>{sortLabel({ kind: "rubric", area })}</span>
-                  </Button>
-                </th>
-              ))}
-              <th>
-                <Button variant="text" size="small" onClick={() => handleSort({ kind: "total" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
-                  Total <span>{sortLabel({ kind: "total" })}</span>
-                </Button>
-              </th>
-              <th>
-                <Button variant="text" size="small" onClick={() => handleSort({ kind: "overall" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
-                  Feedback <span>{sortLabel({ kind: "overall" })}</span>
-                </Button>
-              </th>
-            </tr>
+            <ResultsTableHeaderRow rubricAreaNames={run.rubricAreaNames} onSort={handleSort} sortLabel={sortLabel} />
           </thead>
           <tbody>
             {sortedResults.map((result) => {
@@ -820,40 +704,15 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         </table>
       </div>
 
-      {expandedBox && (() => {
-        const { student, field } = expandedBox;
-        const meta = FEEDBACK_FIELD_META[field];
-        const edit = edits[student] ?? blankRowEdit();
-        return (
-          <ModalShell
-            label={`${meta.descriptorCapitalized} for ${student}`}
-            onDismiss={() => setExpandedBox(null)}
-          >
-            <div className={styles.previewHeader}>
-              <div>
-                <p className={styles.previewMeta}>Student: {student}</p>
-                <h3>{meta.fieldLabel}</h3>
-              </div>
-              <button
-                type="button"
-                className={styles.previewCloseButton}
-                onClick={() => setExpandedBox(null)}
-              >
-                Close
-              </button>
-            </div>
-            <TextField
-              multiline
-              value={edit[field]}
-              onChange={(event) => updateFeedbackField(student, field, event.target.value)}
-              aria-label={`${meta.descriptorCapitalized} for ${student} (expanded)`}
-              fullWidth
-              size="small"
-              minRows={12}
-            />
-          </ModalShell>
-        );
-      })()}
+      {expandedBox && (
+        <FeedbackExpandModal
+          student={expandedBox.student}
+          field={expandedBox.field}
+          edit={edits[expandedBox.student] ?? blankRowEdit()}
+          onChange={(field, value) => updateFeedbackField(expandedBox.student, field, value)}
+          onClose={() => setExpandedBox(null)}
+        />
+      )}
       {codeOutputStudent && (() => {
         const row = run.results.find((r) => r.student === codeOutputStudent);
         const cr = codeRuns[codeOutputStudent] ?? row?.codeExecution ?? null;

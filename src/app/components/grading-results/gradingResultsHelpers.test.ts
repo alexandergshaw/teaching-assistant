@@ -88,6 +88,12 @@ describe("compareText", () => {
   });
 });
 
+// sortGradeRows has its own oracle file, sortGradeRows.test.ts, in this same
+// directory - split out to keep this file under the project's 1000-line-per-
+// file cap rather than because the concern is unrelated (it is the same
+// "pure logic extracted from GradingResults.tsx, proven with frozen
+// literals" pattern this file's header comment describes).
+
 describe("parseEarnedPoints", () => {
   it("extracts the numerator of a fraction", () => {
     expect(parseEarnedPoints("8/10")).toBe("8");
@@ -783,6 +789,15 @@ describe("grading-results client files stay client-bundle-safe", () => {
     "./gradingResultsHelpers.ts",
     "./RowFeedbackBoxes.tsx",
     "./SubmittedFilesPanel.tsx",
+    // The four files added by GradingResults.tsx's line-budget extraction
+    // (icons, the sort hook + its header row, and the feedback expand modal)
+    // - none of them import gradingResultsHelpers.ts's banned modules
+    // themselves, but each is a new file under this folder the same class of
+    // regression could reach just as easily as it reached the original one.
+    "./icons.tsx",
+    "./useResultsSort.ts",
+    "./ResultsTableHeaderRow.tsx",
+    "./FeedbackExpandModal.tsx",
     "../GradingResults.tsx",
   ];
 

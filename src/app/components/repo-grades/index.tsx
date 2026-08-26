@@ -47,6 +47,7 @@ import {
 } from "./repoGradesLog";
 import RepoGradesLogPanel from "./RepoGradesLogPanel";
 import RepoGradesControls from "./RepoGradesControls";
+import RepoGradesStatusBanners from "./RepoGradesStatusBanners";
 import LinkUsernamesPanel from "./LinkUsernamesPanel";
 import { linkUsernamesLogDetail } from "./linkRepoUsernames";
 import { buildRepoGradeGridModel, sortRepoGradeRows, type RepoGradeColumn, type RepoGradeRow } from "./repoGradesRows";
@@ -113,12 +114,42 @@ export default function RepoGradesTab() {
     assignmentsError,
     reloadScan,
     acceptBinding,
-    linkBlockedReason,
+    // Renamed from `linkBlockedReason` - it only ever blocked the LIVE
+    // Canvas-submissions link below, never the course-table one.
+    liveLinkBlockedReason,
     linkGithubUsernames,
     confirmSuggestedBindings,
+    // This wave's fix (full explanation at the `model` comment below): the
+    // course tile's hand-maintained roster link, folded in as a derived
+    // overlay on top of course.studentRepos.
+    effectiveStudentRepos,
+    rosterOverlay,
+    linkFromCourseRoster,
+    // LinkUsernamesPanel's merged live-Canvas-plus-saved-export assignment
+    // options, plus the export list's own loading/error state.
+    assignmentOptions,
+    exportAssignmentsLoading,
+    exportAssignmentsError,
   } = useRepoGradesData(uiState.courseId, uiState.orgPrefix);
 
-  const model = scan ? buildRepoGradeGridModel(scan.repos, roster, course?.studentRepos ?? [], uiState.orgPrefix) : null;
+  // THE BUG THIS WAVE FIXES: the course tile already carries a student-to-
+  // GitHub-username link the instructor maintains BY HAND in the Courses
+  // tab's Roster tile, but this binder used to match only against
+  // `course?.studentRepos ?? []`, which nothing but a live Canvas link or a
+  // per-row accept ever wrote to - so thirty hand-typed usernames still left
+  // every repo unbound. `effectiveStudentRepos` (useRepoGradesData.ts, backed
+  // by rosterUsernameOverlay.ts) folds that table's usernames in as
+  // additional rows; passing it here instead is THE fix - do NOT "simplify"
+  // this back to `course?.studentRepos ?? []`, that reintroduces the bug.
+  //
+  // Consequence: `effectiveStudentRepos` is a DERIVED view, not saved data. A
+  // row it adds is not written to the tile until the instructor presses
+  // "Apply usernames from the course table" (or confirms the row) in
+  // LinkUsernamesPanel, so the grid can show a SUGGESTED binding sourced
+  // purely from the roster table before anything is actually saved. That is
+  // intended - the same "suggested first, confirm second" honesty this view
+  // already applies to a live Canvas link.
+  const model = scan ? buildRepoGradeGridModel(scan.repos, roster, effectiveStudentRepos, uiState.orgPrefix) : null;
   const sortedRows = model ? sortRepoGradeRows(model.rows, uiState.sort) : [];
   // AC2 item 7 sibling: rows currently in the "suggested" binding state - a
   // link just produced one, or the grid's own name-based guess did, and the
@@ -319,6 +350,29 @@ export default function RepoGradesTab() {
           })
         )
       );
+    }
+    return result;
+  };
+
+  // Companion to handleLinkUsernames above, for the OTHER source this wave
+  // adds: applying usernames already saved in the course table's Roster tile
+  // instead of reading them fresh off Canvas (see the `model` comment above
+  // for the actual fix). Forwards linkFromCourseRoster's result UNCHANGED and
+  // records nothing on error - the same rule handleAcceptBinding and
+  // handleLinkUsernames both follow. Reuses the SAME "usernames-linked" log
+  // kind (another way a repo becomes SUGGESTED via a linked username, not a
+  // new event kind), with detail text naming the course table as the source.
+  const handleLinkFromCourseRoster = async () => {
+    const result = await linkFromCourseRoster();
+    if (!("error" in result)) {
+      recordLog([
+        buildLogEntry("usernames-linked", {
+          detail:
+            `Linked from the course table roster - matched ${result.matched}, added ${result.added}` +
+            (result.withoutCanvasId > 0 ? `, ${result.withoutCanvasId} without a Canvas user id` : "") +
+            ".",
+        }),
+      ]);
     }
     return result;
   };
@@ -772,73 +826,22 @@ export default function RepoGradesTab() {
         onRubricChange={(value) => setUiState((prev) => ({ ...prev, rubric: value }))}
       />
 
-      {!course && !coursesLoading && <p className={styles.emptyState}>Choose a course tile above to list its repos.</p>}
-
-      {course && missingInstitution && (
-        <p className={styles.error} role="alert">
-          &quot;{course.name}&quot; has no institution set, so its Canvas roster cannot be loaded for binding - set one on
-          the course tile first.
-        </p>
-      )}
-
-      {course && missingOrg && (
-        <p className={styles.error} role="alert">
-          &quot;{course.name}&quot; has no GitHub org set, so its repos cannot be listed - set one on the course tile
-          first.
-        </p>
-      )}
-
-      {course && !missingOrg && scanLoading && (
-        <div className={styles.loadingState} role="status" aria-live="polite">
-          <span className={styles.spinner} aria-hidden="true" />
-          <div>
-            <p className={styles.loadingTitle}>Scanning {course.githubOrg} for repos...</p>
-          </div>
-        </div>
-      )}
-
-      {course && !missingOrg && scanError && (
-        <p className={styles.error} role="alert">
-          {scanError}
-        </p>
-      )}
-
-      {course && !missingInstitution && rosterLoading && (
-        <p className={styles.fieldHint} role="status" aria-live="polite">
-          Loading the Canvas roster...
-        </p>
-      )}
-
-      {course && !missingInstitution && rosterError && (
-        <p className={styles.error} role="alert">
-          Roster: {rosterError}
-        </p>
-      )}
-
-      {course && !missingInstitution && assignmentsLoading && (
-        <p className={styles.fieldHint} role="status" aria-live="polite">
-          Loading the course&apos;s Canvas assignments...
-        </p>
-      )}
-
-      {course && !missingInstitution && assignmentsError && (
-        <p className={styles.error} role="alert">
-          Assignments: {assignmentsError}
-        </p>
-      )}
-
-      {scan && scan.truncated && (
-        <p className={gridStyles.banner} role="status">
-          This org has at least as many repos as this scan&apos;s listing limit - the repos below may be an incomplete
-          list, not the full org.
-        </p>
-      )}
-
-      {scan && scan.rateLimit && (
-        <p className={gridStyles.banner} role="status">
-          {scan.rateLimit.message}
-        </p>
-      )}
+      <RepoGradesStatusBanners
+        hasCourse={!!course}
+        coursesLoading={coursesLoading}
+        courseName={course?.name ?? ""}
+        missingInstitution={missingInstitution}
+        missingOrg={missingOrg}
+        githubOrg={course?.githubOrg ?? ""}
+        scanLoading={scanLoading}
+        scanError={scanError}
+        rosterLoading={rosterLoading}
+        rosterError={rosterError}
+        assignmentsLoading={assignmentsLoading}
+        assignmentsError={assignmentsError}
+        scanTruncated={!!scan?.truncated}
+        rateLimitMessage={scan?.rateLimit?.message ?? null}
+      />
 
       {/* Instructor complaint this wave fixes: the mechanism used to live only
           in a workflow step elsewhere in the app, and this exact spot used to
@@ -854,12 +857,18 @@ export default function RepoGradesTab() {
           the fix before the table, not under it. */}
       {course && (
         <LinkUsernamesPanel
-          assignments={assignments}
+          assignmentOptions={assignmentOptions}
           assignmentsLoading={assignmentsLoading}
           assignmentsError={assignmentsError}
+          exportAssignmentsLoading={exportAssignmentsLoading}
+          exportAssignmentsError={exportAssignmentsError}
           assignmentId={uiState.linkAssignmentId}
           onAssignmentIdChange={(id) => setUiState((prev) => ({ ...prev, linkAssignmentId: id }))}
-          blockedReason={linkBlockedReason}
+          linkSource={uiState.linkSource}
+          onLinkSourceChange={(value) => setUiState((prev) => ({ ...prev, linkSource: value }))}
+          liveLinkBlockedReason={liveLinkBlockedReason}
+          rosterOverlay={rosterOverlay}
+          onLinkFromCourseRoster={handleLinkFromCourseRoster}
           noConfirmedRows={noConfirmedRows}
           suggestedCount={suggestedRows.length}
           onLink={handleLinkUsernames}

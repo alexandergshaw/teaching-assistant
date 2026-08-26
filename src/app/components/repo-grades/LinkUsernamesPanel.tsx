@@ -31,36 +31,102 @@
 // here as their own labelled lists rather than only living in a result an
 // instructor would have to think to download.
 //
+// SOURCE CONTROL (this wave). Two mutually exclusive ways to populate
+// suggested bindings, chosen with a radiogroup, course table first and
+// default:
+//   1. "Usernames already in the course table" - the SAVED link the
+//      instructor maintains by hand in the Courses tab's Roster tile
+//      (course.roster, `Student Name | username` per line). No Canvas
+//      connection needed at all - this is the one `liveLinkBlockedReason`
+//      must NOT disable, because it is the entire fix for the instructor
+//      who has no live Canvas link but does have thirty usernames typed into
+//      that table. Shows the hook's `rosterOverlay` facts BEFORE the
+//      instructor commits, so nothing here is a surprise once they press the
+//      button.
+//   2. "Read a Canvas assignment's submissions" - the original live path
+//      below, unchanged in behaviour. This is the ONE `liveLinkBlockedReason`
+//      disables (renamed from `blockedReason` - it only ever blocked THIS
+//      path, never the course-table one, so the rename makes that scope
+//      explicit rather than implied).
+//
 // Busy/error/result state is local useState, same as RepoGradesLogPanel.tsx
-// and RepoBindingControl.tsx; every persistent value (the assignment choice)
-// is a prop the parent owns. No useEffect - nothing here needs one, and
-// react-hooks/set-state-in-effect is strict in this repo. Every async call
-// site sits behind a real onClick, matching the shape
-// repoGrades.wiring.test.ts reads this folder's other files for.
+// and RepoBindingControl.tsx; every persistent value (the assignment choice,
+// and now `linkSource`) is a prop the parent owns. `linkSource` (which of the
+// two source choices is showing) used to be local useState with a comment
+// here explaining repoGradesUiState.ts was outside that implementer's file
+// set - that follow-up is done: it is now a controlled prop persisted under
+// `ta-repo-grades-link-source` (repoGradesUiState.ts), the same shape
+// `assignmentId`/`onAssignmentIdChange` already use.
+//
+// This file's own roster-source section moved out to
+// LinkUsernamesRosterSection.tsx (this file had grown to 500 lines carrying
+// two independent feature halves) - this file now only renders it for the
+// roster branch and keeps the radiogroup, the live-submissions section, and
+// the shared "Confirm all suggested bindings" section.
+//
+// No useEffect - nothing here needs one, and react-hooks/set-state-in-effect
+// is strict in this repo. Every async call site sits behind a real onClick,
+// matching the shape repoGrades.wiring.test.ts reads this folder's other
+// files for.
 import { useState } from "react";
-import type { CanvasAssignmentBrief } from "@/lib/canvas";
+import { isPostableAssignmentOption, type RepoGradeAssignmentOption } from "./repoGradesAssignmentSources";
+import type { RosterUsernameOverlayResult } from "./rosterUsernameOverlay";
 import { linkUsernamesSummaryLine, type LinkUsernamesOutcome } from "./linkRepoUsernames";
+import LinkUsernamesRosterSection from "./LinkUsernamesRosterSection";
 import styles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 
+type LinkSource = "roster" | "live";
+
 export interface LinkUsernamesPanelProps {
-  /** The course's Canvas assignments, already loaded by the view. */
-  assignments: CanvasAssignmentBrief[];
+  /** The merged Canvas-assignment picker options for the live-submissions
+   * source below: the live course assignment list plus the course tile's own
+   * saved export, so the picker still has something to offer when no live
+   * Canvas connection exists. Each option carries which list it came from and
+   * the real Canvas assignment id (null for an export option - see
+   * isPostableAssignmentOption). Replaces the old raw `assignments` prop. */
+  assignmentOptions: RepoGradeAssignmentOption[];
+  /** The LIVE Canvas assignment list's own loading/error state. */
   assignmentsLoading: boolean;
   assignmentsError: string | null;
+  /** The saved EXPORT's own assignment list loading/error state - independent
+   * of the live list above, since an export can be read with no Canvas
+   * connection at all and can fail (or still be loading) on its own. */
+  exportAssignmentsLoading: boolean;
+  exportAssignmentsError: string | null;
   /** The persisted assignment choice, owned by the parent. */
   assignmentId: string;
   onAssignmentIdChange: (assignmentId: string) => void;
-  /** Non-null when linking cannot run at all (no course chosen, no institution
-   * on the tile, no Canvas course URL) - render the reason and disable the
-   * controls rather than offering a button that can only fail. */
-  blockedReason: string | null;
+  /** Which of the two source choices is showing - persisted, owned by the
+   * parent (repoGradesUiState.ts's `ta-repo-grades-link-source`). Defaults to
+   * "roster": it needs no Canvas connection, so it is the choice most likely
+   * to actually work the first time an instructor opens this panel. */
+  linkSource: LinkSource;
+  onLinkSourceChange: (linkSource: LinkSource) => void;
+  /** Non-null when the LIVE-SUBMISSIONS source cannot run at all (no course
+   * chosen, no institution on the tile, no Canvas course URL) - render the
+   * reason and disable ONLY that source's controls. Renamed from
+   * `blockedReason`: the course-table source below never needed a live Canvas
+   * link, and this rename makes that scope explicit instead of leaving it to
+   * be re-discovered by reading the whole file. */
+  liveLinkBlockedReason: string | null;
+  /** The course table roster's own overlay preview - what applying it right
+   * now would do, computed live so the instructor sees the effect before
+   * committing to it. */
+  rosterOverlay: RosterUsernameOverlayResult;
+  /** Applies the course table roster's GitHub usernames (course.roster) as
+   * suggested bindings, in one write, with no Canvas read at all. Resolves to
+   * the outcome, or an error to display. */
+  onLinkFromCourseRoster: () => Promise<
+    { matched: number; added: number; withoutCanvasId: number; conflicts: string[] } | { error: string }
+  >;
   /** True when the grid has rows but none is confirmed-bound - the panel leads
    * with the "nothing is bound yet" framing in that case. */
   noConfirmedRows: boolean;
   /** How many rows are currently `suggested` and could be confirmed in bulk. */
   suggestedCount: number;
-  /** Runs the link. Resolves to the outcome, or an error to display. */
+  /** Runs the live-submissions link. Resolves to the outcome, or an error to
+   * display. */
   onLink: (assignmentId: string, assignmentName: string) => Promise<LinkUsernamesOutcome | { error: string }>;
   /** Confirms every currently-suggested binding in one write. Resolves to the
    * number confirmed, or an error to display. */
@@ -73,12 +139,18 @@ export interface LinkUsernamesPanelProps {
 }
 
 export default function LinkUsernamesPanel({
-  assignments,
+  assignmentOptions,
   assignmentsLoading,
   assignmentsError,
+  exportAssignmentsLoading,
+  exportAssignmentsError,
   assignmentId,
   onAssignmentIdChange,
-  blockedReason,
+  linkSource,
+  onLinkSourceChange,
+  liveLinkBlockedReason,
+  rosterOverlay,
+  onLinkFromCourseRoster,
   noConfirmedRows,
   suggestedCount,
   onLink,
@@ -93,15 +165,30 @@ export default function LinkUsernamesPanel({
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmResult, setConfirmResult] = useState<number | null>(null);
 
-  const chosenAssignment = assignments.find((assignment) => assignment.id === assignmentId) ?? null;
-  const linkDisabled = linkBusy || assignmentsLoading || blockedReason !== null || !chosenAssignment;
+  const chosenAssignmentOption = assignmentOptions.find((option) => option.value === assignmentId) ?? null;
+  // The live-submissions read needs a REAL Canvas assignment id to fetch
+  // submissions for - an export option's `canvasAssignmentId` is always null
+  // (it is not postable either, for the exact same reason: nothing behind it
+  // is a live Canvas assignment). isPostableAssignmentOption is the one place
+  // that decision is made (repoGradesAssignmentSources.ts), reused here
+  // rather than re-testing `canvasAssignmentId !== null` by hand so this
+  // gate can never drift from the posting gate it is really the same check
+  // as.
+  const chosenOptionUsableForLiveRead = isPostableAssignmentOption(chosenAssignmentOption);
+  const anyAssignmentListLoading = assignmentsLoading || exportAssignmentsLoading;
+  const linkDisabled =
+    linkBusy ||
+    anyAssignmentListLoading ||
+    liveLinkBlockedReason !== null ||
+    !chosenAssignmentOption ||
+    !chosenOptionUsableForLiveRead;
 
   const handleLink = async () => {
-    if (!chosenAssignment) return;
+    if (!chosenAssignmentOption || !chosenOptionUsableForLiveRead || chosenAssignmentOption.canvasAssignmentId === null) return;
     setLinkBusy(true);
     setLinkError(null);
     setOutcome(null);
-    const result = await onLink(chosenAssignment.id, chosenAssignment.name);
+    const result = await onLink(chosenAssignmentOption.canvasAssignmentId, chosenAssignmentOption.label);
     setLinkBusy(false);
     if ("error" in result) {
       setLinkError(result.error);
@@ -145,87 +232,143 @@ export default function LinkUsernamesPanel({
       {noConfirmedRows && <p className={styles.linkLeadLine}>No repos are confirmed-bound to a roster student yet.</p>}
 
       <p className={pageStyles.fieldHint}>
-        Students submit their own GitHub username to a Canvas assignment. Linking reads that assignment and matches each
-        username to the roster student who submitted it - more reliable than the name-based guess the grid otherwise
-        makes on its own, because it uses each student&apos;s own submission rather than an inferred match.
+        A repo binds to the roster student whose GitHub username matches it. Pick where those usernames come from
+        below.
       </p>
 
-      <p className={pageStyles.fieldHint}>
-        Linking does not confirm anything by itself: a matched repo shows up as a SUGGESTED binding, the same state a
-        row gets from a name-based guess. Use &quot;Confirm all suggested bindings&quot; below to confirm every match
-        from this link in one write, instead of confirming rows one at a time.
-      </p>
-
-      {blockedReason && <p className={pageStyles.error}>{blockedReason}</p>}
-
-      <div className={styles.linkPanelRow}>
-        <label htmlFor="repo-grades-link-assignment" className={styles.linkPanelLabel}>
-          Canvas assignment
-        </label>
-        <select
-          id="repo-grades-link-assignment"
-          value={assignmentId}
-          onChange={(e) => onAssignmentIdChange(e.target.value)}
-          disabled={assignmentsLoading || blockedReason !== null}
-        >
-          <option value="">{assignmentsLoading ? "Loading..." : "Choose an assignment..."}</option>
-          {assignments.map((assignment) => (
-            <option key={assignment.id} value={assignment.id}>
-              {assignment.name}
-            </option>
-          ))}
-        </select>
+      <div className={styles.linkSourceToggle} role="radiogroup" aria-label="Where to read GitHub usernames from">
         <button
           type="button"
-          className={pageStyles.linkButton}
-          disabled={linkDisabled}
-          onClick={() => {
-            void handleLink();
-          }}
+          role="radio"
+          aria-checked={linkSource === "roster"}
+          className={linkSource === "roster" ? styles.linkSourceButtonActive : styles.linkSourceButton}
+          onClick={() => onLinkSourceChange("roster")}
         >
-          {linkBusy ? "Linking..." : "Link GitHub usernames"}
+          Usernames already in the course table
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={linkSource === "live"}
+          className={linkSource === "live" ? styles.linkSourceButtonActive : styles.linkSourceButton}
+          onClick={() => onLinkSourceChange("live")}
+        >
+          Read a Canvas assignment&apos;s submissions
         </button>
       </div>
 
-      {assignmentsLoading && <p className={pageStyles.fieldHint}>Loading the course&apos;s Canvas assignments...</p>}
-      {assignmentsError && <p className={pageStyles.error}>{assignmentsError}</p>}
-      {linkError && <p className={pageStyles.error}>{linkError}</p>}
+      {linkSource === "roster" && (
+        <LinkUsernamesRosterSection
+          rosterOverlay={rosterOverlay}
+          onLinkFromCourseRoster={onLinkFromCourseRoster}
+          onAnnounce={onAnnounce}
+        />
+      )}
 
-      {/* The two lists below name what each bucket ACTUALLY is. An earlier
-          draft labelled them "matched more than one roster student" and
-          "already bound to a different student", and both were wrong:
-          `ambiguous` comes from partitionGithubUsernameSubmissions and means
-          the submitted TEXT did not parse as a GitHub username (a sentence, a
-          typo'd URL) - no roster matching has happened at that point at all -
-          while `conflicts` comes from buildRosterUpdate and means two students
-          submitted the SAME username (that pair is skipped entirely) or two
-          students share a display name (their repos get named with the
-          username instead). Mislabelling these sends the instructor looking
-          for the wrong problem in Canvas. */}
-      {outcome && (
-        <div className={styles.linkResult}>
-          <p className={styles.linkResultLine}>{linkUsernamesSummaryLine(outcome)}</p>
-          {outcome.ambiguous.length > 0 && (
-            <div>
-              <p className={styles.linkNoteLabel}>
-                Could not read a GitHub username from these submissions - fix them in Canvas, or bind those repos by
-                hand in the grid:
-              </p>
-              <ul className={styles.linkNoteList}>
-                {outcome.ambiguous.map((line, index) => (
-                  <li key={`${index}-${line}`}>{line}</li>
-                ))}
-              </ul>
-            </div>
+      {linkSource === "live" && (
+        <div className={styles.linkSourceSection}>
+          <p className={pageStyles.fieldHint}>
+            Students submit their own GitHub username to a Canvas assignment. Reading that assignment matches each
+            username to the roster student who submitted it - more reliable than the name-based guess the grid
+            otherwise makes on its own, because it uses each student&apos;s own submission rather than an inferred
+            match.
+          </p>
+
+          <p className={pageStyles.fieldHint}>
+            Linking does not confirm anything by itself: a matched repo shows up as a SUGGESTED binding, the same
+            state a row gets from a name-based guess. Use &quot;Confirm all suggested bindings&quot; below to confirm
+            every match from this link in one write, instead of confirming rows one at a time.
+          </p>
+
+          {liveLinkBlockedReason && <p className={pageStyles.error}>{liveLinkBlockedReason}</p>}
+
+          <div className={styles.linkPanelRow}>
+            <label htmlFor="repo-grades-link-assignment" className={styles.linkPanelLabel}>
+              Canvas assignment
+            </label>
+            <select
+              id="repo-grades-link-assignment"
+              value={assignmentId}
+              onChange={(e) => onAssignmentIdChange(e.target.value)}
+              disabled={anyAssignmentListLoading || liveLinkBlockedReason !== null}
+            >
+              <option value="">{anyAssignmentListLoading ? "Loading..." : "Choose an assignment..."}</option>
+              {assignmentOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={pageStyles.linkButton}
+              disabled={linkDisabled}
+              onClick={() => {
+                void handleLink();
+              }}
+            >
+              {linkBusy ? "Linking..." : "Link GitHub usernames"}
+            </button>
+          </div>
+
+          {/* An export option is a perfectly fine thing to have selected in
+              this picker (it is still a real assignment name to recognize),
+              but Canvas has no live submissions to read for it - only a real
+              Canvas assignment id supports that. Say so instead of leaving the
+              disabled button unexplained. */}
+          {chosenAssignmentOption && !chosenOptionUsableForLiveRead && !liveLinkBlockedReason && (
+            <p className={pageStyles.fieldHint}>
+              &quot;{chosenAssignmentOption.label}&quot; is from the saved course export, not a live Canvas
+              assignment, so there are no submissions to read for it here. Choose a live Canvas assignment instead,
+              or use the course table source above.
+            </p>
           )}
-          {outcome.conflicts.length > 0 && (
-            <div>
-              <p className={styles.linkNoteLabel}>Needs review - duplicate username or duplicate student name:</p>
-              <ul className={styles.linkNoteList}>
-                {outcome.conflicts.map((line, index) => (
-                  <li key={`${index}-${line}`}>{line}</li>
-                ))}
-              </ul>
+
+          {assignmentsLoading && <p className={pageStyles.fieldHint}>Loading the course&apos;s Canvas assignments...</p>}
+          {assignmentsError && <p className={pageStyles.error}>{assignmentsError}</p>}
+          {exportAssignmentsLoading && (
+            <p className={pageStyles.fieldHint}>Loading the saved export&apos;s assignments...</p>
+          )}
+          {exportAssignmentsError && <p className={pageStyles.error}>{exportAssignmentsError}</p>}
+          {linkError && <p className={pageStyles.error}>{linkError}</p>}
+
+          {/* The two lists below name what each bucket ACTUALLY is. An earlier
+              draft labelled them "matched more than one roster student" and
+              "already bound to a different student", and both were wrong:
+              `ambiguous` comes from partitionGithubUsernameSubmissions and means
+              the submitted TEXT did not parse as a GitHub username (a sentence, a
+              typo'd URL) - no roster matching has happened at that point at all -
+              while `conflicts` comes from buildRosterUpdate and means two students
+              submitted the SAME username (that pair is skipped entirely) or two
+              students share a display name (their repos get named with the
+              username instead). Mislabelling these sends the instructor looking
+              for the wrong problem in Canvas. */}
+          {outcome && (
+            <div className={styles.linkResult}>
+              <p className={styles.linkResultLine}>{linkUsernamesSummaryLine(outcome)}</p>
+              {outcome.ambiguous.length > 0 && (
+                <div>
+                  <p className={styles.linkNoteLabel}>
+                    Could not read a GitHub username from these submissions - fix them in Canvas, or bind those repos
+                    by hand in the grid:
+                  </p>
+                  <ul className={styles.linkNoteList}>
+                    {outcome.ambiguous.map((line, index) => (
+                      <li key={`${index}-${line}`}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {outcome.conflicts.length > 0 && (
+                <div>
+                  <p className={styles.linkNoteLabel}>Needs review - duplicate username or duplicate student name:</p>
+                  <ul className={styles.linkNoteList}>
+                    {outcome.conflicts.map((line, index) => (
+                      <li key={`${index}-${line}`}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -26,6 +26,14 @@ const SELECTED_KEY = "ta-repo-grades-selected";
 // standing project rule (every control in this view persists across reload
 // under a ta- key), same as COURSE_KEY/ORG_PREFIX_KEY above.
 const LINK_ASSIGNMENT_KEY = "ta-repo-grades-link-assignment";
+// Which of the two "Link GitHub usernames" sources is showing (the course
+// table roster, or a live Canvas assignment's submissions) - standing
+// project rule (every control in this view persists across reload under a
+// ta- key), same as LINK_ASSIGNMENT_KEY above. Follow-up to the wave that
+// added LinkUsernamesPanel.tsx: that file's own header comment records this
+// control was local useState only because this file was outside that
+// implementer's file set.
+const LINK_SOURCE_KEY = "ta-repo-grades-link-source";
 // AC5 items 25-26: the per-column-to-Canvas-assignment mapping, persisted per
 // COURSE (one course's "week-1" folder means nothing to another course's
 // Canvas assignment list) as a single JSON blob keyed by course id, then by
@@ -63,10 +71,22 @@ export interface RepoGradesUiState {
   /** The Canvas assignment id chosen for "Link GitHub usernames" - restored
    * on reload so re-running the link doesn't require re-picking it. */
   linkAssignmentId: string;
+  /** Which of LinkUsernamesPanel's two sources is showing - "roster" (the
+   * course table, default: it needs no Canvas connection) or "live" (a
+   * Canvas assignment's own submissions). */
+  linkSource: "roster" | "live";
 }
 
 function defaultUiState(): RepoGradesUiState {
-  return { courseId: "", orgPrefix: "", sort: DEFAULT_REPO_GRADE_SORT, instructions: "", rubric: "", linkAssignmentId: "" };
+  return {
+    courseId: "",
+    orgPrefix: "",
+    sort: DEFAULT_REPO_GRADE_SORT,
+    instructions: "",
+    rubric: "",
+    linkAssignmentId: "",
+    linkSource: "roster",
+  };
 }
 
 function isSortField(value: unknown): value is RepoGradeSortField {
@@ -75,6 +95,17 @@ function isSortField(value: unknown): value is RepoGradeSortField {
 
 function isSortDirection(value: unknown): value is SortDirection {
   return value === "asc" || value === "desc";
+}
+
+function isLinkSource(value: unknown): value is "roster" | "live" {
+  return value === "roster" || value === "live";
+}
+
+/** Parses a persisted link-source value, falling back to the default
+ * ("roster") for anything missing or naming a source that no longer exists -
+ * the same "never trust stored data" posture parseSort takes above. */
+function parseLinkSource(raw: string | null): "roster" | "live" {
+  return isLinkSource(raw) ? raw : "roster";
 }
 
 /** Parses a persisted sort value, falling back to DEFAULT_REPO_GRADE_SORT for
@@ -109,6 +140,7 @@ export function loadRepoGradesUiState(): RepoGradesUiState {
     instructions: localStorage.getItem(INSTRUCTIONS_KEY) ?? "",
     rubric: localStorage.getItem(RUBRIC_KEY) ?? "",
     linkAssignmentId: localStorage.getItem(LINK_ASSIGNMENT_KEY) ?? "",
+    linkSource: parseLinkSource(localStorage.getItem(LINK_SOURCE_KEY)),
   };
 }
 
@@ -121,6 +153,7 @@ export function persistRepoGradesUiState(state: RepoGradesUiState): void {
     localStorage.setItem(INSTRUCTIONS_KEY, state.instructions);
     localStorage.setItem(RUBRIC_KEY, state.rubric);
     localStorage.setItem(LINK_ASSIGNMENT_KEY, state.linkAssignmentId);
+    localStorage.setItem(LINK_SOURCE_KEY, state.linkSource);
   } catch {
     // localStorage can throw (private browsing, quota) - losing persistence
     // for one change is acceptable, crashing the tab is not. Matches

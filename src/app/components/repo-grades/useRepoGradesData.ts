@@ -31,11 +31,30 @@ import {
   loadOrgRepoTreesAction,
   updateCourseHubAction,
 } from "@/app/actions";
-import type { Course } from "@/lib/supabase/courses";
+import type { Course, CourseStudentRepo } from "@/lib/supabase/courses";
 import { courseToInput } from "@/lib/courses-tab-helpers";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import type { OrgRepoTreesResult } from "@/lib/repo-grade-tree-scan";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
+import { useSupabase } from "@/context/SupabaseProvider";
+// lmsRenderSourcesFor is the SAME "does this course tile actually have a live
+// Canvas connection / a stored export" gate useLmsAssignmentPull.ts already
+// uses (courses-table-helpers.ts, not the similarly-named courses-tab-
+// helpers.ts above) - reused here rather than re-derived so the export-
+// assignments load below makes no request, and reports no error, for a
+// course with no stored export at all, exactly like that hook's own
+// exportKey does.
+import { lmsRenderSourcesFor } from "@/lib/courses-table-helpers";
+import { readExportCourseContentById, type ExportCourseContent } from "@/lib/lms-export-source";
+import { exportAssignmentOptions } from "@/lib/lms-export-source/export-assignments";
+// overlayRosterUsernames folds the Courses tab's hand-maintained roster text
+// (course.roster, "Student Name | username" per line) onto studentRepos -
+// see effectiveStudentRepos/rosterOverlay below for why this is the point of
+// the wave. buildRepoGradeAssignmentOptions merges the live Canvas
+// assignment list with the export's flattened assignment items into one
+// picker-ready list (item 4 below).
+import { overlayRosterUsernames, type RosterUsernameOverlayResult } from "./rosterUsernameOverlay";
+import { buildRepoGradeAssignmentOptions, type RepoGradeAssignmentOption } from "./repoGradesAssignmentSources";
 // Type-only import (erased at build time - safe from a "use client" module
 // even though src/lib/canvas/listings.ts, where CanvasAssignmentBrief is
 // actually defined, is only ever reached at runtime through the "use server"
@@ -108,6 +127,73 @@ export interface UseRepoGradesDataResult {
   assignments: CanvasAssignmentBrief[];
   assignmentsLoading: boolean;
   assignmentsError: string | null;
+  /**
+   * `overlayRosterUsernames(course.studentRepos, course.roster).rows` -
+   * computed on every render (pure, cheap, no I/O) rather than stored, so it
+   * can never go stale relative to the tile actually selected. THIS IS THE
+   * POINT OF THIS WAVE: index.tsx feeds THIS - not `course.studentRepos` -
+   * into `buildRepoGradeGridModel` as the binder's `stored` input, so the
+   * GitHub usernames an instructor already typed into the Courses tab's
+   * Roster tile (course.roster, a plain "Student Name | username" text field
+   * with no Canvas dependency) finally reach tier 1 of
+   * `suggestRepoStudentBindings`'s match instead of being invisible to it.
+   * `course.studentRepos` itself is never mutated to produce this - see the
+   * comment on `rosterOverlay` below for why both derive from ONE overlay
+   * call.
+   */
+  effectiveStudentRepos: CourseStudentRepo[];
+  /**
+   * The full result of the SAME overlay call `effectiveStudentRepos` reads
+   * `.rows` from - computed exactly once per render, never called twice, so
+   * the two can never disagree. Lets the panel report matched/added/
+   * withoutCanvasId/conflicts honestly instead of just silently swapping in
+   * different rows.
+   */
+  rosterOverlay: RosterUsernameOverlayResult;
+  /**
+   * Persists `rosterOverlay.rows` onto the tile's `studentRepos` - the same
+   * `updateCourseHubAction(course.id, {...courseToInput(course),
+   * studentRepos: ...})` / `setCourses` write shape `acceptBinding`,
+   * `confirmSuggestedBindings`, and `linkGithubUsernames` all use. Makes NO
+   * Canvas call anywhere in its body and is never gated on
+   * `liveLinkBlockedReason`: unlike `linkGithubUsernames` below, this reads
+   * only `course.roster`, a plain instructor-typed field, so it must work for
+   * a tile with no institution and no Canvas URL at all - that is the entire
+   * requirement this function exists to satisfy. Never writes `course.roster`
+   * itself back - that text stays the instructor's own field; this only
+   * fills in the studentRepos the roster's usernames were missing from.
+   * Returns `{ error }` (never throws) when there is no course selected, or
+   * when the overlay found nothing new to add (`matched === 0 && added ===
+   * 0`), naming the Courses tab Roster tile as where to add usernames.
+   */
+  linkFromCourseRoster: () => Promise<
+    { matched: number; added: number; withoutCanvasId: number; conflicts: string[] } | { error: string }
+  >;
+  /**
+   * The course's live Canvas assignments and its saved export's assignment-
+   * like module items, merged into one picker list by
+   * `buildRepoGradeAssignmentOptions` (repoGradesAssignmentSources.ts). The
+   * export half needs no student roster at all (an export carries no
+   * students - see `exportAssignmentsLoading`/`exportAssignmentsError`
+   * below), which is exactly why it can offer assignments a tile with no
+   * Canvas roster still cannot get from `assignments` above.
+   */
+  assignmentOptions: RepoGradeAssignmentOption[];
+  /**
+   * Derived-loading for the export-content load feeding `assignmentOptions`'
+   * export half - same "request key vs. last-completed key" idiom every
+   * other load in this file uses (see the file header comment). `false`
+   * whenever the chosen course has no stored export at all
+   * (`lmsRenderSourcesFor(course).export` is false), since that case makes no
+   * request in the first place.
+   */
+  exportAssignmentsLoading: boolean;
+  /**
+   * The export-content load's error, or `null` on success or when the chosen
+   * course has no stored export (in which case no request was ever made, so
+   * there is nothing to report as an error).
+   */
+  exportAssignmentsError: string | null;
   /** Manually re-runs the org scan for the current course/prefix (e.g. a
    * "Refresh" button after the instructor pushes new repos). */
   reloadScan: () => void;
@@ -123,15 +209,21 @@ export interface UseRepoGradesDataResult {
    */
   acceptBinding: (repo: string, canvasUserId: string, student: string, username: string | null) => Promise<{ ok: true } | { error: string }>;
   /**
-   * Null when the "Link GitHub usernames" action can run; otherwise the
-   * reason it cannot, worded to match this view's existing missingInstitution
-   * / missingOrg banners (index.tsx) - named-course, states-what-is-missing,
-   * states-what-that-breaks. Derived on every render from `course`/
-   * `institution`/`canvasCourseId` (the same values the roster/assignments
-   * loads below already compute), never stored, so it can never go stale
-   * relative to the tile actually selected.
+   * RENAMED from `linkBlockedReason` this wave (its meaning narrowed - see
+   * below). Null when the LIVE-Canvas "Link GitHub usernames" action
+   * (`linkGithubUsernames`, which reads a Canvas assignment's text
+   * submissions) can run; otherwise the reason it cannot, worded to match
+   * this view's existing missingInstitution / missingOrg banners (index.tsx)
+   * - named-course, states-what-is-missing, states-what-that-breaks. Governs
+   * ONLY the live-Canvas submissions source. It must NOT block
+   * `linkFromCourseRoster` (the course-table roster source above, which needs
+   * no institution or Canvas course id at all) or `assignmentOptions`' export
+   * half (which needs a stored export, not a live Canvas connection).
+   * Derived on every render from `course`/`institution`/`canvasCourseId` (the
+   * same values the roster/assignments loads below already compute), never
+   * stored, so it can never go stale relative to the tile actually selected.
    */
-  linkBlockedReason: string | null;
+  liveLinkBlockedReason: string | null;
   /**
    * Mirrors the "Link GitHub usernames to roster" workflow step
    * (steps.course-setup.rosters.ts:70-173) inline in this view: reads one
@@ -262,6 +354,68 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
   const assignmentsError = assignmentsMatches ? assignmentsResult!.error : null;
   const assignmentsLoading = assignmentsKey !== null && !assignmentsMatches;
 
+  // ---- course-table roster overlay (course.roster's "Student | username"
+  // lines folded onto studentRepos) - see effectiveStudentRepos/rosterOverlay
+  // on UseRepoGradesDataResult above for why this is the point of the wave.
+  // overlayRosterUsernames is pure and does no I/O, so it is computed
+  // directly here on every render rather than behind a keyed load like the
+  // scan/roster/assignments above - there is no async gap to key against.
+  // Computed ONCE: both `rosterOverlay` (the full result) and
+  // `effectiveStudentRepos` (just its rows) read from this one call, never
+  // two separate calls that could disagree.
+  const rosterOverlay: RosterUsernameOverlayResult = overlayRosterUsernames(course?.studentRepos ?? [], course?.roster ?? null);
+  const effectiveStudentRepos: CourseStudentRepo[] = rosterOverlay.rows;
+
+  // ---- export assignments (merged with live below into assignmentOptions) -
+  // Same institution-free precedent useLmsAssignmentPull.ts's own exportKey/
+  // exportResult pair sets: gated on lmsRenderSourcesFor(course).export
+  // (courses-table-helpers.ts) rather than institution/canvasCourseId, so a
+  // course with no stored export makes no request and reports no error, and
+  // a course with an export but no live Canvas connection at all still gets
+  // an assignment list. Same KeyedResult idiom as scan/roster/assignments
+  // above - an effect with `let cancelled = false`, an async IIFE that AWAITS
+  // BEFORE any setState, an `if (cancelled) return` guard, cleanup setting
+  // `cancelled = true`, and DERIVED loading state - never a synchronous
+  // setLoading(true), which react-hooks/set-state-in-effect forbids.
+  const { supabase } = useSupabase();
+  const courseSources = course ? lmsRenderSourcesFor(course) : { live: false, export: false };
+  const exportContentKey = course && courseSources.export ? course.id : null;
+  const [exportContentResult, setExportContentResult] = useState<KeyedResult<ExportCourseContent | null> | null>(null);
+
+  useEffect(() => {
+    if (exportContentKey === null) return;
+    let cancelled = false;
+    (async () => {
+      const result = await readExportCourseContentById(supabase, exportContentKey);
+      if (cancelled) return;
+      if ("error" in result) {
+        setExportContentResult({ key: exportContentKey, data: null, error: result.error });
+      } else {
+        setExportContentResult({ key: exportContentKey, data: result, error: null });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [exportContentKey, supabase]);
+
+  const exportContentMatches = exportContentKey !== null && exportContentResult?.key === exportContentKey;
+  const exportContent = exportContentMatches ? exportContentResult!.data : null;
+  const exportAssignmentsError = exportContentMatches ? exportContentResult!.error : null;
+  const exportAssignmentsLoading = exportContentKey !== null && !exportContentMatches;
+
+  // exportAssignmentOptions flattens the export's modules into
+  // {moduleTitle, itemTitle, key, body, hasBody} items (export-assignments.ts).
+  // buildRepoGradeAssignmentOptions' `export` parameter is typed as
+  // {key, itemTitle} (repoGradesAssignmentSources.ts), matching those two
+  // fields exactly, so ExportAssignmentOption satisfies it structurally with
+  // no adapting - passed straight through rather than remapped.
+  const exportAssignmentItems = exportContent ? exportAssignmentOptions(exportContent.modules) : [];
+  const assignmentOptions: RepoGradeAssignmentOption[] = buildRepoGradeAssignmentOptions({
+    live: assignments,
+    export: exportAssignmentItems,
+  });
+
   const reloadScan = () => setScanNonce((n) => n + 1);
 
   const acceptBinding = async (
@@ -281,12 +435,56 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     return { ok: true };
   };
 
+  // ---- link from the Courses tab's own roster text (no Canvas call) ------
+  // Persists `rosterOverlay` (computed above, once, alongside
+  // effectiveStudentRepos) onto the tile's studentRepos - the same
+  // updateCourseHubAction/setCourses write shape acceptBinding above and
+  // confirmSuggestedBindings/linkGithubUsernames below all use. Deliberately
+  // makes NO Canvas call anywhere in its body and is never gated on
+  // liveLinkBlockedReason: course.roster is a plain instructor-typed field
+  // with no institution or Canvas-course-id dependency, so this must work
+  // for a tile with no institution and no Canvas URL at all - that is the
+  // entire requirement this function exists to satisfy. Never writes
+  // course.roster itself back - that text stays the instructor's own field;
+  // this only fills in the studentRepos rows the roster's usernames were
+  // missing from.
+  const linkFromCourseRoster = async (): Promise<
+    { matched: number; added: number; withoutCanvasId: number; conflicts: string[] } | { error: string }
+  > => {
+    if (!course) return { error: "Choose a course tile first." };
+    // Nothing changed: report it plainly rather than writing a no-op update,
+    // and point at exactly where to add usernames - mirrors linkGithubUsernames'
+    // own "ok.length === 0" no-write-on-no-change branch below.
+    if (rosterOverlay.matched === 0 && rosterOverlay.added === 0) {
+      return {
+        error: `The Courses tab roster for "${course.name}" has no GitHub usernames this grid was missing. Add "Student Name | username" lines to its Roster tile on the Courses tab.`,
+      };
+    }
+    const writeResult = await updateCourseHubAction(course.id, {
+      ...courseToInput(course),
+      studentRepos: rosterOverlay.rows,
+    });
+    if ("error" in writeResult) return { error: writeResult.error };
+    setCourses((prev) => prev.map((c) => (c.id === writeResult.course.id ? writeResult.course : c)));
+    return {
+      matched: rosterOverlay.matched,
+      added: rosterOverlay.added,
+      withoutCanvasId: rosterOverlay.withoutCanvasId,
+      conflicts: rosterOverlay.conflicts,
+    };
+  };
+
   // ---- link GitHub usernames from a Canvas assignment's submissions ------
   // Same institution/canvasCourseId gate the roster/assignments loads above
   // already computed - reusing those exact values (rather than re-deriving)
   // so this action degrades identically to the rest of the view for a tile
-  // missing either one.
-  const linkBlockedReason: string | null = !course
+  // missing either one. RENAMED from `linkBlockedReason` to
+  // `liveLinkBlockedReason` this wave: its meaning narrowed to "the LIVE
+  // Canvas submissions source cannot run" now that `linkFromCourseRoster` and
+  // `assignmentOptions`' export half exist as sources that need neither
+  // institution nor a Canvas course id - see the doc comment on
+  // UseRepoGradesDataResult.liveLinkBlockedReason above.
+  const liveLinkBlockedReason: string | null = !course
     ? "Choose a course tile above first."
     : !institution
       ? `"${course.name}" has no institution set, so its Canvas assignment submissions cannot be read until one is set on the course tile.`
@@ -298,11 +496,11 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     assignmentId: string,
     assignmentName: string
   ): Promise<LinkUsernamesOutcome | { error: string }> => {
-    if (linkBlockedReason) return { error: linkBlockedReason };
+    if (liveLinkBlockedReason) return { error: liveLinkBlockedReason };
     const trimmedAssignmentId = assignmentId.trim();
     if (!trimmedAssignmentId) return { error: "Choose the assignment students submitted their GitHub username to." };
 
-    // linkBlockedReason === null guarantees course, institution and
+    // liveLinkBlockedReason === null guarantees course, institution and
     // canvasCourseId are all non-null/non-empty at this point.
     const result = await listAssignmentTextSubmissionsAction(institution, canvasCourseId!, trimmedAssignmentId);
     if ("error" in result) return { error: result.error };
@@ -382,9 +580,15 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     assignments,
     assignmentsLoading,
     assignmentsError,
+    effectiveStudentRepos,
+    rosterOverlay,
+    linkFromCourseRoster,
+    assignmentOptions,
+    exportAssignmentsLoading,
+    exportAssignmentsError,
     reloadScan,
     acceptBinding,
-    linkBlockedReason,
+    liveLinkBlockedReason,
     linkGithubUsernames,
     confirmSuggestedBindings,
   };

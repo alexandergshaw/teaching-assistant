@@ -60,7 +60,7 @@ afterEach(() => {
 });
 
 describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
-  it("returns defaults (empty course, empty prefix, repo/asc sort, empty instructions/rubric/link assignment) when nothing is stored", () => {
+  it("returns defaults (empty course, empty prefix, repo/asc sort, empty instructions/rubric/link assignment, roster link source) when nothing is stored", () => {
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "",
       orgPrefix: "",
@@ -68,6 +68,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       instructions: "",
       rubric: "",
       linkAssignmentId: "",
+      linkSource: "roster",
     });
   });
 
@@ -80,6 +81,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       instructions: "",
       rubric: "",
       linkAssignmentId: "",
+      linkSource: "roster",
     });
   });
 
@@ -91,6 +93,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       instructions: "Grade the README against the rubric.",
       rubric: "5 pts: has a README",
       linkAssignmentId: "9001",
+      linkSource: "live",
     });
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "course-1",
@@ -99,6 +102,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       instructions: "Grade the README against the rubric.",
       rubric: "5 pts: has a README",
       linkAssignmentId: "9001",
+      linkSource: "live",
     });
   });
 
@@ -112,6 +116,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         instructions: "",
         rubric: "",
         linkAssignmentId: "",
+        linkSource: "roster",
       })
     ).not.toThrow();
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBeNull();
@@ -127,6 +132,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         instructions: "",
         rubric: "",
         linkAssignmentId: "",
+        linkSource: "roster",
       })
     ).not.toThrow();
   });
@@ -141,7 +147,25 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
     expect(loadRepoGradesUiState().sort).toEqual(DEFAULT_REPO_GRADE_SORT);
   });
 
-  it("persists course id, org prefix, sort, instructions, rubric, and link assignment id under six distinct ta- keys", () => {
+  it("round-trips the link source through persist then load", () => {
+    persistRepoGradesUiState({
+      courseId: "",
+      orgPrefix: "",
+      sort: DEFAULT_REPO_GRADE_SORT,
+      instructions: "",
+      rubric: "",
+      linkAssignmentId: "",
+      linkSource: "live",
+    });
+    expect(loadRepoGradesUiState().linkSource).toBe("live");
+  });
+
+  it("falls back to the default link source (\"roster\") for a stored value that is neither \"roster\" nor \"live\"", () => {
+    fakeStorage.setItem("ta-repo-grades-link-source", "workflow-step");
+    expect(loadRepoGradesUiState().linkSource).toBe("roster");
+  });
+
+  it("persists course id, org prefix, sort, instructions, rubric, link assignment id, and link source under seven distinct ta- keys", () => {
     persistRepoGradesUiState({
       courseId: "course-9",
       orgPrefix: "wk",
@@ -149,6 +173,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       instructions: "Grade folder by folder.",
       rubric: "10 pts total",
       linkAssignmentId: "9001",
+      linkSource: "live",
     });
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBe("course-9");
     expect(fakeStorage.getItem("ta-repo-grades-org-prefix")).toBe("wk");
@@ -156,6 +181,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
     expect(fakeStorage.getItem("ta-repo-grades-instructions")).toBe("Grade folder by folder.");
     expect(fakeStorage.getItem("ta-repo-grades-rubric")).toBe("10 pts total");
     expect(fakeStorage.getItem("ta-repo-grades-link-assignment")).toBe("9001");
+    expect(fakeStorage.getItem("ta-repo-grades-link-source")).toBe("live");
   });
 });
 

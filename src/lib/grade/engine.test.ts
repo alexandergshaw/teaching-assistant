@@ -16,7 +16,7 @@ vi.mock("../llm", () => ({
 
 import { callLlm } from "../llm";
 import { gradeEntries } from "./engine";
-import type { StudentSubmissionEntry } from "./types";
+import { RESUBMIT_NOTICE, type StudentSubmissionEntry } from "./types";
 
 const mockCallLlm = vi.mocked(callLlm);
 
@@ -109,5 +109,47 @@ describe("gradeEntries - submission truncation is reported to the caller (C2.7)"
 
     expect(run.results[0].totalScore).toBe("8/10");
     expect(run.results[0].overallComment).toContain("Solid work overall.");
+  });
+});
+
+// AC6 item 22 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
+// gradeSubmission's RESUBMIT_NOTICE append (engine.ts) had NO test before this
+// one, unlike the embedded-grader's two variants - so a regression here would
+// fail silently while the embedded suites fail loudly. Pins CURRENT behavior
+// (notice appended exactly when points were deducted, absent at full credit)
+// before the three-feedback-boxes refactor touches this function.
+describe("gradeEntries - resubmit notice on the LLM path (previously untested)", () => {
+  it("appends RESUBMIT_NOTICE to overallComment when points were deducted", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT }); // scores 8/10
+
+    const run = await gradeEntries(
+      [entry()],
+      "Grade the assignment.",
+      "Grade for correctness and clarity.",
+      "gemini"
+    );
+
+    expect(run.results[0].totalScore).toBe("8/10");
+    expect(run.results[0].overallComment).toBe(`Solid work overall. ${RESUBMIT_NOTICE}`);
+  });
+
+  it("does not append RESUBMIT_NOTICE when the submission earns full credit", async () => {
+    const fullCreditText = JSON.stringify({
+      overallComment: "Excellent work overall.",
+      rubricResults: [{ area: "Overall", score: "10/10" }],
+      totalScore: "10/10",
+    });
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: fullCreditText });
+
+    const run = await gradeEntries(
+      [entry()],
+      "Grade the assignment.",
+      "Grade for correctness and clarity.",
+      "gemini"
+    );
+
+    expect(run.results[0].totalScore).toBe("10/10");
+    expect(run.results[0].overallComment).toBe("Excellent work overall.");
+    expect(run.results[0].overallComment).not.toContain(RESUBMIT_NOTICE);
   });
 });

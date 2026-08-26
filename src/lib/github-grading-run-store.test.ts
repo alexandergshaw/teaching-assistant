@@ -20,6 +20,9 @@ function fixtureResult(overrides: Partial<GradeResult> = {}): GradeResult {
   return {
     student: "Jane Doe",
     overallComment: "Nice work.",
+    strengths: "Nice work.",
+    improvements: "",
+    resubmitNotice: "",
     rubricAreas: [{ area: "Clarity", score: "8/10", comment: "" }],
     totalScore: "8/10",
     feedback: "Total Score: 8/10\nOverall: Nice work.",
@@ -71,6 +74,9 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
       {
         student: "Jane Doe",
         overallComment: "Nice work.",
+        strengths: "Nice work.",
+        improvements: "",
+        resubmitNotice: "",
         rubricAreas: [{ area: "Clarity", score: "8/10", comment: "" }],
         totalScore: "8/10",
         feedback: "Total Score: 8/10\nOverall: Nice work.",
@@ -251,6 +257,37 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
     const restored = parseStoredGithubGradingRun(JSON.stringify(stored));
     expect(restored).not.toBeNull();
     expect(restored!.run.results[0].submissionTruncated).toBeUndefined();
+  });
+
+  // docs/grading-results-feedback-boxes-acceptance-criteria.md A5 item 18: the
+  // three feedback-box fields are REQUIRED on GradeResult, so this store must
+  // NOT copy the strict-validation idiom this suite exercises above (one bad
+  // result invalidates the whole run) for them - that would erase every run
+  // already sitting in a user's localStorage the moment this feature ships. A
+  // blob saved before this feature existed has no strengths/improvements/
+  // resubmitNotice keys at all; it must still load, with those three fields
+  // degrading to "" rather than the run being rejected.
+  it("still loads a run predating this feature, with no strengths/improvements/resubmitNotice keys at all", () => {
+    const oldResult = fixtureResult() as unknown as Record<string, unknown>;
+    delete oldResult.strengths;
+    delete oldResult.improvements;
+    delete oldResult.resubmitNotice;
+    const stored = {
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "week-1",
+      truncatedRepos: [],
+      run: { results: [oldResult], rubricAreaNames: ["Clarity"], fullCreditChecklist: [] },
+    };
+    const restored = parseStoredGithubGradingRun(JSON.stringify(stored));
+    expect(restored).not.toBeNull();
+    expect(restored!.run.results[0].student).toBe("Jane Doe");
+    // The pre-existing composed comment survives untouched...
+    expect(restored!.run.results[0].overallComment).toBe("Nice work.");
+    // ...while the three new boxes, unavailable on this old blob, degrade to
+    // "" instead of the whole run being thrown away.
+    expect(restored!.run.results[0].strengths).toBe("");
+    expect(restored!.run.results[0].improvements).toBe("");
+    expect(restored!.run.results[0].resubmitNotice).toBe("");
   });
 });
 

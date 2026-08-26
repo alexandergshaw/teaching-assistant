@@ -34,6 +34,10 @@ describe("buildZeroGradingEntry", () => {
     expect(entry.run.results[0].student).toBe("Alice Smith");
     expect(entry.run.results[0].userId).toBe(101);
     expect(entry.run.results[0].overallComment).toBe("");
+    // No submission means nothing honest to say in any of the three boxes.
+    expect(entry.run.results[0].strengths).toBe("");
+    expect(entry.run.results[0].improvements).toBe("");
+    expect(entry.run.results[0].resubmitNotice).toBe("");
     expect(entry.run.results[0].totalScore).toBe("0/100");
     expect(entry.run.results[0].rubricAreas).toEqual([]);
     expect(entry.run.results[0].submittedFiles).toEqual([]);

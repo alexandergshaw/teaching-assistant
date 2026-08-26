@@ -48,6 +48,10 @@ function toRubricAreaResult(value: unknown): RubricAreaResult | null {
 
 export function parseRubricResponse(raw: string): {
   overallComment: string;
+  // The model's separate "what could be better" text (prompts.ts's
+  // `improvements` field) - "" when the model omitted it or the response
+  // fell back to raw text (no structured improvement guidance to extract).
+  improvements: string;
   rubricAreas: RubricAreaResult[];
   totalScore: string;
 } {
@@ -56,6 +60,7 @@ export function parseRubricResponse(raw: string): {
   if (!jsonText) {
     return {
       overallComment: raw.trim() || "No feedback generated.",
+      improvements: "",
       rubricAreas: [
         {
           area: "Overall",
@@ -70,6 +75,7 @@ export function parseRubricResponse(raw: string): {
   try {
     const parsed = JSON.parse(jsonText) as {
       overallComment?: unknown;
+      improvements?: unknown;
       rubricResults?: unknown;
       totalScore?: unknown;
     };
@@ -82,10 +88,12 @@ export function parseRubricResponse(raw: string): {
 
     const overallComment =
       normalizeText(parsed.overallComment) || "No overall comment provided.";
+    const improvements = normalizeText(parsed.improvements);
 
     if (rubricAreas.length === 0) {
       return {
         overallComment,
+        improvements,
         rubricAreas: [
           {
             area: "Overall",
@@ -99,12 +107,14 @@ export function parseRubricResponse(raw: string): {
 
     return {
       overallComment,
+      improvements,
       rubricAreas,
       totalScore: normalizeText(parsed.totalScore),
     };
   } catch {
     return {
       overallComment: raw.trim() || "No feedback generated.",
+      improvements: "",
       rubricAreas: [
         {
           area: "Overall",

@@ -4,12 +4,15 @@ import {
   stripGradingRunForDraft,
   stripGradingRunEntriesForDraft,
 } from "./workflows/grading-review-rows";
-import type { GradeResult, GradingRun, GradingRunEntry } from "./grade";
+import { RESUBMIT_NOTICE, type GradeResult, type GradingRun, type GradingRunEntry } from "./grade";
 
 function makeResult(overrides: Partial<GradeResult> = {}): GradeResult {
   return {
     student: "Jane Doe",
     overallComment: "Nice work.",
+    strengths: "Nice work.",
+    improvements: "",
+    resubmitNotice: "",
     rubricAreas: [{ area: "Clarity", score: "8/10", comment: "" }],
     totalScore: "8/10",
     feedback: "Total Score: 8/10\nOverall: Nice work.",
@@ -66,6 +69,23 @@ describe("stripGradeResultForDraft", () => {
     expect(stripped.feedback).toBe("Total Score: 8/10\nOverall: Nice work.");
     expect(stripped.mergedFileCount).toBe(1);
     expect(stripped.userId).toBe(42);
+  });
+
+  // docs/grading-results-feedback-boxes-acceptance-criteria.md A5 item 16:
+  // stripGradeResultForDraft is an explicit allowlist whose own comment warns
+  // a future field is excluded by default - this exact bug already shipped
+  // once with submissionTruncated. Proves the three feedback-box fields
+  // survive the draft round-trip rather than being silently dropped.
+  it("keeps strengths, improvements, and resubmitNotice (the three feedback boxes)", () => {
+    const result = makeResult({
+      strengths: "Great use of comments.",
+      improvements: "Consider adding unit tests.",
+      resubmitNotice: RESUBMIT_NOTICE,
+    });
+    const stripped = stripGradeResultForDraft(result);
+    expect(stripped.strengths).toBe("Great use of comments.");
+    expect(stripped.improvements).toBe("Consider adding unit tests.");
+    expect(stripped.resubmitNotice).toBe(RESUBMIT_NOTICE);
   });
 
   it("handles a result with no submitted files or userId", () => {

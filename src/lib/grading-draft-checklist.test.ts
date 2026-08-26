@@ -12,6 +12,9 @@ function makeResult(student: string) {
   return {
     student,
     overallComment: "Good work",
+    strengths: "Good work",
+    improvements: "",
+    resubmitNotice: "",
     rubricAreas: [{ area: "Correctness", score: "9/10", comment: "Nice" }],
     totalScore: "9/10",
     feedback: "",

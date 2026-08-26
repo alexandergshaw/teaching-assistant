@@ -7,6 +7,27 @@ export const MAX_NESTED_ZIP_DEPTH = 3;
 export const RESUBMIT_NOTICE =
   "You are welcome to resubmit this assignment, and I will regrade it with no late penalty.";
 
+// docs/grading-results-feedback-boxes-acceptance-criteria.md, A1 item 2:
+// overallComment is retained (roughly 32 downstream files read it) but is now
+// DERIVED from the three independently-copyable boxes rather than
+// independently authored. Every producer of a GradeResult must build
+// overallComment through this function, in this exact order (strengths, then
+// improvements, then resubmitNotice), so a reader of overallComment always
+// sees the same composition regardless of which grader produced it. Empty
+// parts are dropped rather than leaving stray whitespace, so a producer that
+// has nothing for one box (e.g. an embedded grader with no improvement text)
+// does not leave a double space or a trailing separator in the composed text.
+export function composeOverallComment(
+  strengths: string,
+  improvements: string,
+  resubmitNotice: string
+): string {
+  return [strengths, improvements, resubmitNotice]
+    .filter((part) => part.trim().length > 0)
+    .join(" ")
+    .trim();
+}
+
 export interface RubricAreaResult {
   area: string;
   score: string;
@@ -24,7 +45,27 @@ export interface SubmittedFileInfo {
 
 export interface GradeResult {
   student: string;
+  // overallComment is the COMPOSITION of strengths + improvements +
+  // resubmitNotice (see composeOverallComment above), never authored on its
+  // own - kept because ~32 downstream files (Canvas posting, CSV export,
+  // drafts, sorting) read it and expect the full feedback text.
   overallComment: string;
+  // What the student did well. Required (not optional) so a producer that
+  // forgets to populate it fails at compile time (tsc) rather than silently
+  // dropping a third of the feedback at runtime. May be "" when a producer
+  // genuinely has nothing to say (e.g. a zero for a non-submission).
+  strengths: string;
+  // What the student could do better - guidance the LLM prompt used to
+  // forbid (prompts.ts) until the instructor asked for it explicitly. "" when
+  // a producer cannot honestly produce improvement text (an embedded grader
+  // that met every check, or an external engine with no coaching signal) -
+  // never filler invented to fill the box.
+  improvements: string;
+  // RESUBMIT_NOTICE verbatim when points were deducted, "" at full credit -
+  // the exact wording and condition every producer used before this feature.
+  // Never model-generated or reworded: it is a promise about instructor
+  // policy, and every producer must say it identically or not at all.
+  resubmitNotice: string;
   rubricAreas: RubricAreaResult[];
   totalScore: string;
   feedback: string;

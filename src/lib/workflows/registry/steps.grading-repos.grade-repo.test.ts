@@ -148,6 +148,9 @@ function fakeGradeRun(): GradingRun {
       {
         student: "octocat/hello-world",
         overallComment: "Nice work.",
+        strengths: "Nice work.",
+        improvements: "",
+        resubmitNotice: "",
         rubricAreas: [{ area: "Correctness", score: "8/10", comment: "" }],
         totalScore: "8/10",
         feedback: "",
@@ -166,6 +169,9 @@ function fakeGradeRunFor(student: string, totalScore: string): GradingRun {
       {
         student,
         overallComment: "Nice work.",
+        strengths: "Nice work.",
+        improvements: "",
+        resubmitNotice: "",
         rubricAreas: [{ area: "Correctness", score: totalScore, comment: "" }],
         totalScore,
         feedback: "",

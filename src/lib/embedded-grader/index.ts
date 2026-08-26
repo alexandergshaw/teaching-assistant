@@ -11,6 +11,7 @@
 
 import {
   scaleResultToPoints,
+  composeOverallComment,
   RESUBMIT_NOTICE,
   type GradingRun,
   type RubricAreaResult,
@@ -71,11 +72,13 @@ export function buildEmbeddedRubric(input: BuildRubricInput): EmbeddedRubric {
 }
 
 
-/** Factual, warm-but-professional overall comment. States what was met and, where
- *  points were lost, the concrete reason, without coaching the student to improve.
- *  Phrasing varies deterministically per student (seeded) so a class's comments
- *  read naturally rather than stamped, while the factual core stays identical. */
-function buildOverallComment(passed: number, total: number, missing: string[], seed: string): string {
+/** Factual, warm-but-professional strengths statement: what was met (and, at
+ *  partial credit, how many of the total). Deliberately excludes the missing-
+ *  criteria list - that is improvement information, not a strength, and is
+ *  built separately by buildImprovements below. Phrasing varies
+ *  deterministically per student (seeded) so a class's comments read
+ *  naturally rather than stamped, while the factual core stays identical. */
+function buildStrengths(passed: number, total: number, missing: string[], seed: string): string {
   if (total === 0) return "No rubric criteria were available to score this submission.";
   const s = total === 1 ? "" : "s";
   if (missing.length === 0) {
@@ -89,15 +92,22 @@ function buildOverallComment(passed: number, total: number, missing: string[], s
       seed
     );
   }
-  const detail = `Not found in this submission: ${missing.join(", ")}.`;
   return pick(
     [
-      `${passed} of ${total} requirements met. ${detail}`,
-      `Good progress: ${passed} of ${total} requirements met. ${detail}`,
-      `${passed} of ${total} requirements met on this submission. ${detail}`,
+      `${passed} of ${total} requirements met.`,
+      `Good progress: ${passed} of ${total} requirements met.`,
+      `${passed} of ${total} requirements met on this submission.`,
     ],
     seed
   );
+}
+
+/** What would improve the score: the engine's own `missing` list, restated as
+ *  the concrete gap it already computed - not fabricated coaching. "" when
+ *  every check passed, since there is nothing honest to add to the box. */
+function buildImprovements(missing: string[]): string {
+  if (missing.length === 0) return "";
+  return `Not found in this submission: ${missing.join(", ")}.`;
 }
 
 /**
@@ -154,16 +164,17 @@ export function gradeEntriesEmbedded(
     const totalScore = possible > 0 ? `${formatNumber(earned)}/${formatNumber(possible)}` : "";
     const scaled = scaleResultToPoints(rawAreas, totalScore, pointsPossible);
 
-    const baseComment = buildOverallComment(
+    const strengths = buildStrengths(
       passedCount,
       rubric.checks.length,
       missing,
       `${entry.student}|${missing.join(",")}`
     );
+    const improvements = buildImprovements(missing);
     // A failed/partial check always lands in `missing` (a passing check earns full
     // points), so `missing.length > 0` is exactly when points were deducted.
-    const overallComment =
-      missing.length > 0 ? `${baseComment} ${RESUBMIT_NOTICE}` : baseComment;
+    const resubmitNotice = missing.length > 0 ? RESUBMIT_NOTICE : "";
+    const overallComment = composeOverallComment(strengths, improvements, resubmitNotice);
 
     return {
       student: entry.student,
@@ -171,6 +182,9 @@ export function gradeEntriesEmbedded(
       totalScore: scaled.totalScore,
       rubricAreas: scaled.rubricAreas,
       overallComment,
+      strengths,
+      improvements,
+      resubmitNotice,
       feedback: "",
       mergedFileCount: entry.mergedFileCount,
       submittedFiles: entry.submittedFiles,

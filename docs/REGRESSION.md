@@ -33388,3 +33388,181 @@ No test renders any component (vitest is node-env, collecting only
 breakdown remains unposted from this page for every source - see entry 352's
 closing note for why that is a rescaling consequence, not a criterion-name
 one.
+
+## 354. BASELINE (pre-change): one feedback box per grading result row, and where its text comes from
+
+Recorded 2026-08-26 BEFORE the three-feedback-box work
+(`docs/grading-results-feedback-boxes-acceptance-criteria.md`) changes any
+of it. Same purpose as entry 352: so the change can be proved not to have
+altered anything it did not intend to.
+
+**One box, one string.** `GradingResults.tsx` renders a single "Overall
+feedback" textarea per student row, with its own Copy control
+(`Copy overall feedback for ${result.student}`) and an expand-to-modal
+affordance. Its value is one field on the grading result, `overallComment`.
+
+**A second field exists and is nearly always redundant.** The result type
+carries BOTH `overallComment` and `feedback`. The shipped rule for showing
+the second is "only if it adds something" - `DraftedGradesTab.tsx:663`
+renders `feedback` only when it differs from `overallComment`, and both
+Repo Grades log builders apply the same test before adding a `Feedback:`
+note.
+
+**The resubmission sentence is already app-authored, not model-authored.**
+`RESUBMIT_NOTICE` (`src/lib/grade/types.ts:7-8`) is a fixed string that
+THREE producers append into `overallComment` whenever points were deducted:
+`engine.ts:69-71` (the LLM path), `embedded-grader/index.ts:165-166`, and
+`embedded-grader/discussion.ts:213-214`. Of those three, only the two
+embedded ones are covered by tests - the LLM path's append has none, so a
+change there fails silently while the other two fail loudly.
+
+**Improvement guidance is explicitly FORBIDDEN today.**
+`src/lib/grade/prompts.ts:79` instructs the model not to include suggestions
+for how the student could improve, next steps, or advice for future work,
+and not to coach the student. This is a deliberate policy, and the
+instructor's request to add a "what they could do better" box reverses it.
+Any future reader wondering why improvement text suddenly appears should
+read this paragraph first.
+
+**Nothing on this surface persists.** `GradingResults.tsx` seeds its edit
+state with `useState(() => seedEdits(run))` and wipes it on every run
+change; there is no `localStorage` in the file at all. The standing project
+rule that every control persists under a `ta-` key is therefore already
+violated by the ONE box that exists today. `edits` is keyed by bare student
+name, so any future key must be assignment-scoped or one assignment's
+feedback will surface on another's identically-named student.
+
+**Where one string becomes many consumers - the sites that would silently
+drop new fields.**
+- `stripGradeResultForDraft` (`src/lib/grading-review-rows.ts:33-49`) is an
+  ALLOWLIST, and its own comment states new fields are excluded by default.
+  This has already caused one shipped bug, with `submissionTruncated`,
+  recorded at `github-grading-run-store.ts:70-80`.
+- `github-grading-run-store.ts:151-196` is the opposite hazard: it
+  hard-validates, and `:196` makes ONE bad result invalidate an ENTIRE
+  stored run. The safe pattern is documented in the same file at
+  `:164-168` - degrade the field, never the run.
+- The Canvas post path sends `comment: edit.overall`
+  (`GradingResults.tsx:322`, `:385`). If that field ever goes stale, Canvas
+  receives pre-edit text, reports success, and writes to a live gradebook
+  with no undo.
+- CSV export writes one feedback column (`:192`, via `buildCsvContent`,
+  moved to `grading-results/gradingResultsHelpers.ts` in commit 0978eaa).
+
+**A naming hazard.** There are TWO unrelated functions called
+`formatFeedback`: the local display helper moved into
+`gradingResultsHelpers.ts` (it collapses em/en dashes, one call site), and
+`src/lib/grade/parsing.ts:232`'s `formatFeedback(overallComment,
+rubricAreas, totalScore)`. They are not interchangeable.
+
+## 355. One feedback box becomes three, each copyable on its own - and the only gate that could see the bug it introduced
+
+Acceptance criteria:
+`docs/grading-results-feedback-boxes-acceptance-criteria.md`. Baseline of the
+replaced behaviour: entry 354.
+
+The instructor asked for "mult textboxes for each grading results row - one
+textbox for what students did well, one textbox for what they could do
+better, one textbox telling the student they can resubmit. all should be
+copyable independently of each other."
+
+### The three boxes were not three equal jobs
+
+- **The resubmission box already existed as CONTENT.** `RESUBMIT_NOTICE`
+  (`src/lib/grade/types.ts:7-8`) was already appended into `overallComment`
+  by three producers when points were deducted. That box is a DE-MERGE of
+  text the app already wrote, and it keeps the exact wording - it is a
+  promise about instructor policy, so it is not model-generated and not
+  reworded.
+- **The improvements box was FORBIDDEN by the shipped prompt.**
+  `prompts.ts:79` instructed the model not to suggest improvements, next
+  steps, or advice, and not to coach. Splitting existing text was therefore
+  impossible - the text had never been generated. The prompt now REQUESTS
+  improvement guidance in its own field rather than merely dropping the
+  prohibition, so coaching cannot scatter back through the other two boxes.
+  This is a deliberate reversal of a deliberate policy, made at the
+  instructor's explicit request.
+
+### Shape
+
+`GradeResult` gained three REQUIRED fields - `strengths`, `improvements`,
+`resubmitNotice`. Required rather than optional on purpose: it turned every
+site that would silently drop them into a `tsc` error. `overallComment` is
+retained as their composition through `composeOverallComment(strengths,
+improvements, resubmitNotice)` - fixed order, single-space join, empty parts
+dropped - so roughly 32 downstream readers keep working unchanged and no
+producer authors it independently.
+
+The UI lives in a new `grading-results/RowFeedbackBoxes.tsx`, so
+`GradingResults.tsx` grew only 822 -> 825 against its 1000-line cap. Each box
+has its own copy control whose accessible name carries BOTH the box and the
+student (three boxes times N rows makes an ambiguous name unusable with a
+screen reader), plus one "Copy all feedback" control so the common case does
+not cost triple the clicks.
+
+`RowEdit.overall` is no longer independently editable.
+`applyFeedbackFieldEdit` is the ONLY writer, and it recomputes the
+composition in the same step; restore-from-storage never trusts a stored
+`overall` and always recomputes it. That is what stops Canvas from receiving
+text that disagrees with what is on screen.
+
+### The bug this shipped with, and the only gate that saw it
+
+`gradingResultsHelpers.ts` - a CLIENT module - value-imported
+`composeOverallComment` from the `@/lib/grade` barrel. That barrel reaches
+`supabase/server.ts` and `next/headers` through
+`grade.ts -> grade/rubric.ts -> research/rubric-bank.ts -> research/db.ts`.
+`grade.ts`'s own header comment already names this hazard.
+
+**tsc, eslint and the full 14285-test suite all passed while it was broken.**
+Only `next build`'s compile stage caught it, and only because a concurrent
+refactor happened to run that gate. Fixed with a local composition helper
+plus a parity test pinning it byte-identical to the real function, and a
+`readFileSync` guard scanning the three client files for banned import
+specifiers - with a canary asserting the patterns fire on five known-bad
+fixtures and do NOT fire on an ordinary React import, so the guard is proven
+to discriminate rather than to match everything.
+
+### Traps handled
+
+- `stripGradeResultForDraft` (`grading-review-rows.ts:33-49`) is an ALLOWLIST
+  that excludes new fields by default - the exact bug already shipped once
+  with `submissionTruncated`. All three fields added, with a round-trip test.
+- `github-grading-run-store.ts`'s parser hard-validates and would invalidate
+  an ENTIRE stored run on one bad field. Followed the documented
+  degrade-to-default idiom instead, with a test proving an OLD stored run
+  carrying none of the three keys still loads. The SAME trap was found and
+  fixed in a second, previously unnamed site: `grading-drafts.ts`'s
+  `coerceGradeResult`.
+- Canvas posting was traced at every site (`GradingResults.tsx`,
+  `actions/grading.ts`, `repoGradesPosting.ts`): all source `comment` from
+  `overallComment` or an edit seeded from it, so all send the composition and
+  none needed changing.
+- CSV export now writes three columns. Its frozen-literal oracle from commit
+  0978eaa was updated deliberately, not deleted.
+
+### Also in this batch
+
+`src/app/actions/grading.ts` was split 920 -> 844, extracting
+`grading-run-mapping.ts` (65) and `grading-missing-submissions.ts` (59). The
+second de-duplicated an IDENTICAL block that existed in both
+`listMissingSubmissionsAction` and `draftZerosForMissingAction`. Both new
+modules are non-"use server", because that file may export only async
+functions. Oracles were frozen from the pre-move code and proven by
+sabotage (breaking `parseCourseIdFromCanvasUrl`'s capture group turned one
+named test red, then reverted).
+
+### Gates
+
+`npx tsc --noEmit` clean; `npx eslint src` 0 errors (5 pre-existing warnings
+in untouched files); `npx vitest run` 699 files / 14285 tests passing, from a
+pre-feature baseline of 697 / 14236; `npx next build` compiles successfully
+(it still fails in the env-dependent prerender tail this project's gate
+excludes, naming no file from this work).
+
+### Limits
+
+No test renders a component, so the boxes' markup, labels and keyboard
+behaviour are verified by reading only. `gradingApiToRun`'s external "Other
+API" engine populates `strengths` only and never offered a resubmit notice;
+that pre-existing gap was left rather than inventing a policy for it.

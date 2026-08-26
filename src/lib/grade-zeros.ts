@@ -44,7 +44,14 @@ export interface BuildZeroGradingEntryInput {
 export function buildZeroGradingEntry(input: BuildZeroGradingEntryInput): GradingRunEntry {
   const results = input.nonSubmitters.map((s) => ({
     student: s.name,
+    // No submission means nothing to describe as a strength, no improvement
+    // guidance to give, and no resubmission is being offered here (this is a
+    // zero for a missed deadline, not a graded-but-imperfect submission) - all
+    // three stay "", matching overallComment's pre-existing "" exactly.
     overallComment: "",
+    strengths: "",
+    improvements: "",
+    resubmitNotice: "",
     rubricAreas: [],
     totalScore: `0/${input.pointsPossible ?? 0}`,
     feedback: "",

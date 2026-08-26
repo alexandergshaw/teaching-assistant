@@ -108,6 +108,15 @@ function coerceGradeResult(value: unknown): GradeResult | null {
   return {
     student: o.student,
     overallComment: typeof o.overallComment === "string" ? o.overallComment : "",
+    // Same degrade-to-default idiom as github-grading-run-store.ts's
+    // parseGradeResult (docs/grading-results-feedback-boxes-acceptance-
+    // criteria.md A5 item 18): a draft saved before this feature existed, or
+    // one with a hand-edited/wrong-typed field, defaults the missing box to
+    // "" rather than dropping the whole result the way the strict-validation
+    // idiom this file otherwise avoids would.
+    strengths: typeof o.strengths === "string" ? o.strengths : "",
+    improvements: typeof o.improvements === "string" ? o.improvements : "",
+    resubmitNotice: typeof o.resubmitNotice === "string" ? o.resubmitNotice : "",
     rubricAreas,
     totalScore: typeof o.totalScore === "string" ? o.totalScore : "",
     feedback: typeof o.feedback === "string" ? o.feedback : "",

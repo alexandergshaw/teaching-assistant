@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { StudentSubmissionEntry } from "@/lib/grade";
+import { RESUBMIT_NOTICE, type StudentSubmissionEntry } from "@/lib/grade";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, MAX_CRITERIA } from "./index";
 
 function entry(student: string, content: string, extensions: string[] = [], userId?: number): StudentSubmissionEntry {
@@ -99,6 +99,11 @@ describe("gradeEntriesEmbedded", () => {
     expect(result.userId).toBe(42); // userId preserved for Canvas write-back
     expect(result.submittedFiles).toHaveLength(1); // files preserved for previews
     expect(result.overallComment).not.toContain("resubmit");
+    // Full credit: the strengths box carries the whole comment, and there is
+    // honestly nothing to put in improvements or the resubmit box.
+    expect(result.strengths).toBe(result.overallComment);
+    expect(result.improvements).toBe("");
+    expect(result.resubmitNotice).toBe("");
   });
 
   it("awards partial totals and names the missing criteria", () => {
@@ -109,6 +114,17 @@ describe("gradeEntriesEmbedded", () => {
     expect(result.overallComment).toContain("Defines clean");
     expect(result.overallComment).toContain("Submitted .py");
     expect(result.overallComment).toContain("resubmit");
+    // The three boxes de-merge the same composed comment: a factual pass
+    // count (strengths), the missing-criteria list (improvements), and the
+    // fixed resubmit wording, composed back together as overallComment.
+    expect(result.strengths).toContain("1 of 3 requirements met");
+    expect(result.strengths).not.toContain("Defines clean");
+    expect(result.improvements).toContain("Defines clean");
+    expect(result.improvements).toContain("Submitted .py");
+    expect(result.resubmitNotice).toBe(RESUBMIT_NOTICE);
+    expect(`${result.strengths} ${result.improvements} ${result.resubmitNotice}`).toBe(
+      result.overallComment
+    );
   });
 
   it("exposes the rubric area names and a deterministic full-credit checklist", () => {

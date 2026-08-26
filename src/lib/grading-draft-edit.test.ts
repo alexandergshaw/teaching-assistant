@@ -14,6 +14,9 @@ describe("replaceAreaComment", () => {
             {
               student: "Alice",
               overallComment: "Good work",
+              strengths: "Good work",
+              improvements: "",
+              resubmitNotice: "",
               rubricAreas: [
                 { area: "Clarity", score: "9/10", comment: "Well written" },
                 { area: "Correctness", score: "8/10", comment: "One edge case missed" },
@@ -76,6 +79,9 @@ describe("replaceAreaComment", () => {
               {
                 student: "Alice",
                 overallComment: "Good",
+                strengths: "Good",
+                improvements: "",
+                resubmitNotice: "",
                 rubricAreas: [{ area: "Design", score: "9/10", comment: "Clear design" }],
                 totalScore: "9/10",
                 feedback: "Good",
@@ -85,6 +91,9 @@ describe("replaceAreaComment", () => {
               {
                 student: "Bob",
                 overallComment: "Needs work",
+                strengths: "Needs work",
+                improvements: "",
+                resubmitNotice: "",
                 rubricAreas: [{ area: "Design", score: "6/10", comment: "Confusing layout" }],
                 totalScore: "6/10",
                 feedback: "Needs work",
@@ -117,6 +126,9 @@ describe("replaceAreaComment", () => {
               {
                 student: "Alice",
                 overallComment: "",
+                strengths: "",
+                improvements: "",
+                resubmitNotice: "",
                 rubricAreas: [{ area: "Quality", score: "8/10", comment: "Original 1" }],
                 totalScore: "8/10",
                 feedback: "",
@@ -126,6 +138,9 @@ describe("replaceAreaComment", () => {
               {
                 student: "Bob",
                 overallComment: "",
+                strengths: "",
+                improvements: "",
+                resubmitNotice: "",
                 rubricAreas: [{ area: "Quality", score: "7/10", comment: "Original 2" }],
                 totalScore: "7/10",
                 feedback: "",
@@ -184,6 +199,9 @@ describe("replaceAreaComment", () => {
               {
                 student: "Alice",
                 overallComment: "Good work",
+                strengths: "Good work",
+                improvements: "",
+                resubmitNotice: "",
                 rubricAreas: [
                   { area: "Quality", score: "9/10", comment: "Original Alice comment" },
                 ],
@@ -206,6 +224,9 @@ describe("replaceAreaComment", () => {
               {
                 student: "Bob",
                 overallComment: "Needs work",
+                strengths: "Needs work",
+                improvements: "",
+                resubmitNotice: "",
                 rubricAreas: [
                   { area: "Quality", score: "6/10", comment: "Original Bob comment" },
                 ],
@@ -241,6 +262,9 @@ describe("replaceAreaComment", () => {
               {
                 student: "Alice",
                 overallComment: "No overall comment provided.",
+                strengths: "No overall comment provided.",
+                improvements: "",
+                resubmitNotice: "",
                 rubricAreas: [
                   { area: "Overall", score: "", comment: "No overall comment provided." },
                   { area: "Clarity", score: "9/10", comment: "Well written" },

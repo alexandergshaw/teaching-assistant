@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { RESUBMIT_NOTICE } from "@/lib/grade";
 import {
   defaultDiscussionRubric,
   buildDiscussionRubric,
@@ -85,6 +86,25 @@ describe("gradeDiscussion with the default rubric", () => {
     expect(weakRun.results[0].overallComment).toContain("resubmit");
     const strongRun = gradeDiscussion([strong], rubric, ctx);
     expect(strongRun.results[0].overallComment).not.toContain("resubmit");
+  });
+
+  it("de-merges the composed comment into the three feedback boxes", () => {
+    const weakRun = gradeDiscussion([weak], rubric, ctx);
+    const weakResult = weakRun.results[0];
+    // Participation summary always lands in strengths, never the shortfall list.
+    expect(weakResult.strengths).toContain("initial response");
+    expect(weakResult.strengths).not.toContain("Points were reduced for");
+    expect(weakResult.improvements).toContain("Points were reduced for");
+    expect(weakResult.resubmitNotice).toBe(RESUBMIT_NOTICE);
+    expect(`${weakResult.strengths} ${weakResult.improvements} ${weakResult.resubmitNotice}`).toBe(
+      weakResult.overallComment
+    );
+
+    const strongRun = gradeDiscussion([strong], rubric, ctx);
+    const strongResult = strongRun.results[0];
+    expect(strongResult.strengths).toBe(strongResult.overallComment);
+    expect(strongResult.improvements).toBe("");
+    expect(strongResult.resubmitNotice).toBe("");
   });
 
   it("re-bases the total onto a Canvas points_possible", () => {

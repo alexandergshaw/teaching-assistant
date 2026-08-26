@@ -1,0 +1,126 @@
+"use client";
+
+// The three independently-editable, independently-copyable feedback boxes
+// per grading-results row (A2, docs/grading-results-feedback-boxes-
+// acceptance-criteria.md): what the student did well, what they could do
+// better, and the resubmission note. Split out of GradingResults.tsx into
+// its own component because that file was already 822 of the project's
+// 1000-line-per-file cap before this feature, and the three-box group
+// (three TextFields, three copy controls, three expand controls, one
+// "copy all" control, each needing a distinct accessible name) does not fit
+// in the remaining headroom.
+//
+// CopyIcon/ExpandIcon below are deliberately duplicated from
+// GradingResults.tsx rather than imported from it: this feature's file set
+// is fixed to GradingResults.tsx, this file, and their helpers files, so
+// there is no shared icons module to import from, and importing them back
+// from GradingResults.tsx (which already imports this file to render it)
+// would create a circular module dependency. Two tiny stateless SVG
+// components are cheap to duplicate; keep them byte-for-byte identical to
+// GradingResults.tsx's copies if either ever changes.
+
+import IconButton from "@mui/material/IconButton";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import styles from "../../page.module.css";
+import {
+  FEEDBACK_FIELDS,
+  FEEDBACK_FIELD_META,
+  formatFeedback,
+  type FeedbackField,
+  type RowEdit,
+} from "./gradingResultsHelpers";
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M7 3.5A2.5 2.5 0 0 1 9.5 1h6A2.5 2.5 0 0 1 18 3.5v8A2.5 2.5 0 0 1 15.5 14h-6A2.5 2.5 0 0 1 7 11.5v-8Zm2.5-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-6Z" />
+      <path d="M2 7.5A2.5 2.5 0 0 1 4.5 5h.75a.75.75 0 0 1 0 1.5H4.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-.75a.75.75 0 0 1 1.5 0v.75A2.5 2.5 0 0 1 10.5 18h-6A2.5 2.5 0 0 1 2 15.5v-8Z" />
+    </svg>
+  );
+}
+
+function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M3 3.75A.75.75 0 0 1 3.75 3h4a.75.75 0 0 1 0 1.5H5.56l3.22 3.22a.75.75 0 1 1-1.06 1.06L4.5 5.56v2.19a.75.75 0 0 1-1.5 0v-4Zm14 12.5a.75.75 0 0 1-.75.75h-4a.75.75 0 0 1 0-1.5h2.19l-3.22-3.22a.75.75 0 1 1 1.06-1.06l3.22 3.22V12.25a.75.75 0 0 1 1.5 0v4Z" />
+    </svg>
+  );
+}
+
+export interface RowFeedbackBoxesProps {
+  student: string;
+  edit: RowEdit;
+  copiedKey: string | null;
+  onCopy: (key: string, value: string) => Promise<void>;
+  onChangeField: (field: FeedbackField, value: string) => void;
+  onExpand: (field: FeedbackField) => void;
+}
+
+/**
+ * Three independently-editable, independently-copyable feedback boxes for one
+ * grading-results row, plus one control that copies all three composed
+ * together (AC item 10 - the common case must not cost triple the clicks).
+ * Every copy/expand control's accessible name carries both the box identity
+ * and the student name (AC item 7): many rows, three boxes each, can be on
+ * screen at once, and an ambiguous name makes the page unusable with a
+ * screen reader.
+ */
+export function RowFeedbackBoxes({ student, edit, copiedKey, onCopy, onChangeField, onExpand }: RowFeedbackBoxesProps) {
+  const allKey = `${student}-all-feedback`;
+  const allCopied = copiedKey === allKey;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button
+          variant="text"
+          size="small"
+          onClick={() => onCopy(allKey, formatFeedback(edit.overall || "No feedback provided."))}
+          aria-label={allCopied ? "Copied" : `Copy all feedback for ${student}`}
+          sx={{ textTransform: "none", minWidth: 0, p: "2px 6px" }}
+        >
+          {allCopied ? "Copied" : "Copy all feedback"}
+        </Button>
+      </div>
+      {FEEDBACK_FIELDS.map((field) => {
+        const meta = FEEDBACK_FIELD_META[field];
+        const key = `${student}-${field}`;
+        const copied = copiedKey === key;
+        return (
+          <div key={field} className={styles.overallFeedbackWrap} style={{ marginTop: 6 }}>
+            <IconButton
+              size="small"
+              title={copied ? "Copied" : meta.copyTitle}
+              aria-label={copied ? "Copied" : `Copy ${meta.descriptorLower} for ${student}`}
+              onClick={() => onCopy(key, formatFeedback(edit[field] || meta.emptyCopyFallback))}
+            >
+              <CopyIcon />
+            </IconButton>
+            <IconButton
+              size="small"
+              title="Expand feedback"
+              aria-label={`Expand ${meta.descriptorLower} for ${student}`}
+              onClick={() => onExpand(field)}
+            >
+              <ExpandIcon />
+            </IconButton>
+            <TextField
+              multiline
+              label={meta.fieldLabel}
+              value={edit[field]}
+              onChange={(event) => onChangeField(field, event.target.value)}
+              aria-label={`${meta.descriptorCapitalized} for ${student}`}
+              placeholder={field === "resubmitNotice" ? "No resubmission note - full credit" : undefined}
+              fullWidth
+              size="small"
+              minRows={2}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default RowFeedbackBoxes;

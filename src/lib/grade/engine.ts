@@ -6,7 +6,7 @@ import {
 } from "../gemini";
 import { callLlm, type LlmPart, type LlmProvider } from "../llm";
 import { runSubmittedCode, type CodeRunResult } from "../code-runner";
-import { RESUBMIT_NOTICE, type GradeResult, type GradingRun, type StudentSubmissionEntry, type RubricAreaResult } from "./types";
+import { RESUBMIT_NOTICE, composeOverallComment, type GradeResult, type GradingRun, type StudentSubmissionEntry, type RubricAreaResult } from "./types";
 import { GEMINI_IMAGE_MIME_TYPES } from "./constants";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
@@ -66,13 +66,24 @@ async function gradeSubmission(
     pointsPossible
   );
 
-  const overallComment = pointsWereDeducted(totalScore, rubricAreas)
-    ? `${parsed.overallComment} ${RESUBMIT_NOTICE}`.trim()
-    : parsed.overallComment;
+  // docs/grading-results-feedback-boxes-acceptance-criteria.md, A1: the model
+  // supplies strengths (still called overallComment in its JSON response -
+  // what it did well plus the specific reason for each deduction) and
+  // improvements (prompts.ts's new field) as two independent boxes;
+  // resubmitNotice is NEVER model-generated, only this fixed-wording,
+  // fixed-condition append. overallComment is the composition of all three,
+  // never authored on its own.
+  const strengths = parsed.overallComment;
+  const improvements = parsed.improvements;
+  const resubmitNotice = pointsWereDeducted(totalScore, rubricAreas) ? RESUBMIT_NOTICE : "";
+  const overallComment = composeOverallComment(strengths, improvements, resubmitNotice);
 
   return {
     student: studentName,
     overallComment,
+    strengths,
+    improvements,
+    resubmitNotice,
     rubricAreas,
     totalScore,
     mergedFileCount: 1,
@@ -146,7 +157,11 @@ async function gradeStudentEntries(
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "An unexpected grading error occurred.";
-      const overallComment = `This submission could not be graded: ${message}`;
+      // A grading failure has no improvement guidance or resubmit policy to
+      // offer - the whole message lives in strengths, and overallComment is
+      // still composed (not authored directly) so it can never drift from it.
+      const strengths = `This submission could not be graded: ${message}`;
+      const overallComment = composeOverallComment(strengths, "", "");
       const fallbackRubricAreas: RubricAreaResult[] = [
         {
           area: "Overall",
@@ -158,6 +173,9 @@ async function gradeStudentEntries(
       results.push({
         student,
         overallComment,
+        strengths,
+        improvements: "",
+        resubmitNotice: "",
         rubricAreas: fallbackRubricAreas,
         totalScore: "",
         mergedFileCount,

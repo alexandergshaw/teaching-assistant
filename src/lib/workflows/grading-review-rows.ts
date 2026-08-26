@@ -34,6 +34,15 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
   return {
     student: result.student,
     overallComment: result.overallComment,
+    // docs/grading-results-feedback-boxes-acceptance-criteria.md A5 item 16:
+    // this is the exact allowlist that already dropped submissionTruncated
+    // once (github-grading-run-store.ts:70-80 documents that incident) -
+    // strengths/improvements/resubmitNotice are grade-relevant (they compose
+    // overallComment) and small, so they are kept explicitly rather than
+    // silently excluded like the comment above warns a future field would be.
+    strengths: result.strengths,
+    improvements: result.improvements,
+    resubmitNotice: result.resubmitNotice,
     rubricAreas: result.rubricAreas,
     totalScore: result.totalScore,
     feedback: result.feedback,

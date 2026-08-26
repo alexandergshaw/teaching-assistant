@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode, Ref } from "react";
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
@@ -9,18 +9,24 @@ import { postCanvasGradesAction, runSubmissionCodeAction } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import type { CodeRunResult } from "@/lib/code-runner";
 import { ModalShell } from "./ui/ModalShell";
+import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
 import styles from "../page.module.css";
 import {
   DEFAULT_SORT,
+  FEEDBACK_FIELD_META,
+  applyFeedbackFieldEdit,
+  blankRowEdit,
   buildCsvContent,
   compareText,
-  formatFeedback,
+  defaultRowEdit,
+  loadGradingResultsEdits,
+  persistGradingResultsEdits,
   parseEarnedPoints,
   parseScoreValue,
   recomputeTotal,
-  seedEdits,
   sortColumnKey,
   type AreaEdit,
+  type FeedbackField,
   type GradeRow,
   type GradingRun,
   type RowEdit,
@@ -56,13 +62,9 @@ function DownloadIcon() {
   );
 }
 
-function ExpandIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path d="M3 3.75A.75.75 0 0 1 3.75 3h4a.75.75 0 0 1 0 1.5H5.56l3.22 3.22a.75.75 0 1 1-1.06 1.06L4.5 5.56v2.19a.75.75 0 0 1-1.5 0v-4Zm14 12.5a.75.75 0 0 1-.75.75h-4a.75.75 0 0 1 0-1.5h2.19l-3.22-3.22a.75.75 0 1 1 1.06-1.06l3.22 3.22V12.25a.75.75 0 0 1 1.5 0v4Z" />
-    </svg>
-  );
-}
+// ExpandIcon moved to grading-results/RowFeedbackBoxes.tsx (duplicated, not
+// imported - see that file's header comment for why) once the single
+// "Overall feedback" expand button became three per-box expand buttons.
 
 // Sort helpers, seedEdits, recomputeTotal, buildCsvContent, and their pure
 // support functions moved to ./grading-results/gradingResultsHelpers.ts (see
@@ -126,44 +128,72 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   banner,
   sectionRef,
 }: GradingResultsProps, ref) {
-  const [edits, setEdits] = useState<Record<string, RowEdit>>(() => seedEdits(run));
+  // A3 (docs/grading-results-feedback-boxes-acceptance-criteria.md):
+  // edits persist under an assignment-scoped key - `edits` is keyed by bare
+  // student name, so an unscoped key would leak one assignment's feedback
+  // onto a different assignment's identically-named student. Lazy-init reads
+  // whatever was last persisted for THIS canvasUrl, validated and merged
+  // against the current run by loadGradingResultsEdits (never trusts stored
+  // data - see its own doc comment in gradingResultsHelpers.ts).
+  const [edits, setEdits] = useState<Record<string, RowEdit>>(() => loadGradingResultsEdits(canvasUrl, run));
   const [prevRun, setPrevRun] = useState(run);
   const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
   const [postSummary, setPostSummary] = useState("");
   const [posting, setPosting] = useState(false);
   const [sortState, setSortState] = useState(DEFAULT_SORT);
-  const [expandedStudent, setExpandedStudent] = useState<string | null>(null);
+  // Which student + which of the three feedback boxes is expanded, or null.
+  const [expandedBox, setExpandedBox] = useState<{ student: string; field: FeedbackField } | null>(null);
   const [codeRuns, setCodeRuns] = useState<Record<string, CodeRunResult | null>>({});
   const [codeRunning, setCodeRunning] = useState<Record<string, boolean>>({});
   const [codeOutputStudent, setCodeOutputStudent] = useState<string | null>(null);
 
-  // Re-seed editable rows when a new run arrives (adjust-state-on-prop-change).
+  // Re-load editable rows when a new run arrives (adjust-state-on-prop-change).
+  // Loads from storage (not a bare re-seed) so edits already persisted for
+  // this canvasUrl survive a run refresh; loadGradingResultsEdits degrades to
+  // the seeded map for a student the new run doesn't have.
   if (run !== prevRun) {
     setPrevRun(run);
-    setEdits(seedEdits(run));
+    setEdits(loadGradingResultsEdits(canvasUrl, run));
     setPostStatus({});
     setPostSummary("");
-    setExpandedStudent(null);
+    setExpandedBox(null);
     setCodeRuns({});
     setCodeRunning({});
     setCodeOutputStudent(null);
   }
 
+  // Persists on every edits change (grade, per-criterion score, or any of the
+  // three feedback boxes) - best-effort, see persistGradingResultsEdits's own
+  // doc comment for why a write failure is swallowed rather than thrown.
+  useEffect(() => {
+    persistGradingResultsEdits(canvasUrl, edits);
+  }, [canvasUrl, edits]);
+
   const updateEdit = (student: string, patch: Partial<RowEdit>) =>
     setEdits((prev) => ({
       ...prev,
-      [student]: { ...(prev[student] ?? { total: "", overall: "", areas: {} }), ...patch },
+      [student]: { ...(prev[student] ?? blankRowEdit()), ...patch },
     }));
 
   const updateArea = (student: string, areaName: string, patch: Partial<AreaEdit>) =>
     setEdits((prev) => {
-      const row = prev[student] ?? { total: "", overall: "", areas: {} };
+      const row = prev[student] ?? blankRowEdit();
       const area = row.areas[areaName] ?? { score: "" };
       const areas = { ...row.areas, [areaName]: { ...area, ...patch } };
       // Editing a criterion's points re-totals the student automatically.
       const total =
         patch.score !== undefined ? recomputeTotal(areas, run.rubricAreaNames, row.total) : row.total;
       return { ...prev, [student]: { ...row, areas, total } };
+    });
+
+  // The only place that patches one of the three feedback boxes - always
+  // routes through applyFeedbackFieldEdit so `overall` (what Canvas posting
+  // reads) is recomputed in the same step and can never disagree with the
+  // three boxes on screen.
+  const updateFeedbackField = (student: string, field: FeedbackField, value: string) =>
+    setEdits((prev) => {
+      const row = prev[student] ?? blankRowEdit();
+      return { ...prev, [student]: applyFeedbackFieldEdit(row, field, value) };
     });
 
   const gradableResults = useMemo(
@@ -187,7 +217,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
 
     const userIdToStudent = new Map<number, string>();
     const payload = gradableResults.map((r) => {
-      const edit = edits[r.student] ?? { total: r.totalScore, overall: r.overallComment, areas: {} };
+      const edit = edits[r.student] ?? defaultRowEdit(r);
       userIdToStudent.set(r.userId as number, r.student);
       return {
         userId: r.userId as number,
@@ -250,7 +280,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // shape as the bulk post, with a one-element array.
   const handlePostOne = async (row: GradeRow) => {
     if (typeof row.userId !== "number") return;
-    const edit = edits[row.student] ?? { total: row.totalScore, overall: row.overallComment, areas: {} };
+    const edit = edits[row.student] ?? defaultRowEdit(row);
     const payload = [
       {
         userId: row.userId,
@@ -505,7 +535,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               </th>
               <th>
                 <Button variant="text" size="small" onClick={() => handleSort({ kind: "overall" })} sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}>
-                  Overall Feedback <span>{sortLabel({ kind: "overall" })}</span>
+                  Feedback <span>{sortLabel({ kind: "overall" })}</span>
                 </Button>
               </th>
             </tr>
@@ -513,11 +543,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
           <tbody>
             {sortedResults.map((result) => {
               const areaMap = new Map(result.rubricAreas.map((area) => [area.area, area]));
-              const edit = edits[result.student] ?? {
-                total: result.totalScore,
-                overall: result.overallComment,
-                areas: {},
-              };
+              const edit = edits[result.student] ?? defaultRowEdit(result);
               const status = postStatus[result.student];
               const sgHref = speedGraderHref(result.userId);
               const canPostRow = canvasGradable && typeof result.userId === "number";
@@ -695,42 +721,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     />
                   </td>
                   <td>
-                    <div className={styles.overallFeedbackWrap}>
-                      <IconButton
-                        size="small"
-                        title={copiedKey === `${result.student}-overall-comment` ? "Copied" : "Copy Overall Feedback"}
-                        aria-label={
-                          copiedKey === `${result.student}-overall-comment`
-                            ? "Copied"
-                            : `Copy overall feedback for ${result.student}`
-                        }
-                        onClick={() =>
-                          onCopy(
-                            `${result.student}-overall-comment`,
-                            formatFeedback(edit.overall || "No overall feedback provided.")
-                          )
-                        }
-                      >
-                        <CopyIcon />
-                      </IconButton>
-                      <IconButton
-                        size="small"
-                        title="Expand feedback"
-                        aria-label={`Expand overall feedback for ${result.student}`}
-                        onClick={() => setExpandedStudent(result.student)}
-                      >
-                        <ExpandIcon />
-                      </IconButton>
-                      <TextField
-                        multiline
-                        value={edit.overall}
-                        onChange={(e) => updateEdit(result.student, { overall: e.target.value })}
-                        aria-label={`Overall feedback for ${result.student}`}
-                        fullWidth
-                        size="small"
-                        minRows={3}
-                      />
-                    </div>
+                    <RowFeedbackBoxes
+                      student={result.student}
+                      edit={edit}
+                      copiedKey={copiedKey}
+                      onCopy={onCopy}
+                      onChangeField={(field, value) => updateFeedbackField(result.student, field, value)}
+                      onExpand={(field) => setExpandedBox({ student: result.student, field })}
+                    />
                   </td>
                 </tr>
               );
@@ -739,35 +737,40 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         </table>
       </div>
 
-      {expandedStudent && (
-        <ModalShell
-          label={`Overall feedback for ${expandedStudent}`}
-          onDismiss={() => setExpandedStudent(null)}
-        >
-          <div className={styles.previewHeader}>
-            <div>
-              <p className={styles.previewMeta}>Student: {expandedStudent}</p>
-              <h3>Overall Feedback</h3>
+      {expandedBox && (() => {
+        const { student, field } = expandedBox;
+        const meta = FEEDBACK_FIELD_META[field];
+        const edit = edits[student] ?? blankRowEdit();
+        return (
+          <ModalShell
+            label={`${meta.descriptorCapitalized} for ${student}`}
+            onDismiss={() => setExpandedBox(null)}
+          >
+            <div className={styles.previewHeader}>
+              <div>
+                <p className={styles.previewMeta}>Student: {student}</p>
+                <h3>{meta.fieldLabel}</h3>
+              </div>
+              <button
+                type="button"
+                className={styles.previewCloseButton}
+                onClick={() => setExpandedBox(null)}
+              >
+                Close
+              </button>
             </div>
-            <button
-              type="button"
-              className={styles.previewCloseButton}
-              onClick={() => setExpandedStudent(null)}
-            >
-              Close
-            </button>
-          </div>
-          <TextField
-            multiline
-            value={edits[expandedStudent]?.overall ?? ""}
-            onChange={(event) => updateEdit(expandedStudent, { overall: event.target.value })}
-            aria-label={`Overall feedback for ${expandedStudent} (expanded)`}
-            fullWidth
-            size="small"
-            minRows={12}
-          />
-        </ModalShell>
-      )}
+            <TextField
+              multiline
+              value={edit[field]}
+              onChange={(event) => updateFeedbackField(student, field, event.target.value)}
+              aria-label={`${meta.descriptorCapitalized} for ${student} (expanded)`}
+              fullWidth
+              size="small"
+              minRows={12}
+            />
+          </ModalShell>
+        );
+      })()}
       {codeOutputStudent && (() => {
         const row = run.results.find((r) => r.student === codeOutputStudent);
         const cr = codeRuns[codeOutputStudent] ?? row?.codeExecution ?? null;

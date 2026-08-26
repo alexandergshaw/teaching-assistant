@@ -1,7 +1,7 @@
 "use server";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
-import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, scaleResultToPoints, canvasWorkToEntry, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry } from "@/lib/grade";
+import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry } from "@/lib/grade";
 import { runSubmittedCode, type CodeRunResult } from "@/lib/code-runner";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText, buildDiscussionRubric, gradeDiscussion, renderDiscussionRubric } from "@/lib/embedded-grader";
 import { rememberRubric } from "@/lib/research/rubric-bank";
@@ -9,49 +9,17 @@ import { detectCanvasUrlKind } from "@/lib/canvas-url";
 import { fetchCanvasWork, canvasWorkToZipBase64, fetchCanvasMeta, fetchAssignmentPointsPossible, getSpeedGraderUrl, postCanvasGrades, fetchSubmissionDetail, listAssignmentNonSubmitters, listAssignmentBriefsWithDue, type CanvasSubmissionDetail, type CanvasStudentWork } from "@/lib/canvas";
 import { resolveInstitution } from "@/lib/canvas-core";
 import { normalizeProvider, type LlmProvider } from "@/lib/llm";
-import { gradeViaGradingEngine, detectRubricSource, type GradingApiResponse } from "@/lib/grading-engine";
+import { gradeViaGradingEngine, detectRubricSource } from "@/lib/grading-engine";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGradingDraftReviewed, updateGradingDraft, deleteGradingDraft, findPendingGradingDraftForWorkflow, type GradingDraft, type GradingDraftPayload, type GradingDraftSource } from "@/lib/grading-drafts";
-import { buildZeroGradingEntry, isZeroableAssignment } from "@/lib/grade-zeros";
-
-
-
-// Map the deterministic Grading API response onto the app's GradingRun so the
-// existing results matrix in GradingTab renders it unchanged. The grader returns
-// no per-student files and no full-credit checklist, so those degrade to "-" /
-// hidden in the UI.
-//
-// When grading from a Canvas URL, pointsPossible re-bases the engine's rubric
-// total onto the assignment's real scale (same anchoring as the AI path), so the
-// tool never grades out of a different total than Canvas.
-function gradingApiToRun(
-  resp: GradingApiResponse,
-  pointsPossible: number | null = null
-): GradingRun {
-  return {
-    rubricAreaNames: resp.criteria,
-    fullCreditChecklist: [],
-    results: resp.students.map((s) => {
-      const passedCount = s.criteria.filter((c) => c.passed).length;
-      const rawAreas = s.criteria.map((c) => ({
-        area: c.criterion,
-        score: `${c.points_earned}/${c.points_possible}`,
-        comment: c.detail,
-      }));
-      const scaled = scaleResultToPoints(rawAreas, `${s.total}/${s.possible}`, pointsPossible);
-      return {
-        student: s.student,
-        totalScore: scaled.totalScore,
-        overallComment: `${passedCount}/${s.criteria.length} checks passed`,
-        feedback: "",
-        mergedFileCount: 0,
-        submittedFiles: [],
-        rubricAreas: scaled.rubricAreas,
-      };
-    }),
-  };
-}
+import { buildZeroGradingEntry } from "@/lib/grade-zeros";
+import { gradingApiToRun } from "./grading-run-mapping";
+import {
+  parseCourseIdFromCanvasUrl,
+  parseSingleAssignmentId,
+  selectPastDueZeroableAssignmentIds,
+} from "./grading-missing-submissions";
 
 /** The owner's still-pending draft for one workflow + source (grade-repo's
  * re-run guard, AC3): lets an unattended re-run find the draft it previously
@@ -157,11 +125,10 @@ export async function listMissingSubmissionsAction(input: {
     const { baseUrl, token, institution } = resolveInstitution(input.courseUrl);
 
     // Parse course ID from URL
-    const courseMatch = input.courseUrl.match(/courses\/(\d+)/);
-    if (!courseMatch || !courseMatch[1]) {
+    const courseId = parseCourseIdFromCanvasUrl(input.courseUrl);
+    if (!courseId) {
       return { error: "Could not parse the Canvas course ID from the URL." };
     }
-    const courseId = courseMatch[1];
 
     // Get current time for due date comparison
     const nowIso = new Date().toISOString();
@@ -170,9 +137,7 @@ export async function listMissingSubmissionsAction(input: {
     let targetIds: string[] = [];
     if (input.assignmentId && input.assignmentId.trim()) {
       // Single assignment: extract numeric ID from URL or bare id
-      const assignId = input.assignmentId.trim();
-      const match = assignId.match(/assignments\/(\d+)/);
-      const bareId = match ? match[1] : /^\d+$/.test(assignId) ? assignId : null;
+      const bareId = parseSingleAssignmentId(input.assignmentId);
       if (bareId) {
         targetIds = [bareId];
       } else {
@@ -181,20 +146,7 @@ export async function listMissingSubmissionsAction(input: {
     } else {
       // Sweep all past-due zeroable assignments
       const briefs = await listAssignmentBriefsWithDue(baseUrl, token, institution, courseId);
-      const now = new Date(nowIso).getTime();
-      targetIds = briefs
-        .filter(
-          (b) =>
-            b.dueAt &&
-            new Date(b.dueAt).getTime() < now &&
-            isZeroableAssignment({
-              submissionTypes: b.submissionTypes,
-              gradingType: b.gradingType,
-              published: b.published,
-              omitFromFinalGrade: b.omitFromFinalGrade,
-            })
-        )
-        .map((b) => b.assignmentId);
+      targetIds = selectPastDueZeroableAssignmentIds(briefs, nowIso);
     }
 
     if (targetIds.length === 0) {
@@ -280,11 +232,10 @@ export async function draftZerosForMissingAction(input: {
     const { baseUrl, token, institution } = resolveInstitution(input.courseUrl);
 
     // Parse course ID from URL
-    const courseMatch = input.courseUrl.match(/courses\/(\d+)/);
-    if (!courseMatch || !courseMatch[1]) {
+    const courseId = parseCourseIdFromCanvasUrl(input.courseUrl);
+    if (!courseId) {
       return { error: "Could not parse the Canvas course ID from the URL." };
     }
-    const courseId = courseMatch[1];
 
     // Get current time for due date comparison
     const nowIso = new Date().toISOString();
@@ -293,9 +244,7 @@ export async function draftZerosForMissingAction(input: {
     let targetIds: string[] = [];
     if (input.assignmentId && input.assignmentId.trim()) {
       // Single assignment: extract numeric ID from URL or bare id
-      const assignId = input.assignmentId.trim();
-      const match = assignId.match(/assignments\/(\d+)/);
-      const bareId = match ? match[1] : /^\d+$/.test(assignId) ? assignId : null;
+      const bareId = parseSingleAssignmentId(input.assignmentId);
       if (bareId) {
         targetIds = [bareId];
       } else {
@@ -304,20 +253,7 @@ export async function draftZerosForMissingAction(input: {
     } else {
       // Sweep all past-due zeroable assignments
       const briefs = await listAssignmentBriefsWithDue(baseUrl, token, institution, courseId);
-      const now = new Date(nowIso).getTime();
-      targetIds = briefs
-        .filter(
-          (b) =>
-            b.dueAt &&
-            new Date(b.dueAt).getTime() < now &&
-            isZeroableAssignment({
-              submissionTypes: b.submissionTypes,
-              gradingType: b.gradingType,
-              published: b.published,
-              omitFromFinalGrade: b.omitFromFinalGrade,
-            })
-        )
-        .map((b) => b.assignmentId);
+      targetIds = selectPastDueZeroableAssignmentIds(briefs, nowIso);
     }
 
     if (targetIds.length === 0) {

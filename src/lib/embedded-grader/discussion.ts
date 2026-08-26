@@ -11,6 +11,7 @@
 
 import {
   scaleResultToPoints,
+  composeOverallComment,
   RESUBMIT_NOTICE,
   type GradingRun,
   type RubricAreaResult,
@@ -206,14 +207,19 @@ function scoreCriterion(
   };
 }
 
-function buildOverall(stats: StudentStats, shortfalls: string[]): string {
+/** What the student did: a factual participation summary, always present. */
+function buildStrengths(stats: StudentStats): string {
   const posts = `${stats.initialCount} initial ${stats.initialCount === 1 ? "response" : "responses"}`;
   const replies = `${stats.replyCount} ${stats.replyCount === 1 ? "reply" : "replies"}`;
-  let comment = `Posted ${posts} and ${replies} (${stats.totalWords} words total).`;
-  if (shortfalls.length > 0) {
-    comment += ` Points were reduced for: ${shortfalls.join(", ")}. ${RESUBMIT_NOTICE}`;
-  }
-  return comment;
+  return `Posted ${posts} and ${replies} (${stats.totalWords} words total).`;
+}
+
+/** What would improve the score: the shortfalls already computed while
+ *  scoring each criterion, restated as the concrete gap - not invented advice.
+ *  "" when nothing was reduced. */
+function buildImprovements(shortfalls: string[]): string {
+  if (shortfalls.length === 0) return "";
+  return `Points were reduced for: ${shortfalls.join(", ")}.`;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -458,12 +464,19 @@ export function gradeDiscussion(
       .map((p) => `${p.isReply ? "Reply" : "Post"}: ${p.text}`)
       .join("\n\n---\n\n");
 
+    const strengths = buildStrengths(stats);
+    const improvements = buildImprovements(shortfalls);
+    const resubmitNotice = shortfalls.length > 0 ? RESUBMIT_NOTICE : "";
+
     return {
       student: student.student,
       userId: student.userId,
       totalScore: scaled.totalScore,
       rubricAreas: scaled.rubricAreas,
-      overallComment: buildOverall(stats, shortfalls),
+      overallComment: composeOverallComment(strengths, improvements, resubmitNotice),
+      strengths,
+      improvements,
+      resubmitNotice,
       feedback: "",
       mergedFileCount: stats.initialCount + stats.replyCount,
       submittedFiles: postsText

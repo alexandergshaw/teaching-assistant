@@ -18,6 +18,9 @@ function makeResult(overrides: Partial<GradeResult> = {}): GradeResult {
   return {
     student: "Alice",
     overallComment: "Good work",
+    strengths: "Good work",
+    improvements: "",
+    resubmitNotice: "",
     rubricAreas: [{ area: "Correctness", score: "9/10", comment: "Nice" }],
     totalScore: "9/10",
     feedback: "",

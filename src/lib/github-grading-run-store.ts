@@ -166,10 +166,25 @@ function parseGradeResult(raw: unknown): GradeResult | null {
   // degrades to undefined rather than invalidating the whole run, since this
   // one flag being unreadable does not make the rest of the result untrustworthy.
   const submissionTruncated = typeof raw.submissionTruncated === "boolean" ? raw.submissionTruncated : undefined;
+  // docs/grading-results-feedback-boxes-acceptance-criteria.md A5 item 18: the
+  // three feedback-box fields are REQUIRED on GradeResult (unlike
+  // submissionTruncated above), so unlike that field they cannot degrade to
+  // undefined - but they follow the exact same PRINCIPLE this file's header
+  // names: a blob predating this feature (or a wrong-typed field within it)
+  // degrades that one field to a default ("") rather than invalidating the
+  // whole run via the strict-validation idiom below. Losing every stored run
+  // in a user's localStorage the moment this feature ships would be far worse
+  // than a restored run whose new boxes are temporarily blank.
+  const strengths = typeof raw.strengths === "string" ? raw.strengths : "";
+  const improvements = typeof raw.improvements === "string" ? raw.improvements : "";
+  const resubmitNotice = typeof raw.resubmitNotice === "string" ? raw.resubmitNotice : "";
 
   return {
     student: raw.student,
     overallComment: raw.overallComment,
+    strengths,
+    improvements,
+    resubmitNotice,
     rubricAreas,
     totalScore: raw.totalScore,
     feedback: raw.feedback,

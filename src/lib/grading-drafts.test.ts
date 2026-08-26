@@ -194,6 +194,20 @@ describe("coerceGradingDraftPayload", () => {
     expect(payload.runs[0].run.results[0].gradedRepo).toBeNull();
     expect(payload.runs[0].run.results[0].gradedRef).toBeNull();
   });
+
+  // docs/grading-results-feedback-boxes-acceptance-criteria.md A5 item 18:
+  // same degrade-to-default idiom as github-grading-run-store.ts - a draft
+  // saved before this feature existed has no strengths/improvements/
+  // resubmitNotice keys in its stored jsonb at all, and must still coerce
+  // into a valid result rather than being dropped like a genuinely malformed
+  // row (the "drops a malformed grade result" case above).
+  it("defaults strengths/improvements/resubmitNotice to \"\" for a result predating this feature", () => {
+    const payload = coerceGradingDraftPayload({ runs: [validRunEntry] });
+    expect(payload.runs[0].run.results[0].student).toBe("Jane Doe");
+    expect(payload.runs[0].run.results[0].strengths).toBe("");
+    expect(payload.runs[0].run.results[0].improvements).toBe("");
+    expect(payload.runs[0].run.results[0].resubmitNotice).toBe("");
+  });
 });
 
 describe("createGradingDraft", () => {

@@ -28,7 +28,13 @@
 //     GradingResults.tsx:301-313's `payload = gradableResults.map(...)`. A3
 //     (see repoGradeScoreWasEdited below): a postable row's `rubricAreas` is
 //     included only when the instructor has not hand-edited the score away
-//     from what gradeRepoAction most recently produced for that cell.
+//     from what gradeRepoAction most recently produced for that cell, AND
+//     the posted total was not itself rescaled onto the assignment's
+//     pointsPossible (resolvePostScore/repoGradePostScore.ts) - a rescaled
+//     percentage total no longer matches the AI's raw per-area numbers, and
+//     Canvas applies both the posted grade and the rubric assessment in one
+//     request (src/lib/canvas/grades.ts:83-96), so a mismatched rubric could
+//     silently overwrite the rescaled grade with the rubric's own raw sum.
 //   - fanOutRepoGradePostResult: AFTER the call resolves. Turns
 //     postCanvasGradesAction's `{posted, failures}` (or a whole-request
 //     `{error}`) into a per-row status, copying the structure at
@@ -40,6 +46,7 @@
 //     with that one message (GradingResults.tsx:326-334).
 
 import { repoGradePostability, type PostabilityInput } from "@/lib/repo-grade-postability";
+import { resolvePostScore } from "./repoGradePostScore";
 import { moduleItemContentUrl } from "@/lib/canvas-url";
 import type { RepoGradePostStatus, RepoGradeRow } from "./repoGradesRows";
 import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
@@ -254,12 +261,29 @@ export function buildRepoGradePostPlan(
       continue;
     }
     const trimmedComment = row.comment.trim();
-    // A3: only include the rubric breakdown when there IS one and the
+    // LIVE-DEFECT FIX: repoGradePostability's PostabilityResult does not
+    // expose resolvePostScore's `rescaled` flag (repoGradePostScore.ts), so
+    // it is recovered here by calling resolvePostScore directly with the
+    // SAME inputs (row.score, pointsPossible) repoGradePostability already
+    // used internally to compute result.score - this is the one function
+    // that owns "did this score get rescaled," called a second time with
+    // identical arguments, never a second hand-rolled fraction check. A
+    // fraction-shaped score that gets scaled onto the assignment's
+    // pointsPossible (e.g. "13/16" -> 81.25/100) no longer matches the RAW
+    // rubric areas gradeRepoAction generated (which would still sum to 13) -
+    // and both `submission[posted_grade]` and
+    // `rubric_assessment[<criterionId>][points]` reach Canvas in the SAME
+    // request (src/lib/canvas/grades.ts:83-96), so a rescaled total must
+    // suppress rubricAreas exactly as a hand-edited total does.
+    const scoreResolution = resolvePostScore(row.score, pointsPossible);
+    const wasRescaled = scoreResolution.ok && scoreResolution.rescaled;
+    // A3: only include the rubric breakdown when there IS one, the
     // instructor has not since hand-edited the score away from what
-    // produced it - a contradictory rubric is worse than none
+    // produced it, and the posted total was not itself rescaled onto the
+    // assignment's points - a contradictory rubric is worse than none
     // (steps.grading-draft-flow.ts:595-625's precedent).
     const rubricAreas =
-      row.rubricAreas.length > 0 && !repoGradeScoreWasEdited(row.score, row.generatedScore)
+      row.rubricAreas.length > 0 && !repoGradeScoreWasEdited(row.score, row.generatedScore) && !wasRescaled
         ? row.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: "" }))
         : undefined;
     postable.push({

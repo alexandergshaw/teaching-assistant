@@ -33141,3 +33141,25 @@ Acceptance criteria: `docs/repo-grades-ux-overhaul-acceptance-criteria.md`. Thre
 - **`feedback` (grade/types.ts:30) is still discarded client-side**, as are the structured truncation flags. The generated rubric is returned by the action and dropped at two destructure sites.
 - **The 24x24 hit target remains unmet** for `.linkButton`. Reverting restored correctness, not compliance; a technique that does not grow the border box is still owed.
 - **Guard quality is uneven, and an audit found three holes** that predate this batch: two `extractUseEffectBodies` assertions are vacuous against files containing zero `useEffect`; `callSitesGatedByClick` blesses an ungated call in `RepoGradesLogPanel.tsx` because that file's concise-form arrow handlers contain no `}}`; and `hasBlanketPersistEffect` is evaded by adding one extra dependency, which would reintroduce the exact mount-time race it exists to prevent. None are regressions from this push; all are recorded so they are not mistaken for coverage.
+
+### 350a. Follow-up: the rescaled total and an unscaled rubric breakdown went out in the same Canvas PUT
+
+Found by the regression pass on entry 350's own batch, BEFORE it was pushed. Introduced by that batch, on the very surface it set out to make correct.
+
+Making AI-graded fractions postable meant converting them to a percentage scaled onto the Canvas assignment's `pointsPossible`. But `repoGradesPosting.ts` still attached the rubric breakdown with RAW per-area scores, and both travel in ONE request - `canvas/grades.ts:83` appends `submission[posted_grade]` and `:91` appends `rubric_assessment[<id>][points]` into the same params body. The inclusion condition selected EXACTLY the freshly-graded, un-hand-edited, fraction-shaped rows that were being rescaled.
+
+Concrete, reachable, irreversible: a 100-point assignment with an attached rubric whose criterion names normalize-match the AI's area names. A `13/16` grade posts `posted_grade=81.25` alongside criterion points summing to 13. With `use_for_grading` set, the student is recorded at **13/100 instead of 81.25/100** - a silent 68-point error, no undo, no audit table.
+
+**The fix omits the breakdown whenever the total was rescaled**, rather than scaling each area. The AI's per-area denominators are as arbitrary as its total and Canvas's real per-criterion scale is unknown, so per-area scaling would be guesswork wearing the costume of precision. The file's own comment already stated the governing rule - a contradictory rubric is worse than none.
+
+**Why the suite could not have caught it.** `repo-grade-postability.test.ts` is a frozen oracle and still passed - but it contains no fraction-shaped score case at all, because before this batch a fraction was never postable. The batch added a branch its own frozen test could not reach. The new test was proved by running it against the pre-fix code and watching it fail.
+
+**Residual, reported not fixed:** `PostabilityResult` does not carry `rescaled`, so the plan builder recovers it by calling `resolvePostScore` again with the identical inputs. Same pure function, same arguments - not a second derivation of the same fact - but the flag belongs on the result.
+
+### Still open after this batch
+
+- Retrying a partial run generates a SECOND rubric: the prologue only fires on a blank rubric field, and a retry rebuilds the plan from live scores, so the survivors get a fresh one. The established rubric is persisted nowhere the retry can reach.
+- The per-cell Grade button is not disabled during a bulk run - `bulkRunningFolder` never reaches `RepoGradeCellControl` at all. Entry 349 warned in writing that a second grading entry point would need its own disable.
+- `maxDepth` 2 is a silent cutoff: `assignments/unit1/module_01` offers only `assignments/unit1`, with nothing saying so.
+- The per-cell Grade path still drops `gradeRepoAction`'s 7th argument, so it ignores the README toggle while the UI says otherwise.
+- Nested folder labels keep only the last segment plus an indent, so two folders with the same leaf name and equal counts render identically.

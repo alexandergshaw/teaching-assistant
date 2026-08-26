@@ -334,6 +334,84 @@ describe("buildRepoGradePostPlan - A3: rubricAreas is included/omitted based on 
   // change was reverted after confirming the failure.
 });
 
+// ---------------------------------------------------------------------------
+// The live-defect fix: resolvePostScore (repoGradePostScore.ts) rescales a
+// fraction-shaped score onto the assignment's pointsPossible before it posts
+// (e.g. "13/16" against a 100-point assignment posts as 81.25) - but the
+// RAW rubric areas (e.g. summing to 13) must never ride along with that
+// rescaled total, because Canvas applies both `submission[posted_grade]` and
+// `rubric_assessment[<criterionId>][points]` in the SAME request
+// (src/lib/canvas/grades.ts:83-96), and when the assignment's attached rubric
+// is marked use_for_grading, Canvas overwrites the posted grade with the
+// rubric's own point sum - silently recording 13/100 instead of 81.25/100.
+// A contradictory rubric is worse than none (the same principle already
+// governing the hand-edited case above) - so a rescaled total must omit
+// rubricAreas exactly as a hand-edited total does, even though the row's
+// score was never hand-edited.
+describe("buildRepoGradePostPlan - the live-defect fix: a rescaled total never carries a contradicting rubricAreas breakdown", () => {
+  const areas = [
+    { area: "Correctness", score: "13/16", comment: "" },
+    { area: "Style", score: "0/0", comment: "" },
+  ];
+
+  it("a rescaled fraction post (scaled onto pointsPossible) carries NO rubricAreas, even though the score was never hand-edited", () => {
+    const plan = buildRepoGradePostPlan(
+      [row({ score: "13/16", rubricAreas: areas, generatedScore: "13/16" })],
+      "701",
+      100
+    );
+    expect(plan.postable[0].grade.grade).toBe("81.25");
+    expect("rubricAreas" in plan.postable[0].grade).toBe(false);
+  });
+
+  it("a bare-number post (not rescaled) still carries rubricAreas exactly as before, even when pointsPossible is known", () => {
+    const plan = buildRepoGradePostPlan(
+      [row({ score: "85", rubricAreas: areas, generatedScore: "85/100" })],
+      "701",
+      100
+    );
+    expect(plan.postable[0].grade.grade).toBe("85");
+    expect(plan.postable[0].grade.rubricAreas).toEqual([
+      { area: "Correctness", score: "13/16", comment: "" },
+      { area: "Style", score: "0/0", comment: "" },
+    ]);
+  });
+
+  it("a hand-edited score still suppresses rubricAreas even when the edited score is itself fraction-shaped and would also rescale", () => {
+    const plan = buildRepoGradePostPlan(
+      [row({ score: "15/16", rubricAreas: areas, generatedScore: "13/16" })],
+      "701",
+      100
+    );
+    expect("rubricAreas" in plan.postable[0].grade).toBe(false);
+    expect(plan.postable[0].grade.grade).toBe("93.75");
+  });
+
+  it("the posted grade string (submission[posted_grade]) is identical with or without this fix - only rubricAreas presence changes", () => {
+    const rescaled = buildRepoGradePostPlan(
+      [row({ score: "13/16", rubricAreas: areas, generatedScore: "13/16" })],
+      "701",
+      100
+    );
+    const notRescaled = buildRepoGradePostPlan(
+      [row({ score: "85", rubricAreas: areas, generatedScore: "85/100" })],
+      "701",
+      100
+    );
+    const edited = buildRepoGradePostPlan(
+      [row({ score: "95", rubricAreas: areas, generatedScore: "85/100" })],
+      "701",
+      100
+    );
+    // These numeric grade strings are exactly what repoGradePostability/
+    // resolvePostScore already computed before this fix - the fix only ever
+    // adds or removes `rubricAreas`, never touches `grade`.
+    expect(rescaled.postable[0].grade.grade).toBe("81.25");
+    expect(notRescaled.postable[0].grade.grade).toBe("85");
+    expect(edited.postable[0].grade.grade).toBe("95");
+  });
+});
+
 describe("fanOutRepoGradePostResult - AC5 item 30: per-row status after a bulk post", () => {
   const attempted = [
     { repo: "org/a", userId: 1 },

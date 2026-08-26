@@ -322,6 +322,34 @@ it. U0c is the single highest value-per-risk change in this work item.*
     `rateLimitMessage`, and `assignmentsError` with a saved mapping (which
     index.tsx:244 deliberately withholds, so "you never mapped one" and "your
     mapping exists but we withheld it" currently look identical). [SRC]
+19d. **The Canvas assignment picker never renders empty with no explanation.**
+    REPORTED BY THE OWNER, 2026-08-26: "the assignments drop down on the repo
+    grade view doesn't actually populate. i can't choose anything from there."
+    Traced and confirmed - it is a SILENT failure, not a slow load:
+    `assignmentsKey` is null unless the course has BOTH a non-blank
+    `institution` AND a `canvasUrl` from which `parseCanvasCourseId`
+    (src/lib/canvas-url.ts) can extract `/courses/<digits>`
+    (useRepoGradesData.ts:292-294, 330). When it is null the effect returns
+    at its first line (:334), so `assignments` stays `[]` (:353),
+    `assignmentsLoading` is FALSE (:355, because it is defined as
+    `assignmentsKey !== null && !matches`) and `assignmentsError` is NULL
+    (:354). RepoGradesStatusBanners only speaks when one of those two is set
+    (:101-111), so nothing renders. The picker shows "Choose an
+    assignment..." with zero options, forever, with no spinner and no error.
+    **There is no banner for a missing or unparseable `canvasUrl` at all** -
+    index.tsx:507-508 computes only `missingInstitution` and `missingOrg`.
+    Required: the view distinguishes, in words, (a) no institution set,
+    (b) no Canvas URL set, (c) a Canvas URL that carries no `/courses/<id>`,
+    (d) the list genuinely loading, (e) a load that failed, and (f) a course
+    that really has no assignments. Each names the field to fix and where.
+    Note (a)'s existing banner is also misleading: it says only that the
+    Canvas ROSTER cannot be loaded (RepoGradesStatusBanners.tsx:60-65) while
+    the same gate silently empties the assignment picker too. [SRC]
+19e. The same gate govers the roster, so whenever 19d's blocked state is
+    live, `RepoBindingControl`'s student picker reads "No roster loaded"
+    (RepoBindingControl.tsx:117) and posting is unreachable. The view states
+    that ONCE, naming both consequences, rather than leaving the instructor
+    to discover them in two different controls. [SRC]
 19b. No copy hard-codes a spatial reference that regrouping invalidates -
     "Choose a course tile above" (RepoGradesStatusBanners.tsx:57) is the
     existing example. [SRC]

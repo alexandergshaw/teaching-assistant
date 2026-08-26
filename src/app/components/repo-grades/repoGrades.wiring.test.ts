@@ -55,13 +55,47 @@ const HOOK_PATH = join(process.cwd(), "src/app/components/repo-grades/useRepoGra
 const hookSource = readFileSync(HOOK_PATH, "utf8");
 
 /**
+ * Starting at `openBraceIdx` (which must point at a `{`), walks forward
+ * counting brace depth and returns the index of the `}` that brings depth
+ * back to zero - i.e. the brace that actually closes this one. Returns -1 if
+ * the text ends first.
+ */
+function findMatchingBraceEnd(text: string, openBraceIdx: number): number {
+  let depth = 0;
+  for (let i = openBraceIdx; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
  * Finds every call site of `${calleeName}(` in `text` and reports, per call
  * site, whether it is textually inside an `onClick={...}` handler - i.e. the
- * nearest `onClick={` before it has no intervening `}}` (which would close
- * that handler before reaching the call). A call with no preceding `onClick={`
- * at all is reported as NOT gated. This is a narrow text heuristic, not a
- * real parser - it is good enough for this file's actual shape (verified by
- * the canary below) and is not asked to handle arbitrary JSX.
+ * nearest `onClick={` before it has a MATCHING closing brace (found by depth
+ * counting, not by scanning for a literal "}}") that comes AFTER the call
+ * site. A call with no preceding `onClick={` at all is reported as NOT gated.
+ *
+ * This used to look for a literal "}}" between the nearest `onClick={` and
+ * the call site, on the theory that a block-body handler
+ * (`onClick={() => { ... }}`) always closes with two braces together. That
+ * heuristic silently blessed the exact bug it was meant to catch for any file
+ * using the CONCISE arrow form - `onClick={() => foo()}` or `onClick={foo}` -
+ * which closes with a single `}` and contains no "}}" anywhere. Any call
+ * within 400 characters after such a handler was reported "gated" regardless
+ * of whether it was actually inside it, because the old check never found a
+ * "}}" to signal the handler had already closed. Depth-counting the ACTUAL
+ * braces from the `onClick={`'s own `{` recognizes both forms correctly and
+ * is proven against the concise-arrow case (RepoGradesLogPanel.tsx's shape)
+ * in the canary block below, not just the "present vs absent" pair that
+ * caught this file's other two files' block-body handlers before.
+ *
+ * Still a narrow text heuristic, not a real parser - good enough for this
+ * file's actual shape (verified by the canary below), not asked to handle
+ * arbitrary JSX.
  */
 function callSitesGatedByClick(text: string, calleeName: string): boolean[] {
   const marker = `${calleeName}(`;
@@ -74,17 +108,19 @@ function callSitesGatedByClick(text: string, calleeName: string): boolean[] {
 
     const windowStart = Math.max(0, idx - 400);
     const preceding = text.slice(windowStart, idx);
-    const lastOnClick = preceding.lastIndexOf("onClick={");
-    if (lastOnClick === -1) {
+    const lastOnClickRel = preceding.lastIndexOf("onClick={");
+    if (lastOnClickRel === -1) {
       results.push(false);
       continue;
     }
-    const closingBetween = preceding.indexOf("}}", lastOnClick);
-    // No "}}" between the nearest onClick={ and this call site means the
-    // handler is still open when the call happens - gated. A "}}" found in
-    // between means some EARLIER handler already closed before this call, so
-    // this call site is not actually inside it - not gated.
-    results.push(closingBetween === -1);
+    const onClickBraceIdx = windowStart + lastOnClickRel + "onClick=".length;
+    const closeIdx = findMatchingBraceEnd(text, onClickBraceIdx);
+    // Gated only if the call site falls strictly before the onClick
+    // expression's own matching close - true for a block-body handler
+    // (closes after its SECOND brace) and equally for a concise-arrow one
+    // (closes after its FIRST and only brace), unlike the old "}}"-substring
+    // search which only recognized the block-body shape.
+    results.push(closeIdx !== -1 && idx < closeIdx);
   }
   return results;
 }
@@ -108,6 +144,16 @@ describe("callSitesGatedByClick (canary: proves the gating check actually discri
   it("reports one boolean per call site when there are several", () => {
     const fixture = `<button onClick={() => accept(1, "a")}>A</button><button onClick={() => accept(2, "b")}>B</button>`;
     expect(callSitesGatedByClick(fixture, "accept")).toEqual([true, true]);
+  });
+
+  it("reports a call inside a CONCISE-arrow onClick (`onClick={() => accept(...)}`, no block body) as gated - this is the shape a `}}`-substring search cannot see, since a concise arrow closes with a single `}` and never produces \"}}\" at all", () => {
+    const fixture = `<button onClick={() => accept(id, name)}>Confirm</button>`;
+    expect(callSitesGatedByClick(fixture, "accept")).toEqual([true]);
+  });
+
+  it("reports a call placed at RENDER scope right after a concise-arrow onClick as NOT gated - the exact false pass this checker used to produce: with no \"}}\" to find, the old implementation treated any later call within 400 characters of ANY onClick as gated, even one sitting outside every handler entirely", () => {
+    const fixture = `<button onClick={() => accept(1, "a")}>A</button>\n{(() => { accept(2, "b"); return null; })()}`;
+    expect(callSitesGatedByClick(fixture, "accept")).toEqual([true, false]);
   });
 });
 
@@ -141,7 +187,19 @@ describe("RepoBindingControl.tsx wires binding acceptance behind an explicit cli
   it("the suggested-state branch requires the SAME repo's single candidate id, never a hardcoded or unrelated one", () => {
     const suggestedBranchIdx = source.indexOf('row.binding.state === "suggested"');
     expect(suggestedBranchIdx).toBeGreaterThan(-1);
-    const branch = source.slice(suggestedBranchIdx, suggestedBranchIdx + 700);
+    // Bounded by the NEXT branch's own condition (the "ambiguous" state,
+    // which follows "suggested" in this file), not by a fixed character
+    // count - matching the fix already applied to the ColumnHeaderControls
+    // guard (RepoGradesGrid.tsx window, elsewhere in this file) and to the
+    // handlePostColumn guard above. A fixed 700-character window measured
+    // ~69 characters of headroom against the real file at the time of this
+    // fix: any comment added inside the "suggested" branch (of which
+    // RepoBindingControl.tsx already has several - the U9.36 note, the
+    // no-Canvas-id explanation) could push the real assertion past the cut
+    // and fail this test for a reason unrelated to the wiring it checks.
+    const ambiguousBranchIdx = source.indexOf('row.binding.state === "ambiguous"', suggestedBranchIdx);
+    expect(ambiguousBranchIdx).toBeGreaterThan(suggestedBranchIdx);
+    const branch = source.slice(suggestedBranchIdx, ambiguousBranchIdx);
     expect(branch).toContain("accept(candidate.canvasUserId, candidate.name)");
   });
 
@@ -270,15 +328,20 @@ describe("useRepoGradesGradingActions.ts never calls gradeRepoAction or postCanv
     expect(stripComments(hookSource)).not.toContain("useEffect");
   });
 
-  it("gradeRepoAction is never called from inside any useEffect body", () => {
-    const bodies = extractUseEffectBodies(hookSource);
-    expect(bodies.some((b) => b.includes("gradeRepoAction("))).toBe(false);
-  });
-
-  it("postCanvasGradesAction is never called from inside any useEffect body", () => {
-    const bodies = extractUseEffectBodies(hookSource);
-    expect(bodies.some((b) => b.includes("postCanvasGradesAction("))).toBe(false);
-  });
+  // A "gradeRepoAction/postCanvasGradesAction is never called from inside any
+  // useEffect body" pair used to live here, built on extractUseEffectBodies
+  // exactly like the checks below index.tsx's own effect. It was vacuous:
+  // this hook contains no `useEffect(() => {` at all (proven by the
+  // stripComments assertion directly above), so extractUseEffectBodies(hookSource)
+  // is always `[]`, and `[].some(...)` is `false` for any predicate - the
+  // assertions passed no matter what the two actions' call sites looked like.
+  // The stripComments check above is strictly the stronger guarantee: it
+  // fails on ANY occurrence of the literal text "useEffect" anywhere in this
+  // file, which is a necessary condition for a real `useEffect(...)` call to
+  // exist at all, so there is no path by which either action could be called
+  // from an effect body here without that check already failing first.
+  // Deleted rather than kept as dead weight, per this file's own header rule
+  // that a retained vacuous assertion implies coverage it does not have.
 
   it("gradeRepoAction is called from inside handleGradeCell, the function index.tsx wires to RepoGradesGrid's onGradeCell prop - not some other unrelated function", () => {
     const defIdx = hookSource.indexOf("const handleGradeCell = async");
@@ -353,14 +416,26 @@ function stripComments(text: string): string {
 
 /**
  * True when `text` (after stripping comments) contains a
- * `useEffect(() => { <body> }, [<deps>]);` whose dependency array is JUST
- * `stateVarName` (nothing else) and whose body calls
- * `persistSelectedRepoIds(` - i.e. the exact blanket "persist on every
- * change to this one piece of state" shape that caused the mount-time race
- * described above. Reuses extractUseEffectBodies's own marker-walking
- * approach but additionally captures each effect's dependency-array text, so
- * it can require an EXACT single-dependency match rather than merely "this
- * state appears somewhere in the deps list."
+ * `useEffect(() => { <body> }, [<deps>]);` whose dependency array CONTAINS
+ * `stateVarName` as one of its entries (exactly, not as a substring of a
+ * longer identifier) and whose body calls `persistSelectedRepoIds(` - i.e.
+ * the blanket "persist on every change to this piece of state" shape that
+ * caused the mount-time race described above. Reuses extractUseEffectBodies's
+ * own marker-walking approach but additionally captures each effect's
+ * dependency-array text, split into individual entries.
+ *
+ * This used to require the ENTIRE deps array to be exactly `stateVarName`
+ * and nothing else, which is evadable by one extra dependency:
+ * `useEffect(() => { persistSelectedRepoIds(selected); }, [selected, model]);`
+ * reintroduces the identical shipped bug (fires on the first commit with
+ * `selected`'s untouched empty default and overwrites the stored selection
+ * before the restore branch runs) but did not match `deps === stateVarName`
+ * because `deps` was `"selected, model"`. Splitting the deps text on commas
+ * and checking membership (with each entry trimmed and compared for EXACT
+ * equality, not `.includes(stateVarName)` on the raw deps string) keeps the
+ * real requirement intact - a deps entry named `selectedRepoIds` must still
+ * not count as containing `selected` - while no longer requiring the array
+ * to have exactly one entry.
  */
 function hasBlanketPersistEffect(text: string, stateVarName: string): boolean {
   const stripped = stripComments(text);
@@ -383,7 +458,11 @@ function hasBlanketPersistEffect(text: string, stateVarName: string): boolean {
     }
     const body = stripped.slice(bodyStart, bodyEnd);
     const deps = stripped.slice(depsStart, depsEnd).trim();
-    if (deps === stateVarName && body.includes("persistSelectedRepoIds(")) {
+    const depsList = deps
+      .split(",")
+      .map((d) => d.trim())
+      .filter((d) => d.length > 0);
+    if (depsList.includes(stateVarName) && body.includes("persistSelectedRepoIds(")) {
       return true;
     }
     searchFrom = depsEnd + 1;
@@ -429,6 +508,18 @@ describe("hasBlanketPersistEffect (canary: proves the mount-time-race detector a
   it("does not false-positive on an unrelated single-dependency effect that happens to persist something else", () => {
     const other = `useEffect(() => { persistRepoGradesUiState(uiState); }, [uiState]);`;
     expect(hasBlanketPersistEffect(other, "selected")).toBe(false);
+  });
+
+  it("detects the buggy shape even with an EXTRA dependency in the array - one additional dep reintroduces the identical mount-time race (the effect still fires on the first commit with `selected`'s untouched default) and must not evade this guard just by adding a second entry", () => {
+    const buggyWithExtraDep = `useEffect(() => {\n  persistSelectedRepoIds(selected);\n}, [selected, model]);`;
+    expect(hasBlanketPersistEffect(buggyWithExtraDep, "selected")).toBe(true);
+    const buggyWithExtraDepFirst = `useEffect(() => {\n  persistSelectedRepoIds(selected);\n}, [model, selected]);`;
+    expect(hasBlanketPersistEffect(buggyWithExtraDepFirst, "selected")).toBe(true);
+  });
+
+  it("does NOT false-positive on a deps entry that merely CONTAINS the state var name as a substring - e.g. a `selectedRepoIds` dependency must not count as `selected` being present", () => {
+    const fixture = `useEffect(() => {\n  persistSelectedRepoIds(selectedRepoIds);\n}, [selectedRepoIds]);`;
+    expect(hasBlanketPersistEffect(fixture, "selected")).toBe(false);
   });
 });
 
@@ -591,11 +682,23 @@ describe("the activity log's download and clear are click-gated", () => {
     expect(confirmIdx).toBeLessThan(clearIdx);
   });
 
-  it("no download or clear is reachable from a useEffect body", () => {
-    const bodies = extractUseEffectBodies(logPanelSource);
-    expect(bodies.some((b) => b.includes("triggerFileDownload("))).toBe(false);
-    expect(bodies.some((b) => b.includes("onClear("))).toBe(false);
+  it("the file defines no effect at all, so there is no mount-time or state-change-triggered path that could download or clear the log automatically - the same backstop RepoBindingControl.tsx (line 138 above) and useRepoGradesGradingActions.ts (line 316 above) already have", () => {
+    expect(stripComments(logPanelSource)).not.toContain("useEffect");
   });
+  // A "no download or clear is reachable from a useEffect body" pair used to
+  // live here, built on extractUseEffectBodies exactly like the checks above
+  // index.tsx's own effects. It was vacuous for the same reason as the
+  // deleted hookSource pair above: this file contains no
+  // `useEffect(() => {` at all, so extractUseEffectBodies(logPanelSource) is
+  // always `[]` and `[].some(...)` is `false` regardless of what
+  // triggerFileDownload/onClear's call sites looked like - this file
+  // previously had NO backstop proving that at all (unlike hookSource, which
+  // already had the stripComments check). The assertion directly above is
+  // that backstop, added now, and is strictly the stronger guarantee: it
+  // fails on any occurrence of the literal text "useEffect" anywhere in this
+  // file, which is a necessary condition for a real effect to exist, so
+  // there is no path by which either call could reach an effect body without
+  // that check already failing first.
 
   it("the panel builds its file through the shared triggerFileDownload, not a hand-rolled object URL", () => {
     expect(logPanelSource).toContain("triggerFileDownload");
@@ -662,8 +765,24 @@ describe("index.tsx renders LinkUsernamesPanel above the grid, wired to the view
   it("gates the panel on `course` alone, matching how RepoGradesLogPanel below it is gated - never on `model && noConfirmedRows`, which would hide it exactly when an instructor has the least other way to bind repos (a failed scan or an unset org)", () => {
     const panelIdx = indexSource.indexOf("<LinkUsernamesPanel");
     expect(panelIdx).toBeGreaterThan(-1);
-    const precedingGate = indexSource.slice(Math.max(0, panelIdx - 60), panelIdx);
-    expect(precedingGate).toContain("{course && (");
+    // Structural bound, not a fixed character window: a fixed 60-character
+    // backward slice measured only ~38 characters of headroom against the
+    // real file at the time of this fix, and the JSX comment immediately
+    // above this gate (explaining exactly why it is gated on `course` alone)
+    // is itself long enough that growing it by a sentence would push the
+    // gate out of a fixed-size window and fail this test for a reason
+    // unrelated to the wiring it checks - precisely the risk another agent
+    // editing index.tsx's surrounding comments right now would trip.
+    // lastIndexOf has no such limit; requiring that ONLY whitespace sits
+    // between the gate's closing "(" and the tag (rather than requiring the
+    // gate to fall within an arbitrary N characters of it) is what actually
+    // proves this gate - not some other, unrelated "{course && (" earlier in
+    // the file - is the one immediately wrapping <LinkUsernamesPanel.
+    const gateMarker = "{course && (";
+    const gateIdx = indexSource.lastIndexOf(gateMarker, panelIdx);
+    expect(gateIdx).toBeGreaterThan(-1);
+    const between = indexSource.slice(gateIdx + gateMarker.length, panelIdx);
+    expect(between.trim()).toBe("");
   });
 });
 

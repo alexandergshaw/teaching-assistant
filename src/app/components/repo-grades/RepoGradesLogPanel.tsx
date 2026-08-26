@@ -27,6 +27,16 @@ import {
   REPO_GRADE_LOG_EVENT_LABELS,
   type RepoGradeLogEntry,
 } from "./repoGradesLog";
+// U12.48/U12.49 (docs/repo-grades-ux-overhaul-acceptance-criteria.md): the log
+// shows a percentage wherever it shows a score - never the raw "earned/
+// possible" total a generated-per-repo rubric happened to invent - and
+// reports when this course's recorded grades came back on more than one
+// scale, naming the cause. summarizeScoreSpread only ever reads `entry.score`
+// off "grade-succeeded" entries: that is the one event kind whose `score`
+// field is gradeRepoAction's raw totalScore text (see
+// useRepoGradesGradingActions.ts); a post's own `score` field is already a
+// bare posted number with no denominator to compare.
+import { formatScorePercent, summarizeScoreSpread } from "./repoGradeScoreDisplay";
 import styles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 
@@ -69,6 +79,13 @@ export default function RepoGradesLogPanel({ log, courseId, courseName, onClear,
   const summary = summarizeRepoGradeLog(log);
   const recent = recentRepoGradeLogEntries(log, RECENT_COUNT);
   const empty = log.length === 0;
+  // U12.49: every "grade-succeeded" score this course's log has ever recorded
+  // - not just the 10 shown below - matching summarizeRepoGradeLog's own
+  // whole-log aggregation just above, rather than a "most recent run" window
+  // this log has no recorded boundary for (entries carry no run id).
+  const scoreSpread = summarizeScoreSpread(
+    log.filter((entry) => entry.kind === "grade-succeeded").map((entry) => entry.score)
+  );
 
   const handleDownload = (format: "csv" | "json") => {
     // The one clock read in this feature's UI path. Everything downstream
@@ -121,25 +138,40 @@ export default function RepoGradesLogPanel({ log, courseId, courseName, onClear,
         </div>
       </div>
 
+      {/* U12.49 - surfaced where it will actually be seen: this panel is
+          already the one place that aggregates a course's grading activity
+          into counts ("N event(s) - X graded, Y posted, Z failed"), directly
+          above. Reuses .banner (warning-toned, already used elsewhere in this
+          view for a condition worth the instructor's attention) rather than
+          inventing a second notice style. */}
+      {!empty && scoreSpread.inconsistentScales && <p className={styles.banner}>{scoreSpread.detail}</p>}
+
       {!empty && (
         <>
           <ol className={styles.logList}>
-            {recent.map((entry, index) => (
-              // The key pairs the timestamp with the target and the index
-              // within this rendered slice: two entries CAN share a
-              // millisecond (a column post fans out its whole result in one
-              // synchronous batch), so `at` alone is not unique.
-              <li key={`${entry.at}-${entry.repo}-${entry.folder}-${index}`} className={styles.logEntry}>
-                <span className={styles.logEntryTime}>{formatEntryTime(entry.at)}</span>
-                <span className={styles.logEntryKind}>{REPO_GRADE_LOG_EVENT_LABELS[entry.kind]}</span>
-                <span className={styles.logEntryTarget}>{entryTarget(entry)}</span>
-                <span className={styles.logEntryDetail}>
-                  {entry.score && <strong>{entry.score}</strong>}
-                  {entry.score && entry.detail ? " - " : ""}
-                  {entry.detail}
-                </span>
-              </li>
-            ))}
+            {recent.map((entry, index) => {
+              // U12.48 - a percentage, never the raw total: formatScorePercent
+              // passes anything it cannot parse (a bare posted number, "") through
+              // unchanged, so this is safe to apply to every entry's score field
+              // regardless of which event kind produced it.
+              const displayScore = formatScorePercent(entry.score);
+              return (
+                // The key pairs the timestamp with the target and the index
+                // within this rendered slice: two entries CAN share a
+                // millisecond (a column post fans out its whole result in one
+                // synchronous batch), so `at` alone is not unique.
+                <li key={`${entry.at}-${entry.repo}-${entry.folder}-${index}`} className={styles.logEntry}>
+                  <span className={styles.logEntryTime}>{formatEntryTime(entry.at)}</span>
+                  <span className={styles.logEntryKind}>{REPO_GRADE_LOG_EVENT_LABELS[entry.kind]}</span>
+                  <span className={styles.logEntryTarget}>{entryTarget(entry)}</span>
+                  <span className={styles.logEntryDetail}>
+                    {displayScore && <strong>{displayScore}</strong>}
+                    {displayScore && entry.detail ? " - " : ""}
+                    {entry.detail}
+                  </span>
+                </li>
+              );
+            })}
           </ol>
           {log.length > recent.length && (
             <p className={pageStyles.fieldHint}>

@@ -33,6 +33,16 @@
 import { repoGradePostability } from "@/lib/repo-grade-postability";
 import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
+// U12.48/U12.52 (docs/repo-grades-ux-overhaul-acceptance-criteria.md): the
+// instructor reads a PERCENTAGE beside the score field, never a raw total -
+// but the editable score field itself keeps showing `edit.score` exactly as
+// gradeRepoAction/the instructor produced it (still a bare "value={edit.score}"
+// controlled input, pinned by repoGrades.wiring.test.ts:188). That raw text is
+// what repoGradePostability and buildRepoGradePostPlan (repoGradesPosting.ts)
+// read to decide what actually posts to Canvas - changing what this input
+// SHOWS as its value would change what gets posted. formatScorePercent is
+// display-only, read-only, and never fed back into onScoreChange.
+import { formatScorePercent, scorePercentValue } from "./repoGradeScoreDisplay";
 import styles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 
@@ -86,26 +96,50 @@ export default function RepoGradeCellControl({ row, column, edit, onScoreChange,
     edit.postStatus === "posting" ? "Posting..." : edit.postStatus === "posted" ? "Re-post" : edit.postStatus === "error" ? "Retry" : "Post";
   const postButtonDisabled = edit.postStatus === "posting" || (edit.postStatus === "idle" && !postability.postable);
 
+  // U12.48: only shown once the raw score actually parses as an
+  // "earned/possible" fraction - an unreadable or not-yet-graded score already
+  // reads fine in the input alone, and repeating it here would just show the
+  // same text twice.
+  const scorePercent = scorePercentValue(edit.score) !== null ? formatScorePercent(edit.score) : null;
+
+  const handleCopyComment = () => {
+    void navigator.clipboard.writeText(edit.comment);
+  };
+
   return (
     <div className={styles.cellControl}>
       <div className={styles.cellInputs}>
-        <input
-          type="text"
-          inputMode="decimal"
-          value={edit.score}
-          onChange={(e) => onScoreChange(e.target.value)}
-          aria-label={`${column.folder} score for ${row.repo}`}
-          placeholder="Score"
-          className={styles.scoreInput}
-        />
-        <input
-          type="text"
-          value={edit.comment}
-          onChange={(e) => onCommentChange(e.target.value)}
-          aria-label={`${column.folder} comment for ${row.repo}`}
-          placeholder="Comment (optional)"
-          className={styles.commentInput}
-        />
+        <div className={styles.scoreRow}>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={edit.score}
+            onChange={(e) => onScoreChange(e.target.value)}
+            aria-label={`${column.folder} score for ${row.repo}`}
+            placeholder="Score"
+            className={styles.scoreInput}
+          />
+          {scorePercent && <span className={styles.scorePercent}>{scorePercent}</span>}
+        </div>
+        <div className={styles.commentRow}>
+          <textarea
+            value={edit.comment}
+            onChange={(e) => onCommentChange(e.target.value)}
+            aria-label={`${column.folder} comment for ${row.repo}`}
+            placeholder="Comment (optional)"
+            className={styles.commentTextarea}
+          />
+          {edit.comment.trim() !== "" && (
+            <button
+              type="button"
+              className={pageStyles.linkButton}
+              aria-label={`Copy the ${column.folder} comment for ${row.repo}`}
+              onClick={handleCopyComment}
+            >
+              Copy
+            </button>
+          )}
+        </div>
       </div>
       <div className={styles.cellActions}>
         <button

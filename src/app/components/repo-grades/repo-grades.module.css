@@ -238,7 +238,19 @@
 
 .cellInputs {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* U12.48/U12.52 - the score input stays the raw, editable "earned/possible"
+   text (that is what actually posts to Canvas - see RepoGradeCellControl.tsx's
+   header comment), with a read-only percentage shown beside it so the
+   instructor never has to do the division by eye across differing rubric
+   totals. */
+.scoreRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .scoreInput {
@@ -250,14 +262,36 @@
   color: var(--text-primary);
 }
 
-.commentInput {
+.scorePercent {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* U12.51 - the comment row: a multi-line, resizable textarea (never a
+   single-line input truncating a paragraph) plus a one-click Copy button,
+   following the same "View/Copy" idiom as courses/RosterCell.tsx. Still
+   editable - textarea keeps the same controlled value={edit.comment} /
+   onChange wiring the single-line input had. */
+.commentRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.commentTextarea {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 60px;
+  resize: vertical;
   padding: 4px 6px;
   border: 1px solid var(--field-border);
   border-radius: 6px;
   background: var(--field-background);
   color: var(--text-primary);
+  font: inherit;
+  line-height: 1.4;
 }
 
 .cellActions {
@@ -457,7 +491,7 @@
     max-width: 100%;
   }
 
-  .cellInputs {
+  .commentRow {
     flex-wrap: wrap;
   }
 
@@ -724,7 +758,7 @@
 .linkSourceButton:focus-visible,
 .linkSourceButtonActive:focus-visible,
 .scoreInput:focus-visible,
-.commentInput:focus-visible {
+.commentTextarea:focus-visible {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }

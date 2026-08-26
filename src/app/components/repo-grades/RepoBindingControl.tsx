@@ -122,21 +122,37 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
       <div className={styles.bindingCell}>
         <span className={styles.bindingBadgeAmbiguous}>Ambiguous - {row.binding.candidates.length} matches</span>
         <ul className={styles.candidateList}>
-          {row.binding.candidates.map((candidate) => (
-            <li key={candidate.canvasUserId} className={styles.candidateItem}>
-              <span className={styles.bindingDetail}>{candidate.name}</span>
-              <button
-                type="button"
-                className={pageStyles.linkButton}
-                disabled={busy}
-                onClick={() => {
-                  void accept(candidate.canvasUserId, candidate.name);
-                }}
-              >
-                Bind to this student
-              </button>
-            </li>
-          ))}
+          {row.binding.candidates.map((candidate) => {
+            // Same guard as the "suggested" branch above (U9.36): a
+            // candidate whose canvasUserId cannot round-trip as CONFIRMED
+            // must not get a "Bind to this student" button, or the row loses
+            // its suggestion and its confirm control in the same click.
+            const candidateConfirmable = isConfirmableCandidate(candidate);
+            return (
+              <li key={candidate.canvasUserId} className={styles.candidateItem}>
+                <span className={styles.bindingDetail}>{candidate.name}</span>
+                {candidateConfirmable && (
+                  <button
+                    type="button"
+                    className={pageStyles.linkButton}
+                    disabled={busy}
+                    onClick={() => {
+                      void accept(candidate.canvasUserId.trim(), candidate.name);
+                    }}
+                  >
+                    Bind to this student
+                  </button>
+                )}
+                {!candidateConfirmable && (
+                  <span className={styles.postReason}>
+                    This match has no Canvas user id yet, so it cannot be confirmed directly - run
+                    &quot;Read a Canvas assignment&apos;s submissions&quot; in the panel above to get one, or bind this
+                    repo to a roster student by hand below.
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
         {error && <span className={pageStyles.error}>{error}</span>}
       </div>

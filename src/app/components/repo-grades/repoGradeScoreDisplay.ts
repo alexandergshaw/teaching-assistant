@@ -3,11 +3,17 @@
 // inconsistent totals to each of the assignments. i don't need totals. i need
 // percentages with clearly viewable and copyable comments."
 //
-// The cause (src/app/actions/github-repos.ts:680) is that a blank rubric
-// field makes `generateRubric` run once PER repo, fed that repo's own
+// The LIKELY cause (src/app/actions/github-repos.ts:680) is that a blank
+// rubric field makes `generateRubric` run once PER repo, fed that repo's own
 // content, so every student is graded against a rubric that invents its own
-// point total. This module does not fix that (tracked separately as U12.50 -
-// it changes gradeRepoAction, which is out of scope for a display module).
+// point total. That is the cause whenever the rubric field was left blank;
+// an instructor who supplied an explicit rubric can still see differing
+// totals across separately-graded folders (each folder's own explicit
+// rubric can legitimately use a different point total), so this module must
+// not assert the generated-per-repo cause as fact - only name it as the
+// thing to check. This module does not fix the generated-rubric case
+// (tracked separately as U12.50 - it changes gradeRepoAction, which is out
+// of scope for a display module).
 // It fixes the half Section 1 puts in scope: a percentage is comparable
 // across repos and across runs no matter what denominator a generated rubric
 // happened to pick.
@@ -102,11 +108,20 @@ export interface ScoreSpreadSummary {
 
 /**
  * U12.49: surfaces what the instructor previously had to export a log and
- * read by eye to notice - that a run's repos were graded against
+ * read by eye to notice - that a set of scores were graded against
  * differently-scaled rubrics. Ignores anything parseScoreFraction cannot
  * read (a bare "pass", an empty cell) rather than counting it as its own
  * scale, so a handful of ungraded cells sitting alongside a consistent run
  * cannot manufacture a false positive.
+ *
+ * Regression note: this function only compares the scores it is HANDED - it
+ * does not know which folder or run each one came from. A caller that feeds
+ * it every "grade-succeeded" score in a whole course log will flag any course
+ * that has graded two different assignments, since different assignments
+ * legitimately carry different point totals. Callers must scope the input to
+ * scores that are actually meant to be comparable - e.g. one folder's worth
+ * - rather than the whole log. See RepoGradesLogPanel.tsx's per-folder
+ * grouping.
  */
 export function summarizeScoreSpread(scores: readonly string[]): ScoreSpreadSummary {
   const denominators = new Set<number>();
@@ -117,7 +132,7 @@ export function summarizeScoreSpread(scores: readonly string[]): ScoreSpreadSumm
   const distinctDenominators = denominators.size;
   const inconsistentScales = distinctDenominators > 1;
   const detail = inconsistentScales
-    ? `These scores came from ${distinctDenominators} different rubrics with different point totals - each generated per repo from that repo's own content, rather than one shared rubric for the run. Percentages are shown instead of totals so they stay comparable.`
+    ? `These scores came from ${distinctDenominators} different point totals. The likely cause: the rubric field was left blank, so a rubric was generated per repo from that repo's own content instead of one shared rubric - check the rubric field for this folder. Percentages are shown instead of totals so they stay comparable.`
     : "";
   return { distinctDenominators, inconsistentScales, detail };
 }

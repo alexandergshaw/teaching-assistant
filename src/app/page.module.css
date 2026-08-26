@@ -661,19 +661,26 @@
   margin: 8px 0 0;
 }
 
-/* An inline text button styled as a link (e.g. "clear"). U6.27: padding plus
-   a compensating negative margin gives this a real hit area (WCAG 2.2 SC
-   2.5.8's 24x24 minimum - measured at ~21.6px before this change, from
-   `font: inherit` inside the repo-grades grid's 0.9rem/1.5 line-height text)
-   without shifting surrounding layout, since the negative margin cancels the
-   padding's box-size increase. */
+/* An inline text button styled as a link (e.g. "clear"). Regression fix:
+   a prior change added `padding: 4px; margin: -4px;` here to try to grow the
+   WCAG 2.2 SC 2.5.8 24x24 hit target without shifting layout. The negative
+   margin does cancel the padding's effect on the MARGIN box, so layout was
+   unaffected, but the BORDER BOX - what actually receives clicks and draws
+   the focus ring - grew by 8px in each dimension. Wherever two `.linkButton`
+   siblings sit in a flex/column row with a gap under 8px, their hit areas
+   now overlap and the later sibling steals clicks from the earlier one
+   (verified: repo-grades `.columnHeader`'s "Post" vs "Grade all", the
+   activity log's action row, CourseRow's Edit/Delete, and others). Reverted
+   to `padding: 0` - the primitive's exact pre-regression behaviour. The
+   24x24 hit target is a real requirement, but needs a technique that does
+   not grow the border box (or a variant class scoped to one view); that is
+   tracked as its own follow-up change with its own regression check. */
 .linkButton {
   background: none;
   border: none;
   color: var(--accent-ink);
   cursor: pointer;
-  padding: 4px;
-  margin: -4px;
+  padding: 0;
   font: inherit;
 }
 

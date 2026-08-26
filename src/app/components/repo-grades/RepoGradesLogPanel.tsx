@@ -79,13 +79,37 @@ export default function RepoGradesLogPanel({ log, courseId, courseName, onClear,
   const summary = summarizeRepoGradeLog(log);
   const recent = recentRepoGradeLogEntries(log, RECENT_COUNT);
   const empty = log.length === 0;
-  // U12.49: every "grade-succeeded" score this course's log has ever recorded
-  // - not just the 10 shown below - matching summarizeRepoGradeLog's own
-  // whole-log aggregation just above, rather than a "most recent run" window
-  // this log has no recorded boundary for (entries carry no run id).
-  const scoreSpread = summarizeScoreSpread(
-    log.filter((entry) => entry.kind === "grade-succeeded").map((entry) => entry.score)
-  );
+  // U12.49: differing scales are only a meaningful signal WITHIN one folder -
+  // different assignments legitimately carry different point totals, so
+  // comparing every "grade-succeeded" score in the whole course log (all
+  // folders, all time) trips this banner for any course that has graded two
+  // different assignments, which is normal and not a defect. The log records
+  // no run boundary, so a single run cannot be isolated either; grouping by
+  // `folder` is the closest available approximation to "scores that are
+  // actually meant to be comparable" - see summarizeScoreSpread's own
+  // regression note in repoGradeScoreDisplay.ts. Only entries with a real
+  // score are compared: filtering by folder is stable even though it does
+  // not know about separate runs against the SAME folder.
+  const scoresByFolder = new Map<string, string[]>();
+  for (const entry of log) {
+    if (entry.kind !== "grade-succeeded") continue;
+    const bucket = scoresByFolder.get(entry.folder);
+    if (bucket) bucket.push(entry.score);
+    else scoresByFolder.set(entry.folder, [entry.score]);
+  }
+  const spreadByFolder = Array.from(scoresByFolder.entries()).map(([folder, scores]) => ({
+    folder,
+    spread: summarizeScoreSpread(scores),
+  }));
+  const inconsistentFolder = spreadByFolder.find((entry) => entry.spread.inconsistentScales);
+  const scoreSpread = {
+    inconsistentScales: Boolean(inconsistentFolder),
+    detail: inconsistentFolder
+      ? inconsistentFolder.folder
+        ? `Folder "${inconsistentFolder.folder}": ${inconsistentFolder.spread.detail}`
+        : inconsistentFolder.spread.detail
+      : "",
+  };
 
   const handleDownload = (format: "csv" | "json") => {
     // The one clock read in this feature's UI path. Everything downstream

@@ -33566,3 +33566,196 @@ No test renders a component, so the boxes' markup, labels and keyboard
 behaviour are verified by reading only. `gradingApiToRun`'s external "Other
 API" engine populates `strengths` only and never offered a resubmit notice;
 that pre-existing gap was left rather than inventing a policy for it.
+
+## 356. BASELINE (pre-change): the file viewer that already exists, and the three reasons it appears absent
+
+Recorded 2026-08-26 BEFORE the F3/F2/F1 work
+(`docs/grading-results-file-viewer-acceptance-criteria.md`) changes any of it.
+Same purpose as entries 352 and 354: so the change can be proved not to have
+altered anything it did not intend to. This entry restates the AC document's
+own "THE REFRAME" as a factual baseline, verified against the code as it
+stood, not the AC's prose alone.
+
+**The control already existed.** `GradingResults.tsx:607-664` (pre-change,
+per-file-viewer feature) renders a Files column with a per-file Preview (eye)
+button and a Download button for every `result.submittedFiles` entry, and the
+eye opens `FilePreviewModal.tsx`, which already handled text, PDFs, images, a
+truncation notice, and a Run button. Nothing about the request needed a new
+viewer; three separate defects made the existing one look absent or, in one
+case, actively wrong.
+
+**Defect 1 - the truncation notice was a lie on the repo path.**
+`repoDigestToEmbeddedEntry` (`src/app/actions/github.ts:572`,
+`src/app/actions/github-repos.ts:596`) hardcoded `previewTruncated: false` for
+every file, while `ingestRepo` (`src/lib/github.digest.ts:295-311`) already
+computed, per file, `const slice = body.slice(0, perFileBudget); if
+(slice.length < body.length) truncated = true;` and then discarded that fact -
+`RepoFile` (`:89-92`, pre-change) had no `truncated` field at all, so there
+was nowhere for the per-file result to go. A preview of a cut file therefore
+showed no truncation notice at exactly the files that had been cut, and the
+same truncated text is what the model graded - an instructor reading what
+looked like the whole file could reach a conclusion the grade never reflected,
+with no way to know.
+
+**Defect 2 - the repo-graded LLM path never populated the file list at all.**
+`gradeRepoAction`'s LLM-provider branch (`github-repos.ts:681-685`,
+pre-change) built its entry as `{ student: digest.fullName, content:
+digest.text, mergedFileCount: digest.fileCount, submittedFiles: [] }` -
+literally empty, always - while `gradeReposAction`'s LLM-provider branch
+(`github.ts:644-649`, pre-change) did the identical thing for the bulk path.
+Both files' EMBEDDED-provider branch, a few lines above each, already called
+`repoDigestToEmbeddedEntry(digest[, label])` to populate `submittedFiles` from
+`digest.files` - the conversion existed, and simply was not reused on the
+other branch. A repo graded with the default (non-embedded) provider therefore
+showed "-" in the Files column: nothing to preview, even once the button
+worked.
+
+**Defect 3 - the Preview button was wired to a no-op.**
+`GithubGradingPanel.tsx:726` (pre-change) passed `onOpenPreview={() => {}}` to
+`GradingResults`. The button rendered, was labelled, and took keyboard focus -
+and did nothing. Already recorded at entry (this file) 23278-23286 as known,
+deferred work, including why no gate caught it: a zero-arg lambda satisfies
+`onOpenPreview`'s three-arg type, so `tsc --noEmit` stayed silent, and vitest
+here is node-env and never renders a component, so nothing ever clicked the
+button either.
+
+**A fourth thing that is NOT a defect.** `github-grading-run-store.ts:179` and
+`grading-review-rows.ts:41` both drop `submittedFiles` when persisting a
+restored run or a draft, deliberately, and their own tests assert the empty
+array. This is correct - file contents are not meant to be re-persisted into
+localStorage - and out of scope for this baseline's fixes.
+
+**What the run-level view already got right, that the per-file preview did
+not.** `useRepoGradesGradingActions.ts:279-286` already distinguishes two
+different cuts by name rather than merging them - `digestTruncated` (the
+ingest budget excluded some files from the folder digest entirely) versus
+`submissionTruncated` (the assembled text was cut AGAIN, after ingestion,
+before the model ever saw it) - and `GithubGradingPanel.tsx`'s
+`describeGithubGradingTruncation` renders both as separate sentences when
+either fired. The per-file preview had no equivalent: a file's own
+`previewTruncated` (once honest) can only say whether THAT file's stored
+content was cut, not whether the model saw even less than the stored content
+because the whole submission was trimmed again downstream.
+
+## 357. The existing file viewer stops lying about truncation and stops looking absent - F3, F2, F1
+
+Acceptance criteria: `docs/grading-results-file-viewer-acceptance-criteria.md`.
+Baseline of the replaced behaviour: entry 356. Scope was explicitly F3, then
+F2, then F1, in that order (F3 is a correctness bug independent of whether the
+viewer is reachable) - the browsing-all-files panel and F5 (the Canvas
+GitHub-link path) are follow-up work, not shipped here.
+
+### F3 - the truncation fact is now carried, never recomputed
+
+`RepoFile` (`src/lib/github.digest.ts:88-103`) gained a `truncated: boolean`
+field, set at the ONE place `ingestRepo` already computed it
+(`:315-324`): `const fileTruncated = slice.length < body.length; ...
+files.push({ path: f.path, content: slice, truncated: fileTruncated });`. Both
+`repoDigestToEmbeddedEntry` copies (`github.ts:572`, `github-repos.ts:596`)
+now read `previewTruncated: file.truncated` instead of the hardcoded `false` -
+one source of truth, carried through, never guessed at the far end.
+`github-repos.ts`'s own local structural `RepoFile`/`RepoDigest` types
+(`:67-68`) gained the same field so `file.truncated` type-checks there too.
+
+`FilePreviewModal.tsx` now says so at the CUT POINT, not only in a header: the
+existing top-of-content notice is unchanged, and a second notice
+("cut off here - the rest of this file was not included when this run was
+graded") now renders immediately AFTER the `<pre>` content when `truncated` is
+true - where a reader's eye actually is once they finish reading.
+
+The two different cuts are named separately, matching
+`useRepoGradesGradingActions.ts`'s `digestTruncated`/`submissionTruncated`
+distinction rather than merging them: `PreviewFile` gained a distinct
+`submissionTruncated?: boolean` (from `GradeResult.submissionTruncated`,
+threaded through by `GradingResults.tsx` at the point it builds the preview
+object), rendered as its OWN notice - "the assembled submission was cut down
+again before the model graded it... even where this file's own content below
+is not cut off" - because a file's own `truncated: false` does not mean the
+grader saw it: the cut that produced `submissionTruncated` happens to the
+concatenated text, after this file's own content was already whole.
+
+### F2 - the repo path reuses the existing mapper instead of a second, empty one
+
+`gradeRepoAction`'s LLM branch (`github-repos.ts:684-690`) and
+`gradeReposAction`'s LLM branch (`github.ts:648-654`) now build their
+entry/entries via `repoDigestToEmbeddedEntry(digest[, label])` - the SAME
+conversion the embedded-provider branch a few lines above each already
+called - rather than a hand-built object with `submittedFiles: []`. No new
+fetch, no new type: `digest.files` was already in scope on the line above in
+both cases.
+
+### F1 - the Preview button is wired to a real opener
+
+`GithubGradingPanel.tsx` gained its own `selectedPreview`/`previewBlobUrl`
+state, a `handleOpenPreview`/`handleClosePreview` pair modeled on
+`page.tsx`'s own (this panel is not reachable from `page.tsx`'s tree - it owns
+its own tab - so it needs its own copy of this state, not a threaded prop),
+and a `FilePreviewModal` render site gated on `selectedPreview`.
+`onOpenPreview={() => {}}` became `onOpenPreview={handleOpenPreview}`.
+
+A source-reading guard (`GithubGradingPanel.wiring.test.ts`) now fails loudly
+if this regresses: it asserts the file contains no `onOpenPreview={() =>
+{}}`-shaped literal (with or without an internal space) and DOES contain
+`onOpenPreview={handleOpenPreview}`, paired with canaries proving the detector
+fires on both known-bad spellings and does NOT fire on a real handler
+identity or a real inline three-arg call - the same "prove the guard can
+fail" idiom `gradingResultsHelpers.test.ts:722-773` established for this
+project's other client-bundle/wiring guards. One trap found while writing it:
+the guard's OWN header comment quotes the banned literal to explain what it
+guards against, which tripped its own "must not match" assertion until
+comments were stripped before scanning first - the same habit
+`syllabusUploadTransport.wiring.test.ts` already uses, for the mirror-image
+reason (there, a commented-out bad call must not satisfy a positive match;
+here, a comment quoting the bad call must not fail a negative one).
+
+### What proves F2 and F3 without executing a "use server" action
+
+`gradeRepoAction`/`gradeReposAction` are "use server" actions with heavy
+runtime dependencies (Supabase auth, live GitHub fetches, an LLM call) that
+nothing in this repo imports directly in a test today. Following this
+project's own actions/ precedent
+(`syllabusUploadTransport.wiring.test.ts`), `githubRepoGrading.wiring.test.ts`
+proves the wiring by reading source text - that neither file's LLM branch
+still contains `submittedFiles: []`, and that both call
+`repoDigestToEmbeddedEntry` - paired with canaries on both the buggy and
+fixed literal shapes. The underlying FACT those guards depend on -
+that `ingestRepo` computes a real, independent, per-file `truncated` flag - is
+proven directly, with mocked GitHub calls and no source-reading involved, by
+three new cases in `github.digest.test.ts`: a file within budget is not
+truncated, a file over budget is, and two files graded together get
+INDEPENDENT flags (one cut, one not) rather than the digest-level aggregate
+being read back as if it applied to both.
+
+### Traps handled
+
+- `SubmittedFileInfo`'s existing test fixtures (`embedded-grader/index.test.ts`,
+  `embedded-grader/checks.test.ts`, `discussion.ts:483`,
+  `grading-drafts.test.ts:146`, `grade.strip.test.ts:25`) all build entries
+  for UNRELATED producers (discussion posts, non-repo grading, persistence
+  round-trips) and were left untouched - none of them assert the repo-digest
+  defect this work fixes, so none needed to change, and none did.
+- F4's tests (`github-grading-run-store.test.ts`,
+  `grading-review-rows.ts`'s allowlist behaviour) assert `submittedFiles` is
+  dropped on a restored run or draft. That is a deliberate contract, not the
+  defect - left exactly as it was, per the AC document's own explicit
+  instruction not to re-persist file contents.
+
+### Gates
+
+`npx tsc --noEmit` clean; `npx eslint src` 0 errors (5 pre-existing warnings,
+same three files as the prior baseline -
+`repoGradesSliceA.guards.test.ts`, `canvas-modules/graphql.test.ts`,
+`canvas-modules/new-quiz.test.ts`); `npx vitest run` 701 files / 14302 tests
+passing, up from the pre-feature baseline of 699 / 14285; `npx next build`
+compiles successfully ("Compiled successfully in 13.4s", TypeScript stage
+finished clean) and still fails only in the env-dependent prerender tail this
+project's gate excludes (`@supabase/ssr` missing env vars on `/_not-found`),
+naming no file from this work.
+
+### Limits
+
+No test renders a component, so the two new notices in `FilePreviewModal.tsx`
+(the cut-point restatement and the `submissionTruncated` caveat) are verified
+by reading only, not by rendering. The browsing-all-files panel and F5 (the
+Canvas GitHub-link path flattening structure at `repo-content.ts:117`) are
+unstarted, per the AC document's own sequencing.

@@ -16,6 +16,7 @@ import {
 import { useLlmProvider } from "@/lib/llm-provider";
 import GithubRepoPicker from "./GithubRepoPicker";
 import GradingResults from "./GradingResults";
+import FilePreviewModal, { type PreviewFile } from "./FilePreviewModal";
 import Typeahead from "./ui/Typeahead";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -138,6 +139,16 @@ export default function GithubGradingPanel() {
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const aliveRef = useRef(true);
+  // F1 (docs/grading-results-file-viewer-acceptance-criteria.md): the real
+  // opener for GradingResults's per-file Preview button, which this panel
+  // used to wire to a no-op (`onOpenPreview={() => {}}`, recorded as a known
+  // defect at docs/REGRESSION.md:23278-23286). Modeled on page.tsx's own
+  // handleOpenPreview/handleClosePreview - this panel is not reachable from
+  // page.tsx's tree (it owns its own tab), so it needs its own copy of this
+  // state rather than a prop threaded in from outside.
+  const [selectedPreview, setSelectedPreview] = useState<PreviewFile | null>(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const previewTriggerRef = useRef<HTMLElement | null>(null);
 
   // Track mount so detached test-poll loops don't setState after unmount.
   useEffect(() => {
@@ -230,6 +241,32 @@ export default function GithubGradingPanel() {
     await navigator.clipboard.writeText(value);
     setCopiedKey(key);
     window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+  };
+
+  // F1: the real onOpenPreview handler - captures the clicked trigger for
+  // focus restoration, decodes rawBase64 into a blob URL for PDFs/images
+  // exactly as page.tsx's handleOpenPreview does, and leaves text files to
+  // FilePreviewModal's plain <pre> path (no blob needed).
+  const handleOpenPreview = (student: string, file: PreviewFile, trigger: HTMLElement) => {
+    previewTriggerRef.current = trigger;
+    setSelectedPreview({ ...file, student });
+    if (file.rawBase64 && file.mimeType) {
+      const byteChars = atob(file.rawBase64);
+      const byteArray = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([byteArray], { type: file.mimeType });
+      setPreviewBlobUrl(URL.createObjectURL(blob));
+    } else {
+      setPreviewBlobUrl(null);
+    }
+  };
+
+  const handleClosePreview = () => {
+    setSelectedPreview(null);
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+      setPreviewBlobUrl(null);
+    }
   };
 
   const addToQueue = () => {
@@ -723,7 +760,7 @@ export default function GithubGradingPanel() {
             canvasUrl=""
             copiedKey={copiedKey}
             onCopy={onCopy}
-            onOpenPreview={() => {}}
+            onOpenPreview={handleOpenPreview}
             banner={
               // R2.5: a restored run must be obviously restored, not passed
               // off as fresh - an instructor who cannot tell the difference
@@ -737,6 +774,15 @@ export default function GithubGradingPanel() {
             }
           />
         </div>
+      )}
+
+      {selectedPreview && (
+        <FilePreviewModal
+          selectedPreview={selectedPreview}
+          previewBlobUrl={previewBlobUrl}
+          onClose={handleClosePreview}
+          restoreFocusRef={previewTriggerRef}
+        />
       )}
     </>
   );

@@ -64,7 +64,7 @@ import { type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
 
-type RepoFile = { path: string; content: string };
+type RepoFile = { path: string; content: string; truncated: boolean };
 type RepoDigest = { fullName: string; text: string; fileCount: number; files: RepoFile[] };
 
 // ── Repository operations (fork, branches, commits, PRs, Actions) ───────────
@@ -601,7 +601,11 @@ function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentS
       name: file.path,
       extension,
       previewContent: file.content,
-      previewTruncated: false,
+      // F3: report the fact `ingestRepo` already computed for THIS file
+      // rather than guessing here - this was hardcoded false, so the
+      // truncation notice was suppressed on precisely the files that had
+      // been cut.
+      previewTruncated: file.truncated,
       mimeType: "text/plain",
     };
   });
@@ -678,12 +682,11 @@ export async function gradeRepoAction(
     }
 
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${digest.text}`, provider));
-    const entry: StudentSubmissionEntry = {
-      student: digest.fullName,
-      content: digest.text,
-      mergedFileCount: digest.fileCount,
-      submittedFiles: [],
-    };
+    // F2: reuse the same shape-conversion the embedded path already does a
+    // few lines up (repoDigestToEmbeddedEntry) rather than hand-building a
+    // second entry with an always-empty submittedFiles - that emptiness was
+    // the reason a repo-graded row never had a file list to preview.
+    const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry(digest);
     const run = await gradeEntries([entry], instructions, effectiveRubric, provider);
     return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing };
   } catch (err) {

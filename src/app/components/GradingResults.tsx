@@ -654,6 +654,12 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                                       extension: file.extension,
                                       content: file.previewContent || "No extracted text available for this file.",
                                       truncated: file.previewTruncated,
+                                      // F3 requirement 3: a second, distinct
+                                      // cut - the whole submission (this file
+                                      // included) may have been trimmed again
+                                      // before the model saw it, even when
+                                      // this one file's own content was not.
+                                      submissionTruncated: result.submissionTruncated,
                                       rawBase64: file.rawBase64,
                                       mimeType: file.mimeType,
                                     },

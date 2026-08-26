@@ -1,6 +1,23 @@
-import { describe, it, expect } from "vitest";
-import { selectDigestFiles, DEFAULT_BUDGET, SCOPED_BUDGET, type SelectDigestFilesOpts } from "./github.digest";
+import { describe, it, expect, vi } from "vitest";
+import { ingestRepo, selectDigestFiles, DEFAULT_BUDGET, SCOPED_BUDGET, type SelectDigestFilesOpts } from "./github.digest";
 import type { RepoTreeEntry } from "./github.files";
+
+// ingestRepo's own network dependencies, mocked so its per-file truncation
+// bookkeeping (F3: docs/grading-results-file-viewer-acceptance-criteria.md)
+// can be exercised directly rather than only through selectDigestFiles,
+// which never sees a real file BODY (only tree metadata) and so cannot prove
+// anything about per-file slicing.
+vi.mock("./github.repos", () => ({
+  getRepo: vi.fn(),
+  ghFetch: vi.fn(),
+}));
+vi.mock("./github.files", () => ({
+  getRepoTreeWithMeta: vi.fn(),
+  getFileText: vi.fn(),
+}));
+
+import { getRepo } from "./github.repos";
+import { getRepoTreeWithMeta, getFileText } from "./github.files";
 
 // The filtering in selectDigestFiles is pure given a tree - no network - so it
 // is tested directly here, per docs/folder-scoped-grading-completeness-acceptance-criteria.md.
@@ -148,5 +165,81 @@ describe("selectDigestFiles", () => {
     const result = selectDigestFiles(tree, opts({ pathPrefix: "week3" }));
     expect(result.prefixMatchedNothing).toBe(false);
     expect(result.selected).toHaveLength(1);
+  });
+});
+
+// F3 (docs/grading-results-file-viewer-acceptance-criteria.md): ingestRepo
+// must report per-file truncation as a computed FACT, not a hardcoded
+// constant - `RepoFile.truncated` is true exactly when that file's own
+// content was cut by the byte budget, false when the whole file made it in
+// whole. getRepo/getRepoTreeWithMeta/getFileText are mocked (module-level
+// above) so this exercises the real slicing logic in ingestRepo itself,
+// not just selectDigestFiles's tree-only filtering.
+describe("ingestRepo - per-file truncated is computed per file, not guessed", () => {
+  const repoInfo = {
+    fullName: "org/repo",
+    owner: "org",
+    name: "repo",
+    description: "",
+    private: false,
+    defaultBranch: "main",
+    updatedAt: "",
+    htmlUrl: "",
+    isTemplate: false,
+    archived: false,
+  };
+
+  it("a file entirely within perFileBytes is NOT truncated", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repoInfo);
+    vi.mocked(getRepoTreeWithMeta).mockResolvedValue({
+      entries: [{ path: "small.py", type: "blob", size: 50, sha: "s" }],
+      truncated: false,
+    });
+    vi.mocked(getFileText).mockResolvedValue("x".repeat(50));
+
+    const digest = await ingestRepo("org", "repo", { perFileBytes: 8_000, maxBytes: 220_000 });
+    expect(digest.files).toHaveLength(1);
+    expect(digest.files[0].truncated).toBe(false);
+    expect(digest.files[0].content).toBe("x".repeat(50));
+    expect(digest.truncated).toBe(false);
+  });
+
+  it("a file longer than perFileBytes IS truncated, and the digest-level flag follows it", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repoInfo);
+    vi.mocked(getRepoTreeWithMeta).mockResolvedValue({
+      entries: [{ path: "big.py", type: "blob", size: 20_000, sha: "s" }],
+      truncated: false,
+    });
+    vi.mocked(getFileText).mockResolvedValue("y".repeat(20_000));
+
+    const digest = await ingestRepo("org", "repo", { perFileBytes: 8_000, maxBytes: 220_000 });
+    expect(digest.files).toHaveLength(1);
+    expect(digest.files[0].truncated).toBe(true);
+    expect(digest.files[0].content).toHaveLength(8_000);
+    expect(digest.truncated).toBe(true);
+  });
+
+  it("two files, only one cut - each file's own flag is independent, not smeared across the digest", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repoInfo);
+    vi.mocked(getRepoTreeWithMeta).mockResolvedValue({
+      entries: [
+        { path: "src/short.py", type: "blob", size: 10, sha: "s" },
+        { path: "src/long.py", type: "blob", size: 50_000, sha: "s" },
+      ],
+      truncated: false,
+    });
+    vi.mocked(getFileText).mockImplementation(async (_owner, _repo, path) =>
+      path === "src/short.py" ? "z".repeat(10) : "w".repeat(50_000)
+    );
+
+    const digest = await ingestRepo("org", "repo", { perFileBytes: 8_000, maxBytes: 220_000, maxFiles: 40 });
+    const short = digest.files.find((f) => f.path === "src/short.py");
+    const long = digest.files.find((f) => f.path === "src/long.py");
+    expect(short?.truncated).toBe(false);
+    expect(long?.truncated).toBe(true);
+    // The digest-level aggregate is still true (something was cut), but the
+    // per-file flags are what a preview reads, and they must not agree just
+    // because the aggregate does.
+    expect(digest.truncated).toBe(true);
   });
 });

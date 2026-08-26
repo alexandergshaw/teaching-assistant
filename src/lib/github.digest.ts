@@ -89,6 +89,17 @@ function pathRank(path: string): number {
 export interface RepoFile {
   path: string;
   content: string;
+  /**
+   * True when THIS file's own content was cut by `perFileBytes` (or by the
+   * remaining `maxBytes` headroom) - i.e. `content.length < <the file's real
+   * size>`. Set at the exact point the slice happens (below), never
+   * recomputed later from `content` alone: a file that is short because it
+   * IS short must not be mistaken for a file that is short because it was
+   * cut (docs/grading-results-file-viewer-acceptance-criteria.md F3). A
+   * viewer reads this to warn at the point the text stops, not just in a
+   * header.
+   */
+  truncated: boolean;
 }
 
 /** Counts of every reason a candidate file did not make it into the digest. */
@@ -303,9 +314,14 @@ export async function ingestRepo(
     }
     const perFileBudget = Math.min(perFileBytes, maxBytes - used);
     const slice = body.slice(0, perFileBudget);
-    if (slice.length < body.length) truncated = true;
+    // The one place this fact is ever computed - callers (the repo grading
+    // actions, F3) carry `fileTruncated` through as `previewTruncated` rather
+    // than re-deriving it, so there is exactly one source of truth for
+    // whether a given file's preview is honest.
+    const fileTruncated = slice.length < body.length;
+    if (fileTruncated) truncated = true;
     parts.push(`\n\n--- FILE: ${f.path} ---\n${slice}`);
-    files.push({ path: f.path, content: slice });
+    files.push({ path: f.path, content: slice, truncated: fileTruncated });
     used += slice.length;
     count += 1;
   }

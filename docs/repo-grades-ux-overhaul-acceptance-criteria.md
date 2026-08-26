@@ -606,6 +606,70 @@ several tags claim a method that cannot deliver:
 - **U5.21b is [OWNER]** - whether a screen reader re-announces a repeated
   string cannot be established by reading source.
 
+
+### U12 - Percentages, one rubric per run, and readable comments
+
+Reported by the owner 2026-08-26 with an exported log as evidence: "the
+grader applied inconsistent totals to each of the assignments. i don't need
+totals. i need percentages with clearly viewable and copyable comments."
+
+**The evidence.** Two bulk runs over the same folder ("assignments") with the
+same README instructions, eleven repos each. Denominators varied both within
+a single run and between runs for the same repo: 100, 400, 40 and 16 in run
+one; 100, 400 and 40 in run two. Same repo, run one to run two:
+`350/400 -> 100/100`, `13/16 -> 37/40`, `40/40 -> 400/400`.
+
+**The cause, verified at src/app/actions/github-repos.ts:680:**
+
+    const effectiveRubric = rubric.trim() || (await generateRubric(
+      `${instructions}\n\n${digest.text}`, provider));
+
+With the rubric textarea blank - its default - a rubric is generated PER
+CALL, from a prompt containing `digest.text`, that repo's OWN content. Every
+student is therefore graded against a different rubric derived from their own
+submission, and each generated rubric invents its own point total. This was
+predicted by the data engineering pass (section 5, "keep rubricText per cell,
+not per run") before the owner reported it.
+
+**Normalizing the display makes scores COMPARABLE, not CONSISTENT.** In
+percentage terms the same log still shows real run-to-run variance: one repo
+moved 100% to 85%, two moved 87.5% to 100%. Both halves are needed.
+
+48. **Scores display as percentages, never as raw totals.** A cell, the log,
+    and any summary show `87.5%`, not `350/400`. `totalScore` is a STRING
+    shaped "earned/possible" (grade/types.ts:29), so this is a parse plus a
+    format, pinned by repoGradeScoreDisplay.test.ts. A score that cannot be
+    parsed passes through unchanged rather than being blanked - losing a
+    visible score to a parser failure is worse than showing the raw string.
+    [TEST]
+49. **The view says when a run used more than one scale.** The instructor had
+    to export a log and read it by eye to notice. After a run, the view
+    reports how many distinct denominators it saw and names the cause. [TEST]
+50. **ONE RUBRIC PER RUN, not one per repo.** This is the root cause and the
+    only fix that makes grading fair - today a weak submission can generate an
+    easy rubric for itself, because the rubric is generated from that repo's
+    own content. When the rubric field is blank, generate ONCE for the run and
+    reuse it for every repo in that run. The generated rubric must be visible
+    and retrievable (U10.44), because a rubric nobody can read cannot be
+    audited or corrected.
+    **Scope note:** this changes `gradeRepoAction`'s behaviour and therefore
+    needs its own raise beyond U9's authorized list. It is raised here.
+    Grading against per-repo rubrics is not a presentation defect; it is a
+    fairness defect, and the owner's log is the evidence. [TEST]
+51. **The AI's comment is readable and copyable.** `overallComment` currently
+    renders into `.commentInput`, a single-line `<input type="text">` in a
+    cell with a 170px floor (repo-grades.module.css:230, 239-247) - a
+    paragraph in a one-line box. It must be readable in full without
+    truncation, selectable, and copyable in one action. `feedback`
+    (grade/types.ts:30) is a second, longer field the client currently never
+    reads at all; surface it too or state why not. [SRC]
+52. **Percentages and posting must not disagree.** `repoGradesPosting.ts`
+    sends a score to the live Canvas gradebook. Changing the DISPLAY to a
+    percentage must not change what is POSTED unless that is deliberate and
+    stated - Canvas assignments carry their own points-possible, and posting a
+    percentage into a 40-point assignment would silently mis-grade. Whatever
+    is decided, the cell must make clear which number will reach Canvas. [TEST]
+
 ### Rejected in revision 1 - do not reinstate
 
 - "Choosing a folder to grade is already possible and is already the ONLY way

@@ -5,15 +5,27 @@ import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from 
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
-import { postCanvasGradesAction, runSubmissionCodeAction, type GradeActionState } from "../actions";
+import { postCanvasGradesAction, runSubmissionCodeAction } from "../actions";
 import type { PreviewFile } from "./FilePreviewModal";
 import type { CodeRunResult } from "@/lib/code-runner";
 import { ModalShell } from "./ui/ModalShell";
 import styles from "../page.module.css";
-
-// Derived from the action's run shape so this file needs no server-code import.
-type GradingRun = NonNullable<GradeActionState["run"]>;
-type GradeRow = GradingRun["results"][number];
+import {
+  DEFAULT_SORT,
+  buildCsvContent,
+  compareText,
+  formatFeedback,
+  parseEarnedPoints,
+  parseScoreValue,
+  recomputeTotal,
+  seedEdits,
+  sortColumnKey,
+  type AreaEdit,
+  type GradeRow,
+  type GradingRun,
+  type RowEdit,
+  type SortColumn,
+} from "./grading-results/gradingResultsHelpers";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
@@ -52,151 +64,11 @@ function ExpandIcon() {
   );
 }
 
-// ── Sort helpers ───────────────────────────────────────────────────────────
-
-type SortDirection = "asc" | "desc";
-
-type SortColumn =
-  | { kind: "student" }
-  | { kind: "files" }
-  | { kind: "rubric"; area: string }
-  | { kind: "total" }
-  | { kind: "overall" };
-
-const DEFAULT_SORT: { column: SortColumn; direction: SortDirection } = {
-  column: { kind: "student" },
-  direction: "asc",
-};
-
-function sortColumnKey(column: SortColumn): string {
-  return column.kind === "rubric" ? `rubric:${column.area}` : column.kind;
-}
-
-function compareText(a: string, b: string): number {
-  return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
-}
-
-// Pull the earned points out of a score string ("8/10" -> "8", "85%" -> "85").
-function parseEarnedPoints(total: string): string {
-  const fraction = total.match(/(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/);
-  if (fraction) return fraction[1];
-  const num = total.match(/-?\d+(?:\.\d+)?/);
-  return num ? num[0] : "";
-}
-
-function parseScoreValue(value: string): number | null {
-  const match = value.match(/-?\d+(?:\.\d+)?/);
-  if (!match) return null;
-  const parsed = Number.parseFloat(match[0]);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-// Editable grade, overall comment, and per-criterion scores per student
-// (keyed by student name, then by rubric area name).
-type AreaEdit = { score: string };
-type RowEdit = { total: string; overall: string; areas: Record<string, AreaEdit> };
-
-function seedEdits(run: GradingRun): Record<string, RowEdit> {
-  const seeded: Record<string, RowEdit> = {};
-  for (const result of run.results) {
-    const areas: Record<string, AreaEdit> = {};
-    for (const area of result.rubricAreas) {
-      areas[area.area] = { score: area.score };
-    }
-    seeded[result.student] = {
-      total: result.totalScore,
-      overall: result.overallComment,
-      areas,
-    };
-  }
-  return seeded;
-}
+// Sort helpers, seedEdits, recomputeTotal, buildCsvContent, and their pure
+// support functions moved to ./grading-results/gradingResultsHelpers.ts (see
+// that file's header comment for the full inventory and why).
 
 type PostState = { status: "idle" | "posting" | "posted" | "error"; message?: string };
-
-// The denominator of a "X/Y" score, or null when there is no "/Y" part.
-function parseDenominator(value: string): number | null {
-  const match = value.match(/\/\s*(-?\d+(?:\.\d+)?)/);
-  return match ? Number(match[1]) : null;
-}
-
-// Format a points number without trailing-zero noise (8 -> "8", 7.5 -> "7.5").
-function formatPoints(n: number): string {
-  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
-}
-
-// Recompute a student's total as the sum of their per-criterion earned points.
-// Keeps the existing total's denominator when it has one (e.g. "17/20"); else
-// uses the summed criterion denominators when every criterion supplies one.
-// Returns the current total unchanged when no criterion has a numeric score.
-function recomputeTotal(
-  areas: Record<string, AreaEdit>,
-  areaNames: string[],
-  currentTotal: string
-): string {
-  let earned = 0;
-  let sawNumber = false;
-  let denomSum = 0;
-  let everyHasDenom = true;
-  for (const name of areaNames) {
-    const score = areas[name]?.score ?? "";
-    if (!score.trim()) {
-      everyHasDenom = false;
-      continue;
-    }
-    const e = parseScoreValue(score);
-    if (e !== null) {
-      earned += e;
-      sawNumber = true;
-    }
-    const d = parseDenominator(score);
-    if (d !== null) denomSum += d;
-    else everyHasDenom = false;
-  }
-  if (!sawNumber) return currentTotal;
-  const denom = parseDenominator(currentTotal) ?? (everyHasDenom ? denomSum : null);
-  return denom !== null ? `${formatPoints(earned)}/${formatPoints(denom)}` : formatPoints(earned);
-}
-
-function formatFeedback(text: string): string {
-  return text.replace(/\s*[–—]\s*/g, ", ");
-}
-
-function escapeCsvCell(value: string): string {
-  const sanitized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  return `"${sanitized.replace(/"/g, '""')}"`;
-}
-
-function buildCsvContent(run: GradingRun, edits: Record<string, RowEdit>): string {
-  const header = ["Student"];
-  for (const area of run.rubricAreaNames) {
-    header.push(`${area} Score`);
-  }
-  header.push("Total Score");
-  header.push("Overall Comment");
-  header.push("Submitted Files");
-  header.push("Submitted Extensions");
-
-  const rows = [header.map((cell) => escapeCsvCell(cell)).join(",")];
-
-  for (const result of run.results) {
-    const edit = edits[result.student];
-    const row: string[] = [result.student];
-    const areaMap = new Map(result.rubricAreas.map((area) => [area.area, area]));
-    for (const areaName of run.rubricAreaNames) {
-      const area = areaMap.get(areaName);
-      const areaEdit = edit?.areas?.[areaName];
-      row.push(areaEdit?.score ?? area?.score ?? "");
-    }
-    row.push(edit?.total ?? result.totalScore);
-    row.push(edit?.overall ?? result.overallComment);
-    row.push(result.submittedFiles.map((file) => file.name).join("; "));
-    row.push(Array.from(new Set(result.submittedFiles.map((file) => file.extension))).join("; "));
-    rows.push(row.map((cell) => escapeCsvCell(cell)).join(","));
-  }
-
-  return rows.join("\n");
-}
 
 // ── Component ──────────────────────────────────────────────────────────────
 

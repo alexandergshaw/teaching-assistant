@@ -15,6 +15,7 @@
 import { useState } from "react";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 import type { RepoGradeRow } from "./repoGradesRows";
+import { isConfirmableCandidate } from "./repoGradesBindingConfirm";
 import styles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 
@@ -53,13 +54,17 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
     );
   }
 
+  // U9.36: see the isConfirmableCandidate import above and
+  // repoGradesBindingConfirm.ts's header comment for why a candidate with no
+  // confirmable Canvas user id must not get a "Confirm binding" button.
   if (row.binding.state === "suggested") {
     const candidate = row.binding.candidates[0];
+    const candidateConfirmable = isConfirmableCandidate(candidate);
     return (
       <div className={styles.bindingCell}>
         <span className={styles.bindingBadgeSuggested}>Suggested</span>
         <span className={styles.bindingDetail}>{row.binding.student ?? "Unknown"}</span>
-        {candidate && (
+        {candidate && candidateConfirmable && (
           <button
             type="button"
             className={pageStyles.linkButton}
@@ -70,6 +75,42 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
           >
             {busy ? "Confirming..." : "Confirm binding"}
           </button>
+        )}
+        {candidate && !candidateConfirmable && (
+          <>
+            <span className={styles.postReason}>
+              This match has no Canvas user id yet, so it cannot be confirmed directly - run
+              &quot;Read a Canvas assignment&apos;s submissions&quot; in the panel above to get one, or bind this repo
+              to a roster student by hand below.
+            </span>
+            <div className={styles.unboundPicker}>
+              <select
+                aria-label={`Bind ${row.repo} to a roster student`}
+                value={pickedRosterId}
+                onChange={(e) => setPickedRosterId(e.target.value)}
+                disabled={busy || roster.length === 0}
+              >
+                <option value="">{roster.length === 0 ? "No roster loaded" : "Choose a student..."}</option>
+                {roster.map((student) => (
+                  <option key={student.id} value={student.id}>
+                    {student.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={pageStyles.linkButton}
+                disabled={busy || !pickedRosterId}
+                onClick={() => {
+                  const picked = roster.find((student) => student.id === pickedRosterId);
+                  if (!picked) return;
+                  void accept(picked.id, picked.name);
+                }}
+              >
+                {busy ? "Binding..." : "Bind"}
+              </button>
+            </div>
+          </>
         )}
         {error && <span className={pageStyles.error}>{error}</span>}
       </div>

@@ -661,18 +661,33 @@
   margin: 8px 0 0;
 }
 
-/* An inline text button styled as a link (e.g. "clear"). */
+/* An inline text button styled as a link (e.g. "clear"). U6.27: padding plus
+   a compensating negative margin gives this a real hit area (WCAG 2.2 SC
+   2.5.8's 24x24 minimum - measured at ~21.6px before this change, from
+   `font: inherit` inside the repo-grades grid's 0.9rem/1.5 line-height text)
+   without shifting surrounding layout, since the negative margin cancels the
+   padding's box-size increase. */
 .linkButton {
   background: none;
   border: none;
   color: var(--accent-ink);
   cursor: pointer;
-  padding: 0;
+  padding: 4px;
+  margin: -4px;
   font: inherit;
 }
 
 .linkButton:hover {
   text-decoration: underline;
+}
+
+/* U6.27: no `:disabled` rule existed anywhere for this primitive, so a
+   disabled action rendered identical to an enabled one - `color` is author-
+   specified here, so the UA's GrayText default never kicked in. Same idiom
+   as .submitButton:disabled above (opacity plus cursor, not colour alone). */
+.linkButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .adaptSectionsHeader {

@@ -72,6 +72,7 @@ import { useState } from "react";
 import { isPostableAssignmentOption, type RepoGradeAssignmentOption } from "./repoGradesAssignmentSources";
 import type { RosterUsernameOverlayResult } from "./rosterUsernameOverlay";
 import { linkUsernamesSummaryLine, type LinkUsernamesOutcome } from "./linkRepoUsernames";
+import type { ConfirmableBindingSummary } from "./repoGradesBindingConfirm";
 import LinkUsernamesRosterSection from "./LinkUsernamesRosterSection";
 import styles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
@@ -123,8 +124,14 @@ export interface LinkUsernamesPanelProps {
   /** True when the grid has rows but none is confirmed-bound - the panel leads
    * with the "nothing is bound yet" framing in that case. */
   noConfirmedRows: boolean;
-  /** How many rows are currently `suggested` and could be confirmed in bulk. */
-  suggestedCount: number;
+  /** The currently-suggested rows, split into what a batch confirm may
+   * actually send (`confirmable`) and what it must exclude (`blocked`), with
+   * `blockedDetail` naming how many and why (U9.37). THE CRITICAL RULE this
+   * exists for: the button's label and the click handler's payload must both
+   * be built from `confirmable` - never from the raw suggested-row count -
+   * or an instructor can see "Confirm all 11 suggested bindings", click it,
+   * and land on "No bindings to confirm." with nothing explained. */
+  confirmableSummary: ConfirmableBindingSummary;
   /** Runs the live-submissions link. Resolves to the outcome, or an error to
    * display. */
   onLink: (assignmentId: string, assignmentName: string) => Promise<LinkUsernamesOutcome | { error: string }>;
@@ -152,7 +159,7 @@ export default function LinkUsernamesPanel({
   rosterOverlay,
   onLinkFromCourseRoster,
   noConfirmedRows,
-  suggestedCount,
+  confirmableSummary,
   onLink,
   onConfirmAllSuggested,
   onAnnounce,
@@ -202,10 +209,15 @@ export default function LinkUsernamesPanel({
   const handleConfirmAll = async () => {
     // A binding decides which student a later grade post lands on, and grade
     // posting in this app has no undo - the same stakes RepoGradesLogPanel's
-    // own clear-log confirm names for its own (much smaller) risk.
+    // own clear-log confirm names for its own (much smaller) risk. The count
+    // named here is `confirmableSummary.confirmable` - the SAME number the
+    // button below is labelled from and the SAME number onConfirmAllSuggested
+    // actually sends - never the raw suggested-row count, which can be higher
+    // than what this click can safely do.
+    const confirmableCount = confirmableSummary.confirmable;
     const proceed = window.confirm(
-      `Confirm all ${suggestedCount} suggested binding${suggestedCount === 1 ? "" : "s"}? Each binding decides which ` +
-        `student a later grade post lands on, and posting a grade in this app cannot be undone.`
+      `Confirm all ${confirmableCount} suggested binding${confirmableCount === 1 ? "" : "s"}? Each binding decides ` +
+        `which student a later grade post lands on, and posting a grade in this app cannot be undone.`
     );
     if (!proceed) return;
     setConfirmBusy(true);
@@ -218,8 +230,12 @@ export default function LinkUsernamesPanel({
       onAnnounce(result.error);
       return;
     }
+    const blockedNote =
+      confirmableSummary.blocked > 0
+        ? ` ${confirmableSummary.blockedDetail}`
+        : "";
     setConfirmResult(result.confirmed);
-    const message = `Confirmed ${result.confirmed} binding${result.confirmed === 1 ? "" : "s"}.`;
+    const message = `Confirmed ${result.confirmed} binding${result.confirmed === 1 ? "" : "s"}.${blockedNote}`;
     onAnnounce(message);
   };
 
@@ -374,18 +390,36 @@ export default function LinkUsernamesPanel({
         </div>
       )}
 
-      {suggestedCount > 0 && (
+      {confirmableSummary.confirmable + confirmableSummary.blocked > 0 && (
         <div className={styles.linkPanelRow}>
+          {/* U9.37 / the label-vs-payload defect: labelled from
+              confirmableSummary.confirmable, the exact number
+              onConfirmAllSuggested sends - never the raw suggested-row
+              count, which includes rows this click cannot safely confirm.
+              Promoted from .linkButton to .submitButton (section 6/7 of the
+              acceptance criteria: one of the four consequential actions),
+              since it writes a binding a later grade post relies on. */}
           <button
             type="button"
-            className={pageStyles.linkButton}
-            disabled={confirmBusy}
+            className={pageStyles.submitButton}
+            disabled={confirmBusy || confirmableSummary.confirmable === 0}
             onClick={() => {
               void handleConfirmAll();
             }}
           >
-            {confirmBusy ? "Confirming..." : `Confirm all ${suggestedCount} suggested binding${suggestedCount === 1 ? "" : "s"}`}
+            {confirmBusy
+              ? "Confirming..."
+              : `Confirm all ${confirmableSummary.confirmable} suggested binding${
+                  confirmableSummary.confirmable === 1 ? "" : "s"
+                }`}
           </button>
+          {/* Stated up front, not only after a failed click: how many
+              suggested rows this action cannot touch, and why - so an
+              instructor never sees a confident "Confirm all N" that turns
+              out to send fewer than N. */}
+          {confirmableSummary.blocked > 0 && (
+            <span className={pageStyles.fieldHint}>{confirmableSummary.blockedDetail}</span>
+          )}
         </div>
       )}
 

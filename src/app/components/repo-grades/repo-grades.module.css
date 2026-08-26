@@ -186,6 +186,20 @@
   border: 0;
 }
 
+/* U5.20 - the visible role="status" region index.tsx renders postSummary
+   into. A quiet inline notice (existing tokens only, same subtle-surface
+   family as .logPanel/.linkPanel below), never a modal - this is a status
+   report, not an interruption. */
+.statusBanner {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  border: 1px solid var(--card-border);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+}
+
 /* AC5 items 25-26 - one column header's folder name, Canvas assignment
    picker, and bulk Post/Re-post button, stacked so a header cell reads
    top-to-bottom rather than needing extra horizontal width per column. */
@@ -690,4 +704,27 @@
   flex-direction: column;
   gap: 8px;
   padding-top: 4px;
+}
+
+/* U11.46 - this file had zero :focus/:focus-visible/outline rules, unlike
+   the rest of the app (page.module.css:234-235's .textInput:focus is the
+   idiom matched here). Covers every native interactive control this view's
+   own stylesheet governs - table buttons/selects, the binding pickers, the
+   per-column assignment controls, the score/comment inputs, and the
+   source-toggle radiogroup buttons - so tabbing through this view always
+   shows where focus is. */
+.grid button:focus-visible,
+.grid select:focus-visible,
+.unboundPicker select:focus-visible,
+.unboundPicker button:focus-visible,
+.columnHeader select:focus-visible,
+.columnHeader button:focus-visible,
+.linkPanelRow select:focus-visible,
+.linkPanelRow button:focus-visible,
+.linkSourceButton:focus-visible,
+.linkSourceButtonActive:focus-visible,
+.scoreInput:focus-visible,
+.commentInput:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
 }

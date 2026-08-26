@@ -49,6 +49,7 @@ import RepoGradesControls from "./RepoGradesControls";
 import RepoGradesStatusBanners from "./RepoGradesStatusBanners";
 import LinkUsernamesPanel from "./LinkUsernamesPanel";
 import { linkUsernamesLogDetail } from "./linkRepoUsernames";
+import { confirmableBindingSummary, partitionConfirmableBindings } from "./repoGradesBindingConfirm";
 import {
   buildRepoGradeGridModel,
   sortRepoGradeRows,
@@ -65,7 +66,6 @@ import {
 } from "./repoGradesCellEdits";
 import RepoGradesGrid from "./RepoGradesGrid";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
-import styles from "../../page.module.css";
 import gridStyles from "./repo-grades.module.css";
 
 // AC2 item 7 (reframed by this wave): the instructor complaint this wave
@@ -157,6 +157,19 @@ export default function RepoGradesTab() {
   // applied, and a batch action should never disagree with what is on screen
   // when it runs.
   const suggestedRows = sortedRows.filter((row) => row.binding.state === "suggested");
+  // U9.36/U9.37: not every "suggested" row can safely be confirmed - the
+  // course-table roster link (rosterUsernameOverlay.ts:144-147) produces
+  // suggested rows whose candidate carries no Canvas user id at all, and
+  // confirming one writes a binding that re-derives as UNBOUND on the next
+  // render (repo-student-bindings.ts:156-159). `confirmableBindingSummary`
+  // is the SAME computation `handleConfirmAllSuggested` below partitions
+  // its payload from, so the batch button's label (rendered by
+  // LinkUsernamesPanel) and the write it triggers can never disagree.
+  const suggestedBindingCandidates = suggestedRows.map((row) => ({
+    repo: row.repo,
+    candidate: row.binding.candidates[0],
+  }));
+  const confirmableSummary = confirmableBindingSummary(suggestedBindingCandidates);
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   // AC4 item 23: the persisted selection is restored (and filtered against
@@ -324,13 +337,17 @@ export default function RepoGradesTab() {
   // lives in LinkUsernamesPanel.tsx itself, not here - a second confirm here
   // would double-prompt for the same click.
   const handleConfirmAllSuggested = async () => {
-    const bindings = suggestedRows
-      .map((row) => {
-        const candidate = row.binding.candidates[0];
-        if (!candidate) return null;
-        return { repo: row.repo, canvasUserId: candidate.canvasUserId, student: candidate.name };
-      })
-      .filter((binding): binding is { repo: string; canvasUserId: string; student: string } => binding !== null);
+    // U9.37: never send a candidate the confirm-binding guard would reject -
+    // partitionConfirmableBindings is the single source of truth for which
+    // rows may be written, shared with RepoBindingControl.tsx's own per-row
+    // guard (U9.36) so the batch path and the single-row path can never
+    // disagree about what counts as confirmable.
+    const { confirmable } = partitionConfirmableBindings(suggestedBindingCandidates);
+    const bindings = confirmable.map((entry) => ({
+      repo: entry.repo,
+      canvasUserId: entry.canvasUserId,
+      student: entry.student,
+    }));
     const result = await confirmSuggestedBindings(bindings);
     if (!("error" in result)) {
       // One entry PER binding, same detail shape handleAcceptBinding uses
@@ -509,7 +526,15 @@ export default function RepoGradesTab() {
   const noConfirmedRows = !!model && model.rows.length > 0 && model.rows.every((row) => row.binding.state !== "confirmed");
 
   return (
-    <div className={styles.tabContainer}>
+    // U0c/U6.26a: no nested container here. page.tsx:238 already wraps every
+    // tab panel in styles.tabContainer, and page.tsx:385-387 wraps this view
+    // in <TabShell>, which supplies .card (gap: 28px; padding: 36px) - so
+    // this view already gets its padding and inter-section gap from the two
+    // shells around it. Rendering a THIRD `styles.tabContainer` here (as this
+    // file used to) sets `gap: 0` on top of that, which is what removed every
+    // vertical gap between the header, controls, banners, link panel, grid
+    // and log below. A plain fragment adds no frame and no gap override.
+    <>
       <TabHeader
         eyebrow="Grading"
         title="Repo Grades"
@@ -584,7 +609,7 @@ export default function RepoGradesTab() {
           rosterOverlay={rosterOverlay}
           onLinkFromCourseRoster={handleLinkFromCourseRoster}
           noConfirmedRows={noConfirmedRows}
-          suggestedCount={suggestedRows.length}
+          confirmableSummary={confirmableSummary}
           onLink={handleLinkUsernames}
           onConfirmAllSuggested={handleConfirmAllSuggested}
           onAnnounce={setPostSummary}
@@ -606,14 +631,27 @@ export default function RepoGradesTab() {
         </p>
       )}
 
-      {/* AC5 item 31: results are announced through a role="status"
+      {/* AC5 item 31 / U5.20: results are announced through a role="status"
           aria-live="polite" region, matching TasksTab.tsx:717. This is the
           ONLY region that reports post outcomes - per-cell status text is
           also visible directly in the grid, but this is the one a screen
-          reader user does not have to go hunting through the table for. */}
-      <div role="status" aria-live="polite" className={gridStyles.srOnly}>
-        {postSummary}
-      </div>
+          reader user does not have to go hunting through the table for.
+          U5.20's fix: this region must be VISIBLE, not only reachable via
+          assistive tech - a sighted instructor who clicks "Grade all" on an
+          already-graded column previously saw nothing happen, because the
+          only render of postSummary sat inside gridStyles.srOnly (clip-path:
+          inset(50%), a 1x1px box). Keeping the region screen-reader-only
+          while adding a separate visible copy would be an ARIA inversion (two
+          live regions racing for the same announcement); this is the single
+          region, moved to a visible surface, styled with existing tokens
+          only - a quiet inline notice, not a modal. Rendered only when there
+          is something to say, so it never occupies space with an empty
+          box. */}
+      {postSummary && (
+        <p role="status" aria-live="polite" className={gridStyles.statusBanner}>
+          {postSummary}
+        </p>
+      )}
 
       {model && (
         <RepoGradesGrid
@@ -652,6 +690,6 @@ export default function RepoGradesTab() {
           onAnnounce={setPostSummary}
         />
       )}
-    </div>
+    </>
   );
 }

@@ -116,6 +116,9 @@ export default function RepoGradesTab() {
     assignments,
     assignmentsLoading,
     assignmentsError,
+    // U4.19d/19e: the one reason `assignments`/`roster` both stay empty with
+    // no other signal - see useRepoGradesData.ts's doc comment on this field.
+    canvasGateBlockedReason,
     reloadScan,
     acceptBinding,
     // Renamed from `linkBlockedReason` - it only ever blocked the LIVE
@@ -644,9 +647,12 @@ export default function RepoGradesTab() {
     setPostSummary,
   });
 
-  const missingInstitution = !!course && !(course.institution ?? "").trim();
   const missingOrg = !!course && !(course.githubOrg ?? "").trim();
   const noConfirmedRows = !!model && model.rows.length > 0 && model.rows.every((row) => row.binding.state !== "confirmed");
+  // U4.19d state (f): the assignments load succeeded, cleanly, with nothing
+  // in it - distinct from still-loading, errored, or blocked-by-the-gate,
+  // each of which RepoGradesStatusBanners already renders from its own prop.
+  const assignmentsEmpty = !canvasGateBlockedReason && !assignmentsLoading && !assignmentsError && assignments.length === 0;
 
   return (
     // U0c/U6.26a: no nested container here. page.tsx:238 already wraps every
@@ -697,7 +703,7 @@ export default function RepoGradesTab() {
         hasCourse={!!course}
         coursesLoading={coursesLoading}
         courseName={course?.name ?? ""}
-        missingInstitution={missingInstitution}
+        canvasGateBlockedReason={canvasGateBlockedReason}
         missingOrg={missingOrg}
         githubOrg={course?.githubOrg ?? ""}
         scanLoading={scanLoading}
@@ -706,6 +712,7 @@ export default function RepoGradesTab() {
         rosterError={rosterError}
         assignmentsLoading={assignmentsLoading}
         assignmentsError={assignmentsError}
+        assignmentsEmpty={assignmentsEmpty}
         scanTruncated={!!scan?.truncated}
         rateLimitMessage={scan?.rateLimit?.message ?? null}
       />

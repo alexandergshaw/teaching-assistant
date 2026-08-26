@@ -128,6 +128,21 @@ export interface UseRepoGradesDataResult {
   assignmentsLoading: boolean;
   assignmentsError: string | null;
   /**
+   * U4.19d/19e - non-null exactly when `rosterKey`/`assignmentsKey` above are
+   * both null (the SAME institution+canvasCourseId gate, never a wider one),
+   * naming which of the three causes applies - no institution, no Canvas
+   * URL, or a Canvas URL with no `/courses/<id>` in it - and, in one place,
+   * every consequence: the assignment picker stays empty, the roster stays
+   * empty (which is what makes RepoBindingControl.tsx's student picker read
+   * "No roster loaded"), and posting is unreachable (no way to reach a
+   * CONFIRMED binding with a numeric Canvas user id). Purely derived from
+   * `course`/`institution`/`canvasUrl`/`canvasCourseId` on every render,
+   * never stored, so it can never go stale relative to the tile actually
+   * selected - the same reasoning `liveLinkBlockedReason` below already
+   * documents for itself.
+   */
+  canvasGateBlockedReason: string | null;
+  /**
    * `overlayRosterUsernames(course.studentRepos, course.roster).rows` -
    * computed on every render (pure, cheap, no I/O) rather than stored, so it
    * can never go stale relative to the tile actually selected. THIS IS THE
@@ -213,8 +228,9 @@ export interface UseRepoGradesDataResult {
    * below). Null when the LIVE-Canvas "Link GitHub usernames" action
    * (`linkGithubUsernames`, which reads a Canvas assignment's text
    * submissions) can run; otherwise the reason it cannot, worded to match
-   * this view's existing missingInstitution / missingOrg banners (index.tsx)
-   * - named-course, states-what-is-missing, states-what-that-breaks. Governs
+   * this view's existing missingOrg banner and the `canvasGateBlockedReason`
+   * above (index.tsx) - named-course, states-what-is-missing, states-what-
+   * that-breaks. Governs
    * ONLY the live-Canvas submissions source. It must NOT block
    * `linkFromCourseRoster` (the course-table roster source above, which needs
    * no institution or Canvas course id at all) or `assignmentOptions`' export
@@ -290,6 +306,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
 
   // ---- roster (needed for binding suggestions) ---------------------------
   const institution = (course?.institution ?? "").trim();
+  const canvasUrl = (course?.canvasUrl ?? "").trim();
   const canvasCourseId = course?.canvasUrl ? parseCanvasCourseId(course.canvasUrl) : null;
   const rosterKey = course && institution && canvasCourseId ? `${course.id}:${institution}:${canvasCourseId}` : null;
   const [rosterResult, setRosterResult] = useState<KeyedResult<RepoBindingRosterEntry[]> | null>(null);
@@ -353,6 +370,47 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
   const assignments = assignmentsMatches ? assignmentsResult!.data : [];
   const assignmentsError = assignmentsMatches ? assignmentsResult!.error : null;
   const assignmentsLoading = assignmentsKey !== null && !assignmentsMatches;
+
+  // ---- U4.19d/19e: the reason `rosterKey`/`assignmentsKey` above are both
+  // null, named for a person rather than left to read as two silent empty
+  // lists. This is the SAME gate those two keys already use
+  // (`institution && canvasCourseId`) - not a new or wider one, so it never
+  // changes WHEN either load runs, only whether the instructor is TOLD why
+  // nothing loaded. Reported by the owner: "the assignments drop down on the
+  // repo grade view doesn't actually populate. i can't choose anything from
+  // there." - traced to exactly this gate producing assignmentsLoading=false
+  // and assignmentsError=null (both defined above from assignmentsMatches),
+  // which is indistinguishable from "no assignments configured" in every
+  // banner that only checks those two fields. Three distinct causes collapse
+  // into that one silent gate today, so this reason distinguishes all three
+  // in its own text instead of reporting one blended non-answer:
+  //   (a) institution blank,
+  //   (b) canvasUrl blank,
+  //   (c) canvasUrl set but parseCanvasCourseId (imported above) found no
+  //       "/courses/<digits>" segment in it - the single most likely real
+  //       cause, since pasting the institution's Canvas ROOT address (e.g.
+  //       "https://school.instructure.com") instead of a specific course's
+  //       URL parses to null with no error thrown anywhere.
+  // U4.19e: named ONCE here (not per-consequence in each of the three
+  // controls it affects), listing every consequence together - the
+  // assignment picker (this hook's own `assignments` staying `[]`), the
+  // roster (`roster` below staying `[]`, which is what makes
+  // RepoBindingControl.tsx's student picker read "No roster loaded"), and
+  // posting (repo-grade-postability.ts's `postable` requires a CONFIRMED
+  // binding with a numeric canvasUserId - unreachable with no roster to bind
+  // against and no live-Canvas submissions read to supply one, since
+  // `liveLinkBlockedReason` below is gated on this identical condition) -
+  // rather than leaving the instructor to discover the same one cause
+  // separately in three different places on this page.
+  const canvasGateBlockedReason: string | null = !course
+    ? null
+    : !institution
+      ? `"${course.name}" has no institution set, so neither its Canvas roster nor its Canvas assignments can be loaded - set one on the course tile first. Until then the assignment picker stays empty, each row's student picker reads "No roster loaded", and posting to the gradebook is unreachable.`
+      : !canvasUrl
+        ? `"${course.name}" has no Canvas course URL set, so neither its Canvas roster nor its Canvas assignments can be loaded - set one on the course tile first. Until then the assignment picker stays empty, each row's student picker reads "No roster loaded", and posting to the gradebook is unreachable.`
+        : !canvasCourseId
+          ? `"${course.name}"'s Canvas course URL does not contain a Canvas course id ("/courses/<number>"), so neither its Canvas roster nor its Canvas assignments can be loaded - paste the course's own URL (for example "https://<school>.instructure.com/courses/12345"), not the institution's general Canvas address, on the course tile. Until then the assignment picker stays empty, each row's student picker reads "No roster loaded", and posting to the gradebook is unreachable.`
+          : null;
 
   // ---- course-table roster overlay (course.roster's "Student | username"
   // lines folded onto studentRepos) - see effectiveStudentRepos/rosterOverlay
@@ -580,6 +638,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     assignments,
     assignmentsLoading,
     assignmentsError,
+    canvasGateBlockedReason,
     effectiveStudentRepos,
     rosterOverlay,
     linkFromCourseRoster,

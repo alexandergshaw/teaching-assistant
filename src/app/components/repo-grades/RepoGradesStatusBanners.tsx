@@ -6,10 +6,21 @@
 // 1000-line-per-file cap and had nowhere left to grow - not because these
 // paragraphs needed a home of their own. This is the part of that file with
 // no decisions in it: every value shown and every gate a block renders
-// behind (`course && !missingOrg`, `course && !missingInstitution`) all come
-// in as props. This component owns no state and no effects - index.tsx still
-// owns every underlying value (`course`, `scanLoading`, `scan`, etc.) and
-// only passes down what this file needs to render.
+// behind (`course && !missingOrg`, `course && !canvasGateBlockedReason`) all
+// come in as props. This component owns no state and no effects - index.tsx
+// still owns every underlying value (`course`, `scanLoading`, `scan`, etc.)
+// and only passes down what this file needs to render.
+//
+// U4.19d/19e: `canvasGateBlockedReason` (useRepoGradesData.ts) replaces the
+// old `missingInstitution` boolean here. That boolean only ever triggered a
+// banner claiming the Canvas ROSTER could not load - but the identical gate
+// (institution blank, canvasUrl blank, or canvasUrl with no parseable
+// `/courses/<id>`) also silently empties the Canvas assignment picker and
+// leaves RepoBindingControl.tsx's student picker reading "No roster loaded"
+// with posting unreachable, none of which the old banner ever said. The
+// hook now distinguishes all three causes in its own wording and states
+// every consequence once; this component only renders whatever string (or
+// null) it is handed.
 //
 // vitest in this codebase is node-env and collects only src/**/*.test.ts, so
 // no component is ever rendered by a test - nothing in this file is
@@ -22,7 +33,9 @@ export interface RepoGradesStatusBannersProps {
   hasCourse: boolean;
   coursesLoading: boolean;
   courseName: string;
-  missingInstitution: boolean;
+  /** U4.19d/19e - see this file's header comment and
+   * useRepoGradesData.ts's own doc comment on `canvasGateBlockedReason`. */
+  canvasGateBlockedReason: string | null;
   missingOrg: boolean;
   githubOrg: string;
   scanLoading: boolean;
@@ -31,6 +44,12 @@ export interface RepoGradesStatusBannersProps {
   rosterError: string | null;
   assignmentsLoading: boolean;
   assignmentsError: string | null;
+  /** U4.19d state (f): the assignments load finished, found no error, and
+   * the gate above is open - but the course genuinely has zero Canvas
+   * assignments. Computed by index.tsx from `assignments.length === 0`
+   * (the array this component itself never receives) rather than
+   * re-derived here. */
+  assignmentsEmpty: boolean;
   scanTruncated: boolean;
   rateLimitMessage: string | null;
 }
@@ -39,7 +58,7 @@ export default function RepoGradesStatusBanners({
   hasCourse,
   coursesLoading,
   courseName,
-  missingInstitution,
+  canvasGateBlockedReason,
   missingOrg,
   githubOrg,
   scanLoading,
@@ -48,6 +67,7 @@ export default function RepoGradesStatusBanners({
   rosterError,
   assignmentsLoading,
   assignmentsError,
+  assignmentsEmpty,
   scanTruncated,
   rateLimitMessage,
 }: RepoGradesStatusBannersProps) {
@@ -57,10 +77,9 @@ export default function RepoGradesStatusBanners({
         <p className={styles.emptyState}>Choose a course tile above to list its repos.</p>
       )}
 
-      {hasCourse && missingInstitution && (
+      {hasCourse && canvasGateBlockedReason && (
         <p className={styles.error} role="alert">
-          &quot;{courseName}&quot; has no institution set, so its Canvas roster cannot be loaded for binding - set one on
-          the course tile first.
+          {canvasGateBlockedReason}
         </p>
       )}
 
@@ -86,27 +105,34 @@ export default function RepoGradesStatusBanners({
         </p>
       )}
 
-      {hasCourse && !missingInstitution && rosterLoading && (
+      {hasCourse && !canvasGateBlockedReason && rosterLoading && (
         <p className={styles.fieldHint} role="status" aria-live="polite">
           Loading the Canvas roster...
         </p>
       )}
 
-      {hasCourse && !missingInstitution && rosterError && (
+      {hasCourse && !canvasGateBlockedReason && rosterError && (
         <p className={styles.error} role="alert">
           Roster: {rosterError}
         </p>
       )}
 
-      {hasCourse && !missingInstitution && assignmentsLoading && (
+      {hasCourse && !canvasGateBlockedReason && assignmentsLoading && (
         <p className={styles.fieldHint} role="status" aria-live="polite">
           Loading the course&apos;s Canvas assignments...
         </p>
       )}
 
-      {hasCourse && !missingInstitution && assignmentsError && (
+      {hasCourse && !canvasGateBlockedReason && assignmentsError && (
         <p className={styles.error} role="alert">
           Assignments: {assignmentsError}
+        </p>
+      )}
+
+      {hasCourse && !canvasGateBlockedReason && !assignmentsLoading && !assignmentsError && assignmentsEmpty && (
+        <p className={styles.fieldHint} role="status">
+          &quot;{courseName}&quot; has no Canvas assignments yet, so the assignment picker has nothing to offer -
+          add one in Canvas, then reload.
         </p>
       )}
 

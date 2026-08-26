@@ -56,7 +56,8 @@
 //     this file's test exercises for per-repo isolation and the concurrency
 //     bound actually bounding.
 
-import { assignmentFoldersFromTree, DEFAULT_IGNORED_REPO_FOLDERS } from "@/lib/repo-assignment-folders";
+import { DEFAULT_IGNORED_REPO_FOLDERS } from "@/lib/repo-assignment-folders";
+import { assignmentFolderPathsFromTree } from "@/lib/repo-assignment-folder-paths";
 import { classifyGithubFailure, type GithubLimitVerdict } from "@/lib/github-rate-limit";
 import { asGithubHttpError, EMPTY_GITHUB_HEADERS } from "@/lib/github-http-error";
 import { mapWithConcurrency } from "@/app/actions/shared";
@@ -221,7 +222,7 @@ export async function scanOrgRepoTrees(
   const rows = await mapWithConcurrency(scanned, concurrency, async (repo): Promise<RepoFolderRow> => {
     try {
       const paths = await fetchers.fetchTreePaths(repo.fullName);
-      return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: assignmentFoldersFromTree(paths, ignore), error: null };
+      return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: assignmentFolderPathsFromTree(paths, ignore), error: null };
     } catch (err) {
       const verdict = classifyScanFailure(err, nowMs);
       if (verdict) {

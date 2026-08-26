@@ -117,6 +117,29 @@ export function buildFolderOptions(repos: readonly FolderCensusRepo[]): FolderCe
 }
 
 /**
+ * The dropdown label's own indented display name for a (possibly nested)
+ * folder path, e.g. "assignments/module_03" -> an indented "module_03" so
+ * sixteen sibling modules under one parent read as a hierarchy rather than
+ * sixteen unrelated top-level entries (repo-assignment-folder-paths.ts now
+ * offers every depth up to its own maxDepth, not just the top level). Only
+ * the LABEL is shortened this way - the option's VALUE stays the full raw
+ * path unchanged, since that raw string is the assignment-mapping key and
+ * the value buildBulkGradePlan matches folders on (see this module's own
+ * header comment on why folder names are kept raw).
+ *
+ * Uses U+00A0 (non-breaking space) rather than a plain space for the
+ * indent: a `<select>`'s rendered option text collapses ordinary whitespace,
+ * which would silently erase the indentation this exists to show.
+ */
+function folderDisplayLabel(folder: string): string {
+  const segments = folder.split("/");
+  const depth = segments.length - 1;
+  const name = segments[depth];
+  const indent = "  ".repeat(depth);
+  return `${indent}${name}`;
+}
+
+/**
  * The dropdown option's own visible text (U1.4) - what an instructor reads
  * BEFORE grading, not after. Always names the folder and how many of the
  * scanned repos have it; only mentions repos that could not be read at all
@@ -131,7 +154,7 @@ export function describeFolderOption(
   const { scannedRepos, unknownRepos } = census;
   const absent = Math.max(0, scannedRepos - presentIn - unknownRepos);
   const unknownClause = unknownRepos > 0 ? `; ${unknownRepos} could not be read` : "";
-  return `${folder} - in ${presentIn} of ${scannedRepos} repos (${absent} without it${unknownClause})`;
+  return `${folderDisplayLabel(folder)} - in ${presentIn} of ${scannedRepos} repos (${absent} without it${unknownClause})`;
 }
 
 /**

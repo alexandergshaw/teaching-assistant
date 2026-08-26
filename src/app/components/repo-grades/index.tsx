@@ -30,15 +30,23 @@ import TabHeader from "../TabHeader";
 import { useRepoGradesData } from "./useRepoGradesData";
 import {
   loadAssignmentMapping,
+  loadFolderSelection,
   loadRepoGradeLog,
   loadRepoGradesUiState,
   loadSelectedRepoIds,
   persistAssignmentMapping,
+  persistFolderSelection,
   persistRepoGradeLog,
   persistRepoGradesUiState,
   persistSelectedRepoIds,
   type RepoGradesUiState,
 } from "./repoGradesUiState";
+import {
+  ALL_FOLDERS,
+  buildFolderOptions,
+  resolveSelectedFolder,
+  shouldPersistFolderDrop,
+} from "./repoGradesFolderSelection";
 import {
   appendRepoGradeLogEntries,
   type RepoGradeLogEntry,
@@ -67,6 +75,7 @@ import {
 import RepoGradesGrid from "./RepoGradesGrid";
 import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
 import gridStyles from "./repo-grades.module.css";
+import pageStyles from "../../page.module.css";
 
 // AC2 item 7 (reframed by this wave): the instructor complaint this wave
 // fixes is that the grid's own empty state used to NAME this workflow step
@@ -266,6 +275,104 @@ export default function RepoGradesTab() {
     if (filtered !== stored) persistAssignmentMapping(uiState.courseId, filtered);
   }
   const columnsWithMapping = model ? applyRepoGradeAssignmentMapping(model.columns, assignmentMapping) : [];
+  // `model.columns`/`columnsWithMapping` above are the FULL column set -
+  // every folder in the scan - and must keep feeding `mappingKey` above,
+  // the mapping restore above, and `filterRepoGradeAssignmentMapping` above
+  // exactly as they do today. NEVER pass the DISPLAYED, folder-scoped set
+  // (below) into any of those three: U9.41 -
+  // filterRepoGradeAssignmentMapping drops every folder not present in the
+  // array it is given, and the restore branch above writes that filtered
+  // result back to storage a few lines up - so scoping the array before it
+  // reaches that filter would silently erase every OTHER folder's saved
+  // Canvas assignment mapping the instant the instructor picked one folder
+  // to view, invisible until a reload. `columnsWithMapping` stays the FULL
+  // set for exactly this reason.
+
+  // ---- U1.1-U1.6d, section 5 ("Data engineering pass and architect
+  // revision 3", which overrides sections 3/4 where they conflict) - the
+  // folder chooser the instructor asked for, twice: "i should be able to
+  // choose which assignment folder i want graded from this view" / "i don't
+  // want to select an assignment from the lms, i want to select a folder
+  // from the repo in the drop down to grade". `selectedFolder` is the
+  // PERSISTED-CONCEPT choice - "" (nothing chosen yet), a raw folder name,
+  // or repoGradesFolderSelection.ts's ALL_FOLDERS sentinel - and is only
+  // ever changed by: an explicit dropdown pick (handleFolderChange below), a
+  // genuine write-back drop (this block), or a course switch (folded into
+  // the existing per-course reset block further down, which is this idiom's
+  // OTHER trigger - see that block's own comment on which one wins if both
+  // could fire in the same render). `currentSelectedFolder` is a PURE, cheap
+  // re-derivation via resolveSelectedFolder on every render - never itself
+  // stored - so a scan that is loading or has failed (`model` null,
+  // `folderCensus.options` empty) always reads as "All folders" for display
+  // without ever touching `selectedFolder` state (U1.6d: a folder must not
+  // be dropped merely because a scan is in flight or failed).
+  const [selectedFolder, setSelectedFolder] = useState<string>("");
+  const [folderResolvedForKey, setFolderResolvedForKey] = useState<string | null>(null);
+  const [folderDropNotice, setFolderDropNotice] = useState<string | null>(null);
+  const folderCensus = scan ? buildFolderOptions(scan.repos) : { options: [], scannedRepos: 0, unknownRepos: 0 };
+  const currentSelectedFolder = model ? resolveSelectedFolder(folderCensus.options, selectedFolder) : ALL_FOLDERS;
+  // Keyed on the course AND the resolved folder set, so a narrower PREFIXED
+  // re-scan (every keystroke into the org-prefix filter re-keys the scan -
+  // RepoGradesControls.tsx's onOrgPrefixChange, useRepoGradesData.ts's
+  // scanKey) is evaluated too, without ever persisting anything from it -
+  // shouldPersistFolderDrop (not this key) is what decides that (section 5:
+  // "the folder write-back must not fire on a filtered scan" - a folder
+  // missing from a PREFIXED scan is merely hidden, not gone).
+  const folderScanKey = model ? `${uiState.courseId}:${folderCensus.options.map((o) => o.folder).join(",")}` : null;
+  if (folderScanKey !== null && folderScanKey !== folderResolvedForKey) {
+    setFolderResolvedForKey(folderScanKey);
+    if (
+      currentSelectedFolder !== selectedFolder &&
+      shouldPersistFolderDrop({ persisted: selectedFolder, resolved: currentSelectedFolder, orgPrefix: uiState.orgPrefix })
+    ) {
+      // U1.6b: explain the drop before overwriting it - `selectedFolder`
+      // here is still the PRE-drop value (this branch's own condition above
+      // already proved it differs from `currentSelectedFolder`), so this is
+      // exactly the folder that just vanished from an unfiltered scan.
+      setFolderDropNotice(
+        `"${selectedFolder}" is no longer in this course's scanned repos, so this view now shows All folders.`
+      );
+      // U1.6c: write the drop back, so the stale folder cannot resurrect if
+      // it reappears in a LATER scan later this same session.
+      setSelectedFolder(currentSelectedFolder);
+      persistFolderSelection(uiState.courseId, currentSelectedFolder);
+    }
+  }
+
+  const handleFolderChange = (value: string) => {
+    setSelectedFolder(value);
+    setFolderDropNotice(null);
+    persistFolderSelection(uiState.courseId, value);
+  };
+
+  // U1.3/U1.3b - the columns and rows the GRID actually renders, scoped to
+  // `currentSelectedFolder`. DISPLAY ONLY: `displayedRows` never reaches
+  // buildBulkGradePlan - useRepoGradesGradingActions below is still built
+  // from `sortedRows` (the FULL row list), and that plan already skips
+  // `missing-folder`/`scan-error` rows internally
+  // (repoGradesBulkGrade.ts:95-110), so scoping rows here changes only what
+  // is SHOWN, never what a bulk run covers (section 5: "row scoping is
+  // DISPLAY-ONLY", AC U1.3b).
+  const displayedColumns =
+    currentSelectedFolder === ALL_FOLDERS
+      ? columnsWithMapping
+      : columnsWithMapping.filter((column) => column.folder === currentSelectedFolder);
+  const displayedRows =
+    currentSelectedFolder === ALL_FOLDERS
+      ? sortedRows
+      : sortedRows.filter((row) => row.cells[currentSelectedFolder]?.status === "ungraded");
+  const folderMissingCount =
+    currentSelectedFolder === ALL_FOLDERS
+      ? 0
+      : sortedRows.filter((row) => row.cells[currentSelectedFolder]?.status === "missing-folder").length;
+  const folderScanErrorCount =
+    currentSelectedFolder === ALL_FOLDERS
+      ? 0
+      : sortedRows.filter((row) => row.cells[currentSelectedFolder]?.status === "scan-error").length;
+  const folderEmptyStateMessage =
+    currentSelectedFolder !== ALL_FOLDERS && sortedRows.length > 0 && displayedRows.length === 0
+      ? `None of the scanned repos have a "${currentSelectedFolder}" folder.`
+      : undefined;
 
   const handleAssignmentChange = (folder: string, assignmentId: string | null) => {
     const next = setRepoGradeAssignmentMapping(assignmentMapping, folder, assignmentId);
@@ -417,6 +524,22 @@ export default function RepoGradesTab() {
     setCellEdits(EMPTY_REPO_GRADE_CELL_EDITS);
     setPostSummary("");
     setLog(loadRepoGradeLog(uiState.courseId));
+    // U1.5/U1.6 - folded in here rather than a separate branch, per this
+    // feature's own design note above: this block IS index.tsx's "the course
+    // changed" trigger already (it resets cellEdits/postSummary/log
+    // together for the identical reason). The folder restore's OTHER
+    // trigger - the scan settling, above near `model` - runs EARLIER in this
+    // file's top-to-bottom render order, so if both could ever fire in the
+    // SAME render, this course-switch write runs LAST and is authoritative
+    // for what is displayed starting next render. In practice the two never
+    // act on stale data in the same render: `model` only ever reflects the
+    // CURRENT `uiState.courseId` (useRepoGradesData's scanKey embeds it), so
+    // a courseId change nulls `model` synchronously in THIS SAME render
+    // (scanMatches becomes false against the new scanKey) - the scan-settle
+    // branch above therefore sees `model === null` and does nothing until a
+    // later render, by which point this reset has already run.
+    setSelectedFolder(loadFolderSelection(uiState.courseId));
+    setFolderDropNotice(null);
   }
 
   // The log is the ONE piece of state in this file persisted from an effect
@@ -555,6 +678,11 @@ export default function RepoGradesTab() {
         showRowDependentFields={!!model && model.rows.length > 0}
         sort={uiState.sort}
         onSortChange={(value) => setUiState((prev) => ({ ...prev, sort: value }))}
+        folderOptions={folderCensus.options}
+        folderCensus={{ scannedRepos: folderCensus.scannedRepos, unknownRepos: folderCensus.unknownRepos }}
+        selectedFolder={currentSelectedFolder}
+        onSelectedFolderChange={handleFolderChange}
+        folderDropNotice={folderDropNotice}
         instructions={uiState.instructions}
         onInstructionsChange={(value) => setUiState((prev) => ({ ...prev, instructions: value }))}
         rubric={uiState.rubric}
@@ -653,10 +781,28 @@ export default function RepoGradesTab() {
         </p>
       )}
 
+      {/* U1.3b - rows follow columns, DISPLAY ONLY (section 5: buildBulkGradePlan
+          already skips missing-folder/scan-error rows internally, so this
+          never changes what a bulk run covers). Named counts rather than
+          silently rendering fewer rows with no explanation. */}
+      {model && currentSelectedFolder !== ALL_FOLDERS && (folderMissingCount > 0 || folderScanErrorCount > 0) && (
+        <p className={pageStyles.fieldHint}>
+          {displayedRows.length} repo{displayedRows.length === 1 ? "" : "s"} shown with a &quot;{currentSelectedFolder}
+          &quot; folder
+          {folderMissingCount > 0
+            ? `; ${folderMissingCount} repo${folderMissingCount === 1 ? "" : "s"} do not have it`
+            : ""}
+          {folderScanErrorCount > 0
+            ? `; ${folderScanErrorCount} repo${folderScanErrorCount === 1 ? "" : "s"} could not be scanned`
+            : ""}
+          .
+        </p>
+      )}
+
       {model && (
         <RepoGradesGrid
-          columns={columnsWithMapping}
-          rows={sortedRows}
+          columns={displayedColumns}
+          rows={displayedRows}
           roster={roster}
           selected={selected}
           onToggleSelected={toggleSelected}
@@ -673,6 +819,9 @@ export default function RepoGradesTab() {
           onGradeColumn={handleGradeColumn}
           bulkRunningFolder={bulkRunningFolder}
           bulkProgress={bulkProgress}
+          bulkSelectionOnly={uiState.bulkSelectionOnly}
+          scanTruncated={!!scan?.truncated}
+          emptyStateMessage={folderEmptyStateMessage}
         />
       )}
 

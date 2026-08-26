@@ -76,6 +76,21 @@ const BULK_SELECTION_ONLY_KEY = "ta-repo-grades-bulk-selection-only";
 // `ta-` localStorage key because that is the only durable store this view has
 // (postCanvasGradesAction writes to Canvas and keeps nothing locally).
 const LOG_KEY = "ta-repo-grades-log";
+// U1.5/U1.6 (docs/repo-grades-ux-overhaul-acceptance-criteria.md) - the
+// folder chooser's own selection, the 13th ta- key (section 5's storage
+// design table). Stored per COURSE, the same shape and reason as
+// ASSIGNMENT_MAP_KEY above: one course's "week-1" folder means nothing under
+// another course. Deliberately NOT folded into ASSIGNMENT_MAP_KEY's blob -
+// that blob's parser (isStringRecord below) requires every value in a
+// course's slice to be a plain string keyed by folder name; a nested
+// per-course object here would fail that check and drop the WHOLE course's
+// assignment mapping, not just this one field. The value stored per course is
+// itself a single string: "" (nothing chosen yet), a raw folder name, or
+// repoGradesFolderSelection.ts's ALL_FOLDERS sentinel - this module stores
+// and restores that string verbatim and does not interpret it; deciding what
+// it MEANS (which folder to show, whether a drop is genuine) is
+// repoGradesFolderSelection.ts's job, not this one's.
+const FOLDER_KEY = "ta-repo-grades-folder";
 
 export interface RepoGradesUiState {
   courseId: string;
@@ -343,6 +358,55 @@ export function persistRepoGradeLog(courseId: string, entries: readonly RepoGrad
     const byCourse = parseLogByCourse(localStorage.getItem(LOG_KEY));
     byCourse[courseId] = entries.slice();
     localStorage.setItem(LOG_KEY, JSON.stringify(byCourse));
+  } catch {
+    // best-effort persistence only, matching persistRepoGradesUiState above.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-course folder selection (U1.5/U1.6, FOLDER_KEY above). Same load/persist
+// shape as loadAssignmentMapping/persistAssignmentMapping - a no-op on a
+// blank courseId, an empty default when nothing is stored yet, and a write
+// that preserves every other course's slice untouched - except the per-course
+// value here is a single string rather than a nested record.
+
+function parseFolderByCourse(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const result: Record<string, string> = {};
+    for (const [courseId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === "string") result[courseId] = value;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+/** Reads `courseId`'s persisted folder choice - "" (never persisted, or a
+ * blank courseId) when nothing is stored, otherwise whatever string was last
+ * written: a raw folder name or repoGradesFolderSelection.ts's ALL_FOLDERS
+ * sentinel. The caller is expected to run this through
+ * resolveSelectedFolder before trusting it against the current scan, the same
+ * way loadAssignmentMapping's own doc comment expects filterRepoGradeAssignmentMapping
+ * to run before its result is applied. */
+export function loadFolderSelection(courseId: string): string {
+  if (typeof window === "undefined" || !courseId) return "";
+  const byCourse = parseFolderByCourse(localStorage.getItem(FOLDER_KEY));
+  return byCourse[courseId] ?? "";
+}
+
+/** Writes `courseId`'s persisted folder choice, preserving every OTHER
+ * course's choice untouched. Best-effort, matching persistAssignmentMapping
+ * above. */
+export function persistFolderSelection(courseId: string, folder: string): void {
+  if (typeof window === "undefined" || !courseId) return;
+  try {
+    const byCourse = parseFolderByCourse(localStorage.getItem(FOLDER_KEY));
+    byCourse[courseId] = folder;
+    localStorage.setItem(FOLDER_KEY, JSON.stringify(byCourse));
   } catch {
     // best-effort persistence only, matching persistRepoGradesUiState above.
   }

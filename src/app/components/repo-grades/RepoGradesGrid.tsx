@@ -28,9 +28,10 @@
 import RepoBindingControl from "./RepoBindingControl";
 import RepoGradeCellControl from "./RepoGradeCellControl";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
-import type { RepoGradeCellStatus, RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
+import type { RepoGradeCell, RepoGradeCellStatus, RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
+import { buildBulkGradePlan } from "./repoGradesBulkGrade";
 // Type-only import - see useRepoGradesData.ts's header comment for why this
 // is safe from a "use client" module even though CanvasAssignmentBrief is
 // only ever produced at runtime through the "use server" listCourseAssignmentsAction.
@@ -79,6 +80,20 @@ export interface RepoGradesGridProps {
   /** Progress for the column named by bulkRunningFolder - null whenever no
    * bulk run is in flight for ANY column. */
   bulkProgress: { done: number; total: number } | null;
+  /** U1.2/U1.7b - whether a "Grade all" run only covers the checked rows
+   * (index.tsx's uiState.bulkSelectionOnly). Threaded down so the button's
+   * own resting label can say "N selected" instead of implying it covers
+   * every repo in the column when it does not. */
+  bulkSelectionOnly: boolean;
+  /** U1.2 - true when the org scan hit its own listing cap, so the grid's
+   * row list may be missing repos the run would otherwise have covered.
+   * Threaded down so the "Grade" label can flag that rather than silently
+   * asserting completeness it cannot back up. */
+  scanTruncated: boolean;
+  /** U4.18 - overrides the default "no repositories matched" empty state
+   * with a more specific reason (e.g. a folder-scoped view where no scanned
+   * repo has that folder) when index.tsx has one to give. */
+  emptyStateMessage?: string;
 }
 
 const CELL_STATUS_TEXT: Record<RepoGradeCellStatus, string> = {
@@ -112,6 +127,8 @@ function ColumnHeaderControls({
   onGradeColumn,
   bulkRunningFolder,
   bulkProgress,
+  bulkSelectionOnly,
+  scanTruncated,
 }: {
   column: RepoGradeColumn;
   rows: RepoGradeRow[];
@@ -124,6 +141,8 @@ function ColumnHeaderControls({
   onGradeColumn: (folder: string) => void;
   bulkRunningFolder: string | null;
   bulkProgress: { done: number; total: number } | null;
+  bulkSelectionOnly: boolean;
+  scanTruncated: boolean;
 }) {
   // Scoped exactly as index.tsx's post handler scopes it - see this file's
   // header comment on AC5 item 28. Counting every row while a selection
@@ -142,8 +161,33 @@ function ColumnHeaderControls({
   // lookup.
   const bulkRunning = bulkRunningFolder !== null;
   const gradingThisColumn = bulkRunningFolder === column.folder;
+  // U1.2/U9.38 (this file's own header comment on the "grade this column"
+  // click) - the resting label must name the folder and a count derived from
+  // the ACTUAL plan a click would run, never a bare "all" that quietly lies
+  // when scanTruncated is set or bulkSelectionOnly scopes the run to the
+  // checked rows (repoGradesBulkGrade.ts:80). `withLiveScores`'s merge is
+  // duplicated here (it is a private helper inside
+  // useRepoGradesGradingActions.ts, which this component does not import,
+  // matching this file's own layering - see the AC5 item 27 header comment
+  // on why gradeRepoAction/postCanvasGradesAction never appear in this file)
+  // so this LABEL agrees with what handleGradeColumn's own plan will cover,
+  // without this file ever calling the dangerous action itself.
+  const liveRows: RepoGradeRow[] = rows.map((row) => {
+    const cells: Record<string, RepoGradeCell> = {};
+    for (const [folder, cell] of Object.entries(row.cells)) {
+      cells[folder] = { ...cell, score: getRepoGradeCellEdit(cellEdits, row.repo, folder).score };
+    }
+    return { ...row, cells };
+  });
+  const gradePlan = buildBulkGradePlan({ rows: liveRows, folder: column.folder, selected, selectionOnly: bulkSelectionOnly });
+  const gradeTargetCount = gradePlan.targets.length;
+  const scopedToSelection = bulkSelectionOnly && selected.size > 0;
+  const restingGradeLabel =
+    gradeTargetCount === 0
+      ? `Nothing to grade in ${column.folder}`
+      : `Grade ${scopedToSelection ? `${gradeTargetCount} selected` : `all ${gradeTargetCount}`} repo${gradeTargetCount === 1 ? "" : "s"} in ${column.folder}${scanTruncated ? " (scan incomplete)" : ""}`;
   const gradeAllLabel =
-    gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}...` : "Grade all";
+    gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}...` : restingGradeLabel;
 
   return (
     <div className={styles.columnHeader}>
@@ -163,6 +207,7 @@ function ColumnHeaderControls({
       <button
         type="button"
         className={pageStyles.linkButton}
+        aria-label={gradeAllLabel}
         disabled={bulkRunning}
         onClick={() => {
           onGradeColumn(column.folder);
@@ -203,9 +248,16 @@ export default function RepoGradesGrid({
   onGradeColumn,
   bulkRunningFolder,
   bulkProgress,
+  bulkSelectionOnly,
+  scanTruncated,
+  emptyStateMessage,
 }: RepoGradesGridProps) {
   if (rows.length === 0) {
-    return <p className={pageStyles.emptyState}>No repositories matched this org (and prefix filter, if set).</p>;
+    return (
+      <p className={pageStyles.emptyState}>
+        {emptyStateMessage ?? "No repositories matched this org (and prefix filter, if set)."}
+      </p>
+    );
   }
 
   return (
@@ -244,6 +296,8 @@ export default function RepoGradesGrid({
                   onGradeColumn={onGradeColumn}
                   bulkRunningFolder={bulkRunningFolder}
                   bulkProgress={bulkProgress}
+                  bulkSelectionOnly={bulkSelectionOnly}
+                  scanTruncated={scanTruncated}
                 />
               </th>
             ))}

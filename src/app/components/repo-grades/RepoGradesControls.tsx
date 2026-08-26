@@ -19,6 +19,7 @@
 // testing.
 import type { Course } from "@/lib/supabase/courses";
 import type { RepoGradeSortField, RepoGradeSortState, SortDirection } from "./repoGradesRows";
+import { ALL_FOLDERS, describeFolderOption, type FolderOption } from "./repoGradesFolderSelection";
 import styles from "../../page.module.css";
 
 /** Moved verbatim from index.tsx, unchanged - parses the sort `<select>`'s
@@ -56,6 +57,22 @@ export interface RepoGradesControlsProps {
   onInstructionsChange: (value: string) => void;
   rubric: string;
   onRubricChange: (value: string) => void;
+
+  /** U1.1/U1.3 - which assignment folder this view is scoped to right now:
+   * a raw folder name, or ALL_FOLDERS (repoGradesFolderSelection.ts). The
+   * options and the census both come from index.tsx's `buildFolderOptions`
+   * call over the current scan - this component renders them, it does not
+   * derive them. */
+  folderOptions: FolderOption[];
+  folderCensus: { scannedRepos: number; unknownRepos: number };
+  selectedFolder: string;
+  onSelectedFolderChange: (value: string) => void;
+  /** U1.6b - non-null only right after a previously-persisted folder was
+   * genuinely dropped (gone from an unfiltered scan, not merely hidden by
+   * the org-prefix filter - see shouldPersistFolderDrop). Rendered inline
+   * next to the folder control so the instructor is told, not left to
+   * notice the view silently reset to "All folders". */
+  folderDropNotice: string | null;
 
   /** When true, every "Grade" / "Grade all" call reads a folder's own README
    * as that folder's assignment instructions instead of the instructions
@@ -105,6 +122,11 @@ export default function RepoGradesControls({
   showRowDependentFields,
   sort,
   onSortChange,
+  folderOptions,
+  folderCensus,
+  selectedFolder,
+  onSelectedFolderChange,
+  folderDropNotice,
   instructions,
   onInstructionsChange,
   rubric,
@@ -154,6 +176,36 @@ export default function RepoGradesControls({
               {scanLoading ? "Scanning..." : "Refresh"}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* U1.1/U1.3 - the folder chooser, in the view's own control surface
+          rather than buried in a table column header. describeFolderOption
+          gives each option its "in N of M repos" hint (U1.4) so the
+          instructor can see how common a folder is BEFORE grading it. */}
+      {showRowDependentFields && (
+        <div className={styles.field}>
+          <label htmlFor="repo-grades-folder">Assignment folder to grade</label>
+          <select
+            id="repo-grades-folder"
+            value={selectedFolder}
+            onChange={(e) => onSelectedFolderChange(e.target.value)}
+          >
+            <option value={ALL_FOLDERS}>All folders</option>
+            {folderOptions.map((option) => (
+              <option key={option.folder} value={option.folder}>
+                {describeFolderOption(option, folderCensus)}
+              </option>
+            ))}
+          </select>
+          {folderOptions.length === 0 && (
+            <p className={styles.fieldHint}>No assignment folders were found in this course&apos;s scanned repos.</p>
+          )}
+          {folderDropNotice && (
+            <p className={styles.error} role="alert">
+              {folderDropNotice}
+            </p>
+          )}
         </div>
       )}
 

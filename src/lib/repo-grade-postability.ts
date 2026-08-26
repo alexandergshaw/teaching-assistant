@@ -6,6 +6,7 @@
 // Pure, no I/O.
 
 import type { RepoBindingState } from "@/lib/repo-student-bindings";
+import { resolvePostScore } from "@/app/components/repo-grades/repoGradePostScore";
 
 export interface PostabilityInput {
   bindingState: RepoBindingState;
@@ -21,6 +22,16 @@ export interface PostabilityInput {
   folderPresent: boolean;
   /** The raw, editable-cell score text, exactly as typed - not yet parsed. */
   score: string;
+  /** The mapped Canvas assignment's own points value, or null when it is not
+   * known (no mapping yet, or the assignment carries no points value).
+   * Optional (and treated as null when omitted) so every existing caller -
+   * including this module's own frozen test file, which predates this field -
+   * keeps compiling and keeps behaving identically for a bare-number score,
+   * which never consults this field at all. Only a fraction-shaped score
+   * (repoGradePostScore.ts's resolvePostScore) needs it, to scale onto the
+   * assignment's own point total instead of posting an arbitrary generated
+   * rubric's raw numerator. */
+  pointsPossible?: number | null;
 }
 
 export type PostabilityResult =
@@ -36,7 +47,7 @@ export type PostabilityResult =
  * instead of a bare "not postable".
  */
 export function repoGradePostability(input: PostabilityInput): PostabilityResult {
-  const { bindingState, canvasUserId, assignmentId, folderPresent, score } = input;
+  const { bindingState, canvasUserId, assignmentId, folderPresent, score, pointsPossible } = input;
 
   if (bindingState !== "confirmed") {
     return {
@@ -59,15 +70,20 @@ export function repoGradePostability(input: PostabilityInput): PostabilityResult
     return { postable: false, reason: "This repo has no folder for this assignment." };
   }
 
-  const scoreTrimmed = score.trim();
-  if (!scoreTrimmed) {
-    return { postable: false, reason: "Enter a score before posting." };
+  // U12.52 / the pre-existing postability defect it exposes: a freshly
+  // graded cell's score is shaped "earned/possible" (e.g. "350/400" -
+  // src/lib/grade/types.ts:29), which `Number(...)` alone always reads as
+  // NaN - so before this, no AI-graded score was ever postable without first
+  // being hand-retyped as a bare number. resolvePostScore
+  // (repoGradePostScore.ts) is the single place that now decides what a raw
+  // score string actually resolves to: a bare number posts unchanged, and a
+  // fraction is converted to a percentage and scaled onto pointsPossible (or
+  // refused outright when pointsPossible is unknown, rather than guessing on
+  // a live, no-undo gradebook write).
+  const resolved = resolvePostScore(score, pointsPossible ?? null);
+  if (!resolved.ok) {
+    return { postable: false, reason: resolved.reason };
   }
 
-  const parsedScore = Number(scoreTrimmed);
-  if (!Number.isFinite(parsedScore)) {
-    return { postable: false, reason: `"${score}" is not a valid score.` };
-  }
-
-  return { postable: true, userId: Number(idTrimmed), score: parsedScore };
+  return { postable: true, userId: Number(idTrimmed), score: resolved.score };
 }

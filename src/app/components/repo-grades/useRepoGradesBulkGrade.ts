@@ -64,6 +64,56 @@ export interface UseRepoGradesBulkGradeParams {
   onAnnounce: (message: string) => void;
 }
 
+export interface RubricAttemptResult {
+  rubricUsed: string | null;
+}
+
+/**
+ * Pure retry algorithm behind the U12.50 sequential rubric-setup prologue
+ * below, pulled out of the hook so it can be unit-tested without rendering
+ * (this project's vitest runs in the "node" environment with no jsdom/
+ * @testing-library/react - see vitest.config.ts and the precedent in
+ * caption-studio-wiring.structure.test.ts).
+ *
+ * Tries `targets` one at a time, in order, via `attempt`, until `attempt`
+ * returns a non-null `rubricUsed` or every target has been tried once. A
+ * failed attempt (`rubricUsed: null` - gradeRepoAction never throws, it
+ * returns `{ error }`, see gradeOneTarget below) must not stop the retry:
+ * stopping after a single failed attempt is exactly the bug this function
+ * exists to prevent, because the caller would then hand every remaining
+ * target the still-blank `rubric`, and gradeRepoAction generates its own
+ * rubric per repo whenever it receives one - silently reverting the whole
+ * rest of the run to the per-repo-rubric unfairness U12.50 exists to remove.
+ * If every target fails, `sharedRubric` in the return value is simply the
+ * original `rubric` unchanged (still blank) and `consumed` is
+ * `targets.length` - the caller must treat that as "no rubric could be
+ * established" and must not loop again itself.
+ *
+ * `onAttempted` fires exactly once per target this function tries, in order,
+ * so a caller wiring this into `done`/`setProgress` state gets one increment
+ * per completed target with no double counting and no skipped counts.
+ * `consumed` tells the caller how many leading targets this function already
+ * graded, so its own worker pool can resume at that offset rather than
+ * re-grading any of them.
+ */
+export async function establishSharedRubric(
+  targets: readonly BulkGradeTarget[],
+  rubric: string,
+  attempt: (target: BulkGradeTarget) => Promise<RubricAttemptResult>,
+  onAttempted: () => void,
+): Promise<{ sharedRubric: string; consumed: number }> {
+  let sharedRubric = rubric;
+  let consumed = 0;
+  while (consumed < targets.length && sharedRubric.trim() === "") {
+    const target = targets[consumed];
+    consumed += 1;
+    const { rubricUsed } = await attempt(target);
+    if (rubricUsed !== null) sharedRubric = rubricUsed;
+    onAttempted();
+  }
+  return { sharedRubric, consumed };
+}
+
 export interface UseRepoGradesBulkGradeResult {
   /** The folder currently being bulk-graded, or null. Only ONE bulk run at a
    * time across the whole view. */
@@ -99,7 +149,103 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
 
     const outcomes: BulkGradeOutcome[] = [];
     let done = 0;
+
+    /** One target's grading call, applied to cell state/outcomes exactly the
+     * same way regardless of whether it ran as the sequential rubric-setup
+     * step below or inside a pool worker - factored out so those two call
+     * sites cannot drift apart on what a graded/failed outcome actually
+     * writes. `rubricArg` is whatever this target's OWN gradeRepoAction call
+     * should receive - see runBulkGrade's own header note on `sharedRubric`
+     * for why that is not always the instructor's raw `rubric` field. */
+    const gradeOneTarget = async (target: BulkGradeTarget, rubricArg: string): Promise<{ rubricUsed: string | null }> => {
+      onCellUpdate(target.repo, target.folder, { grading: true, gradeError: null });
+      const result = await gradeRepoAction(target.repo, instructions, rubricArg, provider, undefined, target.folder, useReadmeInstructions);
+
+      if ("error" in result) {
+        onCellUpdate(target.repo, target.folder, { grading: false, gradeError: result.error });
+        outcomes.push({ repo: target.repo, folder: target.folder, status: "failed", score: "", detail: result.error });
+        return { rubricUsed: null };
+      }
+
+      const first = result.run.results[0];
+      const score = first?.totalScore ?? "";
+      onCellUpdate(target.repo, target.folder, {
+        grading: false,
+        gradeError: null,
+        score,
+        comment: first?.overallComment ?? "",
+        rubricAreas: first?.rubricAreas ?? [],
+        // Set at the SAME time as `score`, matching index.tsx's
+        // handleGradeCell exactly - this is the field that later tells a
+        // hand-edited score apart from an untouched one (that file's own
+        // header comment on the field explains why), so a bulk-graded
+        // row must set it too or it will misreport as "edited" the
+        // moment it is graded.
+        generatedScore: first?.totalScore ?? null,
+      });
+      // `detail` on success names the README path actually used (or a
+      // missing-README fallback note - never silent about which repos fell
+      // back to the typed instructions vs. read a per-folder README), plus
+      // U12.50's capture of `result.rubric`/`first.feedback` (see
+      // useRepoGradesGradingActions.ts's handleGradeCell for why the log's
+      // free-text `detail` is where both land: neither is discarded, and
+      // there is no per-cell UI slot for either without extending
+      // RepoGradeCellEdit, out of this wave's file set). The rubric is only
+      // worth naming here when it was GENERATED (rubricArg came from
+      // `sharedRubric` below, not the instructor's own typed field) - an
+      // instructor-typed rubric is already visible in the textarea and
+      // repeating it on every one of a run's graded cells would bloat the
+      // log for no new information.
+      const readmeNote = result.readmeMissing
+        ? "no README found in this folder - graded from the typed instructions instead"
+        : result.readmePath
+          ? `graded from ${result.readmePath}`
+          : "";
+      const rubricNote = rubric.trim() === "" ? `Rubric used: ${result.rubric}` : "";
+      const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
+      const detail = [readmeNote, rubricNote, feedbackNote].filter((part) => part !== "").join(" | ");
+      outcomes.push({ repo: target.repo, folder: target.folder, status: "graded", score, detail });
+      return { rubricUsed: result.rubric };
+    };
+
+    // U12.50 fairness fix (the reason this whole feature exists per
+    // github-repos.ts:680's header comment): when the rubric field is blank,
+    // gradeRepoAction generates one PER REPO, fed that repo's own content -
+    // so a run's students could each be graded against a different invented
+    // point total (the owner's own log: denominators of 100, 400, 40 and 16
+    // across eleven students in one run). The honest fix is to establish ONE
+    // rubric for the whole run BEFORE the worker pool opens, not to let
+    // BULK_GRADE_CONCURRENCY workers each race their own generation the
+    // instant the pool starts (they would each see the shared rubric still
+    // unset and each generate their own, reproducing the exact bug this
+    // exists to close). Targets are therefore graded alone, sequentially,
+    // ahead of the pool, via establishSharedRubric above - which keeps trying
+    // the next target rather than giving up after one failure, because a
+    // single failed grade (GitHub rate limit, a transient network error, one
+    // repo missing the folder) must not revert the rest of the run back to
+    // per-repo rubrics either. gradeRepoAction's own return carries the
+    // effectiveRubric it used, so once one succeeds, every remaining target
+    // reuses that EXACT text as its own `rubric` argument, never triggering
+    // gradeRepoAction's `rubric.trim() || generateRubric(...)` branch again
+    // for the rest of this run. When the instructor DID type a rubric,
+    // `sharedRubric` is simply that text from the start and nothing here
+    // changes - every target already agreed on one rubric with no setup
+    // needed.
+    let sharedRubric = rubric;
     let cursor = 0;
+    if (rubric.trim() === "" && targets.length > 0) {
+      const prologue = await establishSharedRubric(
+        targets,
+        rubric,
+        (target) => gradeOneTarget(target, rubric),
+        () => {
+          done += 1;
+          setProgress({ done, total: targets.length });
+        },
+      );
+      sharedRubric = prologue.sharedRubric;
+      cursor = prologue.consumed;
+    }
 
     // One worker: pulls the next unclaimed target off the shared cursor until
     // none remain. BULK_GRADE_CONCURRENCY workers run this concurrently below,
@@ -110,50 +256,13 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         const index = cursor;
         cursor += 1;
         if (index >= targets.length) return;
-        const target: BulkGradeTarget = targets[index];
-
-        onCellUpdate(target.repo, target.folder, { grading: true, gradeError: null });
-        const result = await gradeRepoAction(target.repo, instructions, rubric, provider, undefined, target.folder, useReadmeInstructions);
-
-        if ("error" in result) {
-          onCellUpdate(target.repo, target.folder, { grading: false, gradeError: result.error });
-          outcomes.push({ repo: target.repo, folder: target.folder, status: "failed", score: "", detail: result.error });
-        } else {
-          const first = result.run.results[0];
-          const score = first?.totalScore ?? "";
-          onCellUpdate(target.repo, target.folder, {
-            grading: false,
-            gradeError: null,
-            score,
-            comment: first?.overallComment ?? "",
-            rubricAreas: first?.rubricAreas ?? [],
-            // Set at the SAME time as `score`, matching index.tsx's
-            // handleGradeCell exactly - this is the field that later tells a
-            // hand-edited score apart from an untouched one (that file's own
-            // header comment on the field explains why), so a bulk-graded
-            // row must set it too or it will misreport as "edited" the
-            // moment it is graded.
-            generatedScore: first?.totalScore ?? null,
-          });
-          // `detail` on success is the README path actually used, or a
-          // missing-README note - never silent about which repos fell back
-          // to the typed instructions vs. read a per-folder README (a run
-          // that mixed the two without saying so per repo would be
-          // unexplainable to the instructor after the fact).
-          const detail = result.readmeMissing
-            ? "no README found in this folder - graded from the typed instructions instead"
-            : result.readmePath
-              ? `graded from ${result.readmePath}`
-              : "";
-          outcomes.push({ repo: target.repo, folder: target.folder, status: "graded", score, detail });
-        }
-
+        await gradeOneTarget(targets[index], sharedRubric);
         done += 1;
         setProgress({ done, total: targets.length });
       }
     };
 
-    const workerCount = Math.min(BULK_GRADE_CONCURRENCY, targets.length);
+    const workerCount = Math.min(BULK_GRADE_CONCURRENCY, Math.max(targets.length - cursor, 0));
     await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 
     onOutcomes(outcomes);

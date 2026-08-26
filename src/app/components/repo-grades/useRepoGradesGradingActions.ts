@@ -103,8 +103,13 @@ export interface UseRepoGradesGradingActionsResult {
   handleScoreChange: (repo: string, folder: string, score: string) => void;
   handleCommentChange: (repo: string, folder: string, comment: string) => void;
   handleGradeCell: (row: RepoGradeRow, column: RepoGradeColumn) => Promise<void>;
-  handlePostColumn: (column: RepoGradeColumn) => Promise<void>;
-  handlePostOneCell: (row: RepoGradeRow, column: RepoGradeColumn) => Promise<void>;
+  /** U12.52: `pointsPossible` is the mapped Canvas assignment's own points
+   * value (RepoGradesGrid.tsx's pointsPossibleForColumn) - the SAME value
+   * that column's header count was computed from, so this call can never
+   * scale a fraction score differently than the button that triggered it
+   * claimed it would. */
+  handlePostColumn: (column: RepoGradeColumn, pointsPossible: number | null) => Promise<void>;
+  handlePostOneCell: (row: RepoGradeRow, column: RepoGradeColumn, pointsPossible: number | null) => Promise<void>;
   /** Per-column posting busy state - index.tsx's old `columnPosting`, now
    * owned here since only the posting handlers below ever write to it. */
   columnPosting: Readonly<Record<string, boolean>>;
@@ -213,7 +218,29 @@ export function useRepoGradesGradingActions(
     const cuts: string[] = [];
     if (result.digestTruncated) cuts.push("some folder files were left out of the digest");
     if (first?.submissionTruncated) cuts.push("the submission text was truncated before grading");
-    const detail = cuts.length > 0 ? `Graded by ${provider} - ${cuts.join("; ")}` : `Graded by ${provider}`;
+    // U12.50: `result.rubric` and `first.feedback` (src/lib/grade/types.ts:30)
+    // used to be requested off this call and then never read again - neither
+    // is discarded now. There is no per-cell UI slot for either yet (that
+    // would mean extending RepoGradeCellEdit, out of this wave's file set),
+    // so both are captured into THIS call's own log entry instead -
+    // RepoGradeLogEntry.detail is already free text (L2 item 10's own
+    // comment), so this needs no schema change, and the log is already this
+    // view's durable, downloadable record. The rubric is only worth logging
+    // when it was GENERATED (the instructor left the rubric field blank) -
+    // an instructor-typed rubric is already visible in the textarea, and
+    // repeating a possibly-long rubric on every one of a run's graded cells
+    // would bloat the log for no new information. `feedback` is only logged
+    // when it differs from `overallComment` (the same "only show if it adds
+    // something" rule DraftedGradesTab.tsx:663 already applies to the two).
+    const rubricNote = rubric.trim() === "" ? `Rubric used: ${result.rubric}` : "";
+    const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
+    const detail = [
+      cuts.length > 0 ? `Graded by ${provider} - ${cuts.join("; ")}` : `Graded by ${provider}`,
+      rubricNote,
+      feedbackNote,
+    ]
+      .filter((part) => part !== "")
+      .join(" | ");
     if (cuts.length > 0) {
       setPostSummary(`${row.repo} / ${column.folder}: graded, but ${cuts.join("; ")}.`);
     }
@@ -259,11 +286,11 @@ export function useRepoGradesGradingActions(
   // actual write is never mis-stated - only the header's separate, always-
   // visible count can be stale relative to it. Closing that requires
   // threading `selected` into RepoGradesGrid.tsx's ColumnHeaderControls.
-  const handlePostColumn = async (column: RepoGradeColumn) => {
+  const handlePostColumn = async (column: RepoGradeColumn, pointsPossible: number | null) => {
     if (!course) return;
     const scopedRows = scopeRepoGradeRowsToSelection(rows, selected);
     const candidates = repoGradePostCandidateRows(scopedRows, cellEdits, column.folder);
-    const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
+    const plan = buildRepoGradePostPlan(candidates, column.assignmentId, pointsPossible);
     const usingSelection = selected.size > 0;
     // Now reachable post-A1 (e.g. every selected row is unbound) - say so.
     if (plan.postable.length === 0) {
@@ -388,10 +415,10 @@ export function useRepoGradesGradingActions(
   // WIRED: passed to RepoGradesGrid as `onPostOneCell`, which forwards it into
   // each cell as RepoGradeCellControl's `onPostOne`. It did not ship switched
   // off - the failure mode docs/REGRESSION.md entry 211 records.
-  const handlePostOneCell = async (row: RepoGradeRow, column: RepoGradeColumn) => {
+  const handlePostOneCell = async (row: RepoGradeRow, column: RepoGradeColumn, pointsPossible: number | null) => {
     if (!course) return;
     const candidates = repoGradePostCandidateRows([row], cellEdits, column.folder);
-    const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
+    const plan = buildRepoGradePostPlan(candidates, column.assignmentId, pointsPossible);
     if (plan.postable.length === 0) {
       // This path is otherwise completely silent (by design - the button that
       // reaches it is already only rendered for a plausible cell), which is

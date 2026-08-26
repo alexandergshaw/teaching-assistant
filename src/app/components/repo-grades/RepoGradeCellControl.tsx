@@ -43,6 +43,14 @@ import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
 // SHOWS as its value would change what gets posted. formatScorePercent is
 // display-only, read-only, and never fed back into onScoreChange.
 import { formatScorePercent, scorePercentValue } from "./repoGradeScoreDisplay";
+// U12.52: the pre-existing postability defect Part 2 fixes, and its
+// companion display rule - repoGradePostScore.test.ts is that module's
+// specification. describePostScore never re-derives the decision itself
+// (resolvePostScore, called by repoGradePostability below, already decided
+// it) - it only names, in words, exactly what a Post click would send, so
+// the instructor is never left guessing whether "350/400" or "35" (out of a
+// 40-point assignment) is the number about to reach a live gradebook.
+import { describePostScore } from "./repoGradePostScore";
 import styles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 
@@ -50,6 +58,14 @@ export interface RepoGradeCellControlProps {
   row: RepoGradeRow;
   column: RepoGradeColumn;
   edit: RepoGradeCellEdit;
+  /** The mapped Canvas assignment's own points value, or null when unknown
+   * (no mapping yet, or the assignment carries no points value) -
+   * RepoGradesGrid.tsx's pointsPossibleForColumn, the SAME value its column
+   * header's Post button count is computed from. Threaded through to both
+   * repoGradePostability (below) and describePostScore so this cell's own
+   * postability and its "what will post" text can never disagree with the
+   * column header. */
+  pointsPossible: number | null;
   onScoreChange: (score: string) => void;
   onCommentChange: (comment: string) => void;
   onGrade: () => void;
@@ -72,7 +88,7 @@ export interface RepoGradeCellControlProps {
   onPostOne?: () => void;
 }
 
-export default function RepoGradeCellControl({ row, column, edit, onScoreChange, onCommentChange, onGrade, onPostOne }: RepoGradeCellControlProps) {
+export default function RepoGradeCellControl({ row, column, edit, pointsPossible, onScoreChange, onCommentChange, onGrade, onPostOne }: RepoGradeCellControlProps) {
   // Always folderPresent: true - see the module header for why that is safe
   // for every cell this component is ever asked to render.
   const postability = repoGradePostability({
@@ -81,7 +97,15 @@ export default function RepoGradeCellControl({ row, column, edit, onScoreChange,
     assignmentId: column.assignmentId,
     folderPresent: true,
     score: edit.score,
+    pointsPossible,
   });
+  // U12.52: shown only once every OTHER postability gate has already passed -
+  // describePostScore only looks at score/pointsPossible, so showing it
+  // whenever the binding/assignment/folder gates are still failing would
+  // read as "this will post" for a row that is nowhere close to postable.
+  // When postability itself failed on the score/scale, postability.reason
+  // (below) already carries that exact same text.
+  const postScoreDescription = postability.postable ? describePostScore(edit.score, pointsPossible) : null;
 
   const postStatusClass =
     edit.postStatus === "error" ? styles.postStatusError : edit.postStatus === "posted" ? styles.postStatusPosted : styles.postStatusPosting;
@@ -164,6 +188,7 @@ export default function RepoGradeCellControl({ row, column, edit, onScoreChange,
             {postButtonLabel}
           </button>
         )}
+        {postScoreDescription && <span className={styles.postReason}>{postScoreDescription}</span>}
         {!postability.postable && <span className={styles.postReason}>{postability.reason}</span>}
       </div>
       {edit.gradeError && (

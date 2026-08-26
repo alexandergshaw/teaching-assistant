@@ -226,7 +226,17 @@ export function repoGradePostCandidateRows(
  */
 export function buildRepoGradePostPlan(
   rows: readonly RepoGradePostCandidateRow[],
-  assignmentId: string | null
+  assignmentId: string | null,
+  // U12.52 / the fairness fix's other half: the mapped Canvas assignment's
+  // own points value, or null when unknown - threaded through to
+  // repoGradePostability so a fraction-shaped score (what a fresh AI grade
+  // looks like) is scaled onto the assignment's real point total instead of
+  // posting an arbitrary generated rubric's raw numerator. Optional, default
+  // null, so every existing call site (and this module's own frozen test
+  // file, which predates this parameter and calls with exactly two
+  // arguments) keeps compiling and keeps behaving identically for bare-number
+  // scores, which never consult it at all.
+  pointsPossible: number | null = null
 ): RepoGradePostPlan {
   const postable: RepoGradePostPlanItem[] = [];
   const skipped: RepoGradePostPlanSkip[] = [];
@@ -237,6 +247,7 @@ export function buildRepoGradePostPlan(
       assignmentId,
       folderPresent: row.folderPresent,
       score: row.score,
+      pointsPossible,
     });
     if (!result.postable) {
       skipped.push({ repo: row.repo, reason: result.reason });

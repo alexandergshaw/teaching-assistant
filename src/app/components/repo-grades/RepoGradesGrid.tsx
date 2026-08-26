@@ -39,6 +39,25 @@ import type { CanvasAssignmentBrief } from "@/lib/canvas";
 import styles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 
+/**
+ * U12.52 / the fairness fix's other half: the ONE place a column's
+ * assignmentId is turned into that assignment's own pointsPossible - both the
+ * column header's live postable count/plan (ColumnHeaderControls below) and
+ * each cell's post payload/description (the main component's own render,
+ * RepoGradeCellControl's onPostOne) read it from THIS function over the SAME
+ * `assignments` prop, so the two can never disagree about which assignment's
+ * points a given column scales onto (the same guarantee AC5 item 28 already
+ * requires of postability itself, one layer further out). Returns null - not
+ * 0, not NaN - for an unmapped column or an assignment whose own
+ * pointsPossible is null, which is exactly the "unknown, refuse to guess"
+ * signal resolvePostScore (repoGradePostScore.ts) requires.
+ */
+function pointsPossibleForColumn(column: RepoGradeColumn, assignments: CanvasAssignmentBrief[]): number | null {
+  if (!column.assignmentId) return null;
+  const assignment = assignments.find((a) => a.id === column.assignmentId);
+  return assignment ? assignment.pointsPossible : null;
+}
+
 export interface RepoGradesGridProps {
   columns: RepoGradeColumn[];
   rows: RepoGradeRow[];
@@ -57,12 +76,17 @@ export interface RepoGradesGridProps {
   onCommentChange: (repo: string, folder: string, comment: string) => void;
   onGradeCell: (row: RepoGradeRow, column: RepoGradeColumn) => void;
   onAssignmentChange: (folder: string, assignmentId: string | null) => void;
-  onPostColumn: (column: RepoGradeColumn) => void;
+  /** U12.52: `pointsPossible` is the SAME value pointsPossibleForColumn just
+   * computed for this column's own postable count/plan above it, so the
+   * button's count and the actual post scale identically (never re-derived
+   * inside the handler). */
+  onPostColumn: (column: RepoGradeColumn, pointsPossible: number | null) => void;
   /** Post a SINGLE row's grade for one column (AC A4) - the retry path after a
    * partial column post, so re-sending the failures never re-posts the
    * successes alongside them. Mirrors GradingResults.tsx's own handlePostOne:
-   * a one-element payload that touches only that row's status. */
-  onPostOneCell: (row: RepoGradeRow, column: RepoGradeColumn) => void;
+   * a one-element payload that touches only that row's status. `pointsPossible`
+   * is the same U12.52 value described on onPostColumn above. */
+  onPostOneCell: (row: RepoGradeRow, column: RepoGradeColumn, pointsPossible: number | null) => void;
   /** True while THIS column's bulk post call is in flight - governs its
    * button's busy state, independent of any other column's post attempt. */
   columnPosting: Readonly<Record<string, boolean>>;
@@ -137,7 +161,7 @@ function ColumnHeaderControls({
   cellEdits: RepoGradeCellEditsByRepo;
   columnPosting: Readonly<Record<string, boolean>>;
   onAssignmentChange: (folder: string, assignmentId: string | null) => void;
-  onPostColumn: (column: RepoGradeColumn) => void;
+  onPostColumn: (column: RepoGradeColumn, pointsPossible: number | null) => void;
   onGradeColumn: (folder: string) => void;
   bulkRunningFolder: string | null;
   bulkProgress: { done: number; total: number } | null;
@@ -149,7 +173,12 @@ function ColumnHeaderControls({
   // governs posting would claim "Post 30 grade(s)" and then post four.
   const scopedRows = scopeRepoGradeRowsToSelection(rows, selected);
   const candidates = repoGradePostCandidateRows(scopedRows, cellEdits, column.folder);
-  const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
+  // U12.52: the SAME pointsPossible the actual post (onPostColumn below) will
+  // use - both read it from pointsPossibleForColumn over this component's own
+  // `assignments` prop, so this button's count can never disagree with what
+  // the click it labels actually posts.
+  const pointsPossible = pointsPossibleForColumn(column, assignments);
+  const plan = buildRepoGradePostPlan(candidates, column.assignmentId, pointsPossible);
   const alreadyAttempted = scopedRows.some(
     (row) => getRepoGradeCellEdit(cellEdits, row.repo, column.folder).postStatus !== "idle"
   );
@@ -220,7 +249,7 @@ function ColumnHeaderControls({
         className={pageStyles.linkButton}
         disabled={busy || plan.postable.length === 0}
         onClick={() => {
-          onPostColumn(column);
+          onPostColumn(column, pointsPossible);
         }}
       >
         {busy ? "Posting..." : `${alreadyAttempted ? "Re-post" : "Post"} ${plan.postable.length} grade(s)`}
@@ -325,6 +354,13 @@ export default function RepoGradesGrid({
               </td>
               {columns.map((column) => {
                 const cell = row.cells[column.folder];
+                // U12.52: the SAME pointsPossible ColumnHeaderControls above
+                // computes for this column's Post button - both read
+                // pointsPossibleForColumn over this component's own
+                // `assignments` prop, so a cell's displayed "what will post"
+                // text and its own Post/Re-post click can never disagree with
+                // the column header's count.
+                const pointsPossible = pointsPossibleForColumn(column, assignments);
                 return (
                   <td role="cell" key={column.folder}>
                     <span className={styles.cellColumnLabel} aria-hidden="true">
@@ -335,10 +371,11 @@ export default function RepoGradesGrid({
                         row={row}
                         column={column}
                         edit={getRepoGradeCellEdit(cellEdits, row.repo, column.folder)}
+                        pointsPossible={pointsPossible}
                         onScoreChange={(score) => onScoreChange(row.repo, column.folder, score)}
                         onCommentChange={(comment) => onCommentChange(row.repo, column.folder, comment)}
                         onGrade={() => onGradeCell(row, column)}
-                        onPostOne={() => onPostOneCell(row, column)}
+                        onPostOne={() => onPostOneCell(row, column, pointsPossible)}
                       />
                     ) : (
                       <CellStatus status={cell.status} />

@@ -62,6 +62,7 @@ import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText } from "@/l
 import { rememberRubric } from "@/lib/research/rubric-bank";
 import { type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
+import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
 
 type RepoFile = { path: string; content: string };
 type RepoDigest = { fullName: string; text: string; fileCount: number; files: RepoFile[] };
@@ -619,9 +620,17 @@ export async function gradeRepoAction(
   rubric: string,
   provider: LlmProvider = "gemini",
   branch?: string,
-  pathPrefix?: string
+  pathPrefix?: string,
+  useReadmeInstructions?: boolean
 ): Promise<
-  | { run: GradingRun; rubric: string; fullName: string; digestTruncated?: boolean }
+  | {
+      run: GradingRun;
+      rubric: string;
+      fullName: string;
+      digestTruncated?: boolean;
+      readmePath?: string;
+      readmeMissing?: boolean;
+    }
   | { error: string }
 > {
   try {
@@ -634,7 +643,26 @@ export async function gradeRepoAction(
     // before grading ever saw it. Both return branches below now carry it
     // through as `digestTruncated` instead of discarding it.
     const digestTruncated = digest.truncated;
-    const instructions = assignmentInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
+
+    // When asked to grade against the graded folder's own README, prefer it
+    // over the typed-in textarea. A missing README is reported, never an
+    // error - the instructor still gets a grade using whatever instructions
+    // they already had, and the UI surfaces `readmeMissing` so the fallback
+    // is visible rather than silent.
+    let effectiveInstructions = assignmentInstructions;
+    let readmePath: string | undefined;
+    let readmeMissing: boolean | undefined;
+    if (useReadmeInstructions) {
+      const pick = pickReadmeInstructions(digest.files, pathPrefix);
+      if (pick) {
+        effectiveInstructions = pick.instructions;
+        readmePath = pick.path;
+      } else {
+        readmeMissing = true;
+      }
+    }
+
+    const instructions = effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
 
     // Embedded Deterministic Engine: grade the repo in-process against the
     // supplied rubric, or one generated from the instructions. No model call.
@@ -646,7 +674,7 @@ export async function gradeRepoAction(
       // Grow the rubric bank from human-authored rubrics (fire-and-forget).
       if (rubric.trim()) void rememberRubric(instructions, rubric);
       const run = gradeEntriesEmbedded([repoDigestToEmbeddedEntry(digest)], builtRubric);
-      return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName, digestTruncated };
+      return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName, digestTruncated, readmePath, readmeMissing };
     }
 
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${digest.text}`, provider));
@@ -657,7 +685,7 @@ export async function gradeRepoAction(
       submittedFiles: [],
     };
     const run = await gradeEntries([entry], instructions, effectiveRubric, provider);
-    return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated };
+    return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repository." };
   }

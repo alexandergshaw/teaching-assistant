@@ -52,6 +52,21 @@ const ASSIGNMENT_MAP_KEY = "ta-repo-grades-assignment-map";
 // app rather than per view - the same "one thing to remember" simplicity.
 const INSTRUCTIONS_KEY = "ta-repo-grades-instructions";
 const RUBRIC_KEY = "ta-repo-grades-rubric";
+// The instructor's own framing of the bulk-grading request this key exists
+// for: "I should just be able to grade what's in a selected assignment dir
+// against the readme instructions ... without needing to associate these to
+// students." Defaults to true - the instructor's whole complaint is having
+// to type instructions that are already sitting in the folder, so the
+// control should start in the state that avoids that friction rather than
+// requiring an opt-in on every course. gradeRepoAction's new
+// useReadmeInstructions parameter is what this flag ultimately feeds.
+const README_INSTRUCTIONS_KEY = "ta-repo-grades-readme-instructions";
+// Whether a "grade this whole column" bulk run is scoped to the checked rows
+// only, or (default false) the whole column regardless of what happens to be
+// checked - repoGradesBulkGrade.ts's buildBulkGradePlan header comment
+// documents why those two are deliberately different even when they happen
+// to produce the same target list.
+const BULK_SELECTION_ONLY_KEY = "ta-repo-grades-bulk-selection-only";
 // L3 (docs/repo-grades-activity-log-acceptance-criteria.md): the activity
 // log, stored per COURSE inside one blob for the same reason
 // ASSIGNMENT_MAP_KEY is - one course's record of "who did I post, at what
@@ -75,6 +90,14 @@ export interface RepoGradesUiState {
    * course table, default: it needs no Canvas connection) or "live" (a
    * Canvas assignment's own submissions). */
   linkSource: "roster" | "live";
+  /** When true, a grading call prefers the graded folder's own README over
+   * the typed `instructions` above (gradeRepoAction's useReadmeInstructions
+   * parameter). Default true - see README_INSTRUCTIONS_KEY's comment above. */
+  useReadmeInstructions: boolean;
+  /** When true, a "grade this whole column" bulk run only touches checked
+   * rows; when false (the default), it means the whole column. See
+   * BULK_SELECTION_ONLY_KEY's comment above. */
+  bulkSelectionOnly: boolean;
 }
 
 function defaultUiState(): RepoGradesUiState {
@@ -86,6 +109,8 @@ function defaultUiState(): RepoGradesUiState {
     rubric: "",
     linkAssignmentId: "",
     linkSource: "roster",
+    useReadmeInstructions: true,
+    bulkSelectionOnly: false,
   };
 }
 
@@ -106,6 +131,25 @@ function isLinkSource(value: unknown): value is "roster" | "live" {
  * the same "never trust stored data" posture parseSort takes above. */
 function parseLinkSource(raw: string | null): "roster" | "live" {
   return isLinkSource(raw) ? raw : "roster";
+}
+
+/** Parses the persisted "use README instructions" flag. Stored as "1" for
+ * true / "" for false (persistRepoGradesUiState below always writes one or
+ * the other), so `raw === null` is the ONLY case that means "never
+ * persisted" and is the one case that falls back to the default (true) -
+ * every other raw value, including a stray non-"1" string a hand-edited
+ * localStorage blob might carry, reads as false rather than crashing or
+ * silently reverting to true. */
+function parseUseReadmeInstructions(raw: string | null): boolean {
+  return raw === null ? true : raw === "1";
+}
+
+/** Parses the persisted "bulk run scoped to selection" flag. Default false,
+ * so anything other than the exact persisted "true" marker ("1") reads as
+ * false - no `raw === null` special case is needed here (false is already
+ * what "never persisted" should read as). */
+function parseBulkSelectionOnly(raw: string | null): boolean {
+  return raw === "1";
 }
 
 /** Parses a persisted sort value, falling back to DEFAULT_REPO_GRADE_SORT for
@@ -141,6 +185,8 @@ export function loadRepoGradesUiState(): RepoGradesUiState {
     rubric: localStorage.getItem(RUBRIC_KEY) ?? "",
     linkAssignmentId: localStorage.getItem(LINK_ASSIGNMENT_KEY) ?? "",
     linkSource: parseLinkSource(localStorage.getItem(LINK_SOURCE_KEY)),
+    useReadmeInstructions: parseUseReadmeInstructions(localStorage.getItem(README_INSTRUCTIONS_KEY)),
+    bulkSelectionOnly: parseBulkSelectionOnly(localStorage.getItem(BULK_SELECTION_ONLY_KEY)),
   };
 }
 
@@ -154,6 +200,8 @@ export function persistRepoGradesUiState(state: RepoGradesUiState): void {
     localStorage.setItem(RUBRIC_KEY, state.rubric);
     localStorage.setItem(LINK_ASSIGNMENT_KEY, state.linkAssignmentId);
     localStorage.setItem(LINK_SOURCE_KEY, state.linkSource);
+    localStorage.setItem(README_INSTRUCTIONS_KEY, state.useReadmeInstructions ? "1" : "");
+    localStorage.setItem(BULK_SELECTION_ONLY_KEY, state.bulkSelectionOnly ? "1" : "");
   } catch {
     // localStorage can throw (private browsing, quota) - losing persistence
     // for one change is acceptable, crashing the tab is not. Matches

@@ -56,7 +56,40 @@ export interface RepoGradesControlsProps {
   onInstructionsChange: (value: string) => void;
   rubric: string;
   onRubricChange: (value: string) => void;
+
+  /** When true, every "Grade" / "Grade all" call reads a folder's own README
+   * as that folder's assignment instructions instead of the instructions
+   * textarea below - the action falls back to the textarea only for a repo
+   * whose folder has no README, and reports that fallback itself. This
+   * component only renders/reports the checkbox; the persisted value lives
+   * in RepoGradesUiState (repoGradesUiState.ts). */
+  useReadmeInstructions: boolean;
+  onUseReadmeInstructionsChange: (value: boolean) => void;
+
+  /** Scopes a "Grade all" bulk run to the checked rows only. With nothing
+   * checked, a bulk grade covers the whole column - the same "no selection
+   * means everything" convention handlePostColumn already applies to a
+   * column post. */
+  bulkSelectionOnly: boolean;
+  onBulkSelectionOnlyChange: (value: boolean) => void;
 }
+
+/** Shared inline override for a checkbox's <label> inside a `.field` wrapper -
+ * `.field label` (page.module.css) is styled for a short field CAPTION
+ * (small, bold, uppercase, letter-spaced), which reads wrong next to an
+ * inline checkbox's own sentence-case prompt text. Overriding just the
+ * text-styling properties here keeps `.field`'s spacing/gap without
+ * duplicating a whole new CSS rule for two checkboxes. */
+const CHECKBOX_LABEL_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  textTransform: "none",
+  letterSpacing: "normal",
+  fontWeight: 500,
+  fontSize: "0.9rem",
+  color: "var(--text-primary)",
+};
 
 export default function RepoGradesControls({
   courses,
@@ -76,6 +109,10 @@ export default function RepoGradesControls({
   onInstructionsChange,
   rubric,
   onRubricChange,
+  useReadmeInstructions,
+  onUseReadmeInstructionsChange,
+  bulkSelectionOnly,
+  onBulkSelectionOnlyChange,
 }: RepoGradesControlsProps) {
   return (
     <>
@@ -139,7 +176,34 @@ export default function RepoGradesControls({
       {showRowDependentFields && (
         <>
           <div className={styles.field}>
-            <label htmlFor="repo-grades-instructions">Assignment instructions (used by every &quot;Grade&quot; call)</label>
+            <label htmlFor="repo-grades-use-readme" style={CHECKBOX_LABEL_STYLE}>
+              <input
+                id="repo-grades-use-readme"
+                type="checkbox"
+                checked={useReadmeInstructions}
+                onChange={(e) => onUseReadmeInstructionsChange(e.target.checked)}
+              />
+              Use each folder&apos;s README as the assignment instructions
+            </label>
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="repo-grades-bulk-selection-only" style={CHECKBOX_LABEL_STYLE}>
+              <input
+                id="repo-grades-bulk-selection-only"
+                type="checkbox"
+                checked={bulkSelectionOnly}
+                onChange={(e) => onBulkSelectionOnlyChange(e.target.checked)}
+              />
+              Only the checked rows
+            </label>
+            <p className={styles.fieldHint}>With nothing checked, a bulk grade covers the whole column.</p>
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="repo-grades-instructions">
+              {useReadmeInstructions
+                ? "Assignment instructions (fallback - used only for a repo whose folder has no README)"
+                : "Assignment instructions (used by every \"Grade\" call)"}
+            </label>
             <textarea
               id="repo-grades-instructions"
               value={instructions}

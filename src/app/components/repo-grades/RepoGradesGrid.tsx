@@ -65,6 +65,20 @@ export interface RepoGradesGridProps {
   /** True while THIS column's bulk post call is in flight - governs its
    * button's busy state, independent of any other column's post attempt. */
   columnPosting: Readonly<Record<string, boolean>>;
+  /** GRADING sibling of onPostColumn above - grades every row this column
+   * covers (bound or not; see the sibling repoGradesBulkGrade.ts's
+   * buildBulkGradePlan, which never filters or orders by row.binding) rather
+   * than one cell at a time. index.tsx builds the plan and runs it; this file
+   * only reports the click. */
+  onGradeColumn: (folder: string) => void;
+  /** The folder currently running a bulk grade, or null when no bulk run is
+   * in flight - mirrors columnPosting's per-column busy flag, but ONLY one
+   * column can bulk-grade at a time (unlike posting, which tracks every
+   * column independently), so this is a single value rather than a record. */
+  bulkRunningFolder: string | null;
+  /** Progress for the column named by bulkRunningFolder - null whenever no
+   * bulk run is in flight for ANY column. */
+  bulkProgress: { done: number; total: number } | null;
 }
 
 const CELL_STATUS_TEXT: Record<RepoGradeCellStatus, string> = {
@@ -95,6 +109,9 @@ function ColumnHeaderControls({
   columnPosting,
   onAssignmentChange,
   onPostColumn,
+  onGradeColumn,
+  bulkRunningFolder,
+  bulkProgress,
 }: {
   column: RepoGradeColumn;
   rows: RepoGradeRow[];
@@ -104,6 +121,9 @@ function ColumnHeaderControls({
   columnPosting: Readonly<Record<string, boolean>>;
   onAssignmentChange: (folder: string, assignmentId: string | null) => void;
   onPostColumn: (column: RepoGradeColumn) => void;
+  onGradeColumn: (folder: string) => void;
+  bulkRunningFolder: string | null;
+  bulkProgress: { done: number; total: number } | null;
 }) {
   // Scoped exactly as index.tsx's post handler scopes it - see this file's
   // header comment on AC5 item 28. Counting every row while a selection
@@ -115,6 +135,15 @@ function ColumnHeaderControls({
     (row) => getRepoGradeCellEdit(cellEdits, row.repo, column.folder).postStatus !== "idle"
   );
   const busy = !!columnPosting[column.folder];
+  // GRADING sibling of the Post button's own busy/label logic above. Only ONE
+  // column can bulk-grade at a time (unlike posting, tracked per-folder in
+  // columnPosting), so "is a run in flight at all" and "is THIS column the
+  // one running" are two separate checks rather than a single per-folder
+  // lookup.
+  const bulkRunning = bulkRunningFolder !== null;
+  const gradingThisColumn = bulkRunningFolder === column.folder;
+  const gradeAllLabel =
+    gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}...` : "Grade all";
 
   return (
     <div className={styles.columnHeader}>
@@ -131,6 +160,16 @@ function ColumnHeaderControls({
           </option>
         ))}
       </select>
+      <button
+        type="button"
+        className={pageStyles.linkButton}
+        disabled={bulkRunning}
+        onClick={() => {
+          onGradeColumn(column.folder);
+        }}
+      >
+        {gradeAllLabel}
+      </button>
       <button
         type="button"
         className={pageStyles.linkButton}
@@ -161,6 +200,9 @@ export default function RepoGradesGrid({
   onPostColumn,
   onPostOneCell,
   columnPosting,
+  onGradeColumn,
+  bulkRunningFolder,
+  bulkProgress,
 }: RepoGradesGridProps) {
   if (rows.length === 0) {
     return <p className={pageStyles.emptyState}>No repositories matched this org (and prefix filter, if set).</p>;
@@ -199,6 +241,9 @@ export default function RepoGradesGrid({
                   columnPosting={columnPosting}
                   onAssignmentChange={onAssignmentChange}
                   onPostColumn={onPostColumn}
+                  onGradeColumn={onGradeColumn}
+                  bulkRunningFolder={bulkRunningFolder}
+                  bulkProgress={bulkProgress}
                 />
               </th>
             ))}

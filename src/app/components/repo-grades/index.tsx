@@ -25,7 +25,6 @@
 // hook's derived state and the pure repoGradesRows.ts/repoGradesPosting.ts/
 // repoGradesAssignmentMapping.ts functions, and renders.
 import { useEffect, useRef, useState } from "react";
-import { gradeRepoAction, postCanvasGradesAction } from "@/app/actions";
 import { useLlmProvider } from "@/lib/llm-provider";
 import TabHeader from "../TabHeader";
 import { useRepoGradesData } from "./useRepoGradesData";
@@ -50,7 +49,10 @@ import RepoGradesControls from "./RepoGradesControls";
 import RepoGradesStatusBanners from "./RepoGradesStatusBanners";
 import LinkUsernamesPanel from "./LinkUsernamesPanel";
 import { linkUsernamesLogDetail } from "./linkRepoUsernames";
-import { buildRepoGradeGridModel, sortRepoGradeRows, type RepoGradeColumn, type RepoGradeRow } from "./repoGradesRows";
+import {
+  buildRepoGradeGridModel,
+  sortRepoGradeRows,
+} from "./repoGradesRows";
 import {
   applyRepoGradeAssignmentMapping,
   filterRepoGradeAssignmentMapping,
@@ -59,17 +61,10 @@ import {
 } from "./repoGradesAssignmentMapping";
 import {
   EMPTY_REPO_GRADE_CELL_EDITS,
-  setRepoGradeCellEdit,
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
-import {
-  buildRepoGradePostPlan,
-  fanOutRepoGradePostResult,
-  repoGradeAssignmentUrl,
-  repoGradePostCandidateRows,
-  scopeRepoGradeRowsToSelection,
-} from "./repoGradesPosting";
 import RepoGradesGrid from "./RepoGradesGrid";
+import { useRepoGradesGradingActions } from "./useRepoGradesGradingActions";
 import styles from "../../page.module.css";
 import gridStyles from "./repo-grades.module.css";
 
@@ -377,17 +372,18 @@ export default function RepoGradesTab() {
     return result;
   };
 
-  // ---- per-cell editable state (AC4 items 20-21) and per-column posting
-  // (AC5) - ephemeral UI memory, never persisted to localStorage (a typed
-  // but un-posted score surviving a reload would be surprising, and this
-  // codebase's own precedent - GradingResults.tsx's `edits`/`postStatus` -
-  // does not persist these either). Reset whenever the selected course
-  // changes, via the same render-phase compare-and-adjust idiom the
-  // selection Set above uses, so switching courses cannot leave a prior
-  // course's in-progress edits or post statuses visible against a
-  // different course's repos. --------------------------------------------
+  // ---- per-cell editable state (AC4 items 20-21) - ephemeral UI memory,
+  // never persisted to localStorage (a typed but un-posted score surviving a
+  // reload would be surprising, and this codebase's own precedent -
+  // GradingResults.tsx's `edits`/`postStatus` - does not persist these
+  // either). Reset whenever the selected course changes, via the same
+  // render-phase compare-and-adjust idiom the selection Set above uses, so
+  // switching courses cannot leave a prior course's in-progress edits
+  // visible against a different course's repos. The per-column posting busy
+  // state (`columnPosting`) lives in useRepoGradesGradingActions now - it
+  // gets the SAME courseId and does its OWN render-phase reset in lockstep
+  // with this branch (see that hook's header comment). --------------------
   const [cellEdits, setCellEdits] = useState<RepoGradeCellEditsByRepo>(EMPTY_REPO_GRADE_CELL_EDITS);
-  const [columnPosting, setColumnPosting] = useState<Record<string, boolean>>({});
   const [postSummary, setPostSummary] = useState("");
   // ---- the activity log (docs/repo-grades-activity-log-acceptance-criteria.md).
   // Unlike cellEdits above this one DOES persist (L3): it is the record of
@@ -402,7 +398,6 @@ export default function RepoGradesTab() {
   if (uiState.courseId !== cellStateResetForCourse) {
     setCellStateResetForCourse(uiState.courseId);
     setCellEdits(EMPTY_REPO_GRADE_CELL_EDITS);
-    setColumnPosting({});
     setPostSummary("");
     setLog(loadRepoGradeLog(uiState.courseId));
   }
@@ -477,322 +472,37 @@ export default function RepoGradesTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanError]);
 
-  const handleScoreChange = (repo: string, folder: string, score: string) => {
-    setCellEdits((prev) => setRepoGradeCellEdit(prev, repo, folder, { score }));
-  };
-
-  const handleCommentChange = (repo: string, folder: string, comment: string) => {
-    setCellEdits((prev) => setRepoGradeCellEdit(prev, repo, folder, { comment }));
-  };
-
-  // AC4 item 21: reuses gradeRepoAction with `folderPath` as the `pathPrefix` -
-  // the same call folder-per-module grading already makes - never a new
-  // grading engine. Gated behind RepoGradeCellControl's "Grade" button click
-  // only (see that file's header and repoGrades.wiring.test.ts's canary-
-  // paired guard) - never on render, matching REGRESSION entries 98 and 101.
-  //
-  // AC "posting and reflow" A3: also records `rubricAreas` and
-  // `generatedScore` on the cell edit - the ONLY place either is ever set
-  // (never by handleScoreChange/handleCommentChange below) - so
-  // repoGradesPosting.ts's repoGradeScoreWasEdited can later tell "the
-  // instructor left the AI's score alone" from "the instructor hand-edited
-  // it" by comparing the CURRENT score field against `generatedScore`, the
-  // score exactly as THIS call produced it.
-  const handleGradeCell = async (row: RepoGradeRow, column: RepoGradeColumn) => {
-    const cell = row.cells[column.folder];
-    // Defensive guard mirroring RepoGradeCellControl's own render condition
-    // (it is only ever mounted for an "ungraded" cell) - a stale closure
-    // from a re-scan mid-edit should never grade a folder that turned out
-    // not to exist.
-    if (cell.status !== "ungraded") return;
-    setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: true, gradeError: null }));
-    const result = await gradeRepoAction(row.repo, uiState.instructions, uiState.rubric, provider, undefined, column.folder);
-    if ("error" in result) {
-      setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
-      // L1 item 2. A grading failure otherwise leaves only a per-cell error
-      // string that the next attempt overwrites.
-      recordLog([buildLogEntry("grade-failed", { repo: row.repo, folder: column.folder, detail: result.error })]);
-      return;
-    }
-    const first = result.run.results[0];
-    setCellEdits((prev) =>
-      setRepoGradeCellEdit(prev, row.repo, column.folder, {
-        grading: false,
-        gradeError: null,
-        score: first?.totalScore ?? "",
-        comment: first?.overallComment ?? "",
-        rubricAreas: first?.rubricAreas ?? [],
-        generatedScore: first?.totalScore ?? null,
-      })
-    );
-    // L1 item 1: the score AS GENERATED, with the provider that produced it -
-    // so a later "why is this score what it is" question can tell an AI
-    // result from a hand-typed one even after the instructor has edited the
-    // cell (the same distinction repoGradeScoreWasEdited makes at post time).
-    // docs/folder-scoped-grading-completeness-acceptance-criteria.md C2: the
-    // grading path used to COMPUTE whether the submission was cut and then
-    // throw both flags away, so an instructor could not tell "the model read
-    // my whole folder" from "it read the first fraction of it". Both are now
-    // returned, and this is where they become visible - in the log that is
-    // already this view's durable, downloadable record (entry 333), so the
-    // fact survives the note and travels in the CSV.
-    //
-    // `digestTruncated` means the INGEST hit a cap collecting the folder;
-    // `submissionTruncated` means the assembled text was cut again before the
-    // model saw it. They are different cuts at different layers, so they are
-    // named separately rather than merged into one "truncated" - a reader
-    // chasing missing code needs to know WHICH budget to raise.
-    const cuts: string[] = [];
-    if (result.digestTruncated) cuts.push("some folder files were left out of the digest");
-    if (first?.submissionTruncated) cuts.push("the submission text was truncated before grading");
-    const detail = cuts.length > 0 ? `Graded by ${provider} - ${cuts.join("; ")}` : `Graded by ${provider}`;
-    if (cuts.length > 0) {
-      setPostSummary(`${row.repo} / ${column.folder}: graded, but ${cuts.join("; ")}.`);
-    }
-
-    recordLog([
-      buildLogEntry("grade-succeeded", {
-        repo: row.repo,
-        folder: column.folder,
-        score: first?.totalScore ?? "",
-        detail,
-      }),
-    ]);
-  };
-
-  // AC5 items 27-32: the dangerous half. ONE postCanvasGradesAction call for
-  // this column's postable rows (built by repoGradePostCandidateRows +
-  // buildRepoGradePostPlan - the SAME two functions RepoGradesGrid.tsx's
-  // column header calls to compute the button's own count/enabled state, so
-  // the two can never disagree - AC5 item 28), gated behind an explicit
-  // confirm naming the count (AC5 item 29, the exact existing wording from
-  // GradingResults.tsx:293), with the userId -> row map built BEFORE posting
-  // so every attempted row flips to "posting" first, then
-  // fanOutRepoGradePostResult maps the real result back per row after the
-  // call resolves (AC5 item 30, copying GradingResults.tsx:300-352's shape).
-  //
-  // AC "posting and reflow" A1: `selected` now governs which rows this call
-  // even CONSIDERS - scopeRepoGradeRowsToSelection (repoGradesPosting.ts)
-  // narrows `sortedRows` to the checked repos before candidate assembly when
-  // a selection exists, and is a no-op (whole column) when it does not. This
-  // is the fix for the real defect the "posting and reflow" AC's A1 names:
-  // before this, `selected` gated nothing on the post path at all, so
-  // ticking four students and clicking Post silently graded-and-posted every
-  // postable row in the column instead.
-  //
-  // NOTE (flagged plainly, not papered over): RepoGradesGrid.tsx's column
-  // header button (ColumnHeaderControls) computes ITS OWN postable count
-  // from the UNSCOPED `rows` it was given - it has no `selected` prop wired
-  // to it and this implementer's file set excludes RepoGradesGrid.tsx, so
-  // that header count/enabled-state can now legitimately disagree with what
-  // actually gets posted whenever a selection is active (it will show the
-  // whole column's count even though only the selection posts). The confirm
-  // dialog below and the "nothing postable in the current scope" summary
-  // message always describe the REAL, selection-scoped plan, so the actual
-  // write is never mis-stated - only the header's separate, always-visible
-  // count can be stale relative to it. Closing that requires threading
-  // `selected` into RepoGradesGrid.tsx's ColumnHeaderControls.
-  const handlePostColumn = async (column: RepoGradeColumn) => {
-    if (!course) return;
-    const scopedRows = scopeRepoGradeRowsToSelection(sortedRows, selected);
-    const candidates = repoGradePostCandidateRows(scopedRows, cellEdits, column.folder);
-    const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
-    const usingSelection = selected.size > 0;
-    // Now reachable post-A1 (e.g. every selected row is unbound) - say so.
-    if (plan.postable.length === 0) {
-      const summary = usingSelection
-        ? `${column.folder}: none of the ${selected.size} selected row(s) are postable in this column.`
-        : `${column.folder}: nothing is postable in this column yet.`;
-      setPostSummary(summary);
-      // L1 item 5: every skipped row with its OWN reason from the plan, not
-      // just the one-line summary - "why was this student not posted" is the
-      // question the log exists to answer, and the reasons differ per row
-      // (unbound, no folder, no score, no assignment mapped).
-      recordLog([
-        buildLogEntry("post-skipped", { folder: column.folder, assignmentId: column.assignmentId ?? "", detail: summary }),
-        ...plan.skipped.map((skip) =>
-          buildLogEntry("post-skipped", {
-            repo: skip.repo,
-            folder: column.folder,
-            assignmentId: column.assignmentId ?? "",
-            detail: skip.reason,
-          })
-        ),
-      ]);
-      return;
-    }
-
-    // A2: base sentence byte-identical to GradingResults.tsx:293-295.
-    const scopeSentence = usingSelection
-      ? ` This posts only your ${plan.postable.length} selected row(s), not the whole column.`
-      : ` No rows are selected, so this posts the whole column (all ${plan.postable.length} postable row(s)).`;
-    if (!window.confirm(`Post ${plan.postable.length} grade(s) to Canvas? This writes to the live gradebook.${scopeSentence}`)) {
-      // L1 item 6: "nothing happened and I do not remember why" is exactly
-      // the question a log exists to answer.
-      recordLog([
-        buildLogEntry("post-cancelled", {
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          detail: `Declined the confirm for ${plan.postable.length} grade(s)`,
-        }),
-      ]);
-      return;
-    }
-
-    const assignmentUrl = column.assignmentId ? repoGradeAssignmentUrl(course.canvasUrl ?? "", column.assignmentId) : null;
-    if (!assignmentUrl) {
-      const summary = `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`;
-      setPostSummary(summary);
-      recordLog([
-        buildLogEntry("post-skipped", { folder: column.folder, assignmentId: column.assignmentId ?? "", detail: summary }),
-      ]);
-      return;
-    }
-
-    setColumnPosting((prev) => ({ ...prev, [column.folder]: true }));
-    setCellEdits((prev) => {
-      let next = prev;
-      for (const item of plan.postable) {
-        next = setRepoGradeCellEdit(next, item.repo, column.folder, { postStatus: "posting", postMessage: null });
-      }
-      return next;
-    });
-
-    const result = await postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade));
-
-    const fanout = fanOutRepoGradePostResult(
-      plan.postable.map((p) => ({ repo: p.repo, userId: p.userId })),
-      result
-    );
-    setCellEdits((prev) => {
-      let next = prev;
-      for (const outcome of fanout) {
-        next = setRepoGradeCellEdit(next, outcome.repo, column.folder, {
-          postStatus: outcome.postStatus,
-          postMessage: outcome.postMessage,
-        });
-      }
-      return next;
-    });
-    setColumnPosting((prev) => ({ ...prev, [column.folder]: false }));
-
-    // L1 items 3-5: one entry per ATTEMPTED row carrying the exact score that
-    // went out (read off the plan, never re-read from the edit state, which
-    // the instructor may have kept typing into while the call was in flight),
-    // plus one per row the plan dropped before the call.
-    const gradeByRepo = new Map(plan.postable.map((item) => [item.repo, item.grade.grade]));
-    recordLog([
-      ...fanout.map((outcome) =>
-        buildLogEntry(outcome.postStatus === "error" ? "post-failed" : "post-succeeded", {
-          repo: outcome.repo,
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          score: gradeByRepo.get(outcome.repo) ?? "",
-          detail: outcome.postMessage ?? "",
-        })
-      ),
-      ...plan.skipped.map((skip) =>
-        buildLogEntry("post-skipped", {
-          repo: skip.repo,
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          detail: skip.reason,
-        })
-      ),
-    ]);
-
-    const failedCount = fanout.filter((f) => f.postStatus === "error").length;
-    setPostSummary(
-      `${column.folder}: posted ${fanout.length - failedCount}${failedCount ? `, ${failedCount} failed` : ""}.`
-    );
-  };
-
-  // AC "posting and reflow" A4: retries (or deliberately re-posts) exactly
-  // ONE cell - a one-element-array call mirroring GradingResults.tsx:363-390's
-  // handlePostOne, reusing the SAME repoGradePostCandidateRows /
-  // buildRepoGradePostPlan / fanOutRepoGradePostResult pipeline
-  // handlePostColumn uses (scoped to `[row]`), so a retry can never disagree
-  // with what a whole-column post would have done for that exact row, and
-  // never touches any other row's status. No confirm dialog, by design: this
-  // app treats click cost as a first-class factor and a single, already-
-  // scoped row is a deliberate enough act on its own (handlePostOne itself
-  // has none either).
-  //
-  // WIRED: passed to RepoGradesGrid as `onPostOneCell`, which forwards it into
-  // each cell as RepoGradeCellControl's `onPostOne`. It did not ship switched
-  // off - the failure mode docs/REGRESSION.md entry 211 records.
-  const handlePostOneCell = async (row: RepoGradeRow, column: RepoGradeColumn) => {
-    if (!course) return;
-    const candidates = repoGradePostCandidateRows([row], cellEdits, column.folder);
-    const plan = buildRepoGradePostPlan(candidates, column.assignmentId);
-    if (plan.postable.length === 0) {
-      // This path is otherwise completely silent (by design - the button that
-      // reaches it is already only rendered for a plausible cell), which is
-      // precisely why the log should say the retry did nothing and name the
-      // plan's own reason for it.
-      recordLog(
-        plan.skipped.map((skip) =>
-          buildLogEntry("post-skipped", {
-            repo: skip.repo,
-            folder: column.folder,
-            assignmentId: column.assignmentId ?? "",
-            detail: skip.reason,
-          })
-        )
-      );
-      return;
-    }
-
-    const assignmentUrl = column.assignmentId ? repoGradeAssignmentUrl(course.canvasUrl ?? "", column.assignmentId) : null;
-    if (!assignmentUrl) {
-      const summary = `${column.folder}: could not build a Canvas assignment URL for "${course.name}" - check the course's Canvas URL.`;
-      setPostSummary(summary);
-      recordLog([
-        buildLogEntry("post-skipped", {
-          repo: row.repo,
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          detail: summary,
-        }),
-      ]);
-      return;
-    }
-
-    setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { postStatus: "posting", postMessage: null }));
-
-    const result = await postCanvasGradesAction(assignmentUrl, plan.postable.map((p) => p.grade));
-
-    const fanout = fanOutRepoGradePostResult(
-      plan.postable.map((p) => ({ repo: p.repo, userId: p.userId })),
-      result
-    );
-    setCellEdits((prev) => {
-      let next = prev;
-      for (const outcome of fanout) {
-        next = setRepoGradeCellEdit(next, outcome.repo, column.folder, {
-          postStatus: outcome.postStatus,
-          postMessage: outcome.postMessage,
-        });
-      }
-      return next;
-    });
-
-    const singleGrade = plan.postable[0]?.grade.grade ?? "";
-    recordLog(
-      fanout.map((outcome) =>
-        buildLogEntry(outcome.postStatus === "error" ? "post-failed" : "post-succeeded", {
-          repo: outcome.repo,
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          score: singleGrade,
-          detail: outcome.postMessage ?? "Single-row retry",
-        })
-      )
-    );
-
-    const failed = fanout.some((f) => f.postStatus === "error");
-    setPostSummary(`${row.repo} / ${column.folder}: ${failed ? "failed to post." : "posted."}`);
-  };
+  // AC4 items 20-21 and AC5 (docs/repo-grades-view-acceptance-criteria.md):
+  // per-cell score/comment edits, on-demand and bulk grading, and posting to
+  // the live Canvas gradebook. Extracted into this hook once this file hit
+  // the codebase's 1000-line cap - see that hook's own header comment for
+  // the full rationale and the exact param surface.
+  const {
+    handleScoreChange,
+    handleCommentChange,
+    handleGradeCell,
+    handlePostColumn,
+    handlePostOneCell,
+    columnPosting,
+    handleGradeColumn,
+    bulkRunningFolder,
+    bulkProgress,
+  } = useRepoGradesGradingActions({
+    rows: sortedRows,
+    cellEdits,
+    setCellEdits,
+    selected,
+    instructions: uiState.instructions,
+    rubric: uiState.rubric,
+    useReadmeInstructions: uiState.useReadmeInstructions,
+    bulkSelectionOnly: uiState.bulkSelectionOnly,
+    courseId: uiState.courseId,
+    course,
+    provider,
+    recordLog,
+    buildLogEntry,
+    setPostSummary,
+  });
 
   const missingInstitution = !!course && !(course.institution ?? "").trim();
   const missingOrg = !!course && !(course.githubOrg ?? "").trim();
@@ -824,6 +534,10 @@ export default function RepoGradesTab() {
         onInstructionsChange={(value) => setUiState((prev) => ({ ...prev, instructions: value }))}
         rubric={uiState.rubric}
         onRubricChange={(value) => setUiState((prev) => ({ ...prev, rubric: value }))}
+        useReadmeInstructions={uiState.useReadmeInstructions}
+        onUseReadmeInstructionsChange={(value) => setUiState((prev) => ({ ...prev, useReadmeInstructions: value }))}
+        bulkSelectionOnly={uiState.bulkSelectionOnly}
+        onBulkSelectionOnlyChange={(value) => setUiState((prev) => ({ ...prev, bulkSelectionOnly: value }))}
       />
 
       <RepoGradesStatusBanners
@@ -918,6 +632,9 @@ export default function RepoGradesTab() {
           onPostColumn={handlePostColumn}
           onPostOneCell={handlePostOneCell}
           columnPosting={columnPosting}
+          onGradeColumn={handleGradeColumn}
+          bulkRunningFolder={bulkRunningFolder}
+          bulkProgress={bulkProgress}
         />
       )}
 

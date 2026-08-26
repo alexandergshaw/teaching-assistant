@@ -43,6 +43,16 @@ const GRID_PATH = join(process.cwd(), "src/app/components/repo-grades/RepoGrades
 const gridSource = readFileSync(GRID_PATH, "utf8");
 const INDEX_PATH = join(process.cwd(), "src/app/components/repo-grades/index.tsx");
 const indexSource = readFileSync(INDEX_PATH, "utf8");
+// The grading/posting handlers (handleGradeCell, handlePostColumn,
+// handlePostOneCell, handleGradeColumn, and the withLiveScores/
+// useRepoGradesBulkGrade wiring) moved out of index.tsx into this hook once
+// index.tsx hit the codebase's 1000-line cap - see that file's own header
+// comment. Every guard below that used to read those handlers' bodies off
+// indexSource now reads them off hookSource instead; guards about the JSX
+// wiring itself (onGradeCell={handleGradeCell} etc.) still read indexSource,
+// since that wiring did not move.
+const HOOK_PATH = join(process.cwd(), "src/app/components/repo-grades/useRepoGradesGradingActions.ts");
+const hookSource = readFileSync(HOOK_PATH, "utf8");
 
 /**
  * Finds every call site of `${calleeName}(` in `text` and reports, per call
@@ -231,45 +241,56 @@ describe("extractUseEffectBodies (canary: proves the effect-body extractor actua
   });
 });
 
-describe("index.tsx never calls gradeRepoAction or postCanvasGradesAction from inside a useEffect (AC4 item 21, AC5 items 27/29 - no auto-grade or auto-post on render)", () => {
+describe("useRepoGradesGradingActions.ts never calls gradeRepoAction or postCanvasGradesAction from inside a useEffect (AC4 item 21, AC5 items 27/29 - no auto-grade or auto-post on render)", () => {
+  // handleGradeCell, handlePostColumn, handlePostOneCell and their shared
+  // helpers moved out of index.tsx into useRepoGradesGradingActions.ts once
+  // index.tsx hit the codebase's 1000-line cap (that hook's own header
+  // comment explains the move) - so every check in this describe block that
+  // used to read indexSource now reads hookSource instead. The two checks
+  // that assert the JSX WIRING itself (onGradeCell={handleGradeCell},
+  // onPostColumn={handlePostColumn}) still read indexSource, since that
+  // wiring did not move.
   it("canary: the file was actually read and imports both dangerous actions", () => {
-    expect(indexSource.length).toBeGreaterThan(500);
-    expect(indexSource).toContain("gradeRepoAction");
-    expect(indexSource).toContain("postCanvasGradesAction");
+    expect(hookSource.length).toBeGreaterThan(500);
+    expect(hookSource).toContain("gradeRepoAction");
+    expect(hookSource).toContain("postCanvasGradesAction");
   });
 
-  it("index.tsx contains at least one useEffect body (uiState persistence), so the absence checks below are not vacuous", () => {
+  it("index.tsx still contains at least one useEffect body (uiState persistence), proving the extractUseEffectBodies technique itself is not vacuous - relevant here because the hook checked below defines no effect at all, which the next test asserts directly", () => {
     // Selection persistence is deliberately NOT a useEffect body any more -
-    // see the mount-time-race guard below (and index.tsx:106-169's own
-    // comment) for why a blanket `useEffect(() => persist(selected), [selected])`
-    // was itself the bug. uiState persistence (index.tsx:81-83) is the
-    // remaining effect and is enough to keep the "not found within any
-    // effect body" assertions below non-vacuous - they would trivially (and
-    // meaninglessly) pass against an empty bodies array too.
+    // see the mount-time-race guard below (and index.tsx's own comment) for
+    // why a blanket `useEffect(() => persist(selected), [selected])` was
+    // itself the bug. uiState persistence is the remaining effect in
+    // index.tsx and is enough to keep extractUseEffectBodies proven non-
+    // vacuous in general.
     expect(extractUseEffectBodies(indexSource).length).toBeGreaterThanOrEqual(1);
   });
 
+  it("useRepoGradesGradingActions.ts defines no useEffect at all, so gradeRepoAction/postCanvasGradesAction can only ever run from a real onClick reaching one of its returned handlers, never from render or an effect - stripComments (proven above) keeps this file's own comment about the rule from tripping the check", () => {
+    expect(stripComments(hookSource)).not.toContain("useEffect");
+  });
+
   it("gradeRepoAction is never called from inside any useEffect body", () => {
-    const bodies = extractUseEffectBodies(indexSource);
+    const bodies = extractUseEffectBodies(hookSource);
     expect(bodies.some((b) => b.includes("gradeRepoAction("))).toBe(false);
   });
 
   it("postCanvasGradesAction is never called from inside any useEffect body", () => {
-    const bodies = extractUseEffectBodies(indexSource);
+    const bodies = extractUseEffectBodies(hookSource);
     expect(bodies.some((b) => b.includes("postCanvasGradesAction("))).toBe(false);
   });
 
-  it("gradeRepoAction is called from inside handleGradeCell, the function wired to RepoGradesGrid's onGradeCell prop - not some other unrelated function", () => {
-    const defIdx = indexSource.indexOf("const handleGradeCell = async");
+  it("gradeRepoAction is called from inside handleGradeCell, the function index.tsx wires to RepoGradesGrid's onGradeCell prop - not some other unrelated function", () => {
+    const defIdx = hookSource.indexOf("const handleGradeCell = async");
     expect(defIdx).toBeGreaterThan(-1);
-    const nextFnIdx = indexSource.indexOf("const handlePostColumn", defIdx);
-    const body = indexSource.slice(defIdx, nextFnIdx > -1 ? nextFnIdx : defIdx + 1500);
+    const nextFnIdx = hookSource.indexOf("const handlePostColumn", defIdx);
+    const body = hookSource.slice(defIdx, nextFnIdx > -1 ? nextFnIdx : defIdx + 1500);
     expect(body).toContain("gradeRepoAction(");
     expect(indexSource).toContain("onGradeCell={handleGradeCell}");
   });
 
-  it("postCanvasGradesAction is called from inside handlePostColumn, the function wired to RepoGradesGrid's onPostColumn prop - not some other unrelated function", () => {
-    const defIdx = indexSource.indexOf("const handlePostColumn = async");
+  it("postCanvasGradesAction is called from inside handlePostColumn, the function index.tsx wires to RepoGradesGrid's onPostColumn prop - not some other unrelated function", () => {
+    const defIdx = hookSource.indexOf("const handlePostColumn = async");
     expect(defIdx).toBeGreaterThan(-1);
     // Bounded by the NEXT handler's definition rather than by a fixed
     // character count (the sibling gradeRepoAction assertion above already
@@ -277,19 +298,19 @@ describe("index.tsx never calls gradeRepoAction or postCanvasGradesAction from i
     // handler" and "this handler grew past N characters" into the same
     // failure, and the activity-log wave's added recordLog calls are exactly
     // the benign growth that tripped the old 2000-character bound.
-    const nextFnIdx = indexSource.indexOf("const handlePostOneCell", defIdx);
-    const body = indexSource.slice(defIdx, nextFnIdx > -1 ? nextFnIdx : indexSource.length);
+    const nextFnIdx = hookSource.indexOf("const handlePostOneCell", defIdx);
+    const body = hookSource.slice(defIdx, nextFnIdx > -1 ? nextFnIdx : hookSource.length);
     expect(body).toContain("postCanvasGradesAction(");
     expect(indexSource).toContain("onPostColumn={handlePostColumn}");
   });
 
   it("handlePostColumn requires an explicit window.confirm before calling postCanvasGradesAction, with the exact required wording", () => {
-    const defIdx = indexSource.indexOf("const handlePostColumn = async");
-    const callIdx = indexSource.indexOf("postCanvasGradesAction(", defIdx);
-    const confirmIdx = indexSource.indexOf("window.confirm(", defIdx);
+    const defIdx = hookSource.indexOf("const handlePostColumn = async");
+    const callIdx = hookSource.indexOf("postCanvasGradesAction(", defIdx);
+    const confirmIdx = hookSource.indexOf("window.confirm(", defIdx);
     expect(confirmIdx).toBeGreaterThan(-1);
     expect(confirmIdx).toBeLessThan(callIdx);
-    expect(indexSource).toContain("Post ${plan.postable.length} grade(s) to Canvas? This writes to the live gradebook.");
+    expect(hookSource).toContain("Post ${plan.postable.length} grade(s) to Canvas? This writes to the live gradebook.");
   });
 });
 
@@ -476,28 +497,34 @@ describe("usesSharedFunction (canary: proves the import+call check actually disc
   });
 });
 
-describe("RepoGradesGrid.tsx and index.tsx both drive postability through buildRepoGradePostPlan, never a hand-rolled duplicate (AC5 item 28)", () => {
+describe("RepoGradesGrid.tsx and useRepoGradesGradingActions.ts both drive postability through buildRepoGradePostPlan, never a hand-rolled duplicate (AC5 item 28)", () => {
+  // The post payload's assembly (buildRepoGradePostPlan/repoGradePostCandidateRows
+  // calls, and the postCanvasGradesAction/gradeRepoAction calls themselves)
+  // moved from index.tsx into useRepoGradesGradingActions.ts along with
+  // handlePostColumn/handlePostOneCell/handleGradeCell - see that hook's own
+  // header comment. Every check below that used to read indexSource for
+  // these now reads hookSource instead.
   it("RepoGradesGrid.tsx's column header count/button state is computed via buildRepoGradePostPlan, imported from repoGradesPosting.ts", () => {
     expect(usesSharedFunction(gridSource, "buildRepoGradePostPlan", "./repoGradesPosting")).toBe(true);
   });
 
-  it("index.tsx's actual post payload is computed via the SAME buildRepoGradePostPlan, imported from repoGradesPosting.ts", () => {
-    expect(usesSharedFunction(indexSource, "buildRepoGradePostPlan", "./repoGradesPosting")).toBe(true);
+  it("useRepoGradesGradingActions.ts's actual post payload is computed via the SAME buildRepoGradePostPlan, imported from repoGradesPosting.ts", () => {
+    expect(usesSharedFunction(hookSource, "buildRepoGradePostPlan", "./repoGradesPosting")).toBe(true);
   });
 
-  it("RepoGradesGrid.tsx and index.tsx both also assemble their candidate rows via the SAME repoGradePostCandidateRows, never each deriving their own row list", () => {
+  it("RepoGradesGrid.tsx and useRepoGradesGradingActions.ts both also assemble their candidate rows via the SAME repoGradePostCandidateRows, never each deriving their own row list", () => {
     expect(usesSharedFunction(gridSource, "repoGradePostCandidateRows", "./repoGradesPosting")).toBe(true);
-    expect(usesSharedFunction(indexSource, "repoGradePostCandidateRows", "./repoGradesPosting")).toBe(true);
+    expect(usesSharedFunction(hookSource, "repoGradePostCandidateRows", "./repoGradesPosting")).toBe(true);
   });
 
-  it("postCanvasGradesAction is called from index.tsx alone - never from RepoGradesGrid.tsx or RepoGradeCellControl.tsx (AC5 item 27: one call path, nothing else)", () => {
-    expect(indexSource).toContain("postCanvasGradesAction(");
+  it("postCanvasGradesAction is called from useRepoGradesGradingActions.ts alone - never from RepoGradesGrid.tsx or RepoGradeCellControl.tsx (AC5 item 27: one call path, nothing else)", () => {
+    expect(hookSource).toContain("postCanvasGradesAction(");
     expect(gridSource).not.toContain("postCanvasGradesAction(");
     expect(cellControlSource).not.toContain("postCanvasGradesAction(");
   });
 
-  it("gradeRepoAction is called from index.tsx alone - never from RepoGradesGrid.tsx or RepoGradeCellControl.tsx (no second grading engine)", () => {
-    expect(indexSource).toContain("gradeRepoAction(");
+  it("gradeRepoAction is called from useRepoGradesGradingActions.ts alone - never from RepoGradesGrid.tsx or RepoGradeCellControl.tsx (no second grading engine)", () => {
+    expect(hookSource).toContain("gradeRepoAction(");
     expect(gridSource).not.toContain("gradeRepoAction(");
     expect(cellControlSource).not.toContain("gradeRepoAction(");
   });
@@ -588,9 +615,9 @@ describe("index.tsx actually feeds and renders the activity log", () => {
     expect(indexSource).toContain("onClear={() => setLog([])}");
   });
 
-  it("records an entry on both post outcomes and on both grading outcomes", () => {
+  it("records an entry on both post outcomes and on both grading outcomes - these four record sites moved into useRepoGradesGradingActions.ts along with the handlers that own them", () => {
     for (const kind of ['"post-succeeded"', '"post-failed"', '"grade-succeeded"', '"grade-failed"']) {
-      expect(indexSource).toContain(kind);
+      expect(hookSource).toContain(kind);
     }
   });
 
@@ -734,7 +761,12 @@ describe("handleConfirmAllSuggested records a log entry only when confirmSuggest
   it("the buildLogEntry(\"binding-confirmed\" call site sits inside handleConfirmAllSuggested's own non-error guard", () => {
     const defIdx = indexSource.indexOf("const handleConfirmAllSuggested = async");
     expect(defIdx).toBeGreaterThan(-1);
-    const nextFnIdx = indexSource.indexOf("const handleGradeCell = async", defIdx);
+    // Bounded by the next function actually declared in index.tsx
+    // (handleLinkFromCourseRoster) rather than by handleGradeCell, which
+    // used to follow it here but has since moved into
+    // useRepoGradesGradingActions.ts along with the rest of the grading/
+    // posting handlers - see that hook's own header comment.
+    const nextFnIdx = indexSource.indexOf("const handleLinkFromCourseRoster = async", defIdx);
     expect(nextFnIdx).toBeGreaterThan(defIdx);
     const body = indexSource.slice(defIdx, nextFnIdx);
     expect(body).toContain('buildLogEntry("binding-confirmed"');

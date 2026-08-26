@@ -60,7 +60,7 @@ afterEach(() => {
 });
 
 describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
-  it("returns defaults (empty course, empty prefix, repo/asc sort, empty instructions/rubric/link assignment, roster link source) when nothing is stored", () => {
+  it("returns defaults (empty course, empty prefix, repo/asc sort, empty instructions/rubric/link assignment, roster link source, README instructions on, bulk selection-only off) when nothing is stored", () => {
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "",
       orgPrefix: "",
@@ -69,6 +69,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       rubric: "",
       linkAssignmentId: "",
       linkSource: "roster",
+      useReadmeInstructions: true,
+      bulkSelectionOnly: false,
     });
   });
 
@@ -82,6 +84,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       rubric: "",
       linkAssignmentId: "",
       linkSource: "roster",
+      useReadmeInstructions: true,
+      bulkSelectionOnly: false,
     });
   });
 
@@ -94,6 +98,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       rubric: "5 pts: has a README",
       linkAssignmentId: "9001",
       linkSource: "live",
+      useReadmeInstructions: false,
+      bulkSelectionOnly: true,
     });
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "course-1",
@@ -103,6 +109,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       rubric: "5 pts: has a README",
       linkAssignmentId: "9001",
       linkSource: "live",
+      useReadmeInstructions: false,
+      bulkSelectionOnly: true,
     });
   });
 
@@ -117,6 +125,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         rubric: "",
         linkAssignmentId: "",
         linkSource: "roster",
+        useReadmeInstructions: true,
+        bulkSelectionOnly: false,
       })
     ).not.toThrow();
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBeNull();
@@ -133,6 +143,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
         rubric: "",
         linkAssignmentId: "",
         linkSource: "roster",
+        useReadmeInstructions: true,
+        bulkSelectionOnly: false,
       })
     ).not.toThrow();
   });
@@ -156,6 +168,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       rubric: "",
       linkAssignmentId: "",
       linkSource: "live",
+      useReadmeInstructions: true,
+      bulkSelectionOnly: false,
     });
     expect(loadRepoGradesUiState().linkSource).toBe("live");
   });
@@ -165,7 +179,34 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
     expect(loadRepoGradesUiState().linkSource).toBe("roster");
   });
 
-  it("persists course id, org prefix, sort, instructions, rubric, link assignment id, and link source under seven distinct ta- keys", () => {
+  it("round-trips useReadmeInstructions=false and bulkSelectionOnly=true through persist then load", () => {
+    persistRepoGradesUiState({
+      courseId: "",
+      orgPrefix: "",
+      sort: DEFAULT_REPO_GRADE_SORT,
+      instructions: "",
+      rubric: "",
+      linkAssignmentId: "",
+      linkSource: "roster",
+      useReadmeInstructions: false,
+      bulkSelectionOnly: true,
+    });
+    const loaded = loadRepoGradesUiState();
+    expect(loaded.useReadmeInstructions).toBe(false);
+    expect(loaded.bulkSelectionOnly).toBe(true);
+  });
+
+  it("reads useReadmeInstructions as false for any stored value other than the exact \"1\" marker - only NEVER-persisted (raw null) falls back to the true default", () => {
+    fakeStorage.setItem("ta-repo-grades-readme-instructions", "nonsense");
+    expect(loadRepoGradesUiState().useReadmeInstructions).toBe(false);
+  });
+
+  it("reads bulkSelectionOnly as false for any stored value other than the exact \"1\" marker, same as its own true-marker default of false", () => {
+    fakeStorage.setItem("ta-repo-grades-bulk-selection-only", "nonsense");
+    expect(loadRepoGradesUiState().bulkSelectionOnly).toBe(false);
+  });
+
+  it("persists course id, org prefix, sort, instructions, rubric, link assignment id, link source, README-instructions flag, and bulk-selection-only flag under nine distinct ta- keys", () => {
     persistRepoGradesUiState({
       courseId: "course-9",
       orgPrefix: "wk",
@@ -174,6 +215,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       rubric: "10 pts total",
       linkAssignmentId: "9001",
       linkSource: "live",
+      useReadmeInstructions: false,
+      bulkSelectionOnly: true,
     });
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBe("course-9");
     expect(fakeStorage.getItem("ta-repo-grades-org-prefix")).toBe("wk");
@@ -182,6 +225,8 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
     expect(fakeStorage.getItem("ta-repo-grades-rubric")).toBe("10 pts total");
     expect(fakeStorage.getItem("ta-repo-grades-link-assignment")).toBe("9001");
     expect(fakeStorage.getItem("ta-repo-grades-link-source")).toBe("live");
+    expect(fakeStorage.getItem("ta-repo-grades-readme-instructions")).toBe("");
+    expect(fakeStorage.getItem("ta-repo-grades-bulk-selection-only")).toBe("1");
   });
 });
 

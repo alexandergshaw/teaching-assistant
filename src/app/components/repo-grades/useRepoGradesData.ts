@@ -24,6 +24,7 @@
 // derived-loading state without any effect ever writing "loading" itself.
 import { useEffect, useState } from "react";
 import {
+  listAssignmentTextSubmissionsAction,
   listCourseAssignmentsAction,
   listCourseHubAction,
   listCourseRosterAction,
@@ -42,6 +43,16 @@ import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
 // the same way from src/lib/supabase/courses.ts.
 import type { CanvasAssignmentBrief } from "@/lib/canvas";
 import { applyRepoGradeBinding } from "./repoGradesRows";
+// buildRosterUpdate is the exact merge the "Link GitHub usernames to roster"
+// workflow step (steps.course-setup.rosters.ts:70-173) uses to fold accepted
+// {student, canvasUserId, username} submissions into studentRepos/roster -
+// reused here rather than re-implemented so the two entry points (the
+// workflow step and this view) can never drift on dedup/disambiguation/merge
+// rules. partitionGithubUsernameSubmissions is the sibling pure formatter
+// that turns raw Canvas text submissions into that same ok/ambiguous split
+// (mirroring the workflow step's own extractGithubHandle loop).
+import { buildRosterUpdate } from "@/lib/workflows/roster-merge";
+import { partitionGithubUsernameSubmissions, type LinkUsernamesOutcome } from "./linkRepoUsernames";
 
 interface KeyedResult<T> {
   key: string;
@@ -111,6 +122,38 @@ export interface UseRepoGradesDataResult {
    * per-row click (see RepoGradesGrid.tsx / RepoBindingControl.tsx).
    */
   acceptBinding: (repo: string, canvasUserId: string, student: string, username: string | null) => Promise<{ ok: true } | { error: string }>;
+  /**
+   * Null when the "Link GitHub usernames" action can run; otherwise the
+   * reason it cannot, worded to match this view's existing missingInstitution
+   * / missingOrg banners (index.tsx) - named-course, states-what-is-missing,
+   * states-what-that-breaks. Derived on every render from `course`/
+   * `institution`/`canvasCourseId` (the same values the roster/assignments
+   * loads below already compute), never stored, so it can never go stale
+   * relative to the tile actually selected.
+   */
+  linkBlockedReason: string | null;
+  /**
+   * Mirrors the "Link GitHub usernames to roster" workflow step
+   * (steps.course-setup.rosters.ts:70-173) inline in this view: reads one
+   * Canvas assignment's text submissions, extracts a GitHub username from
+   * each, and folds the clean ones into the tile's roster/studentRepos
+   * through the SAME updateCourseHubAction save path acceptBinding uses.
+   * Returns `{ error }` rather than throwing for every failure mode (missing
+   * course/institution/course id, blank assignment, the submissions read, or
+   * the write) so the panel can show the reason inline instead of crashing.
+   */
+  linkGithubUsernames: (
+    assignmentId: string,
+    assignmentName: string
+  ) => Promise<LinkUsernamesOutcome | { error: string }>;
+  /**
+   * Confirms a batch of previously-"suggested" bindings in ONE write. See
+   * this function's own body below for why a loop calling `acceptBinding`
+   * once per binding would silently keep only the LAST one.
+   */
+  confirmSuggestedBindings: (
+    bindings: ReadonlyArray<{ repo: string; canvasUserId: string; student: string }>
+  ) => Promise<{ confirmed: number } | { error: string }>;
 }
 
 export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoGradesDataResult {
@@ -238,6 +281,93 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     return { ok: true };
   };
 
+  // ---- link GitHub usernames from a Canvas assignment's submissions ------
+  // Same institution/canvasCourseId gate the roster/assignments loads above
+  // already computed - reusing those exact values (rather than re-deriving)
+  // so this action degrades identically to the rest of the view for a tile
+  // missing either one.
+  const linkBlockedReason: string | null = !course
+    ? "Choose a course tile above first."
+    : !institution
+      ? `"${course.name}" has no institution set, so its Canvas assignment submissions cannot be read until one is set on the course tile.`
+      : !canvasCourseId
+        ? `"${course.name}"'s Canvas course URL has no course id, so its Canvas assignment submissions cannot be read until one is set on the course tile.`
+        : null;
+
+  const linkGithubUsernames = async (
+    assignmentId: string,
+    assignmentName: string
+  ): Promise<LinkUsernamesOutcome | { error: string }> => {
+    if (linkBlockedReason) return { error: linkBlockedReason };
+    const trimmedAssignmentId = assignmentId.trim();
+    if (!trimmedAssignmentId) return { error: "Choose the assignment students submitted their GitHub username to." };
+
+    // linkBlockedReason === null guarantees course, institution and
+    // canvasCourseId are all non-null/non-empty at this point.
+    const result = await listAssignmentTextSubmissionsAction(institution, canvasCourseId!, trimmedAssignmentId);
+    if ("error" in result) return { error: result.error };
+
+    const { ok, ambiguous } = partitionGithubUsernameSubmissions(result.submissions);
+
+    // No clean usernames found: report it without writing anything, exactly
+    // like the workflow step does (steps.course-setup.rosters.ts:135-144) -
+    // an unchanged tile has nothing worth saving.
+    if (ok.length === 0) {
+      return { assignmentId: trimmedAssignmentId, assignmentName, linked: 0, ambiguous, conflicts: [], changed: false };
+    }
+
+    const update = buildRosterUpdate({
+      submissions: ok,
+      existingStudentRepos: course!.studentRepos ?? [],
+    });
+
+    const writeResult = await updateCourseHubAction(course!.id, {
+      ...courseToInput(course!),
+      roster: update.roster,
+      studentRepos: update.studentRepos,
+    });
+    if ("error" in writeResult) return { error: writeResult.error };
+    setCourses((prev) => prev.map((c) => (c.id === writeResult.course.id ? writeResult.course : c)));
+
+    return {
+      assignmentId: trimmedAssignmentId,
+      assignmentName,
+      linked: update.linked,
+      ambiguous,
+      conflicts: update.conflicts,
+      changed: true,
+    };
+  };
+
+  // ---- confirm a batch of suggested bindings in one write -----------------
+  const confirmSuggestedBindings = async (
+    bindings: ReadonlyArray<{ repo: string; canvasUserId: string; student: string }>
+  ): Promise<{ confirmed: number } | { error: string }> => {
+    if (!course) return { error: "Choose a course tile first." };
+    if (bindings.length === 0) return { error: "No bindings to confirm." };
+
+    // ONE reduce over ALL bindings, ONE write - never a loop calling
+    // acceptBinding once per binding. acceptBinding computes its patch from
+    // the `course` captured in this render's closure, which does not change
+    // between iterations of a loop inside a single handler; N sequential
+    // acceptBinding calls would each build their patch from the SAME stale
+    // course.studentRepos, so only the LAST binding would actually survive
+    // the last write. Folding every binding into one array first and issuing
+    // exactly one updateCourseHubAction avoids that entirely.
+    const next = bindings.reduce(
+      (acc, b) => applyRepoGradeBinding(acc, b.repo, b.canvasUserId, b.student, null),
+      course.studentRepos
+    );
+
+    const writeResult = await updateCourseHubAction(course.id, {
+      ...courseToInput(course),
+      studentRepos: next,
+    });
+    if ("error" in writeResult) return { error: writeResult.error };
+    setCourses((prev) => prev.map((c) => (c.id === writeResult.course.id ? writeResult.course : c)));
+    return { confirmed: bindings.length };
+  };
+
   return {
     courses,
     coursesLoading,
@@ -254,5 +384,8 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     assignmentsError,
     reloadScan,
     acceptBinding,
+    linkBlockedReason,
+    linkGithubUsernames,
+    confirmSuggestedBindings,
   };
 }

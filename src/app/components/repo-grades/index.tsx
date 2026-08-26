@@ -46,7 +46,10 @@ import {
   type RepoGradeLogEventKind,
 } from "./repoGradesLog";
 import RepoGradesLogPanel from "./RepoGradesLogPanel";
-import { buildRepoGradeGridModel, sortRepoGradeRows, type RepoGradeColumn, type RepoGradeRow, type RepoGradeSortField, type SortDirection } from "./repoGradesRows";
+import RepoGradesControls from "./RepoGradesControls";
+import LinkUsernamesPanel from "./LinkUsernamesPanel";
+import { linkUsernamesLogDetail } from "./linkRepoUsernames";
+import { buildRepoGradeGridModel, sortRepoGradeRows, type RepoGradeColumn, type RepoGradeRow } from "./repoGradesRows";
 import {
   applyRepoGradeAssignmentMapping,
   filterRepoGradeAssignmentMapping,
@@ -69,19 +72,22 @@ import RepoGradesGrid from "./RepoGradesGrid";
 import styles from "../../page.module.css";
 import gridStyles from "./repo-grades.module.css";
 
-// AC2 item 7: the empty state for "no confirmed rows at all" must name this
-// step by its exact UI label (steps.course-setup.rosters.ts:35's `name`
-// field), not a paraphrase - so a support-doc or screenshot search for the
-// step's real name still finds this text.
+// AC2 item 7 (reframed by this wave): the instructor complaint this wave
+// fixes is that the grid's own empty state used to NAME this workflow step
+// and tell the instructor to go run it on a different screen, instead of
+// putting the mechanism on this page. LinkUsernamesPanel (rendered above the
+// grid below, gated on `course` alone) now IS that mechanism, and its own
+// copy already owns the literal "No repos are confirmed-bound to a roster
+// student yet." empty-state sentence (LinkUsernamesPanel.tsx, gated on the
+// same `noConfirmedRows` value this file computes) - so the banner further
+// below deliberately does NOT repeat that sentence a second time; that
+// surface-ownership decision is called out again at the banner itself. This
+// constant still exists only so the step's exact UI label
+// (steps.course-setup.rosters.ts:35's `name` field) appears verbatim in the
+// banner's own copy too, not a paraphrase - a support-doc or screenshot
+// search for the step's real name should still find this text even though
+// the banner no longer instructs anyone to go run that step elsewhere.
 const LINK_GITHUB_USERNAMES_STEP_LABEL = "Link GitHub usernames to roster";
-
-function parseSortValue(value: string): { field: RepoGradeSortField; direction: SortDirection } {
-  const [field, direction] = value.split(":");
-  return {
-    field: field === "binding" ? "binding" : "repo",
-    direction: direction === "desc" ? "desc" : "asc",
-  };
-}
 
 export default function RepoGradesTab() {
   const [uiState, setUiState] = useState<RepoGradesUiState>(() => loadRepoGradesUiState());
@@ -107,10 +113,24 @@ export default function RepoGradesTab() {
     assignmentsError,
     reloadScan,
     acceptBinding,
+    linkBlockedReason,
+    linkGithubUsernames,
+    confirmSuggestedBindings,
   } = useRepoGradesData(uiState.courseId, uiState.orgPrefix);
 
   const model = scan ? buildRepoGradeGridModel(scan.repos, roster, course?.studentRepos ?? [], uiState.orgPrefix) : null;
   const sortedRows = model ? sortRepoGradeRows(model.rows, uiState.sort) : [];
+  // AC2 item 7 sibling: rows currently in the "suggested" binding state - a
+  // link just produced one, or the grid's own name-based guess did, and the
+  // two are indistinguishable here on purpose (confirmSuggestedBindings and
+  // RepoBindingControl.tsx's own per-row "Confirm binding" button treat them
+  // identically). Read off `sortedRows`, not `model.rows`: the count shown to
+  // the instructor and the actual confirm-all payload must both be built from
+  // EXACTLY the rows the grid currently displays, in the order the
+  // instructor sees them - `model.rows`'s order can differ once a sort is
+  // applied, and a batch action should never disagree with what is on screen
+  // when it runs.
+  const suggestedRows = sortedRows.filter((row) => row.binding.state === "suggested");
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   // AC4 item 23: the persisted selection is restored (and filtered against
@@ -241,6 +261,64 @@ export default function RepoGradesTab() {
           detail: `Bound to ${student}${username ? ` (${username})` : ""}, Canvas user ${canvasUserId}`,
         }),
       ]);
+    }
+    return result;
+  };
+
+  // Companion to handleAcceptBinding above, same spirit: linking usernames
+  // decides which repos become SUGGESTED bindings (never confirmed ones - see
+  // LinkUsernamesPanel.tsx's header comment on the "honest two-step"), and
+  // the Canvas assignment read that grounds it is worth a durable record for
+  // the same reason a binding accept is. Forwards useRepoGradesData's own
+  // linkGithubUsernames result UNCHANGED and records nothing when it reports
+  // an error, so the log can never claim a link that did not actually
+  // persist - the same rule handleAcceptBinding follows above.
+  const handleLinkUsernames = async (assignmentId: string, assignmentName: string) => {
+    const result = await linkGithubUsernames(assignmentId, assignmentName);
+    if (!("error" in result)) {
+      recordLog([
+        buildLogEntry("usernames-linked", {
+          assignmentId: result.assignmentId,
+          detail: linkUsernamesLogDetail(result),
+        }),
+      ]);
+    }
+    return result;
+  };
+
+  // Confirms every currently-suggested row in one write - the "Confirm all"
+  // half of the two-step LinkUsernamesPanel.tsx describes, since linking only
+  // ever produces suggested rows. Built from each row's own top candidate -
+  // the SAME candidate RepoBindingControl.tsx's per-row "Confirm binding"
+  // button would use for that exact row - so a batch confirm can never bind a
+  // repo to a student the per-row control would not also have offered. A row
+  // whose candidate is missing (should not happen for a "suggested" row, but
+  // the type does not guarantee it) is dropped rather than sent as a
+  // malformed binding. The dangerous-count window.confirm for this action
+  // lives in LinkUsernamesPanel.tsx itself, not here - a second confirm here
+  // would double-prompt for the same click.
+  const handleConfirmAllSuggested = async () => {
+    const bindings = suggestedRows
+      .map((row) => {
+        const candidate = row.binding.candidates[0];
+        if (!candidate) return null;
+        return { repo: row.repo, canvasUserId: candidate.canvasUserId, student: candidate.name };
+      })
+      .filter((binding): binding is { repo: string; canvasUserId: string; student: string } => binding !== null);
+    const result = await confirmSuggestedBindings(bindings);
+    if (!("error" in result)) {
+      // One entry PER binding, same detail shape handleAcceptBinding uses
+      // above (minus the optional username, which a suggested candidate does
+      // not carry) - so the log reads a batch confirm as N individual
+      // confirmations, indistinguishable from N per-row clicks.
+      recordLog(
+        bindings.map((binding) =>
+          buildLogEntry("binding-confirmed", {
+            repo: binding.repo,
+            detail: `Bound to ${binding.student}, Canvas user ${binding.canvasUserId}`,
+          })
+        )
+      );
     }
     return result;
   };
@@ -674,85 +752,25 @@ export default function RepoGradesTab() {
         subtitle="Grade every student's GitHub repo folder by folder and post the results to the Canvas gradebook."
       />
 
-      <div className={styles.field}>
-        <label htmlFor="repo-grades-course">Course</label>
-        <select
-          id="repo-grades-course"
-          value={uiState.courseId}
-          disabled={coursesLoading}
-          onChange={(e) => setUiState((prev) => ({ ...prev, courseId: e.target.value }))}
-        >
-          <option value="">{coursesLoading ? "Loading courses..." : "Choose a course..."}</option>
-          {courses.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        {coursesError && (
-          <p className={styles.error} role="alert">
-            {coursesError}
-          </p>
-        )}
-      </div>
-
-      {course && !missingOrg && (
-        <div className={styles.field}>
-          <label htmlFor="repo-grades-org-prefix">Repo name filter (optional)</label>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              id="repo-grades-org-prefix"
-              type="text"
-              value={uiState.orgPrefix}
-              onChange={(e) => setUiState((prev) => ({ ...prev, orgPrefix: e.target.value }))}
-              placeholder="e.g. module"
-              style={{ flex: "1 1 220px" }}
-            />
-            <button type="button" className={styles.linkButton} disabled={scanLoading} onClick={() => reloadScan()}>
-              {scanLoading ? "Scanning..." : "Refresh"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {model && model.rows.length > 0 && (
-        <div className={styles.field}>
-          <label htmlFor="repo-grades-sort">Sort</label>
-          <select
-            id="repo-grades-sort"
-            value={`${uiState.sort.field}:${uiState.sort.direction}`}
-            onChange={(e) => setUiState((prev) => ({ ...prev, sort: parseSortValue(e.target.value) }))}
-          >
-            <option value="repo:asc">Repo name (A to Z)</option>
-            <option value="repo:desc">Repo name (Z to A)</option>
-            <option value="binding:asc">Needs attention first</option>
-            <option value="binding:desc">Confirmed first</option>
-          </select>
-        </div>
-      )}
-
-      {model && model.rows.length > 0 && (
-        <>
-          <div className={styles.field}>
-            <label htmlFor="repo-grades-instructions">Assignment instructions (used by every &quot;Grade&quot; call)</label>
-            <textarea
-              id="repo-grades-instructions"
-              value={uiState.instructions}
-              onChange={(e) => setUiState((prev) => ({ ...prev, instructions: e.target.value }))}
-              placeholder="Describe what a folder needs to contain to earn full credit."
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="repo-grades-rubric">Rubric (optional - generated from the instructions if left blank)</label>
-            <textarea
-              id="repo-grades-rubric"
-              value={uiState.rubric}
-              onChange={(e) => setUiState((prev) => ({ ...prev, rubric: e.target.value }))}
-              placeholder="Paste a grading rubric, or leave blank to generate one from the instructions above."
-            />
-          </div>
-        </>
-      )}
+      <RepoGradesControls
+        courses={courses}
+        coursesLoading={coursesLoading}
+        coursesError={coursesError}
+        courseId={uiState.courseId}
+        onCourseIdChange={(value) => setUiState((prev) => ({ ...prev, courseId: value }))}
+        showOrgPrefixFilter={!!course && !missingOrg}
+        orgPrefix={uiState.orgPrefix}
+        onOrgPrefixChange={(value) => setUiState((prev) => ({ ...prev, orgPrefix: value }))}
+        scanLoading={scanLoading}
+        onRefreshScan={() => reloadScan()}
+        showRowDependentFields={!!model && model.rows.length > 0}
+        sort={uiState.sort}
+        onSortChange={(value) => setUiState((prev) => ({ ...prev, sort: value }))}
+        instructions={uiState.instructions}
+        onInstructionsChange={(value) => setUiState((prev) => ({ ...prev, instructions: value }))}
+        rubric={uiState.rubric}
+        onRubricChange={(value) => setUiState((prev) => ({ ...prev, rubric: value }))}
+      />
 
       {!course && !coursesLoading && <p className={styles.emptyState}>Choose a course tile above to list its repos.</p>}
 
@@ -822,11 +840,46 @@ export default function RepoGradesTab() {
         </p>
       )}
 
+      {/* Instructor complaint this wave fixes: the mechanism used to live only
+          in a workflow step elsewhere in the app, and this exact spot used to
+          just NAME that step and send the instructor to go run it there.
+          LinkUsernamesPanel puts the same mechanism - reading a Canvas
+          assignment's own text submissions, not an inferred name-based guess
+          - directly on this page. Gated on `course` alone (matching
+          RepoGradesLogPanel below), not on `model && noConfirmedRows` the way
+          the banner beneath it still is: an instructor whose org scan failed
+          or whose org is unset has the LEAST other way to get repos bound, so
+          this is exactly the state the panel must not disappear in. Placed
+          here, above the grid: an instructor who cannot bind anything needs
+          the fix before the table, not under it. */}
+      {course && (
+        <LinkUsernamesPanel
+          assignments={assignments}
+          assignmentsLoading={assignmentsLoading}
+          assignmentsError={assignmentsError}
+          assignmentId={uiState.linkAssignmentId}
+          onAssignmentIdChange={(id) => setUiState((prev) => ({ ...prev, linkAssignmentId: id }))}
+          blockedReason={linkBlockedReason}
+          noConfirmedRows={noConfirmedRows}
+          suggestedCount={suggestedRows.length}
+          onLink={handleLinkUsernames}
+          onConfirmAllSuggested={handleConfirmAllSuggested}
+          onAnnounce={setPostSummary}
+        />
+      )}
+
+      {/* Surface-ownership decision (see the LINK_GITHUB_USERNAMES_STEP_LABEL
+          comment near the top of this file): LinkUsernamesPanel.tsx already
+          prints the literal "No repos are confirmed-bound to a roster student
+          yet." sentence when `noConfirmedRows` is true, so this banner does
+          NOT repeat it - it only points at the panel just above and keeps the
+          workflow step's exact label searchable, reframed as "available right
+          here" rather than as an instruction to leave this page. */}
       {model && noConfirmedRows && (
         <p className={gridStyles.banner} role="status">
-          No repos are confirmed-bound to a roster student yet. Running the &quot;{LINK_GITHUB_USERNAMES_STEP_LABEL}&quot;
-          workflow step is the reliable way to populate bindings, since it uses each student&apos;s own Canvas submission
-          rather than an inferred match.
+          The panel above uses the same mechanism the &quot;{LINK_GITHUB_USERNAMES_STEP_LABEL}&quot; workflow step
+          uses - each student&apos;s own Canvas submission, not an inferred match - so there is no need to leave this
+          page to populate bindings.
         </p>
       )}
 

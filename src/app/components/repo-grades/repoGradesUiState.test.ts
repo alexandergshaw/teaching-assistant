@@ -60,13 +60,14 @@ afterEach(() => {
 });
 
 describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
-  it("returns defaults (empty course, empty prefix, repo/asc sort, empty instructions/rubric) when nothing is stored", () => {
+  it("returns defaults (empty course, empty prefix, repo/asc sort, empty instructions/rubric/link assignment) when nothing is stored", () => {
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "",
       orgPrefix: "",
       sort: DEFAULT_REPO_GRADE_SORT,
       instructions: "",
       rubric: "",
+      linkAssignmentId: "",
     });
   });
 
@@ -78,6 +79,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       sort: DEFAULT_REPO_GRADE_SORT,
       instructions: "",
       rubric: "",
+      linkAssignmentId: "",
     });
   });
 
@@ -88,6 +90,7 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       sort: { field: "binding", direction: "desc" },
       instructions: "Grade the README against the rubric.",
       rubric: "5 pts: has a README",
+      linkAssignmentId: "9001",
     });
     expect(loadRepoGradesUiState()).toEqual({
       courseId: "course-1",
@@ -95,13 +98,21 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
       sort: { field: "binding", direction: "desc" },
       instructions: "Grade the README against the rubric.",
       rubric: "5 pts: has a README",
+      linkAssignmentId: "9001",
     });
   });
 
   it("does nothing when window is undefined (SSR-safe write)", () => {
     delete (globalThis as { window?: unknown }).window;
     expect(() =>
-      persistRepoGradesUiState({ courseId: "x", orgPrefix: "y", sort: DEFAULT_REPO_GRADE_SORT, instructions: "", rubric: "" })
+      persistRepoGradesUiState({
+        courseId: "x",
+        orgPrefix: "y",
+        sort: DEFAULT_REPO_GRADE_SORT,
+        instructions: "",
+        rubric: "",
+        linkAssignmentId: "",
+      })
     ).not.toThrow();
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBeNull();
   });
@@ -109,7 +120,14 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
   it("swallows a localStorage write failure (quota/private mode) rather than throwing", () => {
     fakeStorage.throwOnSet = true;
     expect(() =>
-      persistRepoGradesUiState({ courseId: "x", orgPrefix: "y", sort: DEFAULT_REPO_GRADE_SORT, instructions: "", rubric: "" })
+      persistRepoGradesUiState({
+        courseId: "x",
+        orgPrefix: "y",
+        sort: DEFAULT_REPO_GRADE_SORT,
+        instructions: "",
+        rubric: "",
+        linkAssignmentId: "",
+      })
     ).not.toThrow();
   });
 
@@ -123,19 +141,21 @@ describe("loadRepoGradesUiState / persistRepoGradesUiState", () => {
     expect(loadRepoGradesUiState().sort).toEqual(DEFAULT_REPO_GRADE_SORT);
   });
 
-  it("persists course id, org prefix, sort, instructions, and rubric under five distinct ta- keys", () => {
+  it("persists course id, org prefix, sort, instructions, rubric, and link assignment id under six distinct ta- keys", () => {
     persistRepoGradesUiState({
       courseId: "course-9",
       orgPrefix: "wk",
       sort: { field: "repo", direction: "desc" },
       instructions: "Grade folder by folder.",
       rubric: "10 pts total",
+      linkAssignmentId: "9001",
     });
     expect(fakeStorage.getItem("ta-repo-grades-course")).toBe("course-9");
     expect(fakeStorage.getItem("ta-repo-grades-org-prefix")).toBe("wk");
     expect(fakeStorage.getItem("ta-repo-grades-sort")).toBe(JSON.stringify({ field: "repo", direction: "desc" }));
     expect(fakeStorage.getItem("ta-repo-grades-instructions")).toBe("Grade folder by folder.");
     expect(fakeStorage.getItem("ta-repo-grades-rubric")).toBe("10 pts total");
+    expect(fakeStorage.getItem("ta-repo-grades-link-assignment")).toBe("9001");
   });
 });
 

@@ -98,6 +98,14 @@ describe("parseRepoGradeLogEntries", () => {
     expect(parsed).toEqual([good]);
   });
 
+  // The "Link GitHub usernames" action (useRepoGradesData.ts) logs this kind
+  // when it writes accepted usernames back to the tile - confirming it
+  // round-trips through parse the same way every other kind does.
+  it("round-trips an entry with the usernames-linked kind", () => {
+    const stored = [entry({ repo: "", kind: "usernames-linked", detail: "Linked 3 GitHub username(s)." })];
+    expect(parseRepoGradeLogEntries(JSON.parse(JSON.stringify(stored)))).toEqual(stored);
+  });
+
   it("applies the cap to a hand-edited oversized blob, keeping the newest", () => {
     const huge = Array.from({ length: MAX_REPO_GRADE_LOG_ENTRIES + 5 }, (_, i) => entry({ repo: `r-${i}` }));
     const parsed = parseRepoGradeLogEntries(huge);
@@ -167,6 +175,15 @@ describe("formatRepoGradeLogCsv", () => {
       "2026-08-24T15:04:05.123Z,Graded,CS 101,org/a,week-1,9001,18/20,Graded by openai",
       "2026-08-24T15:05:00.000Z,Posted to Canvas,CS 101,org/a,week-1,9001,18,",
     ]);
+  });
+
+  it("renders the usernames-linked label", () => {
+    const csv = formatRepoGradeLogCsv([
+      entry({ kind: "usernames-linked", repo: "", detail: "Linked 3 GitHub username(s)." }),
+    ]);
+    expect(csv.split("\r\n")[1]).toBe(
+      "2026-08-24T15:04:05.123Z,GitHub usernames linked,CS 101,,week-1,9001,18,Linked 3 GitHub username(s)."
+    );
   });
 
   // L5 item 23 - an AI-written overall comment routinely contains all three

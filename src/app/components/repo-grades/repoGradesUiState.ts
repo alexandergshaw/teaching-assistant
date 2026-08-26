@@ -22,6 +22,10 @@ const COURSE_KEY = "ta-repo-grades-course";
 const ORG_PREFIX_KEY = "ta-repo-grades-org-prefix";
 const SORT_KEY = "ta-repo-grades-sort";
 const SELECTED_KEY = "ta-repo-grades-selected";
+// The Canvas assignment chosen in the "Link GitHub usernames" panel -
+// standing project rule (every control in this view persists across reload
+// under a ta- key), same as COURSE_KEY/ORG_PREFIX_KEY above.
+const LINK_ASSIGNMENT_KEY = "ta-repo-grades-link-assignment";
 // AC5 items 25-26: the per-column-to-Canvas-assignment mapping, persisted per
 // COURSE (one course's "week-1" folder means nothing to another course's
 // Canvas assignment list) as a single JSON blob keyed by course id, then by
@@ -56,10 +60,13 @@ export interface RepoGradesUiState {
   sort: RepoGradeSortState;
   instructions: string;
   rubric: string;
+  /** The Canvas assignment id chosen for "Link GitHub usernames" - restored
+   * on reload so re-running the link doesn't require re-picking it. */
+  linkAssignmentId: string;
 }
 
 function defaultUiState(): RepoGradesUiState {
-  return { courseId: "", orgPrefix: "", sort: DEFAULT_REPO_GRADE_SORT, instructions: "", rubric: "" };
+  return { courseId: "", orgPrefix: "", sort: DEFAULT_REPO_GRADE_SORT, instructions: "", rubric: "", linkAssignmentId: "" };
 }
 
 function isSortField(value: unknown): value is RepoGradeSortField {
@@ -101,6 +108,7 @@ export function loadRepoGradesUiState(): RepoGradesUiState {
     sort: parseSort(localStorage.getItem(SORT_KEY)),
     instructions: localStorage.getItem(INSTRUCTIONS_KEY) ?? "",
     rubric: localStorage.getItem(RUBRIC_KEY) ?? "",
+    linkAssignmentId: localStorage.getItem(LINK_ASSIGNMENT_KEY) ?? "",
   };
 }
 
@@ -112,6 +120,7 @@ export function persistRepoGradesUiState(state: RepoGradesUiState): void {
     localStorage.setItem(SORT_KEY, JSON.stringify(state.sort));
     localStorage.setItem(INSTRUCTIONS_KEY, state.instructions);
     localStorage.setItem(RUBRIC_KEY, state.rubric);
+    localStorage.setItem(LINK_ASSIGNMENT_KEY, state.linkAssignmentId);
   } catch {
     // localStorage can throw (private browsing, quota) - losing persistence
     // for one change is acceptable, crashing the tab is not. Matches

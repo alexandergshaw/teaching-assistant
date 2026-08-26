@@ -611,3 +611,133 @@ describe("index.tsx actually feeds and renders the activity log", () => {
     expect(persistBody).toContain("if (cellStateResetForCourse !== uiState.courseId) return;");
   });
 });
+
+// ---------------------------------------------------------------------------
+// LinkUsernamesPanel wiring - the fix for the instructor complaint this wave
+// addresses: the grid's own empty state used to be a dead end that named a
+// workflow step living on a different screen and told the instructor to go
+// run it there. This wave puts the mechanism (LinkUsernamesPanel.tsx) on this
+// page instead. Three separate risks, each checked below: (1) the panel is
+// actually rendered and wired to the view's ONE aria-live region rather than
+// growing a second one (LinkUsernamesPanel.tsx's own header comment names
+// this exact hazard); (2) the banner that used to send the reader elsewhere
+// no longer does, while staying findable by the workflow step's exact label;
+// (3) the log entry a link produces is recorded only when the link actually
+// persisted something, mirroring the same rule this file already proves for
+// handleAcceptBinding via its own "ok" in result guard.
+
+describe("index.tsx renders LinkUsernamesPanel above the grid, wired to the view's single aria-live region", () => {
+  it("renders <LinkUsernamesPanel and routes its outcomes through onAnnounce={setPostSummary} - never a second live region", () => {
+    expect(indexSource).toContain("<LinkUsernamesPanel");
+    expect(indexSource).toContain("onAnnounce={setPostSummary}");
+  });
+
+  it("gates the panel on `course` alone, matching how RepoGradesLogPanel below it is gated - never on `model && noConfirmedRows`, which would hide it exactly when an instructor has the least other way to bind repos (a failed scan or an unset org)", () => {
+    const panelIdx = indexSource.indexOf("<LinkUsernamesPanel");
+    expect(panelIdx).toBeGreaterThan(-1);
+    const precedingGate = indexSource.slice(Math.max(0, panelIdx - 60), panelIdx);
+    expect(precedingGate).toContain("{course && (");
+  });
+});
+
+describe("the no-confirmed-rows banner points at the on-page panel instead of instructing the reader to run a separate workflow step (instructor complaint fix)", () => {
+  it("still contains the workflow step's exact UI label, so a support-doc or screenshot search for the step's real name still finds this text", () => {
+    expect(indexSource).toContain("Link GitHub usernames to roster");
+  });
+
+  it("no longer tells the reader to go RUN the step - the old \"Running the ... workflow step is the reliable way to populate bindings\" sentence is gone", () => {
+    expect(indexSource).not.toContain("Running the &quot;{LINK_GITHUB_USERNAMES_STEP_LABEL}&quot;");
+    expect(indexSource).not.toContain("workflow step is the reliable way to populate bindings");
+  });
+
+  it("does not print LinkUsernamesPanel.tsx's own literal empty-state sentence a second time", () => {
+    // LinkUsernamesPanel.tsx (read in the block below) already renders this
+    // exact sentence when noConfirmedRows is true - the banner deliberately
+    // owns a DIFFERENT sentence instead of repeating it, per this file's own
+    // "surface-ownership decision" comment at the banner's call site.
+    expect(indexSource).not.toContain("No repos are confirmed-bound to a roster student yet.");
+  });
+});
+
+const LINK_PANEL_PATH = join(process.cwd(), "src/app/components/repo-grades/LinkUsernamesPanel.tsx");
+const linkPanelSource = readFileSync(LINK_PANEL_PATH, "utf8");
+
+describe("canary: LinkUsernamesPanel.tsx actually owns the empty-state sentence the banner test above assumes it owns", () => {
+  it("LinkUsernamesPanel.tsx contains the exact sentence, proving the banner's non-duplication above is not vacuously true against a file that never had that sentence to begin with", () => {
+    expect(linkPanelSource).toContain("No repos are confirmed-bound to a roster student yet.");
+  });
+});
+
+/**
+ * True when, searching `text` from the start, the first occurrence of
+ * `ifConditionMarker` opens an `if (...) { ... }` block (found by a brace-
+ * depth count starting at that `if`'s own opening `{`) whose body contains
+ * `calleeMarker`. Generalizes callSitesGatedByClick's "is this call site
+ * actually nested inside a specific guard, not merely somewhere later in the
+ * same function" question from an onClick handler to an arbitrary `if` guard
+ * - the same class of "is this dangerous call actually gated" check this
+ * file already applies to click handlers, applied here to a success-only
+ * branch instead. A narrow text heuristic (this file's established posture),
+ * proven against the canary fixtures below before being trusted against the
+ * real file, per REGRESSION entry 239 check 10's "a structural assertion
+ * without a canary is worthless".
+ */
+function isCallSiteWithinIfBlock(text: string, ifConditionMarker: string, calleeMarker: string): boolean {
+  const ifIdx = text.indexOf(ifConditionMarker);
+  if (ifIdx === -1) return false;
+  const braceStart = text.indexOf("{", ifIdx);
+  if (braceStart === -1) return false;
+  let depth = 0;
+  for (let i = braceStart; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        const blockBody = text.slice(braceStart, i);
+        return blockBody.includes(calleeMarker);
+      }
+    }
+  }
+  return false;
+}
+
+describe("isCallSiteWithinIfBlock (canary: proves the guard-membership check actually discriminates)", () => {
+  it("finds a call INSIDE the if block's own body", () => {
+    const fixture = `if (!("error" in result)) {\n  recordLog([buildLogEntry("x")]);\n}`;
+    expect(isCallSiteWithinIfBlock(fixture, 'if (!("error" in result))', 'buildLogEntry("x"')).toBe(true);
+  });
+
+  it("does NOT find a call placed AFTER the if block has already closed (an unconditional call, the exact bug this guard exists to catch)", () => {
+    const fixture = `if (!("error" in result)) {\n  doSomethingElse();\n}\nrecordLog([buildLogEntry("x")]);`;
+    expect(isCallSiteWithinIfBlock(fixture, 'if (!("error" in result))', 'buildLogEntry("x"')).toBe(false);
+  });
+
+  it("does NOT false-positive on a call inside a DIFFERENT, unrelated if block that happens to appear first", () => {
+    const fixture = `if (someOtherCondition) {\n  buildLogEntry("x");\n}\nif (!("error" in result)) {\n  doNothing();\n}`;
+    expect(isCallSiteWithinIfBlock(fixture, 'if (!("error" in result))', 'buildLogEntry("x"')).toBe(false);
+  });
+});
+
+describe("handleLinkUsernames records a log entry only when linkGithubUsernames succeeds - the log must never claim a link that did not persist", () => {
+  it("the buildLogEntry(\"usernames-linked\" call site sits inside handleLinkUsernames's own non-error guard, the same shape handleAcceptBinding's \"ok\" in result guard already uses above", () => {
+    const defIdx = indexSource.indexOf("const handleLinkUsernames = async");
+    expect(defIdx).toBeGreaterThan(-1);
+    const nextFnIdx = indexSource.indexOf("const handleConfirmAllSuggested", defIdx);
+    expect(nextFnIdx).toBeGreaterThan(defIdx);
+    const body = indexSource.slice(defIdx, nextFnIdx);
+    expect(body).toContain('buildLogEntry("usernames-linked"');
+    expect(isCallSiteWithinIfBlock(body, 'if (!("error" in result))', 'buildLogEntry("usernames-linked"')).toBe(true);
+  });
+});
+
+describe("handleConfirmAllSuggested records a log entry only when confirmSuggestedBindings succeeds - same rule, same shape", () => {
+  it("the buildLogEntry(\"binding-confirmed\" call site sits inside handleConfirmAllSuggested's own non-error guard", () => {
+    const defIdx = indexSource.indexOf("const handleConfirmAllSuggested = async");
+    expect(defIdx).toBeGreaterThan(-1);
+    const nextFnIdx = indexSource.indexOf("const handleGradeCell = async", defIdx);
+    expect(nextFnIdx).toBeGreaterThan(defIdx);
+    const body = indexSource.slice(defIdx, nextFnIdx);
+    expect(body).toContain('buildLogEntry("binding-confirmed"');
+    expect(isCallSiteWithinIfBlock(body, 'if (!("error" in result))', 'buildLogEntry("binding-confirmed"')).toBe(true);
+  });
+});

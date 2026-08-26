@@ -550,3 +550,95 @@
     gap: 2px;
   }
 }
+
+/* Link-usernames panel (LinkUsernamesPanel.tsx) - puts the "Link GitHub
+   usernames to roster" mechanism directly on this view instead of sending an
+   instructor to a workflow step. Same quieter-surface treatment as
+   .logPanel above (a subtle surface, no accent colour) since this, too, is
+   a secondary control below the grid rather than the grid itself - reuses
+   .logTitle and pageStyles.fieldHint/pageStyles.error/pageStyles.linkButton
+   rather than duplicating those rules. */
+.linkPanel {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The "nothing is bound yet" lead line (only rendered when noConfirmedRows
+   is true). Warning-toned like .banner above, since it is naming the same
+   condition that banner used to gate the whole feature behind a workflow
+   step - but styled as a paragraph, not a full banner box, because this
+   panel is not a dead end: the rest of the panel is the fix, right below. */
+.linkLeadLine {
+  margin: 0;
+  color: var(--warning-ink);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.linkPanelRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.linkPanelLabel {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.linkPanelRow select {
+  padding: 4px 6px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background: var(--field-background);
+  color: var(--text-primary);
+}
+
+/* The result of a link run: the one-line summary plus, when non-empty, the
+   ambiguous/conflict lists a human has to resolve by hand. These must be
+   visible here, not only reachable via a download, so they get their own
+   labelled lists rather than folding into the summary line. */
+.linkResult {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.linkResultLine {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+}
+
+.linkNoteLabel {
+  margin: 0 0 4px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.linkNoteList {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 700px) {
+  .linkPanelRow select,
+  .linkPanelRow button {
+    max-width: 100%;
+  }
+}

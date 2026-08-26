@@ -31,7 +31,8 @@ export type RepoGradeLogEventKind =
   | "post-cancelled"
   | "binding-confirmed"
   | "assignment-mapped"
-  | "scan-failed";
+  | "scan-failed"
+  | "usernames-linked";
 
 const LOG_EVENT_KINDS: readonly RepoGradeLogEventKind[] = [
   "grade-succeeded",
@@ -43,6 +44,7 @@ const LOG_EVENT_KINDS: readonly RepoGradeLogEventKind[] = [
   "binding-confirmed",
   "assignment-mapped",
   "scan-failed",
+  "usernames-linked",
 ];
 
 /** Human labels for the panel and for the CSV's `event` column - the CSV
@@ -60,6 +62,7 @@ export const REPO_GRADE_LOG_EVENT_LABELS: Readonly<Record<RepoGradeLogEventKind,
   "binding-confirmed": "Binding confirmed",
   "assignment-mapped": "Assignment mapped",
   "scan-failed": "Org scan failed",
+  "usernames-linked": "GitHub usernames linked",
 };
 
 /**

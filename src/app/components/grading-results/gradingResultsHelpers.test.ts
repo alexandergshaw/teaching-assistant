@@ -298,6 +298,33 @@ describe("recomputeTotal", () => {
     };
     expect(recomputeTotal(areas, areaNames, "17")).toBe("17");
   });
+
+  // docs/rubric-criteria-breakdown-acceptance-criteria.md B5: a percent-shaped
+  // score used to be read by parseScoreValue as though its leading digits
+  // were raw points earned (e.g. "85%" contributed 85 points), wildly
+  // inflating a recomputed total. It must be skipped exactly like a blank
+  // score instead.
+  it("B5 fix: a percent-shaped score is skipped, not added as 85 raw points", () => {
+    const areas: Record<string, AreaEdit> = {
+      "Code Quality": { score: "85%" },
+      Correctness: { score: "8/10" },
+    };
+    expect(recomputeTotal(areas, areaNames, "17/20")).toBe("8/20");
+  });
+
+  it("B5 fix: with no total denominator either, a percent-shaped score's digits never leak into the earned-only fallback", () => {
+    const areas: Record<string, AreaEdit> = {
+      "Code Quality": { score: "85%" },
+      Correctness: { score: "8" },
+    };
+    expect(recomputeTotal(areas, areaNames, "17")).toBe("8");
+  });
+
+  // SABOTAGE-CHECK ANCHOR: temporarily removing the `|| trimmedScore.endsWith("%")`
+  // clause (leaving only the blank-score check) was verified to make the
+  // first B5 fix test above FAIL - it returned "93/20" (85 + 8) instead of
+  // "8/20", because parseScoreValue("85%") reads 85 as a plain number. The
+  // change was reverted after confirming the failure.
 });
 
 describe("buildCsvContent", () => {

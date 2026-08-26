@@ -301,6 +301,38 @@
   flex-wrap: wrap;
 }
 
+/* JOB A (docs/rubric-criteria-breakdown-acceptance-criteria.md): rubricAreas
+   was already written onto every graded cell (useRepoGradesGradingActions.ts)
+   but never rendered anywhere - this is that rendering. Mirrors
+   DraftedGradesTab's own per-area rows (page.module.css's .draftRubricArea/
+   .draftRubricAreaName/.draftRubricAreaScore) rather than inventing a new
+   visual language for the same kind of data - the app's language for a score
+   is a muted tabular-nums string, never a progress bar. */
+.rubricBreakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.rubricBreakdownArea {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.rubricBreakdownName {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rubricBreakdownScore {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* B3 (docs/repo-grades-posting-and-reflow-acceptance-criteria.md) - a purely
    visual, aria-hidden label naming which assignment column a stacked card's
    score/comment fields belong to. Hidden by default (B6: no full-width

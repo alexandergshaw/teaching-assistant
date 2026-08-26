@@ -31,6 +31,14 @@ import {
 } from "@/lib/grading-draft-view";
 import styles from "../page.module.css";
 import local from "./DraftedGradesTab.module.css";
+// docs/rubric-criteria-breakdown-acceptance-criteria.md B1/B2: the SAME
+// tested helpers Repo Grades and GradingResults.tsx use to show a
+// per-criterion percentage beside a raw "8/10"-shaped score. Cross-folder
+// import, deliberately not a relocation - this module is pure (no React, no
+// I/O, no server-only dependency), so it carries none of the client-bundle
+// risk a value import of @/lib/grade would; src/lib/repo-grade-postability.ts
+// already imports a sibling repo-grades helper the same way.
+import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeScoreDisplay";
 
 type CommentEditState = {
   draftId: string;
@@ -631,25 +639,36 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                               )}
                                               {result.rubricAreas.length > 0 && (
                                                 <>
-                                                  {result.rubricAreas.map((area, areaIdx) => (
-                                                    <div key={areaIdx} className={styles.draftRubricArea}>
-                                                      <span className={styles.draftRubricAreaName}>{area.area}</span>
-                                                      <span className={styles.draftRubricAreaScore}>{area.score}</span>
-                                                      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flex: 1 }}>
-                                                        <span className={styles.fieldHint} style={{ margin: 0, flex: 1 }}>
-                                                          {area.comment}
-                                                        </span>
-                                                        <Button
-                                                          size="small"
-                                                          variant="text"
-                                                          onClick={() => setCommentEditState({ draftId: draft.id, runIdx, resultIdx, areaName: area.area })}
-                                                          style={{ whiteSpace: "nowrap", flexShrink: 0 }}
-                                                        >
-                                                          Preview / edit
-                                                        </Button>
+                                                  {result.rubricAreas.map((area, areaIdx) => {
+                                                    // JOB B (docs/rubric-criteria-breakdown-acceptance-criteria.md):
+                                                    // computed from THIS area's own score string alone (B1 - never
+                                                    // from a rubric's declared points) and shown only when it
+                                                    // actually parses (never a fabricated NaN% for a blank score).
+                                                    const areaPercent =
+                                                      scorePercentValue(area.score) !== null ? formatScorePercent(area.score) : null;
+                                                    return (
+                                                      <div key={areaIdx} className={styles.draftRubricArea}>
+                                                        <span className={styles.draftRubricAreaName}>{area.area}</span>
+                                                        <span className={styles.draftRubricAreaScore}>{area.score}</span>
+                                                        {areaPercent && (
+                                                          <span className={styles.draftRubricAreaPercent}>{areaPercent}</span>
+                                                        )}
+                                                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flex: 1 }}>
+                                                          <span className={styles.fieldHint} style={{ margin: 0, flex: 1 }}>
+                                                            {area.comment}
+                                                          </span>
+                                                          <Button
+                                                            size="small"
+                                                            variant="text"
+                                                            onClick={() => setCommentEditState({ draftId: draft.id, runIdx, resultIdx, areaName: area.area })}
+                                                            style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                                                          >
+                                                            Preview / edit
+                                                          </Button>
+                                                        </div>
                                                       </div>
-                                                    </div>
-                                                  ))}
+                                                    );
+                                                  })}
                                                 </>
                                               )}
                                               {result.overallComment && (

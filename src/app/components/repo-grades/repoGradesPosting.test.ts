@@ -20,6 +20,7 @@ import {
   buildRepoGradePostPlan,
   fanOutRepoGradePostResult,
   repoGradeAssignmentUrl,
+  repoGradeBreakdownWillPost,
   repoGradePostCandidateRows,
   repoGradeScoreWasEdited,
   scopeRepoGradeRowsToSelection,
@@ -410,6 +411,105 @@ describe("buildRepoGradePostPlan - the live-defect fix: a rescaled total never c
     expect(notRescaled.postable[0].grade.grade).toBe("85");
     expect(edited.postable[0].grade.grade).toBe("95");
   });
+});
+
+// ---------------------------------------------------------------------------
+// docs/rubric-criteria-breakdown-acceptance-criteria.md B3/B4: the SHARED
+// predicate RepoGradeCellControl.tsx's own "will this breakdown post" caption
+// must use - proven here to agree with buildRepoGradePostPlan's own
+// rubricAreas inclusion decision across every case, and to catch the B4
+// live-defect scenario a bare-number retype used to slip past.
+describe("repoGradeBreakdownWillPost - the shared predicate the UI caption and buildRepoGradePostPlan both use", () => {
+  const areas = [{ area: "Correctness", score: "13/16", comment: "" }];
+
+  it("false when there are no rubric areas to begin with", () => {
+    expect(
+      repoGradeBreakdownWillPost({ rubricAreasLength: 0, currentScore: "85", generatedScore: "85/100", pointsPossible: 100 })
+    ).toBe(false);
+  });
+
+  it("true when unedited, unscaled, and pointsPossible is unknown", () => {
+    expect(
+      repoGradeBreakdownWillPost({ rubricAreasLength: 1, currentScore: "85", generatedScore: "85/100", pointsPossible: null })
+    ).toBe(true);
+  });
+
+  it("true when unedited, unscaled, and pointsPossible matches the generated fraction's own denominator (a bare number that would not have been rescaled anyway)", () => {
+    expect(
+      repoGradeBreakdownWillPost({ rubricAreasLength: 1, currentScore: "85", generatedScore: "85/100", pointsPossible: 100 })
+    ).toBe(true);
+  });
+
+  it("false when the fraction-shaped score would be rescaled onto pointsPossible", () => {
+    expect(
+      repoGradeBreakdownWillPost({ rubricAreasLength: 1, currentScore: "13/16", generatedScore: "13/16", pointsPossible: 100 })
+    ).toBe(false);
+  });
+
+  it("false when the instructor hand-edited the score to a different number", () => {
+    expect(
+      repoGradeBreakdownWillPost({ rubricAreasLength: 1, currentScore: "90", generatedScore: "85/100", pointsPossible: 100 })
+    ).toBe(false);
+  });
+
+  it("false when this cell was never graded (generatedScore null)", () => {
+    expect(
+      repoGradeBreakdownWillPost({ rubricAreasLength: 1, currentScore: "85", generatedScore: null, pointsPossible: 100 })
+    ).toBe(false);
+  });
+
+  it("B4 LIVE-DEFECT FIX: false when a bare-number retype flattens a would-have-rescaled fraction, even though repoGradeScoreWasEdited alone calls it unedited", () => {
+    // Documents the interaction bug directly: in isolation, neither gate
+    // fires - repoGradeScoreWasEdited says "not edited" (same earned digits),
+    // and resolvePostScore treats "13" as a literal bare number (never
+    // rescaled, by design). Only the combination - a fraction denominator
+    // that DIFFERS from pointsPossible, now hidden behind a bare number - is
+    // wrong, and only repoGradeBreakdownWillPost's fourth check catches it.
+    expect(repoGradeScoreWasEdited("13", "13/16")).toBe(false);
+    expect(
+      repoGradeBreakdownWillPost({ rubricAreasLength: 1, currentScore: "13", generatedScore: "13/16", pointsPossible: 20 })
+    ).toBe(false);
+  });
+
+  it("true for a bare-number retype when pointsPossible happens to equal the generated fraction's own denominator (no scaling would have occurred anyway)", () => {
+    expect(
+      repoGradeBreakdownWillPost({ rubricAreasLength: 1, currentScore: "13", generatedScore: "13/16", pointsPossible: 16 })
+    ).toBe(true);
+  });
+
+  it("agrees with buildRepoGradePostPlan's own rubricAreas inclusion decision across every case above", () => {
+    const cases: Array<{ score: string; generatedScore: string | null; pointsPossible: number | null }> = [
+      { score: "85", generatedScore: "85/100", pointsPossible: null },
+      { score: "85", generatedScore: "85/100", pointsPossible: 100 },
+      { score: "13/16", generatedScore: "13/16", pointsPossible: 100 },
+      { score: "90", generatedScore: "85/100", pointsPossible: 100 },
+      { score: "85", generatedScore: null, pointsPossible: 100 },
+      { score: "13", generatedScore: "13/16", pointsPossible: 20 },
+      { score: "13", generatedScore: "13/16", pointsPossible: 16 },
+    ];
+    for (const c of cases) {
+      const predicate = repoGradeBreakdownWillPost({
+        rubricAreasLength: areas.length,
+        currentScore: c.score,
+        generatedScore: c.generatedScore,
+        pointsPossible: c.pointsPossible,
+      });
+      const plan = buildRepoGradePostPlan(
+        [row({ score: c.score, rubricAreas: areas, generatedScore: c.generatedScore })],
+        "701",
+        c.pointsPossible
+      );
+      expect("rubricAreas" in plan.postable[0].grade).toBe(predicate);
+    }
+  });
+
+  // SABOTAGE-CHECK ANCHOR: temporarily removing the fourth (B4) check from
+  // repoGradeBreakdownWillPost - i.e. `return true;` right after the
+  // rescaled-check above, never reaching the bare-number-flattening block -
+  // was verified to make the "B4 LIVE-DEFECT FIX" test above FAIL (it would
+  // return true instead of false, since neither of the first three checks
+  // catches this interaction). The change was reverted after confirming the
+  // failure.
 });
 
 describe("fanOutRepoGradePostResult - AC5 item 30: per-row status after a bulk post", () => {

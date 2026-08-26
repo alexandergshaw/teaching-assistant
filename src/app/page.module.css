@@ -3132,6 +3132,24 @@ a.instFieldValue:hover {
   color: var(--text-primary);
 }
 
+/* JOB B (docs/rubric-criteria-breakdown-acceptance-criteria.md): the
+   per-criterion percentage beside the matrix's editable area-score field -
+   the app's muted tabular-nums visual language for a score (matches
+   .scorePercent in repo-grades.module.css and .draftRubricAreaScore below),
+   never a progress bar or meter. */
+.rubricAreaCell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rubricAreaPercent {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .fileIconGroup {
   display: flex;
   flex-shrink: 0;
@@ -6168,6 +6186,17 @@ a.instFieldValue:hover {
 .draftRubricAreaScore {
   color: var(--accent-ink);
   font-variant-numeric: tabular-nums;
+}
+
+/* JOB B (docs/rubric-criteria-breakdown-acceptance-criteria.md): the
+   per-criterion percentage beside the raw score - same muted tabular-nums
+   language as .rubricAreaPercent above and .scorePercent in
+   repo-grades.module.css, never a progress bar or meter. */
+.draftRubricAreaPercent {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .draftFeedback {

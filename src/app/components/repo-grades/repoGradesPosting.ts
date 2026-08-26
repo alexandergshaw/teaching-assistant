@@ -47,6 +47,12 @@
 
 import { repoGradePostability, type PostabilityInput } from "@/lib/repo-grade-postability";
 import { resolvePostScore } from "./repoGradePostScore";
+// docs/rubric-criteria-breakdown-acceptance-criteria.md B1/B2: the SAME
+// parseScoreFraction repoGradeScoreDisplay.ts already owns for reading a
+// "earned/possible" string - reused here (not reimplemented) to detect the
+// B4 live-defect scenario below, the fourth condition repoGradeBreakdownWillPost
+// checks beyond the original three.
+import { parseScoreFraction } from "./repoGradeScoreDisplay";
 import { moduleItemContentUrl } from "@/lib/canvas-url";
 import type { RepoGradePostStatus, RepoGradeRow } from "./repoGradesRows";
 import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
@@ -170,6 +176,66 @@ export function repoGradeScoreWasEdited(currentScore: string, generatedScore: st
   return parseFloat(current) !== parseFloat(generated);
 }
 
+/**
+ * docs/rubric-criteria-breakdown-acceptance-criteria.md B3: whether ONE
+ * cell's rubric breakdown would actually travel in a Canvas post attempt
+ * right now - the exact decision buildRepoGradePostPlan below makes inline
+ * while assembling a postable row's payload, pulled out and EXPORTED so
+ * RepoGradeCellControl.tsx's "will this reach Canvas" caption is driven by
+ * this SAME function rather than a second, hand-rolled copy of the same
+ * condition living in a .tsx - duplicating it there is the single likeliest
+ * way to ship a caption that quietly drifts out of sync with the real
+ * posting rule. repoGradesPosting.test.ts's "the UI and the plan agree"
+ * describe block proves the two can never disagree.
+ *
+ * Checks four things, in order, any one of which suppresses the breakdown:
+ *   1. There is no breakdown to suppress (`rubricAreasLength === 0`).
+ *   2. The instructor has hand-edited the score away from what grading
+ *      produced (repoGradeScoreWasEdited).
+ *   3. The posted total was itself rescaled onto the assignment's
+ *      pointsPossible (resolvePostScore) - a rescaled percentage no longer
+ *      matches the AI's raw per-area numbers.
+ *   4. B4, THE LIVE-DEFECT FIX: the current score has been retyped down to a
+ *      bare number (e.g. "13/16" -> "13") that still matches the fraction's
+ *      earned amount closely enough for repoGradeScoreWasEdited to call it
+ *      "not edited" (see that function's own doc comment - this is
+ *      deliberate there), AND resolvePostScore treats a bare number as a
+ *      literal, never-rescaled human decision (also deliberate - see
+ *      repoGradePostScore.ts's header) - so with generatedScore's OWN
+ *      denominator differing from pointsPossible, this combination silently
+ *      skips the scaling the fraction shape would otherwise have triggered,
+ *      while still carrying the ORIGINAL, wrong-denominator rubricAreas
+ *      along for the ride. Neither check 2 nor check 3 alone catches this -
+ *      each is individually correct; only their interaction is the defect.
+ *      Scoped narrowly: only fires when pointsPossible is known, the
+ *      generated score was a real fraction, that fraction's own possible
+ *      differs from pointsPossible, and the current score has lost its "/"
+ *      entirely - a current score that is STILL a fraction is already
+ *      covered by check 3, and an unknown pointsPossible already leaves the
+ *      bare-number branch alone exactly as it always has (a bare number
+ *      never consults pointsPossible at all).
+ */
+export function repoGradeBreakdownWillPost(input: {
+  rubricAreasLength: number;
+  currentScore: string;
+  generatedScore: string | null;
+  pointsPossible: number | null;
+}): boolean {
+  const { rubricAreasLength, currentScore, generatedScore, pointsPossible } = input;
+  if (rubricAreasLength === 0) return false;
+  if (repoGradeScoreWasEdited(currentScore, generatedScore)) return false;
+
+  const scoreResolution = resolvePostScore(currentScore, pointsPossible);
+  if (scoreResolution.ok && scoreResolution.rescaled) return false;
+
+  if (pointsPossible !== null && generatedScore !== null && !currentScore.includes("/")) {
+    const generatedFraction = parseScoreFraction(generatedScore);
+    if (generatedFraction && generatedFraction.possible !== pointsPossible) return false;
+  }
+
+  return true;
+}
+
 export interface RepoGradePostPlanItem {
   repo: string;
   userId: number;
@@ -261,31 +327,24 @@ export function buildRepoGradePostPlan(
       continue;
     }
     const trimmedComment = row.comment.trim();
-    // LIVE-DEFECT FIX: repoGradePostability's PostabilityResult does not
-    // expose resolvePostScore's `rescaled` flag (repoGradePostScore.ts), so
-    // it is recovered here by calling resolvePostScore directly with the
-    // SAME inputs (row.score, pointsPossible) repoGradePostability already
-    // used internally to compute result.score - this is the one function
-    // that owns "did this score get rescaled," called a second time with
-    // identical arguments, never a second hand-rolled fraction check. A
-    // fraction-shaped score that gets scaled onto the assignment's
-    // pointsPossible (e.g. "13/16" -> 81.25/100) no longer matches the RAW
-    // rubric areas gradeRepoAction generated (which would still sum to 13) -
-    // and both `submission[posted_grade]` and
-    // `rubric_assessment[<criterionId>][points]` reach Canvas in the SAME
-    // request (src/lib/canvas/grades.ts:83-96), so a rescaled total must
-    // suppress rubricAreas exactly as a hand-edited total does.
-    const scoreResolution = resolvePostScore(row.score, pointsPossible);
-    const wasRescaled = scoreResolution.ok && scoreResolution.rescaled;
-    // A3: only include the rubric breakdown when there IS one, the
-    // instructor has not since hand-edited the score away from what
-    // produced it, and the posted total was not itself rescaled onto the
-    // assignment's points - a contradictory rubric is worse than none
-    // (steps.grading-draft-flow.ts:595-625's precedent).
-    const rubricAreas =
-      row.rubricAreas.length > 0 && !repoGradeScoreWasEdited(row.score, row.generatedScore) && !wasRescaled
-        ? row.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: "" }))
-        : undefined;
+    // A3 / B3 / B4: only include the rubric breakdown when repoGradeBreakdownWillPost
+    // says so - there IS one, the instructor has not since hand-edited the
+    // score away from what produced it, the posted total was not itself
+    // rescaled onto the assignment's points (a contradictory rubric is worse
+    // than none - steps.grading-draft-flow.ts:595-625's precedent), and the
+    // score has not been retyped down to a bare number that silently skipped
+    // a scaling its fraction shape would have triggered (B4's live-defect
+    // fix). EXPORTED and shared with RepoGradeCellControl.tsx's own "will
+    // this post" caption rather than checked inline here a second time - see
+    // that function's own doc comment for the full four-condition breakdown.
+    const rubricAreas = repoGradeBreakdownWillPost({
+      rubricAreasLength: row.rubricAreas.length,
+      currentScore: row.score,
+      generatedScore: row.generatedScore,
+      pointsPossible,
+    })
+      ? row.rubricAreas.map((a) => ({ area: a.area, score: a.score, comment: "" }))
+      : undefined;
     postable.push({
       repo: row.repo,
       userId: result.userId,

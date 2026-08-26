@@ -193,7 +193,14 @@ export function useRepoGradesGradingActions(
   }
 
   const handleScoreChange = (repo: string, folder: string, score: string) => {
-    setCellEdits((prev) => setRepoGradeCellEdit(prev, repo, folder, { score }));
+    // docs/rubric-criteria-breakdown-acceptance-criteria.md B5: a cell must
+    // not keep reading "Posted to Canvas" once the score that was posted has
+    // since changed by hand - that status would misrepresent what is
+    // actually live in the gradebook. Reset to "idle" (this cell's own
+    // untouched state - defaultRepoGradeCellEdit) on every score edit, not
+    // on a comment edit (handleCommentChange below), which never changes
+    // what number posts.
+    setCellEdits((prev) => setRepoGradeCellEdit(prev, repo, folder, { score, postStatus: "idle", postMessage: null }));
   };
 
   const handleCommentChange = (repo: string, folder: string, comment: string) => {

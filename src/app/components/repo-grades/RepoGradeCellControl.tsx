@@ -51,6 +51,16 @@ import { formatScorePercent, scorePercentValue } from "./repoGradeScoreDisplay";
 // the instructor is never left guessing whether "350/400" or "35" (out of a
 // 40-point assignment) is the number about to reach a live gradebook.
 import { describePostScore } from "./repoGradePostScore";
+// JOB A (docs/rubric-criteria-breakdown-acceptance-criteria.md): rubricAreas
+// has been written onto every graded cell's edit state since
+// useRepoGradesGradingActions.ts:263, but was never read back by this
+// component (or any other .tsx) - plumbing 100 percent, display 0 percent.
+// repoGradeBreakdownWillPost is the SAME predicate buildRepoGradePostPlan
+// (repoGradesPosting.ts) uses to decide whether a cell's breakdown actually
+// travels in a post payload - imported here, never re-derived, so the
+// truthful caption below can never drift out of sync with the real posting
+// rule (B3).
+import { repoGradeBreakdownWillPost } from "./repoGradesPosting";
 import styles from "./repo-grades.module.css";
 import pageStyles from "../../page.module.css";
 
@@ -126,6 +136,23 @@ export default function RepoGradeCellControl({ row, column, edit, pointsPossible
   // same text twice.
   const scorePercent = scorePercentValue(edit.score) !== null ? formatScorePercent(edit.score) : null;
 
+  // JOB A/B3: whether THIS cell's breakdown would actually reach Canvas if
+  // it were posted right now - both this cell's overall postability
+  // (binding/assignment/folder/score all passing) AND repoGradeBreakdownWillPost's
+  // own four checks, so the caption below is truthful even for a cell that
+  // is not otherwise postable at all (nothing posts either way in that
+  // case). Computed unconditionally (cheap, pure) rather than only inside
+  // the JSX below, so it stays next to the rest of this component's derived
+  // display state.
+  const breakdownWillPost =
+    postability.postable &&
+    repoGradeBreakdownWillPost({
+      rubricAreasLength: edit.rubricAreas.length,
+      currentScore: edit.score,
+      generatedScore: edit.generatedScore,
+      pointsPossible,
+    });
+
   const handleCopyComment = () => {
     void navigator.clipboard.writeText(edit.comment);
   };
@@ -165,6 +192,43 @@ export default function RepoGradeCellControl({ row, column, edit, pointsPossible
           )}
         </div>
       </div>
+      {edit.rubricAreas.length > 0 && (
+        <div className={styles.rubricBreakdown}>
+          {edit.rubricAreas.map((area, index) => {
+            // B1: computed from THIS area's own score string alone - never
+            // from a rubric's declared points (scaleResultToPoints rescales
+            // every area's numerator AND denominator, and an AI-generated
+            // rubric's declared points are null by construction; see
+            // repoGradeScoreDisplay.ts for the full reasoning). Shown only
+            // when it actually parses - a blank score (engine.ts:212 emits
+            // "" for an area routinely) or an unreadable one shows the raw
+            // text alone, never a fabricated NaN%.
+            const areaPercent = scorePercentValue(area.score) !== null ? formatScorePercent(area.score) : null;
+            return (
+              <div key={`${area.area}-${index}`} className={styles.rubricBreakdownArea}>
+                <span className={styles.rubricBreakdownName}>{area.area}</span>
+                <span className={styles.rubricBreakdownScore}>{area.score || "-"}</span>
+                {areaPercent && <span className={styles.scorePercent}>{areaPercent}</span>}
+              </div>
+            );
+          })}
+          {/* B3: a truthful one-line statement, driven by the SAME
+              repoGradeBreakdownWillPost predicate buildRepoGradePostPlan
+              uses to build the real post payload - never a hand-rolled
+              re-check of the same condition, so this can never say
+              something the actual post does not do. Today this reads "for
+              reference only" for every fresh Repo Grades grade (gradeRepoAction
+              omits pointsPossible, so a fresh fraction score is always
+              rescaled - see this module's own header for the verified
+              chain) - but it is computed, not hardcoded, so it stays
+              truthful if that ever changes. */}
+          <span className={styles.postReason}>
+            {breakdownWillPost
+              ? "This breakdown will be included when this grade posts to Canvas."
+              : "This breakdown is shown for reference only - it does not post to Canvas."}
+          </span>
+        </div>
+      )}
       <div className={styles.cellActions}>
         <button
           type="button"

@@ -33759,3 +33759,116 @@ No test renders a component, so the two new notices in `FilePreviewModal.tsx`
 by reading only, not by rendering. The browsing-all-files panel and F5 (the
 Canvas GitHub-link path flattening structure at `repo-content.ts:117`) are
 unstarted, per the AC document's own sequencing.
+
+## 358. The per-criterion breakdown was already computed on Repo Grades and rendered by nothing - plus the percentage that existed nowhere
+
+Acceptance criteria: `docs/rubric-criteria-breakdown-acceptance-criteria.md`.
+
+The instructor asked for "a score/percentage breakdown of how much of each
+criteria to award each student". Research returned a split verdict, and both
+halves mattered.
+
+### What was already true (the baseline this replaces)
+
+`rubricAreas` was written onto every Repo Grades cell by BOTH grading paths
+(`useRepoGradesGradingActions.ts:263`) and read back by exactly three
+non-test files: the type declaration, the post-plan builder, and comments.
+ZERO `.tsx` files. `RepoGradeCellControl.tsx:91` already received the whole
+`edit` object and simply never touched `edit.rubricAreas`. Plumbing 100
+percent, display 0 percent.
+
+Meanwhile a breakdown DID already render on two other surfaces -
+`GradingResults.tsx:489-500` and `:665-686` (editable per-area columns,
+sortable, CSV-exported) and `DraftedGradesTab.tsx:632-654`. All of them
+showed the raw `"8/10"` string. A per-criterion PERCENTAGE existed nowhere
+in the app; the only percentage helper was applied to the total.
+
+### The denominator decision, which is the whole correctness story
+
+Every percentage is computed from that area's OWN score string, via the
+existing tested `parseScoreFraction` / `scorePercentValue` /
+`formatScorePercent` (`repoGradeScoreDisplay.ts:50-93`). It is NOT sourced
+from `extractRubricCriteria`'s declared points, for three separately
+sufficient reasons:
+- `scaleResultToPoints` (`parsing.ts:224`) rescales every area's numerator
+  AND denominator, so a rubric declaring `(10 pts)` graded against a
+  20-point assignment leaves areas shaped `"2/5"`. Matching back to declared
+  points would produce a WRONG denominator that looks authoritative.
+- AI-generated rubrics are percent-based by construction (`rubric.ts:196`),
+  so `points` is `null` for every criterion.
+- `extractRubricCriteria` has one consumer (`engine.ts:105` ->
+  `buildSystemPrompt`) where the points become prompt text and are
+  discarded. This change deliberately did not make it load-bearing.
+
+A score that does not parse as a fraction renders its raw text and NO
+percent. `engine.ts:212` emits `""` for an area routinely, so that is a
+common path, and `NaN%` was the specific thing to avoid.
+
+### The promise that could not be kept, and how it is kept honest
+
+Breakdowns do not post to SpeedGrader from Repo Grades, for any rubric:
+`gradeRepoAction` omits `pointsPossible` (`github-repos.ts:687`) so every
+fresh grade is fraction-shaped, `resolvePostScore` marks every fraction
+`rescaled: true` (`repoGradePostScore.ts:81-83`), and the plan suppresses
+the breakdown before criterion-name matching is reached.
+
+Making the breakdown visible creates an expectation it reaches the
+gradebook. So the caption saying otherwise is driven by ONE exported
+predicate, `repoGradeBreakdownWillPost` (`repoGradesPosting.ts:218`), used
+by `buildRepoGradePostPlan` (`:340`) and by `RepoGradeCellControl.tsx:149`.
+Duplicating the condition in the component was the named likeliest way to
+ship a claim that silently drifts; a test table proves the two agree case by
+case. The suppression itself was NOT loosened - doing so re-opens entry
+350a's silent 68-point gradebook error.
+
+### A live gradebook defect, fixed and reported separately
+
+Hand-retyping a score from `"13/16"` to a bare `"13"` defeated both existing
+gates and posted raw, unscaled criterion scores to the live gradebook:
+`repoGradeScoreWasEdited` reads matching earned digits as unedited (pinned,
+intentional) and `resolvePostScore` treats a bare number as literal and
+never rescaled (also intentional). Neither is wrong alone; together they
+left a hole. `repoGradeBreakdownWillPost` adds a fourth condition - when
+`pointsPossible` is known, the generated score was a fraction whose
+denominator differs from it, and the current score has lost its slash, the
+breakdown is suppressed. Every pre-existing pinned test still passes
+unchanged.
+
+### Four disagreements between totals and areas: two fixed, two baselined
+
+Fixed: `parseScoreValue` counted `"85%"` as 85 raw points, so
+`recomputeTotal` now skips percent-shaped scores; and a stale `postStatus`
+could read "posted" after the numbers had drifted, now cleared on any
+score-affecting edit.
+
+Baselined deliberately, with the reasoning left in the code: `updateEdit`
+does not touch `areas` (no single correct reaction exists - deleting areas
+loses data, recomputing guesses at intent), and `recomputeTotal` prefers the
+total's existing denominator (documented, intentional, pinned by four
+existing tests, with no clearly-correct alternative).
+
+### The guard that had to exist
+
+The named trap for this feature was that the percent helper gets
+exhaustively unit-tested while the component still never mentions
+`edit.rubricAreas` - which was LITERALLY this field's state before this
+change. `rubricBreakdownPercent.wiring.test.ts` proves by source reading
+that the component actually READS `rubricAreas` (not merely receives it) and
+that all three surfaces call the shared `formatScorePercent` rather than a
+fourth copy of the earned-only regex, of which three already exist. Its
+canary fails correctly against the literal pre-fix source and passes against
+the real one.
+
+### Gates
+
+`npx tsc --noEmit` clean; `npx eslint src` 0 errors (5 pre-existing warnings
+in untouched files); `npx vitest run` 702 files / 14323 tests passing;
+`npx next build` compiles successfully, failing only in the env-dependent
+prerender tail and naming no file from this work.
+
+### Limits
+
+`postStatus` clearing lives in React state closures that vitest's node-env
+never renders, so it is verified by reading. No bar or meter was introduced:
+this app's visual language for a score is a muted `tabular-nums` string, and
+there is no progress bar anywhere in `src/`.

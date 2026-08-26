@@ -268,6 +268,18 @@ export function formatPoints(n: number): string {
 // Keeps the existing total's denominator when it has one (e.g. "17/20"); else
 // uses the summed criterion denominators when every criterion supplies one.
 // Returns the current total unchanged when no criterion has a numeric score.
+// docs/rubric-criteria-breakdown-acceptance-criteria.md B5 item 2: this
+// function ALWAYS prefers `currentTotal`'s own denominator over a freshly
+// summed one when the total already has one (the `parseDenominator(currentTotal) ??`
+// line below) - by design, per this doc comment's own "Keeps the existing
+// total's denominator" line, so a total the instructor (or the assignment's
+// real point scale) already anchored to N points does not silently drift
+// just because one criterion's edit happens to leave every area with a
+// denominator this run. Left UNCHANGED here rather than "fixed" to always
+// prefer the freshly-summed denominator: doing so would flip the exact
+// behaviour four existing pinned tests below assert, for a scenario (an
+// instructor rescaling one criterion to a different max mid-edit) with no
+// single obviously-correct resolution - baselined instead of guessed at.
 export function recomputeTotal(
   areas: Record<string, AreaEdit>,
   areaNames: string[],
@@ -279,16 +291,25 @@ export function recomputeTotal(
   let everyHasDenom = true;
   for (const name of areaNames) {
     const score = areas[name]?.score ?? "";
-    if (!score.trim()) {
+    const trimmedScore = score.trim();
+    // docs/rubric-criteria-breakdown-acceptance-criteria.md B5: a
+    // percent-shaped score (the instructor typed "85%" directly into a
+    // criterion cell, rather than "8/10") has no points-earned value at all
+    // - parseScoreValue would otherwise read its leading digits (85) as
+    // though they were raw points earned, inflating the recomputed total by
+    // roughly 10x. Treated exactly like a blank score: contributes nothing
+    // to `earned`, and its absence of a usable denominator forces the
+    // denominator-sum fallback below to be skipped too.
+    if (!trimmedScore || trimmedScore.endsWith("%")) {
       everyHasDenom = false;
       continue;
     }
-    const e = parseScoreValue(score);
+    const e = parseScoreValue(trimmedScore);
     if (e !== null) {
       earned += e;
       sawNumber = true;
     }
-    const d = parseDenominator(score);
+    const d = parseDenominator(trimmedScore);
     if (d !== null) denomSum += d;
     else everyHasDenom = false;
   }

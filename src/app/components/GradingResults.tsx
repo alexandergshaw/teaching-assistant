@@ -32,6 +32,16 @@ import {
   type RowEdit,
   type SortColumn,
 } from "./grading-results/gradingResultsHelpers";
+// docs/rubric-criteria-breakdown-acceptance-criteria.md B1/B2: the SAME
+// tested helpers Repo Grades already uses to show a per-criterion percentage
+// beside a raw "8/10"-shaped score (RepoGradeCellControl.tsx follows the same
+// "show a percent only when it parses" idiom below). Cross-folder import,
+// deliberately not a relocation - this module is pure (no React, no I/O, no
+// server-only dependency), so it carries none of the client-bundle risk
+// gradingResultsHelpers.ts's own header comment warns about for @/lib/grade;
+// src/lib/repo-grade-postability.ts and useLmsAssignmentPull.ts already
+// import other repo-grades helpers the same way.
+import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeScoreDisplay";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 
@@ -169,13 +179,40 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     persistGradingResultsEdits(canvasUrl, edits);
   }, [canvasUrl, edits]);
 
-  const updateEdit = (student: string, patch: Partial<RowEdit>) =>
+  // docs/rubric-criteria-breakdown-acceptance-criteria.md B5: a row must not
+  // keep reading "Posted to Canvas" once the number that was posted has
+  // since changed - that badge would misrepresent what is actually live in
+  // the gradebook. Called only from edits that can change what posts
+  // (updateEdit/updateArea below), never from updateFeedbackField, which
+  // never touches a number.
+  const clearPostStatus = (student: string) =>
+    setPostStatus((prev) => {
+      if (!(student in prev)) return prev;
+      const next = { ...prev };
+      delete next[student];
+      return next;
+    });
+
+  // docs/rubric-criteria-breakdown-acceptance-criteria.md B5 item 1: a
+  // hand-edited total does NOT touch `areas` here - left this way
+  // deliberately, not fixed. There is no single correct reaction: clearing
+  // the areas would delete already-graded per-criterion detail the
+  // instructor may still want to see or export, and no invented recomputed
+  // area value could be more than a guess at intent (the instructor may be
+  // overriding the total for a reason that has nothing to do with any one
+  // criterion - a late-work penalty, a curve). Each area's own percentage
+  // (Job B) is computed from that area's OWN score string regardless, so it
+  // never claims to sum to whatever the total field currently reads -
+  // baselined instead of guessed at.
+  const updateEdit = (student: string, patch: Partial<RowEdit>) => {
     setEdits((prev) => ({
       ...prev,
       [student]: { ...(prev[student] ?? blankRowEdit()), ...patch },
     }));
+    if (patch.total !== undefined) clearPostStatus(student);
+  };
 
-  const updateArea = (student: string, areaName: string, patch: Partial<AreaEdit>) =>
+  const updateArea = (student: string, areaName: string, patch: Partial<AreaEdit>) => {
     setEdits((prev) => {
       const row = prev[student] ?? blankRowEdit();
       const area = row.areas[areaName] ?? { score: "" };
@@ -185,6 +222,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         patch.score !== undefined ? recomputeTotal(areas, run.rubricAreaNames, row.total) : row.total;
       return { ...prev, [student]: { ...row, areas, total } };
     });
+    if (patch.score !== undefined) clearPostStatus(student);
+  };
 
   // The only place that patches one of the three feedback boxes - always
   // routes through applyFeedbackFieldEdit so `overall` (what Canvas posting
@@ -699,17 +738,32 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     const areaEdit = area
                       ? edit.areas[areaName] ?? { score: area.score }
                       : null;
+                    // JOB B (docs/rubric-criteria-breakdown-acceptance-criteria.md):
+                    // a percentage beside each criterion's raw "8/10"-shaped
+                    // score, computed from THAT area's own score string alone
+                    // (B1 - never from a rubric's declared points, which can
+                    // be rescaled or absent entirely) and shown only when it
+                    // actually parses (B1 item 3 - never a fabricated NaN%
+                    // for a blank or unreadable score, e.g. an empty area
+                    // engine.ts:212 routinely emits before grading).
+                    const areaPercent =
+                      areaEdit && scorePercentValue(areaEdit.score) !== null
+                        ? formatScorePercent(areaEdit.score)
+                        : null;
                     return (
                       <td key={`${result.student}-${areaName}`}>
                         {area && areaEdit ? (
-                          <TextField
-                            size="small"
-                            value={areaEdit.score}
-                            onChange={(e) => updateArea(result.student, areaName, { score: e.target.value })}
-                            aria-label={`${areaName} score for ${result.student}`}
-                            sx={{ width: 84 }}
-                            slotProps={{ htmlInput: { style: { padding: "4px 8px" } } }}
-                          />
+                          <div className={styles.rubricAreaCell}>
+                            <TextField
+                              size="small"
+                              value={areaEdit.score}
+                              onChange={(e) => updateArea(result.student, areaName, { score: e.target.value })}
+                              aria-label={`${areaName} score for ${result.student}`}
+                              sx={{ width: 84 }}
+                              slotProps={{ htmlInput: { style: { padding: "4px 8px" } } }}
+                            />
+                            {areaPercent && <span className={styles.rubricAreaPercent}>{areaPercent}</span>}
+                          </div>
                         ) : (
                           "-"
                         )}

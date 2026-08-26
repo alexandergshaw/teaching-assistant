@@ -69,6 +69,7 @@ describe("canvasWorkToEntry - submission URL", () => {
       content: "File: main.py\n\nprint('hello')",
       fileCount: 1,
       truncated: false,
+      files: [{ path: "main.py", text: "print('hello')", truncated: false }],
     });
 
     const work: CanvasStudentWork = {
@@ -88,6 +89,12 @@ describe("canvasWorkToEntry - submission URL", () => {
     expect(entry.gradedRepo).toBe("student/hw1");
     expect(entry.gradedRef).toBe("abc123def456");
     expect(entry.repoReadNote).toBeNull();
+    // F5: the real file, not only the "Submission link" pseudo-file, is
+    // surfaced in submittedFiles.
+    const repoFile = entry.submittedFiles.find((f) => f.name === "main.py");
+    expect(repoFile?.previewContent).toBe("print('hello')");
+    expect(repoFile?.previewTruncated).toBe(false);
+    expect(entry.submittedFiles.some((f) => f.name === "Submission link")).toBe(true);
   });
 
   // --- AC2.3: degrade to text-only grading, with a note, on every failure

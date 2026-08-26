@@ -34,6 +34,13 @@ export interface GradableRepoContent {
   content: string;
   fileCount: number;
   truncated: boolean;
+  // F5 (docs/grading-results-file-viewer-acceptance-criteria.md): the same
+  // files `content` above flattens, kept structured so a caller (extraction.ts)
+  // can surface the real per-file list instead of only a "Submission link"
+  // pseudo-file. Each file's own `truncated` (set below, from clampFileBytes)
+  // survives the budget trim in applyTotalByteBudget, which only selects a
+  // prefix of this array and never touches the objects it copies.
+  files: SubmissionRepoFile[];
 }
 
 export type GradableRepoResult = GradableRepoContent | { error: string };
@@ -106,7 +113,7 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
     }
     const clamped = clampFileBytes(text);
     if (clamped.truncated) perFileTruncated = true;
-    fetched.push({ path: entry.path, text: clamped.text });
+    fetched.push({ path: entry.path, text: clamped.text, truncated: clamped.truncated });
   }
 
   if (fetched.length === 0) {
@@ -122,5 +129,6 @@ export async function fetchGradableRepoContent(submissionUrl: string): Promise<G
     content,
     fileCount: budgeted.files.length,
     truncated: selectionTruncated || perFileTruncated || budgeted.truncated,
+    files: budgeted.files,
   };
 }

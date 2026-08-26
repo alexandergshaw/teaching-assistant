@@ -11,6 +11,11 @@
 export interface SubmissionRepoFile {
   path: string;
   text: string;
+  // F5 (docs/grading-results-file-viewer-acceptance-criteria.md): optional
+  // and set only by repo-content.ts's grading path (clampFileBytes's own
+  // per-file result) - the on-demand "Load code" action never sets it, so a
+  // reader there sees plain `undefined`, not a false "not truncated".
+  truncated?: boolean;
 }
 
 /** The subset of a GitHub tree entry this module needs (matches RepoTreeEntry

@@ -323,6 +323,27 @@ export function formatFeedback(text: string): string {
   return text.replace(/\s*[–—]\s*/g, ", ");
 }
 
+// ── F4 (docs/grading-results-file-viewer-acceptance-criteria.md) ──────────
+// A restored GithubGradingPanel run and a persisted grading draft both drop
+// `submittedFiles` deliberately (github-grading-run-store.ts's
+// parseGradeResult, grading-review-rows.ts's stripGradeResultForDraft) - file
+// bytes are never re-persisted into localStorage or a draft row. That is
+// CORRECT, not a bug. The bug was the Files column reading an empty array
+// exactly the same way whether the submission genuinely had no files, or the
+// files were simply never brought back. `filesRetained` is the minimal,
+// non-content-bearing flag that tells those two states apart - GithubGrading-
+// Panel.tsx already computes the fact it carries (`runIsRestored`), so no new
+// data had to be invented, only threaded one prop further.
+export const FILES_NOT_RETAINED_LABEL = "Files not retained for this restored run.";
+
+/** What the Files column shows for a result with zero `submittedFiles`:
+ * the genuine "-" when this run's files were actually retained (a fresh run
+ * that truly had no files), or the honest explanation when they were not
+ * (a restored run or a draft) - see this section's header comment. */
+export function filesColumnEmptyLabel(filesRetained: boolean): string {
+  return filesRetained ? "-" : FILES_NOT_RETAINED_LABEL;
+}
+
 export function escapeCsvCell(value: string): string {
   const sanitized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return `"${sanitized.replace(/"/g, '""')}"`;

@@ -34,6 +34,8 @@ import {
   composeOverallCommentLocal,
   defaultRowEdit,
   escapeCsvCell,
+  FILES_NOT_RETAINED_LABEL,
+  filesColumnEmptyLabel,
   formatFeedback,
   formatPoints,
   gradingResultsEditsKey,
@@ -176,6 +178,23 @@ describe("formatFeedback", () => {
 
   it("leaves text with no dashes unchanged", () => {
     expect(formatFeedback("no dashes here")).toBe("no dashes here");
+  });
+});
+
+describe("filesColumnEmptyLabel", () => {
+  // F4 (docs/grading-results-file-viewer-acceptance-criteria.md): an empty
+  // Files column must read differently for a genuinely file-less submission
+  // than for a restored run/draft whose files were never persisted back.
+  it("shows the genuine dash when this run's files were retained", () => {
+    expect(filesColumnEmptyLabel(true)).toBe("-");
+  });
+
+  it("shows the honest explanation when this run's files were not retained", () => {
+    expect(filesColumnEmptyLabel(false)).toBe(FILES_NOT_RETAINED_LABEL);
+  });
+
+  it("the two labels are distinct strings (the whole point of the flag)", () => {
+    expect(filesColumnEmptyLabel(true)).not.toBe(filesColumnEmptyLabel(false));
   });
 });
 
@@ -760,7 +779,12 @@ describe("grading-results client files stay client-bundle-safe", () => {
   // both of which record the identical lesson: only `next build` catches
   // this class of defect, so a source-reading guard test is the only thing
   // that keeps it caught on every routine run.
-  const CLIENT_FILES = ["./gradingResultsHelpers.ts", "./RowFeedbackBoxes.tsx", "../GradingResults.tsx"];
+  const CLIENT_FILES = [
+    "./gradingResultsHelpers.ts",
+    "./RowFeedbackBoxes.tsx",
+    "./SubmittedFilesPanel.tsx",
+    "../GradingResults.tsx",
+  ];
 
   // A quoted import specifier, not this describe block's own prose above
   // (which mentions next/headers and @/lib/grade in backticks/code font
@@ -796,5 +820,74 @@ describe("grading-results client files stay client-bundle-safe", () => {
     for (const pattern of BANNED_IMPORT_PATTERNS) {
       expect(source).not.toMatch(pattern);
     }
+  });
+});
+
+describe("GradingResults.tsx's empty Files cell stays wired to filesColumnEmptyLabel", () => {
+  // F4: the Files column used to hardcode "-" for an empty submittedFiles
+  // array, which cannot distinguish a restored run's stripped files from a
+  // genuinely file-less submission. A future edit that reverts to a bare
+  // "-" literal (or otherwise stops calling the helper) would silently
+  // regress that distinction, and nothing renders in this suite to catch it
+  // - so this is a source-reading guard, the same idiom this file's own
+  // "client files stay client-bundle-safe" block above uses, paired with a
+  // canary proving the detector actually discriminates.
+  const CALL_PATTERN = /filesColumnEmptyLabel\(filesRetained\)/;
+  const BARE_DASH_TERNARY_PATTERN = /:\s*\(\s*"-"\s*\)/;
+
+  function readStrippedSource(relativeToThisFile: string): string {
+    return readFileSync(fileURLToPath(new URL(relativeToThisFile, import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+  }
+
+  it("canary: the real call is detected", () => {
+    expect(CALL_PATTERN.test("filesColumnEmptyLabel(filesRetained)")).toBe(true);
+  });
+
+  it("canary: the pre-F4 bare-dash ternary shape is detected by its own pattern", () => {
+    expect(BARE_DASH_TERNARY_PATTERN.test('result.submittedFiles.length > 0 ? (\n  <ul />\n) : (\n  "-"\n)}')).toBe(
+      true
+    );
+  });
+
+  it("canary: an unrelated ternary is NOT flagged by either pattern", () => {
+    expect(CALL_PATTERN.test('cond ? "a" : "b"')).toBe(false);
+    expect(BARE_DASH_TERNARY_PATTERN.test('cond ? "a" : "b"')).toBe(false);
+  });
+
+  it("GradingResults.tsx calls filesColumnEmptyLabel(filesRetained) for the empty Files cell", () => {
+    const source = readStrippedSource("../GradingResults.tsx");
+    expect(source).toMatch(CALL_PATTERN);
+  });
+});
+
+describe("GradingResults.tsx wires its Browse-all-files button to SubmittedFilesPanel", () => {
+  // Task 2: the per-row "Browse all files" button must actually open
+  // SubmittedFilesPanel with that row's own files, not a stale/wrong
+  // student's - a mis-wired opener (e.g. always opening the first result, or
+  // a button that sets state nothing renders) would be invisible to every
+  // other gate here, since nothing in this suite renders a component.
+  const OPEN_PATTERN = /onClick=\{\(\) => setBrowseFilesFor\(result\)\}/;
+  const RENDER_PATTERN = /<SubmittedFilesPanel/;
+
+  function readStrippedSource(relativeToThisFile: string): string {
+    return readFileSync(fileURLToPath(new URL(relativeToThisFile, import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+  }
+
+  it("canary: the real open handler is detected", () => {
+    expect(OPEN_PATTERN.test("onClick={() => setBrowseFilesFor(result)}")).toBe(true);
+  });
+
+  it("canary: opening a fixed/stale value does NOT satisfy the pattern", () => {
+    expect(OPEN_PATTERN.test("onClick={() => setBrowseFilesFor(sortedResults[0])}")).toBe(false);
+  });
+
+  it("GradingResults.tsx's Browse button opens the CURRENT row, and renders the panel", () => {
+    const source = readStrippedSource("../GradingResults.tsx");
+    expect(source).toMatch(OPEN_PATTERN);
+    expect(source).toMatch(RENDER_PATTERN);
   });
 });

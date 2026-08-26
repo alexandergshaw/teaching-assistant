@@ -10,6 +10,7 @@ import type { PreviewFile } from "./FilePreviewModal";
 import type { CodeRunResult } from "@/lib/code-runner";
 import { ModalShell } from "./ui/ModalShell";
 import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
+import SubmittedFilesPanel from "./grading-results/SubmittedFilesPanel";
 import styles from "../page.module.css";
 import {
   DEFAULT_SORT,
@@ -19,6 +20,7 @@ import {
   buildCsvContent,
   compareText,
   defaultRowEdit,
+  filesColumnEmptyLabel,
   loadGradingResultsEdits,
   persistGradingResultsEdits,
   parseEarnedPoints,
@@ -100,6 +102,13 @@ export type GradingResultsProps = {
    * LiveFeedPanel.tsx (page.tsx -> GradingTab.tsx -> LiveFeedPanel.tsx ->
    * GradingResults.tsx). */
   onOpenPreview: (student: string, file: PreviewFile, trigger: HTMLElement) => void;
+  /** F4 (docs/grading-results-file-viewer-acceptance-criteria.md): true (the
+   * default) for every fresh run, where an empty `submittedFiles` genuinely
+   * means the submission had no files. A caller that can show a RESTORED run
+   * (GithubGradingPanel.tsx, via its own `runIsRestored`) passes `false` so
+   * the Files column can tell "nothing submitted" apart from "not retained"
+   * - see filesColumnEmptyLabel in gradingResultsHelpers.ts. */
+  filesRetained?: boolean;
   /** Called after any successful post (e.g. to refresh badges and the queue). */
   onPosted?: () => void;
   /** Optional context banner rendered above the results header. */
@@ -134,6 +143,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   copiedKey,
   onCopy,
   onOpenPreview,
+  filesRetained = true,
   onPosted,
   banner,
   sectionRef,
@@ -156,6 +166,8 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const [codeRuns, setCodeRuns] = useState<Record<string, CodeRunResult | null>>({});
   const [codeRunning, setCodeRunning] = useState<Record<string, boolean>>({});
   const [codeOutputStudent, setCodeOutputStudent] = useState<string | null>(null);
+  // Task 2: the row whose "Browse all files" panel is open, or null.
+  const [browseFilesFor, setBrowseFilesFor] = useState<GradeRow | null>(null);
 
   // Re-load editable rows when a new run arrives (adjust-state-on-prop-change).
   // Loads from storage (not a bare re-seed) so edits already persisted for
@@ -170,6 +182,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     setCodeRuns({});
     setCodeRunning({});
     setCodeOutputStudent(null);
+    setBrowseFilesFor(null);
   }
 
   // Persists on every edits change (grade, per-criterion score, or any of the
@@ -671,66 +684,76 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                   </td>
                   <td>
                     {result.submittedFiles.length > 0 ? (
-                      <ul className={styles.matrixFileList}>
-                        {result.submittedFiles.map((file) => (
-                          <li key={`${result.student}-file-name-${file.name}`} className={styles.matrixFileItem}>
-                            <span className={styles.matrixFileName}>
-                              {file.extension && file.extension !== "(none)" && !file.name.toLowerCase().endsWith(`.${file.extension.toLowerCase()}`)
-                                ? `${file.name}.${file.extension}`
-                                : file.name}
-                            </span>
-                            <div className={styles.fileIconGroup}>
-                              <IconButton
-                                size="small"
-                                title={`Preview ${file.name}`}
-                                aria-label={`Preview ${file.name}`}
-                                onClick={(event) =>
-                                  onOpenPreview(
-                                    result.student,
-                                    {
-                                      student: result.student,
-                                      name: file.name,
-                                      extension: file.extension,
-                                      content: file.previewContent || "No extracted text available for this file.",
-                                      truncated: file.previewTruncated,
-                                      // F3 requirement 3: a second, distinct
-                                      // cut - the whole submission (this file
-                                      // included) may have been trimmed again
-                                      // before the model saw it, even when
-                                      // this one file's own content was not.
-                                      submissionTruncated: result.submissionTruncated,
-                                      rawBase64: file.rawBase64,
-                                      mimeType: file.mimeType,
-                                    },
-                                    event.currentTarget
-                                  )
-                                }
-                              >
-                                <EyeIcon />
-                              </IconButton>
-                              {file.rawBase64 && (
+                      <>
+                        <ul className={styles.matrixFileList}>
+                          {result.submittedFiles.map((file) => (
+                            <li key={`${result.student}-file-name-${file.name}`} className={styles.matrixFileItem}>
+                              <span className={styles.matrixFileName}>
+                                {file.extension && file.extension !== "(none)" && !file.name.toLowerCase().endsWith(`.${file.extension.toLowerCase()}`)
+                                  ? `${file.name}.${file.extension}`
+                                  : file.name}
+                              </span>
+                              <div className={styles.fileIconGroup}>
                                 <IconButton
                                   size="small"
-                                  title={`Download ${file.name}`}
-                                  aria-label={`Download ${file.name}`}
-                                  onClick={() =>
-                                    handleDownloadFile(
-                                      file.name,
-                                      file.extension,
-                                      file.rawBase64!,
-                                      file.mimeType ?? "application/octet-stream"
+                                  title={`Preview ${file.name}`}
+                                  aria-label={`Preview ${file.name}`}
+                                  onClick={(event) =>
+                                    onOpenPreview(
+                                      result.student,
+                                      {
+                                        student: result.student,
+                                        name: file.name,
+                                        extension: file.extension,
+                                        content: file.previewContent || "No extracted text available for this file.",
+                                        truncated: file.previewTruncated,
+                                        // F3 requirement 3: a second, distinct
+                                        // cut - the whole submission (this file
+                                        // included) may have been trimmed again
+                                        // before the model saw it, even when
+                                        // this one file's own content was not.
+                                        submissionTruncated: result.submissionTruncated,
+                                        rawBase64: file.rawBase64,
+                                        mimeType: file.mimeType,
+                                      },
+                                      event.currentTarget
                                     )
                                   }
                                 >
-                                  <DownloadIcon />
+                                  <EyeIcon />
                                 </IconButton>
-                              )}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+                                {file.rawBase64 && (
+                                  <IconButton
+                                    size="small"
+                                    title={`Download ${file.name}`}
+                                    aria-label={`Download ${file.name}`}
+                                    onClick={() =>
+                                      handleDownloadFile(
+                                        file.name,
+                                        file.extension,
+                                        file.rawBase64!,
+                                        file.mimeType ?? "application/octet-stream"
+                                      )
+                                    }
+                                  >
+                                    <DownloadIcon />
+                                  </IconButton>
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => setBrowseFilesFor(result)}
+                          sx={{ minWidth: 0, textTransform: "none", p: "2px 6px", mt: 0.5 }}
+                        >
+                          Browse all files
+                        </Button>
+                      </>
                     ) : (
-                      "-"
+                      filesColumnEmptyLabel(filesRetained)
                     )}
                   </td>
                   {run.rubricAreaNames.map((areaName) => {
@@ -878,6 +901,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
           </ModalShell>
         );
       })()}
+      {browseFilesFor && (
+        <SubmittedFilesPanel
+          student={browseFilesFor.student}
+          files={browseFilesFor.submittedFiles}
+          submissionTruncated={browseFilesFor.submissionTruncated}
+          onClose={() => setBrowseFilesFor(null)}
+        />
+      )}
     </section>
   );
 });

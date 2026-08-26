@@ -64,6 +64,32 @@ describe("fetchGradableRepoContent - URL forms (AC2.2)", () => {
     expect(result.content).toContain("File: main.py");
     expect(result.content).toContain("print('hi')");
     expect(mockGetRepoTree).toHaveBeenCalledWith("octo", "cat", "deadbeefcafe0123456789");
+    // F5: the structured per-file list survives alongside the flattened blob.
+    expect(result.files).toEqual([{ path: "main.py", text: "print('hi')", truncated: false }]);
+  });
+
+  it("marks only the file that actually exceeded the per-file budget as truncated, independently of a sibling that did not (F5)", async () => {
+    mockGetRepo.mockResolvedValueOnce(fakeRepo("main"));
+    mockListCommits.mockResolvedValueOnce([{ sha: "sha1", message: "", author: "", date: "", htmlUrl: "" }]);
+    // Tree size metadata (both under the pre-fetch selection cap) is what
+    // selectSubmissionRepoFiles filters on - the downloaded TEXT is what
+    // clampFileBytes re-checks, and it is the downloaded text, not the
+    // reported size, that is deliberately made oversized for "big.py" here so
+    // this test exercises clampFileBytes's per-file cut, not the earlier
+    // pre-fetch exclusion (a differently-scoped cap this file does not test).
+    mockGetRepoTree.mockResolvedValueOnce([
+      { path: "big.py", type: "blob", size: 5, sha: "x" },
+      { path: "small.py", type: "blob", size: 5, sha: "y" },
+    ]);
+    mockGetFileText.mockResolvedValueOnce("x".repeat(400_000));
+    mockGetFileText.mockResolvedValueOnce("y = 1");
+
+    const result = await fetchGradableRepoContent("https://github.com/octo/cat");
+    if ("error" in result) throw new Error(`expected success, got error: ${result.error}`);
+    const big = result.files.find((f) => f.path === "big.py");
+    const small = result.files.find((f) => f.path === "small.py");
+    expect(big?.truncated).toBe(true);
+    expect(small?.truncated).toBe(false);
   });
 
   it("handles a trailing slash", async () => {

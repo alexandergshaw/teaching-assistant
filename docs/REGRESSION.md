@@ -33872,3 +33872,78 @@ prerender tail and naming no file from this work.
 never renders, so it is verified by reading. No bar or meter was introduced:
 this app's visual language for a score is a muted `tabular-nums` string, and
 there is no progress bar anywhere in `src/`.
+
+## 359. Browsing a graded submission's files, and telling "we no longer have them" apart from "there were none"
+
+Completes `docs/grading-results-file-viewer-acceptance-criteria.md` - the
+three items entry 357 deferred (F4, the browse-all panel, and F5).
+
+### F4 - an empty state that distinguishes two very different facts
+
+A restored run and a draft deliberately drop `submittedFiles`
+(`github-grading-run-store.ts:179`, `grading-review-rows.ts:41`), and their
+tests assert the empty array. That contract is correct and was NOT changed:
+re-persisting file contents would bloat a store this project already had to
+defend against invalidation bugs.
+
+The defect was that the resulting empty Files column was indistinguishable
+from a submission that genuinely contained no files. The fix carries a
+BOOLEAN, never content: `filesRetained` (default true), threaded from
+`GithubGradingPanel.tsx`'s already-existing `runIsRestored`. The column now
+renders `filesColumnEmptyLabel(filesRetained)` - a plain `-` for a
+file-less fresh submission, and "Files not retained for this restored run."
+when the files were dropped by design. `GradingTab.tsx` and
+`LiveFeedPanel.tsx` never restore, so they keep the old behaviour via the
+default.
+
+`DraftedGradesTab.tsx` was surveyed and needed nothing: it never renders
+`submittedFiles`, and its `SubmissionCodePanel` already carries its own
+honest badge warning that live GitHub content may not be the code the draft
+was graded against.
+
+### The browse-all panel, and why it does not fetch
+
+`grading-results/SubmittedFilesPanel.tsx` (145 lines) renders a file picker
+plus a read-only Monaco editor over `submittedFiles` - the files that were
+ACTUALLY graded. It deliberately does not reuse
+`drafted-grades/SubmissionCodePanel.tsx`, which fetches live from GitHub:
+showing an instructor something other than what was graded is the exact
+failure this whole feature exists to prevent. `FilePreviewModal.tsx` is
+untouched and still owns single-file preview.
+
+Both truncation truths from entry 357 carry into the new surface: the
+per-file cut-point notice, and the separate case where the grader saw less
+than the panel is showing. A new honesty surface that quietly dropped them
+would have reintroduced entry 357's defect one screen over.
+
+### F5 - the Canvas GitHub-link path stops flattening
+
+`repo-content.ts` already had `budgeted.files` and discarded it, folding
+repo source into one blob behind a single "Submission link" pseudo-file. It
+now returns the real list, with per-file `truncated` taken from
+`clampFileBytes`'s own result, and `extraction.ts` emits one entry per real
+file. Landed at ~26 net lines against a ~15-line estimate - over, but
+proportionate, and flagged rather than quietly absorbed.
+
+### An existing pinned test that legitimately moved
+
+`modalAdoption.wiring.test.ts` pins exact counts of every `ModalShell`
+adopting site. `SubmittedFilesPanel.tsx` adopts `ModalShell` from birth, so
+both literals moved by one (45 -> 46, 31 -> 32), updated with the same
+explanatory-comment pattern that file already uses for prior additions. The
+counts were raised because a new legitimate adopter exists, not to make a
+failing assertion pass.
+
+### Gates
+
+`npx tsc --noEmit` clean; `npx eslint src` 0 errors (the 5 pre-existing
+warnings in untouched files); `npx vitest run` 702 files / 14339 tests
+passing; `npx next build` compiles successfully, failing only in the
+env-dependent prerender tail and naming no file from this work.
+
+### Limit worth acting on
+
+`GradingResults.tsx` is now 916 lines against the hard 1000-line cap - 84
+lines of headroom after gaining the three feedback boxes, the per-criterion
+percentage, and this panel's opener in one day. The next feature touching
+this file should extract before it adds, not after.

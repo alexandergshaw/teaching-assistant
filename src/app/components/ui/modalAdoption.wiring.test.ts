@@ -233,7 +233,12 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // F10): ReleaseReviewModal.tsx is one more new dialog site, on the same
     // terms as CommandProposalModal.tsx/CarryModulePatternReviewModal.tsx
     // before it - it adopts ModalShell from birth too.
-    expect(DIALOG_SITES.length).toBe(45);
+    //
+    // 46, not 45, as of the grading-results-file-viewer browsing-panel chunk
+    // (Task 2): grading-results/SubmittedFilesPanel.tsx is one more new
+    // dialog site, on the same terms as ReleaseReviewModal.tsx before it - it
+    // adopts ModalShell from birth too.
+    expect(DIALOG_SITES.length).toBe(46);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -273,7 +278,11 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // thirty described above plus ReleaseReviewModal.tsx, which likewise
     // adopts ModalShell from birth rather than needing a name on one of the
     // three allowlists.
-    expect(ADOPTING_PATHS.size).toBe(31);
+    // 32 as of the grading-results-file-viewer browsing-panel chunk (Task 2)
+    // - the thirty-one described above plus SubmittedFilesPanel.tsx, which
+    // likewise adopts ModalShell from birth rather than needing a name on
+    // one of the three allowlists.
+    expect(ADOPTING_PATHS.size).toBe(32);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

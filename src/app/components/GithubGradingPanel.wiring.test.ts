@@ -67,3 +67,33 @@ describe("onOpenPreview is never wired to an empty-body no-op handler", () => {
     expect(source).toMatch(/const handleOpenPreview = \(student: string, file: PreviewFile, trigger: HTMLElement\) => \{/);
   });
 });
+
+// F4 (docs/grading-results-file-viewer-acceptance-criteria.md): this panel
+// is the one place today that can hand GradingResults a RESTORED run
+// (loadStoredGithubGradingRun), so it is the one place that must tell
+// GradingResults the Files column's empty-array ambiguity does not apply -
+// see filesColumnEmptyLabel in gradingResultsHelpers.ts. A future edit that
+// drops this prop (or hardcodes `filesRetained={true}`, silently re-hiding
+// the restored case) would regress the distinction with nothing in this
+// node-env suite rendering to catch it - hence a source-reading guard again,
+// paired with canaries proving it discriminates.
+describe("GithubGradingPanel.tsx tells GradingResults when this run's files were not retained", () => {
+  const WIRED_PATTERN = /filesRetained=\{!runIsRestored\}/;
+
+  it("canary: the real wiring is detected", () => {
+    expect(WIRED_PATTERN.test("filesRetained={!runIsRestored}")).toBe(true);
+  });
+
+  it("canary: a hardcoded true does NOT satisfy the pattern", () => {
+    expect(WIRED_PATTERN.test("filesRetained={true}")).toBe(false);
+  });
+
+  it("canary: an inverted (wrong) expression does NOT satisfy the pattern", () => {
+    expect(WIRED_PATTERN.test("filesRetained={runIsRestored}")).toBe(false);
+  });
+
+  it("GithubGradingPanel.tsx passes filesRetained={!runIsRestored} to GradingResults", () => {
+    const source = readSource("./GithubGradingPanel.tsx");
+    expect(source).toMatch(WIRED_PATTERN);
+  });
+});

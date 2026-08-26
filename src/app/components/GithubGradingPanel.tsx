@@ -761,6 +761,11 @@ export default function GithubGradingPanel() {
             copiedKey={copiedKey}
             onCopy={onCopy}
             onOpenPreview={handleOpenPreview}
+            // F4: an empty Files column means something different for a
+            // restored run than for a fresh one - see filesColumnEmptyLabel
+            // in gradingResultsHelpers.ts. runIsRestored already tracks
+            // exactly this fact (R2.5), so no new state was needed here.
+            filesRetained={!runIsRestored}
             banner={
               // R2.5: a restored run must be obviously restored, not passed
               // off as fresh - an instructor who cannot tell the difference

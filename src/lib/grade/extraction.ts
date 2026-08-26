@@ -204,6 +204,19 @@ export async function canvasWorkToEntry(work: CanvasStudentWork): Promise<Studen
           contentParts.push(
             `GitHub repository code (${repoResult.repo} @ ${repoResult.ref}${repoResult.truncated ? ", trimmed to fit size limits" : ""}):\n\n${repoResult.content}`
           );
+          // F5 (docs/grading-results-file-viewer-acceptance-criteria.md):
+          // surface the real per-file list alongside the "Submission link"
+          // pseudo-file above, so the Files column and browsing panel show
+          // the actual graded source, not just a link to it.
+          for (const file of repoResult.files) {
+            submittedFiles.push({
+              name: file.path,
+              extension: getFileExtension(file.path),
+              previewContent: file.text,
+              previewTruncated: file.truncated ?? false,
+              mimeType: "text/plain",
+            });
+          }
         }
       } catch (err) {
         repoReadNote = `Could not read the linked GitHub repository: ${err instanceof Error ? err.message : "an unexpected error occurred"}.`;

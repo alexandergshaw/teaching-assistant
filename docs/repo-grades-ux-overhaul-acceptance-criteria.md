@@ -27,7 +27,7 @@ as rejected at the end of section 2.
   renders `columnsWithMapping`, which is
   `applyRepoGradeAssignmentMapping(model.columns, assignmentMapping)`
   (index.tsx:255). The distinction between those two arrays is load-bearing -
-  see U9.40.
+  see U9.41.
 - **There are TWO ways to grade a folder today, not one.** (a) The per-column
   "Grade all" button in that folder's header (RepoGradesGrid.tsx:163-172),
   reachable only by scrolling the table horizontally to that column; and
@@ -37,7 +37,7 @@ as rejected at the end of section 2.
   in the control stack, and neither names its folder in its label. That is the
   defect behind "I should be able to choose which assignment folder I want
   graded from this view" - the capability is reachable but buried, and it has
-  two entry points that disagree with each other (U9.37).
+  two entry points that disagree with each other (U9.38).
 - A column header carries three controls stacked in one `<th>`: the folder
   name, a Canvas assignment `<select>`, "Grade all", and "Post N grade(s)"
   (RepoGradesGrid.tsx:149-183). `thead th` is `position: sticky; top: 0`
@@ -64,12 +64,18 @@ as rejected at the end of section 2.
   and `background: var(--card-background)` - a card frame drawn inside a card
   - and, critically, `gap: 0` (page.module.css:14-27), which is what actually
   destroys the vertical rhythm between the header, controls, panels, grid and
-  log. At a 375px viewport the nesting costs `.page`'s 48px plus 2px of outer
-  border plus `.card`'s 72px plus 2px of inner border - **124px of horizontal
-  chrome, leaving roughly 251px of content**, the largest narrow-width defect
-  in the view. (An earlier draft also claimed the inner container overflows
-  its parent and is clipped by `overflow: clip`. That was FALSE:
-  `width: min(100%, 96vw)` can never exceed 100% of its containing block.)
+  log. **The value of deleting it is the RHYTHM, not the width.** `.card`
+  (page.module.css:29-36) has no border, no radius, no shadow and no
+  background - it is `gap: 28px; padding: 36px` only - so removing the nested
+  container reclaims just 2px of horizontal chrome. What it restores is
+  `.card`'s `gap: 28px` between the header, controls, banners, link panel,
+  grid and log, which is currently `gap: 0`. Two earlier drafts of this bullet
+  overstated it: one claimed the inner container overflows and is clipped
+  (false - `width: min(100%, 96vw)` cannot exceed 100% of its containing
+  block), the other claimed 124px of horizontal chrome (false - 122px of that
+  is `.page` and `.card` padding, which every tab in the app pays). U0c is
+  still the right first move and still one line; the argument for it is the
+  vertical rhythm.
   **The fix is to DELETE the inner `.tabContainer`, not to add `.card`.**
   Nothing anywhere resets a nested `.tabContainer` - page.module.css:14 is its
   only definition.
@@ -105,9 +111,9 @@ IN scope:
 - **The specific behavior fixes enumerated in U9, deliberately and with
   reasons given.** These ARE behavior changes, and this document is the
   "raise" that authorizes them: a confirm-binding path that degrades the
-  instructor's rows (U9.35/36), a grading path that ignores its own toggle
-  (U9.37), an uncancellable spend (U9.39), and a mapping filter that can erase
-  saved data once folder scoping exists (U9.40). Reorganizing the controls
+  instructor's rows (U9.36/36), a grading path that ignores its own toggle
+  (U9.38), an uncancellable spend (U9.40), and a mapping filter that can erase
+  saved data once folder scoping exists (U9.41). Reorganizing the controls
   around these without fixing them would be a facade over a broken mechanism.
 
 OUT of scope:
@@ -212,9 +218,9 @@ it. U0c is the single highest value-per-risk change in this work item.*
 7b. **U1.7 does NOT forbid adding a confirmation.** Today's "Grade all" has NO
    confirm (`handleGradeColumn` calls `void runBulkGrade(plan)` with none,
    unlike `handlePostColumn` which confirms at
-   useRepoGradesGradingActions.ts:296). U8.34 requires a spend of one model
+   useRepoGradesGradingActions.ts:296). U8.35 requires a spend of one model
    call per repo not be reachable by a single stray click. Where U1.7 and
-   U8.34 meet, U8.34 wins: the standing house rule is that click cost is
+   U8.35 meet, U8.35 wins: the standing house rule is that click cost is
    first-class but is never traded against a confirmation step. [SRC]
 
 ### U2 - The control surface has hierarchy
@@ -567,7 +573,7 @@ several tags claim a method that cannot deliver:
 
 - "Choosing a folder to grade is already possible and is already the ONLY way
   to do it." False - the per-cell Grade button is a second path, as this
-  document's own U9.37 states.
+  document's own U9.38 states.
 - "A score input, a comment input, a Grade button and a Post button in every
   body cell." Only for `ungraded` cells.
 - "Nothing else has ever happened in this course." An inference from a capped,
@@ -638,7 +644,7 @@ before any new folder control is designed.
 
 ### Further reuse the original survey missed (from the peer check)
 
-- **Confirm convention** (for U8.34 / U9.39): there is no `ConfirmDialog`
+- **Confirm convention** (for U8.35 / U9.40): there is no `ConfirmDialog`
   helper; the house convention is `window.confirm`, ~25 call sites, three of
   them already in this view (useRepoGradesGradingActions.ts:296,
   RepoGradesLogPanel.tsx:91, LinkUsernamesPanel.tsx:206) with wording pinned
@@ -648,7 +654,7 @@ before any new folder control is designed.
   merge path uses that arming rather than a confirm for its destructive step,
   which is the closer precedent for an expensive fan-out.
   The house irreversibility string is the literal "This cannot be undone."
-- **Consequence tiers** (built for exactly U8.34's question):
+- **Consequence tiers** (built for exactly U8.35's question):
   `content-tab/modules/bulkBarGroups.ts:133` defines
   `ConsequenceTier = "read-only" | "reversible-write" | "fan-out-write" |
   "destructive"`, with `consequenceTag`:488 and a build-failing audit at
@@ -778,7 +784,7 @@ a larger redesign.
   flag checked inside the worker loop, with an outlined error-coloured
   Cancel button beside the primary action
   (`CopilotAgentsSection.tsx:80-84`). This is the proven in-repo answer to
-  U9.39; do not invent an AbortController scheme.
+  U9.40; do not invent an AbortController scheme.
 - **Progress bar**: `tasks/TasksGrid.module.css:461-479` `.progressText` /
   `.progressBarTrack` / `.progressBarFill` (SURVEYED) - the only real
   progress bar in the app, for U5.20.
@@ -823,7 +829,30 @@ WorkflowPanel.module.css:24-39 and used across page.module.css. Colours,
 radii, shadows and focus rings DO have real tokens and the original wording
 holds for them.
 
-## 3. Architect pass (loop step 1b) - REVISION 2
+## 3. Architect pass (loop step 1b) - REVISION 2 - PARTLY SUPERSEDED BY SECTION 5
+
+> **STOP. Read section 5 before acting on anything below.** Section 5
+> overturns four of this section's instructions, and because it appears LATER
+> in the file, a top-to-bottom reader would otherwise follow the wrong one.
+> The four:
+>
+> 1. **"Reuse `rosterOverlay.withoutCanvasId`" for U4.17 - WRONG.** It is a
+>    delta metric that reads ZERO in the instructor's actual state. U4.17a is
+>    correct; this section is not.
+> 2. **"The census can only come from the rows" - WRONG.** It comes from
+>    `buildRepoGradeColumns`'s own input. And the "unknown" count is a
+>    per-scan constant, not a per-folder number.
+> 3. **The rejection of "a new pure module taking columns as input" -
+>    REOPENED.** Its sole stated reason was the census claim in (2), which is
+>    false. That module is required (section 5's extraction list).
+> 4. **"Keep the srOnly region and mark the visible surface `aria-hidden`" -
+>    WRONG.** It is an ARIA inversion. Put `role="status"` on the VISIBLE
+>    node.
+>
+> Also superseded: the +80/+140 line estimate (section 5 says +200/+300), and
+> the "two named values plus a guard test" protection (section 5: never filter
+> on write, filter on read, plus a branded nominal type).
+
 
 Revision 1 was rejected by the peer sabotage check on 2026-08-26 with three
 independently blocking findings. The diagnosis survived; the prescription did
@@ -963,7 +992,7 @@ bearing for AC U5.20/21 and every "the view states..." criterion:
 **Decision: the view gains ONE visible status surface** that renders
 `postSummary` and bulk progress together, positioned so it does not scroll
 out of view during a run. The existing `role="status" aria-live="polite"`
-region stays exactly as it is - AC U7.29 protects it - and the new surface is
+region stays exactly as it is - AC U7.30 protects it - and the new surface is
 visual only, with `aria-hidden` where it would otherwise double-announce.
 Do not make the existing srOnly region visible; do not add a second live
 region.
@@ -1012,7 +1041,7 @@ solve with adjacent detail, never by merging them.
 - Do NOT unify the two GRADING paths by accident either. They already
   disagree today - the bulk path passes `useReadmeInstructions` as
   `gradeRepoAction`'s 7th argument (useRepoGradesBulkGrade.ts:116) and the
-  single-cell path does not (useRepoGradesGradingActions.ts:177). U9.37
+  single-cell path does not (useRepoGradesGradingActions.ts:177). U9.38
   requires fixing that disagreement deliberately, in favour of passing the
   flag on BOTH paths. An implementer moving both actions onto a new surface
   will otherwise unify them incidentally and freeze whichever behaviour they
@@ -1079,7 +1108,33 @@ Two specific items revision 1 missed:
   during every scan window, including every keystroke in the prefix filter.
 - `selectedFolder` as a global field of `RepoGradesUiState`.
 - Column scoping protected by prose alone, with no guard test.
-## 4. UX pass (loop step 1c) - REVISION 2
+## 4. UX pass (loop step 1c) - REVISION 2 - PARTLY SUPERSEDED BY SECTION 6
+
+> **STOP. Read section 6 before acting on anything below.** Section 6
+> overturns five of this section's claims, and appears LATER in the file:
+>
+> 1. **"The sticky header keeps a folder's controls on screen" - FALSE.** The
+>    rule is inert: `.gridWrap` has no height, so it never scrolls vertically
+>    and `top: 0` never engages. This section's entire click-cost baseline was
+>    built on it.
+> 2. **The click arithmetic - WRONG, and inverted.** The assignment mapping is
+>    ALREADY restored with zero clicks today, so the steady state is 3 clicks,
+>    not 5. This section's proposal is +2 in every scenario. The target is a
+>    ZERO-click steady state.
+> 3. **"Fix the post count bug when relocating the button" - THERE IS NO
+>    BUG.** `RepoGradesGrid.tsx:131` already scopes to the selection. This
+>    section mistook a stale code comment for live behaviour.
+> 4. **"Reuse `rosterOverlay.withoutCanvasId`" - WRONG**, same as section 3's
+>    version. See U4.17a.
+> 5. **"AC U2.11 keeps LinkUsernamesPanel between the controls and the grid" -
+>    MISREADS U2.11**, which says the opposite: its placement is not
+>    protected, and moving it is REQUIRED if the grid would otherwise stay
+>    below the fold.
+>
+> Also superseded: the pre-run acknowledgement (U9.38b disables the action
+> instead), and the blanket withdrawal of `.linkButton` (tertiary text actions
+> stay; add a `:disabled` rule and a 24x24 hit area).
+
 
 Revision 1 was rejected by the peer sabotage check on 2026-08-26. It was
 wrong on a point of fact, its central click-cost argument was unchecked and
@@ -1564,13 +1619,13 @@ workflows/builder/InputBindingRow.options-select.test.ts:23, and
 tasks/TaskColumnMenu.focus.test.ts:29. The house answer is "write the test",
 not "move the file".
 
-### New, and unowned by any section: U8.32 has no architectural home
+### New, and unowned by any section: U8.33 has no architectural home
 
 `buildBulkGradePlan` is built at CLICK time only
 (useRepoGradesGradingActions.ts:494-495). To show "will cover N, skip M"
 BEFORE the click, the plan must be built during render, every render, over
 `withLiveScores(rows, cellEdits)`. That is a second invocation over state
-that can change between the two - which is exactly the disagreement U8.32
+that can change between the two - which is exactly the disagreement U8.33
 forbids. Decide where the render-time plan lives and how the click reuses it
 rather than recomputing.
 
@@ -1660,7 +1715,7 @@ Revision 2 estimated +80 to +140 lines on index.tsx (657 today), landing
 740-800. That scoped revision 1's proposal. Revision 2 and this section add a
 second restore branch, the coupling and disable states, a visible status
 surface with progress, per-course load/persist wiring, the render-time plan
-for U8.32, and possibly cancel. Against this file's real comment-to-code
+for U8.33, and possibly cancel. Against this file's real comment-to-code
 ratio - the selection restore branch is 6 lines of code under 35 lines of
 comment (index.tsx:162-202) - the honest range is +200 to +300, landing
 860-960. Under the cap with no margin, in a file already split once at it.
@@ -1683,7 +1738,7 @@ with no behaviour change. AC U1.3b stands.
 
 Which branch wins when the scan-keyed and courseId-keyed restores fire in one
 render; what the folder control shows during that window; the "All folders"
-sentinel encoding; whether cancel ships (U9.39 is absent from every architect
+sentinel encoding; whether cancel ships (U9.40 is absent from every architect
 revision so far); and `RepoGradesControls.tsx`'s fate.
 
 ## 6. UX revision 3 - corrections from the re-check
@@ -1740,8 +1795,8 @@ booked the same mechanism as its own gain. Recounted, course already chosen:
 
 Parity is reached in NO case, and it fails worst in the steady state the
 instructor actually lives in. The parity math also omitted the
-acknowledgement gate revision 2 mandates 26 lines later, plus U8.34's confirm
-and U9.39's cancel-or-warn.
+acknowledgement gate revision 2 mandates 26 lines later, plus U8.35's confirm
+and U9.40's cancel-or-warn.
 
 **The requirement, restated:** the folder choice persists (U1.5), so the
 steady state must cost ZERO clicks. The persisted folder drives a named
@@ -1900,3 +1955,127 @@ Two decisions this document still owes:
   already computed as `noConfirmedRows` (index.tsx:509).
 - **The ten status paragraphs consolidate** into one surface with the counts
   U4 requires.
+
+## 7. Sequencing - three slices, in dependency order
+
+The final consistency check's blocking delivery finding: this document
+mandates a multi-week item and contained no phase split, no dependency
+ordering and no statement of what ships first. Per this project's
+group-per-push rule, it needs groups. Each slice below is independently
+shippable and independently regression-testable.
+
+### Slice A - make the view answer back
+
+Highest value, lowest risk, no new persisted state, and no unmade decision
+blocks it.
+
+- **U0c** - delete the nested `.tabContainer` (index.tsx:512). One line.
+  Restores `.card`'s `gap: 28px` between every section.
+- **U5.20 / 20b / 21** - the visible status surface, with `role="status"`
+  moved onto the VISIBLE node (section 5's ruling, not section 3's).
+- **U6.27** plus a `.linkButton:disabled` rule and a 24x24 hit area, and
+  promoting only the four consequential actions to `.submitButton`/`.ccBtn`.
+- **U9.36 / 37** - the confirm-binding guard. This is the instructor's
+  CURRENT state: 11 rows sitting one click away from going backwards.
+- **U11.46** - focus rules, which the file has none of.
+
+Why first: it fixes "I clicked it and nothing happened"; it is a
+PREREQUISITE for Slice B, because U3.13 deletes `bulkProgress`'s only
+renderer (RepoGradesGrid.tsx:143-146); and it touches no persistence, so
+nothing can be silently erased by getting it wrong.
+
+### Slice B - the mechanism the instructor actually asked for
+
+- the census inside `buildRepoGradeColumns`;
+- `repoGradesFolderSelection.ts` (pure) and
+  `useRepoGradesFolderSelection.ts`;
+- U0a / U0b, U1.1 through U1.6d, U1.3b;
+- U3.13 / 14 / 15;
+- U9.41's read-time filter plus the branded nominal type;
+- U8.33 / 34 / 35.
+
+Ships behind Slice A's status surface, which is why the ordering matters.
+
+### Slice C - the output side
+
+- U10.42 through 45 (review surface, rubric retrieval, persisting
+  `cellEdits`);
+- U9.38 / 38b / 39, and U9.40 (cancel);
+- U4's state consolidation;
+- the two decisions section 6 owes, once written as criteria:
+  LinkUsernamesPanel collapsing to a one-line status, and consolidating the
+  ten status paragraphs.
+
+### If only one slice ships: A
+
+It is the only slice that is all upside, needs no unresolved decision, and
+directly answers the instructor's reaction.
+
+## 8. Decisions still owed before Slice B or C can start
+
+Slice A is unblocked. These block B and C, and an implementer would otherwise
+invent them:
+
+1. **Which restore branch wins** when the scan-keyed and courseId-keyed
+   branches fire in the same render, and what the folder control shows during
+   the scan window.
+2. **The "All folders" persisted encoding.** Section 5 decides this three
+   incompatible ways - out-of-band required, then `""` in the storage table,
+   then listed as undecided.
+3. **U0a versus U1.6 tiebreak.** A stale persisted folder lands in a state
+   U0a says is the first folder and U1.6 says is "All folders", which U0b
+   says is not a default.
+4. **May the wiring guards be edited?** Three will go red (the 400-char
+   window if the selection write-back is deleted, and the two
+   `ColumnHeaderControls` assertions when U3.13 relocates the post control).
+   U7.31 says report, not edit - but never says whether red blocks the push,
+   and U7.32's gate does not run vitest.
+5. **CoursesTable or TasksGrid as the table shell.** U6.26b mandates
+   CoursesTable; section 2b says TasksGrid is the correct analogue because
+   its no-zebra and sentence-case-header divergences were deliberate. This is
+   the single largest visual decision in the work item and it is answered
+   twice, oppositely.
+6. **What happens at 720px** - move the 700px breakpoint, lower the
+   220/190/170 min-width floors, or restate U3.12.
+7. **How U8.35's confirm, U2.9c's acknowledgement and U9.38b's disable
+   compose.** If 38b disables the action, 2.9c's acknowledgement can never
+   fire. U2.9c should probably be deleted.
+8. **Is the selection write-back at index.tsx:201 deleted?** Section 5 says
+   yes, section 1 forbids it, U7.28 arguably forbids it, and a wiring guard
+   asserts it is present. Four sections disagree about one line.
+9. **Does cancel ship** (U9.40 allows "or say plainly that it cannot") - a
+   roughly 150-line swing.
+
+## 9. Known-inaccurate claims in this document, corrected
+
+Kept visible rather than rewritten out, because each was asserted confidently
+and acted on before being caught.
+
+- **The view lacks `.card`.** FALSE - page.tsx:385-387 wraps it in TabShell.
+  The defect is a redundant nested `.tabContainer`; the fix is deletion.
+- **The nesting costs 124px of horizontal chrome.** FALSE - `.card` has no
+  border or radius; deletion reclaims 2px. The value is the restored
+  `gap: 28px`.
+- **The inner container overflows and is clipped.** FALSE - `min(100%, 96vw)`
+  cannot exceed its containing block.
+- **Two horizontal hunts through the table.** FALSE - the controls are
+  stacked in one header cell.
+- **The sticky header keeps them on screen.** FALSE - the rule is inert.
+- **Today's path costs 5 clicks.** FALSE - the assignment mapping is already
+  restored, so the steady state is 3, and the proposal was +2.
+- **`rosterOverlay.withoutCanvasId` gives U4.17's count.** FALSE - it is a
+  delta metric reading zero in exactly the state the criterion exists for.
+- **The header post count disagrees with what posts.** FALSE - already
+  scoped; the code comment describing otherwise is stale.
+- **`rubricAreas` is rendered by nothing.** FALSE repo-wide - true only
+  within `repo-grades/`. GradingResults.tsx and DraftedGradesTab.tsx render
+  it.
+- **The generated rubric is discarded by the server.** FALSE - the action
+  returns it; the client drops it at two destructures.
+- **Logic in a `.tsx` is untestable here.** FALSE - four existing tests
+  import pure functions straight out of `.tsx` files.
+- **`.field textarea` is not relaxed at narrow width.** FALSE - it drops to
+  180px at 600px.
+- **The view renders six live regions.** UNDERCOUNT - fourteen, once
+  `role="alert"` is included.
+- **53 verification tags.** UNDERCOUNT - 69.

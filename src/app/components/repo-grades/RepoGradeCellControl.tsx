@@ -4,10 +4,13 @@
 // criteria.md). One grid cell's editable content: an on-demand "Grade"
 // action that calls gradeRepoAction (task 2 of the wave brief - the SAME
 // call folder-per-module grading already makes, with `folderPath` as the
-// `pathPrefix` - never a new grading engine), editable score/comment text
-// fields following GradingResults.tsx:781-832's idiom (a controlled input
-// bound to local edit state, an aria-label naming exactly what it edits),
-// and this cell's own postability reason and post status.
+// `pathPrefix` - never a new grading engine), an editable score field
+// following GradingResults.tsx:664-671's idiom (a controlled MUI `TextField`
+// bound to local edit state, an aria-label naming exactly what it edits -
+// this comment used to cite GradingResults.tsx:781-832, which was the right
+// idiom but the wrong line range even when it was written; that file is now
+// 775 lines and the real code is at :664-688), and this cell's own
+// postability reason and post status.
 //
 // Only ever rendered for a cell whose derived status is "ungraded"
 // (RepoGradesGrid.tsx keeps missing-folder/scan-error cells on the existing
@@ -31,6 +34,7 @@
 // the same conditions, so the reason text shown here and the column post
 // button's real postability can never disagree (AC5 item 28).
 import { useState } from "react";
+import TextField from "@mui/material/TextField";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
 // docs for this feature (request 2 - "a button ... that can kick off the
 // interpreter/compiler for any specified file(s) in a student's folder"):
@@ -301,14 +305,22 @@ export default function RepoGradeCellControl({
     <div className={styles.cellControl}>
       <div className={styles.cellInputs}>
         <div className={styles.scoreRow}>
-          <input
+          {/* Repo Grades UI consistency audit item #5 - adopts MUI TextField
+              exactly as GradingResults.tsx:664-671 does for the same kind of
+              dense per-row score input (`size="small"`, a fixed `sx` width,
+              and `slotProps.htmlInput` for the tighter padding a grid cell
+              needs). repoGrades.wiring.test.ts:246-247 pins `value={edit.score}`
+              and `onChange={(e) => onScoreChange(e.target.value)}` as source
+              text - both survive verbatim on a TextField. */}
+          <TextField
             type="text"
-            inputMode="decimal"
+            size="small"
+            slotProps={{ htmlInput: { inputMode: "decimal", style: { padding: "4px 8px" } } }}
             value={edit.score}
             onChange={(e) => onScoreChange(e.target.value)}
             aria-label={`${column.folder} score for ${row.repo}`}
             placeholder="Score"
-            className={styles.scoreInput}
+            sx={{ width: 84 }}
           />
           {scorePercent && <span className={styles.scorePercent}>{scorePercent}</span>}
         </div>

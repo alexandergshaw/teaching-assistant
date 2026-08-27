@@ -37,6 +37,7 @@
 // network) and hands the resulting STRING to `ColumnHeaderControls`, which
 // never calls it itself. Same "render what a pure function decided, resolve
 // nothing here" posture as the rest of this file.
+import Button from "@mui/material/Button";
 import RepoBindingControl from "./RepoBindingControl";
 import RepoGradeCellControl from "./RepoGradeCellControl";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
@@ -389,9 +390,20 @@ function ColumnHeaderControls({
           rubric.
         </span>
       )}
-      <button
+      {/* Repo Grades UI consistency audit item #2 - these two buttons write to
+          a live Canvas gradebook and bill per-item LLM calls, so they carry
+          MUI's primary weight (`variant="contained"`) rather than this
+          folder's usual tertiary `linkButton`, matching how
+          GradingResults.tsx:425 renders the same Post-to-Canvas action.
+          Behaviour-preserving: `disabled`/`onClick`/children are unchanged,
+          and repoGrades.wiring.test.ts's pinned source-text assertions
+          (`disabled={busy || plan.postable.length === 0}`,
+          `plan.postable.length`, `alreadyAttempted ? "Re-post" : "Post"`)
+          survive verbatim as JSX prop/child text on a MUI Button. */}
+      <Button
         type="button"
-        className={pageStyles.linkButton}
+        variant="contained"
+        size="small"
         aria-label={gradeAllLabel}
         disabled={bulkRunning}
         onClick={() => {
@@ -399,17 +411,18 @@ function ColumnHeaderControls({
         }}
       >
         {gradeAllLabel}
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        className={pageStyles.linkButton}
+        variant="contained"
+        size="small"
         disabled={busy || plan.postable.length === 0}
         onClick={() => {
           onPostColumn(column, pointsPossible);
         }}
       >
         {busy ? "Posting..." : `${alreadyAttempted ? "Re-post" : "Post"} ${plan.postable.length} grade(s)`}
-      </button>
+      </Button>
     </div>
   );
 }

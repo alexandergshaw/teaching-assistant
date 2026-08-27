@@ -252,6 +252,19 @@ export default function LinkUsernamesPanel({
         below.
       </p>
 
+      {/* Repo Grades UI consistency audit item #3 - DELIBERATELY LEFT
+          hand-rolled, not converted to a MUI Button pair or ToggleButtonGroup.
+          This pair already implements the WAI-ARIA "radio group" pattern
+          exactly (role="radiogroup" here, role="radio" + aria-checked below)
+          - the canonical pattern for a segmented control where exactly one of
+          two options is always selected. A `Button` pair with
+          `variant={active?"contained":"outlined"}` (this app's usual toggle
+          idiom) would carry no ARIA relationship between the two buttons at
+          all. MUI `ToggleButtonGroup` is closer but uses `aria-pressed` (the
+          "toggle button" pattern), which the ARIA Authoring Practices reserve
+          for independent on/off buttons, not a mutually-exclusive segmented
+          choice - swapping in either replacement would be an accessibility
+          DOWNGRADE from what already renders here, so it stays native. */}
       <div className={styles.linkSourceToggle} role="radiogroup" aria-label="Where to read GitHub usernames from">
         <button
           type="button"

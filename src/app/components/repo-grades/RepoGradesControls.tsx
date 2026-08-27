@@ -32,6 +32,10 @@
 // no component is ever rendered by a test - nothing in this file is
 // exercised by any test, which is exactly why it must contain no logic worth
 // testing.
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import type { Course } from "@/lib/supabase/courses";
 import type { RepoGradeSortState } from "./repoGradesRows";
 import { parseRepoGradeSortSelectValue, repoGradeSortSelectValue } from "./repoGradesRows";
@@ -269,22 +273,22 @@ export interface RepoGradesControlsProps {
   onRunCodeScoringChange: (value: boolean) => void;
 }
 
-/** Shared inline override for a checkbox's <label> inside a `.field` wrapper -
- * `.field label` (page.module.css) is styled for a short field CAPTION
- * (small, bold, uppercase, letter-spaced), which reads wrong next to an
- * inline checkbox's own sentence-case prompt text. Overriding just the
- * text-styling properties here keeps `.field`'s spacing/gap without
- * duplicating a whole new CSS rule for two checkboxes. */
-const CHECKBOX_LABEL_STYLE: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  textTransform: "none",
-  letterSpacing: "normal",
-  fontWeight: 500,
-  fontSize: "0.9rem",
-  color: "var(--text-primary)",
-};
+/** Overrides just the label-text typography MUI's `FormControlLabel` slot
+ * inherits from `.field label` (page.module.css) - that rule styles a short
+ * field CAPTION (small, bold, uppercase, letter-spaced), which reads wrong
+ * next to a checkbox's own sentence-case prompt text. `FormControlLabel`
+ * already handles the checkbox+text layout/gap itself, so - unlike the old
+ * hand-rolled `CHECKBOX_LABEL_STYLE` this replaces - nothing here overrides
+ * layout, only the four inherited caption properties. */
+const CHECKBOX_LABEL_SX = {
+  "& .MuiFormControlLabel-label": {
+    textTransform: "none",
+    letterSpacing: "normal",
+    fontWeight: 500,
+    fontSize: "0.9rem",
+    color: "var(--text-primary)",
+  },
+} as const;
 
 export default function RepoGradesControls({
   courses,
@@ -329,19 +333,22 @@ export default function RepoGradesControls({
     <>
       <div className={styles.field}>
         <label htmlFor="repo-grades-course">Course</label>
-        <select
+        <TextField
+          select
+          size="small"
+          fullWidth
           id="repo-grades-course"
           value={courseId}
           disabled={coursesLoading}
           onChange={(e) => onCourseIdChange(e.target.value)}
         >
-          <option value="">{coursesLoading ? "Loading courses..." : "Choose a course..."}</option>
+          <MenuItem value="">{coursesLoading ? "Loading courses..." : "Choose a course..."}</MenuItem>
           {courses.map((c) => (
-            <option key={c.id} value={c.id}>
+            <MenuItem key={c.id} value={c.id}>
               {c.name}
-            </option>
+            </MenuItem>
           ))}
-        </select>
+        </TextField>
         {coursesError && (
           <p className={styles.error} role="alert">
             {coursesError}
@@ -353,13 +360,14 @@ export default function RepoGradesControls({
         <div className={styles.field}>
           <label htmlFor="repo-grades-org-prefix">Repo name filter (optional)</label>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input
+            <TextField
+              size="small"
               id="repo-grades-org-prefix"
               type="text"
               value={orgPrefix}
               onChange={(e) => onOrgPrefixChange(e.target.value)}
               placeholder="e.g. module"
-              style={{ flex: "1 1 220px" }}
+              sx={{ flex: "1 1 220px" }}
             />
             <button type="button" className={styles.linkButton} disabled={scanLoading} onClick={() => onRefreshScan()}>
               {scanLoading ? "Scanning..." : "Refresh"}
@@ -375,18 +383,21 @@ export default function RepoGradesControls({
       {showRowDependentFields && (
         <div className={styles.field}>
           <label htmlFor="repo-grades-folder">Assignment folder to grade</label>
-          <select
+          <TextField
+            select
+            size="small"
+            fullWidth
             id="repo-grades-folder"
             value={selectedFolder}
             onChange={(e) => onSelectedFolderChange(e.target.value)}
           >
-            <option value={ALL_FOLDERS}>All folders</option>
+            <MenuItem value={ALL_FOLDERS}>All folders</MenuItem>
             {folderOptions.map((option) => (
-              <option key={option.folder} value={option.folder}>
+              <MenuItem key={option.folder} value={option.folder}>
                 {describeFolderOption(option, folderCensus)}
-              </option>
+              </MenuItem>
             ))}
-          </select>
+          </TextField>
           {folderOptions.length === 0 && (
             <p className={styles.fieldHint}>No assignment folders were found in this course&apos;s scanned repos.</p>
           )}
@@ -416,55 +427,62 @@ export default function RepoGradesControls({
       {showRowDependentFields && (
         <div className={styles.field}>
           <label htmlFor="repo-grades-sort">Sort</label>
-          <select
+          <TextField
+            select
+            size="small"
+            fullWidth
             id="repo-grades-sort"
             value={repoGradeSortSelectValue(sort)}
             onChange={(e) => onSortChange(parseRepoGradeSortSelectValue(e.target.value))}
           >
-            <option value="repo:asc">Repo name (A to Z)</option>
-            <option value="repo:desc">Repo name (Z to A)</option>
-            <option value="binding:asc">Needs attention first</option>
-            <option value="binding:desc">Confirmed first</option>
-            <option value="firstName:asc">First name (A to Z)</option>
-            <option value="firstName:desc">First name (Z to A)</option>
-            <option value="lastName:asc">Last name (A to Z)</option>
-            <option value="lastName:desc">Last name (Z to A)</option>
+            <MenuItem value="repo:asc">Repo name (A to Z)</MenuItem>
+            <MenuItem value="repo:desc">Repo name (Z to A)</MenuItem>
+            <MenuItem value="binding:asc">Needs attention first</MenuItem>
+            <MenuItem value="binding:desc">Confirmed first</MenuItem>
+            <MenuItem value="firstName:asc">First name (A to Z)</MenuItem>
+            <MenuItem value="firstName:desc">First name (Z to A)</MenuItem>
+            <MenuItem value="lastName:asc">Last name (A to Z)</MenuItem>
+            <MenuItem value="lastName:desc">Last name (Z to A)</MenuItem>
             {/* Rendered only while it is the active value (repoGradeSortSelectValue
                 only ever returns "custom" for a folder-column sort) - disabled
                 so it can never itself be chosen, matching this file's own
                 header comment above. */}
             {repoGradeSortSelectValue(sort) === "custom" && (
-              <option value="custom" disabled>
+              <MenuItem value="custom" disabled>
                 Sorted by a folder column (see the table header)
-              </option>
+              </MenuItem>
             )}
-          </select>
+          </TextField>
         </div>
       )}
 
       {showRowDependentFields && (
         <>
           <div className={styles.field}>
-            <label htmlFor="repo-grades-use-readme" style={CHECKBOX_LABEL_STYLE}>
-              <input
-                id="repo-grades-use-readme"
-                type="checkbox"
-                checked={useReadmeInstructions}
-                onChange={(e) => onUseReadmeInstructionsChange(e.target.checked)}
-              />
-              Use each folder&apos;s README as the assignment instructions
-            </label>
+            <FormControlLabel
+              sx={CHECKBOX_LABEL_SX}
+              control={
+                <Checkbox
+                  id="repo-grades-use-readme"
+                  checked={useReadmeInstructions}
+                  onChange={(e) => onUseReadmeInstructionsChange(e.target.checked)}
+                />
+              }
+              label="Use each folder's README as the assignment instructions"
+            />
           </div>
           <div className={styles.field}>
-            <label htmlFor="repo-grades-bulk-selection-only" style={CHECKBOX_LABEL_STYLE}>
-              <input
-                id="repo-grades-bulk-selection-only"
-                type="checkbox"
-                checked={bulkSelectionOnly}
-                onChange={(e) => onBulkSelectionOnlyChange(e.target.checked)}
-              />
-              Only the checked rows
-            </label>
+            <FormControlLabel
+              sx={CHECKBOX_LABEL_SX}
+              control={
+                <Checkbox
+                  id="repo-grades-bulk-selection-only"
+                  checked={bulkSelectionOnly}
+                  onChange={(e) => onBulkSelectionOnlyChange(e.target.checked)}
+                />
+              }
+              label="Only the checked rows"
+            />
             <p className={styles.fieldHint}>With nothing checked, a bulk grade covers the whole column.</p>
           </div>
           {/* Task B (docs for this feature, request 1) - opt-in, off by
@@ -474,15 +492,17 @@ export default function RepoGradesControls({
               runs" rubric line even though the posted total moves) right
               next to the control, not only in a tooltip or the log. */}
           <div className={styles.field}>
-            <label htmlFor="repo-grades-run-code-scoring" style={CHECKBOX_LABEL_STYLE}>
-              <input
-                id="repo-grades-run-code-scoring"
-                type="checkbox"
-                checked={runCodeScoring}
-                onChange={(e) => onRunCodeScoringChange(e.target.checked)}
-              />
-              Score code execution (deterministic engine only)
-            </label>
+            <FormControlLabel
+              sx={CHECKBOX_LABEL_SX}
+              control={
+                <Checkbox
+                  id="repo-grades-run-code-scoring"
+                  checked={runCodeScoring}
+                  onChange={(e) => onRunCodeScoringChange(e.target.checked)}
+                />
+              }
+              label="Score code execution (deterministic engine only)"
+            />
             <p className={styles.fieldHint}>
               When on, grading runs each repo&apos;s code in the sandbox and adds a &quot;Code runs&quot; criterion to
               the score - only on the deterministic engine (the LLM engine already always runs code and folds it
@@ -507,8 +527,21 @@ export default function RepoGradesControls({
               native <optgroup> grouping, sitting directly above the box
               whose editability it governs, inside its own `styles.field`
               (not folded into the textarea's field below, which would put
-              two `.field label` captions in one wrapper). No MUI: nothing in
-              this folder imports it. */}
+              two `.field label` captions in one wrapper).
+              DELIBERATELY LEFT NATIVE (repo-grades UI consistency audit,
+              item #1) even though this file now imports MUI for its other
+              controls: MUI has no `<optgroup>` equivalent. Its nearest
+              substitute, `ListSubheader`, is NOT disabled by default and
+              lands in the keyboard tab sequence as a focusable no-op -
+              grouping the live/export/other sources is a hard requirement
+              here (`repoGradesRubricSource.ts` builds
+              `RepoGradeRubricOption.group` specifically for it; see
+              `groupRubricSourceOptions` above), not a nice-to-have this
+              select could drop to gain MUI styling. Native `<select>` also
+              gives a real OS picker sheet on mobile, which matters given
+              this view's own narrow-width card reflow. Do not "fix" this to
+              MUI without solving the optgroup/ListSubheader keyboard-focus
+              problem first. */}
           <div className={styles.field}>
             <label htmlFor="repo-grades-rubric-source">Rubric source</label>
             <select

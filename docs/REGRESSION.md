@@ -34057,3 +34057,304 @@ grade(s)", a live-gradebook write, renders as a text link while the same
 action in `GradingResults.tsx:425` is a filled button. The rubric picker's
 `<optgroup>` should stay native regardless: MUI's `ListSubheader` is
 focusable and is not an equivalent.
+
+## 361. Name columns that do not invent names, headers that actually sort, and the roster field that would have eaten the GitHub username
+
+Acceptance criteria:
+`docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md`.
+Shipped in commit c675403 alongside entry 362.
+
+The instructor asked for a first-name column, a last-name column, and all
+columns sortable, clarifying that the names come "from the roster in the
+courses table that are associated to repos".
+
+### The change that was rejected because it would have broken the binding
+
+The obvious implementation - add first/last as extra pipe-separated fields
+on the roster line - is destructive. `rosterToRows`
+(`src/lib/courses-tab-helpers.ts:194-200`) splits on `lastIndexOf("|")`, so
+`Ana Ruiz | aruiz | Ana | Ruiz` parses the USERNAME as `"Ruiz"`, breaking
+the binding the whole view depends on; and `rowsToRoster` (`:202-207`)
+re-emits only two fields, so the third would be deleted on the next
+Roster-tile save. Three writers emit that rigid shape.
+
+### What was built instead
+
+The split is DERIVED, in a new pure `repoGradeStudentName.ts`, and the
+comma is the instructor's correction channel - the convention this codebase
+already used (`canonicalNameKey`, `rosterUsernameOverlay.ts:56-66`) and the
+Roster tile already advertised (its placeholder is literally
+`"Smith, John"`, `RosterCell.tsx:95`).
+
+- Comma present: instructor-explicit. No marker.
+- No comma, two or more tokens: last-word rule, rendered WITH a visible
+  `(derived)` marker whose tooltip says how to correct it.
+- Single token: last name UNKNOWN, shown as an em dash. A one-word name is
+  not a first name with an empty surname, and guessing one would be a
+  fabrication.
+
+Canvas's own `sortableName` ("Last, First") is now preferred where it
+exists. `listCourseRosterAction` already returned it and
+`useRepoGradesData.ts:340` was dropping it on the floor - a free
+correctness win, since Canvas holds the real split.
+
+### The anti-fabrication rule
+
+Names derive from `row.binding.student` and NOTHING else. An independent
+`course.roster` lookup is exactly how the name column comes to disagree
+with the Binding cell rendered beside it. `binding.student` IS the
+roster-derived value; this view already bridges the two fields every render
+via `overlayRosterUsernames` (`useRepoGradesData.ts:437-438`).
+
+### Sorting
+
+Every column now sorts from a header button with `aria-sort`, following the
+Tasks view's solution rather than a new one (`resolveTaskSort`,
+`SortableValue.empty`, `parseTaskSortState`,
+`src/lib/course-tasks-view.ts:545-747`).
+
+Folder columns needed their own comparator: scores live in
+`repoGradesCellEdits.ts`, not on the row, so the folder sort reads the same
+`scorePercentValue` the on-screen badge uses. `mergeRepoGradeLiveScores` was
+extracted so the grid and the grading hook stop keeping two copies of the
+merge helper.
+
+### Three defects fixed that every gate would have passed
+
+- The old `parseSortValue` coerced EVERY unknown field to `"repo"`, so a
+  header-set folder sort would snap back the instant the select was touched.
+  The select now resolves to a disabled `"custom"` placeholder for any sort
+  it cannot represent, so the two controls can never disagree.
+- The cell text and the sort key could have read different name sources.
+  Both call the one `deriveRepoGradeStudentName`, pinned by a canaried
+  source guard that also catches a dead import and a local reimplementation.
+- `ta-repo-grades-sort` is global, not per-course, so a restored folder sort
+  could name a folder the new course lacks. Resolved on read
+  (`resolveRepoGradeSort`) rather than reshaping the key, because the sort
+  must survive a folder missing from ANY scan, not only after a course
+  switch.
+
+## 362. The repo grading path had been executing student code for six commits, badly, and saying nothing
+
+Shipped in commit c675403. This entry exists because the defect was
+INTRODUCED by this project's own entry-357 work earlier the same day.
+
+### How it started
+
+Entry 357 (commit fa57050) fixed the repo path to stop hardcoding
+`submittedFiles: []`. Correct on its own - and it silently switched ON code
+execution for repo grading, because `gradeEntries`
+(`src/lib/grade/engine.ts:135`) calls `runSubmittedCode(submittedFiles)`
+whenever files are present, and pastes the output into the grading prompt
+with an explicit instruction to factor it into the assessment
+(`src/lib/grade/utils.ts:199-214`).
+
+Nobody asked for that, nothing announced it, and student grades moved
+because of it.
+
+### Why it was worse than merely undisclosed
+
+- **The runs failed for OUR reasons.** Repo file names carry FULL PATHS
+  (`name: file.path`, `github-repos.ts:601`), so the sandbox received
+  `week1/src/main.py`. Every cross-file import, relative `open()` and
+  `#include "x.h"` broke. The Canvas and zip paths pass basenames and never
+  had this bug.
+- **The entry point was arbitrary.** Both backends execute `files[0]`
+  (`code-runner.ts:427-429`) over a digest sorted README -> docs -> src ->
+  rest, alphabetically - so `helpers.py` beat `main.py`.
+- **The grade was unexplainable by construction.** The prompt said "Do not
+  mention that the code was run automatically", and `RepoGradeCellEdit` had
+  no `codeExecution` field, so the cell discarded the run entirely.
+- **A truncated file was executed as if whole.** `previewContent` is the
+  post-truncation slice, so a large file ran cut in half and its syntax
+  error read as the student's own.
+
+### The fix
+
+A new pure `src/lib/code-run-selection.ts` owns the decisions: basenames are
+flattened before anything reaches the sandbox, same-basename collisions are
+REPORTED rather than merged or renamed, truncated files are excluded outright
+rather than run-and-labelled, and the entry point is chosen by conventional
+filename and then by main-guard content, with the chosen file carried out so
+it can be displayed.
+
+The "do not mention" instruction is gone. `codeExecution` is carried onto
+the cell by both grading paths and shown in `RepoGradeCellControl.tsx`: what
+ran, whether it ran cleanly, and the output behind a toggle.
+
+Bulk safety: one 12s `AbortSignal.timeout` across all four possible fetches
+(leaving room under Vercel Hobby's 60s ceiling for ingest and the grading
+call), a 20,000-character output cap that says in-band when it truncated,
+and `attachCodeRuns` moved from sequential to a bounded pool. A timeout is a
+reported `CodeRunResult`, never a throw - grading degrades, never aborts.
+
+### The lesson
+
+A fix that makes a previously-empty field populated can turn on downstream
+behaviour nobody was thinking about. `submittedFiles: []` was not just
+missing data; it was, accidentally, the off switch for code execution.
+Before filling an empty field, check what reads it.
+
+## 363. A Run button on every graded cell, opt-in execution scoring, and a test that pinned its own workaround
+
+Shipped in commit c00a6ef, completing the instructor's two requests: "the
+grading repo page/process should also weave in an interpreter/compiler step
+and evaluate based on that as well" and "there should also be a button
+associated with each row that can kick off the interpreter/compiler for any
+specified file(s) in a student's folder".
+
+### Almost all of it already existed on the wrong surface
+
+`runSubmissionCodeAction` (`actions/grading.ts:519`), a per-row Run and
+view-output UI in `GradingResults.tsx`, and a per-file Run button in
+`FilePreviewModal.tsx:107-116` all shipped long ago - reachable only from
+the older GitHub grading panel. The panel Repo Grades renders,
+`grading-results/SubmittedFilesPanel.tsx`, had a picker, Monaco and Download
+and no Run. This is the fifth time this week a capability existed and was
+unreachable from the surface the instructor uses.
+
+### What "run any specified file" honestly means
+
+Running one arbitrary file from a multi-file project is often meaningless -
+for a compiled or import-heavy project it either fails to compile or
+exercises nothing. So the Run control defaults to the DETECTED ENTRY POINT
+with its same-language siblings available, with a select to override which
+file is the entry point.
+
+When a selection cannot run meaningfully, it says why instead of emitting a
+confusing compiler error: a header file is not a program on its own, a data
+file is something a program reads, an unrecognised extension is not a
+language the sandbox knows, and a file already dropped as truncated or as a
+basename-collision loser reports that exact reason. A collision's WINNER is
+never blamed for its loser's exclusion (matched by exact original name
+first). All of it lives in the pure `code-run-selection.ts`; the UI is a
+thin caller.
+
+A manual run is labelled as being for review, never writes back onto the
+cell edit, and always names the file that executed - so it can never be
+mistaken for the run that produced the score.
+
+### Scoring is opt-in, because it moves grades
+
+The embedded engine could already score execution; the two repo branches
+were simply the only callers skipping `attachCodeRuns`
+(`grading.ts:736, 788` do it). They now call it, behind
+`ta-repo-grades-run-code-scoring`, DEFAULT OFF, so no existing course's
+grades move until the instructor asks. `attachCodeRuns` moved out of a
+private corner of `actions/grading.ts` into `code-runner.ts` as a shared
+generic, so all three callers use one implementation.
+
+The column header discloses, BEFORE the irreversible post, that an
+execution-influenced score will not appear as its own SpeedGrader rubric
+line - a code-run criterion name matches nothing in a Canvas rubric, so
+`canvas/grades.ts:88-89` skips it while it still moves the posted total.
+
+### A guard that forced a contorted implementation, corrected in the same batch
+
+The work arrived with the per-cell `gradeRepoAction` call DUPLICATED into
+`if (!runCodeScoring) { <7-arg call> } else { <8-arg call> }`, with a
+comment stating the seven-argument branch "must stay first" - because
+`repoGradesRubricPicker.wiring.test.ts` pinned an exact ARITY of seven and
+read only the FIRST call site. Three new tests then pinned that shape in
+place.
+
+Two call sites that can silently drift, held in a particular order to keep a
+text scan green, is a worse defect than the one being guarded against. The
+guard was amended to pin the FACT it exists to protect -
+`useReadmeInstructions` reaching the action in its seventh position, entry
+352's defect - rather than the call's spelling; the duplicate was collapsed
+into one call. The replacement asserts exactly ONE call site, with canaries
+proving both a seven-argument call and a hardcoded `true` in the eighth
+position are still caught.
+
+This is the project's own recorded lesson ("source-text tests over-specify:
+pin the fact and the ordering, never the spelling") applied to a test that
+had just re-created the problem it warns about.
+
+## 364. The Repo Grades view rejoins the app's component vocabulary - and three controls that correctly stayed native
+
+The instructor's report: "there are a number of components on the repo grade
+view that aren't common to what other views use."
+
+An audit settled it with counts rather than impressions: 209 of 287 non-test
+component files import `@mui/material`; `src/app/components/repo-grades/` was
+0 of 9 - the app's only feature folder that opted out wholesale. The 78
+non-adopters elsewhere are icon modules, one-line shims and layout shells,
+not a competing vocabulary.
+
+**This project's own instructions caused it.** Implementers were repeatedly
+told to "match the surrounding folder" because nothing in `repo-grades/`
+imported MUI. That reasoning is circular: it makes the outlier
+self-perpetuating, and it was used three separate times this week, most
+recently to justify forking a shared component (entry 360). The instruction
+is retired.
+
+### The finding that was not about components at all
+
+`page.module.css` styled `.field textarea` but never a `<select>` or bare
+`<input>` inside `.field`. Five controls in this view rendered as RAW
+BROWSER DEFAULTS - different font, height, radius and dropdown arrow -
+sitting inside app-styled wrappers beside correctly-styled textareas. That
+is almost certainly what the instructor actually saw. Fixed centrally in
+entry 360, which also silently fixed the `tasks` and `ppt-design` views.
+
+### Converted
+
+- The Grade-all and Post-column buttons to `Button variant="contained"`.
+  This was ranked as a SAFETY item, not cosmetics: both write to a live
+  Canvas gradebook and bill per-item LLM calls, yet rendered at the same
+  visual weight as "Copy". The same Post action in `GradingResults.tsx:425`
+  was already a filled button.
+- The three control-panel checkboxes to `Checkbox` + `FormControlLabel`,
+  deleting `CHECKBOX_LABEL_STYLE`. The audit said TWO; a third
+  (`runCodeScoring`) landed after it was written, and converting only two
+  would have left one unstyled checkbox beside two styled ones - the exact
+  divergence being fixed.
+- The course, folder and sort selects and the org-prefix input to
+  `TextField`/`MenuItem`.
+- The score input to `TextField size="small"`. The in-grid comment textarea
+  the audit also named no longer existed - `RowFeedbackBoxes` had already
+  replaced it.
+
+### Deliberately NOT converted - each for a reason worth keeping
+
+- **The segmented live/roster toggle stays native.** Its existing markup is
+  `role="radiogroup"` + `role="radio"`/`aria-checked`, the WAI-ARIA pattern
+  for mutually-exclusive selection. A Button pair carries no group
+  relationship at all, and MUI's `ToggleButtonGroup` uses `aria-pressed`,
+  which is the INDEPENDENT on/off pattern. Both replacements would have been
+  accessibility downgrades. A consistency pass that degrades behaviour is
+  worse than the inconsistency.
+- **The rubric-source select stays native.** MUI has no `<optgroup>`; its
+  nearest equivalent, `ListSubheader`, is not disabled by default and lands
+  in the keyboard sequence. Grouping is a hard requirement there
+  (`repoGradesRubricSource.ts` builds `RepoGradeRubricOption.group`
+  specifically for it), and native gives a real mobile picker, which matters
+  on this view's card reflow.
+- **The per-row grid checkbox stays native.** Thirty-plus MUI checkboxes in
+  a table body is a real render cost and the density argument genuinely
+  applies.
+- Per-cell row buttons keep `linkButton`: inline row actions should stay
+  lighter than the two column-level actions that write to the gradebook.
+
+Each carries a comment at the element saying why, so none is "fixed" later.
+
+### CSS
+
+871 -> 821 lines, removing only what these changes actually made dead, each
+verified by repo-wide search. The `:focus-visible` block stays: native
+controls remain, and `repoGradesSliceA.guards.test.ts:265-289` still needs
+it.
+
+### Gates and limits
+
+`npx tsc --noEmit` clean; `npx eslint src` 0 errors; `npx vitest run` 709
+files / 14552 tests passing, IDENTICAL to the pre-migration baseline; `npx
+next build` compiles.
+
+That identical test count is the point worth recording: vitest here is
+node-env and renders nothing, so a green suite proves NOTHING about this
+change. Every pinned source assertion survived verbatim because MUI accepts
+the same JSX prop text, which is evidence the migration was behaviour-
+preserving but not evidence it looks or behaves right. **A manual keyboard
+and screen-reader pass on the converted controls is still outstanding.**

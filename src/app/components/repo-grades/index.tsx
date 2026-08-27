@@ -679,6 +679,7 @@ export default function RepoGradesTab() {
     columns: columnsWithMapping,
     useReadmeInstructions: uiState.useReadmeInstructions,
     bulkSelectionOnly: uiState.bulkSelectionOnly,
+    runCodeScoring: uiState.runCodeScoring,
     courseId: uiState.courseId,
     course,
     provider,
@@ -746,6 +747,8 @@ export default function RepoGradesTab() {
         onUseReadmeInstructionsChange={(value) => setUiState((prev) => ({ ...prev, useReadmeInstructions: value }))}
         bulkSelectionOnly={uiState.bulkSelectionOnly}
         onBulkSelectionOnlyChange={(value) => setUiState((prev) => ({ ...prev, bulkSelectionOnly: value }))}
+        runCodeScoring={uiState.runCodeScoring}
+        onRunCodeScoringChange={(value) => setUiState((prev) => ({ ...prev, runCodeScoring: value }))}
       />
 
       <RepoGradesStatusBanners
@@ -881,6 +884,12 @@ export default function RepoGradesTab() {
           bulkSelectionOnly={uiState.bulkSelectionOnly}
           scanTruncated={!!scan?.truncated}
           emptyStateMessage={folderEmptyStateMessage}
+          // Task B: the disclosure only applies to the embedded engine's own
+          // "Code runs" criterion (canvas/grades.ts:88-89 skips any rubric
+          // area with no matching Canvas criterion) - the LLM engine never
+          // adds one, so this is false whenever `provider` is not "embedded"
+          // even if the toggle itself is on.
+          codeScoringDisclosure={provider === "embedded" && uiState.runCodeScoring}
         />
       )}
 

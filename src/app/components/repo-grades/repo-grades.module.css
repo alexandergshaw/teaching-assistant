@@ -395,6 +395,19 @@
   border-top: 1px solid var(--field-border);
 }
 
+/* docs for this feature (request 2): the per-cell Run control's own file
+   picker + Run button row - a plain flex row so the (potentially long)
+   "Auto-detected entry point" select never forces the Run button to wrap
+   onto its own line at this grid cell's usual width, matching the reflow
+   posture repo-grades.module.css already takes for other inline control
+   groups in this file. */
+.codeRunControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 /* B3 (docs/repo-grades-posting-and-reflow-acceptance-criteria.md) - a purely
    visual, aria-hidden label naming which assignment column a stacked card's
    score/comment fields belong to. Hidden by default (B6: no full-width

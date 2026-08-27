@@ -509,9 +509,32 @@ function finalizeCodeRunResult(
  * Run the dominant language's files via Piston (falling back to Wandbox).
  * Return null if no valid code files are present. Always returns a result on
  * error - including a timeout - never throws.
+ *
+ * `requestedEntryPoint`, when given, is the per-row Run control's instructor
+ * override (docs for this feature, request 2) - passed straight through to
+ * selectCodeRunFiles. When it names a file that cannot run meaningfully (a
+ * header, a data file, a file this module already excludes as truncated, or
+ * a basename collision's loser), this returns a CodeRunResult carrying that
+ * reason in `error` - never `null` - so the caller's EXISTING "could not
+ * execute" display (FilePreviewModal.tsx / GradingResults.tsx's own
+ * `runResult.error` branch) shows it without a second error-rendering path.
  */
-export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunResult | null> {
-  const selection = selectCodeRunFiles(files);
+export async function runSubmittedCode(
+  files: CodeFileInput[],
+  requestedEntryPoint?: string
+): Promise<CodeRunResult | null> {
+  const selection = selectCodeRunFiles(files, requestedEntryPoint);
+  if (selection.requestedEntryPointError) {
+    return {
+      language: "",
+      files: [],
+      ran: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      error: selection.requestedEntryPointError,
+    };
+  }
   if (selection.runFiles.length === 0) {
     return null;
   }
@@ -527,6 +550,56 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
 
   const raw = await executeRunFiles(selection.language, selection.runFiles, signal);
   return finalizeCodeRunResult(raw, selection.entryPoint, selection.skipped);
+}
+
+// Bounded so a large batch of entries cannot open dozens of simultaneous
+// sandbox requests at once (Piston/Wandbox rate limits), while still
+// finishing well inside Vercel Hobby's 60s ceiling for whichever single
+// server-action call is doing the attaching - each entry's own run already
+// carries its own internal CODE_RUN_TIMEOUT_MS budget, so a fully sequential
+// loop over N entries could take up to N times that budget in the worst
+// case, past a small handful of entries. Shared by every "run every entry's
+// code before the deterministic engine scores it" caller (grading.ts's
+// Canvas/zip embedded paths, github-repos.ts's/github.ts's repo embedded
+// paths) - one constant, one concurrency bound, not a copy per caller.
+export const CODE_RUN_CONCURRENCY = 4;
+
+/** One student/repo entry the deterministic engine is about to score -
+ * generic over the caller's own entry shape (StudentSubmissionEntry from
+ * @/lib/grade/types.ts satisfies this structurally) so this module never has
+ * to import that type and risk a circular import back into grade/types.ts,
+ * which already imports CodeRunResult from here. */
+export interface CodeRunnableEntry {
+  submittedFiles: CodeFileInput[];
+  codeRun?: CodeRunResult | null;
+}
+
+/**
+ * Run every entry's code in the sandbox (bounded concurrency - see
+ * CODE_RUN_CONCURRENCY above) and stash the result on the entry so the
+ * embedded deterministic engine (gradeEntriesEmbedded, src/lib/embedded-
+ * grader/index.ts) can score it without doing any network itself. Entries
+ * with no runnable code get `codeRun: null`. One entry's failure never blocks
+ * another - runSubmittedCode never throws (it returns a `{ error }`-carrying
+ * result, including on a timeout), so there is nothing here to catch.
+ *
+ * Moved here from grading.ts (a private, unexported helper there) so
+ * github-repos.ts's and github.ts's embedded repo-grading branches can call
+ * the SAME function grading.ts's Canvas/zip embedded paths already used,
+ * rather than each hand-rolling their own copy of this worker-pool loop.
+ */
+export async function attachCodeRuns<T extends CodeRunnableEntry>(entries: T[]): Promise<void> {
+  let cursor = 0;
+  const runWorker = async (): Promise<void> => {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= entries.length) return;
+      entries[index].codeRun = await runSubmittedCode(entries[index].submittedFiles);
+    }
+  };
+  const workerCount = Math.min(CODE_RUN_CONCURRENCY, entries.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 }
 
 /**

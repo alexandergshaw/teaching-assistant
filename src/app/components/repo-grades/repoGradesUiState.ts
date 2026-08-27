@@ -67,6 +67,22 @@ const README_INSTRUCTIONS_KEY = "ta-repo-grades-readme-instructions";
 // documents why those two are deliberately different even when they happen
 // to produce the same target list.
 const BULK_SELECTION_ONLY_KEY = "ta-repo-grades-bulk-selection-only";
+// Task B (docs for this feature - the embedded engine's own "Code runs"
+// scoring, request 1): whether a "Grade" / "Grade all" call on the embedded
+// deterministic engine runs each repo's code in the sandbox and scores it
+// (gradeEntriesEmbedded's own auto-run criterion, src/lib/embedded-grader/
+// index.ts) - the SAME thing the LLM path has always done unconditionally
+// (gradeEntries' internal runSubmittedCode call). Default FALSE: before this
+// feature, the embedded engine's repo-grading branches
+// (gradeRepoAction/gradeReposAction) never ran code at all - a silent gap,
+// not a documented default - so this control must start OFF, or every
+// existing course's embedded-engine scores would shift the moment this
+// shipped. Deliberately a SINGLE global flag, not per-column: like
+// useReadmeInstructions/bulkSelectionOnly above, this view only ever grades
+// with one provider/engine at a time, so a per-column value would let two
+// columns of the SAME grading run disagree about whether code scoring is on
+// with no way to see that from the grid.
+const RUN_CODE_SCORING_KEY = "ta-repo-grades-run-code-scoring";
 // L3 (docs/repo-grades-activity-log-acceptance-criteria.md): the activity
 // log, stored per COURSE inside one blob for the same reason
 // ASSIGNMENT_MAP_KEY is - one course's record of "who did I post, at what
@@ -113,6 +129,11 @@ export interface RepoGradesUiState {
    * rows; when false (the default), it means the whole column. See
    * BULK_SELECTION_ONLY_KEY's comment above. */
   bulkSelectionOnly: boolean;
+  /** When true, a "Grade"/"Grade all" call on the embedded deterministic
+   * engine runs each repo's code in the sandbox and scores it. Default
+   * false - see RUN_CODE_SCORING_KEY's comment above for why this must never
+   * default on. */
+  runCodeScoring: boolean;
 }
 
 function defaultUiState(): RepoGradesUiState {
@@ -126,6 +147,7 @@ function defaultUiState(): RepoGradesUiState {
     linkSource: "roster",
     useReadmeInstructions: true,
     bulkSelectionOnly: false,
+    runCodeScoring: false,
   };
 }
 
@@ -160,6 +182,13 @@ function parseBulkSelectionOnly(raw: string | null): boolean {
   return raw === "1";
 }
 
+/** Parses the persisted "score code execution" flag - same shape as
+ * parseBulkSelectionOnly above (default false, only the exact "1" marker
+ * reads as true). */
+function parseRunCodeScoring(raw: string | null): boolean {
+  return raw === "1";
+}
+
 export function loadRepoGradesUiState(): RepoGradesUiState {
   if (typeof window === "undefined") return defaultUiState();
   return {
@@ -172,6 +201,7 @@ export function loadRepoGradesUiState(): RepoGradesUiState {
     linkSource: parseLinkSource(localStorage.getItem(LINK_SOURCE_KEY)),
     useReadmeInstructions: parseUseReadmeInstructions(localStorage.getItem(README_INSTRUCTIONS_KEY)),
     bulkSelectionOnly: parseBulkSelectionOnly(localStorage.getItem(BULK_SELECTION_ONLY_KEY)),
+    runCodeScoring: parseRunCodeScoring(localStorage.getItem(RUN_CODE_SCORING_KEY)),
   };
 }
 
@@ -187,6 +217,7 @@ export function persistRepoGradesUiState(state: RepoGradesUiState): void {
     localStorage.setItem(LINK_SOURCE_KEY, state.linkSource);
     localStorage.setItem(README_INSTRUCTIONS_KEY, state.useReadmeInstructions ? "1" : "");
     localStorage.setItem(BULK_SELECTION_ONLY_KEY, state.bulkSelectionOnly ? "1" : "");
+    localStorage.setItem(RUN_CODE_SCORING_KEY, state.runCodeScoring ? "1" : "");
   } catch {
     // localStorage can throw (private browsing, quota) - losing persistence
     // for one change is acceptable, crashing the tab is not. Matches

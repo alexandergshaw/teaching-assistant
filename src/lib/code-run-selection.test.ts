@@ -246,6 +246,142 @@ describe("describeCodeRunSkip", () => {
   });
 });
 
+describe("selectCodeRunFiles - instructor-chosen entry point (docs for this feature, request 2)", () => {
+  it("switches the dominant language to the requested file's own language and runs its siblings, when the request names a non-dominant file", () => {
+    const result = selectCodeRunFiles(
+      [
+        { name: "A.java", extension: "java", previewContent: "public class A {}" },
+        { name: "B.java", extension: "java", previewContent: "public class B {}" },
+        { name: "main.py", extension: "py", previewContent: "print('hi')" },
+      ],
+      "main.py"
+    );
+    // Without an override this would run Java (2 files beat 1) - see the
+    // "picks the language with the most files" test above for the unchanged
+    // automatic behavior this override must NOT affect.
+    expect(result.language).toBe("python");
+    expect(result.entryPoint).toBe("main.py");
+    expect(result.runFiles).toEqual([{ name: "main.py", content: "print('hi')" }]);
+    expect(result.requestedEntryPointError).toBeUndefined();
+  });
+
+  it("accepts a full repo path (matched via basenameOf) exactly like the automatic path already does for basenames", () => {
+    const result = selectCodeRunFiles(
+      [{ name: "week1/src/main.py", extension: "py", previewContent: "print(1)" }],
+      "week1/src/main.py"
+    );
+    expect(result.entryPoint).toBe("main.py");
+    expect(result.requestedEntryPointError).toBeUndefined();
+  });
+
+  it("rejects a header file with a reason naming it, rather than sending it to the runner", () => {
+    const result = selectCodeRunFiles(
+      [
+        { name: "helper.h", extension: "h", previewContent: "int add(int, int);" },
+        { name: "main.c", extension: "c", previewContent: "int main() { return 0; }" },
+      ],
+      "helper.h"
+    );
+    expect(result.runFiles).toEqual([]);
+    expect(result.entryPoint).toBeNull();
+    expect(result.requestedEntryPointError).toContain("helper.h");
+    expect(result.requestedEntryPointError).toContain("header file");
+  });
+
+  it("rejects a data file with a reason naming it", () => {
+    const result = selectCodeRunFiles(
+      [
+        { name: "story.txt", extension: "txt", previewContent: "once upon a time" },
+        { name: "main.py", extension: "py", previewContent: "print(open('story.txt').read())" },
+      ],
+      "story.txt"
+    );
+    expect(result.runFiles).toEqual([]);
+    expect(result.requestedEntryPointError).toContain("story.txt");
+    expect(result.requestedEntryPointError).toContain("data file");
+  });
+
+  it("rejects an extension that is neither a recognized language nor a recognized data extension, with a reason naming it", () => {
+    const result = selectCodeRunFiles(
+      [{ name: "program.rs", extension: "rs", previewContent: "fn main() {}" }],
+      "program.rs"
+    );
+    expect(result.requestedEntryPointError).toContain("program.rs");
+    expect(result.requestedEntryPointError).toContain("not a language this sandbox recognizes");
+  });
+
+  it("rejects a markdown/text-like file the SAME way as any other data file - DATA_EXTENSIONS includes it, so it is classified as data, not as an unrecognized extension", () => {
+    const result = selectCodeRunFiles(
+      [{ name: "notes.md", extension: "md", previewContent: "# notes" }],
+      "notes.md"
+    );
+    expect(result.requestedEntryPointError).toContain("notes.md");
+    expect(result.requestedEntryPointError).toContain("data file");
+  });
+
+  it("rejects a file this module already excluded as truncated, with the SAME reason describeCodeRunSkip gives", () => {
+    const result = selectCodeRunFiles(
+      [{ name: "week1/main.py", extension: "py", previewContent: "print(1", previewTruncated: true }],
+      "week1/main.py"
+    );
+    expect(result.requestedEntryPointError).toBe(
+      describeCodeRunSkip({ name: "week1/main.py", reason: "truncated" })
+    );
+  });
+
+  it("rejects a basename collision's LOSER with the SAME reason describeCodeRunSkip gives, naming which file was kept instead", () => {
+    const result = selectCodeRunFiles(
+      [
+        { name: "week1/helpers.py", extension: "py", previewContent: "def a(): return 1" },
+        { name: "week2/helpers.py", extension: "py", previewContent: "def a(): return 2" },
+      ],
+      "week2/helpers.py"
+    );
+    expect(result.requestedEntryPointError).toContain("week2/helpers.py");
+    expect(result.requestedEntryPointError).toContain("week1/helpers.py");
+  });
+
+  it("does NOT reject the collision's WINNER just because a same-named loser also exists - only the exact requested name is checked against skips, never basename alone", () => {
+    const result = selectCodeRunFiles(
+      [
+        { name: "week1/helpers.py", extension: "py", previewContent: "def a(): return 1" },
+        { name: "week2/helpers.py", extension: "py", previewContent: "def a(): return 2" },
+      ],
+      "week1/helpers.py"
+    );
+    expect(result.requestedEntryPointError).toBeUndefined();
+    expect(result.entryPoint).toBe("helpers.py");
+    expect(result.runFiles).toEqual([{ name: "helpers.py", content: "def a(): return 1" }]);
+  });
+
+  it("rejects a name that decoded to nothing (empty content, silently dropped) - distinct wording from 'no file with this name'", () => {
+    const result = selectCodeRunFiles(
+      [{ name: "empty.py", extension: "py", previewContent: "" }],
+      "empty.py"
+    );
+    expect(result.requestedEntryPointError).toContain("empty.py");
+    expect(result.requestedEntryPointError).toContain("empty or could not be read");
+  });
+
+  it("rejects a name that names no file in the submission at all", () => {
+    const result = selectCodeRunFiles(
+      [{ name: "main.py", extension: "py", previewContent: "print(1)" }],
+      "nonexistent.py"
+    );
+    expect(result.requestedEntryPointError).toContain("nonexistent.py");
+    expect(result.requestedEntryPointError).toContain("no file with this name");
+  });
+
+  it("an empty-string request is treated as no request at all (the automatic heuristic still runs)", () => {
+    const withoutRequest = selectCodeRunFiles([{ name: "main.py", extension: "py", previewContent: "print(1)" }]);
+    const withEmptyRequest = selectCodeRunFiles(
+      [{ name: "main.py", extension: "py", previewContent: "print(1)" }],
+      ""
+    );
+    expect(withEmptyRequest).toEqual(withoutRequest);
+  });
+});
+
 describe("capOutput (Item 4)", () => {
   it("leaves short output unchanged", () => {
     expect(capOutput("hello", 100)).toBe("hello");

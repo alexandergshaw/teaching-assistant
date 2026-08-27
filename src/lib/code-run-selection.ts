@@ -284,6 +284,81 @@ function withEntryFirst<T extends { name: string }>(files: readonly T[], entryPo
   return copy;
 }
 
+// ── Instructor-chosen entry point (per-row Run button) ──────────────────────
+//
+// The automatic chooseEntryPoint heuristic above is what every grading call
+// still uses by default - this section only exists for the on-demand Run
+// control (docs for this feature, request 2), where an instructor may name a
+// SPECIFIC file to run instead of trusting the heuristic. That is
+// straightforward for a single-file Python/JS submission and often
+// meaningless for a compiled or import-heavy project: running an arbitrary
+// header, a data file, a file this module already excluded as truncated, or
+// a basename collision's loser either fails to compile or exercises nothing.
+// describeEntryPointIneligibility is the ONE place that decides "can this
+// file even be an entry point" and, when not, WHY - so the caller shows that
+// reason instead of forwarding an ineligible file to Piston/Wandbox and
+// letting it produce a confusing compiler error the instructor has to
+// puzzle out. Checked ONLY when an instructor explicitly names a file
+// (selectCodeRunFiles's second argument) - the automatic path above is
+// completely unaffected and unchecked.
+
+/** Header-only source extensions - technically mapped to a language by
+ * EXTENSION_MAP (so a header can still ride along as a sibling file and be
+ * decoded normally), but never eligible to be the file execution STARTS
+ * FROM: a standalone header almost never has a main, and even one that
+ * happens to compile alone is not what a student would call "the program".
+ * The automatic chooseEntryPoint heuristic already never picks one on its
+ * own (ENTRY_NAME_PATTERNS/MAIN_GUARD_PATTERNS never match a bare header),
+ * so this only matters for an explicit instructor pick. */
+const HEADER_EXTENSIONS = new Set(["h", "hpp"]);
+
+/**
+ * Why `requestedEntryPoint` (the caller's raw candidate name - a full repo
+ * path or an already-bare basename, matched the same way basenames are
+ * matched everywhere else in this module) cannot be run as this selection's
+ * entry point, or `null` when it is a perfectly good choice.
+ *
+ * Checks EXACT name first against `skipped` (never a basename-only match
+ * there): two different candidates can share a basename where one survived
+ * and one did not (e.g. "week1/helpers.py" kept, "week2/helpers.py" dropped
+ * as a collision) - matching by basename alone would wrongly blame the
+ * SURVIVING file for the other one's exclusion. Only once the exact name is
+ * cleared of a skip does this fall back to a basename lookup against
+ * `mapped` (which only ever stores the flattened basename a survivor was
+ * kept under) to classify what kind of file it actually is.
+ */
+function describeEntryPointIneligibility(
+  requestedEntryPoint: string,
+  candidates: readonly CodeRunCandidate[],
+  skipped: readonly CodeRunSkip[],
+  mapped: readonly MappedCandidate[]
+): string | null {
+  const exactSkip = skipped.find((s) => s.name === requestedEntryPoint);
+  if (exactSkip) return describeCodeRunSkip(exactSkip);
+
+  const requestedBasename = basenameOf(requestedEntryPoint);
+  const survivor = mapped.find((f) => f.name === requestedBasename);
+  if (survivor) {
+    const ext = extensionOfBasename(survivor.name);
+    if (HEADER_EXTENSIONS.has(ext)) {
+      return `${requestedBasename}: not run - this is a header file, not a program on its own. Pick the source file that includes it instead.`;
+    }
+    if (DATA_EXTENSIONS.has(ext)) {
+      return `${requestedBasename}: not run - this is a data file a program may read, not something that can run on its own.`;
+    }
+    if (!languageForExtension(ext)) {
+      return `${requestedBasename}: not run - "${ext || "no extension"}" is not a language this sandbox recognizes.`;
+    }
+    return null;
+  }
+
+  const original = candidates.find((c) => c.name === requestedEntryPoint || basenameOf(c.name) === requestedBasename);
+  if (original) {
+    return `${requestedBasename}: not run - this file was empty or could not be read as text.`;
+  }
+  return `${requestedBasename}: not run - no file with this name was found in this submission.`;
+}
+
 // ── Full selection ───────────────────────────────────────────────────────────
 
 export interface CodeRunSelectionFile {
@@ -297,7 +372,8 @@ export interface CodeRunSelection {
   /** The exact file list the runner should receive - entry point first, the
    * rest of the dominant language's files after it, then data files.
    * Empty when nothing runnable was found (mirrors runSubmittedCode's
-   * pre-existing `return null` case). */
+   * pre-existing `return null` case), or when a requested entry point was
+   * ineligible (see `requestedEntryPointError` below). */
   runFiles: CodeRunSelectionFile[];
   /** Basename of the file execution starts from - null only when `runFiles`
    * is empty. */
@@ -308,6 +384,12 @@ export interface CodeRunSelection {
    * carry no information worth surfacing (see mapSubmittedFilesForExecution's
    * own doc comment). */
   skipped: CodeRunSkip[];
+  /** Set only when the caller passed a `requestedEntryPoint` that
+   * describeEntryPointIneligibility rejected - explains why in one line, for
+   * display in place of a confusing compiler error. `runFiles` is empty and
+   * `entryPoint` is null whenever this is set. Never set on the automatic
+   * (no `requestedEntryPoint`) path. */
+  requestedEntryPointError?: string;
 }
 
 /**
@@ -315,9 +397,27 @@ export interface CodeRunSelection {
  * get sent, under what names, and which one is the entry point. Pure and
  * network-free - code-runner.ts calls this once, then does nothing but
  * resolve a runtime version and make the actual HTTP calls with the result.
+ *
+ * `requestedEntryPoint`, when given, is an instructor's explicit override
+ * (the per-row Run control) - the candidate's own `name` exactly as it
+ * appears in the submission (a full repo path or an already-bare basename).
+ * When it names an eligible file, that file's language becomes the run's
+ * dominant language and every other decoded file of that SAME language rides
+ * along as a sibling, exactly like the automatic path's own dominant-language
+ * grouping. When it does not, nothing is run - see `requestedEntryPointError`.
  */
-export function selectCodeRunFiles(candidates: readonly CodeRunCandidate[]): CodeRunSelection {
+export function selectCodeRunFiles(
+  candidates: readonly CodeRunCandidate[],
+  requestedEntryPoint?: string
+): CodeRunSelection {
   const { files: mapped, skipped } = mapSubmittedFilesForExecution(candidates);
+
+  if (requestedEntryPoint) {
+    const ineligible = describeEntryPointIneligibility(requestedEntryPoint, candidates, skipped, mapped);
+    if (ineligible) {
+      return { language: "", runFiles: [], entryPoint: null, skipped, requestedEntryPointError: ineligible };
+    }
+  }
 
   const decoded: DecodedRunnableFile[] = [];
   const dataFiles: CodeRunSelectionFile[] = [];
@@ -340,30 +440,42 @@ export function selectCodeRunFiles(candidates: readonly CodeRunCandidate[]): Cod
     return { language: "", runFiles: [], entryPoint: null, skipped };
   }
 
-  // Dominant language: most files, ties broken by total content length -
-  // unchanged from the pre-existing runSubmittedCode logic.
-  const byLanguage = new Map<string, DecodedRunnableFile[]>();
-  for (const file of decoded) {
-    const group = byLanguage.get(file.language);
-    if (group) group.push(file);
-    else byLanguage.set(file.language, [file]);
-  }
-
   let dominantLanguage = "";
   let dominantFiles: DecodedRunnableFile[] = [];
-  let maxFiles = 0;
-  let maxLength = 0;
-  for (const [lang, group] of byLanguage) {
-    const totalLength = group.reduce((sum, f) => sum + f.content.length, 0);
-    if (group.length > maxFiles || (group.length === maxFiles && totalLength > maxLength)) {
-      dominantLanguage = lang;
-      dominantFiles = group;
-      maxFiles = group.length;
-      maxLength = totalLength;
+
+  if (requestedEntryPoint) {
+    // Already proven eligible above (describeEntryPointIneligibility would
+    // have returned early otherwise), so this basename is guaranteed to be
+    // present among `decoded` - never among headers/data files/unrecognized
+    // extensions, which all returned an ineligibility reason above.
+    const requestedBasename = basenameOf(requestedEntryPoint);
+    const requestedFile = decoded.find((f) => f.name === requestedBasename)!;
+    dominantLanguage = requestedFile.language;
+    dominantFiles = decoded.filter((f) => f.language === dominantLanguage);
+  } else {
+    // Dominant language: most files, ties broken by total content length -
+    // unchanged from the pre-existing runSubmittedCode logic.
+    const byLanguage = new Map<string, DecodedRunnableFile[]>();
+    for (const file of decoded) {
+      const group = byLanguage.get(file.language);
+      if (group) group.push(file);
+      else byLanguage.set(file.language, [file]);
+    }
+
+    let maxFiles = 0;
+    let maxLength = 0;
+    for (const [lang, group] of byLanguage) {
+      const totalLength = group.reduce((sum, f) => sum + f.content.length, 0);
+      if (group.length > maxFiles || (group.length === maxFiles && totalLength > maxLength)) {
+        dominantLanguage = lang;
+        dominantFiles = group;
+        maxFiles = group.length;
+        maxLength = totalLength;
+      }
     }
   }
 
-  const entryPoint = chooseEntryPoint(dominantFiles);
+  const entryPoint = requestedEntryPoint ? basenameOf(requestedEntryPoint) : chooseEntryPoint(dominantFiles);
   const orderedDominant = withEntryFirst(dominantFiles, entryPoint);
 
   const runFiles: CodeRunSelectionFile[] = [

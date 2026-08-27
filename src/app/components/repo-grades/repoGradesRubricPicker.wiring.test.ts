@@ -284,9 +284,9 @@ describe("AC item 57/71: the per-cell gradeRepoAction call passes all seven posi
     expect(args[6]).toBe("useReadmeInstructions");
   });
 
-  it("useRepoGradesGradingActions.ts's per-cell call passes seven arguments, the seventh being useReadmeInstructions", () => {
+  it("useRepoGradesGradingActions.ts's per-cell call passes useReadmeInstructions as its SEVENTH argument", () => {
     const args = callArgs(gradingActionsSource, "gradeRepoAction");
-    expect(args).toHaveLength(7);
+    expect(args.length).toBeGreaterThanOrEqual(7);
     expect(args[6]).toBe("useReadmeInstructions");
   });
 
@@ -295,10 +295,43 @@ describe("AC item 57/71: the per-cell gradeRepoAction call passes all seven posi
     expect(args[2]).toBe("resolved.text");
   });
 
-  it("gradeRepoAction's own signature is untouched - no eighth positional argument was added", () => {
-    // The brief forbids widening gradeRepoAction itself; seven is the
-    // ceiling this call may ever pass.
-    expect(callArgs(gradingActionsSource, "gradeRepoAction")).toHaveLength(7);
+  // AMENDED 2026-08-26. This assertion used to read
+  // `expect(...).toHaveLength(7)` under the heading "no eighth positional
+  // argument was added", pinning an exact ARITY. That over-specified: it
+  // pinned the SPELLING of the call rather than the FACT the guard exists to
+  // protect, which is that `useReadmeInstructions` still reaches the action
+  // in its seventh position (docs/REGRESSION.md entry 352's defect).
+  //
+  // When `gradeRepoAction` later gained a genuinely optional eighth
+  // parameter (`runCode`, the opt-in execution-scoring flag), the exact-arity
+  // assertion forced the implementation into a contortion: the call was
+  // duplicated into `if (!runCodeScoring) { <7-arg call> } else { <8-arg
+  // call> }` with a comment warning that the seven-argument branch "must stay
+  // first" because this guard reads only the FIRST call site. That is two
+  // call sites that can silently drift, written that way solely to keep a
+  // text scan green - the exact failure mode this project has recorded
+  // before ("source-text tests over-specify: pin the fact and the ordering,
+  // never the spelling").
+  //
+  // The guard now pins the fact. An eighth argument is permitted; the
+  // seventh being `useReadmeInstructions` is not. The canaries below still
+  // prove a six-argument call is caught, which is the defect that mattered.
+  it("permits a genuinely optional eighth argument, while still pinning the seventh", () => {
+    const withRunCode =
+      "const result = await gradeRepoAction(row.repo, instructions, resolved.text, provider, undefined, column.folder, useReadmeInstructions, runCodeScoring);";
+    const args = callArgs(withRunCode, "gradeRepoAction");
+    expect(args).toHaveLength(8);
+    expect(args[6]).toBe("useReadmeInstructions");
+  });
+
+  it("canary: an eighth argument does NOT rescue a call that dropped useReadmeInstructions", () => {
+    // Proves the relaxed length check did not weaken the guard: a call that
+    // still omits the seventh argument fails, even though it has eight
+    // positions filled by something.
+    const stillBroken =
+      "const result = await gradeRepoAction(row.repo, instructions, resolved.text, provider, undefined, column.folder, runCodeScoring);";
+    const args = callArgs(stillBroken, "gradeRepoAction");
+    expect(args[6]).not.toBe("useReadmeInstructions");
   });
 });
 

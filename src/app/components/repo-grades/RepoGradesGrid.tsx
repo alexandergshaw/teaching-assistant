@@ -219,6 +219,16 @@ export interface RepoGradesGridProps {
    * `rubricDescription` prop), never the function itself, so that
    * subcomponent stays a pure renderer with nothing left to resolve. */
   describeColumnRubric: (assignmentId: string | null) => string;
+  /** Task B (docs for this feature, request 1) - true only while the embedded
+   * engine is selected AND the instructor has turned on "Score code
+   * execution" (index.tsx computes both checks together, this component
+   * only renders the result). Shown next to `rubricDescription` above - the
+   * SAME "pre-post disclosure" line this header already carries for which
+   * rubric a column grades against - because a "Code runs" criterion will
+   * not show up as its own rubric line in Canvas's SpeedGrader
+   * (canvas/grades.ts:88-89 skips any rubric area with no matching Canvas
+   * criterion) even though it still moves the posted total. */
+  codeScoringDisclosure: boolean;
 }
 
 const CELL_STATUS_TEXT: Record<RepoGradeCellStatus, string> = {
@@ -255,6 +265,7 @@ function ColumnHeaderControls({
   bulkSelectionOnly,
   scanTruncated,
   rubricDescription,
+  codeScoringDisclosure,
   sort,
   onSortChange,
 }: {
@@ -277,6 +288,9 @@ function ColumnHeaderControls({
    * renders it - see this file's `RepoGradesGridProps.describeColumnRubric`
    * doc comment for why the call happens one level up. */
   rubricDescription: string;
+  /** See RepoGradesGridProps.codeScoringDisclosure above - forwarded
+   * unchanged, one per column so every column's header states it. */
+  codeScoringDisclosure: boolean;
   /** N4 items 11-13 - this column's own sort toggle (by its cellEdits score,
    * via toggleRepoGradeSort's "folder" branch). The enclosing `<th>` (in the
    * main render below, not here) carries `aria-sort` for this exact folder. */
@@ -365,6 +379,16 @@ function ColumnHeaderControls({
           identical class on the not-yet-postable reason in
           RepoGradeCellControl.tsx). */}
       <span className={styles.postReason}>{rubricDescription}</span>
+      {/* Task B - same pre-post-disclosure primitive as rubricDescription
+          above, one line down: a "Code runs" criterion moves this column's
+          posted total but will not show as its own line in SpeedGrader (see
+          this component's own doc comment on `codeScoringDisclosure`). */}
+      {codeScoringDisclosure && (
+        <span className={styles.postReason}>
+          Code execution is scored into this total, but will not appear as its own line in Canvas&apos;s SpeedGrader
+          rubric.
+        </span>
+      )}
       <button
         type="button"
         className={pageStyles.linkButton}
@@ -415,6 +439,7 @@ export default function RepoGradesGrid({
   scanTruncated,
   emptyStateMessage,
   describeColumnRubric,
+  codeScoringDisclosure,
 }: RepoGradesGridProps) {
   if (rows.length === 0) {
     return (
@@ -471,6 +496,7 @@ export default function RepoGradesGrid({
                     bulkSelectionOnly={bulkSelectionOnly}
                     scanTruncated={scanTruncated}
                     rubricDescription={describeColumnRubric(column.assignmentId)}
+                    codeScoringDisclosure={codeScoringDisclosure}
                     sort={sort}
                     onSortChange={onSortChange}
                   />

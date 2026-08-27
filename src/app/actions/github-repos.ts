@@ -59,6 +59,7 @@ import {
 import { classifyFrontend, classifyBackend, type BackendInfo } from "@/lib/frontend-detect";
 import { generateRubric, gradeEntries, type GradingRun, type StudentSubmissionEntry, type SubmittedFileInfo } from "@/lib/grade";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText } from "@/lib/embedded-grader";
+import { attachCodeRuns } from "@/lib/code-runner";
 import { rememberRubric } from "@/lib/research/rubric-bank";
 import { type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
@@ -617,7 +618,23 @@ function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentS
   };
 }
 
-/** Grade a student's GitHub repo against a rubric (generating one if not given). */
+/**
+ * Grade a student's GitHub repo against a rubric (generating one if not given).
+ *
+ * `runCode`, when true, has the EMBEDDED (deterministic) engine run this
+ * repo's code in the sandbox and score it via gradeEntriesEmbedded's own
+ * "Code runs" criterion (src/lib/embedded-grader/index.ts) - the same
+ * scoring the LLM path already applies unconditionally via gradeEntries'
+ * internal runSubmittedCode call. Default false/omitted: the embedded engine
+ * never ran code here before this parameter existed (github.ts:641 shared the
+ * same silent gap), so a caller that does not pass it sees byte-identical
+ * scores to before - this is an opt-in, not a default behavior change. The
+ * Repo Grades view's own "Score code execution" control
+ * (repoGradesUiState.ts's runCodeScoring) is the only UI surface that ever
+ * passes true; every other caller (workflows, the per-cell "Grade" button's
+ * pinned 7-argument call - see repoGradesRubricPicker.wiring.test.ts) keeps
+ * omitting it and keeps today's behavior.
+ */
 export async function gradeRepoAction(
   repoRef: string,
   assignmentInstructions: string,
@@ -625,7 +642,8 @@ export async function gradeRepoAction(
   provider: LlmProvider = "gemini",
   branch?: string,
   pathPrefix?: string,
-  useReadmeInstructions?: boolean
+  useReadmeInstructions?: boolean,
+  runCode?: boolean
 ): Promise<
   | {
       run: GradingRun;
@@ -677,7 +695,17 @@ export async function gradeRepoAction(
       }
       // Grow the rubric bank from human-authored rubrics (fire-and-forget).
       if (rubric.trim()) void rememberRubric(instructions, rubric);
-      const run = gradeEntriesEmbedded([repoDigestToEmbeddedEntry(digest)], builtRubric);
+      const entries = [repoDigestToEmbeddedEntry(digest)];
+      // The live defect this parameter fixes: gradeEntriesEmbedded only scores
+      // a "Code runs" criterion off `entry.codeRun` (src/lib/embedded-grader/
+      // index.ts) - it never runs anything itself. Every OTHER embedded caller
+      // (grading.ts's Canvas/zip paths) already calls attachCodeRuns first;
+      // this branch never did, so repo grading on the embedded engine has
+      // never run or scored a student's code, silently, regardless of what
+      // the LLM path does. Opt-in and off by default - see this function's
+      // own doc comment on `runCode`.
+      if (runCode) await attachCodeRuns(entries);
+      const run = gradeEntriesEmbedded(entries, builtRubric);
       return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName, digestTruncated, readmePath, readmeMissing };
     }
 

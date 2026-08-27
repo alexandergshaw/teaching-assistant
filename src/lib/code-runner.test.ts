@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   languageForExtension,
   runSubmittedCode,
+  attachCodeRuns,
   __resetRuntimeCacheForTests,
   CodeFileInput,
+  type CodeRunnableEntry,
 } from "./code-runner";
 
 describe("code-runner", () => {
@@ -476,6 +478,96 @@ describe("code-runner", () => {
       expect(result!.ran).toBe(true);
       expect(result!.files).toEqual(["main.py", "story.txt"]);
       expect(result!.language).toBe("python");
+    });
+
+    // docs for this feature (request 2 - the per-row Run control's entry-
+    // point override): an ineligible request must return a CodeRunResult
+    // carrying the reason in `error` - NEVER `null` (which the caller cannot
+    // distinguish from "nothing runnable at all") and NEVER a network call
+    // (no `global.fetch` stub is installed for this test - a request that
+    // reached the network here would throw "fetch is not a function" and
+    // fail the test, proving the ineligibility short-circuit runs first).
+    it("returns an error CodeRunResult (never null, never a network call) when the requested entry point cannot run meaningfully", async () => {
+      const files: CodeFileInput[] = [
+        { name: "helper.h", extension: "h", previewContent: "int add(int, int);" },
+        { name: "main.c", extension: "c", previewContent: "int main() { return 0; }" },
+      ];
+      const result = await runSubmittedCode(files, "helper.h");
+      expect(result).not.toBeNull();
+      expect(result!.ran).toBe(false);
+      expect(result!.error).toContain("helper.h");
+      expect(result!.error).toContain("header file");
+      expect(result!.entryPoint).toBeUndefined();
+    });
+
+    it("runs the requested entry point's OWN language group when it names an eligible, non-dominant file", async () => {
+      global.fetch = vi.fn(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/runtimes")) {
+          return new Response(JSON.stringify([{ language: "python", version: "3.10.0" }]), { status: 200 });
+        }
+        if (urlStr.includes("/execute")) {
+          const body = JSON.parse(String(init?.body));
+          expect(body.language).toBe("python");
+          expect(body.files).toEqual([{ name: "main.py", content: "print('hi')" }]);
+          return new Response(
+            JSON.stringify({
+              language: "python",
+              version: "3.10.0",
+              run: { stdout: "hi\n", stderr: "", code: 0, signal: null, output: "hi\n" },
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`Unexpected URL: ${urlStr}`);
+      });
+
+      const files: CodeFileInput[] = [
+        { name: "A.java", extension: "java", previewContent: "public class A {}" },
+        { name: "main.py", extension: "py", previewContent: "print('hi')" },
+      ];
+      const result = await runSubmittedCode(files, "main.py");
+      expect(result).not.toBeNull();
+      expect(result!.language).toBe("python");
+      expect(result!.entryPoint).toBe("main.py");
+      expect(result!.ran).toBe(true);
+    });
+  });
+
+  // docs for this feature (request 1 - deliberate scoring on the embedded
+  // engine): attachCodeRuns moved here from grading.ts's own private helper
+  // so github-repos.ts's and github.ts's embedded repo-grading branches can
+  // reuse the SAME worker-pool loop grading.ts's Canvas/zip embedded paths
+  // already used, rather than each hand-rolling a copy.
+  describe("attachCodeRuns", () => {
+    it("sets codeRun on every entry that had runnable code, and null on one that did not - never leaving a field untouched", async () => {
+      global.fetch = vi.fn(async (url) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/runtimes")) {
+          return new Response(JSON.stringify([{ language: "python", version: "3.10.0" }]), { status: 200 });
+        }
+        if (urlStr.includes("/execute")) {
+          return new Response(
+            JSON.stringify({
+              language: "python",
+              version: "3.10.0",
+              run: { stdout: "ok\n", stderr: "", code: 0, signal: null, output: "ok\n" },
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`Unexpected URL: ${urlStr}`);
+      });
+
+      const entries: CodeRunnableEntry[] = [
+        { submittedFiles: [{ name: "main.py", extension: "py", previewContent: "print('ok')" }] },
+        { submittedFiles: [{ name: "readme.txt", extension: "txt", previewContent: "no code here" }] },
+      ];
+      await attachCodeRuns(entries);
+
+      expect(entries[0].codeRun).not.toBeNull();
+      expect(entries[0].codeRun?.ran).toBe(true);
+      expect(entries[1].codeRun).toBeNull();
     });
   });
 });

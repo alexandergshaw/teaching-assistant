@@ -111,6 +111,13 @@ export interface UseRepoGradesGradingActionsParams {
   columns: readonly RepoGradeColumn[];
   useReadmeInstructions: boolean;
   bulkSelectionOnly: boolean;
+  /** Task B (docs for this feature, request 1) - repoGradesUiState.ts's
+   * runCodeScoring: whether the embedded deterministic engine should run
+   * each repo's code and score it. Read by BOTH grading paths below
+   * (handleGradeCell and the bulk path via useRepoGradesBulkGrade), the same
+   * "one shared input, never two copies" rule this hook's own header
+   * comment already states for `resolveRubricForColumn`. */
+  runCodeScoring: boolean;
   /** index.tsx's uiState.courseId. Used only to reset `columnPosting` back
    * to {} on a course switch, via the SAME render-phase compare-and-adjust
    * idiom index.tsx's own cellStateResetForCourse branch uses for cellEdits/
@@ -170,6 +177,7 @@ export function useRepoGradesGradingActions(
     columns,
     useReadmeInstructions,
     bulkSelectionOnly,
+    runCodeScoring,
     courseId,
     course,
     provider,
@@ -257,6 +265,21 @@ export function useRepoGradesGradingActions(
     // button. All seven are passed below - gradeRepoAction's own signature
     // is untouched (src/app/actions/github-repos.ts:617-624 already declares
     // seven parameters), so this needed no eighth positional argument.
+    // Task B (request 1): `runCode` is gradeRepoAction's 8th, opt-in
+    // parameter - see github-repos.ts's own doc comment on it for the full
+    // rationale. It is passed unconditionally as the flag's current value,
+    // which is `false` for every course that has not opted in, so the action
+    // behaves exactly as it did before this feature for them.
+    //
+    // This was briefly written as two duplicated call sites in an
+    // if/else, ordered so that a seven-argument call came FIRST, because
+    // repoGradesRubricPicker.wiring.test.ts pinned an exact ARITY of seven
+    // and read only the first call site. That guard has since been amended
+    // to pin the FACT it exists to protect (useReadmeInstructions reaching
+    // the action in its seventh position, entry 352's defect) rather than
+    // the call's spelling. Two call sites that can drift, kept in a
+    // particular order to satisfy a text scan, is a worse defect than the
+    // one the scan was guarding against.
     const result = await gradeRepoAction(
       row.repo,
       instructions,
@@ -264,7 +287,8 @@ export function useRepoGradesGradingActions(
       provider,
       undefined,
       column.folder,
-      useReadmeInstructions
+      useReadmeInstructions,
+      runCodeScoring
     );
     if ("error" in result) {
       setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: result.error }));
@@ -630,6 +654,7 @@ export function useRepoGradesGradingActions(
     provider,
     instructions,
     useReadmeInstructions,
+    runCodeScoring,
     onCellUpdate: handleBulkCellUpdate,
     onOutcomes: handleBulkOutcomes,
     onAnnounce: setPostSummary,

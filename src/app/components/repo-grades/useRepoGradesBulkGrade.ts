@@ -74,6 +74,13 @@ export interface UseRepoGradesBulkGradeParams {
   provider: LlmProvider;
   instructions: string;
   useReadmeInstructions: boolean;
+  /** Task B (docs for this feature, request 1) - repoGradesUiState.ts's
+   * runCodeScoring, passed straight through to every gradeOneTarget call
+   * below as gradeRepoAction's own `runCode` parameter. Unlike the per-cell
+   * path (useRepoGradesGradingActions.ts's handleGradeCell), this call site
+   * carries no pinned argument-count guard, so it is a plain positional
+   * argument - no ordering trick required. */
+  runCodeScoring: boolean;
   /** Writes one cell's edit - index.tsx's setCellEdits wrapper. Called with
    * the same field shape handleGradeCell already writes. */
   onCellUpdate: (repo: string, folder: string, patch: Partial<RepoGradeCellEdit>) => void;
@@ -157,7 +164,7 @@ export interface UseRepoGradesBulkGradeResult {
  * second column's run once the first finishes.
  */
 export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): UseRepoGradesBulkGradeResult {
-  const { provider, instructions, useReadmeInstructions, onCellUpdate, onOutcomes, onAnnounce } = params;
+  const { provider, instructions, useReadmeInstructions, runCodeScoring, onCellUpdate, onOutcomes, onAnnounce } = params;
   const [runningFolder, setRunningFolder] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -183,7 +190,16 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
      * for why that is not always the instructor's raw `rubric` field. */
     const gradeOneTarget = async (target: BulkGradeTarget, rubricArg: string): Promise<{ rubricUsed: string | null }> => {
       onCellUpdate(target.repo, target.folder, { grading: true, gradeError: null });
-      const result = await gradeRepoAction(target.repo, instructions, rubricArg, provider, undefined, target.folder, useReadmeInstructions);
+      const result = await gradeRepoAction(
+        target.repo,
+        instructions,
+        rubricArg,
+        provider,
+        undefined,
+        target.folder,
+        useReadmeInstructions,
+        runCodeScoring
+      );
 
       if ("error" in result) {
         onCellUpdate(target.repo, target.folder, { grading: false, gradeError: result.error });

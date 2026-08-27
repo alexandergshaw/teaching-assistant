@@ -4,6 +4,7 @@ import type { ClassroomRowResult, RepoQueueItem, TestSummary } from "../actions-
 import { generateRubric, gradeEntries, type GradingRun, type StudentSubmissionEntry, type SubmittedFileInfo } from "@/lib/grade";
 import { parseLenientJsonArray } from "@/lib/lenient-json";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText } from "@/lib/embedded-grader";
+import { attachCodeRuns } from "@/lib/code-runner";
 import { rememberRubric } from "@/lib/research/rubric-bank";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { githubConfigured, githubWebhookSecret, listRepos, listOwnedOrgs, listOrgRepos, listBranches, ingestRepo, parseRepoRef, createRepo, createOrgRepo, startCopilotBuild, createCopilotAgentTask, listCopilotTasks, deletePaths, movePaths, generateFromTemplate, putFile, getFileText, getRepo, listWorkflows, dispatchWorkflow, findWorkflowRunSince, downloadArtifactZip, createOrgPushHook, setRepoCollaborator, updateRepo, deleteRepo, listCommits, getRepoTree, listRunArtifacts, type GithubRepo, type RepoDigest, type WorkflowRunInfo, type WorkflowInfo, type RepoPermission, type CopilotTask, setRepoTopics } from "@/lib/github";
@@ -603,7 +604,13 @@ export async function gradeReposAction(
   assignmentInstructions: string,
   rubric: string,
   provider: LlmProvider = "gemini",
-  gradingFolder?: string
+  gradingFolder?: string,
+  // See gradeRepoAction's (github-repos.ts) identical parameter for the full
+  // rationale - this is that same fix, for the bulk multi-repo path this
+  // older panel (GithubGradingPanel.tsx) uses. Default false/omitted keeps
+  // today's behavior: GithubGradingPanel.tsx never passes it, so this fix
+  // changes no existing course's grades on that surface.
+  runCode?: boolean
 ): Promise<{ run: GradingRun; rubric: string; truncatedRepos?: string[] } | { error: string }> {
   try {
     await requireOwner();
@@ -638,10 +645,11 @@ export async function gradeReposAction(
       }
       // Grow the rubric bank from human-authored rubrics (fire-and-forget).
       if (rubric.trim()) void rememberRubric(instructions, rubric);
-      const run = gradeEntriesEmbedded(
-        digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label)),
-        builtRubric
-      );
+      const embeddedEntries = digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label));
+      // Same live defect fix as gradeRepoAction (github-repos.ts) - see that
+      // function's own doc comment on `runCode` for the full rationale.
+      if (runCode) await attachCodeRuns(embeddedEntries);
+      const run = gradeEntriesEmbedded(embeddedEntries, builtRubric);
       return { run, rubric: renderRubricText(builtRubric), truncatedRepos };
     }
 

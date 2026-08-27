@@ -32,6 +32,15 @@
 // button's real postability can never disagree (AC5 item 28).
 import { useState } from "react";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
+// docs for this feature (request 2 - "a button ... that can kick off the
+// interpreter/compiler for any specified file(s) in a student's folder"):
+// reuses runSubmissionCodeAction, the SAME server action the results page's
+// own per-row/per-file Run buttons already call (GradingResults.tsx,
+// FilePreviewModal.tsx) - never a second runner or a second action. Type-only
+// CodeRunResult import matches those two files' own precedent for a client
+// component reading this server-only-runtime shape.
+import { runSubmissionCodeAction } from "@/app/actions";
+import type { CodeRunResult } from "@/lib/code-runner";
 import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
 // docs/grading-results-feedback-boxes-acceptance-criteria.md, brought to this
@@ -151,6 +160,56 @@ export default function RepoGradeCellControl({
   // always visible - only the full output is behind this toggle, mirroring
   // "Browse files" above (a click for detail, never for the headline fact).
   const [codeRunOpen, setCodeRunOpen] = useState(false);
+  // docs for this feature (request 2): the per-row Run control's own state -
+  // which file (if any) the instructor picked to override the automatic
+  // entry point ("" = let selectCodeRunFiles's chooseEntryPoint decide, the
+  // exact default behavior request 2 calls for), whether a manual run is in
+  // flight, and its result. A manual run always wins over the grading-time
+  // `edit.codeExecution` once one has been made (displayedCodeRun below) -
+  // the same "a fresh manual run wins, else the grading-time run" precedent
+  // GradingResults.tsx's own codeRunFor already sets, so this control is a
+  // second instance of an established pattern, not a new one.
+  const [entryPointChoice, setEntryPointChoice] = useState("");
+  const [manualRunning, setManualRunning] = useState(false);
+  const [manualRun, setManualRun] = useState<CodeRunResult | null>(null);
+  const handleRunCode = async () => {
+    setManualRunning(true);
+    try {
+      const files = edit.submittedFiles.map((f) => ({
+        name: f.name,
+        extension: f.extension,
+        rawBase64: f.rawBase64,
+        previewContent: f.previewContent,
+      }));
+      const res = await runSubmissionCodeAction(files, entryPointChoice || undefined);
+      setManualRun(
+        res ?? {
+          language: "",
+          files: [],
+          ran: false,
+          exitCode: null,
+          stdout: "",
+          stderr: "",
+          error: "None of these files are runnable code.",
+        }
+      );
+    } catch (err) {
+      // Surface a failed run (e.g. an expired session) instead of a stuck
+      // spinner - matches GradingResults.tsx's own handleRunCode catch.
+      setManualRun({
+        language: "",
+        files: [],
+        ran: false,
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+        error: err instanceof Error ? err.message : "Run failed.",
+      });
+    } finally {
+      setManualRunning(false);
+      setCodeRunOpen(true);
+    }
+  };
   // docs/grading-results-feedback-boxes-acceptance-criteria.md: the
   // RowFeedbackBoxes/FeedbackExpandModal copy state and expand-modal state
   // this cell owns, mirroring GithubGradingPanel.tsx's own copiedKey/onCopy
@@ -205,6 +264,15 @@ export default function RepoGradeCellControl({
   const postButtonLabel =
     edit.postStatus === "posting" ? "Posting..." : edit.postStatus === "posted" ? "Re-post" : edit.postStatus === "error" ? "Retry" : "Post";
   const postButtonDisabled = edit.postStatus === "posting" || (edit.postStatus === "idle" && !postability.postable);
+
+  // docs for this feature (request 2): a fresh manual Run always wins over
+  // the grading-time run for DISPLAY - the exact "a fresh manual run wins,
+  // else the grading-time run" precedent GradingResults.tsx's own codeRunFor
+  // already sets. Read by the summary/output block near the bottom of this
+  // component's JSX, and nowhere else - manualRun is never posted, never
+  // scored, and never written back onto `edit` (a Run click is read-only
+  // review, not a re-grade).
+  const displayedCodeRun = manualRun ?? edit.codeExecution;
 
   // U12.48: only shown once the raw score actually parses as an
   // "earned/possible" fraction - an unreadable or not-yet-graded score already
@@ -305,54 +373,107 @@ export default function RepoGradeCellControl({
           running this repo's code in the sandbox and feeding the result into
           the grading prompt since commit fa057050 - this is the ONE place an
           instructor can see that happened and why it may have moved the
-          score. The one-line summary is always visible; full stdout/stderr/
-          compileOutput sit behind "Show output", matching "Browse files"
-          above. Reuses page.module.css's previewMeta/previewNotice/
-          previewContent classes - the SAME ones GradingResults.tsx's own
-          code-output modal already uses for a CodeRunResult, so this is not
-          a second visual language for the same kind of data. */}
-      {edit.codeExecution && (
+          score. Request 2 (docs for this feature) adds the Run control right
+          above it: "any specified file(s) in a student's folder" defaults to
+          running the chosen ENTRY POINT with its sibling files available
+          (selectCodeRunFiles's own dominant-language grouping - the same
+          logic grading's own automatic run already uses), and the select
+          below lets the instructor override which file that is. Gated on
+          `edit.submittedFiles` (this cell must already be graded once - the
+          files a Run would use are exactly what grading last read), not on
+          `edit.codeExecution`/`edit.grading`, so it is reachable even for a
+          cell graded on the embedded engine with Task B's code-scoring
+          toggle off. Reuses runSubmissionCodeAction - the SAME server action
+          and CodeRunResult shape GradingResults.tsx's/FilePreviewModal.tsx's
+          own Run buttons already call - never a second runner, a second
+          action, or a second output viewer: the summary/output rendering
+          below is the SAME markup (page.module.css's previewMeta/
+          previewNotice/previewContent classes) this file already used for
+          `edit.codeExecution` alone, now reading `displayedCodeRun` (a fresh
+          manual run when one exists, else the grading-time run - see that
+          const's own comment above). */}
+      {edit.submittedFiles.length > 0 && (
         <div className={styles.codeRunSummary}>
-          <span className={styles.postReason}>
-            {edit.codeExecution.error
-              ? edit.codeExecution.timedOut
-                ? "Code run: timed out before the sandbox reported back - not factored into this grade."
-                : `Code run: could not execute - ${edit.codeExecution.error}`
-              : `Code run: ${edit.codeExecution.entryPoint ?? "the submission"} ${
-                  edit.codeExecution.ran ? "ran cleanly" : "did not run cleanly"
-                }`}
-          </span>
-          {!edit.codeExecution.error && (
-            <button type="button" className={pageStyles.linkButton} onClick={() => setCodeRunOpen((v) => !v)}>
-              {codeRunOpen ? "Hide output" : "Show output"}
+          <div className={styles.codeRunControls}>
+            <label htmlFor={`repo-grade-run-entry-${row.repo}-${column.folder}`} className={pageStyles.previewMeta}>
+              Run
+            </label>
+            <select
+              id={`repo-grade-run-entry-${row.repo}-${column.folder}`}
+              value={entryPointChoice}
+              onChange={(e) => setEntryPointChoice(e.target.value)}
+              aria-label={`Choose which ${column.folder} file to run for ${row.repo}`}
+            >
+              <option value="">Auto-detected entry point</option>
+              {edit.submittedFiles.map((file) => (
+                <option key={file.name} value={file.name}>
+                  {file.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={pageStyles.linkButton}
+              disabled={manualRunning}
+              onClick={() => {
+                void handleRunCode();
+              }}
+            >
+              {manualRunning ? "Running..." : "Run"}
             </button>
-          )}
-          {codeRunOpen && !edit.codeExecution.error && (
-            <div className={styles.codeRunOutput}>
-              <p className={pageStyles.previewMeta}>Ran without errors: {edit.codeExecution.ran ? "yes" : "no"}</p>
-              {edit.codeExecution.compileOutput && edit.codeExecution.compileOutput.trim() && (
-                <>
-                  <p className={pageStyles.previewMeta}>Compiler output</p>
-                  <pre className={pageStyles.previewContent}>{edit.codeExecution.compileOutput}</pre>
-                </>
+          </div>
+          {displayedCodeRun && (
+            <>
+              <span className={styles.postReason}>
+                {/* U12.52-style "never make the instructor guess" rule,
+                    applied here (docs for this feature, request 2's "Always
+                    show WHICH file was executed"): a manual run is labeled as
+                    such so it is never mistaken for what was actually scored
+                    at grading time - manualRun never writes back onto `edit`
+                    (see displayedCodeRun's own comment), so a manual Run can
+                    never itself change a posted score. */}
+                {manualRun ? "Manual run (for review - does not change the score): " : "Code run: "}
+                {displayedCodeRun.error
+                  ? displayedCodeRun.timedOut
+                    ? "timed out before the sandbox reported back."
+                    : `could not execute - ${displayedCodeRun.error}`
+                  : `${displayedCodeRun.entryPoint ?? "the submission"} ${
+                      displayedCodeRun.ran ? "ran cleanly" : "did not run cleanly"
+                    }`}
+              </span>
+              {!displayedCodeRun.error && (
+                <button type="button" className={pageStyles.linkButton} onClick={() => setCodeRunOpen((v) => !v)}>
+                  {codeRunOpen ? "Hide output" : "Show output"}
+                </button>
               )}
-              <p className={pageStyles.previewMeta}>Output (stdout)</p>
-              <pre className={pageStyles.previewContent}>{edit.codeExecution.stdout || "(none)"}</pre>
-              {edit.codeExecution.stderr && edit.codeExecution.stderr.trim() && (
-                <>
-                  <p className={pageStyles.previewMeta}>Errors (stderr)</p>
-                  <pre className={pageStyles.previewContent}>{edit.codeExecution.stderr}</pre>
-                </>
+              {codeRunOpen && !displayedCodeRun.error && (
+                <div className={styles.codeRunOutput}>
+                  <p className={pageStyles.previewMeta}>Ran without errors: {displayedCodeRun.ran ? "yes" : "no"}</p>
+                  {displayedCodeRun.compileOutput && displayedCodeRun.compileOutput.trim() && (
+                    <>
+                      <p className={pageStyles.previewMeta}>Compiler output</p>
+                      <pre className={pageStyles.previewContent}>{displayedCodeRun.compileOutput}</pre>
+                    </>
+                  )}
+                  <p className={pageStyles.previewMeta}>Output (stdout)</p>
+                  <pre className={pageStyles.previewContent}>{displayedCodeRun.stdout || "(none)"}</pre>
+                  {displayedCodeRun.stderr && displayedCodeRun.stderr.trim() && (
+                    <>
+                      <p className={pageStyles.previewMeta}>Errors (stderr)</p>
+                      <pre className={pageStyles.previewContent}>{displayedCodeRun.stderr}</pre>
+                    </>
+                  )}
+                  {displayedCodeRun.filesExcluded && displayedCodeRun.filesExcluded.length > 0 && (
+                    <>
+                      <p className={pageStyles.previewMeta}>Not run</p>
+                      <p className={pageStyles.previewNotice}>
+                        {displayedCodeRun.filesExcluded.map((f) => f.reason).join(" ")}
+                      </p>
+                    </>
+                  )}
+                </div>
               )}
-              {edit.codeExecution.filesExcluded && edit.codeExecution.filesExcluded.length > 0 && (
-                <>
-                  <p className={pageStyles.previewMeta}>Not run</p>
-                  <p className={pageStyles.previewNotice}>
-                    {edit.codeExecution.filesExcluded.map((f) => f.reason).join(" ")}
-                  </p>
-                </>
-              )}
-            </div>
+            </>
           )}
         </div>
       )}

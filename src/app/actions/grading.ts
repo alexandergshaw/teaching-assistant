@@ -1,8 +1,8 @@
 "use server";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
-import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry } from "@/lib/grade";
-import { runSubmittedCode, type CodeRunResult } from "@/lib/code-runner";
+import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, type GradingRun, type GradingRunEntry } from "@/lib/grade";
+import { runSubmittedCode, attachCodeRuns, type CodeRunResult } from "@/lib/code-runner";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText, buildDiscussionRubric, gradeDiscussion, renderDiscussionRubric } from "@/lib/embedded-grader";
 import { rememberRubric } from "@/lib/research/rubric-bank";
 import { detectCanvasUrlKind } from "@/lib/canvas-url";
@@ -515,14 +515,19 @@ export async function postGradingDraftAction(
   }
 }
 
-/** Run one submission's code on demand (the results page Run button). */
+/** Run one submission's code on demand (the results page Run button, and the
+ * Repo Grades view's per-cell Run control - docs for that feature, request
+ * 2). `entryPoint`, when given, overrides which file execution starts from
+ * (code-run-selection.ts's `requestedEntryPoint`) - omitted, this keeps the
+ * existing automatic entry-point choice unchanged. */
 export async function runSubmissionCodeAction(
-  files: Array<{ name: string; extension: string; rawBase64?: string; previewContent?: string }>
+  files: Array<{ name: string; extension: string; rawBase64?: string; previewContent?: string }>,
+  entryPoint?: string
 ): Promise<CodeRunResult | null> {
   // Owner-gated like the rest of the file: this relays code execution through
   // the server's sandbox credentials.
   await requireOwner();
-  return runSubmittedCode(files);
+  return runSubmittedCode(files, entryPoint);
 }
 
 export async function pullSubmissionAction(
@@ -644,36 +649,10 @@ async function gradeZipViaEngine(
   return { run: gradingApiToRun(resp, pointsPossible), error: null, warnings };
 }
 
-// Bounded so a large zip/Canvas batch cannot open dozens of simultaneous
-// sandbox requests (Piston/Wandbox rate limits), while still finishing well
-// inside Vercel Hobby's 60s ceiling for this single server-action call - a
-// fully sequential loop over N entries, each already carrying its own
-// internal CODE_RUN_TIMEOUT_MS budget (code-run-selection.ts), could take
-// N times that budget in the worst case, which stops fitting the ceiling
-// past a small handful of entries. A small worker pool (same shape as
-// useRepoGradesBulkGrade.ts's BULK_GRADE_CONCURRENCY) keeps several runs in
-// flight at once without removing rate-limit consideration entirely.
-const CODE_RUN_CONCURRENCY = 4;
-
-/** Run every entry's code in the sandbox (bounded concurrency - see
- *  CODE_RUN_CONCURRENCY above) and stash the result on the entry so the
- *  embedded engine can score it without doing any network itself. Entries
- *  with no runnable code get null. One entry's failure never blocks another -
- *  runSubmittedCode never throws (it returns a `{ error }`-carrying result,
- *  including on a timeout), so there is nothing here to catch. */
-async function attachCodeRuns(entries: StudentSubmissionEntry[]): Promise<void> {
-  let cursor = 0;
-  const runWorker = async (): Promise<void> => {
-    for (;;) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= entries.length) return;
-      entries[index].codeRun = await runSubmittedCode(entries[index].submittedFiles);
-    }
-  };
-  const workerCount = Math.min(CODE_RUN_CONCURRENCY, entries.length);
-  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-}
+// attachCodeRuns/CODE_RUN_CONCURRENCY moved to @/lib/code-runner (imported
+// above) so github-repos.ts's and github.ts's embedded repo-grading branches
+// can call the SAME worker-pool loop this file's own embedded paths below
+// use, rather than each hand-rolling a copy of it.
 
 export async function gradeAction(
   _prev: GradeActionState,

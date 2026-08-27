@@ -256,6 +256,17 @@ export interface RepoGradesControlsProps {
    * column post. */
   bulkSelectionOnly: boolean;
   onBulkSelectionOnlyChange: (value: boolean) => void;
+
+  /** Task B (docs for this feature, request 1): when true, a "Grade"/"Grade
+   * all" call on the embedded deterministic engine runs each repo's code in
+   * the sandbox and scores it via a "Code runs" criterion - the same thing
+   * the LLM engine has always done unconditionally. Off by default so
+   * turning this on is a deliberate, visible act, not a silent score change.
+   * Only affects the embedded engine; shown regardless of the current
+   * provider (a provider switch is a separate control, elsewhere) so the
+   * instructor's choice here is not lost by switching providers and back. */
+  runCodeScoring: boolean;
+  onRunCodeScoringChange: (value: boolean) => void;
 }
 
 /** Shared inline override for a checkbox's <label> inside a `.field` wrapper -
@@ -311,6 +322,8 @@ export default function RepoGradesControls({
   onUseReadmeInstructionsChange,
   bulkSelectionOnly,
   onBulkSelectionOnlyChange,
+  runCodeScoring,
+  onRunCodeScoringChange,
 }: RepoGradesControlsProps) {
   return (
     <>
@@ -453,6 +466,29 @@ export default function RepoGradesControls({
               Only the checked rows
             </label>
             <p className={styles.fieldHint}>With nothing checked, a bulk grade covers the whole column.</p>
+          </div>
+          {/* Task B (docs for this feature, request 1) - opt-in, off by
+              default (repoGradesUiState.ts's RUN_CODE_SCORING_KEY comment
+              explains why it must start off). States plainly what turning it
+              on does AND its one gap (SpeedGrader will not show a "Code
+              runs" rubric line even though the posted total moves) right
+              next to the control, not only in a tooltip or the log. */}
+          <div className={styles.field}>
+            <label htmlFor="repo-grades-run-code-scoring" style={CHECKBOX_LABEL_STYLE}>
+              <input
+                id="repo-grades-run-code-scoring"
+                type="checkbox"
+                checked={runCodeScoring}
+                onChange={(e) => onRunCodeScoringChange(e.target.checked)}
+              />
+              Score code execution (deterministic engine only)
+            </label>
+            <p className={styles.fieldHint}>
+              When on, grading runs each repo&apos;s code in the sandbox and adds a &quot;Code runs&quot; criterion to
+              the score - only on the deterministic engine (the LLM engine already always runs code and folds it
+              into its judgment). This changes scores, so it defaults off. Canvas&apos;s SpeedGrader rubric has no
+              matching criterion, so this line will not appear there even though it still moves the posted total.
+            </p>
           </div>
           <div className={styles.field}>
             <label htmlFor="repo-grades-instructions">

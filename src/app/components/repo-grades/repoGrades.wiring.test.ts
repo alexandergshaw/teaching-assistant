@@ -242,11 +242,41 @@ describe("RepoGradeCellControl.tsx wires grading behind an explicit click only (
     expect(cellControlSource).not.toContain("useEffect");
   });
 
-  it("the score/comment inputs are controlled (value= bound to the edit prop) rather than uncontrolled, matching GradingResults.tsx:781-832's idiom", () => {
+  it("the score input is controlled (value= bound to the edit prop) rather than uncontrolled, matching GradingResults.tsx:781-832's idiom", () => {
     expect(cellControlSource).toContain("value={edit.score}");
-    expect(cellControlSource).toContain("value={edit.comment}");
     expect(cellControlSource).toContain("onChange={(e) => onScoreChange(e.target.value)}");
-    expect(cellControlSource).toContain("onChange={(e) => onCommentChange(e.target.value)}");
+  });
+
+  // UPDATED for docs/grading-results-feedback-boxes-acceptance-criteria.md
+  // (brought to this surface after it shipped on GradingResults.tsx first -
+  // REGRESSION entry 355): `edit.comment` is no longer independently
+  // editable here - the single free-text textarea and its
+  // `onCommentChange`/`value={edit.comment}` wiring this assertion used to
+  // pin are GONE, replaced by RepoGradeFeedbackBoxes.tsx's three boxes,
+  // which route every edit through `onFeedbackFieldChange` (repoGradesCellEdits.ts's
+  // applyRepoGradeFeedbackFieldEdit is the one place that then recomputes
+  // `comment`). This assertion is updated, not deleted, to pin the new
+  // wiring - the same "update the oracle, do not delete it" treatment entry
+  // 355 gave GradingResults.tsx's CSV export oracle.
+  it("the comment textarea is retired: RepoGradeCellControl.tsx no longer reads or writes edit.comment directly, and instead reuses the shared RowFeedbackBoxes component wired to onFeedbackFieldChange", () => {
+    // Comments are stripped first (stripComments is defined further below in
+    // this file, but function declarations hoist) - this file's own header
+    // comments on RepoGradeCellControlProps deliberately name the RETIRED
+    // `onCommentChange` prop for context, and a bare substring search would
+    // trip on that prose the same way REGRESSION entry 357's F1 guard once
+    // did on its own header comment quoting a banned literal.
+    const stripped = stripComments(cellControlSource);
+    expect(stripped).not.toContain("value={edit.comment}");
+    expect(stripped).not.toContain("onCommentChange");
+    // Reuses grading-results/RowFeedbackBoxes.tsx directly (not a fork) via
+    // its `namePrefix` prop, which is what lets one control's accessible
+    // names carry both the folder column and the repo on this many-cells-at-
+    // once surface.
+    expect(cellControlSource).toContain('import { RowFeedbackBoxes } from "../grading-results/RowFeedbackBoxes"');
+    expect(cellControlSource).toContain("<RowFeedbackBoxes");
+    expect(cellControlSource).toContain("edit={feedbackEdit}");
+    expect(cellControlSource).toContain("onChangeField={onFeedbackFieldChange}");
+    expect(cellControlSource).toContain("namePrefix={column.folder}");
   });
 });
 

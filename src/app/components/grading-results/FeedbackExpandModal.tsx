@@ -15,20 +15,27 @@
 import TextField from "@mui/material/TextField";
 import { ModalShell } from "../ui/ModalShell";
 import styles from "../../page.module.css";
-import { FEEDBACK_FIELD_META, type FeedbackField, type RowEdit } from "./gradingResultsHelpers";
+import { FEEDBACK_FIELD_META, type FeedbackBoxesEdit, type FeedbackField } from "./gradingResultsHelpers";
 
 export interface FeedbackExpandModalProps {
   student: string;
   field: FeedbackField;
-  edit: RowEdit;
+  edit: FeedbackBoxesEdit;
   onChange: (field: FeedbackField, value: string) => void;
   onClose: () => void;
+  /** Same as RowFeedbackBoxes.tsx's own `namePrefix` prop - see that file's
+   * doc comment. Repo Grades passes the folder column name here so this
+   * modal's own label/aria-label stay consistent with the inline boxes'
+   * naming even though only one instance of this modal is ever open at a
+   * time. */
+  namePrefix?: string;
 }
 
-export function FeedbackExpandModal({ student, field, edit, onChange, onClose }: FeedbackExpandModalProps) {
+export function FeedbackExpandModal({ student, field, edit, onChange, onClose, namePrefix }: FeedbackExpandModalProps) {
   const meta = FEEDBACK_FIELD_META[field];
+  const label = namePrefix ? `${namePrefix} ${meta.descriptorLower} for ${student}` : `${meta.descriptorCapitalized} for ${student}`;
   return (
-    <ModalShell label={`${meta.descriptorCapitalized} for ${student}`} onDismiss={onClose}>
+    <ModalShell label={label} onDismiss={onClose}>
       <div className={styles.previewHeader}>
         <div>
           <p className={styles.previewMeta}>Student: {student}</p>
@@ -42,7 +49,7 @@ export function FeedbackExpandModal({ student, field, edit, onChange, onClose }:
         multiline
         value={edit[field]}
         onChange={(event) => onChange(field, event.target.value)}
-        aria-label={`${meta.descriptorCapitalized} for ${student} (expanded)`}
+        aria-label={`${label} (expanded)`}
         fullWidth
         size="small"
         minRows={12}

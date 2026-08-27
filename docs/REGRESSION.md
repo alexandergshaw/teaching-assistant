@@ -33947,3 +33947,113 @@ env-dependent prerender tail and naming no file from this work.
 lines of headroom after gaining the three feedback boxes, the per-criterion
 percentage, and this panel's opener in one day. The next feature touching
 this file should extract before it adds, not after.
+
+## 360. Two features had been built where the instructor could not reach them - and the folder that kept justifying its own divergence
+
+The instructor reported: "the multiple textboxes for feedback in each table
+row aren't showing" and "i don't see a way to view the code from the repo
+grading view either".
+
+Both were true. Entries 355, 357 and 359 built the three feedback boxes and
+the file viewer in `GradingResults.tsx` and its `grading-results/` folder -
+the surface used by the Grading tab, the live feed and the GitHub grading
+panel. The instructor works in the **Repo Grades view**, a SEPARATE
+component tree (`repo-grades/index.tsx` -> `RepoGradesGrid.tsx` ->
+`RepoGradeCellControl.tsx`) which imported none of it and still rendered one
+`edit.comment` textarea per cell.
+
+The requirement said "each grading results row"; that was read as the
+component literally named `GradingResults`, when the whole session's context
+was the repo page. Only the per-criterion breakdown (entry 358) had gone to
+the right surface. This is the FOURTH reachability failure recorded in this
+file this week, and the first where the feature was fully built, fully
+tested, and simply not where anyone would look.
+
+### What shipped now
+
+The unit on this surface is a CELL (one repo x one folder column), so
+`RepoGradeCellControl.tsx` gained the three boxes, the expand modal, and a
+control opening the graded files.
+
+`RepoGradeCellEdit` gained `strengths`, `improvements`, `resubmitNotice`,
+`submittedFiles` and `submissionTruncated`, set by BOTH grading paths in the
+same place as `rubricAreas`/`generatedScore`, so a bulk-graded cell and a
+per-cell-graded cell stay indistinguishable downstream. Existing persisted
+edits carry none of these and degrade to empty rather than invalidating the
+blob.
+
+`edit.comment` is what posts to Canvas, so it keeps exactly ONE writer:
+`applyRepoGradeFeedbackFieldEdit` patches a field and recomputes the
+composition in the same step, reusing `composeOverallCommentLocal` rather
+than re-deriving it. `onCommentChange` was REMOVED to make the single-writer
+rule structural rather than conventional, which legitimately moved one
+pinned assertion in `repoGrades.wiring.test.ts` - updated with an
+explanatory comment, not deleted.
+
+File contents live in the ephemeral `cellEdits` React state, which
+`index.tsx` already documents as never persisted and reset on course switch
+- so this carries none of the store-bloat risk that ruled out re-persisting
+files in entry 359's F4.
+
+### The fork that was caught mid-flight
+
+The implementer first created a `RepoGradeFeedbackBoxes.tsx` fork, justified
+on the grounds that "RepoGradeCellControl.tsx has no MUI import at all".
+That is the same circular reasoning this session had already used twice: a
+concurrent consistency audit established that `repo-grades/` is 0 of 9 files
+importing MUI while 209 of 287 component files elsewhere do - the folder is
+the OUTLIER, so "match the folder" propagates divergence rather than
+respecting a convention. The fork also silently dropped the expand-to-modal
+control.
+
+It was deleted. Instead `RowFeedbackBoxes.tsx` and `FeedbackExpandModal.tsx`
+gained an optional `namePrefix` prop - omitted, they reproduce the original
+wording byte-for-byte; supplied, they produce this grid's
+`${column.folder} ... for ${row.repo}` accessible names, which the grid
+needs because many cells are on screen at once. Both `edit` props were
+narrowed to the minimal shape either actually reads, which is what let
+`RepoGradeCellEdit` satisfy them structurally. One component, two surfaces,
+no wording drift.
+
+The file viewer reuses `SubmittedFilesPanel.tsx` unchanged, which already
+renders through `ModalShell` - so the new overlay was never a hand-rolled
+backdrop lacking a focus trap, Escape handling and focus restore. The audit
+had flagged that as the silent-a11y-hole risk, since a hand-rolled backdrop
+with no recognised marker leaves `modalAdoption.wiring.test.ts` green while
+the view gains an inaccessible modal.
+
+### An app-wide styling gap found by the same audit
+
+`page.module.css` styled `.field textarea` but never a `<select>` or bare
+`<input>` inside `.field`, so five controls in this view (and others in the
+tasks and ppt-design views) rendered as RAW BROWSER DEFAULTS beside
+correctly-styled textareas. Fixed once, centrally, mirroring `.textInput`.
+
+`appearance` is deliberately untouched: stripping the native dropdown arrow
+would require a hand-rolled replacement and change mobile rendering, which
+is a behaviour change rather than a styling fix. The selector lists
+text-like input types EXPLICITLY rather than excluding a few, because the
+first draft used `input:not([type="file"])` and would have stretched every
+checkbox to full width with 14px padding - `.field` wrappers contain
+checkboxes today at `SessionSetupPanel.tsx:193-196` and
+`RepoGradesControls.tsx:417-420`.
+
+### Gates
+
+`npx tsc --noEmit` clean; `npx eslint src` 0 errors (5 pre-existing
+warnings); `npx vitest run` 705 files / 14399 tests passing; `npx next
+build` compiles successfully, failing only in the excluded prerender tail.
+
+The reachability guard this entry exists for: a source-reading test
+asserting `RepoGradeCellControl.tsx` actually RENDERS both controls, with a
+canary proving it fires against a fixture shaped like the old
+single-textarea version.
+
+### Still open
+
+The Repo Grades view remains non-MUI; the broader consistency migration is
+sequenced separately. That view has zero primary-weight buttons - "Post N
+grade(s)", a live-gradebook write, renders as a text link while the same
+action in `GradingResults.tsx:425` is a filled button. The rubric picker's
+`<optgroup>` should stay native regardless: MUI's `ListSubheader` is
+focusable and is not an equivalent.

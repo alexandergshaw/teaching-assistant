@@ -34,11 +34,13 @@ import { gradeRepoAction, postCanvasGradesAction } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
 import type { LlmProvider } from "@/lib/llm";
 import {
+  applyRepoGradeFeedbackFieldEdit,
   getRepoGradeCellEdit,
   setRepoGradeCellEdit,
   type RepoGradeCellEdit,
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
+import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
 import type { RepoGradeLogEntry, RepoGradeLogEventKind } from "./repoGradesLog";
 import type { RepoGradeCell, RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import {
@@ -142,7 +144,11 @@ export interface UseRepoGradesGradingActionsParams {
 
 export interface UseRepoGradesGradingActionsResult {
   handleScoreChange: (repo: string, folder: string, score: string) => void;
-  handleCommentChange: (repo: string, folder: string, comment: string) => void;
+  /** Replaces the old `handleCommentChange` (REGRESSION entry 355's "comment
+   * is no longer independently editable" rule, applied to this surface) -
+   * routes every box edit through applyRepoGradeFeedbackFieldEdit, the ONE
+   * place `edit.comment` is recomputed from the three parts. */
+  handleFeedbackFieldChange: (repo: string, folder: string, field: FeedbackField, value: string) => void;
   handleGradeCell: (row: RepoGradeRow, column: RepoGradeColumn) => Promise<void>;
   /** U12.52: `pointsPossible` is the mapped Canvas assignment's own points
    * value (RepoGradesGrid.tsx's pointsPossibleForColumn) - the SAME value
@@ -198,13 +204,28 @@ export function useRepoGradesGradingActions(
     // since changed by hand - that status would misrepresent what is
     // actually live in the gradebook. Reset to "idle" (this cell's own
     // untouched state - defaultRepoGradeCellEdit) on every score edit, not
-    // on a comment edit (handleCommentChange below), which never changes
-    // what number posts.
+    // on a feedback-box edit (handleFeedbackFieldChange below), which never
+    // changes what number posts.
     setCellEdits((prev) => setRepoGradeCellEdit(prev, repo, folder, { score, postStatus: "idle", postMessage: null }));
   };
 
-  const handleCommentChange = (repo: string, folder: string, comment: string) => {
-    setCellEdits((prev) => setRepoGradeCellEdit(prev, repo, folder, { comment }));
+  // docs/grading-results-feedback-boxes-acceptance-criteria.md, brought to
+  // this surface after it shipped on GradingResults.tsx first (REGRESSION
+  // entry 355): the ONE place a box edit reaches `edit.comment` - reads the
+  // cell's CURRENT edit (so a patch always starts from the latest strengths/
+  // improvements/resubmitNotice, not a stale closure), applies the one
+  // field's new value via applyRepoGradeFeedbackFieldEdit (which recomputes
+  // `comment` in the SAME step), then writes the whole result back. Replaces
+  // handleCommentChange, which used to write `comment` directly - keeping
+  // both would give `comment` two writers, exactly the drift this feature
+  // exists to prevent (see repoGradesCellEdits.ts's own doc comment on the
+  // field).
+  const handleFeedbackFieldChange = (repo: string, folder: string, field: FeedbackField, value: string) => {
+    setCellEdits((prev) => {
+      const current = getRepoGradeCellEdit(prev, repo, folder);
+      const next = applyRepoGradeFeedbackFieldEdit(current, field, value);
+      return setRepoGradeCellEdit(prev, repo, folder, next);
+    });
   };
 
   // AC4 item 21: reuses gradeRepoAction with `folderPath` as the `pathPrefix` -
@@ -215,7 +236,7 @@ export function useRepoGradesGradingActions(
   //
   // AC "posting and reflow" A3: also records `rubricAreas` and
   // `generatedScore` on the cell edit - the ONLY place either is ever set
-  // (never by handleScoreChange/handleCommentChange above) - so
+  // (never by handleScoreChange/handleFeedbackFieldChange above) - so
   // repoGradesPosting.ts's repoGradeScoreWasEdited can later tell "the
   // instructor left the AI's score alone" from "the instructor hand-edited
   // it" by comparing the CURRENT score field against `generatedScore`, the
@@ -266,9 +287,31 @@ export function useRepoGradesGradingActions(
         grading: false,
         gradeError: null,
         score: first?.totalScore ?? "",
+        // `comment` is set directly here, not through
+        // applyRepoGradeFeedbackFieldEdit: `first.overallComment` is ALREADY
+        // composeOverallComment(strengths, improvements, resubmitNotice)'s
+        // output (src/lib/grade/types.ts's own guarantee on the field), so
+        // recomposing it from the three parts below would recompute the
+        // exact same string a second time. A grading call is the one
+        // producer that is allowed to set `comment` directly, because it is
+        // also the one place that sets strengths/improvements/resubmitNotice
+        // - the two can never disagree here by construction. Every OTHER
+        // writer (a box edit) goes through applyRepoGradeFeedbackFieldEdit
+        // instead - see handleFeedbackFieldChange above.
         comment: first?.overallComment ?? "",
+        strengths: first?.strengths ?? "",
+        improvements: first?.improvements ?? "",
+        resubmitNotice: first?.resubmitNotice ?? "",
         rubricAreas: first?.rubricAreas ?? [],
         generatedScore: first?.totalScore ?? null,
+        // docs/grading-results-file-viewer-acceptance-criteria.md, brought to
+        // this surface after it shipped on GradingResults.tsx first
+        // (REGRESSION entries 356/357/359): the files this call ACTUALLY
+        // read, with their contents - never re-fetched live from GitHub for
+        // display. Set at the SAME time as rubricAreas/generatedScore, by
+        // the SAME grading call, never by hand.
+        submittedFiles: first?.submittedFiles ?? [],
+        submissionTruncated: first?.submissionTruncated ?? false,
       })
     );
     // L1 item 1: the score AS GENERATED, with the provider that produced it -
@@ -619,7 +662,7 @@ export function useRepoGradesGradingActions(
 
   return {
     handleScoreChange,
-    handleCommentChange,
+    handleFeedbackFieldChange,
     handleGradeCell,
     handlePostColumn,
     handlePostOneCell,

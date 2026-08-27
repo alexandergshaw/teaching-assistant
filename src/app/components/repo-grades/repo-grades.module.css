@@ -301,6 +301,12 @@
   flex-wrap: wrap;
 }
 
+/* The three feedback boxes (RowFeedbackBoxes.tsx, reused unchanged from
+   grading-results/ via its own MUI styling) and their expand modal
+   (FeedbackExpandModal.tsx) render entirely through MUI + that component's
+   own inline styles - no CSS Module classes of this file's own are needed
+   for them. */
+
 /* JOB A (docs/rubric-criteria-breakdown-acceptance-criteria.md): rubricAreas
    was already written onto every graded cell (useRepoGradesGradingActions.ts)
    but never rendered anywhere - this is that rendering. Mirrors

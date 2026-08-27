@@ -44,6 +44,7 @@ import type { RepoGradeCell, RepoGradeCellStatus, RepoGradeColumn, RepoGradeRow 
 import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
 import { buildBulkGradePlan } from "./repoGradesBulkGrade";
+import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
 // Type-only import - see useRepoGradesData.ts's header comment for why this
 // is safe from a "use client" module even though CanvasAssignmentBrief is
 // only ever produced at runtime through the "use server" listCourseAssignmentsAction.
@@ -85,7 +86,10 @@ export interface RepoGradesGridProps {
   assignments: CanvasAssignmentBrief[];
   cellEdits: RepoGradeCellEditsByRepo;
   onScoreChange: (repo: string, folder: string, score: string) => void;
-  onCommentChange: (repo: string, folder: string, comment: string) => void;
+  /** Replaces the old `onCommentChange` (REGRESSION entry 355's "comment is
+   * no longer independently editable" rule, applied to this surface) -
+   * patches one of the three feedback boxes for one cell. */
+  onFeedbackFieldChange: (repo: string, folder: string, field: FeedbackField, value: string) => void;
   onGradeCell: (row: RepoGradeRow, column: RepoGradeColumn) => void;
   onAssignmentChange: (folder: string, assignmentId: string | null) => void;
   /** U12.52: `pointsPossible` is the SAME value pointsPossibleForColumn just
@@ -306,7 +310,7 @@ export default function RepoGradesGrid({
   assignments,
   cellEdits,
   onScoreChange,
-  onCommentChange,
+  onFeedbackFieldChange,
   onGradeCell,
   onAssignmentChange,
   onPostColumn,
@@ -413,7 +417,7 @@ export default function RepoGradesGrid({
                         edit={getRepoGradeCellEdit(cellEdits, row.repo, column.folder)}
                         pointsPossible={pointsPossible}
                         onScoreChange={(score) => onScoreChange(row.repo, column.folder, score)}
-                        onCommentChange={(comment) => onCommentChange(row.repo, column.folder, comment)}
+                        onFeedbackFieldChange={(field, value) => onFeedbackFieldChange(row.repo, column.folder, field, value)}
                         onGrade={() => onGradeCell(row, column)}
                         onPostOne={() => onPostOneCell(row, column, pointsPossible)}
                       />

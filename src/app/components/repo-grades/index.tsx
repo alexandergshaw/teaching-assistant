@@ -652,7 +652,7 @@ export default function RepoGradesTab() {
   // the full rationale and the exact param surface.
   const {
     handleScoreChange,
-    handleCommentChange,
+    handleFeedbackFieldChange,
     handleGradeCell,
     handlePostColumn,
     handlePostOneCell,
@@ -857,7 +857,7 @@ export default function RepoGradesTab() {
           assignments={assignments}
           cellEdits={cellEdits}
           onScoreChange={handleScoreChange}
-          onCommentChange={handleCommentChange}
+          onFeedbackFieldChange={handleFeedbackFieldChange}
           onGradeCell={handleGradeCell}
           onAssignmentChange={handleAssignmentChange}
           onPostColumn={handlePostColumn}

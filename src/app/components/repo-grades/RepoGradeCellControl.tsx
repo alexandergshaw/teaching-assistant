@@ -30,9 +30,37 @@
 // actual post payload for the whole column - never a hand-rolled re-check of
 // the same conditions, so the reason text shown here and the column post
 // button's real postability can never disagree (AC5 item 28).
+import { useState } from "react";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
 import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import type { RepoGradeCellEdit } from "./repoGradesCellEdits";
+// docs/grading-results-feedback-boxes-acceptance-criteria.md, brought to this
+// surface after it shipped on GradingResults.tsx first (REGRESSION entry
+// 355): three independently-copyable feedback boxes replace the single
+// free-text comment textarea this file used to render directly. REUSES
+// grading-results/RowFeedbackBoxes.tsx and FeedbackExpandModal.tsx AS-IS
+// (both components, not a fork) via their new optional `namePrefix` prop -
+// added specifically so this surface's own naming need ("many repos, each
+// split into several folder columns, on screen at once" - an accessible name
+// must carry the folder AND the repo) does not require a second copy of
+// either component's labels/wording. `edit.comment` (still the field
+// repoGradesPosting.ts posts to Canvas, unchanged) is no longer
+// independently editable - see repoGradesCellEdits.ts's
+// applyRepoGradeFeedbackFieldEdit doc comment.
+import { RowFeedbackBoxes } from "../grading-results/RowFeedbackBoxes";
+import { FeedbackExpandModal } from "../grading-results/FeedbackExpandModal";
+import type { FeedbackBoxesEdit, FeedbackField } from "../grading-results/gradingResultsHelpers";
+// docs/grading-results-file-viewer-acceptance-criteria.md, brought to this
+// surface after it shipped on GradingResults.tsx first (REGRESSION entries
+// 356/357/359): browsing a graded cell's own files, reusing
+// SubmittedFilesPanel.tsx UNCHANGED rather than a second file viewer - it
+// already renders ONLY the files it is handed (never a live GitHub fetch),
+// which is exactly the "show what was actually graded" guarantee this
+// control needs. Imported directly from its existing home under
+// grading-results/ (a plain cross-folder import) rather than moved: nothing
+// about this feature requires a neutral location, and moving a file nobody
+// asked to move only adds churn and risk to an already-shared component.
+import SubmittedFilesPanel from "../grading-results/SubmittedFilesPanel";
 // U12.48/U12.52 (docs/repo-grades-ux-overhaul-acceptance-criteria.md): the
 // instructor reads a PERCENTAGE beside the score field, never a raw total -
 // but the editable score field itself keeps showing `edit.score` exactly as
@@ -77,7 +105,12 @@ export interface RepoGradeCellControlProps {
    * column header. */
   pointsPossible: number | null;
   onScoreChange: (score: string) => void;
-  onCommentChange: (comment: string) => void;
+  /** Patches one of the three feedback boxes - repoGradesCellEdits.ts's
+   * applyRepoGradeFeedbackFieldEdit is the ONE place this recomputes
+   * `edit.comment`, reached through index.tsx's handleFeedbackFieldChange.
+   * Replaces the old `onCommentChange` prop (REGRESSION entry 355's
+   * "comment is no longer independently editable" rule, applied here). */
+  onFeedbackFieldChange: (field: FeedbackField, value: string) => void;
   onGrade: () => void;
   /**
    * AC "posting and reflow" A4: posts (or retries/re-posts) THIS cell alone -
@@ -98,7 +131,45 @@ export interface RepoGradeCellControlProps {
   onPostOne?: () => void;
 }
 
-export default function RepoGradeCellControl({ row, column, edit, pointsPossible, onScoreChange, onCommentChange, onGrade, onPostOne }: RepoGradeCellControlProps) {
+export default function RepoGradeCellControl({
+  row,
+  column,
+  edit,
+  pointsPossible,
+  onScoreChange,
+  onFeedbackFieldChange,
+  onGrade,
+  onPostOne,
+}: RepoGradeCellControlProps) {
+  // docs/grading-results-file-viewer-acceptance-criteria.md: whether this
+  // cell's "Browse files" panel is open. Local state only - the panel shows
+  // ONLY edit.submittedFiles (what THIS grading call actually read), never a
+  // live GitHub fetch, so there is nothing to load on open.
+  const [filesOpen, setFilesOpen] = useState(false);
+  // docs/grading-results-feedback-boxes-acceptance-criteria.md: the
+  // RowFeedbackBoxes/FeedbackExpandModal copy state and expand-modal state
+  // this cell owns, mirroring GithubGradingPanel.tsx's own copiedKey/onCopy
+  // pair (the SAME "await the write, then clear after 1.5s" idiom, not a
+  // second one) since GradingResults.tsx's own copiedKey lives one level up
+  // from RowFeedbackBoxes there too - one cell here plays the same role one
+  // results-table row does there.
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [expandedField, setExpandedField] = useState<FeedbackField | null>(null);
+  const handleCopyFeedback = async (key: string, value: string) => {
+    await navigator.clipboard.writeText(value);
+    setCopiedKey(key);
+    window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+  };
+  // The minimal shape both reused components read (gradingResultsHelpers.ts's
+  // FeedbackBoxesEdit) - `overall` maps to this surface's `comment` (still
+  // the field that actually posts to Canvas; RowFeedbackBoxes only reads
+  // `overall` for its "copy all" fallback, never writes it).
+  const feedbackEdit: FeedbackBoxesEdit = {
+    overall: edit.comment,
+    strengths: edit.strengths,
+    improvements: edit.improvements,
+    resubmitNotice: edit.resubmitNotice,
+  };
   // Always folderPresent: true - see the module header for why that is safe
   // for every cell this component is ever asked to render.
   const postability = repoGradePostability({
@@ -153,10 +224,6 @@ export default function RepoGradeCellControl({ row, column, edit, pointsPossible
       pointsPossible,
     });
 
-  const handleCopyComment = () => {
-    void navigator.clipboard.writeText(edit.comment);
-  };
-
   return (
     <div className={styles.cellControl}>
       <div className={styles.cellInputs}>
@@ -172,26 +239,26 @@ export default function RepoGradeCellControl({ row, column, edit, pointsPossible
           />
           {scorePercent && <span className={styles.scorePercent}>{scorePercent}</span>}
         </div>
-        <div className={styles.commentRow}>
-          <textarea
-            value={edit.comment}
-            onChange={(e) => onCommentChange(e.target.value)}
-            aria-label={`${column.folder} comment for ${row.repo}`}
-            placeholder="Comment (optional)"
-            className={styles.commentTextarea}
-          />
-          {edit.comment.trim() !== "" && (
-            <button
-              type="button"
-              className={pageStyles.linkButton}
-              aria-label={`Copy the ${column.folder} comment for ${row.repo}`}
-              onClick={handleCopyComment}
-            >
-              Copy
-            </button>
-          )}
-        </div>
+        <RowFeedbackBoxes
+          student={row.repo}
+          edit={feedbackEdit}
+          copiedKey={copiedKey}
+          onCopy={handleCopyFeedback}
+          onChangeField={onFeedbackFieldChange}
+          onExpand={(field) => setExpandedField(field)}
+          namePrefix={column.folder}
+        />
       </div>
+      {expandedField && (
+        <FeedbackExpandModal
+          student={row.repo}
+          field={expandedField}
+          edit={feedbackEdit}
+          onChange={onFeedbackFieldChange}
+          onClose={() => setExpandedField(null)}
+          namePrefix={column.folder}
+        />
+      )}
       {edit.rubricAreas.length > 0 && (
         <div className={styles.rubricBreakdown}>
           {edit.rubricAreas.map((area, index) => {
@@ -252,9 +319,35 @@ export default function RepoGradeCellControl({ row, column, edit, pointsPossible
             {postButtonLabel}
           </button>
         )}
+        {/* docs/grading-results-file-viewer-acceptance-criteria.md: only
+            rendered once this cell HAS files to show - a graded cell whose
+            digest genuinely carried none, or a cell never graded, has
+            nothing this button could open. Reuses SubmittedFilesPanel.tsx
+            unchanged (see this file's import comment) - the panel itself
+            already carries F3's truncation-honesty notices. */}
+        {edit.submittedFiles.length > 0 && (
+          <button
+            type="button"
+            className={pageStyles.linkButton}
+            aria-label={`Browse the ${column.folder} files for ${row.repo}`}
+            onClick={() => {
+              setFilesOpen(true);
+            }}
+          >
+            Browse files ({edit.submittedFiles.length})
+          </button>
+        )}
         {postScoreDescription && <span className={styles.postReason}>{postScoreDescription}</span>}
         {!postability.postable && <span className={styles.postReason}>{postability.reason}</span>}
       </div>
+      {filesOpen && (
+        <SubmittedFilesPanel
+          student={row.repo}
+          files={edit.submittedFiles}
+          submissionTruncated={edit.submissionTruncated}
+          onClose={() => setFilesOpen(false)}
+        />
+      )}
       {edit.gradeError && (
         <span className={pageStyles.error} role="alert">
           {edit.gradeError}

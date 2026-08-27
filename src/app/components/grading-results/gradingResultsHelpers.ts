@@ -208,6 +208,18 @@ export type FeedbackField = "strengths" | "improvements" | "resubmitNotice";
 
 export const FEEDBACK_FIELDS: readonly FeedbackField[] = ["strengths", "improvements", "resubmitNotice"];
 
+// The minimal shape RowFeedbackBoxes.tsx and FeedbackExpandModal.tsx actually
+// read off an "edit" - the three feedback fields plus the composed `overall`
+// (only used for the "copy all" fallback) - rather than the full `RowEdit`
+// (which also carries `total`/`areas`, neither of which either component
+// touches). Narrowing their prop types to this shape is what lets Repo Grades
+// reuse both components directly: RepoGradeCellEdit has no `total`/`areas` at
+// all (it is not a rubric-editing surface the way GradingResults.tsx's row is),
+// but it does carry `comment`/`strengths`/`improvements`/`resubmitNotice`,
+// which is all either component needs. `RowEdit` still satisfies this type
+// structurally, so GradingResults.tsx's own call sites need no change.
+export type FeedbackBoxesEdit = Pick<RowEdit, "overall" | FeedbackField>;
+
 export interface FeedbackFieldMeta {
   /** Visible MUI TextField label, and the expand modal's <h3> heading. */
   fieldLabel: string;

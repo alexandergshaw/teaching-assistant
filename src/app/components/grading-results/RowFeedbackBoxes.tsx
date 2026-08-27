@@ -27,8 +27,8 @@ import {
   FEEDBACK_FIELDS,
   FEEDBACK_FIELD_META,
   formatFeedback,
+  type FeedbackBoxesEdit,
   type FeedbackField,
-  type RowEdit,
 } from "./gradingResultsHelpers";
 
 function CopyIcon() {
@@ -50,11 +50,25 @@ function ExpandIcon() {
 
 export interface RowFeedbackBoxesProps {
   student: string;
-  edit: RowEdit;
+  edit: FeedbackBoxesEdit;
   copiedKey: string | null;
   onCopy: (key: string, value: string) => Promise<void>;
   onChangeField: (field: FeedbackField, value: string) => void;
   onExpand: (field: FeedbackField) => void;
+  /**
+   * Prefixes every accessible name with this text ahead of the descriptor -
+   * "Copy the ${namePrefix} ${descriptor} for ${student}" instead of the
+   * default "Copy ${descriptor} for ${student}" - so a surface that shows
+   * MANY subjects at once, each split further into multiple named columns
+   * (Repo Grades: many repos, each with several assignment-folder columns),
+   * can distinguish two cells that would otherwise render an identically-
+   * worded control. Omitted (the default, `undefined`) reproduces
+   * GradingResults.tsx's original wording byte-for-byte - this prop exists so
+   * ONE component serves both surfaces rather than forking a second copy of
+   * every label (see RepoGradeCellControl.tsx's own render site for the
+   * repo-grades caller, which passes `column.folder` here).
+   */
+  namePrefix?: string;
 }
 
 /**
@@ -64,11 +78,21 @@ export interface RowFeedbackBoxesProps {
  * Every copy/expand control's accessible name carries both the box identity
  * and the student name (AC item 7): many rows, three boxes each, can be on
  * screen at once, and an ambiguous name makes the page unusable with a
- * screen reader.
+ * screen reader. `namePrefix` (see its own doc comment above) extends that
+ * same guarantee to a surface that also needs a THIRD identifying fact.
  */
-export function RowFeedbackBoxes({ student, edit, copiedKey, onCopy, onChangeField, onExpand }: RowFeedbackBoxesProps) {
+export function RowFeedbackBoxes({
+  student,
+  edit,
+  copiedKey,
+  onCopy,
+  onChangeField,
+  onExpand,
+  namePrefix,
+}: RowFeedbackBoxesProps) {
   const allKey = `${student}-all-feedback`;
   const allCopied = copiedKey === allKey;
+  const copyAllLabel = namePrefix ? `Copy all ${namePrefix} feedback for ${student}` : `Copy all feedback for ${student}`;
 
   return (
     <div>
@@ -77,7 +101,7 @@ export function RowFeedbackBoxes({ student, edit, copiedKey, onCopy, onChangeFie
           variant="text"
           size="small"
           onClick={() => onCopy(allKey, formatFeedback(edit.overall || "No feedback provided."))}
-          aria-label={allCopied ? "Copied" : `Copy all feedback for ${student}`}
+          aria-label={allCopied ? "Copied" : copyAllLabel}
           sx={{ textTransform: "none", minWidth: 0, p: "2px 6px" }}
         >
           {allCopied ? "Copied" : "Copy all feedback"}
@@ -87,22 +111,26 @@ export function RowFeedbackBoxes({ student, edit, copiedKey, onCopy, onChangeFie
         const meta = FEEDBACK_FIELD_META[field];
         const key = `${student}-${field}`;
         const copied = copiedKey === key;
+        const copyLabel = namePrefix
+          ? `Copy the ${namePrefix} ${meta.descriptorLower} for ${student}`
+          : `Copy ${meta.descriptorLower} for ${student}`;
+        const expandLabel = namePrefix
+          ? `Expand the ${namePrefix} ${meta.descriptorLower} for ${student}`
+          : `Expand ${meta.descriptorLower} for ${student}`;
+        const fieldAriaLabel = namePrefix
+          ? `${namePrefix} ${meta.descriptorLower} for ${student}`
+          : `${meta.descriptorCapitalized} for ${student}`;
         return (
           <div key={field} className={styles.overallFeedbackWrap} style={{ marginTop: 6 }}>
             <IconButton
               size="small"
               title={copied ? "Copied" : meta.copyTitle}
-              aria-label={copied ? "Copied" : `Copy ${meta.descriptorLower} for ${student}`}
+              aria-label={copied ? "Copied" : copyLabel}
               onClick={() => onCopy(key, formatFeedback(edit[field] || meta.emptyCopyFallback))}
             >
               <CopyIcon />
             </IconButton>
-            <IconButton
-              size="small"
-              title="Expand feedback"
-              aria-label={`Expand ${meta.descriptorLower} for ${student}`}
-              onClick={() => onExpand(field)}
-            >
+            <IconButton size="small" title="Expand feedback" aria-label={expandLabel} onClick={() => onExpand(field)}>
               <ExpandIcon />
             </IconButton>
             <TextField
@@ -110,7 +138,7 @@ export function RowFeedbackBoxes({ student, edit, copiedKey, onCopy, onChangeFie
               label={meta.fieldLabel}
               value={edit[field]}
               onChange={(event) => onChangeField(field, event.target.value)}
-              aria-label={`${meta.descriptorCapitalized} for ${student}`}
+              aria-label={fieldAriaLabel}
               placeholder={field === "resubmitNotice" ? "No resubmission note - full credit" : undefined}
               fullWidth
               size="small"

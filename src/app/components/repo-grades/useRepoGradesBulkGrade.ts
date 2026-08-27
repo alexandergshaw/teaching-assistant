@@ -197,7 +197,21 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         grading: false,
         gradeError: null,
         score,
+        // See useRepoGradesGradingActions.ts's handleGradeCell for why
+        // `comment` is set directly here rather than through
+        // applyRepoGradeFeedbackFieldEdit: `first.overallComment` is already
+        // that function's composition of the three fields set alongside it
+        // below, by this SAME call, so recomposing it a second time would
+        // just recompute the identical string.
         comment: first?.overallComment ?? "",
+        // docs/grading-results-feedback-boxes-acceptance-criteria.md,
+        // brought to this surface after it shipped on GradingResults.tsx
+        // first (REGRESSION entry 355) - matches index.tsx's handleGradeCell
+        // exactly, so a bulk-graded cell and a one-off-graded cell stay
+        // indistinguishable to every downstream consumer.
+        strengths: first?.strengths ?? "",
+        improvements: first?.improvements ?? "",
+        resubmitNotice: first?.resubmitNotice ?? "",
         rubricAreas: first?.rubricAreas ?? [],
         // Set at the SAME time as `score`, matching index.tsx's
         // handleGradeCell exactly - this is the field that later tells a
@@ -206,6 +220,12 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         // row must set it too or it will misreport as "edited" the
         // moment it is graded.
         generatedScore: first?.totalScore ?? null,
+        // docs/grading-results-file-viewer-acceptance-criteria.md, brought to
+        // this surface after it shipped on GradingResults.tsx first
+        // (REGRESSION entries 356/357/359) - the files THIS call actually
+        // read, matching index.tsx's handleGradeCell exactly.
+        submittedFiles: first?.submittedFiles ?? [],
+        submissionTruncated: first?.submissionTruncated ?? false,
       });
       // `detail` on success names the README path actually used (or a
       // missing-README fallback note - never silent about which repos fell

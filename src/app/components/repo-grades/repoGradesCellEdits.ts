@@ -24,16 +24,51 @@
 import type { RepoGradePostStatus } from "./repoGradesRows";
 // Type-only import (erased at build time - safe from a "use client"-adjacent
 // module the same way useRepoGradesData.ts's own header comment documents
-// for CanvasAssignmentBrief) - RubricAreaResult is the shape
-// gradeRepoAction's GradeResult.rubricAreas carries (src/lib/grade/types.ts),
-// re-exported from the src/lib/grade.ts barrel.
-import type { RubricAreaResult } from "@/lib/grade";
+// for CanvasAssignmentBrief) - RubricAreaResult/SubmittedFileInfo are the
+// shapes gradeRepoAction's GradeResult.rubricAreas/submittedFiles carry
+// (src/lib/grade/types.ts), re-exported from the src/lib/grade.ts barrel.
+import type { RubricAreaResult, SubmittedFileInfo } from "@/lib/grade";
+// docs/grading-results-feedback-boxes-acceptance-criteria.md's three-box
+// feature landed on the OTHER surface first (REGRESSION entry 355) and
+// already solved "how do three independently-copyable feedback fields
+// compose into the one field that actually posts" - FeedbackField names the
+// three fields, and composeOverallCommentLocal is the byte-identical-to-
+// composeOverallComment composer, proven so by
+// gradingResultsHelpers.test.ts's own parity test. Reused here (VALUE
+// import, not just the type) rather than re-derived a third time - this
+// module is not "use client" itself, but repoGradesCellEdits.ts's values are
+// consumed by index.tsx, a "use client" component tree, so the
+// same client-bundle-safety rule applies: gradingResultsHelpers.ts's own
+// guard test (its "client files stay client-bundle-safe" describe block)
+// already proves it carries no import reaching @/lib/grade / next/headers /
+// @/lib/supabase/server, so importing IT (never the @/lib/grade barrel
+// itself) is safe from here too.
+import { composeOverallCommentLocal, type FeedbackField } from "../grading-results/gradingResultsHelpers";
 
 export interface RepoGradeCellEdit {
   /** Raw, editable score text - typed directly, or seeded by a grading call. */
   score: string;
-  /** Raw, editable comment text - same two sources as `score`. */
+  /** The composed feedback text actually posted to Canvas
+   * (repoGradesPosting.ts reads this field, unchanged by this feature) -
+   * seeded by a grading call, or recomposed from `strengths`/`improvements`/
+   * `resubmitNotice` below by applyRepoGradeFeedbackFieldEdit below, the ONE
+   * place this field is ever written once a cell has any of the three parts.
+   * Never independently editable - there is no UI path left that sets
+   * `comment` directly, matching gradingResultsHelpers.ts's RowEdit.overall
+   * invariant on the other surface (REGRESSION entry 355). */
   comment: string;
+  /** What the repo did well - one of the three independently-copyable
+   * feedback boxes the instructor asked for (docs/grading-results-feedback-
+   * boxes-acceptance-criteria.md, brought to this surface by this feature).
+   * "" until this cell has been graded, or when a producer genuinely has
+   * nothing to say. */
+  strengths: string;
+  /** What the repo could do better. "" when a producer cannot honestly
+   * produce improvement text - never filler invented to fill the box. */
+  improvements: string;
+  /** RESUBMIT_NOTICE verbatim when points were deducted, "" at full credit -
+   * see src/lib/grade/types.ts's own doc comment on the field this mirrors. */
+  resubmitNotice: string;
   /** True only while an on-demand gradeRepoAction call for this exact cell is
    * in flight - never true on render, matching REGRESSION entries 98 and 101
    * (per-item LLM billing must be an explicit action, never a render side
@@ -66,6 +101,29 @@ export interface RepoGradeCellEdit {
    * repoGradesPosting.ts's repoGradeScoreWasEdited before trusting
    * `rubricAreas` enough to post it. */
   generatedScore: string | null;
+  /** docs/grading-results-file-viewer-acceptance-criteria.md, brought to this
+   * surface by this feature: the files gradeRepoAction's last successful
+   * grading call for this cell ACTUALLY read, with their contents - the
+   * digest that was graded, never a live GitHub fetch (showing the
+   * instructor something other than what was graded is the exact failure
+   * this feature exists to prevent). Set at the SAME time as `rubricAreas`/
+   * `generatedScore` - only by a grading call, never by hand. Held here, in
+   * this ephemeral React state, deliberately: index.tsx's own header comment
+   * on `cellEdits` already establishes that this state is NEVER persisted to
+   * localStorage (reset to EMPTY_REPO_GRADE_CELL_EDITS on every course
+   * switch), so storing full file contents here carries none of the
+   * localStorage-bloat/invalidation risk that ruled out re-persisting them
+   * elsewhere (github-grading-run-store.ts, grading-review-rows.ts).
+   * [] until this cell has been graded, or when the grading run genuinely
+   * had no files. */
+  submittedFiles: SubmittedFileInfo[];
+  /** True when the ASSEMBLED submission text was cut again, after ingestion,
+   * before the model ever saw it (GradeResult.submissionTruncated) - the
+   * SECOND, separately-named cut carried through so the browsing panel can
+   * say "the grader saw less than you are seeing" even when no individual
+   * file's own `previewTruncated` fired. false until this cell has been
+   * graded. */
+  submissionTruncated: boolean;
 }
 
 /** The state a cell that has never been touched (no grading call, no post
@@ -75,13 +133,39 @@ export function defaultRepoGradeCellEdit(): RepoGradeCellEdit {
   return {
     score: "",
     comment: "",
+    strengths: "",
+    improvements: "",
+    resubmitNotice: "",
     grading: false,
     gradeError: null,
     postStatus: "idle",
     postMessage: null,
     rubricAreas: [],
     generatedScore: null,
+    submittedFiles: [],
+    submissionTruncated: false,
   };
+}
+
+/**
+ * The ONE writer of `comment` once a cell has any of the three feedback
+ * parts (see the field's own doc comment above) - patches one field and
+ * recomputes `comment` as composeOverallCommentLocal's output in the SAME
+ * step, so a caller can never produce a RepoGradeCellEdit whose `comment`
+ * disagrees with its three parts. Mirrors gradingResultsHelpers.ts's
+ * applyFeedbackFieldEdit exactly (same composer, same "patch one field,
+ * recompute in lockstep" shape) - this is what stops Canvas
+ * (repoGradesPosting.ts reads `comment` unchanged) from ever receiving text
+ * that disagrees with what the three boxes show on screen.
+ */
+export function applyRepoGradeFeedbackFieldEdit(
+  edit: RepoGradeCellEdit,
+  field: FeedbackField,
+  value: string
+): RepoGradeCellEdit {
+  const next: RepoGradeCellEdit = { ...edit, [field]: value };
+  next.comment = composeOverallCommentLocal(next.strengths, next.improvements, next.resubmitNotice);
+  return next;
 }
 
 export type RepoGradeCellEditsByRepo = Readonly<Record<string, Readonly<Record<string, RepoGradeCellEdit>>>>;

@@ -237,6 +237,80 @@
   border-color: var(--accent);
 }
 
+/* A `.field` styled its textarea (:133, :199) and its `.textInput` (:212) but
+ * never a bare `<select>` or `<input>` placed directly inside it - so those
+ * rendered as raw browser defaults inside an app-styled wrapper, immediately
+ * beside correctly-styled textareas. A 2026-08-26 consistency audit found
+ * five such controls in the Repo Grades view alone (RepoGradesControls.tsx
+ * :329, :353, :375, :401, :460), with the same gap affecting the ppt-design
+ * and tasks views. Declaring it here rather than per-view fixes every
+ * `.field` at once and keeps ONE definition of what an app field looks like.
+ *
+ * Values mirror `.textInput` above deliberately - a select and a text input
+ * sitting in the same form must not differ in height, radius, or border.
+ *
+ * `appearance` is left alone on purpose: setting `appearance: none` would
+ * strip the native dropdown arrow and require a hand-rolled replacement,
+ * which is a behaviour change (and a mobile-rendering regression) rather
+ * than the styling fix this is.
+ *
+ * SCOPED BY TYPE, NOT BY EXCLUSION. An earlier draft of this rule used
+ * `input:not([type="file"])`, which still matched checkboxes and radios -
+ * stretching every one of them to `width: 100%` with 14px of padding. That
+ * is not hypothetical: `.field` wrappers contain checkboxes today at
+ * SessionSetupPanel.tsx:193-196 and RepoGradesControls.tsx:417-420. Listing
+ * the text-like types explicitly means a control type added later is left
+ * alone by default rather than silently reshaped, which is the safer
+ * direction for a rule this broad. `[type="file"]` is likewise absent, so
+ * `.fileField input` (:148), the dashed drop zone, keeps its own layout. */
+.field select,
+.field input[type="text"],
+.field input[type="search"],
+.field input[type="url"],
+.field input[type="email"],
+.field input[type="number"],
+.field input[type="password"],
+.field input[type="date"],
+.field input[type="datetime-local"],
+.field input[type="time"],
+.field input:not([type]) {
+  width: 100%;
+  padding: 14px 18px;
+  border: 1px solid var(--field-border);
+  border-radius: 18px;
+  background: var(--field-background);
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text-primary);
+  line-height: 1.55;
+}
+
+.field input[type="text"]::placeholder,
+.field input[type="search"]::placeholder,
+.field input[type="url"]::placeholder,
+.field input[type="email"]::placeholder,
+.field input[type="number"]::placeholder,
+.field input[type="password"]::placeholder,
+.field input:not([type])::placeholder {
+  color: var(--text-muted);
+}
+
+.field select:focus,
+.field input[type="text"]:focus,
+.field input[type="search"]:focus,
+.field input[type="url"]:focus,
+.field input[type="email"]:focus,
+.field input[type="number"]:focus,
+.field input[type="password"]:focus,
+.field input[type="date"]:focus,
+.field input[type="datetime-local"]:focus,
+.field input[type="time"]:focus,
+.field input:not([type]):focus {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
 .syllabusSectionCard {
   display: flex;
   flex-direction: column;

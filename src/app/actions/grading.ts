@@ -644,13 +644,35 @@ async function gradeZipViaEngine(
   return { run: gradingApiToRun(resp, pointsPossible), error: null, warnings };
 }
 
-/** Run every entry's code in the sandbox (sequential, to respect Piston rate
- *  limits) and stash the result on the entry so the embedded engine can score it
- *  without doing any network itself. Entries with no runnable code get null. */
+// Bounded so a large zip/Canvas batch cannot open dozens of simultaneous
+// sandbox requests (Piston/Wandbox rate limits), while still finishing well
+// inside Vercel Hobby's 60s ceiling for this single server-action call - a
+// fully sequential loop over N entries, each already carrying its own
+// internal CODE_RUN_TIMEOUT_MS budget (code-run-selection.ts), could take
+// N times that budget in the worst case, which stops fitting the ceiling
+// past a small handful of entries. A small worker pool (same shape as
+// useRepoGradesBulkGrade.ts's BULK_GRADE_CONCURRENCY) keeps several runs in
+// flight at once without removing rate-limit consideration entirely.
+const CODE_RUN_CONCURRENCY = 4;
+
+/** Run every entry's code in the sandbox (bounded concurrency - see
+ *  CODE_RUN_CONCURRENCY above) and stash the result on the entry so the
+ *  embedded engine can score it without doing any network itself. Entries
+ *  with no runnable code get null. One entry's failure never blocks another -
+ *  runSubmittedCode never throws (it returns a `{ error }`-carrying result,
+ *  including on a timeout), so there is nothing here to catch. */
 async function attachCodeRuns(entries: StudentSubmissionEntry[]): Promise<void> {
-  for (const entry of entries) {
-    entry.codeRun = await runSubmittedCode(entry.submittedFiles);
-  }
+  let cursor = 0;
+  const runWorker = async (): Promise<void> => {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= entries.length) return;
+      entries[index].codeRun = await runSubmittedCode(entries[index].submittedFiles);
+    }
+  };
+  const workerCount = Math.min(CODE_RUN_CONCURRENCY, entries.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 }
 
 export async function gradeAction(

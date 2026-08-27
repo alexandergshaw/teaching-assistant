@@ -33,7 +33,8 @@
 // exercised by any test, which is exactly why it must contain no logic worth
 // testing.
 import type { Course } from "@/lib/supabase/courses";
-import type { RepoGradeSortField, RepoGradeSortState, SortDirection } from "./repoGradesRows";
+import type { RepoGradeSortState } from "./repoGradesRows";
+import { parseRepoGradeSortSelectValue, repoGradeSortSelectValue } from "./repoGradesRows";
 import { ALL_FOLDERS, describeFolderOption, type FolderOption } from "./repoGradesFolderSelection";
 import {
   parseRepoGradeRubricValue,
@@ -42,17 +43,6 @@ import {
 } from "./repoGradesRubricSource";
 import type { RepoGradeRubricListHint } from "./useRepoGradesRubricSource";
 import styles from "../../page.module.css";
-
-/** Moved verbatim from index.tsx, unchanged - parses the sort `<select>`'s
- * combined "field:direction" option value back into a RepoGradeSortState.
- * Lives here now because this is the only control that calls it. */
-export function parseSortValue(value: string): { field: RepoGradeSortField; direction: SortDirection } {
-  const [field, direction] = value.split(":");
-  return {
-    field: field === "binding" ? "binding" : "repo",
-    direction: direction === "desc" ? "desc" : "asc",
-  };
-}
 
 /** One contiguous run of `RepoGradeRubricOption`s sharing the same
  * `<optgroup>` label (or `null` for a top-level option), in the order
@@ -395,18 +385,46 @@ export default function RepoGradesControls({
         </div>
       )}
 
+      {/* N4/N5 (docs/repo-grades-name-columns-and-sorting-acceptance-
+          criteria.md) - every column is ALSO sortable via its own header
+          button now (RepoGradesGrid.tsx), including the per-folder score
+          columns this select cannot reasonably list. This control still
+          covers the four fields it always has, but its value and parsing now
+          both go through repoGradesRows.ts's repoGradeSortSelectValue/
+          parseRepoGradeSortSelectValue - N5 item 15: the OLD local
+          parseSortValue coerced any unrecognised field (e.g. a header-set
+          "firstName" or "folder" sort) to "repo", so simply rendering this
+          select with a mismatched value and then having the instructor
+          interact with it at all could silently snap the sort back to "repo".
+          repoGradeSortSelectValue instead resolves to the disabled "custom"
+          option below whenever the active sort is not one of these four, so
+          the select never shows (or can fire onChange from) a value that
+          does not match one of its own real options. */}
       {showRowDependentFields && (
         <div className={styles.field}>
           <label htmlFor="repo-grades-sort">Sort</label>
           <select
             id="repo-grades-sort"
-            value={`${sort.field}:${sort.direction}`}
-            onChange={(e) => onSortChange(parseSortValue(e.target.value))}
+            value={repoGradeSortSelectValue(sort)}
+            onChange={(e) => onSortChange(parseRepoGradeSortSelectValue(e.target.value))}
           >
             <option value="repo:asc">Repo name (A to Z)</option>
             <option value="repo:desc">Repo name (Z to A)</option>
             <option value="binding:asc">Needs attention first</option>
             <option value="binding:desc">Confirmed first</option>
+            <option value="firstName:asc">First name (A to Z)</option>
+            <option value="firstName:desc">First name (Z to A)</option>
+            <option value="lastName:asc">Last name (A to Z)</option>
+            <option value="lastName:desc">Last name (Z to A)</option>
+            {/* Rendered only while it is the active value (repoGradeSortSelectValue
+                only ever returns "custom" for a folder-column sort) - disabled
+                so it can never itself be chosen, matching this file's own
+                header comment above. */}
+            {repoGradeSortSelectValue(sort) === "custom" && (
+              <option value="custom" disabled>
+                Sorted by a folder column (see the table header)
+              </option>
+            )}
           </select>
         </div>
       )}

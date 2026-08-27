@@ -14,7 +14,7 @@
 // to import from server-rendered code paths, matching every other UI-state
 // module in this codebase (tasksUiState.ts, useRepoSelection.ts).
 
-import { DEFAULT_REPO_GRADE_SORT, type RepoGradeSortField, type RepoGradeSortState, type SortDirection } from "./repoGradesRows";
+import { DEFAULT_REPO_GRADE_SORT, parseRepoGradeSortState, type RepoGradeSortState } from "./repoGradesRows";
 import type { RepoGradeAssignmentMap } from "./repoGradesAssignmentMapping";
 import { parseRepoGradeLogEntries, type RepoGradeLogEntry } from "./repoGradesLog";
 
@@ -129,21 +129,14 @@ function defaultUiState(): RepoGradesUiState {
   };
 }
 
-function isSortField(value: unknown): value is RepoGradeSortField {
-  return value === "repo" || value === "binding";
-}
-
-function isSortDirection(value: unknown): value is SortDirection {
-  return value === "asc" || value === "desc";
-}
-
 function isLinkSource(value: unknown): value is "roster" | "live" {
   return value === "roster" || value === "live";
 }
 
 /** Parses a persisted link-source value, falling back to the default
  * ("roster") for anything missing or naming a source that no longer exists -
- * the same "never trust stored data" posture parseSort takes above. */
+ * the same "never trust stored data" posture parseRepoGradeSortState
+ * (repoGradesRows.ts) takes for the sort value below. */
 function parseLinkSource(raw: string | null): "roster" | "live" {
   return isLinkSource(raw) ? raw : "roster";
 }
@@ -167,35 +160,12 @@ function parseBulkSelectionOnly(raw: string | null): boolean {
   return raw === "1";
 }
 
-/** Parses a persisted sort value, falling back to DEFAULT_REPO_GRADE_SORT for
- * anything missing, malformed JSON, or naming a field/direction that no
- * longer exists - the same "never trust stored data" posture
- * parseTaskSortState (course-tasks-view.ts) takes for the Tasks grid's own
- * persisted sort. */
-function parseSort(raw: string | null): RepoGradeSortState {
-  if (!raw) return DEFAULT_REPO_GRADE_SORT;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      isSortField((parsed as { field?: unknown }).field) &&
-      isSortDirection((parsed as { direction?: unknown }).direction)
-    ) {
-      return { field: (parsed as { field: RepoGradeSortField }).field, direction: (parsed as { direction: SortDirection }).direction };
-    }
-  } catch {
-    // fall through to the default below
-  }
-  return DEFAULT_REPO_GRADE_SORT;
-}
-
 export function loadRepoGradesUiState(): RepoGradesUiState {
   if (typeof window === "undefined") return defaultUiState();
   return {
     courseId: localStorage.getItem(COURSE_KEY) ?? "",
     orgPrefix: localStorage.getItem(ORG_PREFIX_KEY) ?? "",
-    sort: parseSort(localStorage.getItem(SORT_KEY)),
+    sort: parseRepoGradeSortState(localStorage.getItem(SORT_KEY)),
     instructions: localStorage.getItem(INSTRUCTIONS_KEY) ?? "",
     rubric: localStorage.getItem(RUBRIC_KEY) ?? "",
     linkAssignmentId: localStorage.getItem(LINK_ASSIGNMENT_KEY) ?? "",

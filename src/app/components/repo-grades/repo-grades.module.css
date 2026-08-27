@@ -216,6 +216,39 @@
   font-size: 0.95rem;
 }
 
+/* N4 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md) -
+   every sortable column header's clickable control: a plain reset button so
+   it reads as part of the header text, not as a separate form control, with
+   `.grid button:focus-visible` (below) already giving it a visible focus
+   ring like every other button in this table. */
+.sortHeaderButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sortHeaderButton:hover {
+  text-decoration: underline;
+}
+
+/* N2 item 4 - the visible marker on a GUESSED first/last split. Muted and
+   italic, matching this file's own .cellMissing precedent for "true but not
+   the main point" text. */
+.nameDerivedMark {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.8em;
+}
+
 .columnHeader select {
   padding: 4px 6px;
   border: 1px solid var(--field-border);
@@ -337,6 +370,29 @@
 .rubricBreakdownScore {
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+/* Item 3 (docs for this feature): an execution-influenced grade must be
+   explainable - this is where the instructor sees what code was run, the
+   entry point that was chosen, whether it ran cleanly, and its output.
+   `.codeRunSummary` is the always-visible one-line status (never behind a
+   click - "what happened" should not cost an interaction); the full
+   stdout/stderr/compileOutput block toggles via the existing `.postReason`-
+   style link button and reuses page.module.css's previewMeta/previewNotice/
+   previewContent classes, the SAME ones GradingResults.tsx's code-output
+   modal already uses for this exact data shape (CodeRunResult) - no new
+   visual language invented for the same kind of content. */
+.codeRunSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.codeRunOutput {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--field-border);
 }
 
 /* B3 (docs/repo-grades-posting-and-reflow-acceptance-criteria.md) - a purely

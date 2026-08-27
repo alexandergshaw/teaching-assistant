@@ -8,10 +8,12 @@ import {
   applyRepoGradeFeedbackFieldEdit,
   defaultRepoGradeCellEdit,
   getRepoGradeCellEdit,
+  mergeRepoGradeLiveScores,
   setRepoGradeCellEdit,
   EMPTY_REPO_GRADE_CELL_EDITS,
 } from "./repoGradesCellEdits";
 import { composeOverallCommentLocal } from "../grading-results/gradingResultsHelpers";
+import type { RepoGradeRow } from "./repoGradesRows";
 
 describe("getRepoGradeCellEdit", () => {
   it("returns the default state for a cell that has never been written", () => {
@@ -130,6 +132,70 @@ describe("defaultRepoGradeCellEdit degrades the new feedback/file fields to safe
     expect(edit.resubmitNotice).toBe("");
     expect(edit.submittedFiles).toEqual([]);
     expect(edit.submissionTruncated).toBe(false);
+  });
+
+  // Live-defect fix: repo grading has been executing student code since
+  // fa057050 (see this field's own doc comment on RepoGradeCellEdit), but
+  // neither grading path copied the result onto the cell - `codeExecution`
+  // is the fix. Defaults to null (never undefined), same "safe, non-crashing
+  // default for any caller that has not been taught about a new field"
+  // guarantee the rest of this describe block already pins.
+  it("seeds codeExecution to null until a grading call sets it", () => {
+    expect(defaultRepoGradeCellEdit().codeExecution).toBeNull();
+    const edits = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, "org/a", "week-1", { score: "90" });
+    expect(getRepoGradeCellEdit(edits, "org/a", "week-1").codeExecution).toBeNull();
+  });
+});
+
+// docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md N4 item
+// 13: the ONE consolidated copy of the "merge cellEdits scores onto rows"
+// helper - RepoGradesGrid.tsx and useRepoGradesGradingActions.ts both used to
+// hand-roll this same loop; both now call this function instead.
+describe("mergeRepoGradeLiveScores", () => {
+  function row(repo: string, cells: Record<string, { status: "ungraded"; score: string }>): RepoGradeRow {
+    return {
+      repo,
+      htmlUrl: `https://github.com/${repo}`,
+      binding: { repo, state: "unbound", canvasUserId: null, student: null, candidates: [], derivedHandle: null },
+      folders: Object.keys(cells),
+      folderError: null,
+      cells: Object.fromEntries(
+        Object.entries(cells).map(([folder, cell]) => [folder, { ...cell, comment: "", postStatus: "idle" as const }])
+      ),
+    };
+  }
+
+  it("overlays each cell's edited score onto the matching (repo, folder) cell, leaving the raw row's own score untouched as input", () => {
+    const rows = [row("org/a", { "week-1": { status: "ungraded", score: "" } })];
+    const edits = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, "org/a", "week-1", { score: "18/20" });
+    const merged = mergeRepoGradeLiveScores(rows, edits);
+    expect(merged[0].cells["week-1"].score).toBe("18/20");
+    // The input rows array is not mutated.
+    expect(rows[0].cells["week-1"].score).toBe("");
+  });
+
+  it("a cell with no edit yet reads back its untouched \"\" score", () => {
+    const rows = [row("org/a", { "week-1": { status: "ungraded", score: "" } })];
+    const merged = mergeRepoGradeLiveScores(rows, EMPTY_REPO_GRADE_CELL_EDITS);
+    expect(merged[0].cells["week-1"].score).toBe("");
+  });
+
+  it("merges every folder under a repo independently - editing one never bleeds into a sibling folder", () => {
+    const rows = [
+      row("org/a", { "week-1": { status: "ungraded", score: "" }, "week-2": { status: "ungraded", score: "" } }),
+    ];
+    const edits = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, "org/a", "week-1", { score: "90" });
+    const merged = mergeRepoGradeLiveScores(rows, edits);
+    expect(merged[0].cells["week-1"].score).toBe("90");
+    expect(merged[0].cells["week-2"].score).toBe("");
+  });
+
+  it("merges every row independently - editing one repo never bleeds into another repo's same-named folder", () => {
+    const rows = [row("org/a", { "week-1": { status: "ungraded", score: "" } }), row("org/b", { "week-1": { status: "ungraded", score: "" } })];
+    const edits = setRepoGradeCellEdit(EMPTY_REPO_GRADE_CELL_EDITS, "org/a", "week-1", { score: "90" });
+    const merged = mergeRepoGradeLiveScores(rows, edits);
+    expect(merged[0].cells["week-1"].score).toBe("90");
+    expect(merged[1].cells["week-1"].score).toBe("");
   });
 });
 

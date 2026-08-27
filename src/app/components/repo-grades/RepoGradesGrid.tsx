@@ -40,8 +40,10 @@
 import RepoBindingControl from "./RepoBindingControl";
 import RepoGradeCellControl from "./RepoGradeCellControl";
 import type { RepoBindingRosterEntry } from "@/lib/repo-student-bindings";
-import type { RepoGradeCell, RepoGradeCellStatus, RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
-import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
+import type { RepoGradeCellStatus, RepoGradeColumn, RepoGradeRow, RepoGradeSortField, RepoGradeSortState, SortDirection } from "./repoGradesRows";
+import { toggleRepoGradeSort } from "./repoGradesRows";
+import { getRepoGradeCellEdit, mergeRepoGradeLiveScores, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
+import { deriveRepoGradeStudentName, repoGradeLastNameCellText } from "./repoGradeStudentName";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
 import { buildBulkGradePlan } from "./repoGradesBulkGrade";
 import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
@@ -71,10 +73,83 @@ function pointsPossibleForColumn(column: RepoGradeColumn, assignments: CanvasAss
   return assignment ? assignment.pointsPossible : null;
 }
 
+// ---------------------------------------------------------------------------
+// N4 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md):
+// every column gets a header control, not just the two `<select>` fields the
+// controls panel offered before. Follows TasksGrid.tsx's own precedent
+// (aria-sort on the header cell, a button that toggles the sort, a shape-only
+// direction glyph) rather than reinventing the pattern - but the glyph itself
+// is redrawn LOCALLY, not imported from TaskCell.tsx: that file also imports
+// several @mui/material modules for its own popover editor, and this is the
+// app's only wholly non-MUI feature folder (this file's own module import
+// list has never carried an @mui import and must not gain one via a
+// cross-folder reuse of an otherwise-unrelated export). Same triangle shape,
+// same "no colour, shape only" rule TaskCell.tsx's own comment states.
+
+/** Ascending/descending triangle, matching TaskCell.tsx's SortDirectionGlyph
+ * exactly (same points, same viewBox) - redrawn here rather than imported,
+ * per this file's header comment above. */
+function SortDirectionGlyph({ direction }: { direction: SortDirection }) {
+  const points = direction === "asc" ? "10,4 16,15 4,15" : "10,16 16,5 4,5";
+  return (
+    <svg width={10} height={10} viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <polygon points={points} fill="currentColor" />
+    </svg>
+  );
+}
+
+/** `aria-sort`'s value for one header cell - "ascending"/"descending" only
+ * while THIS field (and, for a folder column, this exact folder) is the
+ * active sort; `undefined` (never "none") otherwise, so the attribute is
+ * simply absent on every other header - matching TasksGrid.tsx's own AC-D
+ * item 221 precedent. */
+function sortAriaValue(active: boolean, direction: SortDirection): "ascending" | "descending" | undefined {
+  if (!active) return undefined;
+  return direction === "asc" ? "ascending" : "descending";
+}
+
+/** One plain (non-folder) column's clickable header: a button that toggles
+ * the sort via toggleRepoGradeSort (repoGradesRows.ts - the ONE place that
+ * decision is made, so this component stays a plain forward of it), showing
+ * the direction glyph only while this field is the active sort. */
+function SortableColumnHeader({
+  field,
+  label,
+  sort,
+  onSortChange,
+}: {
+  field: Exclude<RepoGradeSortField, "folder">;
+  label: string;
+  sort: RepoGradeSortState;
+  onSortChange: (next: RepoGradeSortState) => void;
+}) {
+  const active = sort.field === field;
+  return (
+    <th scope="col" role="columnheader" aria-sort={sortAriaValue(active, sort.direction)}>
+      <button
+        type="button"
+        className={styles.sortHeaderButton}
+        onClick={() => onSortChange(toggleRepoGradeSort(sort, field))}
+      >
+        <span>{label}</span>
+        {active && <SortDirectionGlyph direction={sort.direction} />}
+      </button>
+    </th>
+  );
+}
+
 export interface RepoGradesGridProps {
   columns: RepoGradeColumn[];
   rows: RepoGradeRow[];
   roster: RepoBindingRosterEntry[];
+  /** N4 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md) -
+   * the sort every header button below reflects and toggles. index.tsx owns
+   * the state (uiState.sort) and already resolves a stale folder sort before
+   * handing rows to this component; this file never resolves it a second
+   * time, it only reads `sort.field`/`sort.folder` to decide which header
+   * carries `aria-sort` right now. */
+  sort: RepoGradeSortState;
+  onSortChange: (next: RepoGradeSortState) => void;
   selected: ReadonlySet<string>;
   onToggleSelected: (repo: string) => void;
   onAcceptBinding: (
@@ -180,6 +255,8 @@ function ColumnHeaderControls({
   bulkSelectionOnly,
   scanTruncated,
   rubricDescription,
+  sort,
+  onSortChange,
 }: {
   column: RepoGradeColumn;
   rows: RepoGradeRow[];
@@ -200,6 +277,11 @@ function ColumnHeaderControls({
    * renders it - see this file's `RepoGradesGridProps.describeColumnRubric`
    * doc comment for why the call happens one level up. */
   rubricDescription: string;
+  /** N4 items 11-13 - this column's own sort toggle (by its cellEdits score,
+   * via toggleRepoGradeSort's "folder" branch). The enclosing `<th>` (in the
+   * main render below, not here) carries `aria-sort` for this exact folder. */
+  sort: RepoGradeSortState;
+  onSortChange: (next: RepoGradeSortState) => void;
 }) {
   // Scoped exactly as index.tsx's post handler scopes it - see this file's
   // header comment on AC5 item 28. Counting every row while a selection
@@ -227,20 +309,15 @@ function ColumnHeaderControls({
   // click) - the resting label must name the folder and a count derived from
   // the ACTUAL plan a click would run, never a bare "all" that quietly lies
   // when scanTruncated is set or bulkSelectionOnly scopes the run to the
-  // checked rows (repoGradesBulkGrade.ts:80). `withLiveScores`'s merge is
-  // duplicated here (it is a private helper inside
-  // useRepoGradesGradingActions.ts, which this component does not import,
-  // matching this file's own layering - see the AC5 item 27 header comment
-  // on why gradeRepoAction/postCanvasGradesAction never appear in this file)
-  // so this LABEL agrees with what handleGradeColumn's own plan will cover,
-  // without this file ever calling the dangerous action itself.
-  const liveRows: RepoGradeRow[] = rows.map((row) => {
-    const cells: Record<string, RepoGradeCell> = {};
-    for (const [folder, cell] of Object.entries(row.cells)) {
-      cells[folder] = { ...cell, score: getRepoGradeCellEdit(cellEdits, row.repo, folder).score };
-    }
-    return { ...row, cells };
-  });
+  // checked rows (repoGradesBulkGrade.ts:80). mergeRepoGradeLiveScores
+  // (repoGradesCellEdits.ts) is the ONE shared copy of this merge - docs/
+  // repo-grades-name-columns-and-sorting-acceptance-criteria.md N4 item 13
+  // found it already duplicated here (a private copy also lived in
+  // useRepoGradesGradingActions.ts, named withLiveScores) and required
+  // consolidating rather than adding a THIRD copy for sorting - so this LABEL
+  // agrees with what handleGradeColumn's own plan will cover, without this
+  // file ever calling the dangerous action itself.
+  const liveRows: RepoGradeRow[] = mergeRepoGradeLiveScores(rows, cellEdits);
   const gradePlan = buildBulkGradePlan({ rows: liveRows, folder: column.folder, selected, selectionOnly: bulkSelectionOnly });
   const gradeTargetCount = gradePlan.targets.length;
   const scopedToSelection = bulkSelectionOnly && selected.size > 0;
@@ -251,9 +328,22 @@ function ColumnHeaderControls({
   const gradeAllLabel =
     gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}...` : restingGradeLabel;
 
+  // N4 items 11/13: this column's own sort - a click toggles ascending/
+  // descending on THIS folder's score via toggleRepoGradeSort's "folder"
+  // branch, never a decision made here.
+  const folderSortActive = sort.field === "folder" && sort.folder === column.folder;
+
   return (
     <div className={styles.columnHeader}>
-      <span className={styles.columnHeaderFolder}>{column.folder}</span>
+      <button
+        type="button"
+        className={styles.sortHeaderButton}
+        onClick={() => onSortChange(toggleRepoGradeSort(sort, "folder", column.folder))}
+        aria-label={`Sort by ${column.folder} score`}
+      >
+        <span className={styles.columnHeaderFolder}>{column.folder}</span>
+        {folderSortActive && <SortDirectionGlyph direction={sort.direction} />}
+      </button>
       <select
         aria-label={`Canvas assignment for the ${column.folder} column`}
         value={column.assignmentId ?? ""}
@@ -304,6 +394,8 @@ export default function RepoGradesGrid({
   columns,
   rows,
   roster,
+  sort,
+  onSortChange,
   selected,
   onToggleSelected,
   onAcceptBinding,
@@ -348,87 +440,125 @@ export default function RepoGradesGrid({
             <th scope="col" role="columnheader" className={styles.selectHeader}>
               <span className={pageStyles.fieldHint}>Select</span>
             </th>
-            <th scope="col" role="columnheader">
-              Repo
-            </th>
-            <th scope="col" role="columnheader">
-              Binding
-            </th>
-            {columns.map((column) => (
-              <th scope="col" role="columnheader" key={column.folder}>
-                <ColumnHeaderControls
-                  column={column}
-                  rows={rows}
-                  selected={selected}
-                  assignments={assignments}
-                  cellEdits={cellEdits}
-                  columnPosting={columnPosting}
-                  onAssignmentChange={onAssignmentChange}
-                  onPostColumn={onPostColumn}
-                  onGradeColumn={onGradeColumn}
-                  bulkRunningFolder={bulkRunningFolder}
-                  bulkProgress={bulkProgress}
-                  bulkSelectionOnly={bulkSelectionOnly}
-                  scanTruncated={scanTruncated}
-                  rubricDescription={describeColumnRubric(column.assignmentId)}
-                />
-              </th>
-            ))}
+            <SortableColumnHeader field="repo" label="Repo" sort={sort} onSortChange={onSortChange} />
+            {/* N2/N3 - derived from `row.binding.student` alone (repoGradeStudentName.ts),
+                never a second roster lookup, so these two columns can never
+                disagree with the Binding cell rendered beside them. */}
+            <SortableColumnHeader field="firstName" label="First name" sort={sort} onSortChange={onSortChange} />
+            <SortableColumnHeader field="lastName" label="Last name" sort={sort} onSortChange={onSortChange} />
+            <SortableColumnHeader field="binding" label="Binding" sort={sort} onSortChange={onSortChange} />
+            {columns.map((column) => {
+              const folderSortActive = sort.field === "folder" && sort.folder === column.folder;
+              return (
+                <th
+                  scope="col"
+                  role="columnheader"
+                  key={column.folder}
+                  aria-sort={sortAriaValue(folderSortActive, sort.direction)}
+                >
+                  <ColumnHeaderControls
+                    column={column}
+                    rows={rows}
+                    selected={selected}
+                    assignments={assignments}
+                    cellEdits={cellEdits}
+                    columnPosting={columnPosting}
+                    onAssignmentChange={onAssignmentChange}
+                    onPostColumn={onPostColumn}
+                    onGradeColumn={onGradeColumn}
+                    bulkRunningFolder={bulkRunningFolder}
+                    bulkProgress={bulkProgress}
+                    bulkSelectionOnly={bulkSelectionOnly}
+                    scanTruncated={scanTruncated}
+                    rubricDescription={describeColumnRubric(column.assignmentId)}
+                    sort={sort}
+                    onSortChange={onSortChange}
+                  />
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody role="rowgroup">
-          {rows.map((row) => (
-            <tr role="row" key={row.repo}>
-              <td role="cell">
-                <input
-                  type="checkbox"
-                  aria-label={`Select ${row.repo}`}
-                  checked={selected.has(row.repo)}
-                  onChange={() => onToggleSelected(row.repo)}
-                />
-              </td>
-              <td role="cell">
-                <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer" className={styles.repoLink}>
-                  {row.repo}
-                </a>
-                {row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}
-              </td>
-              <td role="cell">
-                <RepoBindingControl row={row} roster={roster} onAcceptBinding={onAcceptBinding} />
-              </td>
-              {columns.map((column) => {
-                const cell = row.cells[column.folder];
-                // U12.52: the SAME pointsPossible ColumnHeaderControls above
-                // computes for this column's Post button - both read
-                // pointsPossibleForColumn over this component's own
-                // `assignments` prop, so a cell's displayed "what will post"
-                // text and its own Post/Re-post click can never disagree with
-                // the column header's count.
-                const pointsPossible = pointsPossibleForColumn(column, assignments);
-                return (
-                  <td role="cell" key={column.folder}>
-                    <span className={styles.cellColumnLabel} aria-hidden="true">
-                      {column.folder}
+          {rows.map((row) => {
+            // N2/N3 - the ONE derivation, read from `row.binding.student`/
+            // `row.binding.studentSortable` alone (repoGradeStudentName.ts),
+            // computed once per row and used by BOTH name cells below. The
+            // sort key (repoGradesRows.ts's sortFieldValue) calls the exact
+            // same function over the exact same two fields - never a second,
+            // independently-derived value - so the table can never sort by
+            // something other than what these two cells display (N5 item 16;
+            // repoGradesSliceB.guards.test.ts pins this with a canary).
+            const nameParts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);
+            return (
+              <tr role="row" key={row.repo}>
+                <td role="cell">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${row.repo}`}
+                    checked={selected.has(row.repo)}
+                    onChange={() => onToggleSelected(row.repo)}
+                  />
+                </td>
+                <td role="cell">
+                  <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer" className={styles.repoLink}>
+                    {row.repo}
+                  </a>
+                  {row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}
+                </td>
+                <td role="cell">{nameParts.firstName}</td>
+                <td role="cell">
+                  {repoGradeLastNameCellText(nameParts)}
+                  {/* N2 item 4 - a visible marker for a GUESSED split, with
+                      the correction instruction in a `title` tooltip rather
+                      than permanently expanding every row - "explicit"
+                      (comma), "canvas" (Canvas's own split) and "single"
+                      (last name honestly unknown) are never marked, only
+                      "derived" is. */}
+                  {nameParts.source === "derived" && (
+                    <span className={styles.nameDerivedMark} title={nameParts.correctionHint ?? undefined}>
+                      {" "}
+                      (derived)
                     </span>
-                    {cell.status === "ungraded" ? (
-                      <RepoGradeCellControl
-                        row={row}
-                        column={column}
-                        edit={getRepoGradeCellEdit(cellEdits, row.repo, column.folder)}
-                        pointsPossible={pointsPossible}
-                        onScoreChange={(score) => onScoreChange(row.repo, column.folder, score)}
-                        onFeedbackFieldChange={(field, value) => onFeedbackFieldChange(row.repo, column.folder, field, value)}
-                        onGrade={() => onGradeCell(row, column)}
-                        onPostOne={() => onPostOneCell(row, column, pointsPossible)}
-                      />
-                    ) : (
-                      <CellStatus status={cell.status} />
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
+                  )}
+                </td>
+                <td role="cell">
+                  <RepoBindingControl row={row} roster={roster} onAcceptBinding={onAcceptBinding} />
+                </td>
+                {columns.map((column) => {
+                  const cell = row.cells[column.folder];
+                  // U12.52: the SAME pointsPossible ColumnHeaderControls above
+                  // computes for this column's Post button - both read
+                  // pointsPossibleForColumn over this component's own
+                  // `assignments` prop, so a cell's displayed "what will post"
+                  // text and its own Post/Re-post click can never disagree with
+                  // the column header's count.
+                  const pointsPossible = pointsPossibleForColumn(column, assignments);
+                  return (
+                    <td role="cell" key={column.folder}>
+                      <span className={styles.cellColumnLabel} aria-hidden="true">
+                        {column.folder}
+                      </span>
+                      {cell.status === "ungraded" ? (
+                        <RepoGradeCellControl
+                          row={row}
+                          column={column}
+                          edit={getRepoGradeCellEdit(cellEdits, row.repo, column.folder)}
+                          pointsPossible={pointsPossible}
+                          onScoreChange={(score) => onScoreChange(row.repo, column.folder, score)}
+                          onFeedbackFieldChange={(field, value) => onFeedbackFieldChange(row.repo, column.folder, field, value)}
+                          onGrade={() => onGradeCell(row, column)}
+                          onPostOne={() => onPostOneCell(row, column, pointsPossible)}
+                        />
+                      ) : (
+                        <CellStatus status={cell.status} />
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

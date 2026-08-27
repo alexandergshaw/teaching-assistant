@@ -209,6 +209,15 @@ export function buildCodeExecutionNote(codeRun: CodeRunResult): string {
   if (codeRun.stderr && codeRun.stderr.trim()) {
     lines.push(`- Errors (stderr):\n${cap(codeRun.stderr)}`);
   }
-  lines.push("Factor this execution result into your assessment where the rubric concerns whether the code works. Do not mention that the code was run automatically.");
+  // An execution-influenced grade must be explainable to the student it
+  // affects - the previous wording here ("Do not mention that the code was
+  // run automatically") made that impossible by construction: a student
+  // whose score moved because of a sandbox failure had no way to learn that
+  // from the feedback. The model is now told it MAY say so, not required to
+  // - most runs are unremarkable and do not need a note - but a run that
+  // failed, or that changed the assessment, should be named as a reason.
+  lines.push(
+    "Factor this execution result into your assessment where the rubric concerns whether the code works. You may mention in your feedback that the code was run automatically - including a failure to run - when that is part of why the score is what it is; the student should be able to tell why, not be left guessing."
+  );
   return lines.join("\n");
 }

@@ -146,6 +146,11 @@ export default function RepoGradeCellControl({
   // ONLY edit.submittedFiles (what THIS grading call actually read), never a
   // live GitHub fetch, so there is nothing to load on open.
   const [filesOpen, setFilesOpen] = useState(false);
+  // Item 3 (docs for this feature): whether this cell's code-run output
+  // (stdout/stderr/compileOutput) is expanded. The one-line summary below is
+  // always visible - only the full output is behind this toggle, mirroring
+  // "Browse files" above (a click for detail, never for the headline fact).
+  const [codeRunOpen, setCodeRunOpen] = useState(false);
   // docs/grading-results-feedback-boxes-acceptance-criteria.md: the
   // RowFeedbackBoxes/FeedbackExpandModal copy state and expand-modal state
   // this cell owns, mirroring GithubGradingPanel.tsx's own copiedKey/onCopy
@@ -294,6 +299,61 @@ export default function RepoGradeCellControl({
               ? "This breakdown will be included when this grade posts to Canvas."
               : "This breakdown is shown for reference only - it does not post to Canvas."}
           </span>
+        </div>
+      )}
+      {/* Item 3 (docs for this feature): gradeRepoAction's LLM branch has been
+          running this repo's code in the sandbox and feeding the result into
+          the grading prompt since commit fa057050 - this is the ONE place an
+          instructor can see that happened and why it may have moved the
+          score. The one-line summary is always visible; full stdout/stderr/
+          compileOutput sit behind "Show output", matching "Browse files"
+          above. Reuses page.module.css's previewMeta/previewNotice/
+          previewContent classes - the SAME ones GradingResults.tsx's own
+          code-output modal already uses for a CodeRunResult, so this is not
+          a second visual language for the same kind of data. */}
+      {edit.codeExecution && (
+        <div className={styles.codeRunSummary}>
+          <span className={styles.postReason}>
+            {edit.codeExecution.error
+              ? edit.codeExecution.timedOut
+                ? "Code run: timed out before the sandbox reported back - not factored into this grade."
+                : `Code run: could not execute - ${edit.codeExecution.error}`
+              : `Code run: ${edit.codeExecution.entryPoint ?? "the submission"} ${
+                  edit.codeExecution.ran ? "ran cleanly" : "did not run cleanly"
+                }`}
+          </span>
+          {!edit.codeExecution.error && (
+            <button type="button" className={pageStyles.linkButton} onClick={() => setCodeRunOpen((v) => !v)}>
+              {codeRunOpen ? "Hide output" : "Show output"}
+            </button>
+          )}
+          {codeRunOpen && !edit.codeExecution.error && (
+            <div className={styles.codeRunOutput}>
+              <p className={pageStyles.previewMeta}>Ran without errors: {edit.codeExecution.ran ? "yes" : "no"}</p>
+              {edit.codeExecution.compileOutput && edit.codeExecution.compileOutput.trim() && (
+                <>
+                  <p className={pageStyles.previewMeta}>Compiler output</p>
+                  <pre className={pageStyles.previewContent}>{edit.codeExecution.compileOutput}</pre>
+                </>
+              )}
+              <p className={pageStyles.previewMeta}>Output (stdout)</p>
+              <pre className={pageStyles.previewContent}>{edit.codeExecution.stdout || "(none)"}</pre>
+              {edit.codeExecution.stderr && edit.codeExecution.stderr.trim() && (
+                <>
+                  <p className={pageStyles.previewMeta}>Errors (stderr)</p>
+                  <pre className={pageStyles.previewContent}>{edit.codeExecution.stderr}</pre>
+                </>
+              )}
+              {edit.codeExecution.filesExcluded && edit.codeExecution.filesExcluded.length > 0 && (
+                <>
+                  <p className={pageStyles.previewMeta}>Not run</p>
+                  <p className={pageStyles.previewNotice}>
+                    {edit.codeExecution.filesExcluded.map((f) => f.reason).join(" ")}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
       <div className={styles.cellActions}>

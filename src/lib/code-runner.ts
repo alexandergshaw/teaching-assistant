@@ -5,19 +5,31 @@
 // (https://wandbox.org/api). Execution is always external—never in-process—and
 // is network-dependent, so this module is not part of the deterministic
 // grading engine.
+//
+// The decision logic (which files get sent, under what names, which one is
+// the entry point, and what the overall time/output budget is) lives in the
+// pure, unit-tested ./code-run-selection module. This file owns only the
+// network calls: resolving a runtime version, calling Piston, and falling
+// back to Wandbox.
 
-import { Buffer } from "buffer";
+import {
+  selectCodeRunFiles,
+  languageForExtension,
+  describeCodeRunSkip,
+  capOutput,
+  CODE_RUN_TIMEOUT_MS,
+  CODE_RUN_OUTPUT_CAP_CHARS,
+  type CodeRunCandidate,
+  type CodeRunSkip,
+  type CodeRunSelectionFile,
+} from "./code-run-selection";
 
-/** One source file to execute. */
-export interface CodeFileInput {
-  name: string;
-  /** File extension without a dot, lowercased (e.g. "py", "cpp"). */
-  extension: string;
-  /** Full file bytes, base64 (preferred source of truth). */
-  rawBase64?: string;
-  /** Fallback text when rawBase64 is absent (may be truncated). */
-  previewContent?: string;
-}
+export { languageForExtension, CODE_RUN_TIMEOUT_MS, CODE_RUN_OUTPUT_CAP_CHARS };
+
+/** One source file to execute. Shape is owned by ./code-run-selection - kept
+ * as a named alias here so every existing caller/import of `CodeFileInput`
+ * from this module keeps working unchanged. */
+export type CodeFileInput = CodeRunCandidate;
 
 /** The outcome of running one student's code. */
 export interface CodeRunResult {
@@ -25,6 +37,11 @@ export interface CodeRunResult {
   language: string;
   /** Names of the files sent to the runner. */
   files: string[];
+  /** Basename of the file execution started from (see code-run-selection.ts's
+   * chooseEntryPoint) - lets a caller display "ran main.py" rather than just
+   * a file list. Undefined only when nothing was runnable (this function
+   * returns null in that case, so callers never see it undefined otherwise). */
+  entryPoint?: string;
   /** True when it compiled (if applicable) and exited 0. */
   ran: boolean;
   /** Process exit code, or null when unknown / not reached. */
@@ -33,42 +50,21 @@ export interface CodeRunResult {
   stderr: string;
   /** Compiler stage output, when the language has a compile step. */
   compileOutput?: string;
-  /** Set when execution could not be attempted (e.g. network error). Non-fatal. */
+  /** Set when execution could not be attempted (e.g. network error, or the
+   * timeout below). Non-fatal. */
   error?: string;
+  /** True when `error` is set BECAUSE this run hit CODE_RUN_TIMEOUT_MS,
+   * rather than failing on its own - a normal, expected outcome for a slow
+   * or unreachable runner under the fixed budget Vercel Hobby's 60s ceiling
+   * requires (see code-run-selection.ts), never a bug to fix by retrying. */
+  timedOut?: boolean;
+  /** Candidate files that were excluded before anything was sent to the
+   * runner, and why (a truncated preview slice, or a basename collision with
+   * another file already claimed for this run) - see
+   * code-run-selection.ts's mapSubmittedFilesForExecution. Undefined when
+   * nothing was excluded. */
+  filesExcluded?: Array<{ name: string; reason: string }>;
 }
-
-// Map from extension to Piston language.
-const EXTENSION_MAP: Record<string, string> = {
-  ts: "typescript",
-  py: "python",
-  java: "java",
-  c: "c",
-  cpp: "c++",
-  cc: "c++",
-  cxx: "c++",
-  hpp: "c++",
-  h: "c++",
-  js: "javascript",
-};
-
-// Plain-text data files that ride along with the code so programs that read
-// them (open("story.txt")) find them in the sandbox working directory.
-const DATA_EXTENSIONS = new Set([
-  "txt",
-  "csv",
-  "tsv",
-  "json",
-  "dat",
-  "md",
-  "xml",
-  "yaml",
-  "yml",
-  "in",
-]);
-
-// Oversized data files are skipped rather than truncated (a truncated input
-// corrupts program behavior more confusingly than a missing one).
-const MAX_DATA_FILE_CHARS = 200_000;
 
 const FALLBACK_VERSIONS: Record<string, string> = {
   python: "3.10.0",
@@ -117,15 +113,6 @@ let wandboxCompilersCache: Array<{ name: string; language: string; version?: str
   null;
 
 /**
- * Normalize an extension (strip leading dot, lowercase) and return the Piston
- * language, or null if not recognized.
- */
-export function languageForExtension(extension: string): string | null {
-  const normalized = extension.replace(/^\./, "").toLowerCase();
-  return EXTENSION_MAP[normalized] ?? null;
-}
-
-/**
  * Compare two semantic versions by splitting on dots and comparing numeric
  * segments. Returns -1 if a < b, 0 if a === b, 1 if a > b.
  */
@@ -143,19 +130,31 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/** True for the DOMException AbortSignal.timeout() raises once its budget
+ * elapses (name "TimeoutError"), or a plain abort (name "AbortError") -
+ * checked by `.name` rather than `instanceof Error` because DOMException does
+ * not extend Error in every runtime this code can run under. */
+function isTimeoutError(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name;
+  return name === "TimeoutError" || name === "AbortError";
+}
+
 /**
  * Fetch the Piston runtimes list and cache it. Return the version of the
  * runtime matching the language (or highest alias match). Fall back to
- * FALLBACK_VERSIONS if lookup fails.
+ * FALLBACK_VERSIONS if lookup fails (including this call's own share of
+ * `signal`'s timeout - a slow/unreachable runtimes endpoint must still let
+ * the run proceed against a reasonable guess, per this module's "degrade,
+ * never abort" contract).
  */
-async function resolveVersion(language: string): Promise<string> {
+async function resolveVersion(language: string, signal: AbortSignal): Promise<string> {
   if (!runtimesCache) {
     try {
       const headers: Record<string, string> = {};
       if (PISTON_KEY) {
         headers.Authorization = PISTON_KEY;
       }
-      const res = await fetch(`${PISTON_URL}/runtimes`, { headers });
+      const res = await fetch(`${PISTON_URL}/runtimes`, { headers, signal });
       if (!res.ok) {
         if (res.status === 401) {
           throw new Error("Piston rejected the request (401 unauthorized). Set PISTON_API_KEY (for the public emkc.org API) or point PISTON_API_URL at a self-hosted Piston instance.");
@@ -212,14 +211,14 @@ async function resolveVersion(language: string): Promise<string> {
  * list.json, falling back to a known-good pinned id when the list is
  * unreachable. Throws when the language has no Wandbox mapping at all.
  */
-async function resolveWandboxCompiler(language: string): Promise<string> {
+async function resolveWandboxCompiler(language: string, signal: AbortSignal): Promise<string> {
   const wandboxLanguage = WANDBOX_LANGUAGES[language];
   if (!wandboxLanguage) {
     throw new Error(`No fallback runner available for language "${language}".`);
   }
   if (!wandboxCompilersCache) {
     try {
-      const res = await fetch(`${WANDBOX_URL}/list.json`);
+      const res = await fetch(`${WANDBOX_URL}/list.json`, { signal });
       if (res.ok) {
         wandboxCompilersCache = (await res.json()) as Array<{
           name: string;
@@ -255,12 +254,13 @@ interface WandboxResponse {
  */
 async function runViaWandbox(
   language: string,
-  files: Array<{ name: string; content: string }>
+  files: CodeRunSelectionFile[],
+  signal: AbortSignal
 ): Promise<CodeRunResult> {
-  const compiler = await resolveWandboxCompiler(language);
+  const compiler = await resolveWandboxCompiler(language, signal);
 
   let mainCode: string;
-  let extraFiles: Array<{ name: string; content: string }>;
+  let extraFiles: CodeRunSelectionFile[];
   if (language === "java") {
     // Only source files can host the entry point (data files ride along too).
     const mainFile =
@@ -308,6 +308,7 @@ async function runViaWandbox(
       ...(extraSources.length > 0 ? { "compiler-option-raw": extraSources.join("\n") } : {}),
       stdin: "",
     }),
+    signal,
   });
   if (!res.ok) {
     throw new Error(`Wandbox returned ${res.status}`);
@@ -354,84 +355,21 @@ interface PistonResponse {
 }
 
 /**
- * Run the dominant language's files via Piston. Return null if no valid
- * code files are present. Always return a result on error (never throw).
+ * Resolve a runtime version and execute `runFiles` (already the runner's
+ * exact file list, per code-run-selection.ts) via Piston, falling back to
+ * Wandbox on a whitelist/rate-limit rejection. Always returns a
+ * CodeRunResult - a timeout or any other network failure is reported through
+ * `error`/`timedOut`, never thrown, matching this module's "degrade, never
+ * abort" contract.
  */
-export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunResult | null> {
-  // Step 1: Decode files and detect their language.
-  const decodedFiles: Array<{ name: string; content: string; language: string | null }> = [];
-
-  for (const file of files) {
-    let content: string | null = null;
-
-    if (file.rawBase64) {
-      try {
-        content = Buffer.from(file.rawBase64, "base64").toString("utf8");
-      } catch {
-        // Silently skip if decoding fails
-        continue;
-      }
-    } else if (file.previewContent) {
-      content = file.previewContent;
-    }
-
-    if (!content || !content.trim()) {
-      continue; // Skip empty files
-    }
-
-    const lang = languageForExtension(file.extension);
-    decodedFiles.push({ name: file.name, content, language: lang });
-  }
-
-  // Step 2: Keep only files with recognized languages. Plain-text data files
-  // (txt/csv/json/...) are collected separately and sent alongside the code.
-  const validFiles = decodedFiles.filter((f) => f.language !== null);
-  if (validFiles.length === 0) {
-    return null;
-  }
-  const dataFiles = decodedFiles.filter(
-    (f) =>
-      f.language === null &&
-      DATA_EXTENSIONS.has(f.name.split(".").pop()?.toLowerCase() ?? "") &&
-      f.content.length <= MAX_DATA_FILE_CHARS
-  );
-
-  // Step 3: Select the dominant language (most files, or by total content length).
-  const byLanguage = new Map<string, Array<{ name: string; content: string }>>();
-  for (const file of validFiles) {
-    const lang = file.language!;
-    if (!byLanguage.has(lang)) {
-      byLanguage.set(lang, []);
-    }
-    byLanguage.get(lang)!.push({ name: file.name, content: file.content });
-  }
-
-  let dominantLanguage = "";
-  let dominantFiles: Array<{ name: string; content: string }> = [];
-  let maxFiles = 0;
-  let maxLength = 0;
-
-  for (const [lang, langFiles] of byLanguage) {
-    const totalLength = langFiles.reduce((sum, f) => sum + f.content.length, 0);
-    if (
-      langFiles.length > maxFiles ||
-      (langFiles.length === maxFiles && totalLength > maxLength)
-    ) {
-      dominantLanguage = lang;
-      dominantFiles = langFiles;
-      maxFiles = langFiles.length;
-      maxLength = totalLength;
-    }
-  }
-
-  // The run payload: the dominant language's code first (the first file is
-  // the entry point for both runners), then supporting data files.
-  const runFiles = [...dominantFiles, ...dataFiles.map((f) => ({ name: f.name, content: f.content }))];
-
-  // Step 4: Resolve version and execute.
+async function executeRunFiles(
+  dominantLanguage: string,
+  runFiles: CodeRunSelectionFile[],
+  signal: AbortSignal
+): Promise<CodeRunResult> {
   let version: string;
   try {
-    version = await resolveVersion(dominantLanguage);
+    version = await resolveVersion(dominantLanguage, signal);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -465,6 +403,7 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
         files: pistonFiles,
         stdin: "",
       }),
+      signal,
     });
 
     if (!res.ok) {
@@ -476,11 +415,29 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
             ? "Piston rate-limited the request (429)."
             : `Piston rejected the request (${res.status}): the public emkc.org API is whitelist-only. Set PISTON_API_KEY if whitelisted, or point PISTON_API_URL at a self-hosted Piston instance.`;
         try {
-          return await runViaWandbox(dominantLanguage, runFiles);
+          return await runViaWandbox(dominantLanguage, runFiles, signal);
         } catch (fallbackErr) {
-          const fallbackMessage =
-            fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          throw new Error(`${pistonMessage} Wandbox fallback also failed: ${fallbackMessage}`);
+          // Reported directly here, not re-thrown to the outer catch below -
+          // re-throwing would wrap this in a fresh plain Error, and the
+          // outer catch's own isTimeoutError check would then always read
+          // false even when THIS is exactly what timed out (the shared
+          // `signal` budget covers this fallback call too).
+          const fallbackTimedOut = isTimeoutError(fallbackErr);
+          const fallbackMessage = fallbackTimedOut
+            ? `timed out after ${CODE_RUN_TIMEOUT_MS / 1000}s`
+            : fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr);
+          return {
+            language: dominantLanguage,
+            files: runFiles.map((f) => f.name),
+            ran: false,
+            exitCode: null,
+            stdout: "",
+            stderr: "",
+            error: `${pistonMessage} Wandbox fallback also failed: ${fallbackMessage}`,
+            timedOut: fallbackTimedOut,
+          };
         }
       }
       throw new Error(`Piston returned ${res.status}`);
@@ -488,7 +445,12 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
 
     result = (await res.json()) as PistonResponse;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const timedOut = isTimeoutError(err);
+    const message = timedOut
+      ? `Code execution timed out after ${CODE_RUN_TIMEOUT_MS / 1000}s (a fixed budget so grading can still finish within the platform's request limit) - the result was not available in time.`
+      : err instanceof Error
+        ? err.message
+        : String(err);
     return {
       language: dominantLanguage,
       files: runFiles.map((f) => f.name),
@@ -497,6 +459,7 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
       stdout: "",
       stderr: "",
       error: message,
+      timedOut,
     };
   }
 
@@ -519,6 +482,51 @@ export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunR
     stderr,
     compileOutput,
   };
+}
+
+/** Attach the selection-level facts (entry point, excluded files) and apply
+ * the output cap to whichever result executeRunFiles produced - one place so
+ * neither the Piston nor the Wandbox branch has to remember to do either. */
+function finalizeCodeRunResult(
+  raw: CodeRunResult,
+  entryPoint: string | null,
+  skipped: readonly CodeRunSkip[]
+): CodeRunResult {
+  return {
+    ...raw,
+    entryPoint: entryPoint ?? undefined,
+    filesExcluded:
+      skipped.length > 0
+        ? skipped.map((s) => ({ name: s.name, reason: describeCodeRunSkip(s) }))
+        : undefined,
+    stdout: capOutput(raw.stdout),
+    stderr: capOutput(raw.stderr),
+    compileOutput: raw.compileOutput !== undefined ? capOutput(raw.compileOutput) : raw.compileOutput,
+  };
+}
+
+/**
+ * Run the dominant language's files via Piston (falling back to Wandbox).
+ * Return null if no valid code files are present. Always returns a result on
+ * error - including a timeout - never throws.
+ */
+export async function runSubmittedCode(files: CodeFileInput[]): Promise<CodeRunResult | null> {
+  const selection = selectCodeRunFiles(files);
+  if (selection.runFiles.length === 0) {
+    return null;
+  }
+
+  // One wall-clock budget for every network call this run makes (the
+  // runtimes lookup, Piston's /execute, and - only on a 401/403/429 - both of
+  // Wandbox's fallback calls). Shared across all of them via the SAME signal
+  // rather than a fresh timeout per call, so the TOTAL time this function can
+  // spend waiting on the network is capped, matching the "fits inside the
+  // 60s Vercel Hobby ceiling with room for the grading call itself"
+  // reasoning documented on CODE_RUN_TIMEOUT_MS in code-run-selection.ts.
+  const signal = AbortSignal.timeout(CODE_RUN_TIMEOUT_MS);
+
+  const raw = await executeRunFiles(selection.language, selection.runFiles, signal);
+  return finalizeCodeRunResult(raw, selection.entryPoint, selection.skipped);
 }
 
 /**

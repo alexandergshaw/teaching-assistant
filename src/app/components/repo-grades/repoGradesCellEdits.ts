@@ -21,13 +21,20 @@
 // getRepoGradeCellEdit to read and setRepoGradeCellEdit to write, exactly the
 // "decide here, render there" split AC6 item 37 requires.
 
-import type { RepoGradePostStatus } from "./repoGradesRows";
+import type { RepoGradeCell, RepoGradePostStatus, RepoGradeRow } from "./repoGradesRows";
 // Type-only import (erased at build time - safe from a "use client"-adjacent
 // module the same way useRepoGradesData.ts's own header comment documents
 // for CanvasAssignmentBrief) - RubricAreaResult/SubmittedFileInfo are the
 // shapes gradeRepoAction's GradeResult.rubricAreas/submittedFiles carry
 // (src/lib/grade/types.ts), re-exported from the src/lib/grade.ts barrel.
 import type { RubricAreaResult, SubmittedFileInfo } from "@/lib/grade";
+// Type-only (erased at build time, same client-bundle-safety rule as the
+// import above) - CodeRunResult is gradeRepoAction's GradeResult.codeExecution
+// shape (src/lib/grade/types.ts re-exports it from src/lib/code-runner.ts).
+// Every other .tsx that already displays a CodeRunResult (GradingResults.tsx,
+// FilePreviewModal.tsx, drafted-grades/SubmissionCodePanel.tsx) imports it the
+// same way, straight from code-runner.ts.
+import type { CodeRunResult } from "@/lib/code-runner";
 // docs/grading-results-feedback-boxes-acceptance-criteria.md's three-box
 // feature landed on the OTHER surface first (REGRESSION entry 355) and
 // already solved "how do three independently-copyable feedback fields
@@ -124,6 +131,18 @@ export interface RepoGradeCellEdit {
    * file's own `previewTruncated` fired. false until this cell has been
    * graded. */
   submissionTruncated: boolean;
+  /** Result of running this cell's code in the sandbox, when gradeRepoAction's
+   * LLM branch had anything runnable - set at the SAME time as `rubricAreas`/
+   * `submittedFiles`, only by a grading call, never by hand. `null` until
+   * this cell has been graded, or when the grading run genuinely had nothing
+   * runnable. This has been a LIVE, silent defect since commit fa057050: repo
+   * grading has been executing student code and feeding the result into the
+   * grading prompt (src/lib/grade/engine.ts's gradeStudentEntries already
+   * sets GradeResult.codeExecution) since real `submittedFiles` started
+   * reaching it, but neither grading path here ever copied the result onto
+   * the cell - an execution-influenced grade had nowhere on screen to be
+   * explained. RepoGradeCellControl.tsx is what actually shows it. */
+  codeExecution: CodeRunResult | null;
 }
 
 /** The state a cell that has never been touched (no grading call, no post
@@ -144,6 +163,7 @@ export function defaultRepoGradeCellEdit(): RepoGradeCellEdit {
     generatedScore: null,
     submittedFiles: [],
     submissionTruncated: false,
+    codeExecution: null,
   };
 }
 
@@ -202,4 +222,34 @@ export function setRepoGradeCellEdit(
       [folder]: { ...current, ...patch },
     },
   };
+}
+
+/**
+ * buildRepoGradeRows (repoGradesRows.ts) always emits a cell with score ""
+ * - the live score lives here, in `cellEdits`. Any caller that needs to
+ * treat a row's cells as "what is actually on screen right now" (a bulk-
+ * grade plan's "already graded" check, a column header's live postable
+ * count, or a sort by a folder column's score) needs THIS merged view, never
+ * raw rows - reading raw rows would re-spend a model call on an
+ * already-graded repo, undercount a column's postable rows, or sort by a
+ * value nothing on screen shows.
+ *
+ * This is the ONE copy: docs/repo-grades-name-columns-and-sorting-
+ * acceptance-criteria.md N4 item 13 found this same merge already
+ * duplicated once (RepoGradesGrid.tsx's own `liveRows`, itself copied
+ * verbatim from useRepoGradesGradingActions.ts's private `withLiveScores`)
+ * and required consolidating rather than adding a third copy for sorting -
+ * both of those call sites, and repoGradesRows.ts's own folder-sort
+ * comparator, now read `getRepoGradeCellEdit` (directly, for the sort) or
+ * this function (for the two call sites that need every column merged at
+ * once) instead of hand-rolling the merge again.
+ */
+export function mergeRepoGradeLiveScores(rows: readonly RepoGradeRow[], edits: RepoGradeCellEditsByRepo): RepoGradeRow[] {
+  return rows.map((row) => {
+    const cells: Record<string, RepoGradeCell> = {};
+    for (const [folder, cell] of Object.entries(row.cells)) {
+      cells[folder] = { ...cell, score: getRepoGradeCellEdit(edits, row.repo, folder).score };
+    }
+    return { ...row, cells };
+  });
 }

@@ -252,6 +252,72 @@ describe("suggestRepoStudentBindings", () => {
     });
   });
 
+  describe("docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md N2 item 6 / N3 item 10 - studentSortable and the live-Canvas-fallback marker", () => {
+    it("a 'suggested' match carries the roster entry's own sortableName", () => {
+      const roster: RepoBindingRosterEntry[] = [
+        { id: "301", name: "Carol Chen", loginId: "cchen", sortableName: "Chen, Carol" },
+      ];
+      const result = suggestRepoStudentBindings(["org/prefix-cchen"], roster, [], "prefix");
+      expect(result[0].studentSortable).toBe("Chen, Carol");
+    });
+
+    it("a 'suggested' match with no sortableName on the roster entry never gets the field at all", () => {
+      const roster: RepoBindingRosterEntry[] = [{ id: "301", name: "Carol Chen", loginId: "cchen" }];
+      const result = suggestRepoStudentBindings(["org/prefix-cchen"], roster, [], "prefix");
+      expect(result[0].studentSortable).toBeUndefined();
+    });
+
+    it("an 'ambiguous' match never carries studentSortable (no single winner to attribute it to)", () => {
+      const collisionRoster: RepoBindingRosterEntry[] = [
+        { id: "501", name: "Jo Smith", loginId: "jsmith1", sortableName: "Smith, Jo" },
+        { id: "502", name: "jo-smith", loginId: "jsmith2" },
+      ];
+      const result = suggestRepoStudentBindings(["org/prefix-jo-smith"], collisionRoster, [], "prefix");
+      expect(result[0].state).toBe("ambiguous");
+      expect(result[0].studentSortable).toBeUndefined();
+    });
+
+    it("a CONFIRMED row with a non-blank stored student never carries studentSortable or the fallback marker - it did not come from the live roster", () => {
+      const roster: RepoBindingRosterEntry[] = [
+        { id: "101", name: "Alice Anderson", loginId: "aanderson", sortableName: "Anderson, Alice" },
+      ];
+      const stored: CourseStudentRepo[] = [
+        { student: "Alice Anderson", canvasUserId: "101", repo: "org/alice-repo", username: "aanderson-gh" },
+      ];
+      const result = suggestRepoStudentBindings(["org/alice-repo"], roster, stored);
+      expect(result[0].studentSortable).toBeUndefined();
+      expect(result[0].studentFromLiveCanvasFallback).toBeUndefined();
+      // Also proves the pre-existing exact shape is unchanged for this case.
+      expect(result[0]).toEqual({
+        repo: "org/alice-repo",
+        state: "confirmed",
+        canvasUserId: "101",
+        student: "Alice Anderson",
+        candidates: [],
+        derivedHandle: null,
+      });
+    });
+
+    it("a CONFIRMED row whose stored student was blank carries the live roster's sortableName AND the fallback marker", () => {
+      const roster: RepoBindingRosterEntry[] = [
+        { id: "101", name: "Alice Anderson", loginId: "aanderson", sortableName: "Anderson, Alice" },
+      ];
+      const stored: CourseStudentRepo[] = [{ student: "", canvasUserId: "101", repo: "org/alice-repo", username: null }];
+      const result = suggestRepoStudentBindings(["org/alice-repo"], roster, stored);
+      expect(result[0].student).toBe("Alice Anderson");
+      expect(result[0].studentSortable).toBe("Anderson, Alice");
+      expect(result[0].studentFromLiveCanvasFallback).toBe(true);
+    });
+
+    it("the fallback marker is still set even when the matching roster entry has no sortableName to give", () => {
+      const roster: RepoBindingRosterEntry[] = [{ id: "101", name: "Alice Anderson", loginId: "aanderson" }];
+      const stored: CourseStudentRepo[] = [{ student: "", canvasUserId: "101", repo: "org/alice-repo", username: null }];
+      const result = suggestRepoStudentBindings(["org/alice-repo"], roster, stored);
+      expect(result[0].studentFromLiveCanvasFallback).toBe(true);
+      expect(result[0].studentSortable).toBeUndefined();
+    });
+  });
+
   it("maps every repo in the input list independently, preserving order", () => {
     const roster: RepoBindingRosterEntry[] = [
       { id: "101", name: "Alice Anderson", loginId: "aanderson" },

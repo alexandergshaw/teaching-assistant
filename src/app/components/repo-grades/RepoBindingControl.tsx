@@ -50,6 +50,16 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
         <span className={styles.bindingDetail}>
           {row.binding.student ?? "Unnamed student"} - Canvas id {row.binding.canvasUserId}
         </span>
+        {/* N3 item 10 (docs/repo-grades-name-columns-and-sorting-acceptance-
+            criteria.md): this row's stored `student` was blank, so the name
+            above came from the LIVE Canvas roster at render time rather than
+            from anything actually saved on this repo's own row - a different
+            provenance from every other confirmed row's typed name. Named
+            here rather than let it silently pass as an ordinary stored
+            name. */}
+        {row.binding.studentFromLiveCanvasFallback && (
+          <span className={styles.postReason}>Name shown from the live Canvas roster - not saved on this row.</span>
+        )}
       </div>
     );
   }

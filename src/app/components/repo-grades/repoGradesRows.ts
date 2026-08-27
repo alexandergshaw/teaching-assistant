@@ -24,6 +24,20 @@ import {
   type RepoBindingSuggestion,
 } from "@/lib/repo-student-bindings";
 import type { RepoFolderRow } from "@/lib/repo-grade-tree-scan";
+// N4/N5 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md):
+// the sort key for "firstName"/"lastName" reads the EXACT SAME derivation
+// the grid's name cells render (repoGradeStudentName.ts), never a
+// re-implementation of the split rules - N5 item 16's failure mode is
+// precisely two call sites reading different derivations for the same
+// visible name. getRepoGradeCellEdit/RepoGradeCellEditsByRepo is a VALUE
+// import from repoGradesCellEdits.ts, which itself only TYPE-imports back
+// from this file (RepoGradePostStatus/RepoGradeCell/RepoGradeRow) - a
+// type-only import is erased at compile time, so this is not a runtime
+// circular dependency, the same reasoning RepoGradesGrid.tsx's own imports
+// from both files already rely on.
+import { deriveRepoGradeStudentName } from "./repoGradeStudentName";
+import { scorePercentValue } from "./repoGradeScoreDisplay";
+import { getRepoGradeCellEdit, type RepoGradeCellEditsByRepo } from "./repoGradesCellEdits";
 
 // ---------------------------------------------------------------------------
 // Natural ordering - the SAME comparator assignmentFoldersFromTree uses
@@ -236,17 +250,48 @@ export function applyRepoGradeBinding(
 }
 
 // ---------------------------------------------------------------------------
-// Sorting (AC4 item 22: pure helpers, own tests, the .tsx only renders).
+// Sorting (AC4 item 22; extended by docs/repo-grades-name-columns-and-
+// sorting-acceptance-criteria.md N4/N5: every column is sortable via a
+// header control, including the dynamic per-folder score columns - pure
+// helpers, own tests, the .tsx files only render/forward).
+//
+// Reuses the Tasks view's own solution (src/lib/course-tasks-view.ts:545-747)
+// rather than reinventing it: a `Record<RepoGradeSortField, true>`
+// exhaustiveness check (so a field added to the union without being added to
+// that record is a TYPE ERROR, not silently-dropped data), a SortableValue
+// `{kind, value, empty}` shape where "empty" always sorts last regardless of
+// direction, and resolveRepoGradeSort mirroring resolveTaskSort's
+// stale-field degrade.
 
-export type RepoGradeSortField = "repo" | "binding";
+export type RepoGradeSortField = "repo" | "binding" | "firstName" | "lastName" | "folder";
 export type SortDirection = "asc" | "desc";
 
 export interface RepoGradeSortState {
   field: RepoGradeSortField;
+  /** Meaningful only when field === "folder" - which folder column is being
+   * sorted. OMITTED (never explicit null) on every other field - mirrors
+   * TaskSortState.taskId's own convention in course-tasks-view.ts: `toEqual`
+   * treats an omitted key differently from an explicit `null`, and
+   * DEFAULT_REPO_GRADE_SORT below (and every producer in this file) leaves
+   * it out rather than nulling it. */
+  folder?: string;
   direction: SortDirection;
 }
 
 export const DEFAULT_REPO_GRADE_SORT: RepoGradeSortState = { field: "repo", direction: "asc" };
+
+// A Record<RepoGradeSortField, true> literal, not a hand-written array -
+// adding a field to the union without adding it here is a TYPE ERROR (a
+// missing property), not silent data loss. Mirrors course-tasks-view.ts's
+// own TASK_SORT_FIELD_MEMBERSHIP and the exact trap it exists to catch.
+const REPO_GRADE_SORT_FIELD_MEMBERSHIP: Record<RepoGradeSortField, true> = {
+  repo: true,
+  binding: true,
+  firstName: true,
+  lastName: true,
+  folder: true,
+};
+const REPO_GRADE_SORT_FIELDS: RepoGradeSortField[] = Object.keys(REPO_GRADE_SORT_FIELD_MEMBERSHIP) as RepoGradeSortField[];
 
 /** Sorting by "binding" surfaces rows that need attention first in ASCENDING
  * order: unbound (nothing known) before ambiguous (needs a human pick) before
@@ -262,21 +307,205 @@ export const BINDING_STATE_SORT_PRIORITY: Record<RepoBindingState, number> = {
 };
 
 /**
- * Sorts a copy of `rows` (never mutates the input) by repo name or binding
- * urgency. Ties within a "binding" sort fall back to repo name, so the
- * result is always fully deterministic - no two rows ever compare equal.
+ * N5 item 17: `ta-repo-grades-sort` (repoGradesUiState.ts) is a GLOBAL
+ * localStorage key, unlike `ta-repo-grades-folder`'s per-course slice - a
+ * persisted folder sort can name a folder the newly-selected course does not
+ * have, which would otherwise render scan order while the header still
+ * claims a sort. CHOSEN FIX: resolve the stale case here, at the one
+ * function that actually orders rows, the same way resolveTaskSort
+ * (course-tasks-view.ts) resolves a stale task-column sort - rather than
+ * reshaping SORT_KEY into a per-course record (a bigger, riskier change to
+ * an already-shipped schema, for a case sortRepoGradeRows already needs to
+ * handle safely regardless, since `columns` can change out from under a
+ * persisted sort on every re-scan too, not only a course switch). Any
+ * non-"folder" sort passes through unchanged.
+ */
+export function resolveRepoGradeSort(sort: RepoGradeSortState, columns: readonly RepoGradeColumn[]): RepoGradeSortState {
+  if (sort.field !== "folder") return sort;
+  if (!sort.folder || !columns.some((c) => c.folder === sort.folder)) return DEFAULT_REPO_GRADE_SORT;
+  return sort;
+}
+
+/**
+ * The next sort state after clicking a header - toggles direction when that
+ * field (and, for "folder", that exact folder) is already the active sort;
+ * otherwise starts a NEW ascending sort on it. The ONE place a header click
+ * decides what "next" means (AC19: vitest never renders a component, so this
+ * decision has to live somewhere a real test can exercise it) - every
+ * onClick in RepoGradesGrid.tsx is a plain `onSortChange(toggleRepoGradeSort(sort, field[, folder]))`.
+ */
+export function toggleRepoGradeSort(
+  current: RepoGradeSortState,
+  field: RepoGradeSortField,
+  folder?: string
+): RepoGradeSortState {
+  const alreadyActive = current.field === field && (field !== "folder" || current.folder === folder);
+  if (alreadyActive) {
+    return { ...current, direction: current.direction === "asc" ? "desc" : "asc" };
+  }
+  return field === "folder" ? { field, folder, direction: "asc" } : { field, direction: "asc" };
+}
+
+/** Parses a persisted `ta-repo-grades-sort` value, falling back to
+ * DEFAULT_REPO_GRADE_SORT for anything missing, malformed, or naming a
+ * field/direction that no longer exists - mirrors parseTaskSortState
+ * (course-tasks-view.ts) exactly, including its "folder" (there: "task")
+ * case requiring a non-blank string identifier or degrading to the
+ * default. */
+export function parseRepoGradeSortState(raw: string | null | undefined): RepoGradeSortState {
+  if (!raw) return DEFAULT_REPO_GRADE_SORT;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return DEFAULT_REPO_GRADE_SORT;
+
+    const field = (parsed as { field?: unknown }).field;
+    const direction = (parsed as { direction?: unknown }).direction;
+    if (!REPO_GRADE_SORT_FIELDS.includes(field as RepoGradeSortField) || (direction !== "asc" && direction !== "desc")) {
+      return DEFAULT_REPO_GRADE_SORT;
+    }
+
+    if (field === "folder") {
+      const folder = (parsed as { folder?: unknown }).folder;
+      if (typeof folder !== "string" || folder.trim() === "") return DEFAULT_REPO_GRADE_SORT;
+      return { field: "folder", folder, direction };
+    }
+    return { field: field as RepoGradeSortField, direction };
+  } catch {
+    return DEFAULT_REPO_GRADE_SORT;
+  }
+}
+
+// The Sort <select>'s (RepoGradesControls.tsx) own plain option keys - every
+// field EXCEPT "folder", since a folder column is variable per course and
+// cannot be reasonably listed in a fixed <select>. N5 item 15:
+// `parseSortValue` used to coerce every unknown field to "repo", so a
+// header-set sort (any of these, or a folder sort) would visibly SNAP BACK to
+// "repo" the instant the instructor merely touched the select - the two
+// controls would disagree about what the sort actually was. The fix here is
+// that the select's own VALUE (repoGradeSortSelectValue below) resolves to
+// the "custom" placeholder whenever the active sort is not one of these four,
+// so the control never shows a value mismatching every one of its real
+// <option>s (the actual mechanism behind that snap-back - see this
+// function's sibling below) - and DECODING only ever accepts a value the
+// select could actually have produced.
+const SELECT_SORT_FIELDS: readonly Exclude<RepoGradeSortField, "folder">[] = ["repo", "binding", "firstName", "lastName"];
+
+/** The Sort `<select>`'s current value: `"<field>:<direction>"` for any of
+ * the four plain fields, or the "custom" placeholder whenever the active
+ * sort is a folder column (or, in principle, any future field the select
+ * does not list) - which the select renders as a disabled option, so it is
+ * never itself selectable and can never fire a spurious onChange. */
+export function repoGradeSortSelectValue(sort: RepoGradeSortState): string {
+  return (SELECT_SORT_FIELDS as readonly string[]).includes(sort.field) ? `${sort.field}:${sort.direction}` : "custom";
+}
+
+/** Decodes the Sort `<select>`'s onChange value. Only ever accepts one of
+ * the four plain fields the select actually renders as real options -
+ * anything else (including "custom", which is disabled and unselectable)
+ * degrades to DEFAULT_REPO_GRADE_SORT rather than being coerced onto an
+ * unrelated field, closing N5 item 15 for good: every value this function
+ * can be CALLED with (there is no way for the browser to produce anything
+ * else through this select) round-trips to the exact field the instructor
+ * clicked. */
+export function parseRepoGradeSortSelectValue(value: string): RepoGradeSortState {
+  const [field, direction] = value.split(":");
+  const parsedDirection: SortDirection = direction === "desc" ? "desc" : "asc";
+  if ((SELECT_SORT_FIELDS as readonly string[]).includes(field)) {
+    return { field: field as RepoGradeSortField, direction: parsedDirection };
+  }
+  return DEFAULT_REPO_GRADE_SORT;
+}
+
+/** One row's sort-relevant value for `sort.field`, in the Tasks view's own
+ * SortableValue shape: `empty` always sorts last, in BOTH directions - never
+ * displacing real data regardless of which way the column points. */
+interface SortableValue {
+  kind: "text" | "number";
+  value: string | number;
+  empty: boolean;
+}
+
+function sortFieldValue(row: RepoGradeRow, sort: RepoGradeSortState, cellEdits: RepoGradeCellEditsByRepo): SortableValue {
+  switch (sort.field) {
+    case "repo":
+      return { kind: "text", value: row.repo, empty: false };
+    case "binding":
+      return { kind: "number", value: BINDING_STATE_SORT_PRIORITY[row.binding.state], empty: false };
+    case "firstName": {
+      // N5 item 16 - the SAME derivation the grid's First name cell renders
+      // (repoGradeStudentName.ts), over the SAME two binding fields. Never a
+      // second, hand-rolled split.
+      const parts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);
+      return { kind: "text", value: parts.firstName, empty: parts.firstName === "" };
+    }
+    case "lastName": {
+      const parts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);
+      // `.lastName` itself (never repoGradeLastNameCellText's em-dash
+      // substitution) - a "single token, last name unknown" row must sort as
+      // BLANK, not as some fixed dash-shaped string, matching how the CELL
+      // deliberately keeps those two ideas separate (repoGradeStudentName.ts
+      // header comment).
+      return { kind: "text", value: parts.lastName, empty: parts.lastName === "" };
+    }
+    case "folder": {
+      // N4 item 13: scores live in cellEdits, not on the row - reads exactly
+      // the one (repo, folder) pair this sort needs via getRepoGradeCellEdit,
+      // rather than building a fully-merged row set the way
+      // mergeRepoGradeLiveScores (repoGradesCellEdits.ts) does for the two
+      // callers that actually need every column merged at once. N5 item 16:
+      // scorePercentValue is the SAME function RepoGradeCellControl.tsx
+      // reads to compute the percentage shown beside the raw score, so the
+      // sort key and the visible badge agree.
+      if (!sort.folder) return { kind: "number", value: 0, empty: true };
+      const score = getRepoGradeCellEdit(cellEdits, row.repo, sort.folder).score;
+      const percent = scorePercentValue(score);
+      return { kind: "number", value: percent ?? 0, empty: percent === null };
+    }
+  }
+}
+
+function compareSortableValues(a: SortableValue, b: SortableValue): number {
+  if (a.kind === "text" && b.kind === "text") {
+    return naturalCompare(a.value as string, b.value as string);
+  }
+  return (a.value as number) - (b.value as number);
+}
+
+/**
+ * Sorts a copy of `rows` (never mutates the input) by `sort.field`/
+ * `sort.direction`. `sort` is resolved through resolveRepoGradeSort FIRST
+ * (N5 item 17), so a stale folder sort degrades to DEFAULT_REPO_GRADE_SORT
+ * here exactly as it does everywhere else. `cellEdits`/`columns` both
+ * default to empty so every existing "repo"/"binding" call site keeps
+ * compiling and behaving identically without passing them - only a "folder"
+ * sort needs either. Ties fall back to repo name (direction-aware, matching
+ * this function's own pre-existing "binding" tie-break), so the result is
+ * always fully deterministic - no two rows ever compare equal.
  */
 export function sortRepoGradeRows(
   rows: readonly RepoGradeRow[],
-  sort: RepoGradeSortState
+  sort: RepoGradeSortState,
+  cellEdits: RepoGradeCellEditsByRepo = {},
+  columns: readonly RepoGradeColumn[] = []
 ): RepoGradeRow[] {
-  const factor = sort.direction === "asc" ? 1 : -1;
-  return rows.slice().sort((a, b) => {
-    if (sort.field === "repo") {
-      return factor * naturalCompare(a.repo, b.repo);
+  const resolved = resolveRepoGradeSort(sort, columns);
+  const factor = resolved.direction === "asc" ? 1 : -1;
+  const decorated = rows.map((row) => ({ row, value: sortFieldValue(row, resolved, cellEdits) }));
+
+  decorated.sort((a, b) => {
+    let primary: number;
+    if (a.value.empty && b.value.empty) {
+      primary = 0;
+    } else if (a.value.empty) {
+      return 1;
+    } else if (b.value.empty) {
+      return -1;
+    } else {
+      primary = factor * compareSortableValues(a.value, b.value);
     }
-    const diff = BINDING_STATE_SORT_PRIORITY[a.binding.state] - BINDING_STATE_SORT_PRIORITY[b.binding.state];
-    if (diff !== 0) return factor * diff;
-    return factor * naturalCompare(a.repo, b.repo);
+    if (primary !== 0) return primary;
+    return factor * naturalCompare(a.row.repo, b.row.repo);
   });
+
+  return decorated.map((d) => d.row);
 }

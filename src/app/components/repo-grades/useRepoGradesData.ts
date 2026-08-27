@@ -337,7 +337,13 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
       } else {
         setRosterResult({
           key: rosterKey,
-          data: result.students.map((s) => ({ id: s.id, name: s.name, loginId: s.loginId })),
+          // docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md
+          // N2 item 6: `sortableName` (Canvas's own "Last, First") used to be
+          // dropped here even though listCourseRosterAction already returns
+          // it - threading it through lets suggestRepoStudentBindings prefer
+          // Canvas's real split over any name derived from the plain display
+          // name, with no second lookup anywhere else in this view.
+          data: result.students.map((s) => ({ id: s.id, name: s.name, loginId: s.loginId, sortableName: s.sortableName })),
           error: null,
         });
       }

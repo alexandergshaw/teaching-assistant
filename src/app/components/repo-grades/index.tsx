@@ -162,8 +162,29 @@ export default function RepoGradesTab() {
   // purely from the roster table before anything is actually saved. That is
   // intended - the same "suggested first, confirm second" honesty this view
   // already applies to a live Canvas link.
+  // ---- per-cell editable state (AC4 items 20-21) - ephemeral UI memory,
+  // never persisted to localStorage (a typed but un-posted score surviving a
+  // reload would be surprising, and this codebase's own precedent -
+  // GradingResults.tsx's `edits`/`postStatus` - does not persist these
+  // either). Reset whenever the selected course changes, via the render-
+  // phase compare-and-adjust idiom below (the `cellStateResetForCourse`
+  // block, further down this file) - that is also why this declaration had
+  // to move ABOVE `sortedRows`: docs/repo-grades-name-columns-and-sorting-
+  // acceptance-criteria.md's folder-sort needs `cellEdits` to read a
+  // folder's live score (N4 item 13), so `sortedRows` below now reads it
+  // too, and a `const` used before its own declaration is a ReferenceError,
+  // not merely a style choice. The per-column posting busy state
+  // (`columnPosting`) lives in useRepoGradesGradingActions now - it gets the
+  // SAME courseId and does its OWN render-phase reset in lockstep with the
+  // block further down (see that hook's header comment). --------------------
+  const [cellEdits, setCellEdits] = useState<RepoGradeCellEditsByRepo>(EMPTY_REPO_GRADE_CELL_EDITS);
   const model = scan ? buildRepoGradeGridModel(scan.repos, roster, effectiveStudentRepos, uiState.orgPrefix) : null;
-  const sortedRows = model ? sortRepoGradeRows(model.rows, uiState.sort) : [];
+  // docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md N5 item
+  // 17: `cellEdits`/`model.columns` let sortRepoGradeRows sort by a folder
+  // column's live score and resolve a stale persisted folder sort against
+  // this course's actual columns - both threaded straight through, no
+  // decision made here.
+  const sortedRows = model ? sortRepoGradeRows(model.rows, uiState.sort, cellEdits, model.columns) : [];
   // AC2 item 7 sibling: rows currently in the "suggested" binding state - a
   // link just produced one, or the grid's own name-based guess did, and the
   // two are indistinguishable here on purpose (confirmSuggestedBindings and
@@ -505,18 +526,6 @@ export default function RepoGradesTab() {
     return result;
   };
 
-  // ---- per-cell editable state (AC4 items 20-21) - ephemeral UI memory,
-  // never persisted to localStorage (a typed but un-posted score surviving a
-  // reload would be surprising, and this codebase's own precedent -
-  // GradingResults.tsx's `edits`/`postStatus` - does not persist these
-  // either). Reset whenever the selected course changes, via the same
-  // render-phase compare-and-adjust idiom the selection Set above uses, so
-  // switching courses cannot leave a prior course's in-progress edits
-  // visible against a different course's repos. The per-column posting busy
-  // state (`columnPosting`) lives in useRepoGradesGradingActions now - it
-  // gets the SAME courseId and does its OWN render-phase reset in lockstep
-  // with this branch (see that hook's header comment). --------------------
-  const [cellEdits, setCellEdits] = useState<RepoGradeCellEditsByRepo>(EMPTY_REPO_GRADE_CELL_EDITS);
   const [postSummary, setPostSummary] = useState("");
   // ---- the activity log (docs/repo-grades-activity-log-acceptance-criteria.md).
   // Unlike cellEdits above this one DOES persist (L3): it is the record of
@@ -851,6 +860,8 @@ export default function RepoGradesTab() {
           columns={displayedColumns}
           rows={displayedRows}
           roster={roster}
+          sort={uiState.sort}
+          onSortChange={(value) => setUiState((prev) => ({ ...prev, sort: value }))}
           selected={selected}
           onToggleSelected={toggleSelected}
           onAcceptBinding={handleAcceptBinding}

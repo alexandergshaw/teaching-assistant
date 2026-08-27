@@ -9,8 +9,12 @@
 // useRepoGradesBulkGrade wiring plus handleBulkCellUpdate/handleBulkOutcomes/
 // handleGradeColumn), and posting to the live Canvas gradebook
 // (handlePostColumn, handlePostOneCell), along with the `columnPosting`
-// per-column busy state and the withLiveScores helper a bulk-grade plan is
-// built from. Everything it reads that index.tsx itself owns (rows,
+// per-column busy state; a bulk-grade plan is built from
+// mergeRepoGradeLiveScores (repoGradesCellEdits.ts - see that function's own
+// header comment for why this used to be a private copy here, named
+// withLiveScores, until docs/repo-grades-name-columns-and-sorting-
+// acceptance-criteria.md N4 item 13 required consolidating it). Everything
+// this hook reads that index.tsx itself owns (rows,
 // cellEdits and its setter, the current selection, the relevant uiState
 // fields, the activity-log recorder, setPostSummary, the LLM provider, and
 // the current course) comes in as an explicit params object - this hook owns
@@ -26,9 +30,10 @@
 //
 // This is a MOVE, not a rewrite: every handler below is unchanged from
 // index.tsx except for reading its inputs off `params` instead of off local
-// state/props, and withLiveScores is copied verbatim. No behavior, no
-// user-visible string, and no disabled condition changed as part of this
-// extraction.
+// state/props. No behavior, no user-visible string, and no disabled
+// condition changed as part of this extraction (the later withLiveScores ->
+// mergeRepoGradeLiveScores consolidation is a pure rename/relocation, not a
+// behavior change either - see that function's own header comment).
 import { useState } from "react";
 import { gradeRepoAction, postCanvasGradesAction } from "@/app/actions";
 import type { Course } from "@/lib/supabase/courses";
@@ -36,13 +41,14 @@ import type { LlmProvider } from "@/lib/llm";
 import {
   applyRepoGradeFeedbackFieldEdit,
   getRepoGradeCellEdit,
+  mergeRepoGradeLiveScores,
   setRepoGradeCellEdit,
   type RepoGradeCellEdit,
   type RepoGradeCellEditsByRepo,
 } from "./repoGradesCellEdits";
 import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
 import type { RepoGradeLogEntry, RepoGradeLogEventKind } from "./repoGradesLog";
-import type { RepoGradeCell, RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
+import type { RepoGradeColumn, RepoGradeRow } from "./repoGradesRows";
 import {
   buildRepoGradePostPlan,
   fanOutRepoGradePostResult,
@@ -79,20 +85,6 @@ function describeResolvedRubricForLog(resolved: ResolvedRubric, generatedRubricT
   const identity = resolved.identity ? ` "${resolved.identity}"` : "";
   const failure = resolved.failureReason ? ` - ${resolved.failureReason}` : "";
   return `Rubric source: ${resolved.source}${identity}${failure}`;
-}
-
-/** buildRepoGradeRows always emits a cell with score "" - the live score
- * lives in `cellEdits`. buildBulkGradePlan reads `cell.score` as its
- * "already graded" signal, so it needs THIS merged view, never raw rows, or
- * a second "Grade all" would re-spend a model call on every graded repo. */
-function withLiveScores(rows: readonly RepoGradeRow[], cellEdits: RepoGradeCellEditsByRepo): RepoGradeRow[] {
-  return rows.map((row) => {
-    const cells: Record<string, RepoGradeCell> = {};
-    for (const [folder, cell] of Object.entries(row.cells)) {
-      cells[folder] = { ...cell, score: getRepoGradeCellEdit(cellEdits, row.repo, folder).score };
-    }
-    return { ...row, cells };
-  });
 }
 
 export interface UseRepoGradesGradingActionsParams {
@@ -312,6 +304,18 @@ export function useRepoGradesGradingActions(
         // the SAME grading call, never by hand.
         submittedFiles: first?.submittedFiles ?? [],
         submissionTruncated: first?.submissionTruncated ?? false,
+        // Live defect fix (this feature): gradeRepoAction's LLM branch has
+        // been running the repo's code in the sandbox since fa057050 wired up
+        // real `submittedFiles` for it (engine.ts's gradeStudentEntries
+        // already sets `codeExecution` on every GradeResult), but this was
+        // the only place that result ever reached - and it was dropped here,
+        // every field EXCEPT this one copied onto the cell. An
+        // execution-influenced grade must be visible to the instructor who
+        // has to defend it; RepoGradeCellControl.tsx is what actually shows
+        // it. `null`, not `undefined`, so this always overwrites a PREVIOUS
+        // grading call's code run rather than leaving a stale one on screen
+        // when the newest run had no runnable code at all.
+        codeExecution: first?.codeExecution ?? null,
       })
     );
     // L1 item 1: the score AS GENERATED, with the provider that produced it -
@@ -631,8 +635,13 @@ export function useRepoGradesGradingActions(
     onAnnounce: setPostSummary,
   });
 
-  // withLiveScores (not raw `rows`) - see its header comment above. An empty
-  // plan announces its skip reasons instead of firing a no-op batch call.
+  // buildRepoGradeRows always emits a cell with score "" - the live score
+  // lives in `cellEdits`. buildBulkGradePlan reads `cell.score` as its
+  // "already graded" signal, so the plan below is built from
+  // mergeRepoGradeLiveScores's merged view (repoGradesCellEdits.ts), never
+  // raw `rows` - a second "Grade all" would otherwise re-spend a model call
+  // on every already-graded repo. An empty plan announces its skip reasons
+  // instead of firing a no-op batch call.
   //
   // AC item 50 - THE reachability seam this feature would otherwise ship
   // half-dead through (docs/repo-grades-rubric-picker-acceptance-criteria.md).
@@ -649,7 +658,7 @@ export function useRepoGradesGradingActions(
   // establishSharedRubric's own "one rubric per run" rule in the sibling
   // hook.
   const handleGradeColumn = async (folder: string) => {
-    const plan = buildBulkGradePlan({ rows: withLiveScores(rows, cellEdits), folder, selected, selectionOnly: bulkSelectionOnly });
+    const plan = buildBulkGradePlan({ rows: mergeRepoGradeLiveScores(rows, cellEdits), folder, selected, selectionOnly: bulkSelectionOnly });
     if (plan.targets.length === 0) {
       const reasons = plan.skipped.length > 0 ? plan.skipped.map((s) => `${s.repo}: ${s.reason}`).join("; ") : "no repos have this folder.";
       setPostSummary(`${folder}: nothing to grade - ${reasons}`);

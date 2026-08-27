@@ -226,6 +226,12 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         // read, matching index.tsx's handleGradeCell exactly.
         submittedFiles: first?.submittedFiles ?? [],
         submissionTruncated: first?.submissionTruncated ?? false,
+        // See useRepoGradesGradingActions.ts's handleGradeCell for why this
+        // is copied at all (it was the one GradeResult field the per-cell
+        // path dropped) - matched here so a bulk-graded cell and a
+        // one-off-graded cell stay indistinguishable to every downstream
+        // consumer, same as every other field set alongside it above.
+        codeExecution: first?.codeExecution ?? null,
       });
       // `detail` on success names the README path actually used (or a
       // missing-README fallback note - never silent about which repos fell

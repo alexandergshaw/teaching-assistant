@@ -35,6 +35,15 @@ import { join } from "path";
 const MODULES_VIEW_PATH = join(process.cwd(), "src/app/components/content-tab/ModulesView.tsx");
 const MODAL_PATH = join(process.cwd(), "src/app/components/content-tab/modules/GeneratedPreviewModal.tsx");
 const SECTION_PATH = join(process.cwd(), "src/app/components/content-tab/modules/GenerateFromSelectionSection.tsx");
+// The "Post to Canvas" footer, extracted out of GeneratedPreviewModal.tsx
+// into its own component (GeneratedPostSection.tsx) as a pure structural
+// move - see that file's own header comment. GeneratedPreviewModalProps
+// itself was NOT touched by the move (still declares every post-related
+// prop, still bound at the ModulesView render site by the checks above), so
+// only the five assertions below that pin the MOVED JSX/comment text now
+// read POST_SECTION_PATH; everything else in this file keeps reading
+// MODAL_PATH.
+const POST_SECTION_PATH = join(process.cwd(), "src/app/components/content-tab/modules/GeneratedPostSection.tsx");
 const PAGE_CSS_PATH = join(process.cwd(), "src/app/page.module.css");
 
 const modulesViewSource = readFileSync(MODULES_VIEW_PATH, "utf8");
@@ -534,9 +543,20 @@ describe("AC6 / AC8 - no new machinery, and the stacking comment tells the truth
   });
 
   it("reuses existing page.module.css classes only", () => {
-    const used = [...new Set([...readFileSync(MODAL_PATH, "utf8").matchAll(/styles\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
-    expect(used.length).toBeGreaterThanOrEqual(4);
-    for (const cls of used) {
+    // Defect fix: used to read MODAL_PATH alone. GeneratedPostSection.tsx now
+    // holds the "Post to Canvas" footer (styles.previewMeta/styles.fieldHint)
+    // that used to live inline in GeneratedPreviewModal.tsx, so a guard that
+    // only ever reads MODAL_PATH stopped covering the file that actually
+    // carries that markup - nothing broken today (both classes are real),
+    // but a future new class added only to GeneratedPostSection.tsx would
+    // pass this check by never being seen at all.
+    const modalUsed = [...new Set([...readFileSync(MODAL_PATH, "utf8").matchAll(/styles\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    expect(modalUsed.length).toBeGreaterThanOrEqual(4);
+    const postSectionUsed = [
+      ...new Set([...readFileSync(POST_SECTION_PATH, "utf8").matchAll(/styles\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1])),
+    ];
+    expect(postSectionUsed.length).toBeGreaterThanOrEqual(1);
+    for (const cls of [...modalUsed, ...postSectionUsed]) {
       expect(pageCss, `.${cls} is a new class; this fix adds none`).toMatch(new RegExp(`\\.${cls}\\b`));
     }
   });
@@ -569,8 +589,10 @@ describe("AC8 - the modal says where the default came from", () => {
   it("renders the hint only when both postTargetFromSelection and a non-empty postModuleChoice hold", () => {
     // Pins the two names and the empty-string comparison, not the exact
     // spacing or quote style - AC8.4's condition, restated structurally.
-    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
-    expect(modalSource).toMatch(/postTargetFromSelection\s*&&\s*postModuleChoice\s*!==\s*(["'])\1/);
+    // This condition lives in GeneratedPostSection.tsx now (the moved
+    // "Post to Canvas" footer) - see POST_SECTION_PATH's own comment above.
+    const sectionSource = stripComments(readFileSync(POST_SECTION_PATH, "utf8"));
+    expect(sectionSource).toMatch(/postTargetFromSelection\s*&&\s*postModuleChoice\s*!==\s*(["'])\1/);
   });
 
   it("renders the hint text exactly once, with its full stop", () => {
@@ -578,8 +600,8 @@ describe("AC8 - the modal says where the default came from", () => {
     // file takes. Counting against raw source would redden the moment any
     // comment quoted the hint's own wording, which is exactly what the
     // comment beside the hint now does when it explains its render gate.
-    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
-    const occurrences = [...modalSource.matchAll(/From your selection\./g)];
+    const sectionSource = stripComments(readFileSync(POST_SECTION_PATH, "utf8"));
+    const occurrences = [...sectionSource.matchAll(/From your selection\./g)];
     expect(occurrences.length).toBe(1);
   });
 
@@ -591,23 +613,23 @@ describe("AC8 - the modal says where the default came from", () => {
     // warning is dev-only), and without this third clause the hint would sit
     // beside an empty box claiming it came from the selection. Presentational
     // only: nothing here changes what gets posted.
-    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
-    const hintIdx = modalSource.indexOf("From your selection.");
+    const sectionSource = stripComments(readFileSync(POST_SECTION_PATH, "utf8"));
+    const hintIdx = sectionSource.indexOf("From your selection.");
     expect(hintIdx, "hint text not found").toBeGreaterThan(-1);
     // The gate must sit in the hint's OWN condition, not merely somewhere in
     // the file - so it is located in the text immediately preceding the hint.
-    const condition = modalSource.slice(Math.max(0, hintIdx - 400), hintIdx);
+    const condition = sectionSource.slice(Math.max(0, hintIdx - 400), hintIdx);
     expect(condition).toMatch(/postModuleOptions\s*\.\s*some\s*\(/);
     expect(condition).toMatch(/postModuleChoice/);
   });
 
   it("renders the hint as a plain styles.previewMeta span, not styles.fieldHint (AC8.2)", () => {
-    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
-    const hintIdx = modalSource.indexOf("From your selection.");
+    const sectionSource = stripComments(readFileSync(POST_SECTION_PATH, "utf8"));
+    const hintIdx = sectionSource.indexOf("From your selection.");
     expect(hintIdx).toBeGreaterThan(-1);
     // The className nearest before the hint text - the element the hint's
     // own text sits in, not just some className appearing anywhere earlier.
-    const before = modalSource.slice(Math.max(0, hintIdx - 200), hintIdx);
+    const before = sectionSource.slice(Math.max(0, hintIdx - 200), hintIdx);
     expect(before).toMatch(/className=\{styles\.previewMeta\}/);
     expect(before).not.toMatch(/className=\{styles\.fieldHint\}/);
   });
@@ -619,18 +641,176 @@ describe("AC8 - the modal says where the default came from", () => {
     // is what keeps it off announcements (postNeedsModuleTarget false) and
     // off generation-only kinds (offersPost false, so this whole subtree
     // never renders) per AC9.
-    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const sectionSource = stripComments(readFileSync(POST_SECTION_PATH, "utf8"));
     const fragmentGate = "postNeedsModuleTarget && (";
-    const fragmentStart = modalSource.indexOf(fragmentGate);
+    const fragmentStart = sectionSource.indexOf(fragmentGate);
     expect(fragmentStart, "postNeedsModuleTarget && ( gate not found").toBeGreaterThan(-1);
-    const fragOpen = modalSource.indexOf("<>", fragmentStart);
+    const fragOpen = sectionSource.indexOf("<>", fragmentStart);
     expect(fragOpen, "fragment open <> not found after the gate").toBeGreaterThan(-1);
-    const fragClose = modalSource.indexOf("</>", fragOpen);
+    const fragClose = sectionSource.indexOf("</>", fragOpen);
     expect(fragClose, "fragment close </> not found after the open").toBeGreaterThan(-1);
 
-    const hintIdx = modalSource.indexOf("From your selection.");
+    const hintIdx = sectionSource.indexOf("From your selection.");
     expect(hintIdx, "hint text not found").toBeGreaterThan(-1);
     expect(hintIdx, "hint sits before the fragment opens").toBeGreaterThan(fragOpen);
     expect(hintIdx, "hint sits after the fragment closes").toBeLessThan(fragClose);
+  });
+});
+
+// docs/announcement-preview-edit-before-post-acceptance-criteria.md adds two
+// capabilities - the Subject field (AC A) and the post confirm step (AC C) -
+// with ZERO new props on GeneratedPreviewModalProps (the subject is local
+// modal state; both new predicates are read from `preview.kindId` through
+// kinds.ts). The generic CAPABILITIES deletion-guard above therefore cannot
+// see either one (AC 22) - the same situation the teleprompter chunk hit,
+// solved there with its own dedicated wiring test file. The reseed/dirty
+// widening and the arm-signature collision proof are pinned as REAL,
+// callable unit tests in generatedPreviewDrafts.test.ts and
+// postConfirmArming.test.ts (AC F21) - those two modules are where the
+// actual logic lives. What follows pins the two things a pure-module test
+// cannot see at all: that this file reads the two new predicates
+// declaratively rather than hardcoding a kind id, and that the double-post
+// guard (AC 12d) and the dismiss-time disarm (AC 13) are wired into the
+// actual handlers in this component, not merely available as importable
+// functions nobody calls correctly.
+describe("AC A/C - the subject field and the post confirm read declarative kind flags, never a hardcoded id", () => {
+  it("gates the Subject field on kindTitleIsContent, never a literal kind id comparison", () => {
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    expect(modalSource).toContain("kindTitleIsContent(preview.kindId)");
+    expect(modalSource).not.toMatch(/kindId\s*===\s*["']announcements["']/);
+  });
+
+  it("gates the post confirm step on kindPostsImmediately, never a literal kind id comparison", () => {
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    expect(modalSource).toContain("kindPostsImmediately(preview.kindId)");
+    // Defect fix: symmetry with the Subject-field check above, which pins
+    // both halves (the declarative call AND the absence of the hardcoded
+    // comparison it replaces). This check only had the positive half.
+    expect(modalSource).not.toMatch(/kindId\s*===\s*["']announcements["']/);
+  });
+
+  it("falls the header title back to kindLabel when the subject field is offered (AC1b)", () => {
+    // Pins the FACT (headerTitle's first branch is `offersSubject`, and it
+    // resolves to `preview.kindLabel`), not the exact surrounding
+    // punctuation - a reformat of the ternary is fine, reverting to always
+    // preferring the saved artifact's own title is not.
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    expect(modalSource).toMatch(/const\s+headerTitle\s*=\s*offersSubject\s*\?\s*preview\.kindLabel/);
+  });
+});
+
+describe("AC 12d/13 - the post confirmation is explicitly disarmed, not left for the signature to invalidate", () => {
+  it("disarms before committing a post, never after (the double-post guard)", () => {
+    // Sabotage target: removing the explicit disarm from the commit branch
+    // (leaving the signature model to "cover" a successful post, which AC
+    // 12d's own reasoning explains it structurally cannot - a successful
+    // write does not change the signature) must turn this test red.
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const match = modalSource.match(/const\s+handlePostAction\s*=\s*\(\)\s*=>\s*\{([\s\S]*?)\n {2}\};/);
+    expect(match, "a handlePostAction handler should exist").not.toBeNull();
+    const body = match![1];
+    const disarmIdx = body.lastIndexOf("setPostArmedFor(null)");
+    const commitIdx = body.lastIndexOf("onPost?.()");
+    expect(disarmIdx, "handlePostAction should disarm the confirmation somewhere in its commit branch").toBeGreaterThan(-1);
+    expect(commitIdx, "handlePostAction should still call through to onPost").toBeGreaterThan(-1);
+    expect(disarmIdx, "the disarm must happen BEFORE the commit call, not after (or a stray second click could still post twice)").toBeLessThan(
+      commitIdx,
+    );
+  });
+
+  // Defect fix: `mayPostCommit` (postConfirmArming.ts) used to be exported
+  // and unit-tested with nothing in the shipped path ever calling it - a
+  // tautological test that could not fail for any change to the real post
+  // flow. It is now consulted in handlePostAction as a second, non-render-
+  // level guard (see that handler's own comment for why). Pinned here as a
+  // FACT about the wiring - the call must exist in the commit branch, before
+  // the disarm - not as source text, so a rename of the surrounding code is
+  // fine and only removing the guard reddens this.
+  it("consults mayPostCommit as a second guard before committing a post (defect fix)", () => {
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const match = modalSource.match(/const\s+handlePostAction\s*=\s*\(\)\s*=>\s*\{([\s\S]*?)\n {2}\};/);
+    expect(match, "a handlePostAction handler should exist").not.toBeNull();
+    const body = match![1];
+    const guardIdx = body.indexOf("mayPostCommit(");
+    const disarmIdx = body.lastIndexOf("setPostArmedFor(null)");
+    expect(guardIdx, "handlePostAction should call mayPostCommit before committing").toBeGreaterThan(-1);
+    expect(guardIdx, "the mayPostCommit guard must run before the disarm/commit, not after").toBeLessThan(disarmIdx);
+    expect(modalSource, "mayPostCommit must actually be imported from postConfirmArming").toMatch(
+      /import\s*\{[^}]*\bmayPostCommit\b[^}]*\}\s*from\s*["']\.\/postConfirmArming["']/,
+    );
+  });
+
+  it("disarms on every dismissal attempt, after the teleprompter rung (AC13)", () => {
+    // Mirrors teleprompter.wiring.test.ts's own ordering check on the same
+    // handler (that file pins teleprompterOpen before onClosePreview()) -
+    // this pins the post-confirm disarm as a THIRD rung, still after
+    // teleprompter, so Escape/backdrop/header Close all disarm the post
+    // confirmation even on a dismissal that only arms the discard-changes
+    // panel below (dirty, first attempt) rather than closing the modal.
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const match = modalSource.match(/const\s+handleDismiss\s*=\s*\(\)\s*=>\s*\{([\s\S]*?)\n {2}\};/);
+    expect(match, "a handleDismiss handler should exist").not.toBeNull();
+    const body = match![1];
+    const teleprompterIdx = body.indexOf("teleprompterOpen");
+    const disarmIdx = body.indexOf("setPostArmedFor(null)");
+    expect(teleprompterIdx, "handleDismiss should still check teleprompterOpen first").toBeGreaterThanOrEqual(0);
+    expect(disarmIdx, "handleDismiss should disarm the post confirmation").toBeGreaterThan(-1);
+    expect(teleprompterIdx, "the teleprompter rung must come before the post-confirm disarm").toBeLessThan(disarmIdx);
+  });
+});
+
+// Defect fix (adversarial verification of the AC A/C wave above): the two
+// describes above pin that this component reads the two new predicates
+// declaratively, and that the handlers wired to them behave correctly - but
+// nothing anywhere actually asserted the NEW MARKUP those predicates gate
+// exists at all. Before this, deleting the whole Subject TextField block
+// (MODAL_PATH) or the whole confirm panel (POST_SECTION_PATH) left every
+// test in this file, generatedPreviewDrafts.test.ts and
+// postConfirmArming.test.ts green, because those only ever exercised the
+// PURE predicates and handlers, never the render output. REGRESSION 312
+// check 12 names exactly this failure mode. Every assertion below is
+// anchored on a structural marker (a gate string, a prop binding) rather
+// than a literal sentence, per this repo's own "source-text tests
+// over-specify" note - and each one was proven to redden by actually
+// deleting the markup it covers, then restoring it (see the wave A report).
+describe("AC A/C defect fix - the new markup itself is asserted, not only the predicates that gate it", () => {
+  it("renders a live Subject TextField, gated on offersSubject, bound to subjectDraft", () => {
+    const modalSource = stripComments(readFileSync(MODAL_PATH, "utf8"));
+    const gateIdx = modalSource.indexOf("offersSubject && (");
+    expect(gateIdx, "the offersSubject && ( gate is missing - the Subject field block was deleted").toBeGreaterThan(-1);
+    const fieldStart = modalSource.indexOf("<TextField", gateIdx);
+    expect(fieldStart, "no TextField renders inside the offersSubject block").toBeGreaterThan(-1);
+    const { end } = tagEnd(modalSource, fieldStart);
+    const tag = modalSource.slice(fieldStart, end + 1);
+    expect(tag, "the Subject field should carry its label").toMatch(/label="Subject"/);
+    expect(tag, "the Subject field should be bound to subjectDraft, not currentTitle or draft").toMatch(/value=\{subjectDraft\}/);
+    expect(tag, "the Subject field's onChange should update subjectDraft").toMatch(/onChange=\{[\s\S]*setSubjectDraft/);
+  });
+
+  it("renders the post confirm panel's consequence paragraph, quoting confirmSubjectText and confirmBodyText", () => {
+    const sectionSource = stripComments(readFileSync(POST_SECTION_PATH, "utf8"));
+    const consequenceIdx = sectionSource.indexOf("Posting publishes this announcement");
+    expect(consequenceIdx, "the confirm panel's consequence paragraph is missing - the panel was deleted").toBeGreaterThan(-1);
+    const before = sectionSource.slice(Math.max(0, consequenceIdx - 700), consequenceIdx);
+    expect(before, "the consequence paragraph should be gated on showCancelConfirm").toMatch(/showCancelConfirm\s*&&/);
+    const after = sectionSource.slice(consequenceIdx, consequenceIdx + 1200);
+    expect(after, "the confirm panel should quote confirmSubjectText, the exact value that will post").toMatch(/\{confirmSubjectText\}/);
+    expect(after, "the confirm panel should quote confirmBodyText, the exact value that will post").toMatch(/\{confirmBodyText\}/);
+  });
+
+  it("replaces the post button with a hint while postBlockedByDirtyEdit, rather than merely disabling it", () => {
+    const sectionSource = stripComments(readFileSync(POST_SECTION_PATH, "utf8"));
+    const hintIdx = sectionSource.indexOf("Save your edit first");
+    expect(hintIdx, "the dirty-block hint text is missing").toBeGreaterThan(-1);
+    const before = sectionSource.slice(Math.max(0, hintIdx - 200), hintIdx);
+    expect(before, "the hint should be gated on postBlockedByDirtyEdit ?").toMatch(/postBlockedByDirtyEdit\s*\?/);
+    // The button row (the ternary's other arm) still has to exist somewhere
+    // after the hint, bound to onPostButtonClick - otherwise the "replaces"
+    // half of this test would pass even if the not-blocked arm were deleted
+    // outright, leaving no way to post at all once the editor is clean.
+    const after = sectionSource.slice(hintIdx, hintIdx + 1200);
+    expect(after, "a Post-to-Canvas button bound to onPostButtonClick should still exist in the other arm").toMatch(
+      /onClick=\{onPostButtonClick\}/,
+    );
   });
 });

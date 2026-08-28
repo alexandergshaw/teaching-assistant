@@ -180,8 +180,14 @@ export interface UseLmsGenerationReturn {
    * other entry point in this hook. On success, copies `refine`'s own tail
    * exactly (E12): re-fetch via `loadVersionsForPreview`, then `setPreview`
    * with the new version selected. On failure, `preview` is left untouched -
-   * the modal's own draft state survives a failed save unmodified (E13). */
-  saveEdit: (text: string) => void;
+   * the modal's own draft state survives a failed save unmodified (E13).
+   *
+   * `title` (announcement-preview-edit-before-post AC B6): an optional edited
+   * title, saved TOGETHER with `text` in this SAME call - one new version,
+   * never a second call/version for the title alone. When omitted, the save
+   * falls back to the previewed version's own current title, unchanged from
+   * this parameter's behaviour before B6. */
+  saveEdit: (text: string, title?: string) => void;
   /** Whether the save triggered by `saveEdit` is in flight - mirrors
    * `refining`/`posting`, so the Save button's own label can read
    * "Saving..." distinctly from `busy` alone. */

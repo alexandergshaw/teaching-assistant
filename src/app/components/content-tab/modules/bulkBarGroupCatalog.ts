@@ -85,6 +85,20 @@ const FOREIGN_KEY_UNPERSISTED =
 const RELEASE_DATE_UNPERSISTED =
   "Follows itemsDueDate, the identical datetime-local control already in this bulk bar: the release instant applies to whatever is selected right now, not a remembered value, and a value restored from a previous session would silently point at the wrong items after a reload (F7, docs/scheduled-publishing-from-modules-acceptance-criteria.md). F7 explicitly overrides that same document's earlier AC9, which asked every new textbox/select in this bar to persist - this is the one control where that general requirement is superseded by a cited, precedent-based exception rather than a fresh rationale.";
 
+// docs/announcement-preview-edit-before-post-acceptance-criteria.md, AC 17.
+// Read COMPOSE_FIELD_UNPERSISTED above first (its rationale is "free-text
+// scratch content for the very next click that consumes it") and confirmed
+// it does NOT genuinely fit here before writing this: the Subject field is
+// not scratch content consumed by the very next click - it is saved,
+// together with the body, into a real `generated_artifacts` version by the
+// existing Save-edit control, and reloaded verbatim whenever a later version
+// is selected. The risk this field actually carries is the one the AC's own
+// "Adjacent defects" section names: per-artifact content belongs to the
+// version, not to the browser, and a value restored from a prior session
+// would silently attach one course's subject to another course's draft.
+const SUBJECT_FIELD_UNPERSISTED =
+  "Per-artifact content, not a remembered preference - the subject belongs to the generated version and is reloaded from whichever version is selected, so persisting it would attach one course's subject to another course's draft.";
+
 const RUBRIC_NEAR_DEAD = {
   why: "Renders as a full-width, disabled \"No rubrics\" select whenever the course has none, rather than being omitted or replaced with a short sentence.",
   recommendation: "Collapse to a single inline sentence when rubricsCount is 0 instead of a full-width disabled select.",
@@ -864,7 +878,20 @@ const generateGroup: BulkBarGroupDef = {
   // (C11's lesson from carryPatternGroup - a tag that overstates is worse
   // than one that understates, because it is the one always-visible sentence
   // describing what this group does).
-  consequenceTag: "Post to Canvas, inside the generated-content preview, writes the drafted content into the live course.",
+  //
+  // REVISED for docs/announcement-preview-edit-before-post-acceptance-
+  // criteria.md (AC 16, "Adjacent defects" section's literal wording): the
+  // confirm step this feature adds means the write no longer happens on the
+  // FIRST click of "Post to Canvas" (see generatePostToCanvas's own tier
+  // comment below, re-derived for the same reason), so the tag now says so.
+  // It also does NOT generalize "goes live immediately" to every kind this
+  // group can post - C11's rule again: objectives/assignments/resources/
+  // introDiscussion all create UNPUBLISHED Canvas objects
+  // (kindPostsImmediately, @/lib/lms-generation/kinds), so a blanket
+  // immediacy claim would overstate the common case for four of the five
+  // "save-and-post" kinds. The immediacy clause is scoped to the one kind it
+  // is actually true for.
+  consequenceTag: "Post to Canvas, inside the generated-content preview, writes the drafted content into the live course - for an announcement that means every student sees it immediately, after a second confirming click.",
   visible: (f) => f.generationKindsCount > 0,
   controls: [
     {
@@ -898,6 +925,63 @@ const generateGroup: BulkBarGroupDef = {
     },
     ...(Object.keys(GENERATE_KIND_LABELS) as GenerationKindId[]).map(generateKindControl),
     { id: "generateDownloadDiagLog", kind: "button", label: "Download diagnostic log", tier: "read-only", visible: (f) => f.generationKindsCount > 0 && f.hasDiagLog, persistKey: null, unpersistedReason: ONE_CLICK_UNPERSISTED },
+    // docs/announcement-preview-edit-before-post-acceptance-criteria.md, AC
+    // 1/2/15: the preview modal's Subject text field, offered only for a kind
+    // whose title is real, instructor-owned content
+    // (BulkBarFacts.generateSubjectEditable - derived from
+    // `kindTitleIsContent`, never a hardcoded `kindId === "announcements"`
+    // here). "read-only" tier, not "reversible-write": this field edits the
+    // modal's local draft only, the same shape `itemsDescriptionText` above
+    // has for the body it composes - the WRITE is `generateSaveEdit`,
+    // declared immediately below, on `generateSubjectField`'s own
+    // reachability fact's strictly broader sibling
+    // (`generateSaveEditReachable`), not one this control's own tier absorbs.
+    {
+      id: "generateSubjectField",
+      kind: "textField",
+      label: "Subject",
+      tier: "read-only",
+      visible: (f) => f.generateSubjectEditable,
+      persistKey: null,
+      unpersistedReason: SUBJECT_FIELD_UNPERSISTED,
+    },
+    // docs/announcement-preview-edit-before-post-acceptance-criteria.md,
+    // "Adjacent defects this diff should close": `Save edit`
+    // (useLmsGeneration.ts's `saveEdit`) persists a new `generated_artifacts`
+    // version and is reachable only from inside GeneratedPreviewModal.tsx -
+    // until now declared NOWHERE in this catalog, precisely the defect
+    // `generatePostToCanvas`'s own comment below describes: "a green check on
+    // an unexamined path, which is worse than no check." Fixed here on that
+    // same control's pattern, one tier down: "reversible-write", not
+    // "read-only" - it is a real write, not a draft edit - and not
+    // "fan-out-write" either, because unlike a Canvas post it is SCOPED to one
+    // artifact and REVERSIBLE (a new version, never an overwrite of anything
+    // already posted) - the exact distinction this file's own header comment
+    // draws between the ten Generate kind buttons above and every fan-out
+    // write in this bar. Gated on `generateSaveEditReachable`
+    // (BulkBarFacts, ./bulkBarGroups.ts), derived from `kindSupportsTextEdit`
+    // (@/lib/lms-generation/kinds) rather than a hardcoded kind id - a kind
+    // whose `structured` payload is authoritative (decks, knowledgeChecks) is
+    // excluded automatically, the same derivation `generateSubjectField`'s
+    // own gate above uses for `kindTitleIsContent`. Deliberately a BROADER
+    // gate than `generateSubjectField`'s: Save edit persists the body alone
+    // for every text-editable kind, subject or no subject, so it must not be
+    // gated on `generateSubjectEditable` - see
+    // BulkBarFacts.generateSaveEditReachable's own doc comment (bulkBarGroups.ts)
+    // for why the two facts are not the same one. No textbox/select/checkbox
+    // of its own, so its unpersisted reason reuses ONE_CLICK_UNPERSISTED
+    // rather than a fresh string, matching every other one-click button in
+    // this group (`generatePostCancel`/`generatePostConfirm`/
+    // `generatePostToCanvas` below).
+    {
+      id: "generateSaveEdit",
+      kind: "button",
+      label: "Save edit",
+      tier: "reversible-write",
+      visible: (f) => f.generateSaveEditReachable,
+      persistKey: null,
+      unpersistedReason: ONE_CLICK_UNPERSISTED,
+    },
     {
       id: "generatePostToCanvas",
       kind: "button",
@@ -919,11 +1003,34 @@ const generateGroup: BulkBarGroupDef = {
       // posting generated content into a live Canvas course is not
       // reversible from this app, so declaring it there would make the tier
       // string itself a false claim; "destructive" is reserved for the four
-      // writes carrying a two-click confirm-arm in their owning hook, and
-      // this one commits on its first click. That leaves "fan-out-write",
-      // whose defining property here is exactly "unconfirmed write that
-      // commits on first click" - the same reading chunk F's design pass
-      // reached independently for Publish/Unpublish.
+      // writes carrying a two-click confirm-arm in their owning hook
+      // (confirmArming.ts's isConfirmArmed/selectionSignature idiom) - a
+      // reservation this control still does not meet even now that it is
+      // also two-click. That leaves "fan-out-write".
+      //
+      // RE-DERIVED for docs/announcement-preview-edit-before-post-
+      // acceptance-criteria.md (AC 24 / "Adjacent defects" section): this
+      // comment used to close the elimination with "and this one commits on
+      // its first click" as the reason it was not "destructive". That
+      // sentence is now FALSE - the sibling UI chunk in
+      // GeneratedPreviewModal.tsx adds a confirm step (confirmArming.ts's own
+      // signature-based arm/disarm model, per that AC's item 12), so the
+      // write no longer happens on the first click.
+      //
+      // The tier does not move, though, because "destructive" is reserved
+      // for a DIFFERENT class of write than this one, independent of click
+      // count: the four controls at that tier are all DELETES - an
+      // undo-shaped mistake where the object existed a moment ago and does
+      // not anymore. Posting to Canvas is the opposite shape - it CREATES an
+      // announcement that did not exist before, and nothing about a second
+      // click changes that class. What actually distinguishes "fan-out-write"
+      // from "destructive" in this model is not "how many clicks", it is
+      // "which of the two failure shapes the write commits to" - and this
+      // control has always been, and remains, an unrecallable CREATE rather
+      // than a DELETE. Restated: "fan-out-write" here means "an unconfirmed
+      // OR confirmed write this app cannot take back", not merely
+      // "unconfirmed"; the confirm step changes how the write is reached, not
+      // which of the two write-shape tiers it belongs to.
       tier: "fan-out-write",
       // Reachability, not existence - see BulkBarFacts.generatePostReachable,
       // which ANDs the modal being mounted, the kind offering a post at all,
@@ -932,6 +1039,46 @@ const generateGroup: BulkBarGroupDef = {
       // make the group permanently fan-out-write, force it open forever, and
       // show a consequence tag for a write that is not on screen - the
       // over-reporting mirror of the defect this fixes.
+      visible: (f) => f.generatePostReachable,
+      persistKey: null,
+      unpersistedReason: ONE_CLICK_UNPERSISTED,
+    },
+    // Wave 2D (docs/announcement-preview-edit-before-post-acceptance-
+    // criteria.md, AC 15/AC 24): the confirm step's two resolutions are new
+    // controls reachable from this flow, and go undeclared here exactly the
+    // way `generatePostToCanvas` itself went undeclared before this same
+    // section fixed that - "a green check on an unexamined path, which is
+    // worse than no check", quoted from that control's own comment above.
+    // Both are gated on the SAME fact as `generatePostToCanvas`
+    // (`f.generatePostReachable`), never on the confirm step's own local
+    // "armed" state, which this pure, hook-free file has no way to read - the
+    // `releaseCommit`/`commandApply` precedent above: the write and its
+    // confirm/cancel pair live inside the same modal and share the same
+    // reachability gate, so all three rise and fall from "visible to
+    // groupTier's reduction" together.
+    {
+      id: "generatePostCancel",
+      kind: "button",
+      label: "Cancel",
+      // Leaves the confirm step with nothing written (AC 13) - dismissing an
+      // armed control back to its unarmed state, not a Canvas write of any
+      // kind. Same tier as the in-file "Revert" precedent this button copies.
+      tier: "read-only",
+      visible: (f) => f.generatePostReachable,
+      persistKey: null,
+      unpersistedReason: ONE_CLICK_UNPERSISTED,
+    },
+    {
+      id: "generatePostConfirm",
+      kind: "button",
+      label: "Confirm post",
+      // The second, distinct click that actually commits (AC 9) - the same
+      // unrecallable Canvas write `generatePostToCanvas` above is declared
+      // at, reached through its own control now that arming splits one click
+      // into two. Declaring this anything other than "fan-out-write" would
+      // make THIS control the unexamined path the comment above warns about,
+      // even though the button beside it is correctly declared.
+      tier: "fan-out-write",
       visible: (f) => f.generatePostReachable,
       persistKey: null,
       unpersistedReason: ONE_CLICK_UNPERSISTED,

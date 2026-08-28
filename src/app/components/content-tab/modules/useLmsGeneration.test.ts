@@ -646,6 +646,55 @@ describe("acronym reaches every by-URL resolve call the hook makes (M12 reachabi
     expect(payloadOf("saveEditedGeneratedArtifactAction({")).toMatch(/\bacronym\b/);
   });
 
+  // docs/announcement-preview-edit-before-post-acceptance-criteria.md,
+  // "Adjacent defects" section (the two hops it names: the payload gained
+  // `title` at this call site, and the modal passes it in). NOT a plain
+  // `/\btitle\b/` match, unlike the `acronym` assertion above this comment
+  // copies the style of - sabotage-checked by hand while writing this
+  // assertion, and a naive word-boundary match against the whole captured
+  // object literal turns out to be VACUOUS here: this payload's own fallback
+  // comment ("kept exactly as before this change") mentions "edited title",
+  // and the `currentTitle: currentVersion?.title` fallback line contains the
+  // literal substring "title" too, so deleting the actual `title,` shorthand
+  // property left both of those in place and the naive regex still passed.
+  // This instead requires a LINE whose only content is the `title,` shorthand
+  // property, matching how `acronym,` and `text,` each sit on their own line
+  // in this same object literal - the one pattern the fallback comment and
+  // the `currentTitle` line cannot satisfy.
+  it("saveEditedGeneratedArtifactAction's payload includes title, not only acronym - dropping it silently discards an edited subject", () => {
+    expect(payloadOf("saveEditedGeneratedArtifactAction({")).toMatch(/^\s*title,\s*$/m);
+  });
+
+  // Companion to the payload check above: the payload can only carry an
+  // edited title if `saveEdit` itself accepts one. Pins the FACT that
+  // `saveEdit` takes a second parameter, never its exact spelling - this very
+  // file's own D1 describe block below records, in as many words, that a
+  // source-text assertion on `saveEdit`'s parameter list has already broken
+  // once this session over exactly that kind of over-specification (the
+  // `const saveEdit = (text: string) => {` marker that AC B6's `title?:
+  // string` addition invalidated). A top-level comma inside the parameter
+  // list is enough to prove a second parameter exists without naming it.
+  it("saveEdit's declaration accepts a second parameter", () => {
+    const sigStart = hookSource.indexOf("const saveEdit = (");
+    expect(sigStart, "saveEdit declaration not found").toBeGreaterThan(-1);
+    const parenStart = hookSource.indexOf("(", sigStart);
+    let depth = 0;
+    let parenEnd = -1;
+    for (let i = parenStart; i < hookSource.length; i += 1) {
+      if (hookSource[i] === "(") depth += 1;
+      else if (hookSource[i] === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          parenEnd = i;
+          break;
+        }
+      }
+    }
+    expect(parenEnd, "unterminated saveEdit parameter list").toBeGreaterThan(parenStart);
+    const params = hookSource.slice(parenStart + 1, parenEnd);
+    expect(params.split(",").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("every loadVersionsForPreview call site (the generate/refine/saveEdit success tails) passes acronym through", () => {
     // Matches only `await loadVersionsForPreview(...)` CALL sites, never a
     // DEFINITION of the same name. The `export async function
@@ -855,11 +904,26 @@ describe("D1: refine()/saveEdit()/post() are each wrapped in runGenerationCall t
   /** The text between two markers, scoping a check to one function's body so
    * a match in a sibling function can never satisfy it by accident - same
    * idea as `genericBranchBody` above, generalized to a caller-supplied end
-   * marker since these three functions are declared back to back. */
-  function sourceBetween(startMarker: string, endMarker: string): string {
-    const start = hookSource.indexOf(startMarker);
+   * marker since these three functions are declared back to back.
+   *
+   * A marker may be a literal string OR a regex - the DECLARATION anchor
+   * (e.g. `const saveEdit = (`), never the exact parameter spelling after
+   * it, so a signature widened with a new optional parameter (announcement-
+   * preview-edit-before-post AC B6 added `title?: string`) does not make this
+   * marker miss. This repo's own lesson, recorded twice now: pin the FACT and
+   * the ORDERING, never the spelling. */
+  function indexOfMarker(marker: string | RegExp, from: number): number {
+    if (typeof marker === "string") return hookSource.indexOf(marker, from);
+    const re = new RegExp(marker.source, marker.flags.includes("g") ? marker.flags : `${marker.flags}g`);
+    re.lastIndex = from;
+    const match = re.exec(hookSource);
+    return match ? match.index : -1;
+  }
+
+  function sourceBetween(startMarker: string | RegExp, endMarker: string | RegExp): string {
+    const start = indexOfMarker(startMarker, 0);
     expect(start, `start marker not found: ${startMarker}`).toBeGreaterThan(-1);
-    const end = hookSource.indexOf(endMarker, start);
+    const end = indexOfMarker(endMarker, start);
     expect(end, `end marker not found after start: ${endMarker}`).toBeGreaterThan(start);
     return hookSource.slice(start, end);
   }
@@ -875,12 +939,12 @@ describe("D1: refine()/saveEdit()/post() are each wrapped in runGenerationCall t
   }
 
   it("refine(): refineGeneratedArtifactAction is wrapped in runGenerationCall, not awaited bare", () => {
-    const body = sourceBetween("const refine = () => {", "const saveEdit = (text: string) => {");
+    const body = sourceBetween("const refine = () => {", /const saveEdit = \(/);
     expectWrapped(body, "refineGeneratedArtifactAction");
   });
 
   it("saveEdit(): saveEditedGeneratedArtifactAction is wrapped in runGenerationCall, not awaited bare", () => {
-    const body = sourceBetween("const saveEdit = (text: string) => {", "const post = () => {");
+    const body = sourceBetween(/const saveEdit = \(/, "const post = () => {");
     expectWrapped(body, "saveEditedGeneratedArtifactAction");
   });
 

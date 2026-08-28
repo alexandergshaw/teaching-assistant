@@ -351,6 +351,68 @@ export interface BulkBarFacts {
    */
   generatePostReachable: boolean;
   /**
+   * Whether the preview modal's Subject text field is offered for the
+   * KIND currently previewed - the same "reachable right now" shape as
+   * `generatePostReachable` immediately above, applied to a control that
+   * lives inside the same modal rather than the bar. TWO conditions:
+   *   1. `lmsGeneration.preview` is non-null - the modal is mounted at all
+   *      (same first condition `generatePostReachable` checks, for the same
+   *      reason: nothing inside the modal is reachable while it is closed);
+   *   2. `kindTitleIsContent(preview.kindId)` (@/lib/lms-generation/kinds) -
+   *      the previewed kind's `title` column is real, instructor-authored
+   *      content rather than a label derived at generate time from a module
+   *      name (that function's own doc comment). Read from the kind's own
+   *      config, never a hardcoded `kindId === "announcements"` here or in
+   *      buildBulkBarFacts.ts - a future kind (introDiscussion is named as
+   *      the obvious next one) opts in by declaring `titleIsContent: true`
+   *      on its own `kinds.ts` config, with no edit to this file or the one
+   *      that derives this fact.
+   *
+   * Declared `read-only` tier on its one control (`generateSubjectField`)
+   * below: it edits a draft, and the WRITE that persists it is the
+   * `generateSaveEdit` control declared immediately below this fact
+   * (`generateSaveEditReachable`) - this fact does not change that a save,
+   * not this field, is the write.
+   */
+  generateSubjectEditable: boolean;
+  /**
+   * Whether the preview modal's "Save edit" write is reachable right now -
+   * the same "reachable right now" shape as `generatePostReachable` and
+   * `generateSubjectEditable` immediately above, applied to a control that
+   * was, until docs/announcement-preview-edit-before-post-acceptance-
+   * criteria.md's "Adjacent defects" section, declared NOWHERE in this
+   * catalog even though it persists a real `generated_artifacts` version.
+   * TWO conditions, the same shape as `generateSubjectEditable`'s own:
+   *   1. `lmsGeneration.preview` is non-null - the modal is mounted at all;
+   *   2. `kindSupportsTextEdit(preview.kindId)` (@/lib/lms-generation/kinds) -
+   *      the previewed kind's `text` is genuinely hand-editable (false only
+   *      for "decks" and "knowledgeChecks", whose `structured` payload is the
+   *      authoritative half - that function's own doc comment). Read from the
+   *      kind's own config, never a hardcoded kind-id list here or in
+   *      buildBulkBarFacts.ts, for the same reason `generateSubjectEditable`
+   *      reads `kindTitleIsContent` instead of one.
+   *
+   * Deliberately NOT the same fact as `generateSubjectEditable`: Save edit is
+   * reachable for every text-editable kind, including the four
+   * `TITLED_GENERIC_KINDS` outliers whose title is module-derived rather than
+   * content (objectives, assignments, scripts, resources) and every kind with
+   * no subject field at all (qa, currentEvents) - the Subject field is a
+   * strict SUBSET of what Save edit covers, not its equal, the same "subset,
+   * never equality" shape docs/announcement-preview-edit-before-post-
+   * acceptance-criteria.md AC 3a draws between the subject flag and
+   * `TITLED_GENERIC_KINDS` itself.
+   *
+   * Declared `reversible-write` tier on its one control (`generateSaveEdit`)
+   * below: a real write (persists a new `generated_artifacts` version), but
+   * SCOPED to one artifact and REVERSIBLE (a new version, never an overwrite
+   * of anything already posted) - the same distinction this file's own header
+   * comment draws between the ten Generate kind buttons and every fan-out
+   * write in this bar, and precisely why declaring it here cannot by itself
+   * raise `generateGroup`'s derived tier above what the kind buttons already
+   * put it at (see bulkBarGroups.test.ts's own theorem pinning that).
+   */
+  generateSaveEditReachable: boolean;
+  /**
    * Whether the command interface's proposal review modal is currently
    * open (docs/llm-command-interface-acceptance-criteria.md section 10,
    * G7) - the exact same shape as `carryReviewOpen` above, and it exists
@@ -632,6 +694,27 @@ const MINIMAL_AUDIT_FACTS: BulkBarFacts = {
   // then. Setting either true here would make I3 demand `defaultOpen: true`
   // for a tier neither group reaches until a modal opens.
   generatePostReachable: false,
+  // False for the same reason `generatePostReachable` immediately above is:
+  // no preview is mounted at this minimal snapshot, so the Subject field's
+  // one condition beyond "the modal is open" - the previewed kind's title
+  // being real content - is not yet reachable either. Its control is
+  // declared `read-only`, so this default does not itself change this
+  // group's I3/I5 posture (the fan-out write remains `generatePostToCanvas`
+  // alone), but it is set to match "just barely visible, nothing extra
+  // toggled on" the same way every other modal-hosted fact here is.
+  generateSubjectEditable: false,
+  // False for the same reason `generatePostReachable`/`generateSubjectEditable`
+  // immediately above are: no preview is mounted at this minimal snapshot, so
+  // `generateSaveEdit`'s one condition beyond "the modal is open" - the
+  // previewed kind supporting text edit - is not yet reachable either. Its
+  // control is declared `reversible-write`, the same tier the ten kind
+  // buttons already sit at under this minimal snapshot, so this default does
+  // not itself change this group's I3/I5 posture (the group is already
+  // "more than read-only the moment it becomes visible" from the kind
+  // buttons alone, and the fan-out write remains `generatePostToCanvas`/
+  // `generatePostConfirm`) - it is set to match "just barely visible, nothing
+  // extra toggled on" the same way every other modal-hosted fact here is.
+  generateSaveEditReachable: false,
   // False for the same reason `carryReviewOpen` is: the proposal review
   // modal is not open the moment the command interface group first becomes
   // visible, so `commandApplyButton` is not yet a visible member and this

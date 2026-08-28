@@ -39,7 +39,16 @@ const GENERATE_START = "const generate = (kindId: GenerationKindId) => {";
 const CLOSE_PREVIEW_START = "const closePreview = () => {";
 const SELECT_VERSION_START = "const selectVersion = (version: number) => {";
 const REFINE_START = "const refine = () => {";
-const SAVE_EDIT_START = "const saveEdit = (text: string) => {";
+// Anchored on the DECLARATION, not on the parameter list. This marker used to
+// spell out `(text: string) => {` in full, which made it break the moment
+// `saveEdit` grew its second parameter (the edited announcement subject) -
+// and because sliceBetween throws on a missing anchor, that took the whole
+// file down with it rather than failing one assertion. Pinning the parameter
+// spelling was exactly the over-specification this file's own header warns
+// against two paragraphs above ("Pin the fact, never the prose that happens
+// to sit next to it"); the fact being anchored is that `saveEdit` is declared
+// here and that `post` follows it, neither of which depends on its arity.
+const SAVE_EDIT_START = "const saveEdit = (";
 const POST_START = "const post = () => {";
 
 /**

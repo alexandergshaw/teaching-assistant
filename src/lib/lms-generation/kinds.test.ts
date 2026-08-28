@@ -6,6 +6,8 @@ import {
   GENERATION_KIND_CONFIGS,
   NON_FAMILY_KIND_IDS,
   kindDeliveredAloud,
+  kindTitleIsContent,
+  kindPostsImmediately,
   qaKindConfig,
   currentEventsKindConfig,
   decksKindConfig,
@@ -240,6 +242,60 @@ describe("T1: deliveredAloud / kindDeliveredAloud", () => {
 
   it("scriptsKindConfig declares deliveredAloud: true", () => {
     expect(scriptsKindConfig.deliveredAloud).toBe(true);
+  });
+});
+
+describe("titleIsContent / kindTitleIsContent / kindPostsImmediately", () => {
+  // SABOTAGE TARGET: setting titleIsContent: false explicitly on any config
+  // that does not opt in, instead of leaving it absent, must fail this test -
+  // same discipline as deliveredAloud's own canary above.
+  it("titleIsContent is absent (not false) on every config that does not opt in", () => {
+    for (const id of GENERATION_KIND_IDS) {
+      if (GENERATION_KIND_CONFIGS[id].titleIsContent === true) continue;
+      expect(GENERATION_KIND_CONFIGS[id].titleIsContent).toBeUndefined();
+    }
+  });
+
+  // Non-vacuity: without this, the sweep above would pass trivially if
+  // titleIsContent were deleted from every config, or if it were never set
+  // anywhere at all.
+  it("at least one kind sets titleIsContent, and at least one does not", () => {
+    const withFlag = GENERATION_KIND_IDS.filter((id) => GENERATION_KIND_CONFIGS[id].titleIsContent === true);
+    const withoutFlag = GENERATION_KIND_IDS.filter((id) => GENERATION_KIND_CONFIGS[id].titleIsContent !== true);
+    expect(withFlag.length).toBeGreaterThan(0);
+    expect(withoutFlag.length).toBeGreaterThan(0);
+  });
+
+  // kindTitleIsContent must DERIVE from the config, not hardcode a literal id
+  // list - proven by reading titleIsContent off every config and comparing
+  // the predicate's result to that, rather than to "announcements" (which
+  // would have to be edited the moment introDiscussion opts in).
+  it("kindTitleIsContent agrees with the config's own titleIsContent field for every id", () => {
+    for (const id of GENERATION_KIND_IDS) {
+      expect(kindTitleIsContent(id)).toBe(GENERATION_KIND_CONFIGS[id].titleIsContent === true);
+    }
+  });
+
+  // kindPostsImmediately must derive from commitMeta?.publishedOnCreation,
+  // the honest source of this fact (see that field's own doc comment,
+  // kinds.ts) - checked for all ten kinds, including the "save-version" kinds
+  // whose commitMeta is undefined altogether.
+  it("kindPostsImmediately agrees with commitMeta?.publishedOnCreation for every id", () => {
+    for (const id of GENERATION_KIND_IDS) {
+      expect(kindPostsImmediately(id)).toBe(GENERATION_KIND_CONFIGS[id].commitMeta?.publishedOnCreation === true);
+    }
+  });
+
+  // Non-vacuity for kindPostsImmediately: announcements is the one kind that
+  // posts immediately today, and most kinds do not - without this, a
+  // hardcoded `() => false` would still pass the agreement check above only
+  // if every config's publishedOnCreation happened to be falsy, which is
+  // true today but is not what the agreement test is meant to prove alone.
+  it("at least one kind posts immediately, and at least one does not", () => {
+    const immediate = GENERATION_KIND_IDS.filter((id) => kindPostsImmediately(id));
+    const notImmediate = GENERATION_KIND_IDS.filter((id) => !kindPostsImmediately(id));
+    expect(immediate.length).toBeGreaterThan(0);
+    expect(notImmediate.length).toBeGreaterThan(0);
   });
 });
 
@@ -633,6 +689,10 @@ describe("announcementsKindConfig", () => {
   it("renderStructured is undefined - title and message already map 1:1 onto the artifact row's own columns", () => {
     expect(announcementsKindConfig.renderStructured).toBeUndefined();
   });
+
+  it("titleIsContent is true - the Subject line is instructor-authored, not a derived label", () => {
+    expect(announcementsKindConfig.titleIsContent).toBe(true);
+  });
 });
 
 describe("scriptsKindConfig", () => {
@@ -786,6 +846,10 @@ describe("introDiscussionKindConfig", () => {
 
   it("deliveredAloud is absent - a discussion prompt is posted for students to read, never read aloud on camera", () => {
     expect(introDiscussionKindConfig.deliveredAloud).toBeUndefined();
+  });
+
+  it("titleIsContent is absent - not part of this chunk, despite sharing announcements' {title, message} shape", () => {
+    expect(introDiscussionKindConfig.titleIsContent).toBeUndefined();
   });
 
   // AC7/W1: the generated-content shape has NO pointsPossible field. Points

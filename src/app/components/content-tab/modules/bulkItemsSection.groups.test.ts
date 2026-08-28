@@ -89,6 +89,18 @@ function itemsSelectedFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts
     creatableGapsCount: 0,
     carryReviewOpen: false,
     generatePostReachable: false,
+    // docs\announcement-preview-edit-before-post-acceptance-criteria.md (AC
+    // 24): the fact gating the preview modal's editable Subject field. This
+    // fixture builds a FULL BulkBarFacts by hand, so every field added to
+    // that interface has to be added here too - false is the honest default
+    // for a fixture with no preview modal open.
+    generateSubjectEditable: false,
+    // docs/announcement-preview-edit-before-post-acceptance-criteria.md,
+    // "Adjacent defects" section: the fact gating the preview modal's
+    // Save-edit control. Same posture as generateSubjectEditable immediately
+    // above - false is the honest default for a fixture with no preview
+    // modal open.
+    generateSaveEditReachable: false,
     // docs/llm-command-interface-acceptance-criteria.md section 10 (G7): the
     // one field this chunk added to BulkBarFacts - see that section's own
     // commandInterfaceGroup comment in bulkBarGroupCatalog.ts.

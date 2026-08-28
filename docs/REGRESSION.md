@@ -34358,3 +34358,169 @@ change. Every pinned source assertion survived verbatim because MUI accepts
 the same JSX prop text, which is evidence the migration was behaviour-
 preserving but not evidence it looks or behaves right. **A manual keyboard
 and screen-reader pass on the converted controls is still outstanding.**
+
+## 365. The announcement bulk action reviews and edits before it reaches Canvas - and the three ways it did not
+
+The owner's report (2026-08-28): *"i need a way for the announcement bulk
+action on the modules view to produce a preview/edit modal before posting the
+announcement to canvas"*. See
+docs/announcement-preview-edit-before-post-acceptance-criteria.md.
+
+**MOST OF IT ALREADY EXISTED, WHICH REFRAMED THE JOB.** The "Announcements"
+kind button already opened `GeneratedPreviewModal` with an Edit/Preview toggle,
+a real textarea, "Save edit" persisting a new artifact version, LLM refine, a
+version picker and a "Post to Canvas" button. The request was not "build the
+modal". Four review passes (architect, UX, data-path, adversarial) found what
+actually made it read as absent, including one live defect nobody had reported.
+
+1. **THE SUBJECT WAS INVISIBLE AND UNEDITABLE.** A Canvas announcement's
+   subject is `artifact.title`, set once at generate time by the model,
+   deliberately not rendered by the kind's `render`, and carried forward
+   verbatim by BOTH edit paths. It reached the screen only incidentally, as the
+   modal's own `<h3>` and in version-picker labels. Half of what students
+   receive could not be seen, let alone changed.
+
+2. **AN UNSAVED EDIT WAS SILENTLY NOT POSTED - a live defect, found by the
+   data pass, not by the report.** `post()` never read the modal draft: it
+   found the row by `selectedVersion` and sent only `artifact.id`, while the
+   modal rendered `draft`. Type a correction, skip "Save edit", press "Post to
+   Canvas", and Canvas received the OLD text while the corrected text stayed on
+   screen. The two existing work-loss guards did not catch it - `handleDismiss`
+   and `handleSelectVersion` both consult `dirty`; the Post button did not.
+   The same held after a FAILED save, where the draft legitimately survives.
+   Fixed by blocking the post while dirty, with an on-screen reason.
+
+3. **THE POST COMMITTED ON THE FIRST CLICK AND CANNOT BE UNDONE.**
+   `publishedOnCreation: true` is honest for this kind - Canvas has no
+   unpublished state for an announcement. The catalog's own entry already said
+   so: tier `fan-out-write`, chosen because "this one commits on its first
+   click". Now a two-step confirm, gated on `kindPostsImmediately`
+   (`commitMeta.publishedOnCreation`), so only announcements gain it and every
+   other save-and-post kind - all of which create UNPUBLISHED objects - keeps
+   single-click posting.
+
+4. **THE ARM INVALIDATES BY CONSTRUCTION, AND THE OBVIOUS REUSE WAS WRONG.**
+   `confirmArming.ts`'s MODEL is reused and `isConfirmArmed` verbatim, but
+   `selectionSignature` deliberately is NOT: it SORTS its inputs and joins with
+   a single space, correct for an order-independent set of opaque ids and wrong
+   for an ordered tuple - sorting scrambles field identity and a space join
+   lets a field containing a space collide across a boundary, so an arm could
+   survive an edit that should have killed it. The AC said to reuse it; the UX
+   pass caught that. `JSON.stringify` of an ordered array instead, with a
+   collision test as the sabotage target.
+
+5. **THE SIGNATURE EXCLUDES THE SUBJECT AND BODY, DELIBERATELY.**
+   `generated_artifacts` is append-only for content, so an `artifactId` names
+   an immutable (title, text) pair forever: signing the text is redundant, and
+   the redundancy is not harmless - it invites the reader to think the arm
+   tracks the on-screen draft, which is exactly what check 6 forbids. What
+   covers an unsaved edit is the dirty block (2), not the signature. Keyed on
+   `id` rather than `version`, because `version` is scoped to (course, kind)
+   while a successful save replaces `preview` wholesale.
+
+6. **THE CONFIRM QUOTES THE SAVED VERSION, NEVER THE DRAFT.** It reads
+   `selectedArtifact`, the same row the post will re-read from the DB by id. A
+   panel rendered from draft state could disagree with what gets posted, which
+   would make the whole confirm a lie. The blank case is handled too: a legacy
+   null-title row shows `kindLabel`, because that is literally what
+   `(artifact.title ?? "").trim() || config.label` will send.
+
+7. **A SUCCESSFUL POST MUST EXPLICITLY DISARM - the one case the signature
+   model does not cover itself.** `post()` does not close the modal and a
+   successful write is not a content change, so the signature stays valid and
+   the arm would survive: one more click would post a SECOND identical
+   announcement. Cleared in the handler, before committing, pinned by a test
+   asserting the disarm index precedes the commit index.
+
+8. **THE RESEED HAD TO GROW A SECOND FIELD IN ONE `if`, NOT TWO.** Saving with
+   only the subject changed produces two versions with IDENTICAL text and
+   different titles - so a text-only reseed trigger would leave the subject
+   field showing the other version's title. That is entry 312 check 7's
+   stale-draft failure reached through a door check 7 never had. One block
+   resets both drafts plus `discardConfirm`/`pendingVersion`; two independent
+   `if`s would leave a frame where subject and body came from different
+   versions. Still a during-render reseed, never an effect (312 check 7).
+
+9. **THE SUBSET INVARIANT IS A SUBSET, NOT AN EQUALITY - the AC said equality
+   and was wrong.** `TITLED_GENERIC_KINDS` holds six kinds, four of whose
+   titles are DERIVED at generate time from a module label
+   (`${moduleLabel} Learning Resources`). Asserting equality would have grown a
+   Subject box on every one of them. Every kind with `titleIsContent` must be
+   IN that list; never the converse. The canary is BEHAVIOURAL - the list is
+   module-private and cannot be exported from a `"use server"` file - so it
+   drives the action and asserts the persisted title, and fails naming the
+   kind. Sabotage-checked by removing "announcements" from the list, which
+   reproduces the exact historical defect entry 310 records.
+
+10. **A BLANK SUBJECT IS REFUSED ONLY WHEN ONE IS SUPPLIED.** An unqualified
+    refusal would have broken legacy rows and every non-titled kind, since
+    today's carry-forward legitimately writes `null`. Absent stays
+    byte-identical, including the `null`; supplied-and-blank is refused at the
+    action. The guard belongs there because `lms-generation.ts:846` silently
+    substitutes `config.label`, making `createAnnouncement`'s own blank-title
+    rejection unreachable.
+
+11. **THE VERIFICATION PASS FOUND THAT THE SHARPEST REQUIREMENT'S TEST WAS A
+    TAUTOLOGY.** `mayPostCommit` was extracted, exported and unit-tested by a
+    test named for this feature's dirty-block - and imported by NOTHING. The
+    behaviour was correct (the button is replaced by a hint while dirty, so no
+    click path exists), but the test could not fail for any change to the
+    shipped path, and two comments asserted the dead function was the live
+    guard. Now consulted in the post handler as a second, non-render-level
+    check, the same defense-in-depth posture the hook already takes.
+
+12. **BOTH NEW CAPABILITIES COULD HAVE BEEN DELETED WITH THE SUITE GREEN.**
+    The first round's assertions only checked that the source CONTAINS
+    `kindTitleIsContent(preview.kindId)` - which survives deleting the entire
+    Subject field, because two other expressions still read it. A grep for
+    every literal in the new markup returned zero matches across all test
+    files. This is entry 312 check 12's failure mode, and neither capability
+    adds a prop (so `CAPABILITIES` could not take an entry) - solved the way
+    the teleprompter chunk solved it, with dedicated per-marker assertions,
+    each verified to redden when its markup is deleted.
+
+13. **AN ARMED CONFIRM COULD BECOME UNCANCELLABLE.** Arm on a clean editor,
+    then type one character: the signature correctly does not disarm on text,
+    but both Cancel and the post button sat inside the other arm of the
+    dirty ternary, leaving the consequence panel on screen with no control to
+    dismiss it. Cancel hoisted so it renders in both arms.
+
+14. **TWO ADJACENT DEFECTS THE DIFF WOULD OTHERWISE HAVE BLESSED.**
+    `Save edit` creates a `generated_artifacts` version and was declared
+    NOWHERE in the bulk-bar catalog - and the first round added comments
+    CITING that gap as a reason not to fix it, which is precisely the "green
+    check on an unexamined path" `generatePostToCanvas`'s own comment warns
+    about. Now declared `reversible-write` on its own derived fact. And
+    Regenerate still bypassed the unsaved-work guard that Close and
+    version-switch both route through - pre-existing, but made easier to hit
+    by a Subject field that was disabled only on `savingEdit`, not on `busy`.
+    Both closed.
+
+15. **THE TIER RATIONALE THIS CHANGE MADE FALSE WAS RE-DERIVED, NOT LEFT
+    STANDING.** `generatePostToCanvas` justified `fan-out-write` over
+    `destructive` because "this one commits on its first click". That sentence
+    is now untrue. The tier is unchanged - an unrecallable CREATE, not a
+    delete - but the reasoning was rewritten, and the sabotage test that blinds
+    it was extended to blind BOTH write controls, with a companion test proving
+    blinding only one does NOT reproduce the defect. Without that, deleting
+    `generatePostToCanvas` alone would no longer have reddened the theorem.
+
+**Limits.** vitest here is node-env and collects only `src/**/*.test.ts`, so no
+component is ever rendered: the Subject field, the confirm panel, focus
+behaviour, `role="status"`, `aria-describedby` and the Escape ladder are
+verified by READING and by source-text assertions only. THE CENTRAL SAFETY
+PROPERTY - that an instructor cannot post past an unsaved edit in a real
+browser - is not proven by the suite; what is proven is that the render-level
+block, the second `mayPostCommit` guard and the arm signature are all wired.
+Three pure modules (`generatedPreviewDrafts.ts`, `postConfirmArming.ts`, plus
+the reused `confirmArming.ts`) were extracted precisely so the reseed, dirty
+and arm decisions ARE genuinely unit-testable in node rather than grepped.
+Nothing here has been exercised against a live Canvas or Supabase.
+`delayed_post_at` scheduling is deliberately out of scope: `createAnnouncement`
+accepts it, but no hop on this path carries it, and threading it would widen
+the writer interface plus three more files.
+`bulkBarGroupCatalog.ts` (1081 -> 1228) and `bulkBarGroups.test.ts`
+(1097 -> 1218) were already over the 1000-line ceiling before this chunk and
+are further over after it - recorded rather than quietly carried; splitting
+`generateGroup` out is a separate, behaviour-neutral structural chunk.
+`useLmsGeneration.ts` went 998 -> 969 via a clean download-hook extraction.

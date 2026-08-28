@@ -413,6 +413,22 @@ export interface SaveEditedGeneratedArtifactInput {
    * same carry-forward rule (TITLED_GENERIC_KINDS, above), same trusted
    * client-supplied value. */
   currentTitle?: string | null;
+  /** B4: the instructor's hand-edited SUBJECT (docs/announcement-preview-
+   * edit-before-post-acceptance-criteria.md), for the kinds whose title is
+   * real content the instructor owns rather than a label derived at generate
+   * time - `kindTitleIsContent` (kinds.ts) is the declarative flag; today
+   * only "announcements" sets it. Optional and additive: an absent `title`
+   * must leave today's `currentTitle` carry-forward byte-identical (AC B4's
+   * own backward-compatibility clause), so every caller that predates this
+   * field - including the TITLED_GENERIC_KINDS canary below, which drives
+   * every text-editable kind through this action with only `currentTitle` -
+   * keeps working unchanged. When supplied, it wins over `currentTitle` for
+   * ANY kind in TITLED_GENERIC_KINDS, not only the ones with the UI flag set
+   * today: the modal only ever sends it for a kind whose config offers the
+   * field, but this action does not re-derive that gate itself (AC A3's
+   * subset invariant already guarantees TITLED_GENERIC_KINDS is a superset of
+   * every kind that could send one). */
+  title?: string;
 }
 
 export interface SaveEditedGeneratedArtifactSuccess {
@@ -470,6 +486,24 @@ export async function saveEditedGeneratedArtifactAction(
     const text = input.text.trim();
     if (!text) return { error: "There is no text to save." };
 
+    // B5: refuse a blank/whitespace-only SUPPLIED title, and ONLY a supplied
+    // one - never an absent one. Why this guard lives here and not on the
+    // Canvas write itself: postGeneratedArtifactAction resolves a blank
+    // title to the literal "Announcement" with no warning
+    // (`(artifact.title ?? "").trim() || config.label`, lms-generation.ts),
+    // so createAnnouncement's own blank-title rejection (announcements.ts)
+    // never fires - the bad value already looks like a normal one by the
+    // time it gets there. An absent `title` must NOT trip this: it means
+    // "no subject edit was made this save", and today's carry-forward
+    // legitimately writes `null` for a version that never had a title
+    // (`{ title: input.currentTitle ?? null }`, below) - an unqualified
+    // guard here would refuse every legacy row and every non-titled kind
+    // that saves through this same action.
+    const editedTitle = input.title === undefined ? undefined : input.title.trim();
+    if (editedTitle !== undefined && !editedTitle) {
+      return { error: "There is no subject to save." };
+    }
+
     const resolved = await resolveGenerationCourseRow(input.courseUrl, input.courseId, input.acronym);
     if ("error" in resolved) {
       return isCourseNotLinkedMessage(resolved.error)
@@ -478,7 +512,18 @@ export async function saveEditedGeneratedArtifactAction(
     }
     const course = resolved.course;
 
-    const carriedTitle = TITLED_GENERIC_KINDS.includes(input.kind) ? { title: input.currentTitle ?? null } : {};
+    // B4: an edited subject wins over the carried-forward `currentTitle` when
+    // one is supplied; an ABSENT `title` leaves today's exact behaviour -
+    // including writing `null` when `currentTitle` is itself undefined -
+    // byte-identical. This resolution MUST stay inside the
+    // TITLED_GENERIC_KINDS true-branch: the false branch's `{}` (no `title`
+    // key at all) is load-bearing for "qa"/"currentEvents", whose existing
+    // tests assert `"title" in input` is false - moving the edited-title
+    // check outside this branch would write a title for kinds that must
+    // never have one.
+    const carriedTitle = TITLED_GENERIC_KINDS.includes(input.kind)
+      ? { title: editedTitle !== undefined ? editedTitle : input.currentTitle ?? null }
+      : {};
 
     const supabase = createServiceClient();
     const artifact = await saveGeneratedArtifactVersion(supabase, user.id, {

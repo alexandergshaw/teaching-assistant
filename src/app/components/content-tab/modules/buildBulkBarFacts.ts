@@ -6,6 +6,7 @@ import type { UseBulkModuleActionsReturn } from "./useBulkModuleActions";
 import type { UseRubricsReturn } from "./useRubrics";
 import type { UseLmsGenerationReturn } from "./lmsGenerationTypes";
 import type { BulkBarFacts } from "./bulkBarGroups";
+import { kindSupportsTextEdit, kindTitleIsContent } from "@/lib/lms-generation/kinds";
 
 export interface BuildBulkBarFactsArgs {
   selection: UseModuleSelectionReturn;
@@ -64,6 +65,36 @@ function generatePostReachableFrom(lmsGeneration: UseLmsGenerationReturn): boole
 }
 
 /**
+ * Whether the preview modal's Subject field is offered for the kind
+ * currently previewed. Copies `generatePostReachableFrom`'s own shape and
+ * rationale immediately above: every input this needs is already on the
+ * `lmsGeneration` hook this function receives whole, so there is no seam for
+ * a caller to get wrong, and the two conditions cannot drift apart from the
+ * modal's own render by being restated at a call site. See
+ * BulkBarFacts.generateSubjectEditable for why it is `kindTitleIsContent`
+ * and never a hardcoded kind id.
+ */
+function generateSubjectEditableFrom(lmsGeneration: UseLmsGenerationReturn): boolean {
+  return lmsGeneration.preview !== null && kindTitleIsContent(lmsGeneration.preview.kindId);
+}
+
+/**
+ * Whether the preview modal's "Save edit" write is reachable for the kind
+ * currently previewed. Copies `generatePostReachableFrom`'s and
+ * `generateSubjectEditableFrom`'s own shape immediately above, for the same
+ * reason: every input this needs is already on the `lmsGeneration` hook this
+ * function receives whole, so there is no seam for a caller to get wrong, and
+ * the two conditions cannot drift apart from the modal's own render by being
+ * restated at a call site. See BulkBarFacts.generateSaveEditReachable for why
+ * it is `kindSupportsTextEdit` and never a hardcoded kind id, and for why it
+ * is a strictly broader fact than `generateSubjectEditable`, not the same
+ * one.
+ */
+function generateSaveEditReachableFrom(lmsGeneration: UseLmsGenerationReturn): boolean {
+  return lmsGeneration.preview !== null && kindSupportsTextEdit(lmsGeneration.preview.kindId);
+}
+
+/**
  * Builds the bulk bar's own consequence/visibility facts (BulkBarFacts,
  * docs/bulk-bar-reorganization-acceptance-criteria.md section 3b/D1) from
  * state ModulesView already holds. Extracted structurally out of
@@ -119,6 +150,8 @@ export function buildBulkBarFacts({
     creatableGapsCount: visualizerCoverage.coverage ? conceptsForCreate(visualizerCoverage.coverage).length : 0,
     carryReviewOpen,
     generatePostReachable: generatePostReachableFrom(lmsGeneration),
+    generateSubjectEditable: generateSubjectEditableFrom(lmsGeneration),
+    generateSaveEditReachable: generateSaveEditReachableFrom(lmsGeneration),
     commandProposalOpen,
     releaseReviewOpen,
   };

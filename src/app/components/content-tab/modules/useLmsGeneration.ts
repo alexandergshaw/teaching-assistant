@@ -107,12 +107,6 @@ import type { ModuleTarget } from "@/lib/lms-generation/commit-plan";
 // See lmsGenerationDiscussion.ts's own header comment (Findings 1/2/4).
 import { discussionCheckpointsKey, resolveDiscussionDeadlinesForClientPost } from "./lmsGenerationDiscussion";
 import { resolveDeckTemplateId, resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
-import {
-  artifactDownloadFormats,
-  artifactDownloadFilename,
-  artifactDownloadFormatLabel,
-  buildArtifactDownloadBlob,
-} from "@/lib/lms-generation/artifact-download";
 import type { ArtifactDownloadFormat } from "@/lib/lms-generation/artifact-download";
 import { DECK_PRESETS } from "@/lib/decks/presets";
 import type { DeckTemplate } from "@/lib/decks/types";
@@ -186,6 +180,11 @@ import {
   deckTemplateOptionsFrom,
   type DeckTemplateOption,
 } from "./lmsGenerationDeckHelpers";
+// The artifact-download concern (selectedPreviewVersion/downloadFormats/
+// download, plus its own `downloading` state) - a STRUCTURAL split kept out
+// of this file to stay under the repo's 1000-line ceiling. See that file's
+// own header comment for why this is a safe, behaviour-free extraction.
+import { useLmsGenerationDownload } from "./useLmsGenerationDownload";
 // GenerationPreviewState and UseLmsGenerationReturn - this hook's two public
 // shape types - live in lmsGenerationTypes.ts (a STRUCTURAL split, same
 // reasoning as every other sibling import above: keep this file under the
@@ -361,7 +360,6 @@ export function useLmsGeneration(
   const [preview, setPreview] = useState<GenerationPreviewState | null>(null);
   const [instructions, setInstructions] = useState("");
   const [refining, setRefining] = useState(false);
-  const [downloading, setDownloading] = useState<ArtifactDownloadFormat | null>(null);
   const [posting, setPosting] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   // AC10: deliberately no `ta-` localStorage key here - see
@@ -741,8 +739,17 @@ export function useLmsGeneration(
    * below) are both derived from `preview` on every render, so replacing it
    * is what makes the modal show the new version with no second reload
    * anywhere in this file.
+   *
+   * `title` (announcement-preview-edit-before-post AC B6): an optional
+   * edited title, threaded through to saveEditedGeneratedArtifactAction's own
+   * `title` field alongside `text` - the two save TOGETHER in this ONE call,
+   * producing ONE new version, never a second call/version for the title
+   * alone. Undefined when the caller has no separate title edit to send (a
+   * kind whose modal offers no title field, or an unchanged title); the
+   * action falls back to `currentTitle` below in that case, exactly as it
+   * always has.
    */
-  const saveEdit = (text: string) => {
+  const saveEdit = (text: string, title?: string) => {
     if (!preview || !canStartGeneration(busy) || !kindSupportsTextEdit(preview.kindId)) return;
     // E5: refused here too, not only via the Save button's own disabled
     // state - the same defense-in-depth posture generate/refine already
@@ -767,6 +774,9 @@ export function useLmsGeneration(
           acronym,
           kind: kindId,
           text,
+          title,
+          // The fallback for when no edited title is supplied above - kept
+          // exactly as before this change (B6).
           currentTitle: currentVersion?.title,
         })
       );
@@ -907,50 +917,11 @@ export function useLmsGeneration(
     setPostModuleChoice(v);
   };
 
-  // The version the preview modal currently has ON SCREEN - AC 1 of
-  // docs/generated-artifact-download-acceptance-criteria.md: "not the newest
-  // version, not the current-marked one", whatever `selectedVersion` points
-  // at. Shared by `downloadFormats` (below) and `download` so both always
-  // agree on which row is being offered/built - mirrors `refine`'s own
-  // `currentVersion` lookup a few lines up.
-  const selectedPreviewVersion = preview?.versions.find((v) => v.version === preview.selectedVersion);
-
-  const downloadFormats = selectedPreviewVersion ? artifactDownloadFormats(selectedPreviewVersion) : [];
-
-  const download = (format: ArtifactDownloadFormat) => {
-    // Three independent no-op guards (AC 7): no preview to download from, a
-    // generate/refine already running, or a download already in flight -
-    // matches this hook's other entry points' own upfront-guard style
-    // (generate/refine above).
-    if (!preview || busy !== "" || downloading !== null) return;
-    const artifact = selectedPreviewVersion;
-    // Defensive only: downloadFormats/artifactDownloadFormats would already
-    // have excluded `format` from what the UI offers if this were false, so
-    // this branch should be unreachable in practice.
-    if (!artifact) return;
-    const { kindLabel } = preview;
-
-    void (async () => {
-      setDownloading(format);
-      try {
-        const blob = await buildArtifactDownloadBlob(artifact, kindLabel, format);
-        const filename = artifactDownloadFilename(artifact, kindLabel, format);
-        triggerFileDownload(blob, filename);
-      } catch (e) {
-        // Surfaces through the SAME setNote channel generate/refine already
-        // use (AC 6) - never an unhandled rejection, and the preview modal
-        // is never closed here, so the instructor's place in the version
-        // history is not lost just because a download failed.
-        const message = e instanceof Error ? e.message : String(e);
-        setNote({
-          kind: "error",
-          text: `Could not build the ${artifactDownloadFormatLabel(format)} download: ${message}`,
-        });
-      } finally {
-        setDownloading(null);
-      }
-    })();
-  };
+  // The artifact-download concern - see useLmsGenerationDownload.ts's own
+  // header comment for why this split is safe (a self-contained, read-only
+  // concern the generation lifecycle never touches) and why it takes exactly
+  // these three arguments.
+  const { downloadFormats, downloading, download } = useLmsGenerationDownload(preview, busy, setNote);
 
   return {
     busy,

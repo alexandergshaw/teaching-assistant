@@ -91,7 +91,7 @@ import { useState, type RefObject } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../../page.module.css";
 import type { ArtifactDownloadFormat, GenerationBusy, GenerationPreviewState, PostModuleOption } from "./useLmsGeneration";
-import { NEW_MODULE_TARGET_VALUE, previewMetaText, resolvePostModuleTarget, versionOptionLabel } from "./useLmsGeneration";
+import { previewMetaText, versionOptionLabel } from "./useLmsGeneration";
 import { artifactDownloadFormatLabel } from "@/lib/lms-generation/artifact-download";
 // previewHeaderTitle is pulled directly from its own module rather than
 // through the useLmsGeneration barrel - it is a defect-fix addition scoped
@@ -101,6 +101,13 @@ import { artifactDownloadFormatLabel } from "@/lib/lms-generation/artifact-downl
 // already reached the same direct way, so this is not a new import shape.
 import { previewHeaderTitle } from "./lmsGenerationNotes";
 import { ModalShell } from "../../ui/ModalShell";
+// The "Post to Canvas" footer - pure structural extraction, see
+// GeneratedPostSection.tsx's own header comment. GeneratedPreviewModalProps
+// below is unchanged by the split: every post-related prop it declared
+// still lives here and is still bound by ModulesView.tsx exactly as before,
+// just forwarded one level down into the extracted component instead of
+// read directly in this file's own JSX.
+import { GeneratedPostSection } from "./GeneratedPostSection";
 // T1 (docs/teleprompter-mode-acceptance-criteria.md): the teleprompter entry
 // point is gated on `kindDeliveredAloud`, the same declarative-flag pattern
 // `kindOffersPost` already reads `commitMode` through - NEVER a hardcoded
@@ -109,6 +116,26 @@ import { ModalShell } from "../../ui/ModalShell";
 // kinds.ts config, with no edit here.
 import { kindDeliveredAloud } from "@/lib/lms-generation/kinds";
 import { TeleprompterPanel } from "./TeleprompterPanel";
+// `kindTitleIsContent` and `kindPostsImmediately` (docs/announcement-
+// preview-edit-before-post-acceptance-criteria.md, AC A2/C9) gate the new
+// Subject field and the post confirm step the same declarative way - NEVER
+// a hardcoded `preview.kindId === "announcements"` comparison at this call
+// site, so a future kind opts in purely by declaring `titleIsContent`/
+// `commitMeta.publishedOnCreation` on its own kinds.ts config. Kept as a
+// SEPARATE import statement from `kindDeliveredAloud` above (rather than one
+// combined `{ kindDeliveredAloud, kindPostsImmediately, kindTitleIsContent }`
+// braced group): teleprompter.wiring.test.ts pins that import as source
+// text, `{ kindDeliveredAloud }` alone, so combining the braces would break
+// an existing, unrelated test for a purely cosmetic import merge.
+import { kindPostsImmediately, kindTitleIsContent } from "@/lib/lms-generation/kinds";
+// F21: the reseed/dirty predicates and the post-confirm arm signature are
+// pure, dependency-free modules beside this component - see their own
+// header comments for why (the same reason confirmArming.ts already is
+// one). `isConfirmArmed` is reused from confirmArming.ts VERBATIM, via
+// postConfirmArming.ts's re-export - see that module's own header comment
+// for why its OWN `selectionSignature` is not reused instead.
+import { draftsDirty, draftsNeedReseed } from "./generatedPreviewDrafts";
+import { isConfirmArmed, mayPostCommit, postArmSignature } from "./postConfirmArming";
 
 export interface GeneratedPreviewModalProps {
   busy: GenerationBusy;
@@ -179,12 +206,20 @@ export interface GeneratedPreviewModalProps {
    * forgets it degrades to "no edit control shown" rather than failing to
    * compile. */
   canEditText?: boolean;
-  /** Persist the modal's OWN local draft as a new version (E2/E3) - wired to
-   * useLmsGeneration's `saveEdit`. Called with the draft text only; never
+  /** Persist the modal's OWN local drafts as a new version (E2/E3, widened
+   * by AC B6 to carry the subject too) - wired to useLmsGeneration's
+   * `saveEdit`. Called with the draft text and, ONLY when this kind offers
+   * the subject field (`kindTitleIsContent`), the draft title too - never
    * read back from `preview` here, because the whole point of an edit is
-   * that the caller's text may already differ from what is stored. Absent
-   * or a no-op whenever `canEditText` is false. */
-  onSaveEdit?: (text: string) => void;
+   * that the caller's values may already differ from what is stored. The
+   * title argument is `undefined`, not the (possibly unchanged) draft
+   * value, whenever the subject field is not offered: `saveEdit`'s "no
+   * edited title supplied" branch keeps carrying `currentTitle` forward
+   * byte-identical (AC B4), including a legitimate `null`, and an
+   * always-supplied empty string would instead risk tripping AC B5's blank-
+   * title refusal for a kind that never offered subject editing in the
+   * first place. Absent or a no-op whenever `canEditText` is false. */
+  onSaveEdit?: (text: string, title?: string) => void;
   /** Whether a save triggered by `onSaveEdit` is in flight - drives the Save
    * button's own progress label ("Saving...") distinctly from `busy` alone,
    * the same split `refining`/`posting` already use for their own buttons. */
@@ -230,16 +265,32 @@ export function GeneratedPreviewModal({
   // result rather than a second `.find` for the title.
   const selectedArtifact = preview.versions.find((v) => v.version === preview.selectedVersion);
   const currentText = selectedArtifact?.text ?? "";
-  // DEFECT FIX: prefer the SAVED artifact's own title over the live kind
-  // label (previewHeaderTitle, ./lmsGenerationNotes - mirrors
-  // artifactDownloadFilename's precedent) so a version saved under a
-  // since-re-geared kind meaning (e.g. "scripts": "Lecture script" ->
-  // "Intro video script", artifactKind deliberately left as
-  // "lecture-script" so old versions stay reachable) keeps showing the name
-  // it was actually generated under. Falls back to `preview.kindLabel` -
-  // the ONLY thing on hand before the versions list has loaded a match, and
-  // still correct for kinds that never save a title at all.
-  const headerTitle = selectedArtifact ? previewHeaderTitle(selectedArtifact, preview.kindLabel) : preview.kindLabel;
+  // AC A1/A2 (docs/announcement-preview-edit-before-post-acceptance-
+  // criteria.md): whether this kind's `title` is real content the
+  // instructor owns, rather than a label derived at generate time from a
+  // module name - see kindTitleIsContent's own doc comment (kinds.ts) for
+  // the invariant this implies (`offersSubject` implies `canEditText`,
+  // asserted below near `saveEditDisabled`).
+  const offersSubject = kindTitleIsContent(preview.kindId);
+  const currentTitle = selectedArtifact?.title ?? "";
+  // AC 1b: THE `<h3>` MUST STOP SHOWING THE SAME STRING TWICE. Before this
+  // feature, `previewHeaderTitle` preferred `artifact.title` unconditionally
+  // (see its own doc comment, ./lmsGenerationNotes, for why - a
+  // since-re-geared kind keeping old versions' names honest), so for
+  // announcements the heading already WAS the subject. Shipping the Subject
+  // field without touching this would
+  // render the same sentence twice, six lines apart - once unlabelled as a
+  // window title, once labelled as content. When a kind offers the subject
+  // field, the heading falls back to the stable `preview.kindLabel` instead,
+  // which also makes `ModalShell`'s accessible name ("Preview of
+  // Announcements") stop silently changing on every keystroke - a
+  // deliberate, accepted trade named in the AC doc's own "Settled UX
+  // decisions" section.
+  const headerTitle = offersSubject
+    ? preview.kindLabel
+    : selectedArtifact
+      ? previewHeaderTitle(selectedArtifact, preview.kindLabel)
+      : preview.kindLabel;
 
   // E9 - THE EDIT BASELINE MOVES UNDER THIS MODAL: `currentText` above is
   // derived fresh every render from `preview`, and it moves both when the
@@ -269,12 +320,20 @@ export function GeneratedPreviewModal({
   // change that caused it.
   const [draft, setDraft] = useState(currentText);
   const [seededText, setSeededText] = useState(currentText);
+  // AC B8/B8a: the subject gets the SAME local-draft treatment as the body,
+  // seeded from and reseeded alongside it - see the reseed block below for
+  // why the two fields must be tested and reset TOGETHER rather than each
+  // getting its own independent `useState`/reseed pair.
+  const [subjectDraft, setSubjectDraft] = useState(currentTitle);
+  const [seededTitle, setSeededTitle] = useState(currentTitle);
   const [editing, setEditing] = useState(false);
   const [discardConfirm, setDiscardConfirm] = useState(false);
   // Which version the armed discard panel would switch to on confirmation;
-  // null means the deferred action is closing the modal. See
-  // handleSelectVersion below for why version-switching needs the guard too.
-  const [pendingVersion, setPendingVersion] = useState<number | null>(null);
+  // null means the deferred action is closing the modal, and "regenerate"
+  // means the deferred action is a Regenerate click - see handleSelectVersion
+  // below for why version-switching needs the guard too, and
+  // handleRegenerateClick below (defect fix) for why Regenerate does too.
+  const [pendingVersion, setPendingVersion] = useState<number | "regenerate" | null>(null);
 
   // T1/T3 (docs/teleprompter-mode-acceptance-criteria.md): teleprompter mode
   // is offered only for a kind meant to be spoken aloud, and entering/leaving
@@ -285,14 +344,62 @@ export function GeneratedPreviewModal({
   const [teleprompterOpen, setTeleprompterOpen] = useState(false);
   const offersTeleprompter = kindDeliveredAloud(preview.kindId);
 
-  if (currentText !== seededText) {
+  // AC 9-14 (docs/announcement-preview-edit-before-post-acceptance-
+  // criteria.md): the two-step "Post to Canvas" confirm, required only for a
+  // kind that posts immediately and irreversibly (kindPostsImmediately,
+  // reads commitMeta.publishedOnCreation - never a hardcoded id check; today
+  // that is announcements alone). `postArmedFor` records the SIGNATURE the
+  // confirm was armed for (postConfirmArming.ts's model, reused from
+  // confirmArming.ts) rather than a boolean reset by an effect - see that
+  // module's own header comment for why. Lives here, not inside
+  // GeneratedPostSection, specifically so `handleDismiss` below (Escape /
+  // backdrop / header Close) can disarm it directly - AC 13.
+  const [postArmedFor, setPostArmedFor] = useState<string | null>(null);
+  const offersPostConfirm = kindPostsImmediately(preview.kindId);
+  // AC 12a-sig: deliberately excludes the subject/body text - see
+  // postConfirmArming.ts's own header comment for why. `artifactId` falls
+  // back to "" only for the render before any version has loaded; a real
+  // arm can never happen against that placeholder, since the button (and
+  // therefore the very first click that could arm) is not reachable until
+  // `preview.versions` has a selected artifact to post.
+  const currentPostSignature = postArmSignature({
+    kindId: preview.kindId,
+    artifactId: selectedArtifact?.id ?? "",
+    moduleChoice: postModuleChoice,
+    newModuleName: postNewModuleName,
+  });
+  const postConfirmArmed = isConfirmArmed(postArmedFor, currentPostSignature);
+
+  // AC 8a - THE RESEED GUARD MUST TEST BOTH FIELDS IN ONE `if`. AC B7 allows
+  // saving with ONLY the subject changed, which produces two versions with
+  // IDENTICAL text and DIFFERENT titles - so a reseed trigger that compared
+  // `currentText` alone would not fire when switching between them, and the
+  // subject field would keep showing the OTHER version's title (REGRESSION
+  // entry 312 check 7's failure, reached through the picker instead of
+  // Save). `draftsNeedReseed` (generatedPreviewDrafts.ts) is the OR of both
+  // fields; this stays the ONE block that resets both drafts plus
+  // `discardConfirm`/`pendingVersion` together - never two independent
+  // `if`s, which would leave a frame where the subject and the body came
+  // from different versions (AC 6's failure mode, reached through the
+  // picker instead of through Save).
+  if (draftsNeedReseed({ text: currentText, title: currentTitle }, { text: seededText, title: seededTitle })) {
     setSeededText(currentText);
+    setSeededTitle(currentTitle);
     setDraft(currentText);
+    setSubjectDraft(currentTitle);
     setDiscardConfirm(false);
     setPendingVersion(null);
   }
 
-  const dirty = canEditText && draft !== currentText;
+  // AC B7: dirty means EITHER field changed - widened from body-only, and
+  // MUST KEEP THIS IDENTIFIER NAME (generatedPreviewModal.wiring.test.ts
+  // slices the version-switch handler and asserts it consults `dirty` by
+  // this exact spelling). Gated on `canEditText` first, same as before:
+  // a kind with no editing offered at all (decks, knowledgeChecks) is never
+  // dirty, full stop. `draftsDirty`'s own `offersSubject` gate is what keeps
+  // a title-only difference from reading as dirty for a kind that does not
+  // render an editable subject field (see that function's own doc comment).
+  const dirty = canEditText && draftsDirty({ text: draft, title: subjectDraft }, { text: currentText, title: currentTitle }, offersSubject);
   // E8: both the editor and the read-only view render the DRAFT (never
   // `currentText` directly) once editing is offered, so toggling the
   // Edit/Preview control never appears to discard an unsaved edit. A kind
@@ -322,6 +429,16 @@ export function GeneratedPreviewModal({
       setTeleprompterOpen(false);
       return;
     }
+    // AC 13: Cancel, Escape and backdrop all disarm the post confirmation
+    // and write nothing. Placed here - after the teleprompter rung, before
+    // every other branch below - so EVERY real dismiss attempt disarms,
+    // including the one that only arms the discard-changes panel below (the
+    // first attempt while dirty) rather than closing the modal outright:
+    // that panel and the post confirmation are two independent armed
+    // states, and a dirty-edit Escape must not leave a stale post arm
+    // sitting behind it once the modal is dismissed. Unconditional and
+    // idempotent - clearing an already-null arm costs nothing.
+    setPostArmedFor(null);
     if (savingEdit) return;
     if (dirty && !discardConfirm) {
       setPendingVersion(null);
@@ -362,18 +479,55 @@ export function GeneratedPreviewModal({
       onClosePreview();
       return;
     }
+    // Defect fix: the third pending-action variant (see handleRegenerateClick
+    // below) resolves the same panel to a refine instead of a version switch.
+    if (pendingVersion === "regenerate") {
+      setPendingVersion(null);
+      setDiscardConfirm(false);
+      onRefine();
+      return;
+    }
     const version = pendingVersion;
     setPendingVersion(null);
     setDiscardConfirm(false);
     onSelectVersion(version);
   };
 
+  // Defect fix: Regenerate used to bypass the unsaved-work guard outright -
+  // a click replaced `preview` (via `onRefine`'s reseed) and silently
+  // discarded whatever sat unsaved in `draft`/`subjectDraft`, the same
+  // work-loss class E10/AC6 already close for Close and a version switch.
+  // Routes through the SAME `discardConfirm`/`pendingVersion` panel as
+  // those two, rather than a fourth confirm idiom, using the third
+  // `pendingVersion` variant ("regenerate") above so the one panel can still
+  // resolve to any of the three deferred actions.
+  const handleRegenerateClick = () => {
+    if (savingEdit) return;
+    if (dirty && !discardConfirm) {
+      setPendingVersion("regenerate");
+      setDiscardConfirm(true);
+      return;
+    }
+    setDiscardConfirm(false);
+    setPendingVersion(null);
+    onRefine();
+  };
+
   const handleSaveEdit = () => {
-    onSaveEdit?.(draft);
+    // AC B6/B4: the title argument is `undefined` - not the (possibly
+    // unchanged) draft value - whenever this kind does not offer the
+    // subject field. `saveEdit`'s "no edited title supplied" branch keeps
+    // carrying `currentTitle` forward byte-identical, including a
+    // legitimate `null`; always supplying a defined string here would risk
+    // tripping AC B5's blank-title refusal for a kind that never offered
+    // subject editing (and whose `currentTitle` can legitimately be `null`,
+    // which `currentTitle` above coerces to `""` for display purposes only).
+    onSaveEdit?.(draft, offersSubject ? subjectDraft : undefined);
   };
 
   const handleRevertEdit = () => {
     setDraft(currentText);
+    setSubjectDraft(currentTitle);
     setDiscardConfirm(false);
     setPendingVersion(null);
   };
@@ -382,18 +536,53 @@ export function GeneratedPreviewModal({
   // draft) or while any generation, refine, download, post or save is
   // already in flight - reusing the same `busy`/`downloading` gates every
   // other control on this modal already uses, rather than inventing a
-  // parallel one.
-  const saveEditDisabled = busy !== "" || downloading !== null || !dirty || draft.trim() === "";
+  // parallel one. AC B5's own refusal lives at the action; this is the
+  // UI-side mirror of it (same posture as the blank-body guard immediately
+  // before it) so a doomed round-trip to the server is not the first place
+  // a blank subject is caught.
+  const saveEditDisabled =
+    busy !== "" ||
+    downloading !== null ||
+    !dirty ||
+    draft.trim() === "" ||
+    (offersSubject && subjectDraft.trim() === "");
 
-  // Disabled the same way the download buttons already are (busy or a
-  // download in flight), PLUS this control's own validation - a blank/
-  // unresolved module target (resolvePostModuleTarget, useLmsGeneration.ts)
-  // disables the button rather than letting a click surface an error note
-  // for something the instructor could see was incomplete right on screen.
-  // A "course-level" kind (postNeedsModuleTarget false - announcements
-  // today) needs no target at all, so it is always considered resolved.
-  const postControlsDisabled = busy !== "" || downloading !== null;
-  const postTargetResolved = !postNeedsModuleTarget || resolvePostModuleTarget(postModuleChoice, postNewModuleName).ok;
+  // AC 9/12d: the single click handler bound to GeneratedPostSection's post
+  // button, for a kind requiring the confirm step. A kind that does NOT
+  // require it (offersPostConfirm false) is unaffected - GeneratedPostSection
+  // calls `onPost` directly for those, exactly as before this feature.
+  //
+  // First click ARMS (records the current signature); a second, distinct
+  // click - reachable only once `postConfirmArmed` is already true, which by
+  // construction means nothing about the target has changed since arming -
+  // COMMITS. AC 12d: a successful post is explicitly disarmed HERE, before
+  // calling through, because the signature model does not cover this case by
+  // construction: `post()` does not close the modal, and the posted version
+  // is unchanged by posting it, so the signature does not invalidate itself
+  // on a successful write. Without this explicit disarm, one further click
+  // would post the SAME announcement a second time.
+  const handlePostAction = () => {
+    if (!offersPostConfirm) {
+      onPost?.();
+      return;
+    }
+    if (!postConfirmArmed) {
+      setPostArmedFor(currentPostSignature);
+      return;
+    }
+    // Defect fix: `mayPostCommit` (postConfirmArming.ts) used to be exported
+    // and unit-tested with nothing ever calling it - a second, non-render-
+    // level guard is consulted here now, the same defense-in-depth posture
+    // useLmsGeneration's own post() already takes even though the module-
+    // target picker and Post button are expected to be hidden/disabled for
+    // every reason it checks. `postDirty` (GeneratedPostSection's render-
+    // level block) is the reason a click here is not reachable while dirty
+    // in practice; this is the second, independent check that refuses the
+    // write even if that render-level guard is ever wrong.
+    if (!mayPostCommit(postUnavailableReason, dirty, postConfirmArmed)) return;
+    setPostArmedFor(null);
+    onPost?.();
+  };
 
   return (
     <ModalShell
@@ -475,7 +664,9 @@ export function GeneratedPreviewModal({
             <p style={{ margin: "0 0 8px 0", fontSize: "14px" }}>
               {pendingVersion === null
                 ? "Discard your unsaved changes and close?"
-                : `Discard your unsaved changes and switch to v${pendingVersion}?`}
+                : pendingVersion === "regenerate"
+                  ? "Discard your unsaved changes and regenerate?"
+                  : `Discard your unsaved changes and switch to v${pendingVersion}?`}
             </p>
             <div style={{ display: "flex", gap: "8px" }}>
               <Button
@@ -566,6 +757,56 @@ export function GeneratedPreviewModal({
           </p>
         )}
 
+        {/* AC A1/A1a: the Subject field, offered only when this kind's
+            title is real content the instructor owns (offersSubject,
+            derived from kindTitleIsContent - never a hardcoded id check).
+            Placement is deliberate: full width, immediately ABOVE
+            `.previewContent` and BELOW the Edit/Save-edit row above - not
+            below the body, whose `max-height: min(66vh, 620px)` scrolls, so
+            a subject placed after it could be pushed off screen and posted
+            unread; not in the header, which is "what this is / what you can
+            do with it / how to leave". ALWAYS LIVE, never gated behind the
+            Edit/Preview toggle: Save edit already renders regardless of
+            `editing`, and a one-line field has no distinct preview
+            rendering worth the two extra clicks per subject change gating
+            would cost.
+
+            INVARIANT: `offersSubject` implies `canEditText`. A kind offering
+            a live subject field but no text editing would render a field
+            with no way to save it, directly above a hint saying editing is
+            unavailable - visibly broken. True today by construction: the
+            only kind setting `titleIsContent` (announcements) also has no
+            `renderStructured`, so `kindSupportsTextEdit` - and therefore
+            `canEditText` - is true for it (kinds.ts). This branch does not
+            special-case `!canEditText` because of that invariant, not
+            because the case cannot be represented in the props. */}
+        {offersSubject && (
+          <TextField
+            fullWidth
+            size="small"
+            label="Subject"
+            value={subjectDraft}
+            // Defect fix: was `savingEdit` alone - a refine in flight
+            // (`busy`) left this field typeable while `onRefine`'s reseed
+            // was about to replace `subjectDraft` out from under whatever
+            // was typed, the same class of loss handleRegenerateClick above
+            // now guards on the Regenerate click itself.
+            disabled={savingEdit || busy !== ""}
+            onChange={(e) => {
+              setSubjectDraft(e.target.value);
+              setDiscardConfirm(false);
+              setPendingVersion(null);
+            }}
+            error={subjectDraft.trim() === ""}
+            helperText={
+              subjectDraft.trim() === ""
+                ? "Enter a subject - an announcement cannot be posted without one."
+                : "Students see this as the announcement's subject line in Canvas."
+            }
+            sx={{ mb: "0.5rem" }}
+          />
+        )}
+
         <div className={styles.previewContent}>
           {canEditText && editing ? (
             <TextField
@@ -607,7 +848,10 @@ export function GeneratedPreviewModal({
               size="small"
               variant="contained"
               disabled={busy !== "" || instructions.trim() === ""}
-              onClick={onRefine}
+              // Defect fix: was `onRefine` directly - unguarded, unlike Close
+              // and a version switch, both of which already route through
+              // the discard panel. See handleRegenerateClick's own comment.
+              onClick={handleRegenerateClick}
             >
               {refining ? "Regenerating…" : "Regenerate with these instructions"}
             </Button>
@@ -617,102 +861,51 @@ export function GeneratedPreviewModal({
           </div>
         </div>
 
-        {/* "Post to Canvas" (chunk 3b, P1/P5) - the review-then-commit
-            step for the version on screen. Shown ONLY for a
-            "save-and-post" kind (offersPost) - every other kind renders
-            nothing here, per this file's own header comment on why no
-            new modal or CSS was needed for this. Reuses the same footer
-            idiom (inline-styled divider + row) the "Ask for changes"
-            block just above already uses. */}
-        {offersPost && (
-          <div style={{ paddingTop: "0.75rem", borderTop: "1px solid var(--field-border)" }}>
-            {/* AC3/AC4 (defect fix): posting is a real Canvas write, so an
-                export selection (no live Canvas connection) shows the SAME
-                reason gateOperation(ctx, "courseWrite") already gives every
-                other gated write in this tab, instead of a control that
-                would just fail on click - never "enabled and broken". */}
-            {postUnavailableReason ? (
-              <p className={styles.fieldHint}>{postUnavailableReason}</p>
-            ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                {/* No module picker at all for a "course-level" kind
-                    (announcements) - it has no module to choose
-                    (postNeedsModuleTarget's own doc comment,
-                    useLmsGeneration.ts). */}
-                {postNeedsModuleTarget && (
-                  <>
-                    <TextField
-                      select
-                      size="small"
-                      label="Post into module"
-                      value={postModuleChoice}
-                      onChange={(e) => onPostModuleChoiceChange?.(e.target.value)}
-                      disabled={postControlsDisabled}
-                      sx={{ minWidth: 200 }}
-                    >
-                      {postModuleOptions.map((m) => (
-                        <MenuItem key={m.id} value={String(m.id)}>
-                          {m.name}
-                        </MenuItem>
-                      ))}
-                      <MenuItem value={NEW_MODULE_TARGET_VALUE}>New module…</MenuItem>
-                    </TextField>
-                    {/* AC8: presentational-only provenance hint - the
-                        instructor's own choice (via onPostModuleChoiceChange)
-                        is what actually decides the target; this span never
-                        drives anything. Plain, unassociated span - matching
-                        the sibling previewMeta span below rather than wired
-                        via aria-describedby (AC8.9).
+        {/* "Post to Canvas" footer - extracted into its own component; see
+            GeneratedPostSection.tsx's own header comment for why (the
+            offersPost gate now lives inside it), and this file's own
+            header comment for why no new modal or CSS was needed for this
+            capability in the first place.
 
-                        The third clause is why this is a RENDER-time gate and
-                        not just a flag read. `postModuleChoice` is seeded when
-                        generation STARTS, while these options come from the
-                        LIVE `modules` tree, which keeps mutating underneath an
-                        open preview (useInlineModuleEdits removes a module,
-                        useDragReorder rewrites the tree). If the seeded module
-                        is gone by the time this renders, MUI finds no matching
-                        MenuItem and draws the select BLANK - and the hint would
-                        then read "From your selection." next to an empty box,
-                        which is a lie. This changes NOTHING about what gets
-                        posted (the hint is presentational; the value itself is
-                        still whatever the hook holds), and it does not defeat
-                        AC3: AC3's case is a module with no items, or one the
-                        client tree has not expanded - such a module is still
-                        PRESENT in `modules` and therefore still an option
-                        here, so its hint still renders. */}
-                    {postTargetFromSelection &&
-                      postModuleChoice !== "" &&
-                      postModuleOptions.some((m) => String(m.id) === postModuleChoice) && (
-                        <span className={styles.previewMeta}>From your selection.</span>
-                      )}
-                    {postModuleChoice === NEW_MODULE_TARGET_VALUE && (
-                      <TextField
-                        size="small"
-                        label="New module name"
-                        value={postNewModuleName}
-                        onChange={(e) => onPostNewModuleNameChange?.(e.target.value)}
-                        disabled={postControlsDisabled}
-                      />
-                    )}
-                  </>
-                )}
-                <Button
-                  size="small"
-                  variant="contained"
-                  disabled={postControlsDisabled || !postTargetResolved}
-                  onClick={onPost}
-                >
-                  {posting ? "Posting…" : "Post to Canvas"}
-                </Button>
-                <span className={styles.previewMeta}>
-                  {postNeedsModuleTarget
-                    ? "Creates (or reuses) this version in Canvas, in the module you choose above."
-                    : "Posts this version to Canvas as a course announcement."}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+            AC 9-14: the confirm step's arm/commit decision (handlePostAction)
+            and its arm state (postArmedFor/postConfirmArmed) live in THIS
+            file, not in GeneratedPostSection - see postArmedFor's own doc
+            comment above for why (handleDismiss needs to reach it directly
+            for AC 13). GeneratedPostSection stays a renderer: it is handed
+            the already-resolved facts (whether this kind requires the
+            confirm at all, whether it is currently armed, and the exact
+            subject/body the confirm must quote per AC 11) plus one click
+            handler, rather than re-deriving any of them itself. */}
+        <GeneratedPostSection
+          busy={busy}
+          downloading={downloading}
+          offersPost={offersPost}
+          postNeedsModuleTarget={postNeedsModuleTarget}
+          postModuleOptions={postModuleOptions}
+          postModuleChoice={postModuleChoice}
+          postTargetFromSelection={postTargetFromSelection}
+          onPostModuleChoiceChange={onPostModuleChoiceChange}
+          postNewModuleName={postNewModuleName}
+          onPostNewModuleNameChange={onPostNewModuleNameChange}
+          posting={posting}
+          postUnavailableReason={postUnavailableReason}
+          postConfirmRequired={offersPostConfirm}
+          postConfirmArmed={postConfirmArmed}
+          postDirty={dirty}
+          onPostButtonClick={handlePostAction}
+          onCancelPostConfirm={() => setPostArmedFor(null)}
+          // Defect fix: for a legacy row with a null/blank title, `currentTitle`
+          // is "" and the confirm panel used to render an EMPTY code block
+          // under "Subject that will be sent:" - but Canvas never receives an
+          // empty subject. `post()`'s server action falls back to the kind's
+          // own label instead (src/app/actions/lms-generation.ts:846 -
+          // `(artifact.title ?? "").trim() || config.label`), so the panel
+          // has to fall back the same way to keep showing what will actually
+          // be sent (AC 11). `preview.kindLabel` is this modal's own copy of
+          // that same `config.label` value.
+          confirmSubjectText={currentTitle.trim() || preview.kindLabel}
+          confirmBodyText={currentText}
+        />
           </>
         )}
     </ModalShell>

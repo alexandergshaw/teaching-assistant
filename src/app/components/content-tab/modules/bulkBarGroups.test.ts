@@ -62,6 +62,8 @@ function baseFacts(overrides: Partial<BulkBarFacts> = {}): BulkBarFacts {
     creatableGapsCount: 0,
     carryReviewOpen: false,
     generatePostReachable: false,
+    generateSubjectEditable: false,
+    generateSaveEditReachable: false,
     commandProposalOpen: false,
     releaseReviewOpen: false,
     ...overrides,
@@ -440,6 +442,16 @@ describe("consequenceTag (I5): present whenever a group can reach fan-out-write 
     // would demand a null consequenceTag on the group F6 exists specifically
     // to keep tagged.
     baseFacts({ itemCount: 1, releaseReviewOpen: true }),
+    // Fourth such correction, for generateGroup's own Subject field
+    // (docs/announcement-preview-edit-before-post-acceptance-criteria.md, AC
+    // 15/24): without this entry the sweep never observes
+    // generateSubjectField (every other entry leaves generateSubjectEditable
+    // false), so observedMaxTier could never be raised BY this control - it
+    // is declared read-only, so it never lifts a group already reaching
+    // fan-out-write via generatePostToCanvas/generatePostConfirm above, but a
+    // future edit that mis-declared its tier would go unseen by this sweep
+    // without this entry.
+    baseFacts({ itemCount: 1, generationKindsCount: 10, generateSubjectEditable: true }),
   ];
 
   function observedMaxTier(group: BulkBarGroupDef): ConsequenceTier {
@@ -779,8 +791,53 @@ describe("generate group: the modal-hosted Post to Canvas write (D17's shape, ap
     // fan-out-write by elimination against this file's own tier definitions:
     // reversible-write PROMISES reversibility and a Canvas post is not
     // reversible from this app; destructive is reserved for the four writes
-    // carrying a two-click confirm-arm, and this one commits on first click.
+    // carrying a two-click confirm-arm, and this control - even now that it
+    // is itself two-click, per docs/announcement-preview-edit-before-post-
+    // acceptance-criteria.md - is a CREATE, not one of the four DELETEs that
+    // tier is reserved for.
     expect(control.tier).toBe("fan-out-write");
+    expect(control.persistKey).toBeNull();
+    expect(control.unpersistedReason ?? "").not.toBe("");
+  });
+
+  // Mirrors the declaration test immediately above, for the confirm step's
+  // OWN commit control (docs/announcement-preview-edit-before-post-
+  // acceptance-criteria.md, AC 9/24). Not redundant with the test above: a
+  // second fan-out-write control gated on the same fact
+  // (generatePostReachable) is precisely the shape that could go
+  // undeclared exactly as generatePostToCanvas itself once did, and only a
+  // per-control assertion - not the group-level THEOREM below, which cannot
+  // tell two fan-out-write controls apart - catches that.
+  it("declares generatePostConfirm at fan-out-write, gated on the same reachability fact as generatePostToCanvas", () => {
+    const control = findControl("generatePostConfirm");
+    expect(control.tier).toBe("fan-out-write");
+    expect(control.persistKey).toBeNull();
+    expect(control.unpersistedReason ?? "").not.toBe("");
+  });
+
+  // Its Cancel sibling and the Subject field stay read-only - neither is a
+  // Canvas write, so neither should be able to lift this group's derived
+  // tier on its own (proven by the THEOREM below, not merely declared here).
+  it("declares generatePostCancel and generateSubjectField at read-only", () => {
+    expect(findControl("generatePostCancel").tier).toBe("read-only");
+    expect(findControl("generateSubjectField").tier).toBe("read-only");
+  });
+
+  // docs/announcement-preview-edit-before-post-acceptance-criteria.md,
+  // "Adjacent defects" section: `generateSaveEdit` closes the same shape of
+  // gap `generatePostToCanvas` itself closed above - a real write, reachable
+  // only from inside GeneratedPreviewModal.tsx, declared nowhere until now.
+  // Also this section's own sabotage check: deleting the control from the
+  // catalog makes `findControl` throw ("no control with id"), which fails
+  // this test - the fact of the control's existence is what is pinned here,
+  // not merely a property of it once found.
+  it("declares generateSaveEdit at reversible-write, gated on its own reachability fact rather than on the group being visible", () => {
+    const control = findControl("generateSaveEdit");
+    // reversible-write, not read-only (it is a real write - a new
+    // generated_artifacts version) and not fan-out-write (unlike a Canvas
+    // post it is SCOPED to one artifact and REVERSIBLE - a new version,
+    // never an overwrite of anything already posted).
+    expect(control.tier).toBe("reversible-write");
     expect(control.persistKey).toBeNull();
     expect(control.unpersistedReason ?? "").not.toBe("");
   });
@@ -790,6 +847,30 @@ describe("generate group: the modal-hosted Post to Canvas write (D17's shape, ap
     const visible = { itemCount: 1, generationKindsCount: 10 };
     expect(groupTier(group, baseFacts({ ...visible, generatePostReachable: false }))).toBe("reversible-write");
     expect(groupTier(group, baseFacts({ ...visible, generatePostReachable: true }))).toBe("fan-out-write");
+  });
+
+  // THEOREM, generateSubjectField's own: a read-only control becoming
+  // visible must never lift the group above whatever generatePostReachable
+  // alone would produce - proves generateSubjectEditable is not silently
+  // wired to a higher tier than declared.
+  it("THEOREM: generateSubjectEditable alone (post unreachable) keeps groupTier at reversible-write, never fan-out-write", () => {
+    const group = findGroup("generate");
+    const visible = { itemCount: 1, generationKindsCount: 10 };
+    expect(groupTier(group, baseFacts({ ...visible, generatePostReachable: false, generateSubjectEditable: true }))).toBe("reversible-write");
+  });
+
+  // THEOREM, generateSaveEdit's own: it is declared reversible-write, the
+  // SAME tier the ten kind buttons already put this group at whenever it is
+  // visible at all (generationKindsCount: 10 above), so becoming reachable
+  // must never lift the group's derived tier past reversible-write on its
+  // own - and, symmetrically, must never DROP it below fan-out-write once
+  // the post is also reachable (`groupTier` is a max-over-visible-controls
+  // reduction, so a lower-tier control gaining visibility cannot lower it).
+  it("THEOREM: generateSaveEditReachable alone (post unreachable) keeps groupTier at reversible-write, never fan-out-write, and never below it once the post also becomes reachable", () => {
+    const group = findGroup("generate");
+    const visible = { itemCount: 1, generationKindsCount: 10 };
+    expect(groupTier(group, baseFacts({ ...visible, generatePostReachable: false, generateSaveEditReachable: true }))).toBe("reversible-write");
+    expect(groupTier(group, baseFacts({ ...visible, generatePostReachable: true, generateSaveEditReachable: true }))).toBe("fan-out-write");
   });
 
   it("THEOREM: mayCollapse is true while the post is unreachable and false once it is reachable", () => {
@@ -812,30 +893,70 @@ describe("generate group: the modal-hosted Post to Canvas write (D17's shape, ap
   });
 
   // SABOTAGE, entry 330 check 5's shape. Reproduces the pre-fix state in
-  // place - the post control invisible to the derivation, exactly as if it
-  // had never been declared - and confirms the group then lies about its own
-  // safety WHILE the post button is genuinely on screen. try/finally because
-  // findGroup/findControl hand back references into ONE shared module-level
-  // array, and a mid-test throw would corrupt the catalog for every later
-  // test in this run.
-  it("SABOTAGE: with the post control invisible to the derivation the group claims to be safe while the write is on screen, and the real declaration does not", () => {
-    const control = findControl("generatePostToCanvas");
+  // place - BOTH fan-out-write controls this group's post flow now declares
+  // (generatePostToCanvas and, since docs/announcement-preview-edit-before-
+  // post-acceptance-criteria.md AC 24, generatePostConfirm) invisible to the
+  // derivation, exactly as if neither had ever been declared - and confirms
+  // the group then lies about its own safety WHILE the write is genuinely
+  // reachable on screen.
+  //
+  // EXTENDED for AC 24: blinding generatePostToCanvas ALONE no longer
+  // reproduces the defect, because generatePostConfirm - gated on the exact
+  // same `generatePostReachable` fact - is still visible to the reduction
+  // and the group correctly stays fan-out-write. That is not a bug in this
+  // test; it is the model working (a second, correctly-declared control
+  // covers for the first one going dark). The sabotage has to blind BOTH to
+  // reproduce "the group claims to be safer than it is", the same way the
+  // scheduledRelease/commandInterface blocks above blind their own group's
+  // one write control - this group now has two, so both must go dark
+  // together. try/finally (nested, so a mid-test throw after the first
+  // control is blinded still restores it) because findGroup/findControl hand
+  // back references into ONE shared module-level array, and a mid-test throw
+  // would corrupt the catalog for every later test in this run.
+  it("SABOTAGE: with BOTH post-flow controls invisible to the derivation the group claims to be safe while the write is on screen, and the real declaration does not", () => {
+    const postControl = findControl("generatePostToCanvas");
+    const confirmControl = findControl("generatePostConfirm");
+    const originalPostVisible = postControl.visible;
+    const originalConfirmVisible = confirmControl.visible;
+    const reachable = baseFacts({ itemCount: 1, generationKindsCount: 10, generatePostReachable: true });
+    try {
+      postControl.visible = () => false;
+      try {
+        confirmControl.visible = () => false;
+        const group = findGroup("generate");
+        // The shipped defect, reproduced: a real Canvas write is one click
+        // away and the group still derives reversible-write and stays
+        // collapsible.
+        expect(groupTier(group, reachable)).toBe("reversible-write");
+        expect(mayCollapse(group, reachable)).toBe(true);
+      } finally {
+        confirmControl.visible = originalConfirmVisible;
+      }
+    } finally {
+      postControl.visible = originalPostVisible;
+    }
+    const group = findGroup("generate");
+    expect(groupTier(group, reachable)).toBe("fan-out-write");
+    expect(mayCollapse(group, reachable)).toBe(false);
+  });
+
+  // Companion to the above, proving the EXTENSION itself is load-bearing:
+  // blinding generatePostConfirm ALONE (leaving generatePostToCanvas
+  // visible) must NOT reproduce the defect, since the group still has a
+  // visible fan-out-write member. If this ever went red, the two-control
+  // sabotage above would be vacuously passing for the wrong reason.
+  it("blinding generatePostConfirm alone leaves the group correctly fan-out-write, because generatePostToCanvas is still visible", () => {
+    const control = findControl("generatePostConfirm");
     const original = control.visible;
     const reachable = baseFacts({ itemCount: 1, generationKindsCount: 10, generatePostReachable: true });
     try {
       control.visible = () => false;
       const group = findGroup("generate");
-      // The shipped defect, reproduced: a real Canvas write is one click
-      // away and the group still derives reversible-write and stays
-      // collapsible.
-      expect(groupTier(group, reachable)).toBe("reversible-write");
-      expect(mayCollapse(group, reachable)).toBe(true);
+      expect(groupTier(group, reachable)).toBe("fan-out-write");
+      expect(mayCollapse(group, reachable)).toBe(false);
     } finally {
       control.visible = original;
     }
-    const group = findGroup("generate");
-    expect(groupTier(group, reachable)).toBe("fan-out-write");
-    expect(mayCollapse(group, reachable)).toBe(false);
   });
 
   // I5's maxPossibleTier ignores visibility and reads DECLARED tiers, so the

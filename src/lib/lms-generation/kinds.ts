@@ -625,6 +625,19 @@ export interface GenerationKindConfig<TGenerated> {
    * absent rather than set to some empty value on the kinds that do not use
    * it. */
   deliveredAloud?: boolean;
+  /** True when this kind's `title` column is a real content field the
+   * instructor authored and can edit, NOT a label derived at generate time
+   * from a module name. Named for that fact, not for what any UI does with
+   * it - "Subject" is the announcement's own UI label for its `title`, not
+   * the fact this field records, which is why this is `titleIsContent` and
+   * not `subjectIsEditable`. Only `announcementsKindConfig` sets it today;
+   * `introDiscussionKindConfig` shares the exact same `{title, message}`
+   * shape (see IntroDiscussionGeneratedContent above) and is the obvious next
+   * kind to opt in, requiring no code change anywhere else - it simply is not
+   * part of this chunk. Optional and left ABSENT (never explicitly `false`)
+   * on every kind that does not opt in, mirroring `deliveredAloud` immediately
+   * above. */
+  titleIsContent?: boolean;
 }
 
 export const qaKindConfig: GenerationKindConfig<QaGeneratedContent> = {
@@ -744,6 +757,10 @@ export const announcementsKindConfig: GenerationKindConfig<AnnouncementGenerated
   render: (generated) => generated.message,
   isEmpty: (generated) => !generated.title.trim() || !generated.message.trim(),
   emptyMessage: "The model returned no usable announcement for this selection.",
+  // The announcement's `title` column IS the "Subject" line the instructor
+  // wrote, not a label derived from the module name at generate time - see
+  // `titleIsContent`'s own doc comment above.
+  titleIsContent: true,
 };
 
 // CHUNK 3d's one new kind, below - "save-version" like qa/currentEvents/
@@ -905,6 +922,38 @@ export function kindSupportsTextEdit(id: GenerationKindId): boolean {
  */
 export function kindDeliveredAloud(id: GenerationKindId): boolean {
   return GENERATION_KIND_CONFIGS[id].deliveredAloud === true;
+}
+
+/**
+ * Whether a kind's `title` column is real, instructor-authored content
+ * rather than a label derived at generate time from a module name - reads
+ * `titleIsContent` off the config rather than hardcoding `id === "announcements"`
+ * at the call site, for the same reason `kindDeliveredAloud` above reads
+ * `deliveredAloud` instead of hardcoding `id === "scripts"`: a future kind
+ * (e.g. `introDiscussion`, which shares announcements' `{title, message}`
+ * shape) opts in by declaring `titleIsContent: true` on its own config, and
+ * this predicate - and everything that calls it - needs no edit when that
+ * happens.
+ */
+export function kindTitleIsContent(id: GenerationKindId): boolean {
+  return GENERATION_KIND_CONFIGS[id].titleIsContent === true;
+}
+
+/**
+ * Whether posting this kind makes it visible to students the instant it is
+ * created, with no unpublished-draft state in between. Reads
+ * `commitMeta?.publishedOnCreation` - the honest source of this fact, already
+ * carrying its full rationale at GenerationCommitMeta's own `publishedOnCreation`
+ * doc comment above - rather than hardcoding `id === "announcements"` at the
+ * call site, so a caller can ask "does this kind's post go live immediately"
+ * without knowing which kind that is today. Today only "announcements"
+ * declares `publishedOnCreation: true`; every other "save-and-post" kind
+ * (objectives/assignments/knowledgeChecks/resources/introDiscussion) creates
+ * an UNPUBLISHED Canvas object, and every "save-version" kind has no
+ * `commitMeta` at all, so this is `false` for all of them.
+ */
+export function kindPostsImmediately(id: GenerationKindId): boolean {
+  return GENERATION_KIND_CONFIGS[id].commitMeta?.publishedOnCreation === true;
 }
 
 /** Keyed lookup so a caller with a `GenerationKindId` gets back a config

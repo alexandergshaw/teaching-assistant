@@ -8,17 +8,71 @@ check (suspended 2026-07-26).
 
 ---
 
-## 0. Standing consent
+## The core principle
+
+**Author is never checker, for every artifact - not just code.**
+
+An agent that produced a thing is the worst available judge of whether it is
+right. That applies to an acceptance-criteria document, an architecture, a
+survey, a test and a fix, exactly as it applies to a feature. So every artifact
+is adversarially checked by a **fresh peer of the same class** before its
+consumer sees it, and the chain ends only on a clean check.
+
+Two consequences that are easy to skip and expensive to skip:
+
+- **The orchestrator does not perform the highest-tier steps itself.** It
+  chunks, briefs, dispatches, adjudicates, reports and pushes. Doing the
+  architecture or the review in the same context that wrote the AC destroys the
+  only property that makes those steps worth running - a reader who has nothing
+  but the documents, which is exactly what the implementers will have.
+- **A sabotage check is itself an artifact and can fail silently.** See the
+  traps section: a sabotage that does not actually apply reports green and looks
+  identical to a test that cannot fail.
+
+---
+
+## 0. Before anything else
+
+**0a. Compare the request against what is already done, queued, or in flight.**
+`git log`, `docs/REGRESSION.md`, open task chips, running agents. A surprising
+share of requests are already built, already surveyed, or already contradicted
+by something in the tree - and the most valuable thing an orchestrator does is
+notice that before dispatching anyone. If a request turns out to already exist,
+say so and reframe the work as fixing why it looks absent, in the same turn.
+
+**0b. Re-chunk the WHOLE queue when a request lands mid-session.** Do not append
+it. Re-plan, in this priority order:
+
+1. **File-set disjointness** - proven against real file sets, not guessed from
+   names. Two chunks that both edit one file are one chunk.
+2. **Unblockers first** - anything other chunks are coded against.
+3. **Same-evidence items together** - work that needs the same survey or the
+   same measurement should not pay for it twice.
+4. **Each chunk independently pushable** - a chunk that cannot ship alone is
+   mis-drawn.
+5. **Never chunk around the gates.** If a split exists only to avoid a canary,
+   a ceiling or a regression pass, it is the wrong split.
+
+**0c. Dispatch disjoint work as concurrent subagents.** Standing consent, no
+size threshold. Prove disjointness against the real file list before dispatch,
+and gate the returning wave with `git status --short`.
+
+**0d. A new ask never preempts the in-flight chunk's push.** Research and
+specification for the new thing can start immediately and in parallel; its
+CODE waits until the current chunk is pushed. Interleaving two groups' code in
+one working tree is how a regression pass stops meaning anything.
+
+## 0e. Standing consent
 
 These do not need to be asked about, ever:
 
-- **Dispatching disjoint file sets as concurrent subagents.** Assumed for every
-  request big enough to split.
+- **Dispatching disjoint file sets as concurrent subagents.**
 - **Committing and pushing to `main`** once the loop completes.
 - **Starting the next backlog item** immediately after a push. A push is not a
   checkpoint. Say what you picked; do not ask permission to pick it.
 
-While a backlog exists, forward motion beats confirmation.
+While a backlog exists, forward motion beats confirmation, and **the chunking is
+the authorization**.
 
 ---
 
@@ -47,6 +101,18 @@ with file paths and line numbers.
 This repo has a lot of near-miss precedent. The survey is what stops a seventh
 filename sanitizer or a second upload-ticket type from being written.
 
+**Verify each candidate by READING it AND its call sites** - never by its name,
+its neighbours, or a memory of it. Two failures this has already caused here:
+an AC named a type that does not exist anywhere in `src/`, sending implementers
+to a file whose same-named export meant something else entirely; and an AC cited
+a function's line number from a *different* file. Both compile. Both would have
+shipped.
+
+The call sites are the half people skip, and they are where the answer usually
+is: a helper's signature does not tell you that its second parameter is always
+`undefined` in production, or that the one existing caller passes a shape your
+feature cannot produce.
+
 ## 3. Plan, research, revise until stable
 
 Where the work touches an external API or an unfamiliar standard, verify the
@@ -56,7 +122,32 @@ build on it wastes the whole wave.
 Fold what you learn back into the AC, then re-read it. Iterate until it stops
 changing.
 
-## 4. A separate architect agent designs the implementation
+## 4. Three concurrent pre-code passes: architect, UX, data engineer
+
+**Spawn all three in one message, on the highest model available, before any
+code.** They are independent, they read the same documents, and they find
+different classes of problem - running them in sequence wastes a round trip and
+lets the first one's framing contaminate the other two.
+
+- **4a. The architect** - module and data-flow design, the disjoint file split,
+  the order of work, and the trade-offs it rejects.
+- **4b. The UX pass** - the flow and its click cost, the empty states, the
+  keyboard path, focus, the copy. Reuses this app's existing visual vocabulary
+  rather than inventing a second one. **This is where "minimize clicks" is
+  designed** (see the standing rules).
+- **4c. The data-engineer pass** - what the data actually is: payload sizes with
+  real numbers, token and latency cost, dedupe and identity, persistence limits,
+  and the exact text of any prompt. **Measured, not estimated**, wherever
+  measuring is possible.
+
+Reconcile all three into the AC before planning goes further. Where two of them
+disagree, that disagreement is the finding.
+
+What these three have caught in this repo that nothing else did: a frame width
+that made body text unreadable on a 4K monitor (measured, not guessed); a dedupe
+key that false-split on 10 of 16 realistic inputs; a hook that would have
+breached the line ceiling by 200 lines; and a UI control that shipped working,
+correct and invisible.
 
 Hand everything produced so far - the AC, the reuse survey, the research - to a
 **fresh agent on the highest model available**, and have it do the architecting.
@@ -109,10 +200,25 @@ Each brief carries:
 
 Rules that are not negotiable in a brief:
 
-- **Never `git stash`.** One agent's stash reverts every sibling's work.
+- **No git writes at all.** Not `stash`, not `commit`, not `checkout`, not
+  `restore`. One agent's stash reverts every sibling's work, and a commit
+  mid-wave destroys the `git status --short` gate that step 7 depends on. The
+  orchestrator owns the tree.
+- **"0 errors AND 0 warnings"**, stated explicitly. An agent told only "no
+  errors" will report success over a wall of warnings, including ones it
+  introduced.
+- **Return the file list it actually touched**, so step 7 has something to
+  compare against besides the diff.
 - Concurrent dependencies are coded against the **AC contract**, not against
   files that may not exist on disk yet. If `tsc` reports a sibling's module
   missing, report it - do not create it or inline a copy.
+- **Say what it had to guess.** Every guess is a line the AC failed to write,
+  and the guesses are where the next defect lives. Agents that were asked this
+  in this repo have surfaced a missing interface field, a contradiction between
+  two ACs, and a stale spec sentence - none of which any gate would have caught.
+- **Frame the work as a rival vendor would see it.** An agent asked to check its
+  own work grades generously; an agent asked whether a competitor could
+  embarrass us with this diff finds the thing that ships broken.
 
 ## 7. Gate every wave with `git status --short`
 
@@ -133,6 +239,39 @@ Read what landed. The audit looks for what tests cannot:
   indistinguishable state is the defect this loop catches most often.
 
 Findings get fixed directly, and the AC is updated to match any contract change.
+
+**The line ceiling is audited, not assumed, and exceeding it is a VERIFICATION
+FAILURE - not a cleanup task.** Count every touched file with
+`@(Get-Content path).Count` and report the numbers. A file over 1000 lines does
+not get a follow-up ticket; the wave is not verified until it is split. Size an
+extraction against the feature's ADDITIONS, not against the headroom - the
+headroom is what a later group will need.
+
+## 8b. Follow-up architect, UX and data passes against the REAL diff
+
+The step 4 trio designed against documents. Run all three again, concurrently,
+against what actually landed. This is not a repeat: a design is a prediction,
+and the diff is the outcome. The follow-up pass is where you learn that the
+split held but the props are unstable, that the flow is right but a control is
+unreachable, or that the measured payload is nothing like the estimate.
+
+Their findings go into step 10's merged list.
+
+## 9b. Accessibility gets its own pass
+
+Not folded into the general review, because it is the thing a general reviewer
+skips when the diff is large and the deadline is close - and because **no test
+in this repo can check any of it**. vitest here is node-env and renders no
+component, so every a11y property is verified by reading, once, by an agent
+whose only job is that.
+
+Work it as a checklist with file:line citations, not as a vibe: accessible names
+on every control, `aria-sort` only on sortable headers, roles that can actually
+carry a label (a bare `<div>` cannot), keyboard reachability of anything
+scrollable, `aria-disabled` rather than `disabled` where focus must survive,
+focus restoration after a removal, live regions that are not flooded by a
+ticking timer, and error text that is not `role="alert"` when N of them fire at
+once.
 
 ## 9. Tests, and they must be able to fail
 
@@ -461,6 +600,117 @@ log must carry content to be useful, say so in the AC, make it an explicit opt-i
 at download time, and state it in the REGRESSION Limits.
 
 ---
+
+---
+
+## Tests that cannot fail: the catalogue
+
+Every entry here has actually happened, in this repo or a sibling one. A test in
+any of these shapes is an assumption wearing a test's clothes, and the suite
+being green is what makes it dangerous.
+
+**The sabotage that did not apply.** You break the behaviour, run the suite, and
+it reports green - so you conclude the test is weak, or worse, you conclude the
+sabotage proved something. In fact the edit never landed: a replacement string
+that did not match the file's line endings, a path that did not exist, an edit
+to a copy. **Confirm the sabotage is present in the file before trusting its
+result.** This happened here on 2026-08-31 and reported 16 passing tests over
+code that had not been touched.
+
+**The tested twin nobody calls.** Two agents implement the same rule against one
+contract; production wires up one; the tests import the other. Invert the live
+one and the suite stays green. This repo has now had FOUR instances in a single
+feature - persistence, reordering, a freshness guard and a concept derivation.
+When you consolidate, delete the loser rather than leaving it exported, and
+check by grep which one production imports.
+
+**The assertion of absence.** `expect(result.foo).toBeUndefined()` passes when
+`foo` was renamed, when the object is empty, and when the function returned
+early without doing anything. Assert what IS there.
+
+**The fixture the code never emits.** A green suite proves nothing if every
+fixture uses a shape the UI cannot produce. Note that `tsc` catches a subset of
+this and vitest does not - on 2026-08-31 the type gate rejected a fixture
+missing a required field that every test had accepted.
+
+**The injected fake that cannot see the bug.** A mock whose signature ignores
+the argument under test will pass whether or not the caller passes it. If the
+defect is "a field was dropped", the fake must be able to observe the field.
+
+**Mocks that outlive their reset.** `vi.restoreAllMocks()` does not clear a
+factory mock. A stale mock from a previous test makes the next one pass for the
+wrong reason.
+
+**The round-trip that hides the regression.** Testing `serialize` by
+`deserialize(serialize(x))` passes when both sides share a defect, and when the
+deserializer independently re-defends the invariant the serializer just broke.
+Assert against the serialized output directly. This exact case was caught here
+by a sabotage check that the first draft of the test survived.
+
+**The test that pins the spelling.** Asserting exact prompt text or an error
+string's wording forces contorted implementations and goes red on every
+harmless edit. Pin the FACT and the ORDERING.
+
+**The count canary nobody bumped.** When a total and a sub-count both move by
+one, that agreement is the proof the new member landed in the right bucket -
+which is why the bump belongs in the same commit, and why "fixing" a red canary
+by deleting an entry destroys the only thing it was measuring.
+
+**The scanner that matched nothing.** A source-text scan that reports clean
+because its pattern never matched anything at all. Two have done this here.
+Every scanner needs a canary case proving it fires on known-bad input.
+
+---
+
+## Standing rules
+
+**Minimize clicks.** Click cost is a first-class design factor, not polish. It
+is **designed at 4b**, **checked at step 8's audit**, and **re-judged at 8b**
+against the real diff. It never trades against accessibility, and it never
+removes a confirmation on a destructive action - a two-step delete is not a
+click to be saved.
+
+**Every new textbox, select or checkbox persists** across reloads under a
+`ta-`-prefixed localStorage key, added to the canary's expected set in the same
+commit.
+
+**Context goes in BEFORE the capture, everywhere.** Added 2026-08-31 at the repo
+owner's instruction: *any* surface where the instructor records something in
+order to generate something offers a place to enter context **before anything is
+generated**.
+
+The reason is structural, not a preference. On these surfaces the model's only
+other input is what the capture happened to contain - a screen, a voice, a set
+of frames. The instructor knows things the recording cannot show: who it is for,
+what to emphasise, what to leave alone, what the last one got wrong. Without a
+place to say so, that knowledge either never arrives or arrives as a re-run,
+which costs a second generation and throws away the first.
+
+Requirements, so this is buildable rather than aspirational:
+
+- The control is reachable **before the record button**, not revealed after the
+  capture stops. A context box that appears next to the output is a re-run
+  affordance, not a context affordance.
+- It is **optional**. It never gates starting a capture, and an empty value
+  produces exactly today's behaviour.
+- It **persists** under a `ta-`-prefixed key like any other control - the same
+  standards usually apply to the next recording too.
+- It **actually reaches the prompt**, and the AC says where. Threading a box to
+  nothing is the reachability failure this loop catches most often.
+- Where selected knowledge-base pages, a rubric or a course already supply
+  context, they satisfy this rule for that surface - the requirement is that
+  context is *possible before generation*, not that every surface grows a
+  freeform box.
+
+This applies to surfaces that already exist, not only new ones. Retrofitting
+them is real work and belongs in the backlog rather than being assumed done.
+
+**Reachability is a first-class check.** A capability can pass every gate and
+ship dead. Trace each one from the control the user touches to the code that
+performs it. This repo has shipped, with every gate green: a counter computed
+and never exposed, an error reason with no path to the screen, a warning made
+unreachable by a second implementation of the same ceiling, a guard whose tested
+copy was not the live one, and a control that rendered but was invisible.
 ## Worked example: 2026-08-21
 
 Two chunks shipped through this loop in one session, before steps 4 and 10

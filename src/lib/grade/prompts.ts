@@ -1,4 +1,5 @@
-import type { RubricCriterion } from "./types";
+import type { RubricCriterion, SubmittedFileInfo } from "./types";
+import { getBaseFileName } from "./utils";
 
 function extractJsonObject(raw: string): string | null {
   const trimmed = raw.trim();
@@ -68,6 +69,7 @@ Rules:
 - Grade generously by default, but do not automatically award full points when an explicit rubric violation is present.
 - If nothing in the submission explicitly violates a rubric area, award full points for that area.
 - Do not deduct points for ambiguity, missing assumptions, or speculative issues that are not explicit rubric violations.
+- If the assignment instructions state required file names for the submission (for example, an exact filename each required file must use), compare each required name against the SUBMITTED FILES list provided with the submission, using exact, case-sensitive matching. A required file that is missing from that list, or present only under a different name, is an explicit rubric violation for the relevant rubric area, not ambiguity and not a speculative issue - deduct for it accordingly and name the missing or misnamed file in overallComment. If the assignment instructions state no required file names, this rule does not apply and must not be used as grounds for any deduction.
 - In overallComment, summarize strengths and, for each deduction, the rubric area and specific reason. Do not include improvement suggestions, next steps, advice for future work, or tips on how to push the work further in overallComment - put all of that in the separate "improvements" field instead, so it never scatters back into overallComment.
 - In the "improvements" field, give concrete, actionable suggestions for how the student could improve: next steps, advice for future work, or tips on how to push the work further. Write it in the same warm, direct, second-person style as overallComment. If the submission already meets every rubric area at the highest level and you have no honest improvement to suggest, return an empty string for "improvements" rather than inventing filler.
 - CRITICAL - these fields are displayed to the student as SEPARATE, side-by-side boxes, not as one paragraph. Each must be independently readable on its own, AND must not repeat material from the other. Concretely:
@@ -115,6 +117,48 @@ Rules:
 - Combine assignment and rubric expectations.
 - Keep each bullet practical and specific.
 - Do not include markdown or text outside the JSON object.`;
+}
+
+/**
+ * Build a clearly delimited block naming every file actually submitted, so
+ * the grading model can compare it against any required file names in the
+ * assignment instructions instead of having to notice filenames buried in
+ * the "--- FILE: path ---" headers inside the submission content (that
+ * impressionistic read is what let a misnamed TripMath.java pass a real
+ * grading run undetected - see the Rules bullet in buildSystemPrompt above
+ * that tells the model to actually use this list).
+ *
+ * Names are reduced to their base filename (no directory prefix) because the
+ * assignment instructions state bare required names (e.g. "Calculator.java"),
+ * and submittedFiles entries are NOT consistently shaped: the zip path
+ * already strips to a bare citation filename (see parseSubmissionFileName in
+ * ./utils), but the GitHub-repo path keeps the full repo-relative path (see
+ * extraction.ts). Comparing full paths against bare required names would
+ * cause false mismatches on the repo path alone.
+ *
+ * Pseudo-entries that are not real submitted files (e.g. the "Discussion
+ * post" / "Submission text" / "Submission link" placeholders extraction.ts
+ * adds when there is no file, only text or a link) never contain a "." and
+ * are filtered out, so they cannot be mistaken for a real submitted file
+ * with a strange name.
+ *
+ * Returns "" when there are no real files to list, so this block - and the
+ * filename-requirement rule that depends on it - is inert wherever a
+ * submission has nothing to compare.
+ */
+export function buildSubmittedFileNamesBlock(submittedFiles: SubmittedFileInfo[]): string {
+  const baseNames = submittedFiles
+    .map((file) => getBaseFileName(file.name))
+    .filter((name) => name.includes("."));
+  const uniqueNames = Array.from(new Set(baseNames));
+
+  if (uniqueNames.length === 0) {
+    return "";
+  }
+
+  return `\n\nSUBMITTED FILES (the exact, complete list of files in this submission - use this list, not just names mentioned in the file content, to check any stated filename requirements):\n${uniqueNames
+    .map((name) => `- ${name}`)
+    .join("\n")}`;
 }
 
 export function buildFileNameConventionPrompt(rawFileNames: string[]): string {

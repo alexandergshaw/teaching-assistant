@@ -6,11 +6,12 @@ import {
 } from "../gemini";
 import { callLlm, type LlmPart, type LlmProvider } from "../llm";
 import { runSubmittedCode, type CodeRunResult } from "../code-runner";
-import { RESUBMIT_NOTICE, composeOverallComment, type GradeResult, type GradingRun, type StudentSubmissionEntry, type RubricAreaResult } from "./types";
+import { RESUBMIT_NOTICE, composeOverallComment, type GradeResult, type GradingRun, type StudentSubmissionEntry, type RubricAreaResult, type SubmittedFileInfo } from "./types";
 import { GEMINI_IMAGE_MIME_TYPES } from "./constants";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
 import { buildSystemPrompt, normalizeAreaName, extractRubricCriteria } from "./rubric";
+import { buildSubmittedFileNamesBlock } from "./prompts";
 
 /** Grade a single student submission. */
 async function gradeSubmission(
@@ -22,7 +23,12 @@ async function gradeSubmission(
   // When set (the Canvas path), re-base the total onto the assignment's real
   // points so the tool grades out of the same total Canvas shows.
   pointsPossible: number | null = null,
-  codeRun: CodeRunResult | null = null
+  codeRun: CodeRunResult | null = null,
+  // The real submitted file names, given to the model as an explicit list
+  // (see buildSubmittedFileNamesBlock) so it can check a stated filename
+  // requirement by comparing two lists instead of noticing names buried in
+  // the "--- FILE: path ---" headers inside `content`.
+  submittedFiles: SubmittedFileInfo[] = []
 ): Promise<GradeResult> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
@@ -34,10 +40,11 @@ async function gradeSubmission(
       : "";
 
   const codeNote = codeRun && !codeRun.error ? buildCodeExecutionNote(codeRun) : "";
+  const fileListBlock = buildSubmittedFileNamesBlock(submittedFiles);
 
   const parts: LlmPart[] = [
     {
-      text: `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${content}${imageNote}${codeNote}`,
+      text: `${systemPrompt}\n\nStudent: ${studentName}${fileListBlock}\n\nSubmission:\n${content}${imageNote}${codeNote}`,
     },
     ...imageFiles.map((f) => ({
       inlineData: { mimeType: f.mimeType, data: f.base64 },
@@ -142,7 +149,8 @@ async function gradeStudentEntries(
         provider,
         imageFiles,
         pointsPossible,
-        codeRun
+        codeRun,
+        submittedFiles
       );
       results.push({
         ...result,

@@ -153,3 +153,75 @@ describe("gradeEntries - resubmit notice on the LLM path (previously untested)",
     expect(run.results[0].overallComment).not.toContain(RESUBMIT_NOTICE);
   });
 });
+
+// Second live grading defect: a student submitted calculator.py, TripMath.java,
+// and trip_math.cpp against a README requiring calculator.py, Calculator.java,
+// calculator.cpp - the grader only caught the C++ mismatch and missed the
+// Java one, because the model was never given the real submitted file names
+// as an explicit list, only the merged text with names buried in "--- FILE:
+// path ---" headers. This pins the FACT that the prompt actually sent to the
+// model now carries that explicit list (not the model's grading behavior,
+// which no unit test can prove).
+describe("gradeEntries - submitted files reach the model as an explicit list (real-run defect)", () => {
+  it("includes every submitted file's exact base name in the prompt sent to the model", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+
+    await gradeEntries(
+      [
+        entry({
+          content: "File: calculator.py\n\n...\n\n---\n\nFile: TripMath.java\n\n...",
+          submittedFiles: [
+            {
+              name: "calculator.py",
+              extension: "py",
+              previewContent: "...",
+              previewTruncated: false,
+            },
+            {
+              name: "TripMath.java",
+              extension: "java",
+              previewContent: "...",
+              previewTruncated: false,
+            },
+            {
+              name: "trip_math.cpp",
+              extension: "cpp",
+              previewContent: "...",
+              previewTruncated: false,
+            },
+          ],
+        }),
+      ],
+      "Required files: calculator.py, Calculator.java, calculator.cpp",
+      "Grade for correctness and clarity.",
+      "gemini"
+    );
+
+    const sentText = mockCallLlm.mock.calls[0][0].contents[0].parts[0];
+    if (!("text" in sentText)) throw new Error("expected a text part");
+    // "SUBMITTED FILES" also appears once in the static rule sentence
+    // (prompts.ts), so a real per-student list block must push the count to
+    // at least two occurrences, not merely one.
+    expect(sentText.text.split("SUBMITTED FILES").length - 1).toBeGreaterThanOrEqual(2);
+    expect(sentText.text).toContain("calculator.py");
+    expect(sentText.text).toContain("TripMath.java");
+    expect(sentText.text).toContain("trip_math.cpp");
+  });
+
+  it("sends no per-student SUBMITTED FILES list block when the entry has no submitted files (inert on paths with nothing to list)", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+
+    await gradeEntries(
+      [entry({ submittedFiles: [] })],
+      "Grade the assignment.",
+      "Grade for correctness and clarity.",
+      "gemini"
+    );
+
+    const sentText = mockCallLlm.mock.calls[0][0].contents[0].parts[0];
+    if (!("text" in sentText)) throw new Error("expected a text part");
+    // Only the static rule sentence mentions "SUBMITTED FILES" here - no
+    // per-student list block was appended, since there was nothing to list.
+    expect(sentText.text.split("SUBMITTED FILES").length - 1).toBe(1);
+  });
+});

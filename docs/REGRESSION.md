@@ -35390,3 +35390,88 @@ verified by widening the outcome union and confirming `tsc` fails at that line.
 - **No grading run was executed against a real repository as part of this fix.**
   Everything is verified by reading and by unit tests against constructed
   digests.
+
+## 371. The grader was never shown which files the student submitted
+
+Second live grading defect from the same course, reported by the instructor
+after entry 370's fix was already running.
+
+### What happened
+
+The assignment README states required filenames in a table: `calculator.py`,
+`Calculator.java`, `calculator.cpp`. A student submitted `calculator.py`,
+**`TripMath.java`** and **`trip_math.cpp`** - two of three wrong. The grader
+flagged only the C++ file, called it "a minor naming discrepancy", missed the
+Java file entirely, and scored Adherence to Instructions **4.2/4.8**. The Java
+miss is the worse one: Java requires the filename to match the public class, so
+`TripMath.java` cannot contain `public class Calculator`.
+
+### Why - two structural gaps, not a model whim
+
+1. **The model was never given the list of submitted files.** `gradeSubmission`
+   presented the work as `Submission:\n${content}` - one concatenated digest with
+   filenames visible only as `--- FILE: path ---` headers buried inside the text.
+   To check a naming requirement the model had to extract the required names from
+   the instructions, extract the actual names from inline headers, and compare,
+   entirely by impression.
+2. **The prompt leaned against flagging it.** "Grade generously by default", "If
+   nothing in the submission explicitly violates a rubric area, award full
+   points", "Do not deduct for ambiguity... or speculative issues", plus a 2:1
+   positive-to-negative ratio. A misnamed file IS an explicit violation - but
+   only once the comparison has actually been performed, and nothing required it.
+
+Confirmed NOT an ingest bug: `java`, `cpp` and `py` are all in `TEXT_EXT`, so the
+file reached the model.
+
+### The fix
+
+`buildSubmittedFileNamesBlock` emits an explicit `SUBMITTED FILES` list into each
+student's prompt, and one new rule makes a **stated** filename requirement an
+explicit violation rather than ambiguity - with a closing clause making it inert
+when the instructions state no filenames.
+
+**The generosity policy was deliberately left intact.** It is the instructor's
+chosen tone; only the narrow question of what counts as "explicit" changed. No
+pre-existing sentence was edited or removed.
+
+Two false-positive risks were found and closed by the implementer, neither of
+them in the brief:
+
+- **`submittedFiles[].name` is inconsistent across ingestion paths.** The zip path
+  already reduces to a bare filename; the GitHub repo path keeps the full
+  repo-relative path (`assignments/module_02/TripMath.java`). Since instructions
+  state bare names, comparing full paths would have produced false mismatches on
+  exactly the path this defect was reported from. Reduced to base names via the
+  existing `getBaseFileName` - no duplicate helper.
+- **Extraction synthesizes pseudo-entries** ("Discussion post", "Submission
+  text", "Submission link") when a submission has no real file. Listing those as
+  submitted files could itself have triggered a phantom mismatch. Filtered out,
+  and the block returns `""` when nothing real is left, so the rule is inert.
+
+Also: the block's header tells the model to use the list rather than names
+mentioned in the content - directly countering entry 370's observed failure
+where the grader claimed a student had renamed `calculator.py` when he had not.
+
+### Gates
+
+`tsc --noEmit` 0. `eslint` clean. `vitest` **735 files, 15098 tests**. Three
+sabotages, each confirmed present in the file before its red run: dropping the
+basename reduction, removing the new rule bullet, and removing `submittedFiles`
+from the call site so the list never reaches the model.
+
+### Limits
+
+- **No unit test can establish that this fixes the reported case.** The tests
+  prove the exact file list reaches the literal prompt text, that the rule is
+  present, that it is absent when there are no real files, and that the
+  generosity sentences are unchanged. Whether the model then performs the
+  comparison correctly is a model-behaviour claim. **It needs a real re-run
+  against that student's repo, and only the instructor can do that.**
+- Matching is exact and case-sensitive. A student submitting `calculator.java`
+  for a required `Calculator.java` will be flagged - correct for Java, and
+  defensible elsewhere, but it is a deliberate choice rather than an accident.
+- The block filters entries with no `.` in the name, so a legitimately
+  extensionless required file (a `Makefile`) would not appear in the list and
+  could read as missing. Not a case this course has; recorded because the filter
+  is invisible from the prompt.
+- Nothing here re-grades anything already issued.

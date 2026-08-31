@@ -45,8 +45,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   mergeCapturedPosts,
-  sortReplyRows,
-  moveRow as moveRowPure,
   serializeReplyTable,
   deserializeReplyTable,
   type ReplyRow,
@@ -54,6 +52,15 @@ import {
   type ReplyResource,
   type ReplySort,
 } from "./discussion-capture";
+// F5/F8/F9/F15: E-B's leaf
+// (docs/discussion-reply-sort-filter-acceptance-criteria.md sections 5-7).
+// `sortReplyRowsForTable` supersedes `discussion-capture.ts`'s own
+// `sortReplyRows` as this hook's display sort (it delegates to that
+// function for the five sorts it already owned, and adds the four
+// first/last modes); `moveVisibleRow` supersedes that module's `moveRow`
+// for the same reason (F15) - both plain `sortReplyRows`/`moveRow` imports
+// were removed from this file in favour of these two.
+import { filterRowsByQuery, sortReplyRowsForTable, moveVisibleRow, REPLY_ROW_HAYSTACK } from "./discussion-table-view";
 
 // AC55: localStorage keys are written as whole string literals - never a
 // template literal - so the key-inventory scan in
@@ -67,6 +74,10 @@ import {
 // the footgun set it off.
 const STORAGE_KEY_TABLE = "ta-rec-disc-table";
 const STORAGE_KEY_SORT = "ta-rec-disc-sort";
+// F10: same whole-string-literal discipline as the two keys above - see the
+// comment on STORAGE_KEY_TABLE for why this file never spells out the scan's
+// own pattern in prose.
+const STORAGE_KEY_FILTER = "ta-rec-disc-filter";
 
 // AC23: two debounces. Structural changes (merge, reorder, remove, a
 // drafted reply landing) are rare and the user expects immediate
@@ -88,11 +99,22 @@ const STORAGE_FULL_MESSAGE =
 // call, noted for review.
 const DEFAULT_SORT: ReplySort = "captured-asc";
 
+// F5: all nine members, none dropped - see discussion-capture.ts's own
+// comment on the ReplySort union, which calls this exact list out by name.
+// Shrinking this set out from under an already-persisted value (e.g.
+// omitting "first-asc") makes isReplySort reject it and silently reverts a
+// returning user's saved sort to the default with no error - the
+// coercion-changes-set-membership lesson, applied here rather than merely
+// cited.
 const VALID_SORTS: ReadonlyArray<ReplySort> = [
   "captured-asc",
   "captured-desc",
   "name-asc",
   "name-desc",
+  "first-asc",
+  "first-desc",
+  "last-asc",
+  "last-desc",
   "custom",
 ];
 
@@ -131,13 +153,51 @@ export function isResourceBatchFresh(currentSeq: number, dispatchSnapshotSeq: nu
 // copy is what makes them tested AND live at the same time.
 
 export interface UseReplyRowsReturn {
-  /** Already sorted for display (AC14). A fresh array reference every time
-   *  `rawRows` or `sort` changes; individual row objects keep the same
-   *  reference when untouched (AC40), which is what lets Set D's
-   *  `React.memo` rows skip re-rendering. */
+  /** Sorted AND filtered for display (AC14, F9). A fresh array reference
+   *  whenever `rawRows`, `sort` or `filterText` changes; individual row
+   *  objects keep the same reference when untouched (AC40/F9), which is
+   *  what lets Set D's `React.memo` rows skip re-rendering. This is a
+   *  SUBSET of the table when a filter is active - see `totalCount` below
+   *  and F0-2/F11: nothing that arms a destructive action or reports a
+   *  whole-table count may read `rows.length` any more. */
   rows: ReplyRow[];
   sort: ReplySort;
   setSort: (next: ReplySort) => void;
+
+  /** F10. Persisted under `ta-rec-disc-filter` (see STORAGE_KEY_FILTER's own
+   *  comment for why that key is never spelled out as a pattern in prose).
+   *  Debounced on the typing timer, like `editReply`'s text writes. */
+  filterText: string;
+  setFilterText: (next: string) => void;
+
+  /** F0-2/F11. The UNFILTERED row count - `rawRows.length`, exposed
+   *  directly because eleven sites in the panel read a row count today and
+   *  two of them (`deleteSignature`, `redraftSignature`) are arming
+   *  signatures for destructive actions. A filter must change what is
+   *  VISIBLE and nothing else (F0-2): if any of those eleven sites read the
+   *  filtered `rows.length` instead, typing in the search box while
+   *  `Delete table` is armed would silently re-arm it against a different
+   *  number, and the confirmation would name a count that does not match
+   *  what it deletes - REGRESSION entry 258's exact defect, already hit
+   *  twice in this feature. Do not remove this in favour of `rows.length`. */
+  totalCount: number;
+
+  /** F0-2/F11 fixer pass (sort-filter review B1-B5): the UNFILTERED row
+   *  objects themselves, not just their count. `totalCount` above (just
+   *  `rawRows.length`) is enough for every COUNT/progress-string/arming-
+   *  signature site F11 governs, but several existing callers need the
+   *  actual ROWS of the whole table - a bulk dispatch (`Redraft every
+   *  reply`, `Draft the missing replies`), the drafting queue's own
+   *  dispatch-time row lookup and edited-during-dispatch resolution, and
+   *  the resource drain's row lookup all used to read `rows` (this hook's
+   *  filtered display array), so a filter active at the wrong moment
+   *  silently narrowed a whole-table action to whatever the search box
+   *  happened to show, or made a queued id resolve to `undefined`
+   *  mid-dispatch and get quietly dropped - never drafted, never marked
+   *  failed, never retried. REGRESSION entry 258's class, one level below
+   *  the counts F11 already covers. Route every whole-table row read
+   *  through this field; `rows` is for what is RENDERED only. */
+  rawRows: ReplyRow[];
 
   /** AC12 (set A's pure `mergeCapturedPosts`, which itself enforces the
    *  AC23b row ceiling and reports `capped` - see BL5) wrapped with the
@@ -269,11 +329,22 @@ export function useReplyRows(): UseReplyRowsReturn {
     const stored = window.localStorage.getItem(STORAGE_KEY_SORT);
     return isReplySort(stored) ? stored : DEFAULT_SORT;
   });
+  // F10: same read-once-in-the-initializer pattern as `sort` above - the
+  // filter is not owned by a capture session either.
+  const [filterText, setFilterTextState] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem(STORAGE_KEY_FILTER) ?? "";
+  });
   const [persistError, setPersistError] = useState<string | null>(null);
 
   // The single synchronously-fresh source of truth - see the file header.
   const rowsRef = useRef<ReplyRow[]>(rawRows);
   const sortRef = useRef<ReplySort>(sort);
+  // F15: moveRow needs the CURRENT filter text synchronously, for the same
+  // reason every mutator in this file reads rowsRef.current instead of a
+  // state closure - see the file header. Kept in lockstep with filterText
+  // by setFilterText below, mirroring sortRef/setSort exactly.
+  const filterTextRef = useRef<string>(filterText);
 
   // AC42/AC44/AC45: non-React bookkeeping in refs, mutated only in handler
   // bodies below, never inside a setRows updater.
@@ -349,6 +420,45 @@ export function useReplyRows(): UseReplyRowsReturn {
     }
   }, []);
 
+  // F10: debounced on the typing timer - a filter keystroke is exactly as
+  // frequent as a reply edit, and not worth a persistence write per
+  // character. The unmount effect below flushes the last value, mirroring
+  // the table's own STRUCTURAL_DEBOUNCE_MS flush-on-unmount.
+  const filterSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setFilterText = useCallback((next: string) => {
+    filterTextRef.current = next;
+    setFilterTextState(next);
+    if (typeof window === "undefined") return;
+    if (filterSaveTimerRef.current !== null) clearTimeout(filterSaveTimerRef.current);
+    filterSaveTimerRef.current = setTimeout(() => {
+      filterSaveTimerRef.current = null;
+      try {
+        window.localStorage.setItem(STORAGE_KEY_FILTER, next);
+      } catch {
+        // Best-effort. `persistError` is reserved for the table's own
+        // storage failures (AC23a) - overloading it for this low-stakes
+        // control would surface a scary banner for a search box losing its
+        // own persistence, with the table itself unaffected.
+      }
+    }, TYPING_DEBOUNCE_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (filterSaveTimerRef.current !== null) {
+        clearTimeout(filterSaveTimerRef.current);
+        filterSaveTimerRef.current = null;
+      }
+      try {
+        window.localStorage.setItem(STORAGE_KEY_FILTER, filterTextRef.current);
+      } catch {
+        // Unmounting - nowhere left to surface this, mirrors the table
+        // flush effect above.
+      }
+    };
+  }, []);
+
   const mergeIncoming = useCallback(
     (incoming: ReadonlyArray<{ author: string; text: string; postedAt?: string }>, now: number = Date.now()) => {
       // BL5: the AC23b row ceiling is enforced INSIDE mergeCapturedPosts now
@@ -378,20 +488,37 @@ export function useReplyRows(): UseReplyRowsReturn {
     [commitRows, scheduleSave]
   );
 
-  // BL4: delegates to discussion-capture.ts's tested `moveRow` (previously
-  // this hook carried its own inline reimplementation which cloned every
-  // row unconditionally - `displayed.map((r, i) => ({ ...r, order: i }))` -
-  // instead of preserving identity for rows that did not move, violating
-  // AC40 and defeating Set D's React.memo on every row after any Name/
-  // Captured sort. The pure version already gets this right and is already
-  // unit-tested; importing it is the fix.
+  // BL4: delegates to a tested pure `moveRow`-shaped helper rather than an
+  // inline reimplementation that clones every row unconditionally -
+  // `displayed.map((r, i) => ({ ...r, order: i }))` - which would not
+  // preserve identity for rows that did not move, violating AC40 and
+  // defeating Set D's React.memo on every row after any sort. F15: the
+  // helper is now `moveVisibleRow` from discussion-table-view.ts, not
+  // discussion-capture.ts's own `moveRow` - see the F15 comment below for
+  // why a filter-aware version is required.
   const moveRow = useCallback(
     (id: string, dir: "up" | "down") => {
       const curSort = sortRef.current;
-      const displayed = sortReplyRows(rowsRef.current, curSort);
+      const displayed = sortReplyRowsForTable(rowsRef.current, curSort);
       if (!displayed.some((r) => r.id === id)) return; // AC40: the row is gone under us - intentional no-op
 
-      const result = moveRowPure(displayed, curSort, id, dir);
+      // F15: swap against adjacency in the VISIBLE (filtered) list, not the
+      // full sorted array - with a filter active, the immediate neighbour
+      // in `displayed` can be a row the user cannot see, so the old
+      // index +/- 1 swap silently targets nothing. `moveVisibleRow` still
+      // rewrites `order` across the FULL sorted array (it takes `displayed`
+      // for that), so the result is stable once the filter is cleared.
+      // Recomputed from refs (rowsRef/sortRef/filterTextRef), not from the
+      // `rows` memo, for the same synchronous-freshness reason every
+      // mutator in this file reads rowsRef.current instead of a state
+      // closure - see the file header.
+      // S4 fix (sort-filter review): shared REPLY_ROW_HAYSTACK, not a
+      // second inline copy of [author, post, reply] - see that constant's
+      // own doc comment (discussion-table-view.ts) for why the two copies
+      // being untested and independently spelled out was itself a defect.
+      const visibleIds = filterRowsByQuery(displayed, filterTextRef.current, REPLY_ROW_HAYSTACK).map((r) => r.id);
+
+      const result = moveVisibleRow(displayed, visibleIds, curSort, id, dir);
       if (result.atBoundary) return; // boundary - D announces this locally, see AC14
 
       commitRows(result.rows);
@@ -637,17 +764,27 @@ export function useReplyRows(): UseReplyRowsReturn {
     return (editSeqRef.current.get(id) ?? 0) === (snapshot.get(id) ?? 0);
   }, []);
 
-  // AC14: the sorted-for-display array. A fresh array reference whenever
-  // rawRows or sort changes; sortReplyRows (set A) reorders, it does not
-  // rebuild, so untouched row objects keep their identity (AC40). Memoized
+  // AC14/F9: sorted for display, then filtered for display. A fresh array
+  // reference whenever rawRows, sort or filterText changes; sortReplyRows
+  // reorders and filterRowsByQuery narrows-by-reference, neither rebuilds a
+  // row object, so untouched rows keep their identity (AC40/F9). Memoized
   // so a render triggered by something unrelated (e.g. persistError) does
-  // not re-sort and hand Set D's memoized rows a new array for nothing.
-  const rows = useMemo(() => sortReplyRows(rawRows, sort), [rawRows, sort]);
+  // not re-sort/re-filter and hand Set D's memoized rows a new array for
+  // nothing. F0-2: this is the DISPLAY array only - `totalCount` below is
+  // what every count/signature/empty-state site must read instead.
+  const rows = useMemo(() => {
+    const sorted = sortReplyRowsForTable(rawRows, sort);
+    return filterRowsByQuery(sorted, filterText, REPLY_ROW_HAYSTACK);
+  }, [rawRows, sort, filterText]);
 
   return {
     rows,
     sort,
     setSort,
+    filterText,
+    setFilterText,
+    totalCount: rawRows.length,
+    rawRows,
     mergeIncoming,
     moveRow,
     editReply,

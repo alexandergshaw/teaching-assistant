@@ -10,7 +10,7 @@
 // section 12.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
+import { Button, Checkbox, FormControlLabel, IconButton, InputAdornment, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 // Section 6: the shared table skin - AutomationsTable.module.css's own
 // header declares it the idiom the app's tables read as one system under.
@@ -23,10 +23,11 @@ import panelStyles from "./DiscussionRepliesPanel.module.css";
 import { fmt } from "./types";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 import { tableClipboardText, draftingArmSignature, type ReplySort } from "./discussion-capture";
-import { CopyIcon, CheckIcon } from "./discussion-icons";
+import { copyAllButtonLabel, computeStoppedSessionSummary } from "./discussion-table-view";
+import { CopyIcon, CheckIcon, CloseIcon } from "./discussion-icons";
 import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } from "./useReplyResources";
 import { useDiscussionReplies } from "./useDiscussionReplies";
-import DiscussionReplyRow from "./DiscussionReplyRow";
+import DiscussionReplyRow, { DISCUSSION_TABLE_COLUMN_COUNT } from "./DiscussionReplyRow";
 // F8/F9 fixes: neither needs a new field on UseDiscussionRepliesReturn (out
 // of this fixer pass's file set) - useLlmProvider is a standalone reactive
 // store read (docs/discussion-reply-resources-acceptance-criteria.md R4e),
@@ -73,9 +74,9 @@ function composeLiveSentence(args: {
   return parts.join(" ");
 }
 
-/** AC14: only Name/Captured carry aria-sort; "none" on the inactive one of
- * the pair (it IS sortable, just not the active sort), never omitted -
- * omitting it on a sortable header is what a non-sortable column does. */
+/** AC14/F6: only First/Last/Captured carry aria-sort; "none" on every
+ * sortable header that is not the active sort, never omitted - omitting it
+ * on a sortable header is what a non-sortable column does. */
 function sortAriaValue(active: boolean, ascending: boolean): "ascending" | "descending" | "none" {
   if (!active) return "none";
   return ascending ? "ascending" : "descending";
@@ -131,7 +132,41 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     previewRef,
     start,
     stop,
+    // CONFIRMED against useReplyRows.ts as landed by its owning set in this
+    // same wave (that file and useDiscussionReplies.ts are both off limits
+    // to this file - read only). Its own doc comments pin the contract this
+    // panel is written against:
+    //   - `rows` now means SORTED-AND-FILTERED-FOR-DISPLAY (a subset of the
+    //     table whenever a filter is active) - NOT the unfiltered array it
+    //     used to be. Every existing `rows`/`rows.length` read in this file
+    //     that F11 requires to stay unfiltered has been repointed at
+    //     `totalCount` below; every read that is genuinely about what is
+    //     RENDERED (the table body, isFirst/isLast, the search box's own "N
+    //     of total" numerator, the neighbour-lookup in handleRemove) keeps
+    //     reading `rows`, which is exactly the visible array now.
+    //   - `totalCount` is `rawRows.length` - the single unfiltered count F11
+    //     requires every progress string, empty state and BOTH arming
+    //     signatures to read, so a stale filter can never change what a
+    //     confirmation names or silently truncate a "N posts found" line.
+    //   - `moveRow` keeps its existing two-arg shape; F15's fix (swap
+    //     against visible adjacency, `moveVisibleRow`) lives entirely inside
+    //     the hook, which computes the visible id list itself from its own
+    //     `filterTextRef` - this panel passes nothing new to it.
+    // NOT YET forwarded by useDiscussionReplies.ts as of this write (its
+    // return type still declares only the old `rows: ReplyRow[]`, unchanged
+    // meaning in its own doc comment) - `filterText`/`setFilterText`/
+    // `totalCount` below are the expected sibling-module tsc errors this
+    // set's gate instructions call out, until that orchestrator file catches
+    // up to useReplyRows.ts's already-landed contract.
     rows,
+    // Fixer pass (sort-filter review, S2/root cause): the true UNFILTERED
+    // row objects, forwarded now that useDiscussionReplies.ts exposes it -
+    // see this panel's own `sessionStartIds`/`sessionRows` computation
+    // below for the one place this file needs it.
+    rawRows,
+    filterText,
+    setFilterText,
+    totalCount,
     sort,
     setSort,
     moveRow,
@@ -168,19 +203,33 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // own note on the same rule).
   const [prevCapturing, setPrevCapturing] = useState(capturing);
   const [sessionStartIds, setSessionStartIds] = useState<ReadonlySet<string>>(() => new Set());
+  // F11: `totalCount` is snapshotted alongside `sessionStartIds` so `found`
+  // below can be computed as a pure count delta - correct regardless of
+  // whatever the filter is doing, since it never touches the (now filtered)
+  // `rows` array at all. See the `found` computation below for why the same
+  // trick does not extend to `drafted`/`failed`.
+  const [sessionStartTotalCount, setSessionStartTotalCount] = useState(0);
   const [stoppedSummary, setStoppedSummary] = useState<StoppedSummary | null>(null);
   if (capturing !== prevCapturing) {
     setPrevCapturing(capturing);
     if (capturing) {
-      setSessionStartIds(new Set(rows.map((r) => r.id)));
+      // S2 fix (sort-filter review): `rawRows`, not `rows`. Building the
+      // start-of-session snapshot from the FILTERED array was the root of
+      // BOTH directions of the bug - it could undercount (a row outside the
+      // filter at Stop looked like it was never in the session) and OVERcount
+      // (a filter matching nothing at Start produced an empty snapshot, so
+      // every persisted row looked "new" once the filter was cleared before
+      // Stop). `rawRows` is exact under any filter change during the session.
+      setSessionStartIds(new Set(rawRows.map((r) => r.id)));
+      setSessionStartTotalCount(totalCount);
       setStoppedSummary(null);
     } else {
-      const sessionRows = rows.filter((r) => !sessionStartIds.has(r.id));
+      // S2 fix (sort-filter review): `rawRows`, not `rows` - same reasoning
+      // as the snapshot above. `drafted`/`failed` are no longer best-effort;
+      // both are exact regardless of what the filter is doing at Stop time.
       setStoppedSummary({
         elapsedAtStop: elapsedSec,
-        found: sessionRows.length,
-        drafted: sessionRows.filter((r) => r.state === "ready").length,
-        failed: sessionRows.filter((r) => r.state === "failed").length,
+        ...computeStoppedSessionSummary({ rawRows, sessionStartIds, totalCount, sessionStartTotalCount }),
       });
     }
   }
@@ -224,7 +273,25 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // UX note's own requirement. N counts only rows that actually contribute
   // something (mirrors AC/R9a's per-row `disabled` condition) so the label
   // never claims a bigger export than what lands on the clipboard.
+  //
+  // JUDGMENT CALL: deliberately left reading `rows` (now the FILTERED
+  // display array) rather than `totalCount`/an unfiltered array. F12 names
+  // exactly three whole-table actions unaffected by the filter - "Draft the
+  // missing replies", "Redraft every reply", "Delete table" - and this
+  // export is not one of them; useReplyRows.ts also exposes no unfiltered
+  // ARRAY to copy from any more (only the unfiltered COUNT, `totalCount`).
+  // Reading `rows.filter(...)` copies exactly what F13/F14 tell the user is
+  // currently visible ("Showing N of M"), which this set's brief did not
+  // ask to change - flagged here as a judgment call, not silently assumed.
   const copyableRows = rows.filter((r) => !!r.reply || !!r.resources?.length);
+  // S4 fix (sort-filter review): the SCOPING above is correct (verified: the
+  // count and the dispatch both read the same `rows` array, so they cannot
+  // drift) - the LABEL was the lie. "Copy every reply (4)" while 37 rows
+  // exist and "Showing 4 of 37" sits a few pixels away claims a bigger
+  // export than what lands on the clipboard. `copyAllButtonLabel` (the
+  // decision, unit-tested in discussion-table-view.test.ts) rewords it to
+  // be honest under a filter; the button's behaviour is unchanged.
+  const copyAllLabel = copyAllButtonLabel(copyableRows.length, filterText.trim() !== "");
   const [allCopied, setAllCopied] = useState(false);
   const allCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -255,6 +322,14 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // (useReplyResources.ts's exported `isFindMissingEligible`), imported
   // rather than re-derived, so the count on the button can never drift from
   // what a click actually enqueues.
+  //
+  // Same judgment call as `copyableRows` above, and checked (not just
+  // assumed) against useReplyResources.ts: `findMissing()` (useReplyResources
+  // .ts:322-324) reads its own captured `rowsApi.rows` - the SAME hook
+  // object this panel destructures `rows` from - so it is filtering the
+  // identical (now-filtered) array this line reads. The count and the
+  // dispatch stay in lockstep either way; this was not left un-updated by
+  // omission.
   const eligibleForResources = rows.filter(isFindMissingEligible);
 
   // AC7a/AC47: one computed sentence, recomputed at most every 5 wall-clock
@@ -265,7 +340,10 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   const lastAnnouncedAtRef = useRef(0);
   useEffect(() => {
     let cancelled = false;
-    const sentence = composeLiveSentence({ count: rows.length, extracting, pendingFrames, stalled, capturing });
+    // F11: AC7's "N posts found" reads `totalCount`, never `rows.length` -
+    // rows is the FILTERED display array now, and this sentence must not
+    // shrink just because the user is mid-search while a capture is live.
+    const sentence = composeLiveSentence({ count: totalCount, extracting, pendingFrames, stalled, capturing });
     void (async () => {
       const sinceLast = Date.now() - lastAnnouncedAtRef.current;
       if (sinceLast < 5000) await new Promise((r) => setTimeout(r, 5000 - sinceLast));
@@ -276,7 +354,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     return () => {
       cancelled = true;
     };
-  }, [rows.length, extracting, pendingFrames, stalled, capturing]);
+  }, [totalCount, extracting, pendingFrames, stalled, capturing]);
 
   // ---- AC19/AC19a: signature-based arming, no timer. isConfirmArmed
   // compares the armed-for signature against the CURRENT one - re-arming
@@ -291,7 +369,14 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // consumes (rowCount + audience + courseId) - forcing them through one
   // shared shape would either drop a delete-only field or add an unused one
   // to redraft's signature, both of which are exactly this bug's class.
-  const deleteSignature = `${rows.length}|${recordingUrl ? "video" : "novideo"}`;
+  // F11/F0-2: BOTH arming signatures read `totalCount`, never `rows.length` -
+  // `rows` is now the FILTERED display array (useReplyRows.ts), and the
+  // whole point of this signature is that typing in the search box must NOT
+  // silently re-arm (or disarm) `Delete table` against a different count
+  // than the confirmation names. This is REGRESSION entry 258's exact
+  // defect, applied to the filter feature this signature now also has to
+  // survive.
+  const deleteSignature = `${totalCount}|${recordingUrl ? "video" : "novideo"}`;
   // BUG FIX (live bug, class of REGRESSION entry 258 - same one deleteSignature
   // was written to prevent): `redraftAll` (useDiscussionReplies.ts) dispatches
   // every draft using BOTH `audienceRef.current` AND `courseNameRef.current`
@@ -309,7 +394,9 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // here - specifically so "does this signature actually include every
   // drafting input" has a test surface at all (vitest renders no component
   // in this repo).
-  const redraftSignature = draftingArmSignature({ rowCount: rows.length, audience, courseId });
+  // F11: same reasoning as deleteSignature above - `rowCount` is `totalCount`,
+  // never the filtered `rows.length`.
+  const redraftSignature = draftingArmSignature({ rowCount: totalCount, audience, courseId });
   const deleteArmed = isConfirmArmed(deleteArmedFor, deleteSignature);
   const redraftArmed = isConfirmArmed(redraftArmedFor, redraftSignature);
 
@@ -320,8 +407,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // S4: `actionsContainerRef`'s own element must therefore be able to
   // OUTLIVE the removal/delete that needs it as a fallback target - it is
   // rendered unconditionally below (its Draft/Delete BUTTONS are still
-  // conditional on `rows.length > 0` inside it), never inside the same
-  // `rows.length > 0` guard that used to unmount it in the same commit as a
+  // conditional on `totalCount > 0` inside it), never inside the same
+  // `totalCount > 0` guard that used to unmount it in the same commit as a
   // "Confirm delete" click that emptied the table. `pendingFocusFallbackRef`
   // is the second, explicit "there is no specific row to focus, but a
   // removal DID happen" signal - the previous code silently skipped the
@@ -377,7 +464,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   );
 
   const handleClearTable = useCallback(() => {
-    // S4: the whole `rows.length > 0` subtree (including the button that
+    // S4: the whole `totalCount > 0` subtree (including the button that
     // currently has focus) unmounts in this same commit - the persistent
     // actionsContainerRef is the only focus target guaranteed to survive it.
     pendingFocusFallbackRef.current = true;
@@ -392,10 +479,14 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     void start();
   };
 
-  const showNeverOpened = !everStarted && rows.length === 0;
-  const showPersistedBanner = !everStarted && rows.length > 0;
-  const showCapturingEmpty = capturing && rows.length === 0;
-  // S2: keyed off `stoppedSummary.found === 0`, not `rows.length === 0`. A
+  // F11/AC59: all four of this panel's original empty states read
+  // `totalCount`, never the filtered `rows.length` - a stale filter that
+  // happens to match nothing must never make a table WITH persisted rows
+  // look like a table that was never opened.
+  const showNeverOpened = !everStarted && totalCount === 0;
+  const showPersistedBanner = !everStarted && totalCount > 0;
+  const showCapturingEmpty = capturing && totalCount === 0;
+  // S2: keyed off `stoppedSummary.found === 0`, not `totalCount === 0`. A
   // session that adds no NEW rows to an already non-empty (persisted) table
   // used to satisfy neither this condition nor the `found > 0` summary
   // gate above, so the panel went completely silent on Stop - the exact
@@ -454,8 +545,11 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
         </Button>
         {/* AC61: the slot keeps its layout box even while hidden (visibility,
             not conditional rendering) so this row does not shift sideways
-            the moment the first post lands. */}
-        <div className={panelStyles.reservedSlot} style={{ visibility: rows.length > 0 ? "visible" : "hidden" }} aria-hidden={rows.length === 0}>
+            the moment the first post lands. F11: gated on `totalCount`, not
+            the filtered `rows.length` - Redraft is a whole-table action
+            (F12) and must stay available (and visible) even while the
+            current filter happens to show nothing. */}
+        <div className={panelStyles.reservedSlot} style={{ visibility: totalCount > 0 ? "visible" : "hidden" }} aria-hidden={totalCount === 0}>
           {redraftArmed ? (
             <>
               <Button size="small" color="warning" onClick={() => { redraftAll(); setRedraftArmedFor(null); }} aria-describedby={REDRAFT_CONSEQUENCE_ID}>
@@ -507,7 +601,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
         {capturing && (
           <div className={panelStyles.statusText}>
             <span>{fmt(elapsedSec)}</span>
-            <span>{rows.length === 0 ? "Capturing - 0 posts so far." : `${rows.length} post${rows.length === 1 ? "" : "s"} found`}</span>
+            {/* F11: AC7's "N posts found" reads `totalCount`. */}
+            <span>{totalCount === 0 ? "Capturing - 0 posts so far." : `${totalCount} post${totalCount === 1 ? "" : "s"} found`}</span>
             {extracting && <span>Reading the screen...</span>}
             {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
           </div>
@@ -556,7 +651,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
       )}
       {showPersistedBanner && (
         <p className={styles.fieldHint}>
-          {`${rows.length} repl${rows.length === 1 ? "y" : "ies"} kept from an earlier session. They stay here until you delete the table.`}
+          {`${totalCount} repl${totalCount === 1 ? "y" : "ies"} kept from an earlier session. They stay here until you delete the table.`}
         </p>
       )}
       {showCapturingEmpty && <p className={styles.fieldHint}>Posts appear here as you scroll past them in the other window.</p>}
@@ -582,14 +677,17 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
       )}
 
       {/* S4: rendered UNCONDITIONALLY (only the buttons inside are gated on
-          `rows.length > 0`) - this is the fallback focus target for both a
+          `totalCount > 0`) - this is the fallback focus target for both a
           per-row removal with no neighbouring row and a table-level delete,
           and it must still exist in the DOM after either one to receive
-          focus. Previously this whole div lived inside the `rows.length > 0`
-          block, so it unmounted in the SAME commit as the "Confirm delete"
-          click that emptied the table, dropping focus to <body>. */}
+          focus. Previously this whole div lived inside that gate's block,
+          so it unmounted in the SAME commit as the "Confirm delete" click
+          that emptied the table, dropping focus to <body>. F11: the gate
+          itself reads `totalCount`, not the filtered `rows.length` - Draft/
+          Find/Delete are whole-table actions (F12) and must stay available
+          even while the current filter shows nothing. */}
       <div className={styles.ghActions} ref={actionsContainerRef} tabIndex={-1}>
-        {rows.length > 0 && (
+        {totalCount > 0 && (
           <>
             {/* Reply-width UX pass, section 5d target #2: the biggest click
                 saving in the feature - exporting a 40-row table used to be
@@ -600,10 +698,10 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
               variant="outlined"
               startIcon={allCopied ? <CheckIcon /> : <CopyIcon />}
               disabled={copyableRows.length === 0}
-              title={allCopied ? "Copied" : `Copy every reply (${copyableRows.length})`}
+              title={allCopied ? "Copied" : copyAllLabel}
               onClick={() => void handleCopyAll()}
             >
-              {`Copy every reply (${copyableRows.length})`}
+              {copyAllLabel}
             </Button>
             <Button size="small" variant="outlined" disabled={drafting} onClick={draftAllPending}>
               Draft the missing replies
@@ -635,9 +733,12 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           </>
         )}
       </div>
-      {rows.length > 0 && deleteArmed && (
+      {/* F11: names `totalCount`, matching `deleteSignature` above - the
+          confirmation must always name the same count that a confirm click
+          actually deletes (F12: Delete table acts on the whole table, always). */}
+      {totalCount > 0 && deleteArmed && (
         <p id={DELETE_CONSEQUENCE_ID} role="status" aria-live="polite" className={panelStyles.consequence}>
-          {`This permanently deletes all ${rows.length} row${rows.length === 1 ? "" : "s"}${recordingUrl ? " and the saved recording" : ""}. This cannot be undone.`}
+          {`This permanently deletes all ${totalCount} row${totalCount === 1 ? "" : "s"}${recordingUrl ? " and the saved recording" : ""}. This cannot be undone.`}
         </p>
       )}
       {/* resourceQueueSize is forwarded straight through from
@@ -652,14 +753,69 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           above, and resourceQueueProgressText (also useReplyResources.ts,
           also unit-tested) is the SAME wording function, so this line can
           never say "finding" while the drain is actually yielded. */}
-      {rows.length > 0 && resourceQueueSize > 0 && (
+      {totalCount > 0 && resourceQueueSize > 0 && (
         <p className={styles.fieldHint}>
           {resourceQueueProgressText(resourceQueueSize, isResourceLaneBusy({ capturing, pendingFrames, extracting }))}
         </p>
       )}
 
-      {rows.length > 0 && (
+      {/* F11/F13, the single most important gate in this block: `totalCount`,
+          NEVER the filtered `rows.length`. `rows` can legitimately be empty
+          while `totalCount` is not (the user's search matches nothing) - if
+          this gate read `rows.length`, the search box and the table region
+          (including F13's own "No replies match" state) would UNMOUNT the
+          instant a filter matched zero rows, taking the only way to see the
+          query or clear it with them. Every count/progress string/empty
+          state/arming signature ABOVE this block already reads `totalCount`
+          (F11); the table body BELOW switches from the old `rows.map` to
+          reading `rows` in its now-filtered sense. */}
+      {totalCount > 0 && (
         <>
+          {/* F8/F0-2: the search box, bound to the hook's filterText. */}
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <TextField
+              type="search"
+              size="small"
+              label="Search replies"
+              placeholder="Search by name or keyword"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              sx={{ minWidth: 220, maxWidth: 320 }}
+              // Item 3's own "clear affordance" on the field itself, distinct
+              // from F14's dedicated Clear control below (which sits next to
+              // the "Showing N of M" count and only appears once a filter is
+              // actually active) - this one lives on the box at all times a
+              // query is typed, matching the standard search-field pattern.
+              slotProps={{
+                input: {
+                  endAdornment: filterText ? (
+                    <InputAdornment position="end">
+                      <IconButton size="small" aria-label="Clear search" onClick={() => setFilterText("")}>
+                        <CloseIcon />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : undefined,
+                },
+              }}
+            />
+            {/* F14: "Showing 4 of 37 replies." - the denominator is
+                `totalCount`, the SAME unfiltered count every other line on
+                this panel reads (F11), so a filtered table can never be
+                mistaken for a short one; the numerator is `rows.length`,
+                which is exactly what is rendered below. Rendered only while
+                a filter is active (F0-2: absent, the plain table already
+                communicates its own size via AC7's post-stop summary etc. -
+                this line exists specifically to disambiguate "filtered"
+                from "short"). */}
+            {filterText.trim() !== "" && (
+              <span className={styles.fieldHint} style={{ margin: 0 }}>
+                {`Showing ${rows.length} of ${totalCount} repl${totalCount === 1 ? "y" : "ies"}.`}{" "}
+                <button type="button" className={styles.linkButton} onClick={() => setFilterText("")}>
+                  Clear
+                </button>
+              </span>
+            )}
+          </div>
           {/* docs/discussion-reply-resources-acceptance-criteria.md R10a:
               the standing hint, once, near the table. */}
           <p className={styles.fieldHint}>
@@ -679,10 +835,28 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
               <caption className={panelStyles.tableCaption}>Captured discussion posts and drafted replies</caption>
               <thead>
                 <tr>
-                  <th scope="col" aria-sort={sortAriaValue(sort === "name-asc" || sort === "name-desc", sort === "name-asc")}>
-                    <button type="button" className={styles.linkButton} onClick={() => setSort(toggleColumnSort(sort, "name-asc", "name-desc"))}>
-                      Name
-                      {(sort === "name-asc" || sort === "name-desc") && <SortGlyph asc={sort === "name-asc"} />}
+                  {/* F6: two independent headers (First/Last), not one
+                      four-state Name header - a single header cycling
+                      asc/desc for two different fields costs up to three
+                      clicks to reach the mode you want and cannot be
+                      labelled honestly. `name-asc`/`name-desc` remain valid
+                      ReplySort values (F5: a persisted value must never be
+                      rejected by isReplySort) but no header maps to them any
+                      more - a returning user with that persisted value keeps
+                      the old whole-string sort order until they click a
+                      header, with neither header showing as active in the
+                      meantime (sortAriaValue correctly reports "none" for
+                      both, since neither IS the active sort). */}
+                  <th scope="col" aria-sort={sortAriaValue(sort === "first-asc" || sort === "first-desc", sort === "first-asc")}>
+                    <button type="button" className={styles.linkButton} onClick={() => setSort(toggleColumnSort(sort, "first-asc", "first-desc"))}>
+                      First
+                      {(sort === "first-asc" || sort === "first-desc") && <SortGlyph asc={sort === "first-asc"} />}
+                    </button>
+                  </th>
+                  <th scope="col" aria-sort={sortAriaValue(sort === "last-asc" || sort === "last-desc", sort === "last-asc")}>
+                    <button type="button" className={styles.linkButton} onClick={() => setSort(toggleColumnSort(sort, "last-asc", "last-desc"))}>
+                      Last
+                      {(sort === "last-asc" || sort === "last-desc") && <SortGlyph asc={sort === "last-asc"} />}
                     </button>
                   </th>
                   <th scope="col" aria-sort={sortAriaValue(sort === "captured-asc" || sort === "captured-desc", sort === "captured-asc")}>
@@ -702,23 +876,53 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => (
-                  <DiscussionReplyRow
-                    key={row.id}
-                    row={row}
-                    isFirst={i === 0}
-                    isLast={i === rows.length - 1}
-                    onEditReply={editReply}
-                    onMove={moveRow}
-                    onRemove={handleRemove}
-                    onRetry={retryRow}
-                    onRetryResources={retryResources}
-                    onRemoveResource={removeResource}
-                    registerRemoveRef={registerRemoveRef}
-                    announce={announce}
-                    onCopyError={handleCopyError}
-                  />
-                ))}
+                {/* F13: the fifth empty state - `totalCount > 0` (this whole
+                    block's own gate, above) but the current filter matches
+                    nothing. `rows.length` (the filtered array) can only be 0
+                    here while filterText is non-empty (F8: an empty/
+                    whitespace query returns the input array BY REFERENCE, so
+                    `rows` holds every row whenever no filter is active - it
+                    can never independently drop to 0 while totalCount is
+                    not). Without this state the user would see AC59's "no
+                    posts were found, check that you shared the right
+                    window" copy, which would be a lie for a table that
+                    plainly has rows - just not ones matching the query. */}
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={DISCUSSION_TABLE_COLUMN_COUNT} className={panelStyles.filterEmptyCell}>
+                      {`No replies match "${filterText.trim()}".`}{" "}
+                      <button type="button" className={styles.linkButton} onClick={() => setFilterText("")}>
+                        Clear
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((row, i) => (
+                    <DiscussionReplyRow
+                      key={row.id}
+                      row={row}
+                      // F15 item 2: boundary buttons ("Move up"/"Move down")
+                      // must reflect the VISIBLE array, not the full one - a
+                      // row that looks first under the current filter must
+                      // report isFirst, and a row that is first only in the
+                      // unfiltered table but has a hidden predecessor must
+                      // not. `rows` IS the filtered/visible array now (see
+                      // the destructuring comment above), so i/rows.length
+                      // here are already scoped correctly by construction.
+                      isFirst={i === 0}
+                      isLast={i === rows.length - 1}
+                      onEditReply={editReply}
+                      onMove={moveRow}
+                      onRemove={handleRemove}
+                      onRetry={retryRow}
+                      onRetryResources={retryResources}
+                      onRemoveResource={removeResource}
+                      registerRemoveRef={registerRemoveRef}
+                      announce={announce}
+                      onCopyError={handleCopyError}
+                    />
+                  ))
+                )}
               </tbody>
             </table>
           </div>

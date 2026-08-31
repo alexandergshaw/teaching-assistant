@@ -3,10 +3,12 @@
 // One logical row of the discussion-replies table, rendered as TWO <tr>s -
 // see docs/discussion-reply-capture-acceptance-criteria.md sections 6/16 and
 // the reply-width UX pass note (scratchpad "reply-width-ux.md"): a compact
-// header bar (Name/Captured/Status/Actions) plus a full-width `colSpan`
-// continuation row holding the post and the reply side by side, always
-// open, no disclosure click. A React.memo child (AC39/section 12 "Set D
-// also splits") - a controlled multiline TextField per row, with every row
+// header bar (First/Last/Captured/Status/Actions - First/Last per F6,
+// docs/discussion-reply-sort-filter-acceptance-criteria.md section 4, which
+// replaced the original single Name column) plus a full-width `colSpan`
+// continuation row holding the post and the reply side by side, always open,
+// no disclosure click. A React.memo child (AC39/section 12 "Set D also
+// splits") - a controlled multiline TextField per row, with every row
 // re-rendering on every keystroke because `rows` is one array in one hook,
 // is visibly laggy past ~25 rows. For the memo to actually skip a
 // re-render, the parent's row updaters (moveRow/editReply/removeRow/retryRow
@@ -15,12 +17,13 @@
 // discipline lives in C2 (useReplyRows.ts) and R-D (useReplyResources.ts),
 // not here; this file only assumes it holds.
 //
-// AC15 amendment (reply-width UX pass): the six-column layout drops to four
-// (Name, Captured, Status, Actions) plus this full-width continuation row -
-// `<th scope="col">Post` and `<th scope="col">Reply` are deleted from the
-// panel's <thead>, since a column header with no cells beneath it is a lie
-// to a screen reader. Nothing is lost: both controls already carry their
-// own accessible name (`Post by ${author}`, `Reply to ${author}`), which is
+// AC15 amendment (reply-width UX pass): the six-column layout drops to five
+// (First, Last, Captured, Status, Actions - Name split into First/Last per
+// F6 above) plus this full-width continuation row - `<th scope="col">Post`
+// and `<th scope="col">Reply` are deleted from the panel's <thead>, since a
+// column header with no cells beneath it is a lie to a screen reader.
+// Nothing is lost: both controls already carry their own accessible name
+// (`Post by ${author}`, `Reply to ${author}`), which is
 // stronger than a column header because it names the subject too.
 
 import { memo, useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
@@ -30,14 +33,78 @@ import panelStyles from "./DiscussionRepliesPanel.module.css";
 import { CopyIcon, CheckIcon, ArrowUpIcon, ArrowDownIcon, CloseIcon } from "./discussion-icons";
 import { replyClipboardText, type ReplyRow, type ReplyRowState } from "./discussion-capture";
 import { RESOURCE_KIND_LABELS } from "@/lib/resource-kind";
+// F1a/F2/F3 (docs/discussion-reply-sort-filter-acceptance-criteria.md section
+// 3): the dependency-free name-split leaf. Read `person-name.ts`'s own header
+// for why this lives outside the recording folder rather than in
+// discussion-table-view.ts - importing it here does not reintroduce that
+// cycle, since person-name.ts imports nothing back from this feature.
+import { deriveReplyAuthorName } from "@/lib/person-name";
 
 const COPY_RESET_MS = 1500;
 
-/** Name, Captured, Status, Actions - kept as a constant so the header bar's
- * cell count and the continuation row's colSpan can never drift apart.
+// F3/F7: the Last-name cell's display convention for an unknown surname
+// (deriveReplyAuthorName sources "single" and "none", where `lastName` is
+// ""). Deliberately NOT exported from person-name.ts, which is UI-agnostic
+// by design (F1a) - and deliberately a fresh local constant rather than an
+// import of repo-grades/repoGradeStudentName.ts's own UNKNOWN_LAST_NAME_MARK,
+// per the reuse survey's "read, not imported" rule (that function lives in a
+// different feature's component folder). Same glyph (em dash) by convention,
+// not by shared code.
+const UNKNOWN_LAST_NAME_MARK = "—";
+
+// S2 fix (sort-filter review S3): `aria-describedby` must resolve to an
+// element carrying the actual `correctionHint` text, not the "(derived)"
+// marker's own visible text - a screen reader was announcing "derived",
+// never the hint `person-name.ts` computes for every derived row (a
+// capability that reached nobody). This is a fresh, tiny local copy of
+// DiscussionRepliesPanel.tsx's `visuallyHidden` idiom rather than an
+// import of it - that file already imports THIS one (DiscussionReplyRow),
+// so importing back would be a module cycle; same "read, not imported"
+// discipline this file already applies to UNKNOWN_LAST_NAME_MARK above.
+//
+// Sort-filter closure re-review SHOULD-2: the hint span this style is
+// applied to sits INSIDE the `<td>` it describes (see the render below).
+// `aria-describedby` only needs the target element to EXIST and be
+// REFERENCEABLE by id - not to be visible - but a plain clip-hidden span
+// left as ordinary cell content is still part of the cell's normal
+// reading order: a screen reader walking through the row (not just the
+// one moment it resolves the description) hits this ~35-word sentence as
+// if it were regular text of the Last cell, on nearly every derived row.
+// The render below therefore also sets `aria-hidden="true"` on the span
+// itself: that pulls it out of the accessibility tree for ordinary
+// browsing, while the accessible name/description computation algorithm
+// (used to resolve `aria-describedby`) explicitly still reads the text of
+// a DIRECTLY id-referenced node even when that node carries
+// `aria-hidden="true"` - so the hint keeps reaching the sighted-mouse
+// `title` and the description, and stops being narrated as if it were the
+// cell's own content.
+//
+// `display: none` is NOT an alternative to the clip idiom below (there is
+// no `.srOnly` class in this repo - see StagePanel.tsx's own clipped
+// `role="status"` span for the precedent this copies): unlike
+// `aria-hidden`, a `display: none` element is dropped from the
+// accessibility tree outright in most browser/AT combinations, with no
+// carve-out for a direct id reference, so `aria-describedby` would simply
+// stop resolving and this whole fix would silently undo itself - the next
+// person to "simplify" this to `display: none` would ship exactly that.
+const visuallyHiddenHint: React.CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0,0,0,0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
+
+/** First, Last, Captured, Status, Actions - kept as a constant so the header
+ * bar's cell count and the continuation row's colSpan can never drift apart.
  * Precedent: AUTOMATION_TABLE_COLUMN_COUNT in
- * ../workflows/AutomationRow.tsx:40. */
-export const DISCUSSION_TABLE_COLUMN_COUNT = 4;
+ * ../workflows/AutomationRow.tsx:40. Bumped from 4 to 5 for F6: the single
+ * "Name" header/cell splits into independent First/Last columns. */
+export const DISCUSSION_TABLE_COLUMN_COUNT = 5;
 
 const STATE_BADGE: Record<ReplyRowState, { label: string; variant: "ghBadgeNeutral" | "ghBadgeWarning" | "ghBadgeSuccess" | "ghBadgeDanger" }> = {
   pending: { label: "Waiting", variant: "ghBadgeNeutral" },
@@ -261,11 +328,51 @@ function DiscussionReplyRowImpl({
   const replyLabel = `Reply to ${row.author}`;
   const canCopyReply = !!row.reply || !!row.resources?.length;
 
+  // F3/F4: computed for DISPLAY (and, separately, for the sort key -
+  // discussion-table-view.ts) from the raw `row.author` string every render -
+  // never written back to the row. Cell text and sort key read this SAME
+  // derivation (entry 361 N5 item 16), but the cell substitutes the em dash
+  // for an unknown surname while the sort key stays "" (F3's deliberate
+  // asymmetry, owned by the sort module, not this file).
+  const nameParts = deriveReplyAuthorName(row.author);
+  const nameHintId = `disc-name-hint-${row.id}`;
+
   return (
     <>
-      {/* --- the header bar: Name / Captured / Status / Actions --- */}
+      {/* --- the header bar: First / Last / Captured / Status / Actions --- */}
       <tr className={panelStyles.summaryRow}>
-        <th scope="row">{row.author}</th>
+        <th scope="row">{nameParts.firstName}</th>
+        {/* F7: a "derived" (guessed) surname carries a visible marker with
+            the correction hint in BOTH a `title` (pointer/tooltip) and an
+            `aria-describedby` pointing at the same marker's id (screen
+            reader). An unknown surname ("single"/"none" - lastName === "")
+            renders the em dash, never blank and never guessed. */}
+        <td aria-describedby={nameParts.source === "derived" ? nameHintId : undefined}>
+          {nameParts.lastName === "" ? UNKNOWN_LAST_NAME_MARK : nameParts.lastName}
+          {nameParts.source === "derived" && (
+            <>
+              <span className={panelStyles.nameDerivedMark} title={nameParts.correctionHint}>
+                {" "}
+                (derived)
+              </span>
+              {/* S2 fix: the id `aria-describedby` points at now carries the
+                  actual hint text, not the marker's own "(derived)" label -
+                  see visuallyHiddenHint's own comment above. The visible
+                  marker keeps its pointer-hover `title` for a sighted mouse
+                  user and no longer needs an id of its own.
+                  SHOULD-2 fix: `aria-hidden="true"` keeps this span out of
+                  the cell's ordinary reading order (it must not be narrated
+                  as if it were the Last cell's own content) while the
+                  sibling `<td>`'s `aria-describedby` above still resolves
+                  its text - see visuallyHiddenHint's comment for why that
+                  is true for `aria-hidden` but would NOT be true for
+                  `display: none`. */}
+              <span id={nameHintId} aria-hidden="true" style={visuallyHiddenHint}>
+                {nameParts.correctionHint}
+              </span>
+            </>
+          )}
+        </td>
         <td>{formatCapturedTime(row.firstSeenAt)}</td>
         <td>
           <span className={`${styles.ghBadge} ${styles[badge.variant]}`}>{badge.label}</span>

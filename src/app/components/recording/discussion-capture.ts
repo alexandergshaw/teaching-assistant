@@ -420,7 +420,24 @@ export interface ReplyRow {
   resourceError?: string | null; // set only when resourceState === "failed", R3c
 }
 
-export type ReplySort = "captured-asc" | "captured-desc" | "name-asc" | "name-desc" | "custom";
+// F5 (docs/discussion-reply-sort-filter-acceptance-criteria.md): four members
+// ADDED, none removed. `name-asc`/`name-desc` (the existing whole-string
+// sort, kept as the "Name" header) MUST stay in this union - removing or
+// renaming either would make useReplyRows.ts's `isReplySort` reject every
+// already-persisted value of it, silently reverting a returning user's
+// saved sort to the default with no error. See that AC's
+// coercion-changes-set-membership lesson: a membership test's set must
+// never shrink out from under a value already written to storage.
+export type ReplySort =
+  | "captured-asc"
+  | "captured-desc"
+  | "name-asc"
+  | "name-desc"
+  | "first-asc"
+  | "first-desc"
+  | "last-asc"
+  | "last-desc"
+  | "custom";
 
 // ---------------------------------------------------------------------------
 // AC12 / AC13 / AC54: merging captured posts into the table.
@@ -532,7 +549,9 @@ export function sortReplyRows(rows: ReadonlyArray<ReplyRow>, sort: ReplySort): R
 }
 
 // ---------------------------------------------------------------------------
-// AC53: the moveRow pure helper.
+// AC53: the shared adjacent-row-swap helper (formerly a `moveRow` pure
+// helper - see swapAdjacentRows's own comment below for why that name was
+// deleted).
 // ---------------------------------------------------------------------------
 
 export interface MoveRowResult {
@@ -544,32 +563,47 @@ export interface MoveRowResult {
   atBoundary: boolean;
 }
 
-/** `displayedRows` must already be sorted for display (every consumer of
- * this module keeps `rows` in exactly that shape). Sets `sort` to `"custom"`
- * in the same result as the swap, and - when the previous sort was not
- * already `"custom"` - first rewrites every row's `order` to its current
- * displayed index, so the first `Move up` after a `Name` sort reorders
- * against what is actually on screen instead of stale capture-time order
- * values. */
-export function moveRow(displayedRows: ReadonlyArray<ReplyRow>, currentSort: ReplySort, id: string, direction: "up" | "down"): MoveRowResult {
-  const index = displayedRows.findIndex((r) => r.id === id);
-  if (index === -1) {
-    return { rows: displayedRows.slice(), sort: currentSort, atBoundary: false };
-  }
-
-  const targetIndex = direction === "up" ? index - 1 : index + 1;
-  if (targetIndex < 0 || targetIndex >= displayedRows.length) {
-    return { rows: displayedRows.slice(), sort: currentSort, atBoundary: true };
-  }
-
+/** S1 fix (sort-filter review): the actual swap, pulled out of this
+ * module's old `moveRow` so `discussion-table-view.ts`'s `moveVisibleRow`
+ * (F15, the filter-aware sibling) can share this ONE implementation
+ * instead of reimplementing it against the visible id list it computes
+ * independently. Before this fix the two had two copies of this exact
+ * swap, and REGRESSION entry 367 defect 4 had already named `moveRow` as
+ * one of the functions in this feature that shipped twice once - this
+ * recreated that shape for it a second time.
+ *
+ * Sort-filter closure re-review SHOULD-1: `moveRow` itself - a thin "which
+ * two ids are adjacent, by physical array index" wrapper around this
+ * function - was deleted after the extraction above left it with ZERO
+ * production callers (every real caller went through `moveVisibleRow`'s
+ * filter-aware adjacency instead; grep confirmed only test files imported
+ * it). Its coverage moved onto this function directly - see
+ * `discussion-capture.rows.test.ts`'s `swapAdjacentRows (AC53)` describe
+ * block - rather than being left behind as a tested-but-dead export, which
+ * is the exact "tested copy nothing runs" shape REGRESSION 367 defect 4
+ * (and this repo's other four instances of it) warns about.
+ *
+ * Rewrites every row's `order` to its current displayed index FIRST when
+ * leaving a non-custom sort (AC53) - a row whose order already equals its
+ * index keeps its object identity - then exchanges `idA`'s and `idB`'s
+ * `order` values and reports `sort: "custom"`. */
+export function swapAdjacentRows(displayedRows: ReadonlyArray<ReplyRow>, currentSort: ReplySort, idA: string, idB: string): MoveRowResult {
   const base: ReplyRow[] =
     currentSort === "custom" ? displayedRows.slice() : displayedRows.map((row, i) => (row.order === i ? row : { ...row, order: i }));
 
+  const indexA = base.findIndex((r) => r.id === idA);
+  const indexB = base.findIndex((r) => r.id === idB);
+  if (indexA === -1 || indexB === -1) {
+    // Defensive: an id not present in displayedRows would be a caller bug,
+    // not a real boundary - no-op rather than corrupt the table.
+    return { rows: displayedRows.slice(), sort: currentSort, atBoundary: false };
+  }
+
   const nextRows = base.slice();
-  const rowAtIndex = nextRows[index];
-  const rowAtTarget = nextRows[targetIndex];
-  nextRows[index] = { ...rowAtTarget, order: rowAtIndex.order };
-  nextRows[targetIndex] = { ...rowAtIndex, order: rowAtTarget.order };
+  const rowA = nextRows[indexA];
+  const rowB = nextRows[indexB];
+  nextRows[indexA] = { ...rowB, order: rowA.order };
+  nextRows[indexB] = { ...rowA, order: rowB.order };
 
   return { rows: nextRows, sort: "custom", atBoundary: false };
 }

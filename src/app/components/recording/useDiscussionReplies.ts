@@ -105,9 +105,22 @@ export interface UseDiscussionRepliesReturn {
   start: () => Promise<void>;
   stop: () => void;
 
+  /** Sorted AND filtered for display. See `totalCount` for the real size. */
   rows: ReplyRow[];
   sort: ReplySort;
   setSort: (s: ReplySort) => void;
+  filterText: string;
+  setFilterText: (next: string) => void;
+  /** The UNFILTERED row count (F0-2/F11). Every count, progress string, empty
+   *  state and - critically - both destructive arming signatures read this,
+   *  never `rows.length`, which a filter narrows. */
+  totalCount: number;
+  /** Fixer pass (root cause): forwarded from C2's `useReplyRows` for one
+   *  consumer - the panel's post-stop session summary (S2), which cannot
+   *  diff the whole table correctly off the filtered `rows`. This file's
+   *  own bulk/dispatch code below reaches C2's `rawRows` via `rowsApiRef`
+   *  directly, not through this field. */
+  rawRows: ReplyRow[];
   moveRow: (id: string, dir: "up" | "down") => void;
   editReply: (id: string, text: string) => void;
   removeRow: (id: string) => void;
@@ -554,7 +567,11 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       // ticker-idle effect needs to see that drain to be able to stop the
       // ticker again.
       setDraftQueueSize(draftQueueRef.current.length);
-      const currentRows = rowsApiRef.current.rows;
+      // B3 fix: `rawRows`, not `rows`. A batch spliced off the queue above
+      // must not vanish because a search-box keystroke hid its ids from the
+      // filtered array at this exact instant - never drafted, never failed,
+      // never re-enqueued. Nothing on screen was ever a selection here.
+      const currentRows = rowsApiRef.current.rawRows;
       // AC52/S1: re-check row state at DISPATCH time, not enqueue time. A
       // non-force entry whose row is USER-EDITED (typed into since it was
       // queued, or already contains hand-written text) is skipped here
@@ -609,7 +626,10 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       // loop below, since the same hole exists on both paths.
       const isUnchanged = (id: string) => rowsApiRef.current.isUnchangedSince(id, editSnap);
       const resolveEditedDuringDispatch = (id: string) => {
-        const current = rowsApiRef.current.rows.find((r) => r.id === id);
+        // B4 fix: `rawRows`, not `rows` - a row hidden by the filter at this
+        // instant must not stay wedged in "drafting" forever, reopening the
+        // exact wedge F10 exists to close (this function's doc comment above).
+        const current = rowsApiRef.current.rawRows.find((r) => r.id === id);
         // S7: pass the row's OWN current `userEdited` through explicitly -
         // this re-applies the user's own hand-typed text (never the
         // model's), so it must keep its authorship flag. applyReply's
@@ -668,7 +688,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // should be immediately paused again, and the idle effect after it needs
   // it to react to every later change.
   //
-  // Deliberately does NOT include `rowsApi.rows.length > 0` - having a
+  // Deliberately does NOT include `rowsApi.rawRows.length > 0` - having a
   // persisted table sitting there is why the loops were STARTED at all (so
   // Retry/redraft can resume against it), but it says nothing about whether
   // either loop has anything to do RIGHT NOW. Enqueuing a draft (retryRow,
@@ -722,10 +742,15 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // become true through any dependency change, and the idle loops (and
   // AC37's exception for them) would never start until the user did
   // something else that happened to touch `capture.capturing` or
-  // `rowsApi.rows.length`. ---
+  // `rowsApi.rawRows.length`.
+  //
+  // S5 fix: this gate reads `rawRows.length`, not the filtered `rows.length`
+  // - a returning user with a persisted filter matching nothing must not
+  // have loop start silently fall through to `hasActivatedRef`/`capturing`
+  // (F0-2 forbids the filter changing anything but what is visible). ---
   useEffect(() => {
     if (loopsStartedRef.current) return;
-    if (!(capture.capturing || rowsApi.rows.length > 0 || hasActivatedRef.current)) return;
+    if (!(capture.capturing || rowsApi.rawRows.length > 0 || hasActivatedRef.current)) return;
     loopsStartedRef.current = true;
     // NEW-1: bump the epoch BEFORE starting the loops, and capture the
     // resulting value locally to hand to both - see the wake-ticker cleanup
@@ -750,7 +775,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     active,
     coursesLoading,
     capture.capturing,
-    rowsApi.rows.length,
+    rowsApi.rawRows.length,
     flushWakeResolvers,
     runExtractionLoop,
     runDraftLoop,
@@ -863,7 +888,10 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   );
 
   const draftAllPending = useCallback(() => {
-    const ids = rowsApiRef.current.rows
+    // B2 fix: `rawRows`, not `rows` - F12's whole-table list, and unlike
+    // Copy/Find resources this button carries no count that could disclose
+    // a narrowed scope.
+    const ids = rowsApiRef.current.rawRows
       .filter((r) => r.state === "pending" || r.state === "failed")
       .map((r) => r.id);
     // S1: deliberately NOT forced - this is a BULK, un-targeted action across
@@ -879,7 +907,10 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // AC45: redraftAll is a structural, destructive rewrite of every row's
     // reply, so it bumps the table epoch the same way clearTable does.
     rowsApiRef.current.tableEpochRef.current += 1;
-    const ids = rowsApiRef.current.rows.map((r) => r.id);
+    // B1 fix - REGRESSION entry 258's class, hit a third time: `rawRows`,
+    // not `rows`. The confirmation names "every reply in the table" and
+    // stays armed through a filter change (F11); dispatch must match that.
+    const ids = rowsApiRef.current.rawRows.map((r) => r.id);
     // AC29: forced - this action is explicitly armed (a confirm step) and
     // allowed to overwrite hand-edited replies, because the user asked for
     // exactly that.
@@ -922,6 +953,19 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     rows: rowsApi.rows,
     sort: rowsApi.sort,
     setSort: rowsApi.setSort,
+    filterText: rowsApi.filterText,
+    setFilterText: rowsApi.setFilterText,
+    // F0-2/F11: the UNFILTERED row count, and it is not a convenience. `rows`
+    // above is filtered for display, so eleven sites must read this instead of
+    // `rows.length` - every count, every progress string, all five empty
+    // states, and BOTH destructive arming signatures. If an arming signature
+    // read the filtered count, typing in the search box while `Delete table`
+    // is armed would silently re-arm it against a different number and the
+    // confirmation would name a count that does not match what it deletes.
+    // That is REGRESSION entry 258, which this feature has already hit twice.
+    // Do not "simplify" this away as a duplicate of `rows.length`.
+    totalCount: rowsApi.totalCount,
+    rawRows: rowsApi.rawRows,
     moveRow,
     editReply,
     removeRow,

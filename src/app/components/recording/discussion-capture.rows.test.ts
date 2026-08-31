@@ -1,6 +1,18 @@
 // Unit tests for the pure discussion-capture module - the reply-table side:
-// mergeCapturedPosts, sortReplyRows, moveRow, and serializeReplyTable /
-// deserializeReplyTable.
+// mergeCapturedPosts, sortReplyRows, swapAdjacentRows, and
+// serializeReplyTable / deserializeReplyTable.
+//
+// Sort-filter closure re-review SHOULD-1: this file used to test a
+// `moveRow` export, a thin "which two ids are physically adjacent" wrapper
+// around the actual swap. `moveRow` was deleted (zero production callers -
+// every real caller goes through `discussion-table-view.ts`'s
+// `moveVisibleRow` instead), so its coverage below now calls
+// `swapAdjacentRows` directly with the two ids `moveRow` used to resolve
+// internally. The two tests that existed purely to check `moveRow`'s own
+// physical-index boundary math (index -1 / index length) are gone with it -
+// that math no longer runs anywhere in production; `moveVisibleRow`'s
+// boundary handling against the VISIBLE id list is covered in
+// discussion-table-view.test.ts.
 //
 // This file was split out of a single discussion-capture.test.ts to stay
 // under this directory's line-count ceiling (see
@@ -20,7 +32,7 @@ import {
   DISCUSSION_TABLE_VERSION,
   mergeCapturedPosts,
   sortReplyRows,
-  moveRow,
+  swapAdjacentRows,
   serializeReplyTable,
   deserializeReplyTable,
   type ReplyRow,
@@ -222,31 +234,29 @@ describe("sortReplyRows (AC14)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC53: moveRow
+// AC53: swapAdjacentRows
 // ---------------------------------------------------------------------------
 
-describe("moveRow (AC53)", () => {
+// Sort-filter closure re-review SHOULD-1: this describe block used to test
+// `moveRow`, a deleted physical-index wrapper around this same swap (see
+// swapAdjacentRows's own header comment in discussion-capture.ts). Every
+// call below passes the two ids directly - the exact pair `moveRow` used to
+// resolve internally from an id + "up"/"down" direction - so the coverage
+// of the swap itself (order rewrite on leaving a non-custom sort, identity
+// preservation, the missing-id no-op) survives unchanged. The two tests
+// that only checked `moveRow`'s own physical-adjacency boundary math
+// (index -1 / index length, before it ever called into the shared swap) are
+// gone with it - that math has no production caller any more, since every
+// real caller resolves adjacency against the VISIBLE id list via
+// `discussion-table-view.ts`'s `moveVisibleRow` instead, whose own boundary
+// handling is covered in discussion-table-view.test.ts.
+describe("swapAdjacentRows (AC53)", () => {
   it("swaps two adjacent rows and switches sort to custom", () => {
     const rows = [makeRow({ id: "a", order: 0 }), makeRow({ id: "b", order: 1 }), makeRow({ id: "c", order: 2 })];
-    const result = moveRow(rows, "custom", "b", "up");
+    const result = swapAdjacentRows(rows, "custom", "b", "a");
     expect(result.sort).toBe("custom");
     expect(result.atBoundary).toBe(false);
     expect(result.rows.map((r) => r.id)).toEqual(["b", "a", "c"]);
-  });
-
-  it("is a no-op with atBoundary true when moving the first row up", () => {
-    const rows = [makeRow({ id: "a", order: 0 }), makeRow({ id: "b", order: 1 })];
-    const result = moveRow(rows, "custom", "a", "up");
-    expect(result.atBoundary).toBe(true);
-    expect(result.rows.map((r) => r.id)).toEqual(["a", "b"]);
-    expect(result.sort).toBe("custom");
-  });
-
-  it("is a no-op with atBoundary true when moving the last row down", () => {
-    const rows = [makeRow({ id: "a", order: 0 }), makeRow({ id: "b", order: 1 })];
-    const result = moveRow(rows, "custom", "b", "down");
-    expect(result.atBoundary).toBe(true);
-    expect(result.rows.map((r) => r.id)).toEqual(["a", "b"]);
   });
 
   it("rewrites order to displayed index before swapping when leaving a non-custom sort", () => {
@@ -254,16 +264,16 @@ describe("moveRow (AC53)", () => {
     // stale capture-time values that do not reflect that. AC53 requires the
     // swap to operate on what is ON SCREEN.
     const displayed = [makeRow({ id: "a", author: "Alvarez", order: 50 }), makeRow({ id: "b", author: "Baxter", order: 10 }), makeRow({ id: "c", author: "Chen", order: 90 })];
-    const result = moveRow(displayed, "name-asc", "b", "up");
+    const result = swapAdjacentRows(displayed, "name-asc", "b", "a");
     expect(result.sort).toBe("custom");
     expect(result.rows.map((r) => r.id)).toEqual(["b", "a", "c"]);
     // custom order re-sort of the result reproduces exactly this sequence.
     expect(sortReplyRows(result.rows, "custom").map((r) => r.id)).toEqual(["b", "a", "c"]);
   });
 
-  it("returns the rows unchanged (by identity of the id sequence) when the row id is not found", () => {
+  it("returns the rows unchanged (by identity of the id sequence) when either id is not found", () => {
     const rows = [makeRow({ id: "a", order: 0 }), makeRow({ id: "b", order: 1 })];
-    const result = moveRow(rows, "custom", "missing", "up");
+    const result = swapAdjacentRows(rows, "custom", "missing", "a");
     expect(result.rows.map((r) => r.id)).toEqual(["a", "b"]);
     expect(result.atBoundary).toBe(false);
   });
@@ -271,21 +281,21 @@ describe("moveRow (AC53)", () => {
   it("BL4/AC40: preserves object identity for a row NOT involved in the swap - this is what lets Set D's React.memo skip re-rendering it", () => {
     const untouched = makeRow({ id: "c", order: 2 });
     const rows = [makeRow({ id: "a", order: 0 }), makeRow({ id: "b", order: 1 }), untouched];
-    const result = moveRow(rows, "custom", "b", "up");
+    const result = swapAdjacentRows(rows, "custom", "b", "a");
     const resultUntouched = result.rows.find((r) => r.id === "c");
     expect(resultUntouched).toBe(untouched);
   });
 
   it("SABOTAGE CHECK (g): documents that unconditionally cloning every row (the previously-shipped, untested duplicate's behaviour) would fail the identity check above", () => {
     // This reproduces the exact divergence BL4 found: useReplyRows.ts's own
-    // inline moveRow did `displayed.map((r, i) => ({ ...r, order: i }))` -
-    // a new object for every row, always - instead of this tested
+    // old inline moveRow did `displayed.map((r, i) => ({ ...r, order: i }))`
+    // - a new object for every row, always - instead of this tested
     // function's `row.order === i ? row : { ...row, order: i }`. Verified
-    // by sabotage (temporarily reverting this file's moveRow to the
-    // clone-everything shape) - see report.
+    // by sabotage (temporarily reverting swapAdjacentRows to the
+    // clone-everything shape) - see this pass's own sabotage log.
     const untouched = makeRow({ id: "c", order: 2 });
     const rows = [makeRow({ id: "a", order: 0 }), makeRow({ id: "b", order: 1 }), untouched];
-    const result = moveRow(rows, "custom", "b", "up");
+    const result = swapAdjacentRows(rows, "custom", "b", "a");
     expect(result.rows.find((r) => r.id === "c")).toBe(untouched);
   });
 });

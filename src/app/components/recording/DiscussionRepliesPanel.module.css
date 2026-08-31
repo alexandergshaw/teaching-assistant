@@ -5,7 +5,12 @@
    what that shared skin and page.module.css do not: the capture preview, the
    fixed-height Post cell, and small layout helpers specific to this panel.
    This file is invisible to recording-split.structure.test.ts (it filters
-   /\.(ts|tsx)$/) - no ta-rec- localStorage key may ever be named here. */
+   /\.(ts|tsx)$/) - no persisted storage key may ever be named here; keys
+   live in the hooks, which the scan does read. Describing the key family
+   rather than spelling its literal prefix is deliberate: writing the prefix
+   out in prose is exactly what turned an explanatory comment in
+   useReplyRows.ts into a fragment the scan itself harvested as a key
+   nothing writes. */
 
 .previewVideo {
   width: 200px;
@@ -188,4 +193,25 @@ tr.bodyRow td {
   font-size: 0.8rem;
   color: var(--text-secondary);
   margin-bottom: 8px;
+}
+
+/* F7 (docs/discussion-reply-sort-filter-acceptance-criteria.md): the visible
+   marker beside a "derived" (guessed) surname split. Deliberately quiet -
+   this fires on most rows, since most captured author strings have no comma,
+   and a loud treatment here would dominate the Last column. */
+.nameDerivedMark {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+/* F13: the fifth empty state - the table has rows, but the current filter
+   query matches none of them. Sits inside a normal <tbody> <tr>, not paired
+   with a continuation row, so it deliberately does NOT join the
+   .summaryRow/.bodyRow border-suppression pair above - it keeps the shared
+   table skin's ordinary cell border. */
+.filterEmptyCell {
+  padding: 14px 8px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
 }

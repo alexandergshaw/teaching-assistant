@@ -214,13 +214,24 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
         setResourceQueueSize(resourceQueueRef.current.length);
 
         const rowsApi = argsRef.current.rowsApi;
-        const currentRows = rowsApi.rows;
+        // B5 fix (sort-filter review): `rawRows`, not `rows` (the filtered
+        // display array). This is worse than B3's version of the same bug -
+        // this drain is fed automatically on every model-authored reply
+        // landing (R6's single trigger point, useDiscussionReplies.ts:654),
+        // not by any bulk-scope judgment call, so reading the filtered array
+        // meant ANY filter active during a capture silently dropped resource
+        // searches for rows outside it: never searched, never "searching",
+        // never an error, dropped from a queue already spliced above. The
+        // comment this replaced ("every id vanished from the table under
+        // us") was no longer true once a filter could hide an id without
+        // removing it.
+        const currentRows = rowsApi.rawRows;
         const posts = ids
           .map((id) => currentRows.find((r) => r.id === id))
           .filter((r): r is ReplyRow => !!r)
           .map((r) => ({ id: r.id, text: r.post }));
 
-        if (posts.length === 0) continue; // every id vanished from the table under us
+        if (posts.length === 0) continue; // every id was actually removed from the table (rawRows), not merely filtered out
 
         const postIds = posts.map((p) => p.id);
         rowsApi.markResourceSearching(postIds);
@@ -320,6 +331,13 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
   }, [args.capturing, args.pendingFrames, args.extracting, drain]);
 
   const findMissing = useCallback(() => {
+    // DELIBERATE (sort-filter review S6, not B3/B5's bug): stays on `rows`,
+    // the FILTERED display array - not `rawRows`. `Find resources (N)` is
+    // not one of F12's three whole-table actions, and the panel's own
+    // `eligibleForResources.length` (DiscussionRepliesPanel.tsx) reads this
+    // SAME `rowsApi.rows` object, so the count on the button and the ids
+    // this dispatches can never drift apart - unlike B3/B5, where nothing
+    // on screen was ever a selection the user saw before clicking.
     const rows = argsRef.current.rowsApi.rows;
     const ids = rows.filter(isFindMissingEligible).map((r) => r.id);
     if (ids.length > 0) enqueueResources(ids);

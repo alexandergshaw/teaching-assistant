@@ -35190,3 +35190,97 @@ byte-identical literal with a pre-existing fallback.
   this surface next.
 - One residual wedge path survives at the `found === undefined` branch,
   unreachable under the action's own contract, which guarantees an entry per id.
+
+## 369. Sort the reply table by first or last name, filter it by keyword - and five places where a filtered array was mistaken for the whole table
+
+Ships `docs/discussion-reply-sort-filter-acceptance-criteria.md`. The Discussion
+replies table gains `First` and `Last` sort headers, a keyword filter over
+author + post + reply, a `Showing N of M` line with Clear, and a fifth empty
+state for "nothing matches". Extends entries 367 and 368.
+
+Five concurrent sets: a dependency-free name leaf, a table-view leaf, the rows
+hook, the panel, and the canary bump.
+
+### Decisions worth re-reading
+
+- **`src/lib/person-name.ts` is a leaf in `src/lib`, not in the recording
+  folder, and that placement is load-bearing.** A later group needs the same
+  derivation inside `discussion-reply-prompt.ts`, and `discussion-capture.ts`
+  already re-exports from that module - so putting it under `recording/` would
+  close a module cycle, which this repo has recorded as silently yielding
+  `undefined` past `tsc`.
+- **Name derivation never invents.** Adopted verbatim from entry 361's "name
+  columns that do not invent names": a comma is the explicit correction channel;
+  two-plus tokens derive with a **visible marker and a correction hint**; a
+  one-word name means the surname is UNKNOWN. The cell renders an em dash and
+  the **sort key is `""`** - a deliberate asymmetry, because sorting on the dash
+  would file every mononym under a punctuation mark. Known limit: "last token is
+  the surname" is wrong for names where the family name comes first, which is
+  exactly why the derived marker and the comma channel exist.
+- **The filter is generic over the row type** (`filterRowsByQuery<T>` with a
+  haystack accessor). A grading table needing the same operation is already
+  specified, and this feature has produced five instances of one rule
+  implemented twice where the tested copy was not the live one.
+- **A filter changes what is VISIBLE and nothing else.** Every count, progress
+  string, empty state and BOTH destructive arming signatures read the unfiltered
+  total.
+- **F15a: a hidden row between two swapped rows keeps its own position** and
+  resurfaces between them when the filter clears. The instructor moved a row
+  relative to what they could see; a row they could not see was not part of that
+  instruction.
+
+### The defect class this group produced, and where the spec was wrong
+
+**The AC enumerated the "eleven sites" that must read the unfiltered count -
+inside the panel only.** The panel was correct at every one. But two HOOKS also
+consumed that array and were never repointed, producing five blockers:
+
+1. **`redraftAll` rewrote only VISIBLE rows** while its confirmation said "every
+   reply in the table", and bumped the table epoch as though all had been
+   redrafted. REGRESSION 258's class, for the third time in this feature.
+2. `draftAllPending` silently skipped hidden pending rows.
+3. **The drafting queue dropped already-spliced ids** whose rows the filter hid
+   at dispatch - never drafted, never failed, never re-enqueued.
+4. `resolveEditedDuringDispatch` no-opped on a hidden row, reopening the
+   "Drafting forever" wedge.
+5. The resource drain dropped ids the same way, on the AUTOMATIC path.
+
+Root cause fixed once by exposing `rawRows` beside `totalCount`. A source-scan
+guard test now pins that no dispatch site reads the filtered array; the closure
+review verified that guard genuinely fires by extracting the pre-fix files from
+git history and running its regexes against them.
+
+Also closed: a 35-word accessibility hint rendering as ordinary cell content on
+every row (fixed with `aria-hidden` on the span - **not** `display: none`, which
+would remove it from the accessibility tree and break the `aria-describedby` it
+exists to serve); three tests that had become tautologies by comparing two
+implementations that now share a helper; and two sort tests whose fixtures
+shared an author and therefore could not discriminate ascending from descending.
+
+### Gates
+
+`tsc --noEmit` 0. `eslint` 0 errors, 0 warnings. `vitest` **734 files, 15079
+tests**. Key canary re-derived independently with an ordinal sort: **49/49**,
+sequence identical. Nothing over the 1000-line ceiling.
+
+### Limits
+
+- **No component was rendered.** Both sort headers, the search box, the em dash,
+  the derived marker, the `Showing N of M` line and the fifth empty state are
+  verified by reading only.
+- **The name rules were never run against a real roster.** The oracle is a set of
+  hand-written cases, not evidence about what a vision model reads off any LMS.
+- **The filter's cost at the 500-row ceiling is reasoned, not profiled.**
+- **THE CEILING IS NOW THE BINDING CONSTRAINT, and comments were deleted to stay
+  under it.** `useDiscussionReplies.ts` reached **1004** during the fix pass and
+  came back to 984 only by trimming its own newly-written comments - which were
+  the reasoning for the five blockers above. That is a warning sign, not a
+  solution. 16 lines of headroom, with four feature groups queued that all touch
+  it. The extraction is specified in the closure report: move the contract block
+  to a leaf and lift `runDraftLoop` into `discussion-draft-loop.ts` (~765), and
+  extract the panel's table subtree into `DiscussionReplyTable.tsx` (~777).
+  **Do this before the next feature group, not after one hits the wall.**
+- `moveRow` was deleted rather than left orphaned; its coverage moved onto the
+  live `swapAdjacentRows`.
+- **This surface still owes a downloadable log** under the rule now in
+  `docs/DEV_LOOP.md`. One run, one debt, still unpaid.

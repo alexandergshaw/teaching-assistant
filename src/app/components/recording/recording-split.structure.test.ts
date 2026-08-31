@@ -145,6 +145,7 @@ describe("recording-split structure", () => {
         "ta-rec-cards",
         "ta-rec-disc-audience",
         "ta-rec-disc-course",
+        "ta-rec-disc-filter",
         "ta-rec-disc-save-video",
         "ta-rec-disc-sort",
         "ta-rec-disc-table",

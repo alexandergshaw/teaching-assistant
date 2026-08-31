@@ -64,6 +64,15 @@ export function deriveResourceConcept(text: string): string {
   return lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
 }
 
+// docs/discussion-thread-structure-acceptance-criteria.md T2: the three-
+// member set a captured post's thread position can hold. Lives HERE (not in
+// discussion-capture.ts or discussion-replies.ts) for the same reason
+// DiscussionAudience does - it is read by BOTH the extraction action (to
+// type what it returns) and, structurally, by anything that needs to name
+// the same three strings without restating them. T2b: anything outside this
+// set coerces to `undefined`, never throws and never invents a fourth value.
+export type ThreadPosition = "root" | "reply" | "unknown";
+
 export type DiscussionAudience = "peers" | "students";
 
 export const DISCUSSION_AUDIENCE_LABELS: Record<DiscussionAudience, string> = {
@@ -118,6 +127,23 @@ export function buildPostExtractionPrompt(courseName: string, frameCount: number
     "- Report it separately in \"postedAt\", exactly as it is shown on screen, for example \"Mar 12 at 9:04 PM\".",
     "- If no timestamp is visible for a post, leave \"postedAt\" out of that entry entirely.",
 
+    // docs/discussion-thread-structure-acceptance-criteria.md T3a. Every
+    // clause below maps to a named failure case from that doc's section 1/0:
+    // T0-1/T0-2 rule out cross-image and cross-batch inference outright (the
+    // model has no memory of another batch and the client cannot stitch
+    // relationships either), and T1/T1a make "unknown" the safe default
+    // rather than a guess. No numeric depth is ever requested - LMS views cap
+    // visual nesting, so depth 3 and depth 4 are pixel-identical, and asking
+    // for a number that is not actually in the image only manufactures a
+    // confident wrong answer.
+    "THREAD POSITION",
+    "- For each post, report whether it is a top-level post or a reply to another post, using only what is visible in these images.",
+    "- If the board prints a line naming who a post replies to, report that name in \"replyingToAuthor\", exactly as it is shown.",
+    "- If you cannot tell from what is visible, report \"unknown\" rather than guessing.",
+    "- Do not infer a post's position from where it sits relative to posts in OTHER images - each image is its own evidence.",
+    "- Do not guess a nesting level from how far a post is indented when no un-indented post is visible for comparison in the same image.",
+    "- Never report a \"replyingToAuthor\" you cannot actually read. A name inferred from context, rather than read off the screen, is a guess about a real person.",
+
     "TEXT THAT IS CUT OFF",
     "- If a post is truncated by a control such as \"Show more\", \"Read more\", \"See more\" or an ellipsis, return only the text that is actually visible, and do NOT include the control's own words in the text.",
     "- If a post runs off the bottom edge of the last image, return the visible part.",
@@ -128,9 +154,12 @@ export function buildPostExtractionPrompt(courseName: string, frameCount: number
     "- If these images show only navigation, a course home page, an empty board or a loading state, return an empty array: []",
 
     "OUTPUT",
-    'Return ONLY a JSON array, and nothing else. Each element is {"author": "...", "text": "...", "postedAt": "..."} - no other keys, and "postedAt" omitted when it is not visible.',
+    'Return ONLY a JSON array, and nothing else. Each element is {"author": "...", "text": "...", "postedAt": "...", "threadPosition": "...", "replyingToAuthor": "..."} - no other keys.',
     '"author" is the display name exactly as it is shown, with no title, no timestamp and no role label.',
     '"text" is the post\'s words as plain text. Use "\\n" between paragraphs. Do not use markdown and do not use backticks.',
+    '"postedAt" is omitted entirely when no timestamp is visible.',
+    '"threadPosition" is exactly one of "root", "reply" or "unknown", per the THREAD POSITION rules above.',
+    '"replyingToAuthor" is included only when the board prints the name of who a reply answers; omit it entirely otherwise.',
     "Order the array the way the posts appear on the page, top to bottom.",
     "No prose before or after the array. No code fences.",
   ].filter(Boolean).join("\n\n");
@@ -169,9 +198,23 @@ const AUDIENCE_STANCE: Record<DiscussionAudience, string> = {
  * model's turn. It is "" on any getWritingStyleBlock failure, which
  * .filter(Boolean) drops cleanly. This builder owns the WHOLE prompt so the
  * whole prompt is unit-testable - the action never concatenates onto it.
+ *
+ * docs/discussion-thread-structure-acceptance-criteria.md T6/T6a: a post may
+ * carry an optional `parent` - the row `resolveDraftParent` (in
+ * discussion-capture.ts, owned by the sibling half of this group) resolved
+ * for it, already gated on all three of threadPosition === "reply", a
+ * printed replyingToAuthor and exactly one matching author. When present, it
+ * is rendered immediately before that post's own block, labelled
+ * `CONTEXT ONLY - DO NOT REPLY TO THIS`, and carries NO "POST n" number -
+ * the output contract only ever asks for `1..posts.length`, so a numberless
+ * block is structurally unaddressable by the model's own reply. This is
+ * deliberate, not an oversight: conflating the parent with something the
+ * model can be asked to answer is the one failure mode T6a exists to
+ * foreclose, and budget was never the constraint (worst case is
+ * DRAFT_BATCH_SIZE extra ~600-character blocks, about 3.5% input growth).
  */
 export function buildReplyDraftingPrompt(
-  posts: ReadonlyArray<{ id: string; author: string; text: string }>,
+  posts: ReadonlyArray<{ id: string; author: string; text: string; parent?: { author: string; text: string } }>,
   audience: DiscussionAudience,
   courseName: string,
   styleBlock: string
@@ -189,11 +232,31 @@ export function buildReplyDraftingPrompt(
     "- No markdown, no headings, no bullet lists, no bold.",
     "- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.",
     "- No emoji.",
-    "- Never state a fact about the course - a date, a policy, a reading, an assignment, a grade - that is not written in the post you are answering. If you need one, write around it.",
+    // T6b: widened EXPLICITLY from "the post you are answering" to "the
+    // posts shown to you here" - a CONTEXT ONLY parent block is now
+    // sometimes shown alongside the post being answered, and the old
+    // phrasing would otherwise silently narrow to exclude it. The point is
+    // to change this on purpose rather than let it drift.
+    "- Never state a fact about the course - a date, a policy, a reading, an assignment, a grade - that is not written in the posts shown to you here. If you need one, write around it.",
     "- Reply only to what that post says. Do not refer to the other posts below.",
+    // Only stated when at least one post in this batch actually carries a
+    // parent - an unconditional instruction about a block that never
+    // appears would be noise in the common case, and would also break the
+    // T6a guarantee that the parent block is the ONLY thing distinguishing
+    // a batch that needed context from one that did not.
+    posts.some((p) => p.parent)
+      ? "- A block labelled CONTEXT ONLY - DO NOT REPLY TO THIS is background for understanding the post beneath it. Never write a reply to that block, and never count it as one of the numbered posts."
+      : "",
 
     "THE POSTS",
-    posts.map((p, i) => `POST ${i + 1}\nWritten by: ${p.author}\n${p.text}`).join("\n\n---\n\n"),
+    posts
+      .map((p, i) => {
+        const context = p.parent
+          ? `CONTEXT ONLY - DO NOT REPLY TO THIS\nWritten by: ${p.parent.author}\n${p.parent.text}\n\n`
+          : "";
+        return `${context}POST ${i + 1}\nWritten by: ${p.author}\n${p.text}`;
+      })
+      .join("\n\n---\n\n"),
 
     "OUTPUT",
     `Return ONLY a JSON array with exactly ${posts.length} elements, and nothing else.`,

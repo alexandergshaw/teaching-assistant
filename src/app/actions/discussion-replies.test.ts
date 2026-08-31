@@ -39,6 +39,16 @@ import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { EXTRACT_BATCH_SIZE, DRAFT_BATCH_SIZE, RESOURCE_BATCH_SIZE } from "@/lib/discussion-reply-prompt";
 import { RESOURCE_KINDS } from "@/lib/resource-kind";
 import { extractDiscussionPostsAction, draftDiscussionRepliesAction, gatherReplyResourcesAction } from "./discussion-replies";
+// FIX 1 (thread-structure review pass): the deserialization gate's own
+// three-member set, imported here ONLY to pin extraction's live gate against
+// it - see the "matches VALID_THREAD_POSITIONS" describe block below for why
+// this is a behavioural comparison rather than a direct import of both
+// arrays. discussion-thread.ts is a zero-import leaf (no production imports
+// of its own), so importing it here creates no cycle - it is a one-way edge
+// from this test file into a leaf module, mirroring the same "read a plain
+// export into a test" pattern discussion-thread.test.ts already uses for
+// `authorsMatch`.
+import { VALID_THREAD_POSITIONS } from "@/app/components/recording/discussion-thread";
 
 const OWNER = { id: "owner-1", email: "owner@example.com" };
 
@@ -184,6 +194,134 @@ describe("extractDiscussionPostsAction", () => {
     if ("posts" in result) {
       expect(result.posts[0].text).toBe("A short post.");
     }
+  });
+
+  // docs/discussion-thread-structure-acceptance-criteria.md T2b/T3.
+  describe("threadPosition / replyingToAuthor coercion (T2b/T3)", () => {
+    // FIX 1 (thread-structure review pass): this repo has TWO live runtime
+    // gates on the same nominal three-member position set - this file's own
+    // (unexported) THREAD_POSITIONS array, which decides what
+    // extractDiscussionPostsAction lets through, and discussion-thread.ts's
+    // exported VALID_THREAD_POSITIONS Set, which decides what
+    // deserializeReplyTable accepts back off disk. Nothing previously pinned
+    // them equal, so a later group could add a fourth position to THIS
+    // file's array, forget the Set, and get: extraction accepts it, the row
+    // renders, and the next reload silently coerces it back to `undefined`.
+    //
+    // The implementer assigned this fix owns discussion-replies.test.ts (this
+    // file) but explicitly NOT discussion-replies.ts - THREAD_POSITIONS
+    // cannot be exported for a direct side-by-side import without touching a
+    // file outside that file set, so the two tests below prove the same claim
+    // BEHAVIOURALLY, through extractDiscussionPostsAction's own public
+    // surface, rather than importing both arrays into one comparison:
+    //
+    //  - the test immediately below now loops over VALID_THREAD_POSITIONS
+    //    itself (imported from discussion-thread.ts), not a re-typed local
+    //    literal - every member of the DESERIALIZATION gate must also survive
+    //    the EXTRACTION gate unchanged. This is the "VALID_THREAD_POSITIONS
+    //    subset-of THREAD_POSITIONS" half, and it is now genuinely coupled:
+    //    if VALID_THREAD_POSITIONS ever gained a member this file's own
+    //    THREAD_POSITIONS array does not recognise, this loop would start
+    //    asserting `undefined` against that member and fail.
+    //  - the frozen-oracle test right after it pins VALID_THREAD_POSITIONS's
+    //    own membership to a literal, so the test still fails if the leaf's
+    //    Set drifted on its own.
+    //  - "sabotage target (c)" below probes the OTHER half - a value NOT in
+    //    VALID_THREAD_POSITIONS ("nested") must also be rejected by THIS
+    //    file's gate. That half is necessarily a finite probe rather than a
+    //    proof: THREAD_POSITIONS' private members cannot be enumerated from
+    //    outside the module, so this only catches a future regression that
+    //    happens to reuse one of the probed values. "nested" is not a random
+    //    choice - it is the literal example the acceptance-criteria doc uses
+    //    for the fourth-position failure mode this fix defends against.
+    //
+    // A direct two-array comparison would need THREAD_POSITIONS exported from
+    // discussion-replies.ts - and that is NOT a follow-up to pick up later, it
+    // is illegal: that file is "use server", where every export must be an
+    // async function. A plain const export there is a build error that only
+    // `next build` catches, and this repo's pre-push gate deliberately stops
+    // before the env-dependent prerender tail, so it would land unnoticed.
+    // The behavioural check below is therefore the strongest available form,
+    // not a compromise waiting to be upgraded. If an exhaustive equality is
+    // ever wanted, move the shared list into a plain leaf module that both
+    // sides import - never widen this file's exports.
+    it("carries a recognised threadPosition through unchanged, for each member of VALID_THREAD_POSITIONS (FIX 1: the deserialization gate)", async () => {
+      for (const value of Array.from(VALID_THREAD_POSITIONS)) {
+        vi.mocked(callLlm).mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: "",
+          text: JSON.stringify([{ author: "Priya", text: "A post.", threadPosition: value }]),
+        } as never);
+        const result = await extractDiscussionPostsAction([{ base64: "x" }], "", "gemini");
+        expect("posts" in result).toBe(true);
+        if ("posts" in result) expect(result.posts[0].threadPosition).toBe(value);
+      }
+    });
+
+    it("FIX 1: VALID_THREAD_POSITIONS is exactly the frozen three-member set ['reply','root','unknown']", () => {
+      expect(Array.from(VALID_THREAD_POSITIONS).sort()).toEqual(["reply", "root", "unknown"]);
+    });
+
+    it("sabotage target (c) / FIX 1's other half: coerces any threadPosition outside VALID_THREAD_POSITIONS to undefined, never lets it through raw", async () => {
+      expect(VALID_THREAD_POSITIONS.has("nested")).toBe(false); // sanity: this probe is genuinely outside the other gate
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ author: "Priya", text: "A post.", threadPosition: "nested" }]),
+      } as never);
+      const result = await extractDiscussionPostsAction([{ base64: "x" }], "", "gemini");
+      expect("posts" in result).toBe(true);
+      if ("posts" in result) {
+        expect(result.posts[0].threadPosition).toBeUndefined();
+        expect(JSON.stringify(result.posts[0])).not.toContain("nested");
+      }
+    });
+
+    it("coerces a non-string threadPosition to undefined", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ author: "Priya", text: "A post.", threadPosition: 3 }]),
+      } as never);
+      const result = await extractDiscussionPostsAction([{ base64: "x" }], "", "gemini");
+      if ("posts" in result) expect(result.posts[0].threadPosition).toBeUndefined();
+    });
+
+    it("carries replyingToAuthor through, trimmed", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ author: "Priya", text: "A post.", threadPosition: "reply", replyingToAuthor: "  Marcus  " }]),
+      } as never);
+      const result = await extractDiscussionPostsAction([{ base64: "x" }], "", "gemini");
+      if ("posts" in result) expect(result.posts[0].replyingToAuthor).toBe("Marcus");
+    });
+
+    it("drops an empty or whitespace-only replyingToAuthor rather than keeping an empty string", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ author: "Priya", text: "A post.", replyingToAuthor: "   " }]),
+      } as never);
+      const result = await extractDiscussionPostsAction([{ base64: "x" }], "", "gemini");
+      if ("posts" in result) expect(result.posts[0].replyingToAuthor).toBeUndefined();
+    });
+
+    it("omits threadPosition and replyingToAuthor entirely when the model omits them, matching the existing postedAt-omission shape", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ author: "Priya", text: "A post." }]),
+      } as never);
+      const result = await extractDiscussionPostsAction([{ base64: "x" }], "", "gemini");
+      expect(result).toEqual({ posts: [{ author: "Priya", text: "A post." }] });
+    });
   });
 });
 
@@ -406,6 +544,44 @@ describe("draftDiscussionRepliesAction", () => {
     } as never);
     const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
     expect(result).toEqual({ replies: [{ id: "row-a", reply: "Valid." }] });
+  });
+
+  // docs/discussion-thread-structure-acceptance-criteria.md T6: this action
+  // does no gating itself (that already happened in resolveDraftParent,
+  // owned by the sibling half of this group) - it only has to thread
+  // whatever `parent` it is handed through into the prompt sent on the wire.
+  it("T6: threads a post's `parent` through into the actual prompt sent to the model", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: "",
+      text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
+    } as never);
+
+    const postsWithParent = [
+      { ...posts[0], parent: { author: "Marcus", text: "The original thread-starting post." } },
+      posts[1],
+      posts[2],
+    ];
+    await draftDiscussionRepliesAction(postsWithParent, "students", "", "gemini");
+
+    const callArgs = vi.mocked(callLlm).mock.calls[0][0];
+    const promptPart = callArgs.contents[0].parts[0] as { text: string };
+    expect(promptPart.text).toContain("CONTEXT ONLY - DO NOT REPLY TO THIS");
+    expect(promptPart.text).toContain("The original thread-starting post.");
+  });
+
+  it("sends no CONTEXT ONLY block when no post in the batch carries a parent", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: "",
+      text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
+    } as never);
+    await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const callArgs = vi.mocked(callLlm).mock.calls[0][0];
+    const promptPart = callArgs.contents[0].parts[0] as { text: string };
+    expect(promptPart.text).not.toContain("CONTEXT ONLY");
   });
 });
 

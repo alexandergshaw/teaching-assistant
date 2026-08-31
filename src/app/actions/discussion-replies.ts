@@ -26,7 +26,25 @@ import {
   buildReplyDraftingPrompt,
   deriveResourceConcept,
   type DiscussionAudience,
+  type ThreadPosition,
 } from "@/lib/discussion-reply-prompt";
+
+// docs/discussion-thread-structure-acceptance-criteria.md T2b/T3: the
+// three-member set a captured post's thread position can hold. Anything
+// outside it coerces to `undefined` - never thrown, never a fourth value.
+const THREAD_POSITIONS: readonly ThreadPosition[] = ["root", "reply", "unknown"];
+
+function coerceThreadPosition(value: unknown): ThreadPosition | undefined {
+  return typeof value === "string" && (THREAD_POSITIONS as readonly string[]).includes(value)
+    ? (value as ThreadPosition)
+    : undefined;
+}
+
+// T3: `replyingToAuthor` survives only as a non-empty, trimmed string - an
+// empty or whitespace-only reading is the same as the LMS printing nothing.
+function coerceReplyingToAuthor(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
 /**
  * Read the discussion posts visible across a batch of screen-capture frames.
@@ -40,7 +58,15 @@ export async function extractDiscussionPostsAction(
   courseName: string,
   provider: LlmProvider
 ): Promise<
-  { posts: Array<{ author: string; text: string; postedAt?: string }> }
+  {
+    posts: Array<{
+      author: string;
+      text: string;
+      postedAt?: string;
+      threadPosition?: ThreadPosition;
+      replyingToAuthor?: string;
+    }>;
+  }
   | { error: string }
 > {
   try {
@@ -70,7 +96,9 @@ export async function extractDiscussionPostsAction(
     if (!r.ok) return { error: describeLlmFailure(r, "Reading the screen failed") };
     if (!r.text.trim()) return { error: describeEmptyLlmText(r, "Reading the screen") };
 
-    const raw = parseLenientJsonArray(r.text) as Array<{ author?: unknown; text?: unknown; postedAt?: unknown }> | null;
+    const raw = parseLenientJsonArray(r.text) as
+      | Array<{ author?: unknown; text?: unknown; postedAt?: unknown; threadPosition?: unknown; replyingToAuthor?: unknown }>
+      | null;
     if (!raw) return { error: "Could not read any posts from that part of the screen." };
 
     const posts = raw
@@ -88,7 +116,20 @@ export async function extractDiscussionPostsAction(
         // decide which read wins, so two truncated reads of an over-long
         // post must not both silently land at exactly the same length.
         const truncated = text.length > MAX_POST_CHARS ? `${text.slice(0, MAX_POST_CHARS)}...` : text;
-        return postedAt ? { author, text: truncated, postedAt } : { author, text: truncated };
+        const threadPosition = coerceThreadPosition(p.threadPosition);
+        const replyingToAuthor = coerceReplyingToAuthor(p.replyingToAuthor);
+
+        const post: {
+          author: string;
+          text: string;
+          postedAt?: string;
+          threadPosition?: ThreadPosition;
+          replyingToAuthor?: string;
+        } = { author, text: truncated };
+        if (postedAt) post.postedAt = postedAt;
+        if (threadPosition) post.threadPosition = threadPosition;
+        if (replyingToAuthor) post.replyingToAuthor = replyingToAuthor;
+        return post;
       });
 
     return { posts };
@@ -105,7 +146,12 @@ export async function extractDiscussionPostsAction(
  * way an opaque token id is not, and it saves output tokens nobody reads.
  */
 export async function draftDiscussionRepliesAction(
-  posts: Array<{ id: string; author: string; text: string }>,
+  // T6/T6c: `parent` is optional and, when present, was already resolved and
+  // gated by the caller (resolveDraftParent in discussion-capture.ts, on all
+  // three of threadPosition === "reply", a printed replyingToAuthor and
+  // exactly one matching author) - this action does no gating of its own,
+  // it only threads whatever `parent` it is handed into the prompt.
+  posts: Array<{ id: string; author: string; text: string; parent?: { author: string; text: string } }>,
   audience: DiscussionAudience,
   courseName: string,
   provider: LlmProvider

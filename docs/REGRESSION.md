@@ -35475,3 +35475,220 @@ from the call site so the list never reaches the model.
   could read as missing. Not a case this course has; recorded because the filter
   is invisible from the prompt.
 - Nothing here re-grades anything already issued.
+
+## 372. Tell an original post apart from the reply that branches off it - and wire the parent into the draft, which took a second pass
+
+Ships `docs/discussion-thread-structure-acceptance-criteria.md`. Each captured
+post carries an optional `threadPosition` (`"root"`/`"reply"`/`"unknown"`) and an
+optional `replyingToAuthor`, printed as a `Reply` badge and a `Replying to X`
+line. When a reply's parent can be identified unambiguously, that parent now goes
+into the drafting prompt as labelled context. Extends entries 367, 368 and 369.
+
+**The AC, in one line each.** T2: two optional non-referential row fields, **no
+`parentId`** - parents are frequently captured after their children, and a
+dangling reference would have to survive `removeRow`, `clearTable` and both
+serialization functions. T2b: `DISCUSSION_TABLE_VERSION` stays at `1`, because
+absence and `"unknown"` render identically. T3a: the extraction prompt gains a
+THREAD POSITION block that reports only what is visible. T4: thread position does
+**not** enter `isSamePost`. T4a: reconciliation runs on **every** match, not only
+the longer-text branch. T5: a per-row attribute, **not a tree**. T5b:
+`replyingToAuthor` stays out of the filter haystack. T6: parent context in the
+drafting prompt, gated on all three of `threadPosition === "reply"`, an
+LMS-printed name, and **exactly one** matching author. T6a: the parent is
+labelled `CONTEXT ONLY - DO NOT REPLY TO THIS` and carries **no post number**.
+T6b: the hallucination guard widens explicitly. T7: no per-depth audience
+variant.
+
+### Decisions worth re-reading
+
+- **A per-row attribute, not a tree (T5/T5a), and this is closed rather than
+  deferred.** A tree would have to be flattened by eight of the nine sort modes,
+  and its move semantics and entry 369's visible-row `moveRow` rule would be
+  *mutually undefined* - neither specifiable without the other. Both chosen cues
+  also survive the 1000px stacking breakpoint, because neither is geometric.
+- **`threadPosition` stayed out of `isSamePost` (T4).** The same post read from
+  two frames can legitimately differ on it - one frame shows the "Replied to"
+  line, another is scrolled past it. Adding it to identity would reopen entry
+  367's measured 10-of-16 false-split class.
+- **T4a was a live trap, and it was closed by moving the write, not by adding a
+  branch.** `mergeCapturedPosts` previously touched a matched row only inside its
+  longer-text branch. `threadPosition` is the first field whose merge rule is not
+  "longer text wins", so a `"reply"` reading arriving in a strictly SHORTER
+  re-read would have been discarded and the row would have kept `"unknown"`
+  forever. Reconciliation now runs before the branch and writes outside the
+  conditional spread, so entry 367's text tie-break stays scoped to the text
+  fields exactly as its comment claims.
+- **A `root`/`reply` contradiction downgrades to `"unknown"`** rather than letting
+  capture order decide. Two readings disagreeing is the case where a guess is
+  least defensible.
+- **`discussion-thread.ts` is a true zero-import leaf.** It has no `import`
+  statement at all, so the `split-constants-into-the-leaf` cycle failure is
+  foreclosed structurally, not merely avoided. `discussion-capture.ts` keeps a
+  three-line two-argument wrapper that supplies its own `authorsMatch`.
+
+### The defect class this group produced - the same one, for the seventh time
+
+**The most valuable part of the group shipped dead, and the review pass caught
+it, not the gates.** `resolveDraftParent` was implemented, unit-tested against
+frozen literals, and **called by nothing in production**: the drafting loop built
+`{ id, author, text }` and the injected action type had no `parent` field, so
+`posts.some((p) => p.parent)` was permanently false and no `CONTEXT ONLY` block
+could ever be emitted. Meanwhile T6b's widening of the hallucination guard - from
+"the post you are answering" to "the posts shown to you here" - shipped
+unconditionally on every draft. **Section 6's only live effect was a looser
+guard**, which is strictly worse than shipping neither half.
+
+The cause was a **scoping defect, not an implementer defect**: the group's file
+set did not include the two files where the feature has to be wired in, so the
+wave gate passed cleanly on a diff that could not possibly be live. This is
+`verify-reachability-not-just-correctness` again - entry 367 defects 1 and 3,
+entry 369's five `rawRows` blockers.
+
+Closed in a second pass, in four places:
+
+1. `discussion-draft-loop.ts` resolves the parent per dispatched row against
+   `currentRows` - the **`rawRows`** snapshot, never the filtered array, so a
+   search-box keystroke cannot change which parent a draft sees - and attaches
+   `parent`, truncated at a new `MAX_DRAFT_PARENT_CHARS = 600` (T6a's own budget
+   figure, which nothing previously enforced). The key is **omitted entirely**
+   when no parent resolves, so a no-parent request stays byte-identical to entry
+   369's.
+2. The **real server action's** parameter widened too, not just the injected
+   type - the half that would have left the feature dead a second time. The two
+   declarations are now identical in shape, so `draftAction:
+   draftDiscussionRepliesAction` is itself a compile-time proof they have not
+   drifted.
+3. `useReplyRows.mergeIncoming`'s declared parameter type - on both the sealed
+   contract and the implementation - widened to the shape `mergeCapturedPosts`
+   has always actually accepted. The thread fields previously crossed that
+   boundary by structural-typing accident: they survived only because every
+   caller passes a variable rather than an object literal, so TS's
+   excess-property check never fired, and because the array was forwarded
+   unrebuilt. One normalising `.map()` inside that function would have silently
+   killed the feature with every gate green.
+4. A new `discussion-draft-loop.test.ts` drives `runDraftLoop` by dependency
+   injection - no hook render - and pins the attach, the **absence** of the key
+   (`"parent" in posts[0]` is `false`, not `toBeUndefined()`), the `rawRows`
+   source with a genuinely different filtered array, and both cap directions.
+
+Three further review findings closed in the same pass: a wrapper-wiring test
+that could only discriminate a matcher *stricter* than the real `authorsMatch`
+gained a case with a non-matching author present, so an over-permissive `() =>
+true` stub now goes red (over-permissive is the dangerous direction - it is what
+makes the gate resolve the wrong person); a comment claiming the `Replying to X`
+line is "never shown for `unknown`" was corrected to state and justify the
+opposite, which is what the code does; and the extraction gate's position set is
+now pinned against the deserialization gate's `VALID_THREAD_POSITIONS` plus a
+frozen literal oracle.
+
+**A fourth defect surfaced sideways and was fixed here.** `src/lib/grade/engine.test.ts`
+did not mock `../code-runner`, so its one test that supplies `.py`/`.java`/`.cpp`
+files reached the REAL runner and died on vitest's 5-second timeout **without
+ever reaching its assertions**. That test is the guard on entry 371's live
+instructor-reported defect - it had never once run. Mocked, then verified by
+sabotaging `buildSubmittedFileNamesBlock` and confirming the count assertion now
+fails; `prompts.ts` reverted clean.
+
+### Gates
+
+`tsc --noEmit` **0 errors**. `eslint` **0 errors, 6 warnings**, all pre-existing
+and outside every diff hunk. `vitest` **738 files, 15198 tests, all passing**
+(pre-group baseline 737/15190; +1 file and +8 tests). This group's five test
+files: **163 tests**. Emoji scan via the committed `src/lib/no-emojis.test.ts`:
+**18/18**. Key canary re-derived independently from source with an ordinal sort:
+**49/49**, both set differences empty, sequence identical, **no new key**.
+Nothing over the 1000-line ceiling: max **961** (`useRecorder.ts`), max
+in-feature **926** (`discussion-capture.ts`).
+
+### Limits
+
+- **The biggest risk is a confident wrong `"root"`/`"reply"` at the top of a
+  scroll.** Section 1 of the AC rates flush-left-versus-inset only MODERATE and
+  says it fails predictably whenever no un-indented post is in frame - the normal
+  state mid-subthread and guaranteed at the top of a scroll. If the model reports
+  `"reply"` there and the gate resolves a parent, the drafting model answers **the
+  wrong person, fluently, in the instructor's voice**, and nothing in the UI or in
+  any gate catches it. The row's `Reply` badge and `Replying to X` line look
+  exactly as confident as a correct one.
+- **Indentation is NOT unconditionally excluded as a threading signal, and the
+  AC's own section 8 says otherwise - the prompt is the authority.**
+  `discussion-reply-prompt.ts:144` forbids guessing a nesting level from
+  indentation **only when no un-indented post is visible for comparison in the
+  same image**. So an indentation-only board yields `"unknown"` only where no
+  flush-left reference is in frame, and a geometric MODERATE-confidence reading
+  everywhere else. **Nothing downstream distinguishes a geometry-derived
+  `"reply"` from one read off a printed "Replied to" line** - by the time it
+  reaches the row and the parent gate, both are just the string `"reply"`.
+  Recorded here because the AC's summary has now been repeated twice.
+- **The parent gate's "exactly one match" is over the CAPTURED TABLE, not the
+  board.** Rows the instructor never scrolled past do not exist for the count.
+  Two students named Chen where only one has been captured resolves to a
+  single - wrong - parent, and `authorsMatch`'s single-token branch
+  (`discussion-capture.ts:202`) makes a surname-only `replyingToAuthor` match any
+  same-surname row. Ambiguity is detected only among what happens to be in the
+  table at dispatch time.
+- **The gate has never been tested against a real LMS board.** Entry 367 records
+  that extraction accuracy was never measured against any LMS at any width; that
+  is still true, and no frame from this pipeline has ever reached the model under
+  test. Every number in this entry is about pure functions.
+- **A parent can appear twice in one batch.** Nothing dedupes a resolved parent
+  against the batch's own numbered posts, so where post 2 is post 4's parent,
+  post 2 is rendered both as `POST 2` and as an unnumbered `CONTEXT ONLY` block
+  above `POST 4`. The output contract still asks for exactly `1..N` and the
+  batch-level bullet says never to count the block as a numbered post, so this is
+  believed harmless - but it is unmeasured, and it is a prompt-behaviour claim,
+  not a tested one. The parent excerpt is also truncated at 600 characters with
+  **no ellipsis**, unlike `MAX_POST_CHARS`, so an over-long parent ends
+  mid-sentence with nothing marking it.
+- **A test can time out before its assertions run and be counted as merely
+  "flaky" rather than as a dead guard.** `src/lib/grade/engine.test.ts`'s
+  submitted-file-names test hit the real code runner and died on vitest's 5s
+  timeout, having asserted nothing - the guard on entry 371's live defect was
+  reporting a pass-shaped nothing. It was initially reported as unrelated and
+  pre-existing. **A timing-out test is a dead test, and the suite's own summary
+  does not distinguish the two.** Whenever a test times out, check what it was
+  supposed to prove before calling it flake.
+- **No component is rendered by any test.** vitest here is node-env and collects
+  only `src/**/*.test.ts`. The `Reply` badge, the `Replying to X` line, their
+  absence for `"unknown"` and for absent, their placement in the **Status**
+  column (a screen reader on that cell reads "Status: ... Reply Replying to Diego
+  Chen" - neither cue is a status), and the fact that neither is added to the
+  filter haystack in the rendered markup are all verified **by reading**. A green
+  suite proves nothing about this markup or about keyboard behaviour.
+- **A `"unknown"` position can coexist with a printed `replyingToAuthor`.** T4a
+  downgrades the position on a `root`/`reply` contradiction but clears the name
+  only on a genuine NAME conflict, so the row renders `Replying to X` with no
+  `Reply` badge. **Intentional** - the printed name is direct textual evidence
+  while the position is a weaker geometric reading - and the in-source comment at
+  `DiscussionReplyRow.tsx:395` now says so.
+- **The three-member position set is declared in four modules**
+  (`discussion-reply-prompt.ts`, `discussion-replies.ts`, `discussion-thread.ts`,
+  `discussion-capture.ts`), two of them live runtime gates on different
+  boundaries. The deserialization gate is now pinned against the extraction gate
+  behaviourally, plus a frozen literal oracle - but only in the subset direction.
+  An exhaustive equality would need `THREAD_POSITIONS` exported from a
+  `"use server"` file, where every export must be an async function; a plain
+  const export there is a build error only `next build` catches, and the pre-push
+  gate deliberately stops before that. **This is the strongest available form,
+  not a follow-up.** If exhaustive equality is ever wanted, move the list to a
+  plain leaf both sides import - never widen that file's exports.
+- **The extraction prompt still says "Do not merge a reply into its parent"**
+  while the AC's opening sentence says this group "reverses that decision". The
+  code is right: T5 explicitly rejects a tree, so the flattening instruction must
+  stay. It is the AC's framing that overstates. Recorded so a future reader does
+  not "fix" it.
+- **`lib/discussion-reply-prompt.ts` (206 -> 269) and
+  `actions/discussion-replies.ts` (304 -> 350) remain outside the non-recursive
+  line canary.** Both grew again; nothing measures either. Third consecutive
+  group.
+- **The ceiling's binding constraint has moved.** Entry 369's prescribed
+  `discussion-draft-loop.ts` lift landed, so `useDiscussionReplies.ts` is down to
+  783. The tightest in-feature file is now `discussion-capture.ts` at **926, with
+  74 lines of headroom**, after going 824 -> 963 -> 926 (the `discussion-thread.ts`
+  extraction bought back 37). `useReplyRows.ts` is at **841**. That is roughly ONE
+  more feature's room, not two. **Extract `discussion-capture.ts`'s serialization
+  block (~170 lines, already self-contained with its own test file) before the
+  next group, not after one hits the wall.**
+- **This surface still owes a downloadable log** under the rule in
+  `docs/DEV_LOOP.md`. Entry 369 recorded the debt; this is now three runs, still
+  unpaid.

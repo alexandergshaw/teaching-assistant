@@ -14,6 +14,19 @@ vi.mock("../llm", () => ({
   callLlm: vi.fn(),
 }));
 
+// engine.ts:142 runs any RUNNABLE code a student submitted before it ever calls
+// the model, and the real runner reaches the network. Every other test here
+// passes `submittedFiles: []`, so it returns null immediately and the omission
+// stayed invisible - but the "SUBMITTED FILES" test below supplies .py/.java/
+// .cpp, so it hung on the real runner and died on vitest's 5s timeout WITHOUT
+// EVER REACHING ITS ASSERTIONS. That test guards a live grading defect (the
+// model was not shown the submitted file names, so a misnamed Java file went
+// unflagged), which means the guard was reporting nothing at all.
+// This file tests prompt assembly and result mapping, never code execution.
+vi.mock("../code-runner", () => ({
+  runSubmittedCode: vi.fn(async () => null),
+}));
+
 import { callLlm } from "../llm";
 import { gradeEntries } from "./engine";
 import { RESUBMIT_NOTICE, type StudentSubmissionEntry } from "./types";

@@ -24,6 +24,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
   isDispatchableDraftItem,
   partitionDraftOutcome,
+  resolveDraftParent,
   shouldLoopContinue,
   type ReplyRow,
   type ReplySort,
@@ -153,12 +154,32 @@ export function writeLocalStorage(key: string, value: string): void {
 // discussion-capture.ts stays dependency-free of anything server-only (that
 // file's own AC35 note). useDiscussionReplies.ts passes the real
 // `draftDiscussionRepliesAction` through as `draftAction` below.
+// T6/T6c (docs/discussion-thread-structure-acceptance-criteria.md section 6):
+// `parent` is optional, resolved per dispatched row via `resolveDraftParent`
+// (discussion-capture.ts's two-arg wrapper) below, and carries only what the
+// prompt needs to render the CONTEXT ONLY block - never the full row. This
+// widens the type to match the real server action's own declared parameter
+// (src/app/actions/discussion-replies.ts:154) exactly, so the fake injected
+// in tests and the real action stay assignment-compatible.
 export type DraftDiscussionRepliesAction = (
-  posts: Array<{ id: string; author: string; text: string }>,
+  posts: Array<{ id: string; author: string; text: string; parent?: { author: string; text: string } }>,
   audience: DiscussionAudience,
   courseName: string,
   provider: LlmProvider
 ) => Promise<{ replies: Array<{ id: string; reply: string }> } | { error: string }>;
+
+// T6a's budget figure (docs/discussion-thread-structure-acceptance-criteria.md
+// section 6): "worst case is 5 x 600 characters, about 3.5% input growth."
+// MAX_POST_CHARS (re-exported from discussion-capture.ts, itself re-exported
+// from src/lib/discussion-reply-prompt.ts) is 4000 - a different budget, for
+// a full post, not a CONTEXT ONLY parent excerpt - so this is its own named
+// constant rather than a reuse of that one. Truncates, never drops: a parent
+// over budget still gives the model SOME context rather than none.
+const MAX_DRAFT_PARENT_CHARS = 600;
+
+function truncateDraftParentText(text: string): string {
+  return text.length > MAX_DRAFT_PARENT_CHARS ? text.slice(0, MAX_DRAFT_PARENT_CHARS) : text;
+}
 
 export interface RunDraftLoopDeps {
   /** NEW-1/AC43/AC50: the mounted/loop-running latch - see
@@ -266,7 +287,22 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
     let result: Awaited<ReturnType<DraftDiscussionRepliesAction>>;
     try {
       result = await draftAction(
-        dispatchable.map((x) => ({ id: x.row.id, author: x.row.author, text: x.row.post })),
+        // FIX 1 (thread-structure group blocker): resolve the parent per
+        // dispatched row against `currentRows` (the `rawRows` snapshot taken
+        // above at dispatch time - see the B3 comment on that assignment),
+        // never the filtered `rows`, so a search-box keystroke cannot change
+        // which parent a draft sees. The key is OMITTED entirely (not set to
+        // `undefined`) when no parent resolves, so a no-parent batch stays
+        // byte-identical to the request shape shipped before this fix.
+        dispatchable.map((x) => {
+          const parentRow = resolveDraftParent(x.row, currentRows);
+          const parent = parentRow
+            ? { author: parentRow.author, text: truncateDraftParentText(parentRow.post) }
+            : undefined;
+          return parent
+            ? { id: x.row.id, author: x.row.author, text: x.row.post, parent }
+            : { id: x.row.id, author: x.row.author, text: x.row.post };
+        }),
         audienceNow,
         courseName,
         provider

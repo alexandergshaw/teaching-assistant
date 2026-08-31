@@ -381,6 +381,37 @@ function DiscussionReplyRowImpl({
               Yours
             </span>
           )}
+          {/* docs/discussion-thread-structure-acceptance-criteria.md T5/T1a:
+              a badge beside the state badge ONLY when the position is the
+              definite "reply" - ghBadgeNeutral, deliberately not
+              ghBadgeSuccess (green would read as a judgement on the post,
+              not a description of its place in the thread). "unknown" and
+              absent BOTH render nothing here - never as if the post were
+              known to be top-level. */}
+          {row.threadPosition === "reply" && (
+            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: 4 }}>
+              Reply
+            </span>
+          )}
+          {/* T5: a "Replying to X" line, ONLY when the LMS actually printed
+              the name - never derived. Gated on `replyingToAuthor` ALONE,
+              deliberately NOT also on `threadPosition === "reply"` like the
+              badge above: a printed name is direct textual evidence (section
+              1's HIGH-reliability cue), while threadPosition is a separate,
+              weaker GEOMETRIC reading - a row can legitimately know WHO is
+              being answered without a confident reading of WHETHER it is a
+              reply. { threadPosition: "unknown", replyingToAuthor: "Diego
+              Chen" } is a real, reachable state (T4a downgrades a root/reply
+              contradiction to "unknown" on every ordinary re-read while
+              clearing replyingToAuthor only on a genuine NAME conflict), and
+              this line is meant to still render "Replying to Diego Chen"
+              with no Reply badge in that case - not an oversight, so do not
+              "fix" it by adding a threadPosition check here. */}
+          {row.replyingToAuthor && (
+            <p className={styles.ghMeta} style={{ marginTop: 4 }}>
+              Replying to {row.replyingToAuthor}
+            </p>
+          )}
           {/* AC17a: plain text, never role="alert" - a failed batch fails up
               to five rows at once and five assertive interruptions in a row
               is the exact defect this avoids. */}

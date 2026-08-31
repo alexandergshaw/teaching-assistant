@@ -15,6 +15,18 @@
 import { sumBase64WireBytes } from "@/lib/upload-budget";
 import { coerceResourceKind, type ResourceKind } from "@/lib/resource-kind";
 
+// FIX 2 (thread-structure group, line-ceiling pass): thread-structure helpers
+// moved to discussion-thread.ts - see that file's header for the import
+// direction (this file imports FROM it, never the reverse) and for why
+// `authorsMatch` stays here rather than moving too. `resolveDraftParent` is
+// re-exported below via a thin wrapper so no existing importer changes.
+import {
+  VALID_THREAD_POSITIONS,
+  reconcileThreadPosition,
+  reconcileReplyingToAuthor,
+  resolveDraftParent as resolveDraftParentImpl,
+} from "./discussion-thread";
+
 // The three constants the SERVER also enforces live in set B's
 // src/lib/discussion-reply-prompt.ts and are re-exported from there, never
 // restated here - see AC8's "split constants into the leaf" rule. This import
@@ -418,6 +430,17 @@ export interface ReplyRow {
   resources?: ReplyResource[]; // R3
   resourceState?: "idle" | "searching" | "done" | "failed"; // R3, R3a
   resourceError?: string | null; // set only when resourceState === "failed", R3c
+  // T2: thread-structure fields. Deliberately NOT referential (no parentId) -
+  // see T2a in docs/discussion-thread-structure-acceptance-criteria.md for
+  // why a parent pointer is the wrong shape here (parents are frequently
+  // captured AFTER their children, and a referential field would have to
+  // survive removeRow, clearTable and both serializers - the exact functions
+  // REGRESSION 367 defect 4 records as having shipped twice with the tested
+  // copy not being the live one). Absence and "unknown" render identically
+  // (T1a) - a row that has never been through extraction round-trips with
+  // neither field set, same as postedAt's own absent-stays-absent treatment.
+  threadPosition?: "root" | "reply" | "unknown";
+  replyingToAuthor?: string; // only when the LMS printed a name, exactly as shown
 }
 
 // F5 (docs/discussion-reply-sort-filter-acceptance-criteria.md): four members
@@ -463,6 +486,20 @@ let mergeIdCounter = 0;
  * the row the first entry just created, finds a match, and since its text is
  * not LONGER it is not applied).
  *
+ * T4a: unlike `post`/`postedAt` (which only ever update inside the
+ * longer-text branch), `threadPosition` and `replyingToAuthor` are
+ * reconciled on EVERY match via reconcileThreadPosition /
+ * reconcileReplyingToAuthor above, regardless of which side's text is
+ * longer - "longer text wins" is a rule about which TRANSCRIPTION to keep,
+ * not about which reading of a boolean-ish thread fact to trust, and a
+ * shorter re-read is exactly the shape a post gets once the page has
+ * scrolled past its "Show more" state and picked up a `Replied to` line that
+ * a longer, earlier, still-truncated read never saw.
+ *
+ * A matched row whose reconciliation changes NOTHING (same text length or
+ * shorter, and both thread fields land back on their existing values) is
+ * left as the SAME object reference - React.memo on the row depends on this.
+ *
  * BL5: `capped` reports whether at least one incoming post that would have
  * become a NEW row was refused because the table was already at
  * MAX_TABLE_ROWS. This can only be answered from INSIDE this function -
@@ -473,7 +510,13 @@ let mergeIdCounter = 0;
  * capped value against its own cap and will never see it exceeded. */
 export function mergeCapturedPosts(
   rows: ReadonlyArray<ReplyRow>,
-  incoming: ReadonlyArray<{ author: string; text: string; postedAt?: string }>,
+  incoming: ReadonlyArray<{
+    author: string;
+    text: string;
+    postedAt?: string;
+    threadPosition?: ReplyRow["threadPosition"];
+    replyingToAuthor?: string;
+  }>,
   now: number
 ): { rows: ReplyRow[]; addedIds: string[]; capped: boolean } {
   let nextRows = rows.slice();
@@ -505,6 +548,8 @@ export function mergeCapturedPosts(
         error: null,
         firstSeenAt: now,
         order: maxOrder + 1,
+        threadPosition: post.threadPosition,
+        replyingToAuthor: post.replyingToAuthor,
       };
       nextRows = [...nextRows, newRow];
       addedIds.push(id);
@@ -512,19 +557,42 @@ export function mergeCapturedPosts(
     }
 
     const existing = nextRows[matchIndex];
-    if (post.text.length > existing.post.length) {
+    const textLonger = post.text.length > existing.post.length;
+    const threadPosition = reconcileThreadPosition(existing.threadPosition, post.threadPosition);
+    const replyingToAuthor = reconcileReplyingToAuthor(existing.replyingToAuthor, post.replyingToAuthor, authorsMatch);
+    const threadChanged = threadPosition !== existing.threadPosition || replyingToAuthor !== existing.replyingToAuthor;
+
+    if (textLonger || threadChanged) {
       const updated: ReplyRow = {
         ...existing,
-        post: post.text,
-        postedAt: existing.postedAt && existing.postedAt.trim() ? existing.postedAt : post.postedAt,
+        // AC54's tie-break ("equal-or-shorter text - the first version
+        // wins") stays scoped to `post`/`postedAt` only - it never governed
+        // the thread fields, which reconcile on every match regardless.
+        ...(textLonger
+          ? { post: post.text, postedAt: existing.postedAt && existing.postedAt.trim() ? existing.postedAt : post.postedAt }
+          : null),
+        threadPosition,
+        replyingToAuthor,
       };
       nextRows = nextRows.map((r, i) => (i === matchIndex ? updated : r));
     }
-    // else: equal-or-shorter text - no change. This is AC54's tie-break: the
-    // first (already-stored) version wins.
+    // else: text is equal-or-shorter AND neither thread field changed - no
+    // change at all, so the row keeps its existing object identity.
   }
 
   return { rows: nextRows, addedIds, capped };
+}
+
+// ---------------------------------------------------------------------------
+// T6 / T6c: parent resolution for the drafting prompt now lives in
+// discussion-thread.ts (FIX 2 - see that file's header for the full
+// rationale, including why `authorsMatch` is passed in rather than moving
+// there too). This wrapper preserves the original two-argument public
+// signature and export name, so no existing importer changes.
+// ---------------------------------------------------------------------------
+
+export function resolveDraftParent(row: ReplyRow, rows: ReadonlyArray<ReplyRow>): ReplyRow | undefined {
+  return resolveDraftParentImpl(row, rows, authorsMatch);
 }
 
 // ---------------------------------------------------------------------------
@@ -618,6 +686,7 @@ export const DISCUSSION_TABLE_VERSION = 1;
 
 const VALID_STATES = new Set<string>(["pending", "drafting", "ready", "failed"]);
 const VALID_RESOURCE_STATES = new Set<string>(["idle", "searching", "done", "failed"]);
+// VALID_THREAD_POSITIONS is imported from ./discussion-thread (FIX 2).
 
 export function serializeReplyTable(rows: ReadonlyArray<ReplyRow>): string {
   const normalized = rows.map((r) => {
@@ -704,7 +773,40 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
       const resourceError: ReplyRow["resourceError"] =
         resourceState === undefined ? undefined : resourceState === "failed" && typeof r.resourceError === "string" ? r.resourceError : null;
 
-      rows.push({ id, author, post, postedAt, reply, userEdited, state, error, firstSeenAt, order, resources, resourceState, resourceError });
+      // T2b: `threadPosition` follows the identical R3c-i discipline as
+      // `resourceState` above - a key ABSENT from the raw JSON (a row from
+      // before this feature, or a row whose extraction never touched thread
+      // fields) stays `undefined`, not coerced to `"unknown"`. Only a key
+      // that is PRESENT and outside the three-member set falls back - and
+      // the fallback here is `undefined` rather than a default member,
+      // because `undefined` and `"unknown"` already render identically
+      // (T1a), so there is no meaningful default to fall back TO.
+      let threadPosition: ReplyRow["threadPosition"];
+      if (r.threadPosition === undefined) {
+        threadPosition = undefined;
+      } else {
+        const threadPositionRaw = typeof r.threadPosition === "string" ? r.threadPosition : "";
+        threadPosition = VALID_THREAD_POSITIONS.has(threadPositionRaw) ? (threadPositionRaw as NonNullable<ReplyRow["threadPosition"]>) : undefined;
+      }
+      const replyingToAuthor = typeof r.replyingToAuthor === "string" && r.replyingToAuthor ? r.replyingToAuthor : undefined;
+
+      rows.push({
+        id,
+        author,
+        post,
+        postedAt,
+        reply,
+        userEdited,
+        state,
+        error,
+        firstSeenAt,
+        order,
+        resources,
+        resourceState,
+        resourceError,
+        threadPosition,
+        replyingToAuthor,
+      });
     });
 
     return rows;

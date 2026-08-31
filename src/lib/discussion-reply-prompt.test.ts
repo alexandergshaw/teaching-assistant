@@ -104,6 +104,50 @@ describe("buildPostExtractionPrompt", () => {
     const prompt = buildPostExtractionPrompt("", 5);
     expect(prompt.toLowerCase()).toContain("backtick");
   });
+
+  // docs/discussion-thread-structure-acceptance-criteria.md T3a.
+  describe("THREAD POSITION block (T3a)", () => {
+    it("mentions the new output keys threadPosition and replyingToAuthor", () => {
+      const prompt = buildPostExtractionPrompt("", 5);
+      expect(prompt).toContain("threadPosition");
+      expect(prompt).toContain("replyingToAuthor");
+    });
+
+    it("instructs the model to report 'unknown' rather than guess when it cannot tell (sabotage target: dropping this line loses the safe default)", () => {
+      const prompt = buildPostExtractionPrompt("", 5);
+      // "cannot tell" only appears in this one instruction - a sabotage that
+      // deletes the "return unknown" rule removes this substring, unlike
+      // the bare word "unknown" which also appears in the OUTPUT section's
+      // enumeration of the three-member set.
+      expect(prompt.toLowerCase()).toContain("cannot tell");
+      expect(prompt).toContain("unknown");
+    });
+
+    it("forbids inferring position from posts in OTHER images (T0-1/T0-2: the loop is stateless per batch)", () => {
+      const prompt = buildPostExtractionPrompt("", 5).toLowerCase();
+      expect(prompt).toContain("other images");
+    });
+
+    it("never asks for a numeric nesting depth (T1: depth 3 and depth 4 are pixel-identical, so it is not in the image)", () => {
+      const prompt = buildPostExtractionPrompt("", 5).toLowerCase();
+      expect(prompt).not.toMatch(/\bdepth\b/);
+    });
+
+    it("forbids reporting a replyingToAuthor the model cannot actually read", () => {
+      const prompt = buildPostExtractionPrompt("", 5).toLowerCase();
+      const idx = prompt.indexOf("never report");
+      expect(idx).toBeGreaterThanOrEqual(0);
+      // The forbidden-guess rule must name replyingToAuthor close by, not
+      // merely appear somewhere else in the prompt (replyingToAuthor is also
+      // named in the OUTPUT section's key list).
+      expect(prompt.slice(idx, idx + 60)).toContain("replyingtoauthor");
+    });
+
+    it("the existing author-not-visible skip rule survives unchanged", () => {
+      const prompt = buildPostExtractionPrompt("", 5);
+      expect(prompt).toContain("SKIP that post entirely");
+    });
+  });
 });
 
 describe("buildReplyDraftingPrompt", () => {
@@ -207,5 +251,69 @@ describe("buildReplyDraftingPrompt", () => {
     const peersPrompt = buildReplyDraftingPrompt(posts, "peers", "", "").toLowerCase();
     expect(studentsPrompt).toContain("deadline");
     expect(peersPrompt).not.toContain("deadline");
+  });
+
+  // docs/discussion-thread-structure-acceptance-criteria.md T6/T6a/T6b.
+  describe("parent context (T6/T6a) and the widened hallucination guard (T6b)", () => {
+    it("omits any CONTEXT ONLY block when no post carries a parent", () => {
+      const prompt = buildReplyDraftingPrompt(posts, "students", "", "");
+      expect(prompt).not.toContain("CONTEXT ONLY");
+    });
+
+    it("labels a resolved parent CONTEXT ONLY - DO NOT REPLY TO THIS, placed immediately before the post it belongs to", () => {
+      const withParent = [
+        posts[0],
+        { ...posts[1], parent: { author: "Priya", text: "The original post text." } },
+        posts[2],
+      ];
+      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "");
+
+      expect(prompt).toContain("CONTEXT ONLY - DO NOT REPLY TO THIS");
+      expect(prompt).toContain("The original post text.");
+
+      // The parent block precedes the reply post it is context for.
+      const contextIdx = prompt.indexOf("CONTEXT ONLY");
+      const post2Idx = prompt.indexOf("POST 2");
+      expect(contextIdx).toBeGreaterThanOrEqual(0);
+      expect(post2Idx).toBeGreaterThan(contextIdx);
+    });
+
+    it("sabotage target (b): the parent block carries NO post number - structurally unaddressable by the 1..N output contract", () => {
+      const withParent = [{ ...posts[0], parent: { author: "Marcus", text: "Parent text here." } }, posts[1], posts[2]];
+      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "");
+
+      const contextIdx = prompt.indexOf("CONTEXT ONLY");
+      const writtenByIdx = prompt.indexOf("Written by:", contextIdx);
+      expect(contextIdx).toBeGreaterThanOrEqual(0);
+      expect(writtenByIdx).toBeGreaterThan(contextIdx);
+
+      // Nothing between the label and the parent's own "Written by:" line
+      // names a POST number - a sabotage that stamps "POST n" onto the
+      // context block would make this fail.
+      const between = prompt.slice(contextIdx, writtenByIdx);
+      expect(between).not.toMatch(/POST\s*\d/i);
+    });
+
+    it("does not renumber posts when one carries a parent - the count and order of POST 1..N is unaffected", () => {
+      const withParent = [{ ...posts[0], parent: { author: "X", text: "Parent." } }, posts[1], posts[2]];
+      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "");
+      expect(prompt).toContain(`Return ONLY a JSON array with exactly ${withParent.length} elements`);
+      expect(prompt).toContain("POST 1");
+      expect(prompt).toContain("POST 2");
+      expect(prompt).toContain("POST 3");
+    });
+
+    it("sabotage target (a, this file's own hallucination-guard equivalent): the guard is widened beyond the single post being answered", () => {
+      const prompt = buildReplyDraftingPrompt(posts, "students", "", "");
+      const idx = prompt.indexOf("Never state a fact about the course");
+      expect(idx).toBeGreaterThanOrEqual(0);
+      // Pin the FACT (plural coverage), not the exact sentence: the guard
+      // must no longer be scoped to a single post ("the post you are
+      // answering") now that a CONTEXT ONLY parent can sit in the prompt
+      // alongside it.
+      const guardWindow = prompt.slice(idx, idx + 220).toLowerCase();
+      expect(guardWindow).toContain("posts");
+      expect(guardWindow).not.toContain("the post you are answering");
+    });
   });
 });

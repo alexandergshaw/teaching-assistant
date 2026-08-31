@@ -205,9 +205,28 @@ export interface UseReplyRowsReturn {
    *  whether the ceiling refused at least one of them. `now` defaults to
    *  `Date.now()` - AC13's "pure, takes now as an argument" binds the
    *  underlying `mergeCapturedPosts`, not this wrapper; an optional
-   *  override is kept for a future test. */
+   *  override is kept for a future test.
+   *
+   *  FIX 2 (thread-structure group, dead-feature review): widened to
+   *  `threadPosition`/`replyingToAuthor` - this is the shape
+   *  `mergeCapturedPosts` (discussion-capture.ts) has always actually
+   *  accepted and forwarded unrebuilt into `mergeCapturedPosts` below, in
+   *  the implementation of this function. The narrower type previously
+   *  declared here was a lie the excess-property check never caught,
+   *  because every production caller passes a variable rather than a
+   *  fresh object literal. No behaviour changes: this only makes the
+   *  declared contract match what already happens at runtime, and stops a
+   *  future literal caller (or a "fix" that trusts this type as ground
+   *  truth and strips the extra fields) from either being wrongly
+   *  rejected or silently breaking thread capture. */
   mergeIncoming: (
-    incoming: ReadonlyArray<{ author: string; text: string; postedAt?: string }>,
+    incoming: ReadonlyArray<{
+      author: string;
+      text: string;
+      postedAt?: string;
+      threadPosition?: ReplyRow["threadPosition"];
+      replyingToAuthor?: string;
+    }>,
     now?: number
   ) => { addedIds: string[]; capped: boolean };
 
@@ -460,7 +479,20 @@ export function useReplyRows(): UseReplyRowsReturn {
   }, []);
 
   const mergeIncoming = useCallback(
-    (incoming: ReadonlyArray<{ author: string; text: string; postedAt?: string }>, now: number = Date.now()) => {
+    (
+      // FIX 2: widened to match `UseReplyRowsReturn["mergeIncoming"]` above
+      // (which itself now matches what `mergeCapturedPosts` below actually
+      // accepts) - see that field's doc comment for why this was previously
+      // narrower than the truth.
+      incoming: ReadonlyArray<{
+        author: string;
+        text: string;
+        postedAt?: string;
+        threadPosition?: ReplyRow["threadPosition"];
+        replyingToAuthor?: string;
+      }>,
+      now: number = Date.now()
+    ) => {
       // BL5: the AC23b row ceiling is enforced INSIDE mergeCapturedPosts now
       // (it reports `capped` itself) rather than re-derived here by
       // comparing `finalRows.length` against MAX_TABLE_ROWS - that

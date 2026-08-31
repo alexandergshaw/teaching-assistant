@@ -233,6 +233,7 @@ describe("summarizeRepoGradingRunLog", () => {
       graded: 2,
       skipped: 1,
       failed: 1,
+      noSubmission: 0,
       notReachedCount: 1,
       truncated: true,
       digestTruncatedGraded: 0,
@@ -246,10 +247,31 @@ describe("summarizeRepoGradingRunLog", () => {
       graded: 0,
       skipped: 0,
       failed: 0,
+      noSubmission: 0,
       notReachedCount: 0,
       truncated: false,
       digestTruncatedGraded: 0,
     });
+  });
+
+  // The live defect fix: a repo with nothing submitted must count in its OWN
+  // bucket - never silently folded into "skipped" (a precondition failure,
+  // e.g. no matching folder) or "failed" (an error) - see the
+  // RepoGradingOutcome doc comment in repo-grading-log.ts.
+  it("counts a no-submission entry in its own bucket, distinct from skipped and failed", () => {
+    const entries = entriesFor([
+      { repo: "org/alice", outcome: "graded" },
+      { repo: "org/bob", outcome: "no-submission", reason: "nothing was submitted" },
+      { repo: "org/carol", outcome: "skipped", reason: "no folder" },
+      { repo: "org/dave", outcome: "failed", reason: "boom" },
+    ]);
+    const log = buildRepoGradingRunLog(entries);
+    const summary = summarizeRepoGradingRunLog(log);
+
+    expect(summary.noSubmission).toBe(1);
+    expect(summary.skipped).toBe(1);
+    expect(summary.failed).toBe(1);
+    expect(summary.graded).toBe(1);
   });
 });
 
@@ -297,6 +319,15 @@ describe("formatRepoGradingLogCsv", () => {
     // row separator by a naive split, so assert on the raw string.
     expect(csv).toContain('"failed, ""bad"" input\nsecond line"');
     expect(rows[0]).toBe("Repo,Outcome,Reason,Score,Digest truncated,At");
+  });
+
+  it("labels a no-submission entry distinctly from Skipped and Failed", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([{ repo: "org/alice", outcome: "no-submission", reason: "nothing was submitted" }])
+    );
+    const csv = formatRepoGradingLogCsv(log);
+    const rows = csv.split("\r\n");
+    expect(rows[1]).toBe(`org/alice,No submission,nothing was submitted,,No,${AT}`);
   });
 
   it("appends a not-reached row per remaining repo when the run was truncated", () => {
@@ -363,7 +394,7 @@ describe("buildRepoGradingReportMarkdown", () => {
 
     expect(md).toContain("# CS 101 repo grading");
     expect(md).toContain("Generated 2026-08-24T16:00:00.000Z");
-    expect(md).toContain("Attempted 3 repo(s): 1 graded, 1 skipped, 1 failed.");
+    expect(md).toContain("Attempted 3 repo(s): 1 graded, 1 skipped, 1 failed, 0 no submission.");
     expect(md).toContain("**org/alice**: Graded - score 9/10");
     expect(md).toContain("**org/bob**: Skipped - no folder matching week 3");
     expect(md).toContain("**org/carol**: Failed - network exploded");
@@ -377,7 +408,7 @@ describe("buildRepoGradingReportMarkdown", () => {
       ])
     );
     const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
-    expect(md).toContain("Attempted 2 repo(s): 0 graded, 2 skipped, 0 failed.");
+    expect(md).toContain("Attempted 2 repo(s): 0 graded, 2 skipped, 0 failed, 0 no submission.");
   });
 
   it("names every not-reached repo when the run was truncated, so silence never reads as \"there were none\"", () => {
@@ -396,6 +427,62 @@ describe("buildRepoGradingReportMarkdown", () => {
     const log = buildRepoGradingRunLog(entriesFor([{ repo: "org/alice", outcome: "graded" }]));
     const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
     expect(md).not.toContain("ended before reaching");
+  });
+
+  // The live defect fix: a report must say, in its own line, how many repos
+  // had nothing submitted - not silently absorbed into the generic count
+  // sentence, and never invented when the count is zero (mirrors the
+  // existing digestTruncatedGraded pattern immediately above).
+  it("adds a no-submission line naming the count when at least one repo had nothing submitted", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([
+        { repo: "org/alice", outcome: "graded", score: "9/10" },
+        { repo: "org/bob", outcome: "no-submission", reason: "nothing was submitted" },
+      ])
+    );
+    const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
+
+    // S2 (verification finding): the headline used to undercount by omitting
+    // no-submission entirely, so these four numbers did not sum to
+    // "Attempted 2" on this exact log. This assertion cements the fixed,
+    // reconciling headline rather than the undercount.
+    expect(md).toContain("Attempted 2 repo(s): 1 graded, 0 skipped, 0 failed, 1 no submission.");
+    expect(md).toContain("1 repo(s) had nothing submitted");
+    expect(md).toContain("**org/bob**: No submission - nothing was submitted");
+  });
+
+  // S2 (verification finding): pins the FACT (the four printed numbers
+  // reconcile with `attempted`), not just the exact wording pinned above -
+  // this is the assertion that would have caught the original undercount
+  // (which was arithmetically wrong: "Attempted 2: 1 graded, 0 skipped, 0
+  // failed" sums to 1, not 2) even if the sentence's phrasing changes later.
+  it("the four printed outcome counts always sum to the printed attempted count", () => {
+    const log = buildRepoGradingRunLog(
+      entriesFor([
+        { repo: "org/alice", outcome: "graded", score: "9/10" },
+        { repo: "org/bob", outcome: "no-submission", reason: "nothing was submitted" },
+        { repo: "org/carol", outcome: "skipped", reason: "no folder matching week 3" },
+        { repo: "org/dave", outcome: "failed", reason: "network exploded" },
+      ])
+    );
+    const summary = summarizeRepoGradingRunLog(log);
+    const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
+
+    const headline = md.split("\n").find((line) => line.startsWith("Attempted "));
+    expect(headline).toBeDefined();
+    const match = headline!.match(
+      /^Attempted (\d+) repo\(s\): (\d+) graded, (\d+) skipped, (\d+) failed, (\d+) no submission\.$/
+    );
+    expect(match).not.toBeNull();
+    const [, attempted, graded, skipped, failed, noSubmission] = match!.map(Number);
+    expect(attempted).toBe(summary.attempted);
+    expect(graded + skipped + failed + noSubmission).toBe(attempted);
+  });
+
+  it("does not invent a no-submission line when nothing had that outcome", () => {
+    const log = buildRepoGradingRunLog(entriesFor([{ repo: "org/alice", outcome: "graded", score: "9/10" }]));
+    const md = buildRepoGradingReportMarkdown(log, { title: "CS 101 repo grading", generatedAt: AT });
+    expect(md).not.toContain("nothing submitted");
   });
 
   // Entry 344's per-repo fact, reaching the one place an instructor with no
@@ -495,6 +582,14 @@ describe("coerceRepoGradingRunLog", () => {
   it("defaults entries/notReached to empty and truncated to false when absent", () => {
     const coerced = coerceRepoGradingRunLog({});
     expect(coerced).toEqual({ entries: [], attempted: 0, truncated: false, notReached: [] });
+  });
+
+  it("round-trips a no-submission entry (does not drop it as an unrecognized outcome)", () => {
+    const log = buildRepoGradingRunLog(entriesFor([{ repo: "org/alice", outcome: "no-submission", reason: "nothing was submitted" }]));
+    const raw = JSON.parse(JSON.stringify(log));
+    const coerced = coerceRepoGradingRunLog(raw);
+    expect(coerced?.entries).toHaveLength(1);
+    expect(coerced?.entries[0].outcome).toBe("no-submission");
   });
 
   it("filters non-string entries out of notReached", () => {

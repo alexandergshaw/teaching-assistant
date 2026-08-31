@@ -35,10 +35,16 @@ export function hasRepoGradingLog(
  * the two surfaces describe the same run the same way. A run of 22 grades
  * that silently skipped 8 repos is exactly the situation this line exists to
  * surface, so it always states the full outcome split rather than only the
- * graded count. */
+ * graded count.
+ *
+ * FIX 2's "no submission" outcome (github-repos.ts's gradeRepoAction) is its
+ * own named count here, not folded into `skipped` - omitting it from this
+ * sentence would make the four numbers stop summing to `attempted`, which is
+ * exactly the kind of silent undercount this panel exists to prevent (R1.1).
+ */
 export function repoGradingLogSummaryLine(log: RepoGradingRunLog): string {
   const summary = summarizeRepoGradingRunLog(log);
-  return `${summary.attempted} repo${summary.attempted === 1 ? "" : "s"} attempted - ${summary.graded} graded, ${summary.skipped} skipped, ${summary.failed} failed.`;
+  return `${summary.attempted} repo${summary.attempted === 1 ? "" : "s"} attempted - ${summary.graded} graded, ${summary.skipped} skipped, ${summary.noSubmission} no submission, ${summary.failed} failed.`;
 }
 
 /** R1.5: a run cut short before reaching every repo it intended to must say

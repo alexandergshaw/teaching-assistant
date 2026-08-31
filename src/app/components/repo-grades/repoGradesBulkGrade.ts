@@ -144,10 +144,17 @@ export const BULK_GRADE_CONCURRENCY = 3;
 export interface BulkGradeOutcome {
   repo: string;
   folder: string;
-  status: "graded" | "failed";
-  /** The score exactly as produced, e.g. "18/20"; "" for a failure. */
+  // "no-submission": gradeRepoAction's `noSubmission: true` result (FIX 2) -
+  // the folder was read and correctly found to have nothing student-authored
+  // in it. Its own status, never "failed" (nothing went wrong) and never
+  // "graded" (no score was produced) - see repoGradesLog.ts's
+  // "grade-no-submission" kind, which this maps to one-for-one.
+  status: "graded" | "failed" | "no-submission";
+  /** The score exactly as produced, e.g. "18/20"; "" for a failure or a
+   * no-submission outcome. */
   score: string;
-  /** Error text for a failure, or the README path actually used on success. */
+  /** Error text for a failure, the "nothing was submitted" reason, or the
+   * README path actually used on success. */
   detail: string;
 }
 
@@ -155,18 +162,20 @@ export interface BulkGradeOutcome {
  * One line for the view's existing aria-live region when the run finishes.
  * RULE 5: this must never claim a total that includes the skipped rows as
  * done, and a run where nothing was actually GRADED - whether because
- * everything was skipped, or every attempted grade failed - must read as
- * "nothing was graded", never as a success, regardless of how many rows the
- * run otherwise touched.
+ * everything was skipped, every attempted grade failed, or every attempted
+ * grade found nothing submitted - must read as "nothing was graded", never
+ * as a success, regardless of how many rows the run otherwise touched.
  */
 export function bulkGradeSummaryLine(outcomes: readonly BulkGradeOutcome[], plan: BulkGradePlan): string {
   const graded = outcomes.filter((outcome) => outcome.status === "graded").length;
   const failed = outcomes.filter((outcome) => outcome.status === "failed").length;
+  const noSubmission = outcomes.filter((outcome) => outcome.status === "no-submission").length;
   const skipped = plan.skipped.length;
 
   const parts: string[] = [];
   if (graded > 0) parts.push(`${graded} graded`);
   if (failed > 0) parts.push(`${failed} failed`);
+  if (noSubmission > 0) parts.push(`${noSubmission} had nothing submitted`);
   if (skipped > 0) parts.push(`${skipped} skipped`);
 
   if (graded === 0) {

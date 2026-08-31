@@ -59,6 +59,7 @@ export type { RepoFile, RepoDigest } from "./github.digest";
 export {
   ingestRepo,
   downloadRepoZipball,
+  excludeInstructionsFromDigest,
 } from "./github.digest";
 
 export type {

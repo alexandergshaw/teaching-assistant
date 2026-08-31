@@ -288,6 +288,23 @@ export async function gradeTileRepos(opts: {
         continue;
       }
 
+      // FIX 2: nothing was submitted - not a failure, not a grade. Recorded
+      // as its own "no-submission" outcome (never "failed" - the read
+      // succeeded and correctly found nothing to grade).
+      if ("noSubmission" in r) {
+        notes.push(`${label}: ${r.reason}`);
+        logEntries.push(
+          buildRepoGradingLogEntry({
+            repo: student.repo,
+            outcome: "no-submission",
+            reason: r.reason,
+            at: new Date().toISOString(),
+            digestTruncated: r.digestTruncated,
+          })
+        );
+        continue;
+      }
+
       const gr = r.run.results[0];
       if (!gr) {
         const reason = "no result returned";
@@ -667,6 +684,23 @@ export async function gradeOrgRepos(opts: {
         logEntries.push(buildRepoGradingLogEntry({ repo: fullName, outcome: "failed", reason: r.error, at: new Date().toISOString() }));
         continue;
       }
+
+      // FIX 2: nothing was submitted - not a failure, not a grade. See the
+      // identical branch in gradeTileRepos above for the full rationale.
+      if ("noSubmission" in r) {
+        notes.push(`${fullName}: ${r.reason}`);
+        logEntries.push(
+          buildRepoGradingLogEntry({
+            repo: fullName,
+            outcome: "no-submission",
+            reason: r.reason,
+            at: new Date().toISOString(),
+            digestTruncated: r.digestTruncated,
+          })
+        );
+        continue;
+      }
+
       const gr = r.run.results[0];
       if (!gr) {
         const reason = "no result returned";

@@ -254,6 +254,42 @@ export const gradingRepoSteps: StepDefinition[] = [
         throw new Error(r.error);
       }
 
+      // FIX 2: nothing was submitted - never a grade, never surfaced as a
+      // failure (the read succeeded; there was correctly nothing to grade).
+      // Still recorded as its own "no-submission" outcome so an unattended
+      // run's report shows it, same as gradeTileRepos/gradeOrgRepos below.
+      if ("noSubmission" in r) {
+        const repoGradingLog: RepoGradingRunLog = buildRepoGradingRunLog([
+          buildRepoGradingLogEntry({
+            repo: r.fullName,
+            outcome: "no-submission",
+            reason: r.reason,
+            at: new Date().toISOString(),
+            digestTruncated: r.digestTruncated,
+          }),
+        ]);
+        const entry: GradingRunEntry = {
+          courseName: r.fullName,
+          assignmentName: "Grade a repository",
+          canvasUrl: "",
+          run: { results: [], rubricAreaNames: [], fullCreditChecklist: [], speedGraderUrl: null },
+          pointsPossible: null,
+        };
+        // AC5 (saveRepoGradingDraft's own rule): zero results writes no
+        // draft, but an unattended run's report still gets this repo's
+        // no-submission entry - see that function's own header comment.
+        const saveResult = await saveRepoGradingDraft({
+          entry,
+          summary: `${r.fullName}: nothing to grade`,
+          helpers,
+          repoGradingLog,
+        });
+        return {
+          outputs: { gradeSummary: r.reason, draftId: saveResult.draftId },
+          summary: { kind: "text", text: r.reason },
+        };
+      }
+
       const summaryLines: string[] = [];
       summaryLines.push(r.fullName);
       if (instructionsSourceNote) summaryLines.push(instructionsSourceNote);

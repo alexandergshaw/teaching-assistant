@@ -458,6 +458,32 @@ describe("grade-repo step run()", () => {
     expect(text.split("\n")[0]).toBe("octocat/hello-world");
   });
 
+  // FIX 2: gradeRepoAction can now return `{ noSubmission: true, ... }`
+  // instead of a run - the single-repo step must surface that as its own
+  // outcome, never throw (a "failed" reading), and never save a draft
+  // carrying a score.
+  it("reports the noSubmission reason as the summary and saves no scored draft, when gradeRepoAction finds nothing submitted", async () => {
+    mockGradeRepoAction.mockResolvedValue({
+      noSubmission: true,
+      fullName: "octocat/hello-world",
+      reason: "Nothing was submitted in \"week1\" - after removing the assignment instructions file and scaffolding (.gitkeep), no student-authored files remain.",
+    });
+
+    const result = await step.run(
+      { repo: "octocat/hello-world", instructions: "Do the thing.", folder: "week1" },
+      testHelpers(),
+      vi.fn()
+    );
+
+    expect(result.outputs.gradeSummary).toContain("Nothing was submitted");
+    const text = result.summary.kind === "text" ? result.summary.text : "";
+    expect(text).toContain("Nothing was submitted");
+    // Never a scored draft: saveGradingDraftAction only sees zero results
+    // (AC5 in saveRepoGradingDraft's own doc comment means no draft is
+    // actually written for this call).
+    expect(mockSaveGradingDraftAction).not.toHaveBeenCalled();
+  });
+
   it("falls back to the repo README when instructions are blank, and names the path used in the summary", async () => {
     mockGetRepoTreeAction.mockResolvedValue({
       tree: [{ path: "README.md", type: "blob", size: 20, sha: "root" }],
@@ -632,6 +658,40 @@ describe("grade-repo step run() - org enumeration", () => {
       expect(result.summary.items.some((i) => i.includes("acme-university/carol-hw1") && i.includes("network exploded"))).toBe(true);
     }
     expect(result.outputs.gradeSummary).toContain("acme-university/alice-hw1");
+  });
+
+  // FIX 2 (org fan-out): a repo with nothing submitted must not count as
+  // graded, must not abort the batch, and must not be logged as "failed" -
+  // it gets its own note and continues like any other per-repo outcome.
+  it("a repo with nothing submitted is noted, not counted as graded, and does not stop the batch (org mode)", async () => {
+    mockListCourseHubAction.mockResolvedValue({
+      courses: [baseCourse({ id: "course-1", name: "CS 101", githubOrg: "acme-university" })],
+    });
+    mockListOrgReposAction.mockResolvedValue({
+      repos: [fakeGithubRepo("acme-university/alice-hw1"), fakeGithubRepo("acme-university/bob-hw1")],
+    });
+    mockGradeRepoAction.mockImplementation(async (repo: string) => {
+      if (repo === "acme-university/alice-hw1") {
+        return { run: fakeGradeRun(), rubric: "", fullName: repo };
+      }
+      return { noSubmission: true, fullName: repo, reason: "Nothing was submitted in \"week1\"." };
+    });
+
+    const result = await step.run(
+      { repo: "", instructions: "Do the thing.", hubCourse: "course-1" },
+      testHelpers(),
+      vi.fn()
+    );
+
+    expect(result.summary.kind).toBe("list");
+    if (result.summary.kind === "list") {
+      expect(result.summary.label).toBe("Graded 1/2 repo(s) in acme-university.");
+      expect(
+        result.summary.items.some((i) => i.includes("acme-university/bob-hw1") && i.includes("Nothing was submitted"))
+      ).toBe(true);
+      // Never described as a failure.
+      expect(result.summary.items.some((i) => i.includes("acme-university/bob-hw1") && i.toLowerCase().includes("fail"))).toBe(false);
+    }
   });
 
   it("falls back to each repo's own README when instructions are blank (per-repo, org mode)", async () => {

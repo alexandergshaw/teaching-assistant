@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { ingestRepo, selectDigestFiles, DEFAULT_BUDGET, SCOPED_BUDGET, type SelectDigestFilesOpts } from "./github.digest";
+import {
+  ingestRepo,
+  selectDigestFiles,
+  excludeInstructionsFromDigest,
+  DEFAULT_BUDGET,
+  SCOPED_BUDGET,
+  type SelectDigestFilesOpts,
+  type RepoDigest,
+} from "./github.digest";
 import type { RepoTreeEntry } from "./github.files";
 
 // ingestRepo's own network dependencies, mocked so its per-file truncation
@@ -241,5 +249,140 @@ describe("ingestRepo - per-file truncated is computed per file, not guessed", ()
     // per-file flags are what a preview reads, and they must not agree just
     // because the aggregate does.
     expect(digest.truncated).toBe(true);
+  });
+});
+
+// excludeInstructionsFromDigest - the live defect fix: a folder's README used
+// as the assignment INSTRUCTIONS must never also be graded as if it were the
+// student's SUBMISSION (see this function's own header comment in
+// github.digest.ts). Built here rather than imported from a fixture so the
+// exact text format matches what ingestRepo itself produces (asserted below).
+function digestOf(
+  fullName: string,
+  description: string,
+  files: Array<{ path: string; content: string; truncated?: boolean }>
+): RepoDigest {
+  const withDefaults = files.map((f) => ({ path: f.path, content: f.content, truncated: f.truncated ?? false }));
+  const header = `# Repository: ${fullName}${description ? `\n\n${description}` : ""}`;
+  const text = [header, ...withDefaults.map((f) => `\n\n--- FILE: ${f.path} ---\n${f.content}`)].join("");
+  return {
+    fullName,
+    description,
+    fileCount: withDefaults.length,
+    text,
+    truncated: false,
+    files: withDefaults,
+    prefixMatchedNothing: false,
+    skipped: { type: 0, size: 0, budget: 0, fetchError: 0 },
+    treeTruncated: false,
+  };
+}
+
+describe("excludeInstructionsFromDigest", () => {
+  it("removes the file at instructionsPath from files, text, and fileCount together", () => {
+    const digest = digestOf("org/repo", "", [
+      { path: "week1/README.md", content: "Full worked solution here." },
+      { path: "week1/main.py", content: "print(1)" },
+    ]);
+
+    const result = excludeInstructionsFromDigest(digest, { instructionsPath: "week1/README.md" });
+
+    expect(result.files.map((f) => f.path)).toEqual(["week1/main.py"]);
+    expect(result.fileCount).toBe(1);
+    expect(result.text).not.toContain("Full worked solution here.");
+    expect(result.text).toContain("week1/main.py");
+    // Rebuilt in the exact same format ingestRepo itself uses.
+    expect(result.text).toBe("# Repository: org/repo\n\n--- FILE: week1/main.py ---\nprint(1)");
+  });
+
+  it("also removes a file by CONTENT match when no path is given - the caller that pre-fetches a README itself", () => {
+    const digest = digestOf("org/repo", "", [
+      { path: "week1/README.md", content: "Full worked solution here." },
+      { path: "week1/main.py", content: "print(1)" },
+    ]);
+
+    // Mirrors steps.grading-repos.helpers.ts's resolveReadmeInstructions
+    // pattern: the caller fetched the README text itself and passes it as
+    // `instructionsText` with no path.
+    const result = excludeInstructionsFromDigest(digest, { instructionsText: "Full worked solution here." });
+
+    expect(result.files.map((f) => f.path)).toEqual(["week1/main.py"]);
+    expect(result.fileCount).toBe(1);
+  });
+
+  it("matches content after trimming surrounding whitespace", () => {
+    const digest = digestOf("org/repo", "", [{ path: "README.md", content: "  Instructions.  \n" }]);
+    const result = excludeInstructionsFromDigest(digest, { instructionsText: "Instructions." });
+    expect(result.files).toHaveLength(0);
+  });
+
+  it("returns the SAME digest reference when neither path nor content matches anything", () => {
+    const digest = digestOf("org/repo", "", [{ path: "main.py", content: "print(1)" }]);
+    const result = excludeInstructionsFromDigest(digest, { instructionsPath: "README.md", instructionsText: "" });
+    expect(result).toBe(digest);
+  });
+
+  it("never treats an empty/blank instructionsText as a match against an empty file", () => {
+    // A digest never actually contains a zero-byte file (ingestRepo skips
+    // size<=0 blobs), but this guards the matcher itself: blank instructions
+    // text must not accidentally match every file.
+    const digest = digestOf("org/repo", "", [{ path: "main.py", content: "print(1)" }]);
+    const result = excludeInstructionsFromDigest(digest, { instructionsText: "   " });
+    expect(result.files).toHaveLength(1);
+  });
+
+  it("removes a file by CONTENT match even when THIS digest truncated it (unscoped/DEFAULT_BUDGET path)", () => {
+    // Reproduces the residual defect: on the unscoped workflow path (no
+    // pathPrefix -> DEFAULT_BUDGET.perFileBytes = 8_000), a README longer
+    // than 8,000 characters is sliced by ingestRepo before it ever reaches
+    // this function, while the caller's `instructionsText` was fetched
+    // separately, in full, via getFileText. The two strings are no longer
+    // byte-identical, so an exact-equality check alone misses this and the
+    // instructions leak back into the graded submission.
+    const fullReadme = "Full worked solution here. " + "x".repeat(20_000);
+    const slicedReadme = fullReadme.slice(0, 8_000);
+    expect(slicedReadme.length).toBeLessThan(fullReadme.length);
+
+    const digest = digestOf("org/repo", "", [
+      { path: "README.md", content: slicedReadme, truncated: true },
+      { path: "main.py", content: "print(1)" },
+    ]);
+
+    const result = excludeInstructionsFromDigest(digest, { instructionsText: fullReadme });
+
+    expect(result.files.map((f) => f.path)).toEqual(["main.py"]);
+    expect(result.fileCount).toBe(1);
+    expect(result.text).not.toContain("Full worked solution here.");
+  });
+
+  it("does NOT prefix-match an UNTRUNCATED file that merely shares a leading prefix with the instructions", () => {
+    // The prefix rule must stay gated on truncated: true. Without that gate,
+    // a legitimately different (but short, coincidentally-prefixed) student
+    // file could be wrongly excluded as "the instructions".
+    const digest = digestOf("org/repo", "", [
+      { path: "week1/main.py", content: "Full worked solution here.", truncated: false },
+    ]);
+
+    const result = excludeInstructionsFromDigest(digest, {
+      instructionsText: "Full worked solution here. And then some more instructions text.",
+    });
+
+    expect(result.files.map((f) => f.path)).toEqual(["week1/main.py"]);
+  });
+
+  it("preserves every other field (truncated, skipped, description) unchanged", () => {
+    const digest: RepoDigest = {
+      ...digestOf("org/repo", "A description.", [
+        { path: "README.md", content: "Solution." },
+        { path: "main.py", content: "code" },
+      ]),
+      truncated: true,
+      skipped: { type: 1, size: 2, budget: 3, fetchError: 4 },
+    };
+    const result = excludeInstructionsFromDigest(digest, { instructionsPath: "README.md" });
+    expect(result.truncated).toBe(true);
+    expect(result.skipped).toEqual({ type: 1, size: 2, budget: 3, fetchError: 4 });
+    expect(result.description).toBe("A description.");
+    expect(result.fullName).toBe("org/repo");
   });
 });

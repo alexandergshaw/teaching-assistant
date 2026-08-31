@@ -382,6 +382,28 @@ describe("useRepoGradesGradingActions.ts never calls gradeRepoAction or postCanv
     expect(indexSource).toContain("onGradeCell={handleGradeCell}");
   });
 
+  // S1 (verification finding): before this, handleGradeCell's noSubmission
+  // branch reset the cell and recorded a log entry, but never told the
+  // instructor anything through the view's own aria-live region - a click
+  // that reads "nothing was submitted" produced a byte-identical cell and no
+  // visible change, indistinguishable from a control that silently did
+  // nothing. setPostSummary is the announce channel every other outcome
+  // already uses (see the bulk path's onAnnounce: setPostSummary a few lines
+  // below, and every post handler above).
+  it("handleGradeCell's noSubmission branch announces the reason through setPostSummary, not just the activity log", () => {
+    const defIdx = hookSource.indexOf("const handleGradeCell = async");
+    expect(defIdx).toBeGreaterThan(-1);
+    const nextFnIdx = hookSource.indexOf("const handlePostColumn", defIdx);
+    const body = hookSource.slice(defIdx, nextFnIdx > -1 ? nextFnIdx : defIdx + 1500);
+
+    const branchIdx = body.indexOf('"noSubmission" in result');
+    expect(branchIdx).toBeGreaterThan(-1);
+    const returnIdx = body.indexOf("return;", branchIdx);
+    expect(returnIdx).toBeGreaterThan(-1);
+    const branch = body.slice(branchIdx, returnIdx);
+    expect(branch).toContain("setPostSummary(");
+  });
+
   it("postCanvasGradesAction is called from inside handlePostColumn, the function index.tsx wires to RepoGradesGrid's onPostColumn prop - not some other unrelated function", () => {
     const defIdx = hookSource.indexOf("const handlePostColumn = async");
     expect(defIdx).toBeGreaterThan(-1);

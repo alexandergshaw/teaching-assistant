@@ -25,6 +25,14 @@ import { escapeCsvValue } from "@/lib/course-tasks-view-csv";
 export type RepoGradeLogEventKind =
   | "grade-succeeded"
   | "grade-failed"
+  // A grading call that correctly found nothing student-authored to grade -
+  // gradeRepoAction's `noSubmission: true` result (FIX 2, github-repos.ts).
+  // Its own kind, never "grade-failed": nothing went wrong, the read
+  // succeeded, and folding it into a failure count would tell an instructor
+  // to go retry a call that would only ever produce the same, correct,
+  // answer. Never "grade-succeeded" either, for the obvious reason - no
+  // score was produced.
+  | "grade-no-submission"
   | "post-succeeded"
   | "post-failed"
   | "post-skipped"
@@ -37,6 +45,7 @@ export type RepoGradeLogEventKind =
 const LOG_EVENT_KINDS: readonly RepoGradeLogEventKind[] = [
   "grade-succeeded",
   "grade-failed",
+  "grade-no-submission",
   "post-succeeded",
   "post-failed",
   "post-skipped",
@@ -55,6 +64,7 @@ const LOG_EVENT_KINDS: readonly RepoGradeLogEventKind[] = [
 export const REPO_GRADE_LOG_EVENT_LABELS: Readonly<Record<RepoGradeLogEventKind, string>> = {
   "grade-succeeded": "Graded",
   "grade-failed": "Grading failed",
+  "grade-no-submission": "Nothing submitted",
   "post-succeeded": "Posted to Canvas",
   "post-failed": "Post failed",
   "post-skipped": "Not posted",
@@ -173,7 +183,12 @@ export interface RepoGradeLogSummary {
  * grading failures and post failures - the instructor's question is "did
  * anything go wrong", and splitting that into two numbers makes the answer
  * harder to read, not easier. A skipped or cancelled post is NOT a failure:
- * nothing was attempted, so nothing broke. */
+ * nothing was attempted, so nothing broke. Same reasoning excludes
+ * "grade-no-submission" from every count here (not graded, not failed): the
+ * call was attempted and correctly found nothing to grade - that is neither
+ * "something went wrong" nor "a grade was produced". It is still visible in
+ * the log entries themselves (recentRepoGradeLogEntries, the CSV/JSON
+ * export) - only this specific three-number summary omits it. */
 export function summarizeRepoGradeLog(log: readonly RepoGradeLogEntry[]): RepoGradeLogSummary {
   let graded = 0;
   let posted = 0;

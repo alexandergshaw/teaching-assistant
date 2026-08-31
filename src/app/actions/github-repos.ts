@@ -37,6 +37,7 @@ import {
   updateRepo,
   downloadRepoZipball,
   ingestRepo,
+  excludeInstructionsFromDigest,
   type GithubRepo,
   type CopyRepoOptions,
   type CopyRepoResult,
@@ -635,6 +636,23 @@ function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentS
  * pinned 7-argument call - see repoGradesRubricPicker.wiring.test.ts) keeps
  * omitting it and keeps today's behavior.
  */
+// Scaffolding basenames that never count as a student submission on their
+// own - the conservative floor FIX 2 (github-repos.ts's own header, and this
+// function's doc comment below) requires: ".gitkeep" is a universal, tool-
+// generated marker for "this empty folder must exist in git", never
+// something a student wrote or was asked to write. Deliberately NOT extended
+// with anything course-specific (a "tests/" folder of instructor-provided
+// harness files, a starter "main.py" stub, ...) - that would hardcode one
+// course's layout into every course's grading, which is exactly what this
+// fix must not do. The assignment-instructions file itself (the README
+// picked by pickReadmeInstructions, or content-matched by
+// excludeInstructionsFromDigest) is excluded separately, before this check
+// ever runs - see gradedDigest below.
+function isScaffoldingFile(path: string): boolean {
+  const base = (path.split("/").pop() ?? path).toLowerCase();
+  return base === ".gitkeep";
+}
+
 export async function gradeRepoAction(
   repoRef: string,
   assignmentInstructions: string,
@@ -649,6 +667,21 @@ export async function gradeRepoAction(
       run: GradingRun;
       rubric: string;
       fullName: string;
+      digestTruncated?: boolean;
+      readmePath?: string;
+      readmeMissing?: boolean;
+    }
+  | {
+      // FIX 2: a folder with nothing student-authored in it must never come
+      // back looking like a successful (if low) grade, and must never read
+      // as an ordinary failure either - `noSubmission: true` is its own
+      // branch so a caller cannot reach `result.run` at all here (there is
+      // none), and cannot mistake this for `{ error }` (nothing actually
+      // went wrong - the read succeeded and correctly found nothing to
+      // grade). See this function's own doc comment for the exact rule.
+      noSubmission: true;
+      fullName: string;
+      reason: string;
       digestTruncated?: boolean;
       readmePath?: string;
       readmeMissing?: boolean;
@@ -684,6 +717,39 @@ export async function gradeRepoAction(
       }
     }
 
+    // FIX 1 - THE LIVE BUG: `digest` still contains whatever file was just
+    // used as the assignment instructions (the README pickReadmeInstructions
+    // chose above, or - for a caller that fetched a folder's README itself
+    // and passed it straight in as `assignmentInstructions`, e.g.
+    // steps.grading-repos.helpers.ts's resolveReadmeInstructions - a
+    // content-identical file with a path this function never learns). Every
+    // consumer of the digest below (repoDigestToEmbeddedEntry's `content`/
+    // `submittedFiles`/`mergedFileCount`, and the rubric-generation basis
+    // text) must read `gradedDigest`, NEVER `digest`, from this point on -
+    // that is what stops the instructions (in the reported case, a full
+    // worked solution) from being graded as if it were the student's own
+    // work. See excludeInstructionsFromDigest's own doc comment in
+    // github.digest.ts for exactly what it excludes and why.
+    const gradedDigest = excludeInstructionsFromDigest(digest, {
+      instructionsPath: readmePath,
+      instructionsText: effectiveInstructions,
+    });
+
+    // FIX 2: a submission that does not exist must not receive a grade. The
+    // rule is deliberately conservative and folder-shaped, not content-
+    // shaped: once the instructions file (just excluded above) and universal
+    // scaffolding (.gitkeep) are removed, is there anything left in the
+    // graded folder at all? This also naturally covers the folder-does-not-
+    // exist case (`digest.prefixMatchedNothing` - `digest.files` is already
+    // empty then) without a separate branch for it.
+    const gradableFiles = gradedDigest.files.filter((f) => !isScaffoldingFile(f.path));
+    if (gradableFiles.length === 0) {
+      const folderLabel = pathPrefix ? `"${pathPrefix}"` : "the repository";
+      const removed = readmePath ? "the assignment instructions file and scaffolding (.gitkeep)" : "scaffolding (.gitkeep)";
+      const reason = `Nothing was submitted in ${folderLabel} - after removing ${removed}, no student-authored files remain.`;
+      return { noSubmission: true, fullName: digest.fullName, reason, digestTruncated, readmePath, readmeMissing };
+    }
+
     const instructions = effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;
 
     // Embedded Deterministic Engine: grade the repo in-process against the
@@ -695,7 +761,7 @@ export async function gradeRepoAction(
       }
       // Grow the rubric bank from human-authored rubrics (fire-and-forget).
       if (rubric.trim()) void rememberRubric(instructions, rubric);
-      const entries = [repoDigestToEmbeddedEntry(digest)];
+      const entries = [repoDigestToEmbeddedEntry(gradedDigest)];
       // The live defect this parameter fixes: gradeEntriesEmbedded only scores
       // a "Code runs" criterion off `entry.codeRun` (src/lib/embedded-grader/
       // index.ts) - it never runs anything itself. Every OTHER embedded caller
@@ -709,12 +775,12 @@ export async function gradeRepoAction(
       return { run, rubric: renderRubricText(builtRubric), fullName: digest.fullName, digestTruncated, readmePath, readmeMissing };
     }
 
-    const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${digest.text}`, provider));
+    const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${gradedDigest.text}`, provider));
     // F2: reuse the same shape-conversion the embedded path already does a
     // few lines up (repoDigestToEmbeddedEntry) rather than hand-building a
     // second entry with an always-empty submittedFiles - that emptiness was
     // the reason a repo-graded row never had a file list to preview.
-    const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry(digest);
+    const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry(gradedDigest);
     const run = await gradeEntries([entry], instructions, effectiveRubric, provider);
     return { run, rubric: effectiveRubric, fullName: digest.fullName, digestTruncated, readmePath, readmeMissing };
   } catch (err) {

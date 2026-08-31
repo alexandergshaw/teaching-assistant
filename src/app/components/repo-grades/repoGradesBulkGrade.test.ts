@@ -190,6 +190,28 @@ describe("bulkGradeSummaryLine", () => {
     expect(line.toLowerCase()).toContain("nothing was graded");
   });
 
+  // FIX 2: gradeRepoAction's "nothing was submitted" result reaches here as
+  // its own outcome status - never counted as graded, never counted as
+  // failed (nothing went wrong).
+  it("a no-submission outcome is its own count, never merged into graded or failed", () => {
+    const plan = { targets: [], skipped: [] };
+    const outcomes = [outcome("org/a", "graded", "18/20"), outcome("org/b", "no-submission")];
+    const line = bulkGradeSummaryLine(outcomes, plan);
+    expect(line).toContain("1 graded");
+    expect(line).toContain("1 had nothing submitted");
+    expect(line).not.toContain("failed");
+    expect(line).not.toContain("2 graded");
+  });
+
+  it("all no-submission: 0 graded, so it must read as nothing-was-graded, not as a success", () => {
+    const plan = { targets: [], skipped: [] };
+    const outcomes = [outcome("org/a", "no-submission"), outcome("org/b", "no-submission")];
+    const line = bulkGradeSummaryLine(outcomes, plan);
+    expect(line.toLowerCase()).toContain("nothing was graded");
+    expect(line).toContain("2 had nothing submitted");
+    expect(line).not.toMatch(/\d+ graded/);
+  });
+
   it("mixed: graded, failed and skipped are all present and the total is never overstated", () => {
     const plan = { targets: [], skipped: [{ repo: "org/c", reason: "already graded" }] };
     const outcomes = [outcome("org/a", "graded", "18/20"), outcome("org/b", "failed")];

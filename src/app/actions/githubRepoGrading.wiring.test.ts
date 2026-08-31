@@ -73,7 +73,11 @@ describe("F2: the LLM-graded repo path reuses repoDigestToEmbeddedEntry instead 
 
   it("github-repos.ts's gradeRepoAction (per-cell, LLM path) no longer hardcodes submittedFiles: []", () => {
     expect(GITHUB_REPOS).not.toMatch(/submittedFiles:\s*\[\]/);
-    expect(GITHUB_REPOS).toMatch(/const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry\(digest\);/);
+    // `gradedDigest`, not `digest`, since the fix for the README-graded-as-
+    // submission defect (github.digest.ts's excludeInstructionsFromDigest) -
+    // grading must read the digest with the instructions file excluded, not
+    // the raw ingest result.
+    expect(GITHUB_REPOS).toMatch(/const entry: StudentSubmissionEntry = repoDigestToEmbeddedEntry\(gradedDigest\);/);
   });
 
   it("github.ts's gradeReposAction (bulk, LLM path) no longer hardcodes submittedFiles: []", () => {

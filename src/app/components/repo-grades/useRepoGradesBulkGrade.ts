@@ -207,6 +207,18 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         return { rubricUsed: null };
       }
 
+      // FIX 2: nothing was submitted - never a grade, never a failure. The
+      // cell is reset to its untouched (not-yet-graded) state rather than
+      // shown as errored, and this target contributes no rubric text to
+      // establishSharedRubric's prologue (same effect as a failed attempt -
+      // the prologue tries the next target - which is correct here too:
+      // there is nothing in this folder to generate a rubric from).
+      if ("noSubmission" in result) {
+        onCellUpdate(target.repo, target.folder, { grading: false, gradeError: null });
+        outcomes.push({ repo: target.repo, folder: target.folder, status: "no-submission", score: "", detail: result.reason });
+        return { rubricUsed: null };
+      }
+
       const first = result.run.results[0];
       const score = first?.totalScore ?? "";
       onCellUpdate(target.repo, target.folder, {
@@ -262,10 +274,15 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
       // can differ from the eventual `sharedRubric`), but the log must
       // describe what the instructor actually picked for this run, which
       // never changes mid-run.
+      // Wording fix: "graded from <path>" used to read as "this is what was
+      // graded" when it actually names where the INSTRUCTIONS came from -
+      // the folder's own content (with that same file excluded, FIX 1) is
+      // what was graded, never the README itself. Reworded to say exactly
+      // that.
       const readmeNote = result.readmeMissing
-        ? "no README found in this folder - graded from the typed instructions instead"
+        ? "no README found in this folder - instructions came from the typed text instead"
         : result.readmePath
-          ? `graded from ${result.readmePath}`
+          ? `instructions came from ${result.readmePath}`
           : "";
       const rubricNote = describeResolvedRubricForLog(resolved, result.rubric);
       const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";

@@ -47,10 +47,24 @@ import { escapeCsvValue } from "@/lib/course-tasks-view-csv";
 
 /** R1.2: what happened to one attempted repo. A repo the run never reached
  * is not an entry at all (see `notReached` on RepoGradingRunLog below) -
- * this type only describes an attempt that FINISHED. */
-export type RepoGradingOutcome = "graded" | "skipped" | "failed";
+ * this type only describes an attempt that FINISHED.
+ *
+ * "no-submission" (added alongside the fix for the live grading defect this
+ * comment describes) is its own member, distinct from both "skipped" and
+ * "failed": the run DID reach the repo, DID read its graded folder, and
+ * correctly determined there was nothing student-authored to grade (only
+ * scaffolding - the assignment instructions file, a ".gitkeep" - see
+ * gradeRepoAction's own doc comment in github-repos.ts). That is neither a
+ * precondition failure ("skipped": no matching folder, no rubric available)
+ * nor an error ("failed": GitHub/model call threw) - conflating it with
+ * either would either bury a real "nobody submitted this" fact inside a
+ * generic skip reason, or make an empty submission look like a technical
+ * failure worth retrying. It is also never "graded": this outcome is the
+ * fix for a real bug where an empty submission WAS graded, off the
+ * assignment's own instructions file left sitting in the digest. */
+export type RepoGradingOutcome = "graded" | "skipped" | "failed" | "no-submission";
 
-const REPO_GRADING_OUTCOMES: readonly RepoGradingOutcome[] = ["graded", "skipped", "failed"];
+const REPO_GRADING_OUTCOMES: readonly RepoGradingOutcome[] = ["graded", "skipped", "failed", "no-submission"];
 
 /** One repo's finished attempt. Every field is a plain string and always
  * present - `reason`/`score` are `""` when they do not apply (a graded repo
@@ -114,6 +128,7 @@ export const REPO_GRADING_OUTCOME_LABELS: Readonly<Record<RepoGradingOutcome, st
   graded: "Graded",
   skipped: "Skipped",
   failed: "Failed",
+  "no-submission": "No submission",
 };
 
 /** Builds one entry. A thin constructor rather than a bare object literal at
@@ -164,6 +179,11 @@ export interface RepoGradingRunLogSummary {
   graded: number;
   skipped: number;
   failed: number;
+  /** Count of `outcome: "no-submission"` entries - reached and read, but
+   * nothing student-authored was found. Its own counter, never folded into
+   * `skipped` (see the RepoGradingOutcome doc comment above for why the two
+   * are deliberately distinct). */
+  noSubmission: number;
   notReachedCount: number;
   truncated: boolean;
   /** How many of the GRADED entries were graded on a truncated digest - see
@@ -177,12 +197,15 @@ export interface RepoGradingRunLogSummary {
 
 /** The counts a report/UI would show. Mirrors summarizeRepoGradeLog's
  * counting style (repoGradesLog.ts) but over this module's own entry shape -
- * `graded + skipped + failed` always equals `attempted` by construction,
- * since every entry has exactly one outcome. */
+ * `graded + skipped + failed + noSubmission` always equals `attempted` by
+ * construction, since every entry has exactly one outcome (S2: this comment
+ * used to omit `noSubmission` from the sum, which was also true of the
+ * Markdown headline below until it was fixed alongside this comment). */
 export function summarizeRepoGradingRunLog(log: RepoGradingRunLog): RepoGradingRunLogSummary {
   let graded = 0;
   let skipped = 0;
   let failed = 0;
+  let noSubmission = 0;
   let digestTruncatedGraded = 0;
   for (const entry of log.entries) {
     if (entry.outcome === "graded") {
@@ -190,8 +213,23 @@ export function summarizeRepoGradingRunLog(log: RepoGradingRunLog): RepoGradingR
       if (entry.digestTruncated) digestTruncatedGraded += 1;
     } else if (entry.outcome === "skipped") {
       skipped += 1;
-    } else {
+    } else if (entry.outcome === "no-submission") {
+      noSubmission += 1;
+    } else if (entry.outcome === "failed") {
       failed += 1;
+    } else {
+      // N1 fix: this used to be a bare `else { failed += 1; }` with a
+      // comment CLAIMING it was "not a catch-all else" so a future fifth
+      // outcome would "fail loudly" - it was, in fact, exactly a catch-all
+      // else, so a fifth outcome would have been silently miscounted as
+      // "failed" (precisely the S2-class undercount this module has already
+      // shipped once). This branch is now genuinely unreachable: `entry`'s
+      // type is `never` here only because every real RepoGradingOutcome
+      // member is handled above, so adding a fifth member to the union
+      // without a matching branch here is a compile error, not a silent
+      // miscount.
+      const exhaustive: never = entry.outcome;
+      throw new Error(`Unhandled repo grading outcome: ${String(exhaustive)}`);
     }
   }
   return {
@@ -199,6 +237,7 @@ export function summarizeRepoGradingRunLog(log: RepoGradingRunLog): RepoGradingR
     graded,
     skipped,
     failed,
+    noSubmission,
     notReachedCount: log.notReached.length,
     truncated: log.truncated,
     digestTruncatedGraded,
@@ -307,12 +346,23 @@ export function buildRepoGradingReportMarkdown(
     "",
     `Generated ${meta.generatedAt}`,
     "",
-    `Attempted ${summary.attempted} repo(s): ${summary.graded} graded, ${summary.skipped} skipped, ${summary.failed} failed.`,
+    // S2: this used to omit noSubmission entirely, so the four printed
+    // numbers (attempted, graded, skipped, failed) did not sum to attempted
+    // on any run with a no-submission repo - the exact class of run this fix
+    // exists to report on. All four outcome counts are printed here now, so
+    // graded + skipped + failed + no submission always equals attempted.
+    `Attempted ${summary.attempted} repo(s): ${summary.graded} graded, ${summary.skipped} skipped, ${summary.failed} failed, ${summary.noSubmission} no submission.`,
   ];
 
   if (summary.digestTruncatedGraded > 0) {
     lines.push(
       `${summary.digestTruncatedGraded} of the graded repo(s) were graded on partial input - their folder digest hit the ingest cap.`
+    );
+  }
+
+  if (summary.noSubmission > 0) {
+    lines.push(
+      `${summary.noSubmission} repo(s) had nothing submitted - only scaffolding (the assignment instructions file, .gitkeep) was found, so no grade was produced.`
     );
   }
 

@@ -339,6 +339,79 @@ export async function ingestRepo(
   };
 }
 
+/**
+ * Removes from a digest whatever file was used as the ASSIGNMENT
+ * INSTRUCTIONS, so that exact content is never also fed to the grader as if
+ * it were the student's own submission. This is the fix for a real grading
+ * defect: `gradeRepoAction` (src/app/actions/github-repos.ts) used to pull a
+ * folder's README out of the digest to use as instructions (via
+ * pickReadmeInstructions) but then left that same README sitting in
+ * `digest.files`/`digest.text` - so a student who submitted nothing but the
+ * assignment's own README (which, in the reported case, contained a full
+ * worked solution) was graded against the model answer as if it were their
+ * work.
+ *
+ * A file is excluded when EITHER:
+ * - its `path` equals `instructionsPath` (the file pickReadmeInstructions
+ *   actually chose, when the caller used that flow), or
+ * - its `content`, trimmed, equals `instructionsText` (trimmed, and only
+ *   when non-empty) - a defensive, path-independent check that also closes
+ *   the same shape of defect for a caller that fetches a folder's README
+ *   ITSELF (via a separate getFileText call) and passes it straight in as
+ *   the instructions argument, without ever going through
+ *   pickReadmeInstructions or setting a "use the README" flag (see
+ *   steps.grading-repos.helpers.ts's resolveReadmeInstructions, used by
+ *   gradeTileRepos/gradeOrgRepos) - gradeRepoAction has no path to go on for
+ *   that caller, only the text, so the content check is what catches it), or
+ * - the file is marked `truncated` AND its (trimmed) `content` is a
+ *   non-empty PREFIX of `instructionsText` (trimmed) - covers the same
+ *   caller when its README was long enough to be cut by THIS digest's own
+ *   per-file budget (perFileBytes: 8,000 bytes when no folder was scoped,
+ *   see DEFAULT_BUDGET/SCOPED_BUDGET above), while `instructionsText` was
+ *   fetched separately, in full, by `getFileText`. Without this branch the
+ *   two strings are no longer byte-identical (one is a slice of the other)
+ *   so the exact-match check above silently fails and the original defect
+ *   reappears for any instructions file over the active per-file budget.
+ *   Gated strictly on `f.truncated` - never loosened to a prefix match for
+ *   an untruncated file, which could wrongly exclude a student file that
+ *   legitimately happens to start with the same text as the instructions.
+ *
+ * Rebuilds `text`/`fileCount` from the surviving files in the exact same
+ * format `ingestRepo` itself builds them in (header, then one
+ * "--- FILE: path ---" block per remaining file) so `content`,
+ * `submittedFiles`, and `mergedFileCount` downstream (repoDigestToEmbeddedEntry)
+ * always agree on what was actually graded. Returns `digest` UNCHANGED
+ * (same reference) when nothing actually matched, so a caller that never
+ * used README instructions pays no cost and sees no accidental behavior
+ * change.
+ */
+export function excludeInstructionsFromDigest(
+  digest: RepoDigest,
+  opts: { instructionsPath?: string; instructionsText?: string }
+): RepoDigest {
+  const trimmedInstructions = opts.instructionsText?.trim() ?? "";
+  const matches = (f: RepoFile): boolean => {
+    if (opts.instructionsPath && f.path === opts.instructionsPath) return true;
+    if (trimmedInstructions === "") return false;
+    const trimmedContent = f.content.trim();
+    if (trimmedContent === trimmedInstructions) return true;
+    // f.truncated is required here: only a file THIS digest actually cut
+    // short can legitimately be a strict prefix of the separately-fetched,
+    // untruncated instructions text. An untruncated file is held to exact
+    // equality only, so a student file that happens to start the same way
+    // is never excluded on a prefix alone.
+    return f.truncated && trimmedContent !== "" && trimmedInstructions.startsWith(trimmedContent);
+  };
+
+  const files = digest.files.filter((f) => !matches(f));
+  if (files.length === digest.files.length) return digest;
+
+  const header = `# Repository: ${digest.fullName}${digest.description ? `\n\n${digest.description}` : ""}`;
+  const text = [header, ...files.map((f) => `\n\n--- FILE: ${f.path} ---\n${f.content}`)].join("");
+
+  return { ...digest, files, fileCount: files.length, text };
+}
+
 /** Download a repo as a zip archive (GitHub's zipball) at `ref` / default branch. */
 export async function downloadRepoZipball(owner: string, repo: string, ref?: string): Promise<Buffer> {
   const branch = ref || (await getRepo(owner, repo)).defaultBranch;

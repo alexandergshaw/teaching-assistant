@@ -297,6 +297,24 @@ export function useRepoGradesGradingActions(
       recordLog([buildLogEntry("grade-failed", { repo: row.repo, folder: column.folder, detail: result.error })]);
       return;
     }
+
+    // FIX 2: nothing was submitted - never a grade, never a failure. The
+    // cell returns to its untouched (not-yet-graded) state; the reason is
+    // still recorded in the activity log under its own "grade-no-submission"
+    // kind (never "grade-failed" - nothing went wrong here).
+    if ("noSubmission" in result) {
+      setCellEdits((prev) => setRepoGradeCellEdit(prev, row.repo, column.folder, { grading: false, gradeError: null }));
+      recordLog([buildLogEntry("grade-no-submission", { repo: row.repo, folder: column.folder, detail: result.reason })]);
+      // S1: without this, the cell returns to byte-identical to its
+      // pre-click state and the reason lives only inside the separate
+      // activity-log panel - a click that produces no visible change reads
+      // as a no-op, not as "nothing was submitted". The bulk path already
+      // announces its outcome this way (onAnnounce: setPostSummary, above);
+      // this is the per-cell equivalent.
+      setPostSummary(`${row.repo} / ${column.folder}: ${result.reason}`);
+      return;
+    }
+
     const first = result.run.results[0];
     setCellEdits((prev) =>
       setRepoGradeCellEdit(prev, row.repo, column.folder, {
@@ -643,10 +661,17 @@ export function useRepoGradesGradingActions(
   };
 
   // Same log kinds handleGradeCell already records above - a bulk grade is
-  // still, per row, an on-demand AI grading call.
+  // still, per row, an on-demand AI grading call. "no-submission" (FIX 2) is
+  // its own log kind - never "grade-failed" (nothing went wrong) and never
+  // "grade-succeeded" (no score was produced).
   const handleBulkOutcomes = (outcomes: readonly BulkGradeOutcome[]) => {
     recordLog(
-      outcomes.map((o) => buildLogEntry(o.status === "graded" ? "grade-succeeded" : "grade-failed", { repo: o.repo, folder: o.folder, score: o.score, detail: o.detail }))
+      outcomes.map((o) =>
+        buildLogEntry(
+          o.status === "graded" ? "grade-succeeded" : o.status === "no-submission" ? "grade-no-submission" : "grade-failed",
+          { repo: o.repo, folder: o.folder, score: o.score, detail: o.detail }
+        )
+      )
     );
   };
 

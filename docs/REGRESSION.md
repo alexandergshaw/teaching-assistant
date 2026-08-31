@@ -35284,3 +35284,109 @@ sequence identical. Nothing over the 1000-line ceiling.
   live `swapAdjacentRows`.
 - **This surface still owes a downloadable log** under the rule now in
   `docs/DEV_LOOP.md`. One run, one debt, still unpaid.
+
+## 370. The assignment instructions were being graded as the student's submission
+
+**A live correctness bug. Real grades were wrong.** Found from an instructor's
+exported grading log plus two real student repos, not from a test.
+
+### What happened
+
+`gradeRepoAction` pulled a folder's `README.md` out of the ingest digest to use
+as the assignment INSTRUCTIONS - and left it in the digest. So
+`repoDigestToEmbeddedEntry` fed the same README back as `content` and
+`submittedFiles`, and `gradeEntries` graded the instructions as the student's
+work. The model received the assignment twice: once as instructions, once as the
+submission.
+
+In the affected course that README is a tutorial carrying the **complete worked
+solution** in three languages, with expected output.
+
+Evidence from the instructor's own export:
+
+- A student whose `assignments/module_02` folder held only `.gitkeep` and
+  `README.md` - **no submission at all** - was graded **10.80/12** and praised
+  for "getting these three programs running across different languages".
+- Three students had byte-identical scores and near-identical feedback: same
+  input, same output.
+- Several were told their files were named `trip_math.py` / `TripMath.java` /
+  `trip_math.cpp`. Those names appear only in the instructions.
+- The one student who really did submit `TripMath.java` was NOT flagged for
+  naming, because he had real files to look at.
+- **All 66 grades in that run are void**, including the plausible ones.
+
+The instructor's hypothesis was cross-student contamination. It was not that -
+nothing crossed between students. Every repo contained the same instructions,
+so every repo appeared to contain the same complete solution.
+
+### The fix
+
+- **`excludeInstructionsFromDigest`** (`github.digest.ts`) rebuilds `files`,
+  `text` and `fileCount` **together**, so the file list can never show a README
+  that was not graded. Matched by path when known, by exact trimmed content
+  otherwise.
+- **A folder with nothing student-authored left returns `noSubmission`, never a
+  score.** Seven call sites now handle that third branch explicitly - `tsc`
+  found every one that did not.
+- **`"no-submission"` is its own logged outcome**, distinct from graded and from
+  failed, with its own label, counter, CSV column and Markdown line, so a glance
+  at the export answers "who submitted nothing".
+- The misleading `graded from <path>` log line now reads
+  `instructions came from <path>` - that wording is part of why this went
+  unnoticed.
+
+### Three instances, not one - and the second review found the third
+
+1. `gradeRepoAction`'s README auto-pick. The reported case.
+2. `steps.grading-repos.helpers.ts` pre-fetches a folder README separately and
+   passes it as `assignmentInstructions` while `ingestRepo` re-reads the same
+   file into the digest. Same defect, different route.
+3. **The fix's own first pass left the bug fully intact on the unattended
+   path.** The content fallback was judged safe against
+   `SCOPED_BUDGET.perFileBytes = 40_000`, where a ~17,000-char README is never
+   cut. But `folder` is optional on two workflow paths, and without a
+   `pathPrefix` the ingest uses `DEFAULT_BUDGET.perFileBytes = 8_000`, slicing
+   the README so the content match fails - instructions leaked back in AND
+   `noSubmission` did not fire. Closed with a prefix match **gated strictly on
+   `f.truncated`**: only a file this digest actually cut can match a prefix.
+   An untruncated file is still held to exact equality, so a student file that
+   merely begins the same way is never excluded.
+
+Checked and clean: `grading.ts` (Canvas and zip) and `github.ts`'s
+`gradeReposAction` take instructions from a typed field or Canvas metadata,
+never from inside a submission - neither carries this defect.
+
+### One claim in the verification pass was wrong, and was settled empirically
+
+The verifier concluded the reported student would still be graded off the
+course-provided harness at `tests/test_module_02.py`. `selectDigestFiles` does a
+plain path-prefix match, so a sibling top-level folder never enters a digest
+scoped to `assignments/module_02`. `noSubmission` fires correctly for that
+student. Recorded because the argument was resolved by reading the scope rule,
+not by preferring one opinion.
+
+### Gates
+
+`tsc --noEmit` 0. `eslint` 0 errors, 0 warnings over 18 files. `vitest` **734
+files, 15085 tests**. Every fix sabotage-checked, each sabotage confirmed
+present in the file before its red run. The new exhaustiveness check was
+verified by widening the outcome union and confirming `tsc` fails at that line.
+
+### Limits - what a re-run still will NOT catch
+
+- **The 66 already-issued grades.** Nothing here revisits them; withdrawing them
+  is the instructor's action.
+- **A course-provided harness file inside the graded folder counts as a
+  submission.** The no-submission rule deliberately hardcodes no course's
+  layout, so a folder containing only provided scaffolding still grades.
+- **Near-copies of the instructions are not excluded** - one changed character,
+  or CRLF versus LF, defeats the content match. Only the exact copy and the
+  truncated-prefix case are caught.
+- **Shared-instructions mode with a drifted student copy** is not caught.
+- **`isScaffoldingFile` is dead code in production**: `.gitkeep` never reaches
+  `digest.files`, because `fileExt` returns `""` and it is not in
+  `NO_EXT_ALLOW`. Kept as defence-in-depth and labelled as such in its test, so
+  the next reader does not mistake it for a live rule.
+- **No grading run was executed against a real repository as part of this fix.**
+  Everything is verified by reading and by unit tests against constructed
+  digests.

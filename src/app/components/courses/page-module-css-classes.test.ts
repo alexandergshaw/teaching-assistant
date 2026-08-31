@@ -43,6 +43,14 @@ const STYLESHEETS: StylesheetTarget[] = [
     cssPath: path.resolve(process.cwd(), "src/app/components/courses/CoursesTable.module.css"),
     label: "src/app/components/courses/CoursesTable.module.css",
   },
+  {
+    // Set D's DiscussionRepliesPanel reuses this table skin (per
+    // docs/discussion-reply-capture-acceptance-criteria.md section 6), so its
+    // references are checked against the real stylesheet the same way the
+    // other two are.
+    cssPath: path.resolve(process.cwd(), "src/app/components/workflows/AutomationsTable.module.css"),
+    label: "src/app/components/workflows/AutomationsTable.module.css",
+  },
 ];
 
 const COMPONENTS_ROOT = path.resolve(process.cwd(), "src");

@@ -1,0 +1,596 @@
+"use client";
+
+// Manual > Recording > "Discussion replies" (AC1-AC4). This is the ONLY
+// import from useDiscussionReplies.ts (set C3) - the panel takes exactly one
+// prop, `active`, and owns no state of its own beyond arming, focus
+// restoration and a couple of announcement helpers (AC39: what lives in D,
+// not C3). See docs/discussion-reply-capture-acceptance-criteria.md sections
+// 2, 6, 16 and AC7/AC7a/AC7b/AC14a-AC19a/AC36/AC39 - this file is built to
+// that contract, against the pinned `UseDiscussionRepliesReturn` shape in
+// section 12.
+
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
+import styles from "../../page.module.css";
+// Section 6: the shared table skin - AutomationsTable.module.css's own
+// header declares it the idiom the app's tables read as one system under.
+// Only .scroller and .table are used; NOT .sortableHeader, which styles a
+// clickable bare <th> with no button inside it and is not keyboard-operable
+// (AC14 - repo-grades/RepoGradesGrid.tsx:129-140 is the markup precedent
+// used instead).
+import tableStyles from "../workflows/AutomationsTable.module.css";
+import panelStyles from "./DiscussionRepliesPanel.module.css";
+import { fmt } from "./types";
+import { isConfirmArmed } from "../content-tab/modules/confirmArming";
+import type { ReplySort } from "./discussion-capture";
+import { useDiscussionReplies } from "./useDiscussionReplies";
+import DiscussionReplyRow from "./DiscussionReplyRow";
+
+const DELETE_CONSEQUENCE_ID = "discussion-delete-table-consequence";
+const REDRAFT_CONSEQUENCE_ID = "discussion-redraft-consequence";
+
+// AC7a: the visible status row is aria-hidden (the elapsed timer ticking
+// every second would otherwise announce ~240 times per capture and defeat
+// this same throttle). There is no .srOnly class in this repo - the inline
+// clip-rect object is the idiom (StagePanel.tsx:539-562).
+const visuallyHidden: React.CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0,0,0,0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
+
+function composeLiveSentence(args: {
+  count: number;
+  extracting: boolean;
+  pendingFrames: number;
+  stalled: boolean;
+  capturing: boolean;
+}): string {
+  const { count, extracting, pendingFrames, stalled, capturing } = args;
+  if (stalled) {
+    return "Nothing new has been read off the screen for 30 seconds. Keep this app's tab visible in a second window while you scroll.";
+  }
+  if (!capturing) return "";
+  const parts: string[] = [];
+  parts.push(count === 0 ? "Capturing - 0 posts so far." : `${count} post${count === 1 ? "" : "s"} found.`);
+  if (extracting) parts.push("Reading the screen...");
+  if (pendingFrames > 0) parts.push("Catching up - scroll a little slower.");
+  return parts.join(" ");
+}
+
+/** AC14: only Name/Captured carry aria-sort; "none" on the inactive one of
+ * the pair (it IS sortable, just not the active sort), never omitted -
+ * omitting it on a sortable header is what a non-sortable column does. */
+function sortAriaValue(active: boolean, ascending: boolean): "ascending" | "descending" | "none" {
+  if (!active) return "none";
+  return ascending ? "ascending" : "descending";
+}
+
+function toggleColumnSort(current: ReplySort, ascKey: ReplySort, descKey: ReplySort): ReplySort {
+  return current === ascKey ? descKey : ascKey;
+}
+
+function SortGlyph({ asc }: { asc: boolean }) {
+  const points = asc ? "10,4 16,15 4,15" : "10,16 16,5 4,5";
+  return (
+    <svg width={10} height={10} viewBox="0 0 20 20" aria-hidden="true" focusable="false" style={{ marginLeft: 4 }}>
+      <polygon points={points} fill="currentColor" />
+    </svg>
+  );
+}
+
+interface StoppedSummary {
+  elapsedAtStop: number;
+  found: number;
+  drafted: number;
+  failed: number;
+}
+
+function stoppedSummarySentence(s: StoppedSummary): string {
+  const base = `Capture stopped after ${fmt(s.elapsedAtStop)}. Found ${s.found} post${s.found === 1 ? "" : "s"}, drafted ${s.drafted} repl${s.drafted === 1 ? "y" : "ies"}.`;
+  if (s.failed === 0) return base;
+  return `${base} ${s.failed} repl${s.failed === 1 ? "y" : "ies"} failed - use Retry on that row.`;
+}
+
+export default function DiscussionRepliesPanel({ active }: { active: boolean }) {
+  const {
+    audience,
+    setAudience,
+    courseId,
+    setCourseId,
+    courses,
+    coursesLoading,
+    coursesError,
+    saveVideo,
+    setSaveVideo,
+    recordingUrl,
+    recordingBytes,
+    capturing,
+    elapsedSec,
+    pendingFrames,
+    droppedFrames,
+    extracting,
+    stalled,
+    notices,
+    dismissNotice,
+    previewRef,
+    start,
+    stop,
+    rows,
+    sort,
+    setSort,
+    moveRow,
+    editReply,
+    removeRow,
+    retryRow,
+    draftAllPending,
+    redraftAll,
+    clearTable,
+    drafting,
+  } = useDiscussionReplies(active);
+
+  // ---- Session bookkeeping for AC7b's post-stop summary. ----
+  // The pinned UseDiscussionRepliesReturn (section 12) exposes only the
+  // whole persisted `rows` array, not a session-scoped tally - AC24 says the
+  // table is not owned by a session at all. So THIS panel snapshots which
+  // row ids existed the moment `start()` was pressed and, on stop, diffs
+  // `rows` against that snapshot to get "found/drafted/failed this
+  // session". Every setState below follows the "adjust state during
+  // rendering" pattern (compare current vs previous, setState in the same
+  // render) rather than a useEffect that calls setState synchronously,
+  // which this repo's eslint config rejects (TaskAttachmentsDialog.tsx's
+  // own note on the same rule).
+  const [prevCapturing, setPrevCapturing] = useState(capturing);
+  const [sessionStartIds, setSessionStartIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [stoppedSummary, setStoppedSummary] = useState<StoppedSummary | null>(null);
+  if (capturing !== prevCapturing) {
+    setPrevCapturing(capturing);
+    if (capturing) {
+      setSessionStartIds(new Set(rows.map((r) => r.id)));
+      setStoppedSummary(null);
+    } else {
+      const sessionRows = rows.filter((r) => !sessionStartIds.has(r.id));
+      setStoppedSummary({
+        elapsedAtStop: elapsedSec,
+        found: sessionRows.length,
+        drafted: sessionRows.filter((r) => r.state === "ready").length,
+        failed: sessionRows.filter((r) => r.state === "failed").length,
+      });
+    }
+  }
+  const everStarted = capturing || stoppedSummary !== null;
+
+  // AC14: "Custom order." on the mode change, and AC38's newest-notice
+  // announcement, both routed into one ad hoc polite region (kept separate
+  // from AC7a's throttled capture sentence below - a burst of row moves
+  // must not wait behind a 5-second capture-status throttle, and a capture
+  // status tick must not be interrupted by an unrelated row move).
+  const [adhocAnnouncement, setAdhocAnnouncement] = useState("");
+  const [prevSort, setPrevSort] = useState(sort);
+  if (sort !== prevSort) {
+    setPrevSort(sort);
+    if (sort === "custom" && prevSort !== "custom") setAdhocAnnouncement("Custom order.");
+  }
+  const noticeSignature = notices.map((n) => n.id).join(",");
+  const [prevNoticeSignature, setPrevNoticeSignature] = useState(noticeSignature);
+  if (noticeSignature !== prevNoticeSignature) {
+    setPrevNoticeSignature(noticeSignature);
+    const newest = notices[notices.length - 1];
+    if (newest) setAdhocAnnouncement(newest.text);
+  }
+  // BL3: stable across renders. Passed into the memoized DiscussionReplyRow
+  // as the `announce` prop - a fresh arrow here on every render (elapsedSec
+  // ticks once a second while capturing) defeated React.memo on every row,
+  // since setAdhocAnnouncement itself is already stable and this closure
+  // captures nothing else.
+  const announce = useCallback((text: string) => setAdhocAnnouncement(text), []);
+
+  // S3/AC16: the clipboard-failure message's visible home. Kept separate
+  // from the general `notices` list (which is C3-owned and dismissed
+  // through `dismissNotice`) - a copy failure is purely a DOM/client-side
+  // event with nothing for the orchestrator hook to know about.
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const handleCopyError = useCallback((text: string) => setCopyError(text), []);
+
+  // AC7a/AC47: one computed sentence, recomputed at most every 5 wall-clock
+  // seconds. setState only happens after an await (a real gate, even a
+  // zero-length one) - this repo's eslint forbids reaching setState
+  // synchronously from inside a useEffect body.
+  const [liveSentence, setLiveSentence] = useState("");
+  const lastAnnouncedAtRef = useRef(0);
+  useEffect(() => {
+    let cancelled = false;
+    const sentence = composeLiveSentence({ count: rows.length, extracting, pendingFrames, stalled, capturing });
+    void (async () => {
+      const sinceLast = Date.now() - lastAnnouncedAtRef.current;
+      if (sinceLast < 5000) await new Promise((r) => setTimeout(r, 5000 - sinceLast));
+      if (cancelled) return;
+      lastAnnouncedAtRef.current = Date.now();
+      setLiveSentence(sentence);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rows.length, extracting, pendingFrames, stalled, capturing]);
+
+  // ---- AC19/AC19a: signature-based arming, no timer. isConfirmArmed
+  // compares the armed-for signature against the CURRENT one - re-arming
+  // after the underlying thing changes (a batch lands mid-session) is
+  // exactly the point; see confirmArming.ts's own header for why a timer
+  // reproduces REGRESSION entry 258. ----
+  const [deleteArmedFor, setDeleteArmedFor] = useState<string | null>(null);
+  const [redraftArmedFor, setRedraftArmedFor] = useState<string | null>(null);
+  const deleteSignature = `${rows.length}|${recordingUrl ? "video" : "novideo"}`;
+  const redraftSignature = `${rows.length}|${audience}`;
+  const deleteArmed = isConfirmArmed(deleteArmedFor, deleteSignature);
+  const redraftArmed = isConfirmArmed(redraftArmedFor, redraftSignature);
+
+  // ---- AC19/S4, modal-focus-restoration decisions 2/3/5: a keyed ref map
+  // so focus after a row removal lands on the NEXT row's Remove button,
+  // falling back to this actions container (never document.body).
+  //
+  // S4: `actionsContainerRef`'s own element must therefore be able to
+  // OUTLIVE the removal/delete that needs it as a fallback target - it is
+  // rendered unconditionally below (its Draft/Delete BUTTONS are still
+  // conditional on `rows.length > 0` inside it), never inside the same
+  // `rows.length > 0` guard that used to unmount it in the same commit as a
+  // "Confirm delete" click that emptied the table. `pendingFocusFallbackRef`
+  // is the second, explicit "there is no specific row to focus, but a
+  // removal DID happen" signal - the previous code silently skipped the
+  // fallback whenever the removed row had no neighbour (a null `targetId`
+  // short-circuited the effect below before it ever reached the fallback
+  // branch), which is the identical bug removing the LAST row hit even
+  // before "Delete table" existed. ----
+  const removeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const actionsContainerRef = useRef<HTMLDivElement | null>(null);
+  const pendingFocusIdRef = useRef<string | null>(null);
+  const pendingFocusFallbackRef = useRef(false);
+  const rowsRef = useRef(rows);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
+  const registerRemoveRef = useCallback((id: string, el: HTMLButtonElement | null) => {
+    if (el) removeRefs.current.set(id, el);
+    else removeRefs.current.delete(id);
+  }, []);
+
+  useLayoutEffect(() => {
+    const targetId = pendingFocusIdRef.current;
+    const wantsFallback = pendingFocusFallbackRef.current;
+    pendingFocusIdRef.current = null;
+    pendingFocusFallbackRef.current = false;
+    if (!targetId && !wantsFallback) return;
+    const next = targetId ? removeRefs.current.get(targetId) : null;
+    if (next) next.focus();
+    else actionsContainerRef.current?.focus();
+  });
+
+  const handleRemove = useCallback(
+    (id: string) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      const fallback = raw[idx + 1] ?? raw[idx - 1] ?? null;
+      if (fallback) {
+        pendingFocusIdRef.current = fallback.id;
+      } else {
+        // The row being removed had no neighbour - removing it leaves the
+        // table empty (or this was already the only row), and the table
+        // subtree is about to unmount. Fall back to the persistent actions
+        // container rather than dropping focus to <body> -
+        // docs/modal-focus-restoration-acceptance-criteria.md AC2 forbids
+        // that outcome unconditionally, and a removal with no neighbouring
+        // row to receive focus is exactly the case that rule exists for.
+        pendingFocusFallbackRef.current = true;
+      }
+      removeRow(id);
+    },
+    [removeRow]
+  );
+
+  const handleClearTable = useCallback(() => {
+    // S4: the whole `rows.length > 0` subtree (including the button that
+    // currently has focus) unmounts in this same commit - the persistent
+    // actionsContainerRef is the only focus target guaranteed to survive it.
+    pendingFocusFallbackRef.current = true;
+    clearTable();
+  }, [clearTable]);
+
+  const handleStartStop = () => {
+    if (capturing) {
+      stop();
+      return;
+    }
+    void start();
+  };
+
+  const showNeverOpened = !everStarted && rows.length === 0;
+  const showPersistedBanner = !everStarted && rows.length > 0;
+  const showCapturingEmpty = capturing && rows.length === 0;
+  // S2: keyed off `stoppedSummary.found === 0`, not `rows.length === 0`. A
+  // session that adds no NEW rows to an already non-empty (persisted) table
+  // used to satisfy neither this condition nor the `found > 0` summary
+  // gate above, so the panel went completely silent on Stop - the exact
+  // "did it work?" moment AC7b exists for, and the likeliest way a
+  // returning user meets a real failure (shared the wrong window with
+  // yesterday's rows still on screen).
+  const showStoppedEmpty = !capturing && stoppedSummary !== null && stoppedSummary.found === 0;
+
+  return (
+    <div className={styles.adaptPanel}>
+      <div className={styles.adaptPanelHeader}>
+        <h2 className={styles.adaptPanelTitle}>Discussion replies</h2>
+        <p className={styles.adaptPanelSubtitle}>
+          Screen-record a discussion board while you scroll - the app reads the posts off the screen and drafts a
+          reply to each one.
+        </p>
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+        <TextField
+          select
+          label="Course"
+          size="small"
+          value={courseId}
+          onChange={(e) => setCourseId(e.target.value)}
+          disabled={coursesLoading}
+          sx={{ minWidth: 220 }}
+        >
+          <MenuItem value="">No course selected</MenuItem>
+          {(courses ?? []).map((c) => (
+            <MenuItem key={c.id} value={c.id}>
+              {c.name}
+            </MenuItem>
+          ))}
+        </TextField>
+        <div>
+          <FormControlLabel
+            control={<Checkbox size="small" checked={saveVideo} onChange={(e) => setSaveVideo(e.target.checked)} />}
+            label="Also save the screen recording"
+          />
+          {/* N5: attached to the control it actually describes - as a bare
+              paragraph below the whole row it read as if it applied to the
+              Course select above it instead. */}
+          <p className={styles.fieldHint} style={{ margin: 0 }}>Applies to the next capture.</p>
+        </div>
+      </div>
+      {coursesError && <p className={styles.fieldHint}>Could not load your courses - drafting still works without one.</p>}
+
+      <div className={styles.ghActions}>
+        <span className={styles.ghMeta}>Replying to:</span>
+        <Button variant={audience === "students" ? "contained" : "outlined"} size="small" onClick={() => setAudience("students")}>
+          My students
+        </Button>
+        <Button variant={audience === "peers" ? "contained" : "outlined"} size="small" onClick={() => setAudience("peers")}>
+          Fellow educators
+        </Button>
+        {/* AC61: the slot keeps its layout box even while hidden (visibility,
+            not conditional rendering) so this row does not shift sideways
+            the moment the first post lands. */}
+        <div className={panelStyles.reservedSlot} style={{ visibility: rows.length > 0 ? "visible" : "hidden" }} aria-hidden={rows.length === 0}>
+          {redraftArmed ? (
+            <>
+              <Button size="small" color="warning" onClick={() => { redraftAll(); setRedraftArmedFor(null); }} aria-describedby={REDRAFT_CONSEQUENCE_ID}>
+                Confirm redraft
+              </Button>
+              <Button size="small" onClick={() => setRedraftArmedFor(null)} style={{ marginLeft: 6 }}>
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button size="small" variant="text" onClick={() => setRedraftArmedFor(redraftSignature)}>
+              Redraft every reply
+            </Button>
+          )}
+        </div>
+      </div>
+      {redraftArmed && (
+        <p id={REDRAFT_CONSEQUENCE_ID} role="status" aria-live="polite" className={panelStyles.consequence}>
+          This overwrites every reply in the table, including ones you edited by hand.
+        </p>
+      )}
+
+      <div className={styles.ghActions}>
+        <Button variant="contained" size="small" onClick={handleStartStop}>
+          {capturing ? "Stop capture" : "Start capture"}
+        </Button>
+      </div>
+      <p className={styles.fieldHint}>You can also stop from your browser&apos;s sharing bar.</p>
+
+      {/* AC7/AC7a: the whole status row is aria-hidden - a separate polite
+          region (below) carries the one sentence a screen reader hears,
+          throttled to at most once per 5 seconds. */}
+      <div className={panelStyles.statusRow} aria-hidden="true">
+        {/* BL2: rendered UNCONDITIONALLY, never `{capturing && <video ...>}`.
+            useDiscussionCapture's start() assigns `previewRef.current.srcObject`
+            synchronously, BEFORE it sets `capturing` true - so a conditionally-
+            mounted video is still null at that exact moment (this element does
+            not exist in the DOM yet) and the assignment is silently skipped
+            with nothing left to reassign it later. The element must already be
+            mounted before start() runs; only its visibility is conditional. */}
+        <video
+          ref={previewRef}
+          className={panelStyles.previewVideo}
+          style={{ display: capturing ? undefined : "none" }}
+          autoPlay
+          muted
+          playsInline
+        />
+        {capturing && (
+          <div className={panelStyles.statusText}>
+            <span>{fmt(elapsedSec)}</span>
+            <span>{rows.length === 0 ? "Capturing - 0 posts so far." : `${rows.length} post${rows.length === 1 ? "" : "s"} found`}</span>
+            {extracting && <span>Reading the screen...</span>}
+            {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
+          </div>
+        )}
+      </div>
+      {stalled && (
+        <p className={styles.error}>
+          Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second window while you scroll.
+        </p>
+      )}
+      {!capturing && stoppedSummary && stoppedSummary.found > 0 && (
+        <p className={styles.fieldHint}>{stoppedSummarySentence(stoppedSummary)}</p>
+      )}
+      {/* AC7b/AC10/F4: the drop sentence sits beneath the persistent
+          post-stop summary, not in the dismissible notices list - it is a
+          session-level fact tied to the summary above it. AC63's exact
+          string. */}
+      {!capturing && stoppedSummary && droppedFrames > 0 && (
+        <p className={styles.fieldHint}>
+          Some of the screen scrolled past faster than it could be read. Scroll back over that section to catch it.
+        </p>
+      )}
+      {recordingUrl && (
+        <p className={styles.fieldHint}>
+          <a href={recordingUrl} download="discussion-capture.webm">
+            {`Download recording (${(recordingBytes / 1048576).toFixed(1)} MB)`}
+          </a>
+        </p>
+      )}
+
+      {notices.length > 0 && (
+        <div className={styles.field}>
+          {notices.map((n) => (
+            <p key={n.id} className={styles.error}>
+              {n.text}{" "}
+              <button type="button" className={styles.linkButton} onClick={() => dismissNotice(n.id)}>
+                Dismiss
+              </button>
+            </p>
+          ))}
+        </div>
+      )}
+
+      {showNeverOpened && (
+        <p className={styles.fieldHint}>No replies yet - start a capture, then scroll through the discussion board in the other window.</p>
+      )}
+      {showPersistedBanner && (
+        <p className={styles.fieldHint}>
+          {`${rows.length} repl${rows.length === 1 ? "y" : "ies"} kept from an earlier session. They stay here until you delete the table.`}
+        </p>
+      )}
+      {showCapturingEmpty && <p className={styles.fieldHint}>Posts appear here as you scroll past them in the other window.</p>}
+      {/* N3: the reasons (if any) are already rendered in full, with Dismiss
+          buttons, in the `notices` block above - re-rendering a deduped copy
+          of the same text here showed a repeated 429 twice. */}
+      {showStoppedEmpty && (
+        <p className={styles.fieldHint}>
+          {`Capture stopped after ${fmt(stoppedSummary?.elapsedAtStop ?? elapsedSec)}. No posts were found. Check that you shared the window showing the discussion board, and scroll through the posts while the capture is running.`}
+        </p>
+      )}
+      {/* S3: clipboard-copy failures land here (AC16: "goes to the panel's
+          error line, never into the icon slot") - a visually-hidden live
+          region alone is invisible to a sighted user, and this is the one
+          panel-level error line the copy button has any reach to. */}
+      {copyError && (
+        <p className={styles.error}>
+          {copyError}{" "}
+          <button type="button" className={styles.linkButton} onClick={() => setCopyError(null)}>
+            Dismiss
+          </button>
+        </p>
+      )}
+
+      {/* S4: rendered UNCONDITIONALLY (only the buttons inside are gated on
+          `rows.length > 0`) - this is the fallback focus target for both a
+          per-row removal with no neighbouring row and a table-level delete,
+          and it must still exist in the DOM after either one to receive
+          focus. Previously this whole div lived inside the `rows.length > 0`
+          block, so it unmounted in the SAME commit as the "Confirm delete"
+          click that emptied the table, dropping focus to <body>. */}
+      <div className={styles.ghActions} ref={actionsContainerRef} tabIndex={-1}>
+        {rows.length > 0 && (
+          <>
+            <Button size="small" variant="outlined" disabled={drafting} onClick={draftAllPending}>
+              Draft the missing replies
+            </Button>
+            {deleteArmed ? (
+              <>
+                <Button size="small" color="error" onClick={() => { handleClearTable(); setDeleteArmedFor(null); }} aria-describedby={DELETE_CONSEQUENCE_ID}>
+                  Confirm delete
+                </Button>
+                <Button size="small" onClick={() => setDeleteArmedFor(null)}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button size="small" color="error" variant="outlined" onClick={() => setDeleteArmedFor(deleteSignature)}>
+                Delete table
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+      {rows.length > 0 && deleteArmed && (
+        <p id={DELETE_CONSEQUENCE_ID} role="status" aria-live="polite" className={panelStyles.consequence}>
+          {`This permanently deletes all ${rows.length} row${rows.length === 1 ? "" : "s"}${recordingUrl ? " and the saved recording" : ""}. This cannot be undone.`}
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <>
+          <div className={tableStyles.scroller}>
+            <table className={tableStyles.table}>
+              <caption className={panelStyles.tableCaption}>Captured discussion posts and drafted replies</caption>
+              <thead>
+                <tr>
+                  <th scope="col" aria-sort={sortAriaValue(sort === "name-asc" || sort === "name-desc", sort === "name-asc")}>
+                    <button type="button" className={styles.linkButton} onClick={() => setSort(toggleColumnSort(sort, "name-asc", "name-desc"))}>
+                      Name
+                      {(sort === "name-asc" || sort === "name-desc") && <SortGlyph asc={sort === "name-asc"} />}
+                    </button>
+                  </th>
+                  <th scope="col" aria-sort={sortAriaValue(sort === "captured-asc" || sort === "captured-desc", sort === "captured-asc")}>
+                    <button type="button" className={styles.linkButton} onClick={() => setSort(toggleColumnSort(sort, "captured-asc", "captured-desc"))}>
+                      Captured
+                      {(sort === "captured-asc" || sort === "captured-desc") && <SortGlyph asc={sort === "captured-asc"} />}
+                    </button>
+                  </th>
+                  <th scope="col">Post</th>
+                  <th scope="col">Reply</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <DiscussionReplyRow
+                    key={row.id}
+                    row={row}
+                    isFirst={i === 0}
+                    isLast={i === rows.length - 1}
+                    onEditReply={editReply}
+                    onMove={moveRow}
+                    onRemove={handleRemove}
+                    onRetry={retryRow}
+                    registerRemoveRef={registerRemoveRef}
+                    announce={announce}
+                    onCopyError={handleCopyError}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* AC7a: the throttled capture-status sentence. */}
+      <span role="status" aria-live="polite" style={visuallyHidden}>
+        {liveSentence}
+      </span>
+      {/* Ad hoc: row moves, remove-arming, "Custom order.", copy failures,
+          the newest notice. */}
+      <span role="status" aria-live="polite" style={visuallyHidden}>
+        {adhocAnnouncement}
+      </span>
+    </div>
+  );
+}

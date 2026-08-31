@@ -34816,3 +34816,249 @@ stays at 961 lines with 39 to spare.
   runs twice at startup; and that hook's error path leaves `libraryVideos` null,
   so a persistent library error re-triggers its effect indefinitely.
   Pre-existing, now doubled.
+
+## 366. BASELINE (pre-change): the Recording tab's inner-view strip, its restore guard, and the two canaries that police the directory
+
+Taken before the Discussion reply capture group
+(docs/discussion-reply-capture-acceptance-criteria.md), which adds a SIXTH
+inner view to the Recording tab, five new `ta-rec-*` localStorage keys, and
+four new files under `src/app/components/recording/`. Entry 2026-07-22
+("Recording surface") already baselines what the Record stage DOES; this entry
+baselines only the surfaces the new group actually edits, so the regression
+pass can tell a change from a coincidence.
+
+Code-traced, not run. Everything below is a read of the tree at the commit this
+group branches from.
+
+1. THE INNER-VIEW STRIP is a literal in `RecordingTab.tsx`, not a registry.
+   There is no `RECORDING_VIEWS` constant anywhere - the tab strip is an inline
+   `([["record", "Record"], ["speed", "Change speed"], ["captions", "Caption a
+   video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(...)`.
+   FIVE entries at baseline. Adding a view therefore means editing a JSX literal
+   AND, separately, the `recView` union type AND, separately again, the restore
+   guard - three hand-maintained places with nothing tying them together. This
+   exact class of drift is what `manual-rail.ts:115-125` exists to prevent one
+   level up (`isManualViewType` is derived FROM `MANUAL_VIEW_ORDER` precisely
+   because "artifact-design" once went missing from `page.tsx`'s restore guard
+   after being added to the type).
+
+2. THE RESTORE GUARD is a chained equality, not a set membership:
+   `v === "speed" || v === "captions" || v === "slides" || v === "avatar" ? v : "record"`,
+   inside the `useState` initializer that reads `ta-rec-view`. A value in the
+   type but missing from this chain restores as `"record"` silently - no error,
+   no warning, and the user simply lands on the wrong pane after a reload. That
+   is the failure mode to check for after this group.
+
+3. KEEP-MOUNTED CONTRACT (restating entry 2026-07-22 check 1 because the new
+   view depends on it): every inner view lives in its own
+   `<div style={{ display: recView === X ? undefined : "none" }}>` and NONE of
+   them unmount on a switch. `active` is threaded only to narrow the R/P/M
+   shortcuts. A new view that needs to survive navigation gets it for free from
+   this stack; a new view that mounts conditionally would not, and would be a
+   regression against this check.
+
+   The narrowing is `recordSurfaceActive` (`RecordingTab.tsx:219-220`):
+   `active && recView === "record" && walkthroughTake === null &&
+   announcementTake === null`. Adding a sixth view therefore silently changes
+   the R/P/M shortcut gate too - pressing R while the new view is showing must
+   NOT start a recording, and it already cannot, because the `recView ===
+   "record"` term excludes every non-record view including one that does not
+   exist yet. Recorded so the regression pass can confirm that rather than
+   assume it.
+
+4. CANARY ONE - the 1000-line ceiling. `recording-split.structure.test.ts`
+   reads `src/app/components/recording/` with a NON-RECURSIVE `readdirSync`,
+   filters `\.(ts|tsx)$`, and asserts every file is `<= 1000` lines; it makes
+   the same assertion about `RecordingTab.tsx` and `TabShell.tsx`. Baseline
+   sizes of the files this group touches: `RecordingTab.tsx` 712;
+   largest existing file in the directory `useRecorder.ts` 961. A new file
+   placed in a SUBDIRECTORY of `recording/` escapes this check entirely -
+   `screen-source.ts`'s header comment says so in as many words, and the AC
+   restates it as AC33.
+
+5. CANARY TWO - the localStorage key inventory. The same test concatenates
+   every non-test `.ts`/`.tsx` in `recording/` plus `RecordingTab.tsx`, matches
+   `/ta-rec-[a-z-]*/g`, sorts the unique results, and asserts DEEP EQUALITY
+   against a hardcoded `expectedKeys` array. Baseline: 43 keys. Consequences,
+   both of which will fire in this group:
+   (a) any new `ta-rec-*` key turns the suite red until the array is updated in
+       the SAME commit, and
+   (b) the regex is `[a-z-]` only - a key with a digit or an underscore would
+       be matched only up to the first illegal character, silently deriving a
+       DIFFERENT string than the one in the source. Every existing key is
+       lowercase-and-hyphen; the five new ones must be too.
+   A nested sub-block additionally asserts that every `ta-rec-avatar-*` key has
+   both a read-shaped and a write-shaped call site. That block is scoped to the
+   `avatar` prefix only - the five new `ta-rec-disc-*` keys get the inventory
+   check but NOT the read/write wiring check.
+
+6. WHAT IS NOT TESTED HERE, so a green suite is not mistaken for coverage.
+   vitest in this repo is node-env and collects only `src/**/*.test.ts` - note
+   the extension: `.test.tsx` is NOT COLLECTED AT ALL, and no component is ever
+   rendered. Nothing in the suite proves:
+   - that the new inner view's button renders, or that clicking it switches panes;
+   - that any table markup, `aria-sort`, `th scope`, or keyboard path works;
+   - that `getDisplayMedia`, `MediaRecorder`, `Worker`, `canvas.toDataURL`, or
+     `navigator.clipboard` behave - none of them exist in the node environment,
+     so any code touching them is reachable by tests only if the pure logic is
+     split out of the hook, which is why AC section 12 puts change detection,
+     dedupe, sorting and serialization in a React-free module;
+   - that a single frame ever reached Gemini, or that a single reply was drafted.
+   Every finding about the SCREEN in this group comes from reading.
+
+7. PRIOR ART THE NEW CODE MUST NOT DIVERGE FROM, recorded so the reviewer can
+   check it by name rather than by taste: vision-over-JPEG-frames server
+   actions already exist at `src/app/actions/media.ts:476` and `:525`
+   (`describeScreenRecordingAction`, `generateVideoNarrationAction`) - both
+   `requireOwner()`, both cap frame COUNT, both additionally budget WIRE bytes
+   via `checkWireBudget(sumBase64WireBytes(...))`, both parse with
+   `parseLenientJsonArray`, and both return `{ error }` rather than throwing.
+   A third such action that skips the wire-byte budget would be a regression
+   against `docs/upload-wire-budget-acceptance-criteria.md`, not a new bug.
+
+## 367. Screen-record a discussion board, read the posts off the screen, and draft a reply to each - plus the four ways it nearly shipped dead
+
+Ships `docs/discussion-reply-capture-acceptance-criteria.md` (74 ACs). Manual >
+Recording gains a sixth inner view, **Discussion replies**: start a screen
+capture, scroll a discussion board in another window, and the app reads the
+posts off sampled frames with a vision model and drafts a reply to each into an
+editable, orderable table that survives a reload until deleted. Baseline for the
+area is entry 366, taken before any of this existed.
+
+Seven agents on disjoint file sets, then a step-8 repair, then reviewer +
+researcher, then a fixer, then a closure review that found a blocker, then
+another fixer, then this pass. The wave gate held: 17 paths, every one on its
+assignment, no stray edit to a neighbouring file.
+
+### What shipped
+
+`recording/discussion-capture.ts` (pure: change detection, dedupe, sort,
+reorder, serialization, batch packing, three loop-policy predicates) +
+`.test.ts`; `lib/discussion-reply-prompt.ts` + test;
+`actions/discussion-replies.ts` + test; three hooks split by lifetime -
+`useDiscussionCapture` (device), `useReplyRows` (table), `useDiscussionReplies`
+(orchestrator); `DiscussionRepliesPanel.tsx`, `DiscussionReplyRow.tsx`,
+`discussion-icons.tsx`, `DiscussionRepliesPanel.module.css`; and the wiring in
+`RecordingTab.tsx` plus two canary widenings.
+
+### Decisions worth re-reading
+
+- **The sampling `<video>` is DETACHED** (`document.createElement`, never
+  appended), following `usePipWebcam`. Sampling from inside the panel's own
+  `display:none` stack would freeze frames SILENTLY - a frozen frame yields an
+  identical signature, change detection correctly suppresses it, and the user
+  scrolls a whole board while the panel reads `0 posts found`. The visible 200px
+  preview is a second, disposable element, mounted unconditionally with
+  `display` toggled, because `start()` assigns `srcObject` before `capturing`
+  flips.
+- **Producer AND consumer must both be off the main thread.** Frame sampling was
+  put on a Worker ticker from the start; the extraction and drafting loops were
+  not, and a chained `setTimeout` lands on the intensively-throttleable queue -
+  1/s hidden, **1/min after five minutes**. The tab is hidden for this feature's
+  entire useful life. Both loops now wake off a Worker ticker.
+- **Dedupe is comparison, not a derived key.** An author + 120-char-prefix key
+  was measured false-splitting on **10 of 16** realistic re-reads (a truncation,
+  a frame-edge cut, one misread word). Replaced with surname-anchored author
+  matching plus token edit distance at 0.25 - chosen from a measured sweep where
+  0/13 split and the merge count is flat from 0.15 to 0.40, i.e. a step edge,
+  not a tuning knob. `postKey` was deleted, not kept alongside.
+- **Row ids are opaque and minted once.** The derived key mutated when a longer
+  read of the same post replaced its text - the row's primary key changing under
+  a normal event, breaking reorder, removal, retry and the drafting queue
+  mid-session.
+- **Frame width is justified by LEGIBILITY ONLY.** `getDisplayMedia` returns the
+  device framebuffer, so a fixed downscale makes text *smaller* on bigger
+  monitors: measured, a 14.5px glyph arrives at 4.8px from a 4K source and is
+  unreadable by eye or model. Now 1920 with a half-scale floor. And Gemini 3.x
+  bills a **flat 1120 tokens per image regardless of resolution**, so
+  downscaling saves nothing - do not "optimise" the width for a cost saving that
+  does not exist.
+- **Batches are packed by BYTES, count as a ceiling.** Six frames of a
+  1920x3000 window measured 3.48MB against a 3.5MB budget - 99.4%. A count-only
+  cap is one tall window away from refusing every batch for a whole session.
+- **`Retry` overrides the "you wrote this" guard; the bulk button does not**
+  (AC28a). A control aimed at one row must always do something; a control that
+  sweeps every row must not silently overwrite typed prose.
+
+### Gates, real numbers
+
+`npx tsc --noEmit` 0 errors. `npx eslint` 0 errors, 1 pre-existing warning
+(`RecordingTab.tsx:273`, outside every diff hunk). `npx vitest run` **726 files,
+14909 tests, all passing** (baseline before the group: 14881). `useDiscussionReplies.ts`
+is 892 lines, the group's closest approach to the ceiling among source files. `no-emojis`
+18/18. Key canary re-derived independently with an ordinal sort: **48/48**, both
+set differences empty, no spurious bare-prefix key. Line ceiling: nothing in
+`recording/` over 1000; `RecordingTab.tsx` 725 (was 712); no subdirectory was
+created, so the ceiling really applied to every new file.
+
+### The four dead-on-arrival defects, recorded because they all passed every gate
+
+1. **The dropped-frame counter and the recorder-error reason** were both
+   computed and never exposed on the hook's return, so AC10's frame-loss notice
+   and AC31's "your recording is not being saved" could never fire. Caught by
+   three separate agents independently.
+2. **The live preview never received the stream** - assigned before the element
+   mounted, never reassigned.
+3. **The "table is full" warning was unreachable**: two agents each implemented
+   the 500-row ceiling, and the second detected fullness by measuring overflow
+   past 500, which the first made impossible. A passing test proved the
+   precondition that killed the detector.
+4. **The persistence and reorder code shipped untested while its tests covered
+   a dead twin.** Two agents each wrote `serializeReplyTable`,
+   `deserializeReplyTable` and `moveRow`; the live copies had no tests and had
+   diverged from the tested ones (identity preservation, and the `error`-only-
+   when-failed invariant). ~130 test lines exercised code with zero production
+   callers.
+
+Plus, from the closure pass: **StrictMode's extra mount cycle killed the wake
+ticker permanently** because a "started" latch was never reset - both loops
+idling forever in `next dev` on the ordinary returning-user path. Fixing the
+latch alone would have traded the hang for a duplicate-loop bug, because the
+active flag flips synchronously across cleanup-and-remount; hence the loop
+epoch.
+
+### Limits - what was never run, never rendered, never observed
+
+- **No browser was ever opened.** Nothing about how this looks was seen by
+  anyone. The stylesheet is checked only for class-reference existence.
+- **1703 lines of hook code have zero executed tests.** vitest here is node-env
+  and collects only `src/**/*.test.ts` - `.test.tsx` is not collected at all and
+  no component is ever rendered. The 200 passing tests in this group are
+  entirely pure-logic. Teardown ordering, the queue drain after stop, the
+  drafting queue, the StrictMode ticker lifetime and every effect are
+  read-verified only.
+- **No frame ever reached Gemini and no reply was ever drafted.** Both actions
+  are covered only for guard clauses, batching refusals and parsing, against a
+  mocked `callLlm`.
+- **Extraction accuracy was never measured against a real discussion board**, at
+  any width, in any LMS.
+- **The hidden-tab premise was never measured.** Worker timer behaviour and
+  MediaStream frame delivery while hidden are settled at source level but were
+  not instrumented here. The `stalled` notice is the only thing between a
+  throttling browser and a session that records nothing, and **it has never been
+  observed firing**.
+- **The detached-video path fails on Android** (a hidden page stops producing
+  frames regardless of attachment). This is a two-window desktop workflow by
+  construction; Android is out of scope, not working.
+- **"Reachable" would mean "answered an HTTP request"** - relevant to the
+  resources follow-up, not to this entry.
+- **The five new `ta-rec-disc-*` keys get the inventory check but NOT the
+  read/write wiring check**, for two independent reasons: that block is scoped to
+  the `ta-rec-avatar-` prefix, AND its regexes look for the key literal wrapped
+  directly in a `getItem`/`setItem` call, while this code goes through local
+  helpers and named constants. Deleting a write would go undetected by the entire
+  suite.
+- **The restore guard is read-verified only.** No test asserts that
+  `ta-rec-view === "discussions"` restores to the new view; the canary proves
+  only that the key string exists. Drop `discussions` from the chain and every
+  gate stays green while the user silently lands on Record.
+- **A saved table starts both loops and a Worker ticker at page load**, whether
+  or not the Recording tab is ever opened, because the panel is always mounted.
+  The ticker now pauses when idle, but the loops still start. Never measured for
+  cost.
+- **`discussion-capture.test.ts` is at 980 of 1000 lines** - now the largest file
+  in the policed directory, ahead of `useRecorder.ts` at 961, with 20 lines of
+  headroom. The next behaviour added to `discussion-capture.ts` will not fit its
+  tests. Split it before adding to it; do not weaken the canary.
+- `lib/discussion-reply-prompt.ts` and `actions/discussion-replies.ts` sit
+  outside the non-recursive line canary entirely. Small today, ungoverned.

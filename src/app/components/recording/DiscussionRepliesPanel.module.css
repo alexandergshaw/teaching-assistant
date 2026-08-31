@@ -1,0 +1,83 @@
+/* Colocated styles for DiscussionRepliesPanel/DiscussionReplyRow. Table
+   chrome itself comes from ../workflows/AutomationsTable.module.css (.scroller
+   / .table - see that panel's own header comment and section 6 of
+   docs/discussion-reply-capture-acceptance-criteria.md); this file only holds
+   what that shared skin and page.module.css do not: the capture preview, the
+   fixed-height Post cell, and small layout helpers specific to this panel.
+   This file is invisible to recording-split.structure.test.ts (it filters
+   /\.(ts|tsx)$/) - no ta-rec- localStorage key may ever be named here. */
+
+.previewVideo {
+  width: 200px;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  border: 1px solid var(--field-border);
+  background: #000;
+  object-fit: cover;
+}
+
+.statusRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.statusText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* AC15a: a FIXED-HEIGHT SCROLL region, not a three-line clamp with "Show
+   more" - matches the reply textbox's minRows={6} so the row does not look
+   lopsided, and is deliberately the same height on every row regardless of
+   post length so the table never reflows under the reader. tabIndex on the
+   element itself (set in DiscussionReplyRow.tsx, not here) is what makes a
+   scrollable region a keyboard-operable stop per WCAG 2.1.1. */
+.postCell {
+  max-height: 148px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 6px 8px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--card-background);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.postCell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* AC61: the Redraft slot keeps its layout box even while hidden
+   (visibility, not display:none - see the toggle vs display note in
+   DiscussionRepliesPanel.tsx) so the audience control never shifts sideways
+   the moment the first row lands. */
+.reservedSlot {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+}
+
+.consequence {
+  margin: 0 0 8px 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* AC36: the table's own <caption> - shown (not visually hidden, unlike the
+   live regions in the panel) since it is useful orientation text for every
+   reader, not only assistive tech. */
+.tableCaption {
+  caption-side: top;
+  text-align: left;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}

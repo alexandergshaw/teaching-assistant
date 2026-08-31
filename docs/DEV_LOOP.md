@@ -292,7 +292,16 @@ coverage that does not exist.
   here without checking.
 - Every new textbox, select or checkbox persists across reloads under a
   `ta-`-prefixed localStorage key.
-- Server-action files export only async functions.
+- **Every feature that has a RUN has a downloadable log.** See the section
+  below - this is a step 1 obligation, not a nice-to-have bolted on later.
+- Server-action files may export **async functions and type-only declarations**
+  (`export type`, `export interface`). They may NOT export a `const`, a
+  synchronous `function`, or an `export { x } from "./y"` re-export - a
+  re-export is illegal by FORM, because the compiler cannot see through it to
+  prove the binding is async. `src/lib/use-server-exports.test.ts` enforces
+  this under vitest, so this class no longer waits for `next build`.
+  (Corrected 2026-08-31: this line previously read "only async functions",
+  which sent an implementer to work around a restriction that does not exist.)
 - Supabase typed selects collapse to `never` - map rows through an explicitly
   typed mapper.
 - Migrations apply themselves via GitHub Actions on push to `main`. Verify the
@@ -306,6 +315,97 @@ pins a version explicitly - never a bare family alias.
 
 ---
 
+
+## Downloadable logs: every feature with a run has one
+
+Added 2026-08-31 at the repo owner's instruction: **all features should have a
+downloadable log.** This section is what that means in practice, so it is a
+buildable obligation rather than a slogan.
+
+### Why this is a rule
+
+Read the Limits of almost any recent `docs/REGRESSION.md` entry. They say, over
+and over, that things were never observed. Entry 367 is the clearest case: its
+stall notice "has never been observed firing", extraction accuracy "was never
+measured against a real board", no frame ever reached the model under test, and
+no browser was ever opened. That is honest, and it is also a standing bet that
+nothing will go wrong in a way nobody can see.
+
+A downloadable log is the cheapest way to convert "never observed" into
+"observable when it matters". It is the only instrument this repo has that runs
+against real data, on real hardware, in the browser the feature actually ships
+to - which is exactly where the node-env test suite cannot reach.
+
+### What counts as a "run"
+
+Anything with a start and an end that does work in between: a capture session, a
+grading pass, a bulk action over N items, a workflow run, an import, a
+long-running generation.
+
+**Not** every feature. A pure library, a settings toggle, a layout change or a
+one-shot form submit has no run and needs no log. Say so explicitly in the AC
+rather than inventing a log to satisfy the rule - a log nobody will open is
+noise that has to be maintained.
+
+### The bar it has to clear
+
+**A log that is silently missing an event still downloads, still opens, still
+looks complete, and answers the user's question with the wrong answer - and it
+will be believed, because it is the only evidence they have.** That failure is
+worse than no log. So:
+
+1. **Write down the diagnostic questions the log must answer** in the AC, in the
+   user's words - "why did my table only have 6 posts", "why did this student
+   get no grade" - and derive the events from those questions. Do not start from
+   what is convenient to log.
+2. **Log what the code THROWS AWAY, not just what it keeps.** This is where the
+   answers live. A branch with seven exit paths that counts one of them cannot
+   explain the other six. Suppressed items, skipped items, retried items, and
+   *which* of several code paths ran are the diagnostic payload; totals alone
+   are decoration.
+3. **Failures carry their real reason**, the same way the surfaced error does. A
+   log recording "extraction failed" when the action returned a 429 with a
+   Retry-After is a log that will be read once and never again.
+4. **Completeness is tested per call site**, and the test is sabotage-checked -
+   delete a log call, confirm a test goes red. A source-text scan over a
+   directory is not sufficient; this repo has had two separate scanners report
+   clean without checking anything.
+
+### The vetted mechanics
+
+- **Download:** `triggerFileDownload(blob, filename)` at
+  `src/app/components/course-planning/utils.ts:19-28`. Do not hand-roll an
+  anchor - `repoGrades.wiring.test.ts:696-703,733-734` asserts call sites use the
+  shared helper from inside an `onClick`, and the older sites that hand-roll it
+  are near-misses, not precedent.
+- **Shape:** plain `.txt` for a session-shaped run - a header block plus
+  sections. `src/lib/live-class/session-log.ts` is the template: one session,
+  `nowMs` taken as a parameter so a mid-run download honestly reads "still
+  running". CSV suits a per-item table and nothing else; forcing four different
+  shapes into rows is a documented mistake (`repo-grading-log.ts:245-251`).
+- **Storage:** default to in-memory plus a Blob built at click time. Do not add a
+  `ta-`-prefixed key for log data - the origin quota is already shared with
+  40-plus keys, and the one that eventually throws will belong to some other
+  feature. Persisting a log for cross-run comparison is a deliberate, separate
+  decision.
+- **There is no shared logger, and that is currently correct.** Five hand-rolled
+  ones exist (`repo-grading-log.ts`, `rubric-run-log.ts`,
+  `workflow-run-log-text.ts`, `repo-grades/repoGradesLog.ts`,
+  `live-class/session-log.ts`), and two argue explicitly for not sharing.
+  Consolidating them is its own group with a frozen literal oracle - never a
+  side quest inside a feature.
+
+### PII
+
+A log carries whatever the feature touches - student names, submitted text, post
+bodies. Default to a **diagnostics-only** payload of counts, timings, reasons and
+identifiers rather than content; that sidesteps redaction instead of doing it
+badly. `src/lib/workflows/run-input-redaction.ts` is a credential and binary
+scrubber with no concept of a person's name and is **not** reusable here. If a
+log must carry content to be useful, say so in the AC, make it an explicit opt-in
+at download time, and state it in the REGRESSION Limits.
+
+---
 ## Worked example: 2026-08-21
 
 Two chunks shipped through this loop in one session, before steps 4 and 10

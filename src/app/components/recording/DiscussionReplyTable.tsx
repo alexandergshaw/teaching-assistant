@@ -63,6 +63,12 @@ export interface DiscussionReplyTableProps {
   sort: ReplySort;
   setSort: (sort: ReplySort) => void;
   llmProvider: LlmProvider;
+  /** docs/reply-composition-controls-acceptance-criteria.md C1c-i (fixer
+   *  pass, BLOCKER 2): forwarded straight through to every
+   *  DiscussionReplyRow, unwrapped, so each row can compute whether ITS OWN
+   *  greeting was skipped - see DiscussionReplyRow.tsx's own doc comment on
+   *  the prop. */
+  addressByName: boolean;
   editReply: (id: string, text: string) => void;
   moveRow: (id: string, dir: "up" | "down") => void;
   onRemove: (id: string) => void;
@@ -82,6 +88,7 @@ export default function DiscussionReplyTable({
   sort,
   setSort,
   llmProvider,
+  addressByName,
   editReply,
   moveRow,
   onRemove,
@@ -225,6 +232,7 @@ export default function DiscussionReplyTable({
                 <DiscussionReplyRow
                   key={row.id}
                   row={row}
+                  addressByName={addressByName}
                   // F15 item 2: boundary buttons ("Move up"/"Move down")
                   // must reflect the VISIBLE array, not the full one - a
                   // row that looks first under the current filter must

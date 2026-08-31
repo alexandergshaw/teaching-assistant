@@ -50,8 +50,27 @@
 
 .rowBody {
   /* Shared between the post scroller and the reply textbox so AC15a's "same
-     fixed height as the reply box" cannot drift between the two. */
-  --reply-block-height: 148px;
+     fixed height as the reply box" cannot drift between the two.
+
+     docs/reply-composition-controls-acceptance-criteria.md C6e: this was
+     148px, tuned to the reply textarea's minRows={6} (DiscussionReplyRow.tsx,
+     out of this group's file set) BEFORE C3 made a paragraph break
+     mandatory for any reply over ~60 words - previously the prompt only
+     asked for a break "if you need one", so a typical reply often filled
+     minRows={6} with no blank line inside it at all. C3 adds one blank
+     line ("\n\n") to every reply that crosses that word count, which is
+     the common case (this prompt already asks for 3-6 sentences, and 6
+     sentences routinely runs past 60 words) - so the textarea's typical
+     auto-grown height is now about one text-line taller than before, while
+     this fixed-height scroller does not grow with it. Bumped by roughly
+     that one line (~22px at this control's font-size/line-height) so the
+     post block does not read as short next to a now-reliably-taller reply
+     in the side-by-side layout that holds at every width down to the
+     1000px stacking breakpoint below. Below that breakpoint the two blocks
+     stack instead of sitting side by side, so a residual few-pixel gap
+     there is far less visually load-bearing than it is in the two-column
+     case this value is actually tuned against. */
+  --reply-block-height: 170px;
 
   display: grid;
   /* The reply grows to a capped, readable measure (~93 characters per line

@@ -80,6 +80,76 @@ export const DISCUSSION_AUDIENCE_LABELS: Record<DiscussionAudience, string> = {
   students: "Students",
 };
 
+// docs/reply-composition-controls-acceptance-criteria.md C2/C4. These live
+// HERE for the same reason DiscussionAudience and ThreadPosition do: this file
+// is already the leaf that both the client controls and the prompt builder
+// import, and every edge points INTO it, so no cycle is possible. Entry 372
+// shipped one three-member set restated in four modules; that is not repeated.
+export type ReplyIngredient =
+  | "compliment"
+  | "deeper-question"
+  | "insight"
+  | "resources"
+  | "correction";
+
+export const REPLY_INGREDIENTS: readonly ReplyIngredient[] = [
+  "compliment",
+  "deeper-question",
+  "insight",
+  "resources",
+  "correction",
+] as const;
+
+// C2e: stem-completing labels - the control reads "Each reply should include:
+// a compliment on what the post did well". "correction" states its own
+// conditionality in the label (C2a), so the UI carries it too, not only the
+// prompt.
+export const REPLY_INGREDIENT_LABELS: Record<ReplyIngredient, string> = {
+  compliment: "a compliment on what the post did well",
+  "deeper-question": "a question that goes deeper",
+  insight: "an insight the post did not cover",
+  resources: "two or three relevant resources",
+  correction: "a gentle correction, only if something is wrong",
+};
+
+// C4a: three stops, ordered casual -> formal, indexed by the slider position.
+// "Balanced" (not "Neutral") because the middle stop preserves the audience
+// register's own tone rather than flattening it.
+export type ReplyFormality = "casual" | "balanced" | "formal";
+
+export const REPLY_FORMALITY_STOPS: readonly ReplyFormality[] = [
+  "casual",
+  "balanced",
+  "formal",
+] as const;
+
+export const REPLY_FORMALITY_LABELS: Record<ReplyFormality, string> = {
+  casual: "Casual",
+  balanced: "Balanced",
+  formal: "Formal",
+};
+
+/**
+ * What the instructor has asked every drafted reply to contain. Passed whole
+ * from the panel through runDraftLoop to buildReplyDraftingPrompt, so a new
+ * field cannot be added on one side and silently dropped on the other.
+ *
+ * C4b-i: the DEFAULTS ARE NOT INERT - two ingredients are pre-selected and
+ * addressByName is ON, so the first capture after this ships produces visibly
+ * different replies with no action taken. That is intended.
+ */
+export interface ReplyCompositionSettings {
+  ingredients: readonly ReplyIngredient[];
+  addressByName: boolean;
+  formality: ReplyFormality;
+}
+
+export const DEFAULT_REPLY_COMPOSITION: ReplyCompositionSettings = {
+  ingredients: ["compliment", "deeper-question"],
+  addressByName: true,
+  formality: "balanced",
+};
+
 /**
  * Coerce an arbitrary value (localStorage, a form control, an untrusted
  * caller) to a DiscussionAudience. Trims and lowercases before comparing, so
@@ -189,6 +259,85 @@ const AUDIENCE_STANCE: Record<DiscussionAudience, string> = {
   ].join(" "),
 };
 
+// docs/reply-composition-controls-acceptance-criteria.md C4b: modulates
+// AUDIENCE_STANCE rather than restating or contradicting it - diction only,
+// never a stance change. C4b/the "balanced stop is inert" requirement: the
+// middle stop contributes NOTHING (empty string, dropped by
+// .filter(Boolean)) so a default-formality call is byte-identical to a call
+// that never mentioned formality at all.
+function formalityClause(formality: ReplyFormality): string {
+  switch (formality) {
+    case "casual":
+      return "Lean casual in how you write this: contractions are fine, favor shorter sentences and everyday word choices - without abandoning the tone and substance described above.";
+    case "formal":
+      return "Lean formal in how you write this: avoid contractions, favor fuller sentences and more precise, exact word choices - without abandoning the tone and substance described above.";
+    case "balanced":
+    default:
+      return "";
+  }
+}
+
+// docs/reply-composition-controls-acceptance-criteria.md C1a: the
+// "No greeting line and no sign-off..." bullet, made conditional on the
+// address-by-name toggle. The no-standalone-greeting-line and no-sign-off
+// rule is unconditional in BOTH branches - it was never about names - only
+// the "do not open with the person's name" clause flips. When `addressing`
+// is false this returns the ORIGINAL line, byte-identical to before this
+// change (C1a "toggle OFF: today's line, byte-identical").
+function nameLine(addressing: boolean, audience: DiscussionAudience): string {
+  if (!addressing) {
+    return "- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.";
+  }
+  // C2g: for students, the greeting PRECEDES the register's own mandated
+  // opening move (naming something the student said) rather than replacing
+  // it - stated explicitly so the two instructions do not compete for the
+  // same sentence.
+  const studentsOrdering =
+    audience === "students"
+      ? ' For students, this comes before naming something the student actually said, not instead of it - for example "Maria, your point about the second reading ...", not a greeting line followed by a restart.'
+      : "";
+  return (
+    "- No separate greeting line of its own (no \"Hi\", no \"Hello\") and no sign-off. Where a greeting name is given for a post below, open that reply with the name itself and nothing else, leading straight into the same sentence - never a standalone salutation." +
+    studentsOrdering +
+    " A post with no greeting name given gets no greeting at all. The reply is pasted into a box that already shows who is speaking and who is being answered."
+  );
+}
+
+// docs/reply-composition-controls-acceptance-criteria.md C2: one prompt
+// clause per selected ingredient.
+//   - C2a: "correction" is explicitly conditional - it must say nothing
+//     against a post that is not actually wrong, or an unconditional
+//     "correct them" instruction invites an invented error.
+//   - C2b: "resources" does NOT ask the model to write links itself - actual
+//     resource links are gathered by a separate pass (entry 368's state
+//     machine, gated elsewhere by this same selection) and inventing a URL
+//     here would be a hallucination this clause exists to forbid.
+//   - C2f: "compliment" is audience-aware. The peers register (:186 above)
+//     already says "Do not open with praise" - the compliment clause for
+//     peers must not instruct an opening praise line, only substance
+//     engagement elsewhere in the reply. The students register (:178) has no
+//     such conflict - it already mandates opening by naming something the
+//     student said, so the compliment clause ties into that SAME opening
+//     move rather than adding a competing one.
+function ingredientClause(ingredient: ReplyIngredient, audience: DiscussionAudience): string {
+  switch (ingredient) {
+    case "compliment":
+      return audience === "peers"
+        ? "- Somewhere in the reply, acknowledge something specific the post gets right - but not as an opening line; the stance above already asks you not to open with praise."
+        : "- A specific compliment on something the post did well, worked into the opening move above rather than a separate line.";
+    case "deeper-question":
+      return "- Ask one question that pushes past what the post already said, not a restatement of it.";
+    case "insight":
+      return "- Add one insight or idea the post did not already raise.";
+    case "resources":
+      return "- Leave room for two or three resource links to be attached separately after your reply; do not invent or write any URL yourself.";
+    case "correction":
+      return "- Only if the post actually contains a factual error, gently correct it. If it does not, say nothing about a correction - do not invent one to satisfy this list.";
+    default:
+      return "";
+  }
+}
+
 /**
  * Prompt for drafting one reply to each of `posts`. `styleBlock` (from
  * getWritingStyleBlock) is threaded through as the LAST element deliberately
@@ -212,16 +361,67 @@ const AUDIENCE_STANCE: Record<DiscussionAudience, string> = {
  * model can be asked to answer is the one failure mode T6a exists to
  * foreclose, and budget was never the constraint (worst case is
  * DRAFT_BATCH_SIZE extra ~600-character blocks, about 3.5% input growth).
+ *
+ * docs/reply-composition-controls-acceptance-criteria.md C1b/C1b-ii: each
+ * post may also carry an optional `greetingName` - precomputed by the
+ * caller (discussion-draft-loop.ts, the sibling half of this group) via
+ * person-name.ts's `greetingNameFromAuthor`, threaded per-post exactly like
+ * `parent`. This file never imports person-name.ts and never derives a name
+ * itself - the model is TOLD the name to use, never asked to guess one
+ * (C1b). Per C1b-ii this also structurally keeps the CONTEXT ONLY parent
+ * block from ever being greeted: `greetingName` only ever exists on a post
+ * element, never on `parent`, and the code below never reads
+ * `p.parent.greetingName`.
  */
 export function buildReplyDraftingPrompt(
-  posts: ReadonlyArray<{ id: string; author: string; text: string; parent?: { author: string; text: string } }>,
+  posts: ReadonlyArray<{
+    id: string;
+    author: string;
+    text: string;
+    parent?: { author: string; text: string };
+    greetingName?: string;
+  }>,
   audience: DiscussionAudience,
   courseName: string,
-  styleBlock: string
+  styleBlock: string,
+  composition: ReplyCompositionSettings
 ): string {
   const course = courseName.trim();
+  const addressing = composition.addressByName;
+  const hasGreetingNames = posts.some((p) => p.greetingName);
+
+  // C2c: emitted ONLY when at least one ingredient is selected - zero
+  // selected leaves the prompt byte-identical to today's.
+  const ingredientsBlock =
+    composition.ingredients.length > 0
+      ? [
+          "EACH REPLY SHOULD INCLUDE",
+          ...composition.ingredients.map((ingredient) => ingredientClause(ingredient, audience)),
+        ].join("\n")
+      : "";
+
+  // The precomputed per-post greeting names, addressed by the SAME "POST n"
+  // numbering used in THE POSTS block and the output contract below (both
+  // left untouched, per this group's scope) so the model can map a name to
+  // a post without either block being restructured. Only emitted when the
+  // toggle is on AND at least one post actually carries a name - a post
+  // that has none is simply absent from this list, which is how "no
+  // greeting instruction even when the toggle is ON" (for that row) is
+  // enforced.
+  const greetingNamesBlock =
+    addressing && hasGreetingNames
+      ? [
+          "GREETING NAMES",
+          "Use each name below only for the post it is listed against, and only as instructed above - never invent, guess, or reuse a name for a post it is not listed against.",
+          ...posts
+            .map((p, i) => (p.greetingName ? `- POST ${i + 1}: ${p.greetingName}` : ""))
+            .filter(Boolean),
+        ].join("\n")
+      : "";
+
   return [
     AUDIENCE_STANCE[audience],
+    formalityClause(composition.formality),
     course ? `The discussion is on a course called "${course}".` : "",
 
     "Write one reply to each post below.",
@@ -230,7 +430,7 @@ export function buildReplyDraftingPrompt(
     "- Write in the first person, as yourself.",
     "- 3 to 6 sentences. Plain prose.",
     "- No markdown, no headings, no bullet lists, no bold.",
-    "- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.",
+    nameLine(addressing, audience),
     "- No emoji.",
     // T6b: widened EXPLICITLY from "the post you are answering" to "the
     // posts shown to you here" - a CONTEXT ONLY parent block is now
@@ -248,6 +448,9 @@ export function buildReplyDraftingPrompt(
       ? "- A block labelled CONTEXT ONLY - DO NOT REPLY TO THIS is background for understanding the post beneath it. Never write a reply to that block, and never count it as one of the numbered posts."
       : "",
 
+    ingredientsBlock,
+    greetingNamesBlock,
+
     "THE POSTS",
     posts
       .map((p, i) => {
@@ -262,7 +465,10 @@ export function buildReplyDraftingPrompt(
     `Return ONLY a JSON array with exactly ${posts.length} elements, and nothing else.`,
     'Each element is {"post": <the POST number>, "reply": "..."} - the number, not the name.',
     `Include every post number from 1 to ${posts.length}, in order.`,
-    'Write the reply as plain text. Use "\\n" between paragraphs if you need one. No backticks.',
+    // C3-i: this line CHANGED (not supplemented) - "if you need one" was a
+    // suggestion; C3 requires a paragraph break, with a blank line, for a
+    // reply over roughly 60 words.
+    'Write the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line ("\\n\\n"). No backticks.',
     "No prose before or after the array. No code fences.",
     styleBlock,
   ].filter(Boolean).join("\n\n");

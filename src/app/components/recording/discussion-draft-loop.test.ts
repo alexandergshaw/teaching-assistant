@@ -25,6 +25,7 @@
 import { describe, it, expect } from "vitest";
 import {
   runDraftLoop,
+  coerceReplyComposition,
   type DraftDiscussionRepliesAction,
   type DraftQueueItem,
   type RunDraftLoopDeps,
@@ -32,6 +33,7 @@ import {
 import { mergeCapturedPosts, type ReplyRow } from "./discussion-capture";
 import type { UseReplyRowsReturn } from "./useReplyRows";
 import type { UseReplyResourcesReturn } from "./useReplyResources";
+import { DEFAULT_REPLY_COMPOSITION, type ReplyCompositionSettings } from "@/lib/discussion-reply-prompt";
 
 // ---------------------------------------------------------------------------
 // Test harness: a minimal fake of every RunDraftLoopDeps field, driving
@@ -56,6 +58,14 @@ interface DispatchResult {
   /** The exact argument `draftAction` was called with, or `null` if it was
    *  never called (e.g. every queued item failed the dispatchable guard). */
   posts: Parameters<DraftDiscussionRepliesAction>[0] | null;
+  /** The exact `composition` argument `draftAction` was called with, or
+   *  `null` if it was never called. */
+  composition: ReplyCompositionSettings | null;
+  /** docs/reply-composition-controls-acceptance-criteria.md C2b (SHOULD 1
+   *  fixer pass): every argument `enqueueResources` was called with, in
+   *  call order - empty when it was never called at all, which is exactly
+   *  what the "resources" ingredient NOT selected must produce. */
+  enqueueResourcesCalls: string[][];
 }
 
 async function dispatchOneBatch(args: {
@@ -64,8 +74,15 @@ async function dispatchOneBatch(args: {
    *  that resolution reads `rawRows`, never this filtered array. */
   filteredRows?: ReplyRow[];
   queue: DraftQueueItem[];
+  /** docs/reply-composition-controls-acceptance-criteria.md C5/JOB1:
+   *  defaults to DEFAULT_REPLY_COMPOSITION when omitted - set to a DIFFERENT
+   *  value to prove `compositionRef.current` (not a stale default) is what
+   *  actually reaches `draftAction`. */
+  composition?: ReplyCompositionSettings;
 }): Promise<DispatchResult> {
   let capturedPosts: Parameters<DraftDiscussionRepliesAction>[0] | null = null;
+  let capturedComposition: ReplyCompositionSettings | null = null;
+  const enqueueResourcesCalls: string[][] = [];
 
   const loopsActiveRef = { current: true };
   const loopEpochRef = { current: 0 };
@@ -83,15 +100,19 @@ async function dispatchOneBatch(args: {
   const rowsApiRef = { current: rowsApiFake };
 
   const resourcesApiFake = {
-    enqueueResources: () => {},
+    enqueueResources: (ids: string[]) => {
+      enqueueResourcesCalls.push(ids);
+    },
   } as unknown as UseReplyResourcesReturn;
   const resourcesApiRef = { current: resourcesApiFake };
 
   const audienceRef = { current: "students" as const };
   const courseNameRef = { current: "Intro to Testing" };
+  const compositionRef = { current: args.composition ?? DEFAULT_REPLY_COMPOSITION };
 
-  const draftAction: DraftDiscussionRepliesAction = async (posts) => {
+  const draftAction: DraftDiscussionRepliesAction = async (posts, _audience, _courseName, composition) => {
     capturedPosts = posts;
+    capturedComposition = composition;
     return { replies: posts.map((p) => ({ id: p.id, reply: "Drafted reply text." })) };
   };
 
@@ -108,13 +129,14 @@ async function dispatchOneBatch(args: {
     resourcesApiRef,
     audienceRef,
     courseNameRef,
+    compositionRef,
     pushNotice: () => {},
     draftAction,
   };
 
   await runDraftLoop(0, deps);
 
-  return { posts: capturedPosts };
+  return { posts: capturedPosts, composition: capturedComposition, enqueueResourcesCalls };
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +167,10 @@ describe("runDraftLoop / FIX 1 - resolveDraftParent wiring into the live draftin
     expect(posts).not.toBeNull();
     expect(posts).toHaveLength(1);
     // Frozen literal oracle - the exact shape, not derived from the
-    // implementation.
+    // implementation. `greetingName` is present here too (docs/reply-
+    // composition-controls-acceptance-criteria.md C1b-ii: derived per-post,
+    // independently of `parent`) - "Jordan Lee" is a two-token, no-comma
+    // author, so the first token is unambiguous.
     expect(posts![0]).toEqual({
       id: "c1",
       author: "Jordan Lee",
@@ -154,6 +179,7 @@ describe("runDraftLoop / FIX 1 - resolveDraftParent wiring into the live draftin
         author: "Sam Osei",
         text: "The original point about photosynthesis.",
       },
+      greetingName: "Jordan",
     });
   });
 
@@ -182,6 +208,7 @@ describe("runDraftLoop / FIX 1 - resolveDraftParent wiring into the live draftin
       id: "c2",
       author: "Taylor Kim",
       text: "Another reply, no thread info captured.",
+      greetingName: "Taylor",
     });
   });
 
@@ -259,6 +286,159 @@ describe("runDraftLoop / FIX 1 - resolveDraftParent wiring into the live draftin
 });
 
 // ---------------------------------------------------------------------------
+// docs/reply-composition-controls-acceptance-criteria.md JOB3: composition
+// and greetingName wiring into the live drafting path - the same
+// "verify-reachability" shape as FIX 1 above (T6's `parent` had zero
+// production callers before that fix landed).
+// ---------------------------------------------------------------------------
+
+describe("runDraftLoop / JOB3 - composition and greetingName wiring", () => {
+  it("`composition` (compositionRef.current at dispatch time, not a stale default) reaches draftAction", async () => {
+    const child = makeRow({ id: "c1", author: "Jordan Lee", post: "A post." });
+    const composition: ReplyCompositionSettings = {
+      ingredients: ["insight", "correction"],
+      addressByName: false,
+      formality: "formal",
+    };
+
+    const { composition: received } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+      composition,
+    });
+
+    expect(received).toEqual(composition);
+  });
+
+  it("the DEFAULT composition reaches draftAction when nothing has customised it", async () => {
+    const child = makeRow({ id: "c1", author: "Jordan Lee", post: "A post." });
+    const { composition: received } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+    });
+    expect(received).toEqual(DEFAULT_REPLY_COMPOSITION);
+  });
+
+  it("`greetingName` is present on the dispatched post, derived from the row's own author", async () => {
+    // "Jordan Lee" - two tokens, no comma - the first token is unambiguous
+    // under C1b-i's own rule, so this is a frozen literal, never re-derived
+    // by calling greetingNameFromAuthor itself (that would only prove this
+    // file calls the function, not that threading it through is correct).
+    const child = makeRow({ id: "c1", author: "Jordan Lee", post: "A post." });
+    const { posts } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+    });
+
+    expect(posts![0]).toEqual({ id: "c1", author: "Jordan Lee", text: "A post.", greetingName: "Jordan" });
+  });
+
+  it("`greetingName` is ABSENT on the CONTEXT ONLY parent block - the parent object carries only author and text", async () => {
+    const parent = makeRow({
+      id: "p1",
+      author: "Sam Osei",
+      post: "The original point about photosynthesis.",
+      threadPosition: "root",
+    });
+    const child = makeRow({
+      id: "c1",
+      author: "Jordan Lee",
+      post: "Replying to that.",
+      threadPosition: "reply",
+      replyingToAuthor: "Sam Osei",
+    });
+
+    const { posts } = await dispatchOneBatch({
+      rawRows: [parent, child],
+      queue: [{ id: "c1", force: false }],
+    });
+
+    const attached = posts![0] as { parent?: { author: string; text: string; greetingName?: string } };
+    expect(attached.parent).toBeDefined();
+    // "in", not toBeUndefined() - a present key set to undefined would also
+    // pass toBeUndefined(), the assertion-of-absence trap this repo's own
+    // dev loop calls out (see the FIX 1 describe block above for the same
+    // discipline applied to `parent` itself).
+    expect("greetingName" in attached.parent!).toBe(false);
+    expect(Object.keys(attached.parent!).sort()).toEqual(["author", "text"]);
+  });
+
+  it("`greetingName` is omitted (not set to `undefined`) for a single-token author that degrades to no greeting", async () => {
+    // person-name.ts's own C1c degrade case: greetingNameFromAuthor returns
+    // "" for input that reads as a handle rather than a name, and this file
+    // must turn that "" into an OMITTED key, never `greetingName: ""` or
+    // `greetingName: undefined`, on the same "never reaches the model as an
+    // instruction to open with nothing" reasoning as this file's own header
+    // comment on the dispatch call site.
+    const child = makeRow({ id: "c1", author: "", post: "A post with no readable author." });
+    const { posts } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+    });
+
+    expect(posts).not.toBeNull();
+    expect("greetingName" in posts![0]).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/reply-composition-controls-acceptance-criteria.md C2b - SHOULD 1
+// fixer pass: selecting "resources" gates the existing resource pass;
+// deselecting it must prevent the dispatch entirely (a real token saving).
+// Before this fix `enqueueResources` was called unconditionally and nothing
+// in the codebase ever read `ingredients` to decide whether to call it -
+// the entry-372 shape ("looks tested, is not wired"), since a prior test
+// here asserted only a no-invented-URL prompt string and never actually
+// drove a call through runDraftLoop to check the dispatch itself.
+// ---------------------------------------------------------------------------
+
+describe("runDraftLoop / SHOULD 1 - the 'resources' ingredient gates the resource-search dispatch (C2b)", () => {
+  it("dispatches a resource search for a landed reply when 'resources' IS selected", async () => {
+    const child = makeRow({ id: "c1", author: "Jordan Lee", post: "A post." });
+    const { enqueueResourcesCalls } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+      composition: { ingredients: ["resources"], addressByName: false, formality: "balanced" },
+    });
+    expect(enqueueResourcesCalls).toEqual([["c1"]]);
+  });
+
+  it("does NOT dispatch a resource search when 'resources' is NOT selected - the real token saving C2b requires", async () => {
+    const child = makeRow({ id: "c1", author: "Jordan Lee", post: "A post." });
+    const { enqueueResourcesCalls } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+      composition: { ingredients: ["compliment"], addressByName: false, formality: "balanced" },
+    });
+    expect(enqueueResourcesCalls).toEqual([]);
+  });
+
+  it("zero ingredients selected also suppresses the resource dispatch", async () => {
+    const child = makeRow({ id: "c1", author: "Jordan Lee", post: "A post." });
+    const { enqueueResourcesCalls } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+      composition: { ingredients: [], addressByName: false, formality: "balanced" },
+    });
+    expect(enqueueResourcesCalls).toEqual([]);
+  });
+
+  it("with 'resources' selected AND multiple rows in the batch, every landed reply's id is dispatched", async () => {
+    const a = makeRow({ id: "a1", author: "Jordan Lee", post: "Post A." });
+    const b = makeRow({ id: "a2", author: "Priya Shah", post: "Post B." });
+    const { enqueueResourcesCalls } = await dispatchOneBatch({
+      rawRows: [a, b],
+      queue: [
+        { id: "a1", force: false },
+        { id: "a2", force: false },
+      ],
+      composition: { ingredients: ["resources"], addressByName: false, formality: "balanced" },
+    });
+    expect(enqueueResourcesCalls).toEqual([["a1"], ["a2"]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // FIX 2: mergeIncoming's declared contract vs. what mergeCapturedPosts
 // actually accepts (useReplyRows.ts:209-224 sealed interface, :481-499
 // implementation).
@@ -301,5 +481,94 @@ describe("FIX 2 - mergeIncoming's declared contract matches what mergeCapturedPo
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].threadPosition).toBe("reply");
     expect(result.rows[0].replyingToAuthor).toBe("Sam Osei");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/reply-composition-controls-acceptance-criteria.md C5a: coerceReplyComposition
+// - a plain exported function (never inline in a useState initializer,
+// which would have no test surface in this node-env, no-hook-rendered
+// suite). Every case below is a value that could plausibly sit in
+// localStorage - written by an older/newer build, hand-edited in devtools,
+// or truncated by a quota failure - and must resolve to a sane
+// ReplyCompositionSettings rather than throwing or reaching the prompt
+// unvalidated.
+// ---------------------------------------------------------------------------
+
+describe("coerceReplyComposition (C5a)", () => {
+  it("returns DEFAULT_REPLY_COMPOSITION when all three raw values are null (first run, nothing persisted yet)", () => {
+    expect(coerceReplyComposition(null, null, null)).toEqual(DEFAULT_REPLY_COMPOSITION);
+  });
+
+  it("round-trips a valid, fully custom stored value", () => {
+    const result = coerceReplyComposition('["insight","resources"]', "0", "formal");
+    expect(result).toEqual({ ingredients: ["insight", "resources"], addressByName: false, formality: "formal" });
+  });
+
+  it("C2c: zero ingredients selected is legal and is NOT replaced with the default", () => {
+    expect(coerceReplyComposition("[]", "1", "balanced").ingredients).toEqual([]);
+  });
+
+  it("malformed JSON for ingredients falls back to the default set, and never throws", () => {
+    expect(() => coerceReplyComposition("not json at all", null, null)).not.toThrow();
+    expect(coerceReplyComposition("not json at all", null, null).ingredients).toEqual(
+      DEFAULT_REPLY_COMPOSITION.ingredients
+    );
+  });
+
+  it("a non-array ingredients blob (a JSON object) falls back to the default set", () => {
+    expect(coerceReplyComposition('{"a":1}', null, null).ingredients).toEqual(DEFAULT_REPLY_COMPOSITION.ingredients);
+  });
+
+  it("a non-array JSON scalar (a bare JSON string) falls back to the default set", () => {
+    expect(coerceReplyComposition('"hello"', null, null).ingredients).toEqual(DEFAULT_REPLY_COMPOSITION.ingredients);
+  });
+
+  it("an ingredient string outside the enum is dropped, not the whole selection reset to default", () => {
+    expect(coerceReplyComposition('["compliment","not-a-real-ingredient"]', null, null).ingredients).toEqual([
+      "compliment",
+    ]);
+  });
+
+  it("a duplicate ingredient collapses to one entry", () => {
+    expect(coerceReplyComposition('["compliment","compliment","insight"]', null, null).ingredients).toEqual([
+      "compliment",
+      "insight",
+    ]);
+  });
+
+  it("an unrecognised formality falls back to the default rather than reaching the prompt", () => {
+    expect(coerceReplyComposition(null, null, "extremely-formal").formality).toBe(DEFAULT_REPLY_COMPOSITION.formality);
+  });
+
+  it("addressByName: null falls back to the default (ON)", () => {
+    expect(coerceReplyComposition(null, null, null).addressByName).toBe(true);
+  });
+
+  it('addressByName: "0" coerces to false', () => {
+    expect(coerceReplyComposition(null, "0", null).addressByName).toBe(false);
+  });
+
+  it('addressByName: "1" coerces to true', () => {
+    expect(coerceReplyComposition(null, "1", null).addressByName).toBe(true);
+  });
+
+  it("addressByName: an unrecognised value falls back to the default rather than silently becoming OFF", () => {
+    expect(coerceReplyComposition(null, "yes please", null).addressByName).toBe(true);
+  });
+
+  it("SABOTAGE CHECK: never throws across every bad-input case in this describe block, run together", () => {
+    const bad: Array<[string | null, string | null, string | null]> = [
+      ["not json at all", null, null],
+      ['{"a":1}', null, null],
+      ['"hello"', null, null],
+      ['["compliment","not-a-real-ingredient"]', null, null],
+      ['["compliment","compliment"]', null, null],
+      [null, null, "extremely-formal"],
+      [null, "garbage", null],
+    ];
+    for (const [ing, addr, form] of bad) {
+      expect(() => coerceReplyComposition(ing, addr, form)).not.toThrow();
+    }
   });
 });

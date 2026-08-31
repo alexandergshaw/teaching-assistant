@@ -38,7 +38,7 @@ import { RESOURCE_KIND_LABELS } from "@/lib/resource-kind";
 // for why this lives outside the recording folder rather than in
 // discussion-table-view.ts - importing it here does not reintroduce that
 // cycle, since person-name.ts imports nothing back from this feature.
-import { deriveReplyAuthorName } from "@/lib/person-name";
+import { deriveReplyAuthorName, isGreetingDegradedForAuthor } from "@/lib/person-name";
 
 const COPY_RESET_MS = 1500;
 
@@ -124,6 +124,15 @@ export interface DiscussionReplyRowProps {
   row: ReplyRow;
   isFirst: boolean;
   isLast: boolean;
+  /** docs/reply-composition-controls-acceptance-criteria.md C1c-i (fixer
+   *  pass, BLOCKER 2): the address-by-name toggle's CURRENT state
+   *  (`composition.addressByName`), threaded down so this row can compute
+   *  whether ITS OWN greeting was skipped. Only a boolean crosses this
+   *  boundary - the row derives its own greeting name locally from
+   *  `row.author` via `greetingNameFromAuthor`, the same leaf
+   *  `discussion-draft-loop.ts` calls at dispatch time, so the marker can
+   *  never drift from what dispatch actually decided. */
+  addressByName: boolean;
   onEditReply: (id: string, text: string) => void;
   /** BL3: one stable callback (the orchestrator's own `moveRow`, passed
    *  through unwrapped) rather than two inline arrows built fresh on every
@@ -165,6 +174,7 @@ function DiscussionReplyRowImpl({
   row,
   isFirst,
   isLast,
+  addressByName,
   onEditReply,
   onMove,
   onRemove,
@@ -337,11 +347,48 @@ function DiscussionReplyRowImpl({
   const nameParts = deriveReplyAuthorName(row.author);
   const nameHintId = `disc-name-hint-${row.id}`;
 
+  // docs/reply-composition-controls-acceptance-criteria.md C1c-i (fixer
+  // pass, BLOCKER 2): a degrade is a defect if it is invisible - a skipped
+  // greeting must look different from a working one, or the instructor can
+  // only find it by reading every reply. `isGreetingDegradedForAuthor` is a
+  // plain exported function from person-name.ts (not inlined here) so its
+  // condition has a real test surface in this repo's node-env vitest, which
+  // renders no component - see that function's own doc comment for the
+  // exact rule and person-name.test.ts for its oracle. It uses the SAME
+  // leaf (`greetingNameFromAuthor`) `discussion-draft-loop.ts` calls at
+  // dispatch time, so this row can never disagree with what was actually
+  // sent to the model.
+  const greetingDegraded = isGreetingDegradedForAuthor(addressByName, row.author);
+  const greetingHintId = `disc-greeting-hint-${row.id}`;
+
   return (
     <>
       {/* --- the header bar: First / Last / Captured / Status / Actions --- */}
       <tr className={panelStyles.summaryRow}>
-        <th scope="row">{nameParts.firstName}</th>
+        <th scope="row" aria-describedby={greetingDegraded ? greetingHintId : undefined}>
+          {nameParts.firstName}
+          {/* C1c-i: the same visible-marker idiom as the "(derived)" surname
+              mark below - a short visible label with a pointer `title`, plus
+              an `aria-hidden` span carrying the full explanation that
+              `aria-describedby` on this <th> resolves to for a screen
+              reader. Deliberately plain text, not `role="alert"` - this is
+              a standing state of the row, not an interruption. */}
+          {greetingDegraded && (
+            <>
+              <span
+                className={panelStyles.nameDerivedMark}
+                title="Address by name is on, but no readable greeting name was found for this post - this reply will open with no greeting."
+              >
+                {" "}
+                (no greeting)
+              </span>
+              <span id={greetingHintId} aria-hidden="true" style={visuallyHiddenHint}>
+                Address by name is on, but no readable greeting name was found for the author of this post
+                (&quot;{row.author}&quot;) - this reply will open with no greeting.
+              </span>
+            </>
+          )}
+        </th>
         {/* F7: a "derived" (guessed) surname carries a visible marker with
             the correction hint in BOTH a `title` (pointer/tooltip) and an
             `aria-describedby` pointing at the same marker's id (screen

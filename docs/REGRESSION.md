@@ -35692,3 +35692,233 @@ in-feature **926** (`discussion-capture.ts`).
 - **This surface still owes a downloadable log** under the rule in
   `docs/DEV_LOOP.md`. Entry 369 recorded the debt; this is now three runs, still
   unpaid.
+
+## 373. Tell the app what every reply must contain - ingredients, a first-name greeting, a formality slider, and paragraphs that are no longer optional
+
+Ships `docs/reply-composition-controls-acceptance-criteria.md` (C-1, the
+discussion half; C-2, announcements, is a separate group by C0-1). The
+Discussion replies surface gains three controls inline above `Start capture`:
+a five-option "Each reply should include" multi-select, an "Open each reply
+with the student's first name" checkbox that ships **ON**, and a three-stop
+Casual/Balanced/Formal slider. Paragraph breaks became a requirement rather
+than a fourth toggle.
+
+### The AC in brief
+
+Four controls feeding `buildReplyDraftingPrompt`, three of them persisted
+(`ta-rec-disc-ingredients`, `ta-rec-disc-address-name`, `ta-rec-disc-formality`)
+and the fourth - paragraphs - unconditional. Placement was load-bearing, not
+cosmetic: `useDiscussionReplies.ts` auto-enqueues drafting as posts merge
+*during* capture, so a control below the capture button or behind a disclosure
+would be discovered only after the first replies were already drafted under
+defaults. The cluster is inline, after the audience row, with no disclosure.
+
+### Decisions worth re-reading
+
+**The greeting name is a NEW export, not the sort key.** An earlier draft of
+the AC said to reuse `deriveReplyAuthorName(...).firstName`. That field is
+`tokens.slice(0, -1).join(" ")` - everything except the LAST token - because a
+table column has to order "Maria de la Cruz" under "Cruz". Reusing it would
+have greeted her as "Maria de la". `greetingNameFromAuthor`
+(`src/lib/person-name.ts:124`) is a separate export returning the FIRST token
+only, and `deriveReplyAuthorName` is byte-for-byte unchanged so the sort column
+cannot move.
+
+**The greeting is threaded per-post, which is what makes the CONTEXT ONLY
+guarantee structural.** It is derived in `discussion-draft-loop.ts:414`, exactly
+the way entry 372 threads `parent`, and `discussion-reply-prompt.ts` never
+imports `person-name.ts`. The parent block is built from a disjoint
+`{ author, text }` literal that has no `greetingName` field, the wire type
+forbids one, and the prompt builder never reads `p.parent.greetingName`. Three
+independent layers, none of them a runtime check.
+
+**Two contradictions were caught in the AC and both are resolved in code.**
+(1) The existing prompt said "Do not open with the person's name" - the toggle
+directly reverses it, so the line is now conditional, with the
+no-standalone-greeting/no-sign-off rule unconditional in both branches because
+it was never about names. (2) The `peers` register says "Do not open with
+praise" while `compliment` is in the DEFAULT set - so the compliment clause is
+audience-branched: for peers it acknowledges substance "but not as an opening
+line", for students it ties into the register's own mandated opening move. Both
+registers are tested separately; a combined test would have passed on either
+one alone.
+
+**The paragraph line was EDITED, not supplemented.** `Use "\n" between
+paragraphs if you need one` became `If it runs longer than about 60 words,
+break it into at least two paragraphs, separated by a blank line ("\n\n")`.
+Adding a second instruction beside the old one would have left the prompt
+asking for one thing while the round-trip test pinned another.
+
+**Coercion is a plain exported function at both ends.** `coerceReplyComposition`
+(client, localStorage) and `coerceCompositionAtBoundary` (server, across the
+Server Action wire) - the declared TS type stops meaning anything once a value
+has crossed a serialization boundary. Neither lives inline in a `useState`
+initializer, because vitest here renders no hook and an inline coercion would
+have no test surface at all.
+
+### The defect classes this group avoided
+
+**Dead-on-arrival wiring (entry 372's headline defect, the seventh instance).**
+Every new exported symbol was traced to a production caller before this entry
+was written: `greetingNameFromAuthor` -> `discussion-draft-loop.ts:414`;
+`coerceReplyComposition` -> `useDiscussionReplies.ts:127`;
+`coerceCompositionAtBoundary` -> `draftDiscussionRepliesAction`;
+`setComposition` -> the panel -> all three controls, writing all three keys;
+the four `discussion-reply-controls.ts` helpers -> `renderValue`,
+`getAriaValueText` and both slider handlers. Not dead.
+
+**A byte-identity claim verified against the real prior behaviour, not against
+the test's own copy of it.** The review rebuilt the whole prompt from
+`git show HEAD:src/lib/discussion-reply-prompt.ts` under `tsx` and diffed it
+line-by-line against the frozen literals: identical on every line except the
+one C3-i paragraph line, which changes unconditionally by design and is
+disclosed in the test's own comment.
+
+**A canary re-derived rather than agreed with.** 49 -> 52 keys, at ORDINAL
+positions (`ta-rec-card-title` precedes `ta-rec-cards`; a culture-aware sort
+reverses that, and did, on the first attempt at re-deriving it). The scan was
+re-run independently from source with an ordinal comparer and matched the
+expected array exactly, 52 for 52.
+
+**A wiring check written for how THIS surface actually stores things.** C5c-i
+recorded that the existing avatar check is not copy-pasteable: it matches a
+literal argument to `readPersisted`/`localStorage.getItem`, but this surface
+uses `readLocalStorage`/`writeLocalStorage` helpers, and three of the nine
+`ta-rec-disc-*` keys are referenced through `const STORAGE_KEY_*` bindings that
+a literal-argument regex cannot see at all. The new check handles both idioms
+and covers all NINE keys (an earlier AC draft said three). Proven by deleting
+one write and watching only that assertion go red.
+
+**Arming did not become re-draft.** `setComposition` sets state and writes three
+keys. It enqueues nothing, rewrites nothing, and the `userEdited` guard in
+`isDispatchableDraftItem` still refuses to overwrite an instructor's edit. The
+only consequence of the signature change is that a pending "Redraft every
+reply" confirm disarms. Each of the three new fields is covered by its OWN
+"varying X alone changes the signature" test.
+
+### The defect classes this group produced
+
+**C1c is not implemented by any layer.** The AC said a single-token author is
+either used whole or degrades to OFF for that row, and "do not let a username
+leak into a greeting". `person-name.ts:112-119` defers the handle judgment to
+"the caller"; the caller (`discussion-draft-loop.ts:414`) only does
+`|| undefined`, which fires on the empty string alone. So `mchen` reaches the
+model as a greeting name, as does a punctuation-only OCR artifact.
+
+**C1c-i's visible degrade marker was not built.** The `(derived)` idiom exists
+at `DiscussionReplyRow.tsx:352-362`; nothing in this group reuses it. A row
+whose greeting was silently skipped is indistinguishable from a broken toggle
+without reading every reply.
+
+**C2b's resource gating was not built in either direction.** Selecting
+`resources` adds a prompt clause; deselecting it dispatches the resource pass
+anyway (`discussion-draft-loop.ts:487` is unconditional). The claimed token
+saving is not realised, and one test's NAME asserts the gate exists while its
+body only checks the no-invented-URL clause.
+
+### All three were closed before the push - and how the first one hid
+
+The two blockers above were found by the review pass, not by any gate, and are
+fixed in this same commit. The mechanism of the first is the part worth keeping:
+
+**Each wave deferred the degrade to the other, and a comment asserted the false
+half.** `person-name.ts`'s doc said judging "reads as a handle" belongs to the
+caller; `discussion-draft-loop.ts:406-408` said the leaf already handled it
+("person-name.ts's own degrade case, e.g. a handle-shaped single token"). Both
+statements were written in good faith, neither was true, and the comment
+described a twin that did not exist - the documented failure class from entry
+367 defect 4. A responsibility split across two waves' file sets is invisible to
+`tsc`, to `eslint`, to the wave gate and to a full green suite, because every
+individual file is self-consistent.
+
+The fix moves the judgment INTO `greetingNameFromAuthor`, where a caller
+structurally cannot forget it. A first token degrades to `""` when it has no
+letters, or contains anything outside letters/hyphen/apostrophe/period, or - for
+single-token authors ONLY - contains no uppercase letter. The asymmetry is
+deliberate: LMS display names are proper-cased, so a bare lowercase single token
+is overwhelmingly a username, while a capitalised mononym is a real name.
+**Never degrade a legitimate mononym** - erasing a person's name is its own
+harm, which is why rule 3 is narrow. `Maria` and `Cher` still greet; `mchen`,
+`_user`, `12345` and `...` do not. `Anne-Marie`, `O'Brien` and `J.R.` are kept.
+
+C1c-i's marker now reuses the `(derived)` idiom on the row, gated by a new pure
+`isGreetingDegradedForAuthor` export - extracted specifically so the CONDITION
+has a vitest surface, since the JSX around it never renders in this suite.
+
+C2b is gated on `ingredients.includes("resources")` with both directions tested,
+and the mis-named test now says what it actually checks.
+
+**One scope note, correctly flagged rather than hidden.** The fixer touched one
+line of `DiscussionRepliesPanel.tsx` outside its assigned file set, because it
+is the only call site that can thread `addressByName` down to the row - without
+it the marker prop has no source and blocker 2 would have shipped as dead code.
+That is the right call and the right disclosure: the assignment was wrong, not
+the agent.
+
+### Gates
+
+- `npx tsc --noEmit` - clean, exit 0.
+- `npm run lint` - exit 0. 6 warnings, 0 errors, all pre-existing
+  (`RecordingTab.tsx:273`, `repoGradesSliceA.guards.test.ts:83`,
+  `graphql.test.ts:33` x2, `new-quiz.test.ts:25` and `:46`). None in this
+  group's files.
+- `npx vitest run` - **740 files / 15307 tests passed** (the review pass measured
+  740/15286; the +21 are the blocker fixes' own tests, added after it ran).
+- Targeted: the 9 files this group touches or is policed by - 308 tests passed
+  at review time, before the fix pass added its own.
+- No-emoji rule: `src/lib/no-emojis.test.ts` (the committed test that owns the
+  rule and its one authorized exception), green inside the full suite. Not a
+  hand-rolled grep.
+- 1000-line ceiling, every `recording/*.ts(x)` counted with
+  `@(Get-Content).Count`: max is `useRecorder.ts` at 961.
+  `DiscussionRepliesPanel.tsx` 831, `useDiscussionReplies.ts` 820,
+  `discussion-capture.ts` 737, `discussion-draft-loop.ts` 503; new files
+  `DiscussionReplyControls.tsx` 157 and `discussion-reply-controls.ts` 56.
+- `git status --short`: exactly the 19 expected paths, 16 modified and 3 new.
+
+### Limits
+
+- **The DEFAULT configuration is NOT inert, and it changes replies sent to real
+  students with no action taken.** Two ingredients are pre-selected and the name
+  toggle ships ON (the owner's explicit ask), and paragraph breaks are
+  unconditional. On the first capture after this ships, before the instructor
+  has seen the new controls, every drafted reply gains a compliment, a deeper
+  question, a first-name greeting and a paragraph break. Only the formality
+  middle stop is genuinely a no-op. This is intended per C4b-i and is recorded
+  here because the previous group's review found an output change shipping with
+  nobody having decided it should.
+- **Whether the model honours any of this is unmeasured.** Every assertion in
+  this group is that an instruction is PRESENT in the prompt string. No frame
+  from this pipeline has ever reached a model under test. The three formality
+  stops in particular are an untested claim about model behaviour - the AC
+  chose three stops rather than five precisely because five would put adjacent
+  positions inside the noise, but that reasoning is also unmeasured.
+- **The greeting's first-token rule is wrong for whole classes of names.**
+  Mononyms, handles and usernames, display orders that put the family name
+  first, and anyone whose preferred name is not their first token. C1c said to
+  degrade rather than guess and C1c-i said the degrade must be visible; neither
+  was built (see above), so a wrong greeting reaches the student silently.
+- **`"correction"` is the highest-risk ingredient.** It asks the model to judge
+  correctness and is one prompt clause away from inventing an error to satisfy
+  the instruction. The clause is written conditionally ("Only if the post
+  actually contains a factual error ... do not invent one to satisfy this
+  list"), which is the mitigation - not a guarantee.
+- **No component is rendered by any test.** vitest here is node-env and collects
+  only `src/**/*.test.ts`. Verified ONLY by reading: that `getAriaValueText` is
+  attached to the Slider; that `aria-labelledby` resolves to a real element;
+  that the new `MuiSlider` thumb focus outline reaches the thumb and is visible
+  in Windows High Contrast; that `renderValue` is invoked by the Select in
+  either direction; that the checkbox announces its state; that `aria-pressed`
+  reaches the DOM on the audience toggle; and every keyboard path through all
+  three controls. The four helper functions' return values ARE unit-tested;
+  their wiring is not.
+- **The CSS height change was made by arithmetic, with no browser check.**
+  `--reply-block-height` 148px -> 170px, reasoning that a mandatory paragraph
+  break adds about one text-line. The variable has exactly ONE consumer
+  (`.postCell`); the reply side is a `minRows={6}` MUI textarea in a different
+  file with no CSS tie, so the "shared ... cannot drift" comment above it is
+  false. The bump helps the filled-long-reply case and leaves the post block
+  ~22px TALLER than an empty or short reply box - the state every row is in
+  while a capture is running. Below the 1000px breakpoint the blocks stack, so
+  the cost there is extra scroll, not a broken layout.
+- This surface **still owes a downloadable log** (four entries running).

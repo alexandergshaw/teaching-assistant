@@ -143,9 +143,12 @@ describe("recording-split structure", () => {
         "ta-rec-card-text",
         "ta-rec-card-title",
         "ta-rec-cards",
+        "ta-rec-disc-address-name",
         "ta-rec-disc-audience",
         "ta-rec-disc-course",
         "ta-rec-disc-filter",
+        "ta-rec-disc-formality",
+        "ta-rec-disc-ingredients",
         "ta-rec-disc-save-video",
         "ta-rec-disc-sort",
         "ta-rec-disc-table",
@@ -235,6 +238,85 @@ describe("recording-split structure", () => {
             combinedRecordingSource,
             `expected a localStorage.setItem write call wired to "${key}"`
           ).toMatch(writePattern);
+        }
+      );
+    });
+
+    describe("every ta-rec-disc-* key is wired to both a read and a write (C5c)", () => {
+      // docs/reply-composition-controls-acceptance-criteria.md C5c-i: the
+      // avatar check right above is NOT copy-pasteable onto this surface,
+      // and an earlier draft of the AC assumed it was. Two mismatches, either
+      // of which yields a screenful of red tests over correct code:
+      //
+      //  - useDiscussionReplies.ts (audience/course/save-video, and this
+      //    group's three new keys - address-name/formality/ingredients)
+      //    reads and writes through `readLocalStorage("literal key")` /
+      //    `writeLocalStorage("literal key", ...)`, not `readPersisted` or a
+      //    bare `localStorage.getItem`/`setItem`.
+      //  - useReplyRows.ts (filter/sort/table) reads and writes through
+      //    `window.localStorage.getItem(STORAGE_KEY_X)` /
+      //    `window.localStorage.setItem(STORAGE_KEY_X, ...)`, where
+      //    STORAGE_KEY_X is a `const` binding, not the literal string, at the
+      //    call site - a literal-argument regex cannot see these three keys
+      //    at all, however the call is spelled.
+      //
+      // So each key is checked two ways below: DIRECT (the literal key
+      // string is itself the argument of a read/write call, covering the six
+      // readLocalStorage/writeLocalStorage keys), or INDIRECT (the key is
+      // bound to a `const NAME = "key"` identifier somewhere in this
+      // directory, and that IDENTIFIER - not the literal - is the argument
+      // of a read/write call, covering the three STORAGE_KEY_* keys). Either
+      // shape counts as wired; a key needs only one to pass.
+      //
+      // Proven by sabotage: with the "ta-rec-disc-address-name" write
+      // deleted from useDiscussionReplies.ts's setComposition, this check's
+      // own "write" assertion for that key went red (and only that
+      // assertion) while the canary above stayed green - the failure mode
+      // hole 1 exists to catch, reproduced and confirmed on this surface,
+      // then reverted.
+      //
+      // The key list is DERIVED from the same combinedRecordingSource the
+      // canary above scans (never hardcoded a second time - see the avatar
+      // block's own comment on why a hardcoded scan-target list has already
+      // failed an audit in this repo).
+      const discKeys = Array.from(
+        new Set(combinedRecordingSource.match(/ta-rec-disc-[a-z-]*/g) ?? [])
+      ).sort();
+
+      it("finds at least one ta-rec-disc-* key to check - a check over nothing proves nothing", () => {
+        expect(discKeys.length).toBeGreaterThan(0);
+      });
+
+      it("finds exactly nine ta-rec-disc-* keys (C5c-ii: six existing plus this group's three new ones)", () => {
+        expect(discKeys).toHaveLength(9);
+      });
+
+      function isWired(key: string, callKind: "read" | "write"): boolean {
+        const directPattern =
+          callKind === "read"
+            ? new RegExp(`(readLocalStorage|readPersisted|localStorage\\.getItem)\\(\\s*["']${key}["']\\s*\\)`)
+            : new RegExp(`(writeLocalStorage|localStorage\\.setItem)\\(\\s*["']${key}["']\\s*,`);
+        if (directPattern.test(combinedRecordingSource)) return true;
+
+        const constNames = Array.from(
+          combinedRecordingSource.matchAll(new RegExp(`const\\s+(\\w+)\\s*=\\s*["']${key}["']`, "g"))
+        ).map((m) => m[1]);
+        if (constNames.length === 0) return false;
+
+        return constNames.some((name) => {
+          const pattern =
+            callKind === "read"
+              ? new RegExp(`(readLocalStorage|readPersisted|localStorage\\.getItem)\\(\\s*${name}\\s*\\)`)
+              : new RegExp(`(writeLocalStorage|localStorage\\.setItem)\\(\\s*${name}\\s*,`);
+          return pattern.test(combinedRecordingSource);
+        });
+      }
+
+      it.each(discKeys)(
+        '"%s" has both a read and a write call wired to that key (directly, or via a const STORAGE_KEY_* binding)',
+        (key) => {
+          expect(isWired(key, "read"), `expected a read call wired to "${key}"`).toBe(true);
+          expect(isWired(key, "write"), `expected a write call wired to "${key}"`).toBe(true);
         }
       );
     });

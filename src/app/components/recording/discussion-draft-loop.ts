@@ -30,7 +30,25 @@ import {
   type ReplySort,
 } from "./discussion-capture";
 import { getStoredProvider } from "@/lib/llm-provider";
-import { DRAFT_BATCH_SIZE, type DiscussionAudience } from "@/lib/discussion-reply-prompt";
+import {
+  DRAFT_BATCH_SIZE,
+  REPLY_INGREDIENTS,
+  REPLY_FORMALITY_STOPS,
+  DEFAULT_REPLY_COMPOSITION,
+  type DiscussionAudience,
+  type ReplyIngredient,
+  type ReplyFormality,
+  type ReplyCompositionSettings,
+} from "@/lib/discussion-reply-prompt";
+// docs/reply-composition-controls-acceptance-criteria.md C1b-ii: the
+// greeting name is derived HERE, per dispatched post, and threaded into the
+// request exactly the way FIX 1 threads `parent` below - never inside
+// discussion-reply-prompt.ts, which must not import person-name.ts. Deriving
+// it per-post (rather than once for the whole batch) is what structurally
+// keeps a CONTEXT ONLY parent block from ever receiving a greeting: `parent`
+// is built from a disjoint object literal ({ author, text }) that has no
+// `greetingName` field to begin with.
+import { greetingNameFromAuthor } from "@/lib/person-name";
 import type { LlmProvider } from "@/lib/llm";
 import type { UseReplyRowsReturn } from "./useReplyRows";
 import type { UseReplyResourcesReturn } from "./useReplyResources";
@@ -55,6 +73,16 @@ export interface UseDiscussionRepliesReturn {
   setSaveVideo: (v: boolean) => void;
   recordingUrl: string | null;
   recordingBytes: number;
+
+  /** docs/reply-composition-controls-acceptance-criteria.md C5/JOB1: what
+   *  every drafted reply must contain (ingredients, address-by-name,
+   *  formality) - persisted the same way audience/courseId/saveVideo are
+   *  (readLocalStorage/writeLocalStorage + the useState-initializer +
+   *  wrapped-setter idiom), and threaded whole into runDraftLoop the same
+   *  way `audience` already is, so a new field cannot be added on one side
+   *  and silently dropped on the other. */
+  composition: ReplyCompositionSettings;
+  setComposition: (next: ReplyCompositionSettings) => void;
 
   capturing: boolean;
   elapsedSec: number;
@@ -146,6 +174,63 @@ export function writeLocalStorage(key: string, value: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// docs/reply-composition-controls-acceptance-criteria.md C5a: coercion for
+// the three ta-rec-disc-ingredients / ta-rec-disc-address-name /
+// ta-rec-disc-formality reads. A PLAIN EXPORTED FUNCTION, not inline inside a
+// `useState` initializer - vitest in this repo is node-env and renders no
+// hook (see this file's own header), so an inline coercion would have no
+// test surface at all. Never throws: a malformed JSON blob, a non-array
+// value, a non-array JSON scalar, an ingredient outside the enum, a
+// duplicate ingredient and an unrecognised formality/address-by-name value
+// each fall back to a sane value rather than reaching the prompt builder.
+// ---------------------------------------------------------------------------
+
+/** C2c: zero ingredients selected is legal ("a plain, well-judged reply") and
+ * is NOT replaced with the default - only a genuinely unparseable or
+ * non-array blob falls back to `DEFAULT_REPLY_COMPOSITION.ingredients`. A
+ * valid array survives with invalid members dropped and duplicates
+ * collapsed (insertion order preserved via `Set`). */
+export function coerceReplyComposition(
+  rawIngredients: string | null,
+  rawAddressByName: string | null,
+  rawFormality: string | null
+): ReplyCompositionSettings {
+  let ingredients: readonly ReplyIngredient[] = DEFAULT_REPLY_COMPOSITION.ingredients;
+  if (rawIngredients !== null) {
+    try {
+      const parsed: unknown = JSON.parse(rawIngredients);
+      if (Array.isArray(parsed)) {
+        const seen = new Set<ReplyIngredient>();
+        for (const v of parsed) {
+          if (typeof v === "string" && (REPLY_INGREDIENTS as readonly string[]).includes(v)) {
+            seen.add(v as ReplyIngredient);
+          }
+        }
+        ingredients = Array.from(seen);
+      }
+      // Array.isArray(parsed) false - a non-array blob (an object, a bare
+      // string, a number) - falls through with `ingredients` left at the
+      // default set above.
+    } catch {
+      // Malformed JSON - fall back to the default, never throw.
+    }
+  }
+
+  // C0's default is ON - only an explicit "0" turns it off; every other
+  // value (null, garbage, "false") falls back to the default rather than
+  // silently becoming OFF.
+  const addressByName =
+    rawAddressByName === "0" ? false : rawAddressByName === "1" ? true : DEFAULT_REPLY_COMPOSITION.addressByName;
+
+  const formality: ReplyFormality =
+    rawFormality !== null && (REPLY_FORMALITY_STOPS as readonly string[]).includes(rawFormality)
+      ? (rawFormality as ReplyFormality)
+      : DEFAULT_REPLY_COMPOSITION.formality;
+
+  return { ingredients, addressByName, formality };
+}
+
+// ---------------------------------------------------------------------------
 // runDraftLoop (AC25-AC28, AC52).
 // ---------------------------------------------------------------------------
 
@@ -157,14 +242,28 @@ export function writeLocalStorage(key: string, value: string): void {
 // T6/T6c (docs/discussion-thread-structure-acceptance-criteria.md section 6):
 // `parent` is optional, resolved per dispatched row via `resolveDraftParent`
 // (discussion-capture.ts's two-arg wrapper) below, and carries only what the
-// prompt needs to render the CONTEXT ONLY block - never the full row. This
-// widens the type to match the real server action's own declared parameter
-// (src/app/actions/discussion-replies.ts:154) exactly, so the fake injected
-// in tests and the real action stay assignment-compatible.
+// prompt needs to render the CONTEXT ONLY block - never the full row.
+// `greetingName` (docs/reply-composition-controls-acceptance-criteria.md
+// C1b-ii) is optional for the same reason: derived per-post below and
+// omitted entirely (never set to `undefined`) when there is nothing to
+// greet with. `composition` (C5/JOB1) is the whole ReplyCompositionSettings
+// object, threaded through unchanged. This widens the type to match the
+// real server action's own declared parameter
+// (src/app/actions/discussion-replies.ts) exactly, so the fake injected in
+// tests and the real action stay assignment-compatible - the
+// `draftAction: draftDiscussionRepliesAction` assignment in
+// useDiscussionReplies.ts is itself the proof the two have not drifted.
 export type DraftDiscussionRepliesAction = (
-  posts: Array<{ id: string; author: string; text: string; parent?: { author: string; text: string } }>,
+  posts: Array<{
+    id: string;
+    author: string;
+    text: string;
+    parent?: { author: string; text: string };
+    greetingName?: string;
+  }>,
   audience: DiscussionAudience,
   courseName: string,
+  composition: ReplyCompositionSettings,
   provider: LlmProvider
 ) => Promise<{ replies: Array<{ id: string; reply: string }> } | { error: string }>;
 
@@ -210,6 +309,10 @@ export interface RunDraftLoopDeps {
   resourcesApiRef: MutableRefObject<UseReplyResourcesReturn>;
   audienceRef: MutableRefObject<DiscussionAudience>;
   courseNameRef: MutableRefObject<string>;
+  /** docs/reply-composition-controls-acceptance-criteria.md C5/JOB1: mirrors
+   *  `audienceRef` exactly - the drafting queue reads the CURRENT composition
+   *  at dispatch time, never a stale closure value. */
+  compositionRef: MutableRefObject<ReplyCompositionSettings>;
   pushNotice: (text: string) => void;
   draftAction: DraftDiscussionRepliesAction;
 }
@@ -226,6 +329,7 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
     resourcesApiRef,
     audienceRef,
     courseNameRef,
+    compositionRef,
     pushNotice,
     draftAction,
   } = deps;
@@ -283,6 +387,7 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
     const provider = getStoredProvider();
     const audienceNow = audienceRef.current;
     const courseName = courseNameRef.current;
+    const compositionNow = compositionRef.current;
 
     let result: Awaited<ReturnType<DraftDiscussionRepliesAction>>;
     try {
@@ -294,17 +399,45 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
         // which parent a draft sees. The key is OMITTED entirely (not set to
         // `undefined`) when no parent resolves, so a no-parent batch stays
         // byte-identical to the request shape shipped before this fix.
+        //
+        // C1b-ii: `greetingName` is derived HERE, per dispatched row, via
+        // `greetingNameFromAuthor(x.row.author)` - never inside the prompt
+        // builder. Also omitted entirely (never `undefined`) when the
+        // derivation returns "" - a blank greeting name must never reach the
+        // model as an instruction to open with nothing.
+        //
+        // BLOCKER 1 fixer pass: `greetingNameFromAuthor` itself now judges
+        // whether the first token is safe to address someone by (a
+        // handle-shaped single token such as "mchen", punctuation-only
+        // input, or a token carrying a digit/underscore/@/slash all degrade
+        // to "" INSIDE that function - see person-name.ts's own doc comment
+        // for the exact rules). An earlier draft of this comment claimed
+        // person-name.ts already handled that degrade while
+        // greetingNameFromAuthor's own doc said the opposite - the judgment
+        // lived in NEITHER layer, so a handle such as "mchen" reached a
+        // reply as a greeting. This `|| undefined` below only needs to
+        // convert person-name.ts's "" into an omitted key; it does not, and
+        // must not, apply any judgment of its own.
         dispatchable.map((x) => {
           const parentRow = resolveDraftParent(x.row, currentRows);
           const parent = parentRow
             ? { author: parentRow.author, text: truncateDraftParentText(parentRow.post) }
             : undefined;
-          return parent
-            ? { id: x.row.id, author: x.row.author, text: x.row.post, parent }
-            : { id: x.row.id, author: x.row.author, text: x.row.post };
+          const greetingName = greetingNameFromAuthor(x.row.author) || undefined;
+          const post: {
+            id: string;
+            author: string;
+            text: string;
+            parent?: { author: string; text: string };
+            greetingName?: string;
+          } = { id: x.row.id, author: x.row.author, text: x.row.post };
+          if (parent) post.parent = parent;
+          if (greetingName) post.greetingName = greetingName;
+          return post;
         }),
         audienceNow,
         courseName,
+        compositionNow,
         provider
       );
     } catch (err) {
@@ -363,7 +496,17 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
         // after a model-authored reply lands. Never on the discard path
         // above, which re-applies the user's own text and searched
         // nothing new.
-        resourcesApiRef.current.enqueueResources([reply.id]);
+        // C2b (docs/reply-composition-controls-acceptance-criteria.md,
+        // SHOULD 1 fixer pass): gated on the "resources" ingredient having
+        // been selected for THIS dispatch (`compositionNow`, captured above
+        // at dispatch time - the same value that reached `draftAction`, not
+        // a possibly-changed `compositionRef.current`). Deselecting
+        // "resources" is a real token saving, so unchecking it must
+        // suppress the resource pass, not merely stop the prompt from
+        // mentioning it.
+        if (compositionNow.ingredients.includes("resources")) {
+          resourcesApiRef.current.enqueueResources([reply.id]);
+        }
       }
     }
     const missing = ids.filter((id) => !returned.has(id));

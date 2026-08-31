@@ -706,6 +706,20 @@ export interface DraftingArmSignatureArgs {
   rowCount: number;
   audience: string;
   courseId: string;
+  // docs/reply-composition-controls-acceptance-criteria.md C6: the three
+  // reply-composition controls (JOB1's persisted ReplyCompositionSettings)
+  // join this signature the same way courseId's own addition once fixed this
+  // exact class of bug - `redraftAll` (useDiscussionReplies.ts, via
+  // runDraftLoop) now dispatches every draft using
+  // `compositionRef.current` as well as audience/courseName, so all three are
+  // real drafting inputs the armed action actually consumes. `ingredients` is
+  // passed as a plain string array (never the ReplyIngredient union type -
+  // this module stays a leaf that does not import that leaf) and joined with
+  // a separator that cannot appear inside a single ingredient id, so two
+  // different SETS never collide onto the same joined string.
+  ingredients: readonly string[];
+  addressByName: boolean;
+  formality: string;
 }
 
 /** Every field is a drafting input `redraftAll` actually reads. Adding a
@@ -713,7 +727,11 @@ export interface DraftingArmSignatureArgs {
  * too, or it silently reopens this exact bug for that new control - this
  * function's own test asserts that varying each current field in isolation
  * changes the output, which is the property that would have caught the
- * shipped defect (an omitted field), not just a wrong separator. */
+ * shipped defect (an omitted field), not just a wrong separator.
+ *
+ * C6a: the three reply-composition fields below are each independently
+ * covered by that same "varying X alone changes the signature" test - a
+ * combined test would pass with only one of the three actually wired. */
 export function draftingArmSignature(args: DraftingArmSignatureArgs): string {
-  return `${args.rowCount}|${args.audience}|${args.courseId}`;
+  return `${args.rowCount}|${args.audience}|${args.courseId}|${args.ingredients.join(",")}|${args.addressByName}|${args.formality}`;
 }

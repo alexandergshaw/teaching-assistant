@@ -7,13 +7,30 @@ import {
   DRAFT_BATCH_SIZE,
   MAX_POST_CHARS,
   DISCUSSION_AUDIENCE_LABELS,
+  DEFAULT_REPLY_COMPOSITION,
+  type ReplyCompositionSettings,
 } from "./discussion-reply-prompt";
 
 // Per the repo's "source-text tests over-specify" lesson, these tests pin the
 // FACT and the ORDERING of what the prompt builders produce - never the exact
 // spelling - so a future wording tweak to the prompt text does not force a
 // contorted rewrite here. Assertions on exact sentences are deliberately
-// avoided.
+// avoided, EXCEPT where the acceptance criteria explicitly calls out
+// byte-identical output (the toggle-OFF name line and the balanced-formality
+// no-op), which are pinned as frozen literals captured from this file's
+// pre-change behaviour.
+
+// docs/reply-composition-controls-acceptance-criteria.md C2c / C1a "toggle
+// OFF": a composition that selects nothing and addresses nobody must leave
+// buildReplyDraftingPrompt's output byte-identical to its pre-composition
+// behaviour. Used as the default composition argument for every test below
+// that is not itself testing a composition control, so those tests keep
+// verifying exactly what they verified before this group.
+const LEGACY_COMPOSITION: ReplyCompositionSettings = {
+  ingredients: [],
+  addressByName: false,
+  formality: "balanced",
+};
 
 describe("EXTRACT_BATCH_SIZE / DRAFT_BATCH_SIZE / MAX_POST_CHARS", () => {
   it("are the values the server and client are both required to enforce (AC8)", () => {
@@ -158,7 +175,7 @@ describe("buildReplyDraftingPrompt", () => {
   ];
 
   it("includes every post's author and text, in the order given, numbered 1..N", () => {
-    const prompt = buildReplyDraftingPrompt(posts, "students", "", "");
+    const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
 
     const idxPriya = prompt.indexOf("Priya");
     const idxFirstText = prompt.indexOf("First post text.");
@@ -195,60 +212,60 @@ describe("buildReplyDraftingPrompt", () => {
   });
 
   it("never puts the caller's row ids on the wire", () => {
-    const prompt = buildReplyDraftingPrompt(posts, "students", "", "");
+    const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
     expect(prompt).not.toContain("disc-");
   });
 
   it("states the exact reply count expected back, matching posts.length", () => {
-    const prompt3 = buildReplyDraftingPrompt(posts, "students", "", "");
-    const prompt1 = buildReplyDraftingPrompt(posts.slice(0, 1), "students", "", "");
+    const prompt3 = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+    const prompt1 = buildReplyDraftingPrompt(posts.slice(0, 1), "students", "", "", LEGACY_COMPOSITION);
     expect(prompt3).toContain("3");
     expect(prompt1).not.toBe(prompt3);
   });
 
   it("puts styleBlock LAST (format instructions must not be buried under freeform prose)", () => {
     const styleBlock = "\n\nMATCH THE INSTRUCTOR'S PERSONAL WRITING STYLE (tone, rhythm, vocabulary) shown in this sample:\nSome sample text.";
-    const prompt = buildReplyDraftingPrompt(posts, "students", "", styleBlock);
+    const prompt = buildReplyDraftingPrompt(posts, "students", "", styleBlock, LEGACY_COMPOSITION);
     expect(prompt.trim().endsWith(styleBlock.trim())).toBe(true);
   });
 
   it("omits the style block entirely when it is empty, with no dangling gap", () => {
-    const withStyle = buildReplyDraftingPrompt(posts, "students", "", "non-empty style");
-    const withoutStyle = buildReplyDraftingPrompt(posts, "students", "", "");
+    const withStyle = buildReplyDraftingPrompt(posts, "students", "", "non-empty style", LEGACY_COMPOSITION);
+    const withoutStyle = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
     expect(withoutStyle).not.toContain("non-empty style");
     expect(withStyle.length).toBeGreaterThan(withoutStyle.length);
   });
 
   it("includes the course name, quoted, when one is given, and omits it entirely when empty", () => {
-    const withCourse = buildReplyDraftingPrompt(posts, "students", "Intro to Robotics", "");
-    const withoutCourse = buildReplyDraftingPrompt(posts, "students", "", "");
+    const withCourse = buildReplyDraftingPrompt(posts, "students", "Intro to Robotics", "", LEGACY_COMPOSITION);
+    const withoutCourse = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
     expect(withCourse).toContain('"Intro to Robotics"');
     expect(withoutCourse).not.toContain("Robotics");
   });
 
   it("trims a whitespace-only course name down to the empty-course case", () => {
-    const whitespaceOnly = buildReplyDraftingPrompt(posts, "students", "   ", "");
-    const empty = buildReplyDraftingPrompt(posts, "students", "", "");
+    const whitespaceOnly = buildReplyDraftingPrompt(posts, "students", "   ", "", LEGACY_COMPOSITION);
+    const empty = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
     expect(whitespaceOnly).toBe(empty);
   });
 
   it("produces a DIFFERENT prompt for the two audiences given the same posts (AC65 - structural, not tonal)", () => {
-    const studentsPrompt = buildReplyDraftingPrompt(posts, "students", "", "");
-    const peersPrompt = buildReplyDraftingPrompt(posts, "peers", "", "");
+    const studentsPrompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+    const peersPrompt = buildReplyDraftingPrompt(posts, "peers", "", "", LEGACY_COMPOSITION);
     expect(studentsPrompt).not.toBe(peersPrompt);
   });
 
   it("both audience stances forbid emoji, markdown and a greeting/sign-off (shared constraints)", () => {
     for (const audience of ["students", "peers"] as const) {
-      const prompt = buildReplyDraftingPrompt(posts, audience, "", "").toLowerCase();
+      const prompt = buildReplyDraftingPrompt(posts, audience, "", "", LEGACY_COMPOSITION).toLowerCase();
       expect(prompt).toContain("emoji");
       expect(prompt).toContain("markdown");
     }
   });
 
   it("only the students register mentions a deadline - an assessment-scoped prohibition meaningless between colleagues (AC65)", () => {
-    const studentsPrompt = buildReplyDraftingPrompt(posts, "students", "", "").toLowerCase();
-    const peersPrompt = buildReplyDraftingPrompt(posts, "peers", "", "").toLowerCase();
+    const studentsPrompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION).toLowerCase();
+    const peersPrompt = buildReplyDraftingPrompt(posts, "peers", "", "", LEGACY_COMPOSITION).toLowerCase();
     expect(studentsPrompt).toContain("deadline");
     expect(peersPrompt).not.toContain("deadline");
   });
@@ -256,7 +273,7 @@ describe("buildReplyDraftingPrompt", () => {
   // docs/discussion-thread-structure-acceptance-criteria.md T6/T6a/T6b.
   describe("parent context (T6/T6a) and the widened hallucination guard (T6b)", () => {
     it("omits any CONTEXT ONLY block when no post carries a parent", () => {
-      const prompt = buildReplyDraftingPrompt(posts, "students", "", "");
+      const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
       expect(prompt).not.toContain("CONTEXT ONLY");
     });
 
@@ -266,7 +283,7 @@ describe("buildReplyDraftingPrompt", () => {
         { ...posts[1], parent: { author: "Priya", text: "The original post text." } },
         posts[2],
       ];
-      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "");
+      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "", LEGACY_COMPOSITION);
 
       expect(prompt).toContain("CONTEXT ONLY - DO NOT REPLY TO THIS");
       expect(prompt).toContain("The original post text.");
@@ -280,7 +297,7 @@ describe("buildReplyDraftingPrompt", () => {
 
     it("sabotage target (b): the parent block carries NO post number - structurally unaddressable by the 1..N output contract", () => {
       const withParent = [{ ...posts[0], parent: { author: "Marcus", text: "Parent text here." } }, posts[1], posts[2]];
-      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "");
+      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "", LEGACY_COMPOSITION);
 
       const contextIdx = prompt.indexOf("CONTEXT ONLY");
       const writtenByIdx = prompt.indexOf("Written by:", contextIdx);
@@ -296,7 +313,7 @@ describe("buildReplyDraftingPrompt", () => {
 
     it("does not renumber posts when one carries a parent - the count and order of POST 1..N is unaffected", () => {
       const withParent = [{ ...posts[0], parent: { author: "X", text: "Parent." } }, posts[1], posts[2]];
-      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "");
+      const prompt = buildReplyDraftingPrompt(withParent, "students", "", "", LEGACY_COMPOSITION);
       expect(prompt).toContain(`Return ONLY a JSON array with exactly ${withParent.length} elements`);
       expect(prompt).toContain("POST 1");
       expect(prompt).toContain("POST 2");
@@ -304,7 +321,7 @@ describe("buildReplyDraftingPrompt", () => {
     });
 
     it("sabotage target (a, this file's own hallucination-guard equivalent): the guard is widened beyond the single post being answered", () => {
-      const prompt = buildReplyDraftingPrompt(posts, "students", "", "");
+      const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
       const idx = prompt.indexOf("Never state a fact about the course");
       expect(idx).toBeGreaterThanOrEqual(0);
       // Pin the FACT (plural coverage), not the exact sentence: the guard
@@ -314,6 +331,313 @@ describe("buildReplyDraftingPrompt", () => {
       const guardWindow = prompt.slice(idx, idx + 220).toLowerCase();
       expect(guardWindow).toContain("posts");
       expect(guardWindow).not.toContain("the post you are answering");
+    });
+  });
+
+  // docs/reply-composition-controls-acceptance-criteria.md - composition
+  // controls (ingredients, address-by-name, formality). The two frozen
+  // literals below were captured by running THIS repo's pre-change
+  // buildReplyDraftingPrompt (4-arg signature) against this file's own
+  // `posts` fixture, audience "students"/"peers", courseName "" and
+  // styleBlock "" - see the implementer's report for how they were
+  // captured (a temporary vitest file, deleted before this commit) -
+  // EXCEPT the final "Write the reply as plain text..." line, which is
+  // updated to the new C3-i wording: that line changes UNCONDITIONALLY
+  // (the paragraph-break requirement is not gated by any composition
+  // control), so a truly byte-for-byte comparison against the untouched
+  // 4-arg-era literal would fail for a reason that has nothing to do with
+  // composition. What toggle-OFF/zero-ingredients/balanced-formality
+  // actually guarantees byte-identical is pinned as two separate, narrower
+  // assertions below (the exact OFF name-line bullet, and this whole
+  // prompt minus only the C3-i line).
+  const BASELINE_STUDENTS_PROMPT =
+    "You are the instructor, replying to a student's post on your course discussion board. Be warm, specific and encouraging. Open by naming something the student actually said - quote or paraphrase their own words, not a generic compliment. Add one substantive thing: an idea they did not raise, a correction if something is wrong, or a concrete example from the field. End with a question that invites them to take it further. Never grade the post, never give or imply a score or a mark, never say whether it meets a requirement, and never promise or hint at a deadline change.\n\nWrite one reply to each post below.\n\nEVERY REPLY, BOTH REGISTERS\n\n- Write in the first person, as yourself.\n\n- 3 to 6 sentences. Plain prose.\n\n- No markdown, no headings, no bullet lists, no bold.\n\n- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.\n\n- No emoji.\n\n- Never state a fact about the course - a date, a policy, a reading, an assignment, a grade - that is not written in the posts shown to you here. If you need one, write around it.\n\n- Reply only to what that post says. Do not refer to the other posts below.\n\nTHE POSTS\n\nPOST 1\nWritten by: Priya\nFirst post text.\n\n---\n\nPOST 2\nWritten by: Marcus\nSecond post text.\n\n---\n\nPOST 3\nWritten by: Devon\nThird post text.\n\nOUTPUT\n\nReturn ONLY a JSON array with exactly 3 elements, and nothing else.\n\nEach element is {\"post\": <the POST number>, \"reply\": \"...\"} - the number, not the name.\n\nInclude every post number from 1 to 3, in order.\n\nWrite the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line (\"\\n\\n\"). No backticks.\n\nNo prose before or after the array. No code fences.";
+
+  const BASELINE_PEERS_PROMPT =
+    "You are replying to a fellow educator's post in a professional community of practice. Address them as an equal. They are not your student and you are not assessing them. Do not open with praise and do not explain the underlying concepts back to them - assume they know the field as well as you do. Engage with the substance directly: extend their argument, add your own experience of it, or put a concrete counterpoint to them. It is fine to disagree, and fine to say the thing you are unsure about.\n\nWrite one reply to each post below.\n\nEVERY REPLY, BOTH REGISTERS\n\n- Write in the first person, as yourself.\n\n- 3 to 6 sentences. Plain prose.\n\n- No markdown, no headings, no bullet lists, no bold.\n\n- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.\n\n- No emoji.\n\n- Never state a fact about the course - a date, a policy, a reading, an assignment, a grade - that is not written in the posts shown to you here. If you need one, write around it.\n\n- Reply only to what that post says. Do not refer to the other posts below.\n\nTHE POSTS\n\nPOST 1\nWritten by: Priya\nFirst post text.\n\n---\n\nPOST 2\nWritten by: Marcus\nSecond post text.\n\n---\n\nPOST 3\nWritten by: Devon\nThird post text.\n\nOUTPUT\n\nReturn ONLY a JSON array with exactly 3 elements, and nothing else.\n\nEach element is {\"post\": <the POST number>, \"reply\": \"...\"} - the number, not the name.\n\nInclude every post number from 1 to 3, in order.\n\nWrite the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line (\"\\n\\n\"). No backticks.\n\nNo prose before or after the array. No code fences.";
+
+  // The exact OFF-branch name-line bullet, byte-for-byte, as it read before
+  // this group (C1a "toggle OFF: today's line, byte-identical"). This is
+  // the one piece of the prompt the AC calls out for an exact-sentence
+  // pin - not the whole prompt, since C3-i's paragraph line changes
+  // unconditionally regardless of the toggle.
+  const ORIGINAL_NAME_LINE =
+    "- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.";
+
+  describe("composition controls (docs/reply-composition-controls-acceptance-criteria.md)", () => {
+    it("C1a: toggle OFF produces the EXACT original name-line bullet, byte-for-byte", () => {
+      const students = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+      const peers = buildReplyDraftingPrompt(posts, "peers", "", "", LEGACY_COMPOSITION);
+      expect(students).toContain(ORIGINAL_NAME_LINE);
+      expect(peers).toContain(ORIGINAL_NAME_LINE);
+    });
+
+    it("C2c/C1a: toggle OFF + zero ingredients + balanced formality is BYTE-IDENTICAL to the pre-composition prompt (modulo C3-i's unconditional paragraph-line rewording), both audiences", () => {
+      const students = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+      const peers = buildReplyDraftingPrompt(posts, "peers", "", "", LEGACY_COMPOSITION);
+      expect(students).toBe(BASELINE_STUDENTS_PROMPT);
+      expect(peers).toBe(BASELINE_PEERS_PROMPT);
+    });
+
+    describe("C1a: address-by-name toggle", () => {
+      const greetingPosts = [
+        { ...posts[0], greetingName: "Priya" },
+        posts[1],
+        { ...posts[2], greetingName: "Devon" },
+      ];
+
+      it("toggle ON opens with the given greeting name and drops the 'do not open with the person's name' clause", () => {
+        const prompt = buildReplyDraftingPrompt(greetingPosts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          addressByName: true,
+        });
+        expect(prompt).not.toContain("Do not open with the person's name");
+        expect(prompt).toContain("Priya");
+        expect(prompt).toContain("Devon");
+      });
+
+      it("the no-greeting-line/no-sign-off rule survives in BOTH branches", () => {
+        // SHOULD 4 fixer pass: pin the FACT (a sign-off prohibition exists,
+        // and the ON branch's rule concerns a greeting line), not a full
+        // invented sentence - "sign-off"/"greeting line" are the load-
+        // bearing concept words; the surrounding phrasing is free to change.
+        const off = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+        const on = buildReplyDraftingPrompt(greetingPosts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          addressByName: true,
+        });
+        expect(off.toLowerCase()).toContain("sign-off");
+        expect(on.toLowerCase()).toContain("sign-off");
+        expect(on.toLowerCase()).toContain("greeting line");
+      });
+
+      it("a post with no greetingName gets no greeting instruction even when the toggle is ON", () => {
+        const mixed = [posts[0], posts[1], { ...posts[2], greetingName: "Devon" }];
+        const prompt = buildReplyDraftingPrompt(mixed, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          addressByName: true,
+        });
+        // Only the post carrying a greetingName is named in the greeting
+        // data - Priya and Marcus (posts[0]/posts[1]) never got one.
+        expect(prompt).not.toMatch(/POST 1:\s*Priya/);
+        expect(prompt).not.toMatch(/POST 2:\s*Marcus/);
+        expect(prompt).toMatch(/POST 3:\s*Devon/);
+      });
+
+      it("toggle ON with NO post carrying a greetingName still states the no-greeting-given fallback, and names no one", () => {
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          addressByName: true,
+        });
+        expect(prompt).not.toContain("GREETING NAMES");
+        // SHOULD 4 fixer pass: pin the fact (a fallback stating "no
+        // greeting" is present), not the full invented sentence.
+        expect(prompt.toLowerCase()).toContain("no greeting");
+      });
+
+      it("C2g: for students with the toggle ON, the greeting precedes the mandated opening move rather than replacing it", () => {
+        // SHOULD 4 fixer pass: pin the fact (an ordering clause naming
+        // "before" the opening move exists), not the full invented sentence.
+        const prompt = buildReplyDraftingPrompt(greetingPosts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          addressByName: true,
+        });
+        expect(prompt.toLowerCase()).toContain("before naming");
+      });
+
+      it("for peers, the toggle-ON name line carries no students-only ordering clause", () => {
+        // SHOULD 4 fixer pass (one of the two negative substring
+        // assertions): relaxed to the same shorter fact-level keyword as
+        // the positive assertion above.
+        const prompt = buildReplyDraftingPrompt(greetingPosts, "peers", "", "", {
+          ...LEGACY_COMPOSITION,
+          addressByName: true,
+        });
+        expect(prompt.toLowerCase()).not.toContain("before naming");
+      });
+
+      it("sabotage target: the CONTEXT ONLY parent block never receives a greeting, even when the toggle is ON and the parent's author matches a greeted post", () => {
+        const withParent = [
+          { ...posts[0], greetingName: "Priya" },
+          { ...posts[1], parent: { author: "Priya", text: "The original post text." } },
+          posts[2],
+        ];
+        const prompt = buildReplyDraftingPrompt(withParent, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          addressByName: true,
+        });
+        // "CONTEXT ONLY" also appears earlier, inside the general EVERY
+        // REPLY guard bullet that explains the label - search from "THE
+        // POSTS" onward to land on the ACTUAL rendered parent block, not
+        // that guard sentence.
+        const postsSectionIdx = prompt.indexOf("THE POSTS");
+        const contextIdx = prompt.indexOf("CONTEXT ONLY", postsSectionIdx);
+        const nextSectionIdx = prompt.indexOf("POST 2", contextIdx);
+        const parentBlock = prompt.slice(contextIdx, nextSectionIdx);
+        expect(contextIdx).toBeGreaterThan(postsSectionIdx);
+        // The greeting data ties a name to "POST n", never to the parent
+        // block, so the parent block itself contains no "POST" reference.
+        expect(parentBlock).not.toMatch(/POST\s*\d/i);
+      });
+    });
+
+    describe("C2: ingredients block", () => {
+      it("C2c: zero ingredients selected omits the block entirely (byte-identical, asserted above)", () => {
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+        expect(prompt).not.toContain("EACH REPLY SHOULD INCLUDE");
+      });
+
+      it("at least one ingredient selected emits the block", () => {
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          ingredients: ["insight"],
+        });
+        expect(prompt).toContain("EACH REPLY SHOULD INCLUDE");
+      });
+
+      it("C2a: the correction clause is explicitly conditional on an error actually being present", () => {
+        // SHOULD 4 fixer pass: pin the facts (a conditional "only if"
+        // framing, and an explicit "say nothing" fallback), not the full
+        // invented sentences.
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          ingredients: ["correction"],
+        }).toLowerCase();
+        expect(prompt).toContain("only if");
+        expect(prompt).toContain("say nothing");
+      });
+
+      // SHOULD 4 fixer pass: this test used to be named "...gates the
+      // separate resource pass..." but only ever asserted a no-invented-URL
+      // substring - it never drove a dispatch through runDraftLoop, so it
+      // could not have caught the gate being unwired (which it was - see
+      // discussion-draft-loop.test.ts's own "SHOULD 1" describe block for
+      // the actual gating test, in both directions). Renamed to what this
+      // test actually checks: the prompt clause's own no-hallucination
+      // instruction. The substring itself is also relaxed per SHOULD 4 -
+      // pin the fact (the clause forbids inventing a URL), not its exact
+      // wording.
+      it("C2b: the resources clause forbids the model from inventing a URL itself (the gate that skips the whole resource pass when unselected is verified in discussion-draft-loop.test.ts)", () => {
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          ingredients: ["resources"],
+        }).toLowerCase();
+        expect(prompt).toContain("invent");
+      });
+
+      it("C2f: peers + compliment does not instruct an opening praise line", () => {
+        // SHOULD 4 fixer pass: pin the facts (the clause references "an
+        // opening line", and the register's own praise ban survives), not
+        // the full invented sentences.
+        const prompt = buildReplyDraftingPrompt(posts, "peers", "", "", {
+          ...LEGACY_COMPOSITION,
+          ingredients: ["compliment"],
+        }).toLowerCase();
+        expect(prompt).toContain("opening line");
+        // The register's own ban survives untouched alongside it.
+        expect(prompt).toContain("open with praise");
+      });
+
+      it("C2f: students + compliment ties the compliment to the register's own opening move, with no conflict", () => {
+        // SHOULD 4 fixer pass (the second of the two negative substring
+        // assertions): relaxed to the same shorter "opening line" keyword
+        // used by the positive peers assertion above, so both stay in sync.
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          ingredients: ["compliment"],
+        }).toLowerCase();
+        expect(prompt).toContain("opening move");
+        expect(prompt).not.toContain("opening line");
+      });
+
+      it("a combined test on only one audience would not catch a one-sided C2f fix - both are asserted independently above", () => {
+        // Sanity check that the two registers really do produce different
+        // compliment clauses, so the two tests above are not accidentally
+        // asserting the same string for both audiences.
+        const peersClause = buildReplyDraftingPrompt(posts, "peers", "", "", {
+          ...LEGACY_COMPOSITION,
+          ingredients: ["compliment"],
+        });
+        const studentsClause = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ...LEGACY_COMPOSITION,
+          ingredients: ["compliment"],
+        });
+        expect(peersClause).not.toBe(studentsClause);
+      });
+    });
+
+    describe("C4: formality", () => {
+      it("the balanced stop is a true no-op: byte-identical to the pre-composition prompt (modulo C3-i, asserted above)", () => {
+        const balanced = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ...DEFAULT_REPLY_COMPOSITION,
+          ingredients: [],
+          addressByName: false,
+          formality: "balanced",
+        });
+        expect(balanced).toBe(BASELINE_STUDENTS_PROMPT);
+      });
+
+      it("each of the three formality stops produces a materially different prompt, all else equal", () => {
+        const base = { ...LEGACY_COMPOSITION };
+        const casual = buildReplyDraftingPrompt(posts, "students", "", "", { ...base, formality: "casual" });
+        const balanced = buildReplyDraftingPrompt(posts, "students", "", "", { ...base, formality: "balanced" });
+        const formal = buildReplyDraftingPrompt(posts, "students", "", "", { ...base, formality: "formal" });
+        expect(casual).not.toBe(balanced);
+        expect(formal).not.toBe(balanced);
+        expect(casual).not.toBe(formal);
+      });
+
+      it("casual and formal clauses modulate diction, not the audience stance - the stance's own text is unchanged", () => {
+        // SHOULD 4 fixer pass: pin the fact (the peers register's praise
+        // ban is present), not its full invented sentence.
+        const casual = buildReplyDraftingPrompt(posts, "peers", "", "", { ...LEGACY_COMPOSITION, formality: "casual" });
+        const formal = buildReplyDraftingPrompt(posts, "peers", "", "", { ...LEGACY_COMPOSITION, formality: "formal" });
+        for (const prompt of [casual, formal]) {
+          expect(prompt.toLowerCase()).toContain("open with praise");
+        }
+      });
+    });
+
+    describe("C3-i: paragraph-break instruction replaces (not supplements) the old line", () => {
+      it("the prompt no longer asks for a paragraph break only 'if you need one'", () => {
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+        expect(prompt).not.toContain('if you need one');
+      });
+
+      it("requires a blank-line paragraph break for replies over roughly 60 words", () => {
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+        expect(prompt).toContain("\\n\\n");
+        expect(prompt.toLowerCase()).toContain("60 words");
+      });
+    });
+
+    describe("scope guard: THE POSTS block, the 1..N output contract and the CONTEXT ONLY parent block are untouched by composition", () => {
+      it("posts' own text block is identical in shape regardless of composition (same author/text rendering)", () => {
+        const noComposition = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+        const fullComposition = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ingredients: ["compliment", "insight"],
+          addressByName: false,
+          formality: "formal",
+        });
+        const postsBlockFrom = (p: string) => p.slice(p.indexOf("THE POSTS"), p.indexOf("OUTPUT"));
+        // "THE POSTS" section still lists POST 1/2/3 with "Written by:" -
+        // composition never rewrites this section's own structure.
+        for (const block of [postsBlockFrom(noComposition), postsBlockFrom(fullComposition)]) {
+          expect(block).toContain("POST 1\nWritten by: Priya");
+          expect(block).toContain("POST 2\nWritten by: Marcus");
+          expect(block).toContain("POST 3\nWritten by: Devon");
+        }
+      });
+
+      it("the output contract's exact-count/order language is unaffected by composition", () => {
+        const prompt = buildReplyDraftingPrompt(posts, "students", "", "", {
+          ingredients: ["compliment", "insight", "correction"],
+          addressByName: true,
+          formality: "casual",
+        });
+        expect(prompt).toContain("Return ONLY a JSON array with exactly 3 elements");
+        expect(prompt).toContain("Include every post number from 1 to 3, in order");
+      });
     });
   });
 });

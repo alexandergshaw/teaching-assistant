@@ -95,6 +95,27 @@ const theme = createTheme({
     MuiAutocomplete: {
       styleOverrides: { inputRoot: { paddingTop: 2, paddingBottom: 2 } },
     },
+    // docs/reply-composition-controls-acceptance-criteria.md C4c: the
+    // MuiButtonBase override above does NOT reach the Slider thumb - it is
+    // not a ButtonBase - so without this it falls back to MUI's default
+    // box-shadow focus ring, which (per this file's own MuiTab comment
+    // above, the same fact recorded a second time here because it governs
+    // a real decision rather than just being restated) is invisible in
+    // Windows High Contrast mode, which discards box-shadows but preserves
+    // outlines. An explicit `outline` on the thumb's focus-visible state
+    // fixes it the same way MuiTab's does, at the default (non-negative)
+    // offset - the thumb is a small circle with plenty of room around it,
+    // unlike a Tab clipped by its scroller.
+    MuiSlider: {
+      styleOverrides: {
+        thumb: {
+          "&:focus-visible": {
+            outline: "2px solid var(--focus-ring-color)",
+            outlineOffset: 2,
+          },
+        },
+      },
+    },
   },
 });
 

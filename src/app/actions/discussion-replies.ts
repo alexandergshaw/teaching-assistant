@@ -22,11 +22,17 @@ import {
   DRAFT_BATCH_SIZE,
   MAX_POST_CHARS,
   RESOURCE_BATCH_SIZE,
+  REPLY_INGREDIENTS,
+  REPLY_FORMALITY_STOPS,
+  DEFAULT_REPLY_COMPOSITION,
   buildPostExtractionPrompt,
   buildReplyDraftingPrompt,
   deriveResourceConcept,
   type DiscussionAudience,
   type ThreadPosition,
+  type ReplyIngredient,
+  type ReplyFormality,
+  type ReplyCompositionSettings,
 } from "@/lib/discussion-reply-prompt";
 
 // docs/discussion-thread-structure-acceptance-criteria.md T2b/T3: the
@@ -44,6 +50,42 @@ function coerceThreadPosition(value: unknown): ThreadPosition | undefined {
 // empty or whitespace-only reading is the same as the LMS printing nothing.
 function coerceReplyingToAuthor(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+// docs/reply-composition-controls-acceptance-criteria.md JOB3: `composition`
+// arrives from the client over the Server Action wire. Its declared TS type
+// is ReplyCompositionSettings, but nothing enforces that at runtime once a
+// value has crossed a serialization boundary (the same reason
+// threadPosition/replyingToAuthor above are coerced rather than trusted) -
+// so it is validated here, exactly like coerceReplyComposition
+// (discussion-draft-loop.ts) validates the client's own localStorage reads,
+// before it ever reaches buildReplyDraftingPrompt. `value` is read as
+// `unknown` internally on purpose, despite the parameter's declared type.
+function coerceCompositionAtBoundary(value: unknown): ReplyCompositionSettings {
+  const obj = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+  let ingredients: readonly ReplyIngredient[] = DEFAULT_REPLY_COMPOSITION.ingredients;
+  if (Array.isArray(obj.ingredients)) {
+    const seen = new Set<ReplyIngredient>();
+    for (const v of obj.ingredients) {
+      if (typeof v === "string" && (REPLY_INGREDIENTS as readonly string[]).includes(v)) {
+        seen.add(v as ReplyIngredient);
+      }
+    }
+    // C2c: zero selected is legal and survives as an empty array - only a
+    // non-array `ingredients` field falls back to the default set.
+    ingredients = Array.from(seen);
+  }
+
+  const addressByName =
+    typeof obj.addressByName === "boolean" ? obj.addressByName : DEFAULT_REPLY_COMPOSITION.addressByName;
+
+  const formality: ReplyFormality =
+    typeof obj.formality === "string" && (REPLY_FORMALITY_STOPS as readonly string[]).includes(obj.formality)
+      ? (obj.formality as ReplyFormality)
+      : DEFAULT_REPLY_COMPOSITION.formality;
+
+  return { ingredients, addressByName, formality };
 }
 
 /**
@@ -151,9 +193,20 @@ export async function draftDiscussionRepliesAction(
   // three of threadPosition === "reply", a printed replyingToAuthor and
   // exactly one matching author) - this action does no gating of its own,
   // it only threads whatever `parent` it is handed into the prompt.
-  posts: Array<{ id: string; author: string; text: string; parent?: { author: string; text: string } }>,
+  // `greetingName` (docs/reply-composition-controls-acceptance-criteria.md
+  // C1b-ii) is likewise derived and gated entirely by the caller
+  // (discussion-draft-loop.ts's runDraftLoop, via greetingNameFromAuthor) -
+  // this action threads it through unchanged, never derives one of its own.
+  posts: Array<{
+    id: string;
+    author: string;
+    text: string;
+    parent?: { author: string; text: string };
+    greetingName?: string;
+  }>,
   audience: DiscussionAudience,
   courseName: string,
+  composition: ReplyCompositionSettings,
   provider: LlmProvider
 ): Promise<{ replies: Array<{ id: string; reply: string }> } | { error: string }> {
   try {
@@ -167,7 +220,9 @@ export async function draftDiscussionRepliesAction(
     // .filter(Boolean) when empty.
     const styleBlock = await getWritingStyleBlock(user.id);
 
-    const prompt = buildReplyDraftingPrompt(posts, audience, courseName, styleBlock);
+    const safeComposition = coerceCompositionAtBoundary(composition);
+
+    const prompt = buildReplyDraftingPrompt(posts, audience, courseName, styleBlock, safeComposition);
     const parts: LlmPart[] = [{ text: prompt }];
 
     // AC4b-ii: temperature 0.7 is advisory on the default Gemini 3 model

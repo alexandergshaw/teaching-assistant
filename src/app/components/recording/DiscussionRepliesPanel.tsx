@@ -26,6 +26,11 @@ import { useDiscussionReplies } from "./useDiscussionReplies";
 // for exactly which subtree moved and why the `totalCount > 0` gate below
 // stayed here rather than moving with it.
 import DiscussionReplyTable from "./DiscussionReplyTable";
+// docs/reply-composition-controls-acceptance-criteria.md JOB 1: the reply
+// composition cluster (ingredients / address-by-name / formality),
+// extracted into its own file rather than grown inline here - see that
+// file's own header for why.
+import DiscussionReplyControls from "./DiscussionReplyControls";
 // F8/F9 fixes: neither needs a new field on UseDiscussionRepliesReturn (out
 // of this fixer pass's file set) - useLlmProvider is a standalone reactive
 // store read (docs/discussion-reply-resources-acceptance-criteria.md R4e),
@@ -96,6 +101,12 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     coursesError,
     saveVideo,
     setSaveVideo,
+    // docs/reply-composition-controls-acceptance-criteria.md C5/JOB1: fully
+    // owned (persistence, coercion, arming) by useDiscussionReplies - this
+    // panel only threads the object into DiscussionReplyControls and passes
+    // its setter straight back as that component's onChange.
+    composition,
+    setComposition,
     recordingUrl,
     recordingBytes,
     capturing,
@@ -373,7 +384,20 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // in this repo).
   // F11: same reasoning as deleteSignature above - `rowCount` is `totalCount`,
   // never the filtered `rows.length`.
-  const redraftSignature = draftingArmSignature({ rowCount: totalCount, audience, courseId });
+  // docs/reply-composition-controls-acceptance-criteria.md C6/JOB0: the
+  // three reply-composition fields join this signature the same way
+  // courseId's own addition once fixed this exact bug class -
+  // `redraftAll`/`runDraftLoop` dispatch every draft using
+  // `compositionRef.current` too, so all three are real drafting inputs
+  // that must disarm a pending "Redraft every reply" confirm when changed.
+  const redraftSignature = draftingArmSignature({
+    rowCount: totalCount,
+    audience,
+    courseId,
+    ingredients: composition.ingredients,
+    addressByName: composition.addressByName,
+    formality: composition.formality,
+  });
   const deleteArmed = isConfirmArmed(deleteArmedFor, deleteSignature);
   const redraftArmed = isConfirmArmed(redraftArmedFor, redraftSignature);
 
@@ -514,10 +538,24 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
 
       <div className={styles.ghActions}>
         <span className={styles.ghMeta}>Replying to:</span>
-        <Button variant={audience === "students" ? "contained" : "outlined"} size="small" onClick={() => setAudience("students")}>
+        {/* docs/reply-composition-controls-acceptance-criteria.md C6d: this
+            segmented toggle had no aria-pressed anywhere in the recording/
+            directory's one existing precedent (SpeedPanel.tsx) - fixed here
+            rather than propagated to a second control. */}
+        <Button
+          variant={audience === "students" ? "contained" : "outlined"}
+          size="small"
+          aria-pressed={audience === "students"}
+          onClick={() => setAudience("students")}
+        >
           My students
         </Button>
-        <Button variant={audience === "peers" ? "contained" : "outlined"} size="small" onClick={() => setAudience("peers")}>
+        <Button
+          variant={audience === "peers" ? "contained" : "outlined"}
+          size="small"
+          aria-pressed={audience === "peers"}
+          onClick={() => setAudience("peers")}
+        >
           Fellow educators
         </Button>
         {/* AC61: the slot keeps its layout box even while hidden (visibility,
@@ -548,6 +586,18 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           This overwrites every reply in the table, including ones you edited by hand.
         </p>
       )}
+
+      {/* docs/reply-composition-controls-acceptance-criteria.md C0-0: this
+          cluster goes HERE - inline, after the audience row, before "Start
+          capture" - and never behind a disclosure. useDiscussionReplies.ts
+          auto-enqueues drafting as posts merge DURING capture, so a control
+          discovered below the capture button (or behind a click) is
+          discovered only after the first replies were already drafted
+          under whatever it defaulted to. That is also why there is no
+          disclosure here at all: it would hide the address-by-name toggle,
+          which is ON by default, i.e. the one control that silently changes
+          output. */}
+      <DiscussionReplyControls composition={composition} onChange={setComposition} />
 
       <div className={styles.ghActions}>
         <Button variant="contained" size="small" onClick={handleStartStop}>
@@ -755,6 +805,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           sort={sort}
           setSort={setSort}
           llmProvider={llmProvider}
+          addressByName={composition.addressByName}
           editReply={editReply}
           moveRow={moveRow}
           onRemove={handleRemove}

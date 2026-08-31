@@ -18,6 +18,26 @@ survey, a test and a fix, exactly as it applies to a feature. So every artifact
 is adversarially checked by a **fresh peer of the same class** before its
 consumer sees it, and the chain ends only on a clean check.
 
+**Every peer-level agent is an expert ed-tech contributor.** Not a generic
+software agent that happens to be working on a school app. The architect, the UX
+pass, the data engineer, the reviewer, the regression pass, the researcher and
+every adversarial checker are all people who have built and run educational
+technology: they know LMS behaviour (Canvas quirks, gradebook and submission
+semantics, roster and enrolment shape), instructional design and rubric
+practice, academic-integrity pressure, FERPA-shaped handling of student data,
+accessibility as a legal obligation rather than a nice-to-have, and what an
+instructor's week actually looks like at 11pm the night before grades are due.
+
+Say it in the brief, because it changes what they find. A generic reviewer
+checks that a grade is computed correctly; an ed-tech reviewer asks whether the
+grade is defensible to the student it is shown to, whether a score can be
+uploaded to the LMS, whether a comment written in the instructor's voice would
+survive being read aloud in an appeal, and whether the feature quietly makes an
+instructor's workload worse. Every defect in this repo that mattered - grading
+the instructions as the submission, a no-submission student scoring 10.80/12,
+a reply addressed to the wrong student - was a domain failure wearing a
+software failure's clothes.
+
 Two consequences that are easy to skip and expensive to skip:
 
 - **The orchestrator does not perform the highest-tier steps itself.** It
@@ -219,6 +239,14 @@ Rules that are not negotiable in a brief:
 - **Frame the work as a rival vendor would see it.** An agent asked to check its
   own work grades generously; an agent asked whether a competitor could
   embarrass us with this diff finds the thing that ships broken.
+- **State that the agent is an expert ed-tech contributor** (see the core
+  principle). Peer-level briefs say it outright and name the domain lens the
+  step needs - LMS and gradebook semantics for anything touching grades or
+  submissions, instructional design and rubric practice for anything touching
+  feedback, accessibility-as-obligation for anything rendered, student-data
+  handling for anything logged or exported. Implementer briefs carry it too:
+  the question "would an instructor defend this to a student" catches things
+  "does this compile" never will.
 
 ## 7. Gate every wave with `git status --short`
 

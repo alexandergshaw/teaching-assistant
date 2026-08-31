@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mirrors the mocking idiom in media.budget.test.ts (mock only the modules
 // this file's action actually calls) and chat-style.test.ts (requireOwner /
@@ -31,12 +31,36 @@ vi.mock("./learning-resource-links", () => ({
   findResourceLinksForConceptsAction: vi.fn(),
 }));
 
+// docs/reply-composition-controls-acceptance-criteria.md JOB3: partially
+// mocked the same way "@/lib/llm" is above - every real export (the prompt
+// builders, the constants, the coercion-relevant Set/array exports) comes
+// through as the REAL implementation via importActual, and only
+// `buildReplyDraftingPrompt` is wrapped in `vi.fn(actual.buildReplyDraftingPrompt)`
+// so its call arguments can be inspected directly. This lets the tests below
+// assert exactly what `composition` reaches the prompt builder as, without
+// depending on that builder's own prompt-text wording (owned by the sibling
+// half of this group and still in flux) or re-implementing its coercion.
+vi.mock("@/lib/discussion-reply-prompt", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/discussion-reply-prompt")>("@/lib/discussion-reply-prompt");
+  return {
+    ...actual,
+    buildReplyDraftingPrompt: vi.fn(actual.buildReplyDraftingPrompt),
+  };
+});
+
 import { requireOwner } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./shared";
 import { callLlm } from "@/lib/llm";
 import { findResourceLinksForConceptsAction } from "./learning-resource-links";
 import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
-import { EXTRACT_BATCH_SIZE, DRAFT_BATCH_SIZE, RESOURCE_BATCH_SIZE } from "@/lib/discussion-reply-prompt";
+import {
+  EXTRACT_BATCH_SIZE,
+  DRAFT_BATCH_SIZE,
+  RESOURCE_BATCH_SIZE,
+  DEFAULT_REPLY_COMPOSITION,
+  buildReplyDraftingPrompt,
+  type ReplyCompositionSettings,
+} from "@/lib/discussion-reply-prompt";
 import { RESOURCE_KINDS } from "@/lib/resource-kind";
 import { extractDiscussionPostsAction, draftDiscussionRepliesAction, gatherReplyResourcesAction } from "./discussion-replies";
 // FIX 1 (thread-structure review pass): the deserialization gate's own
@@ -334,21 +358,21 @@ describe("draftDiscussionRepliesAction", () => {
 
   it("requires ownership - a rejected requireOwner is caught and returned as { error }, never thrown", async () => {
     vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
-    await expect(draftDiscussionRepliesAction(posts, "students", "", "gemini")).resolves.toEqual({
+    await expect(draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini")).resolves.toEqual({
       error: "Not authorized. Sign in with an approved account.",
     });
     expect(callLlm).not.toHaveBeenCalled();
   });
 
   it("refuses zero posts without calling the model", async () => {
-    const result = await draftDiscussionRepliesAction([], "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction([], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect(result).toEqual({ error: "No posts to reply to." });
     expect(callLlm).not.toHaveBeenCalled();
   });
 
   it("refuses a batch over DRAFT_BATCH_SIZE without calling the model", async () => {
     const tooMany = Array.from({ length: DRAFT_BATCH_SIZE + 1 }, (_, i) => ({ id: `r${i}`, author: `A${i}`, text: `T${i}` }));
-    const result = await draftDiscussionRepliesAction(tooMany, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(tooMany, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect(result).toEqual({ error: "Too many posts in one batch." });
     expect(callLlm).not.toHaveBeenCalled();
   });
@@ -360,7 +384,7 @@ describe("draftDiscussionRepliesAction", () => {
       body: "",
       text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
     } as never);
-    await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     const callArgs = vi.mocked(callLlm).mock.calls[0][0];
     expect(callArgs.generationConfig?.maxOutputTokens).toBe(4096);
     expect(callArgs.generationConfig?.temperature).toBe(0.7);
@@ -374,17 +398,17 @@ describe("draftDiscussionRepliesAction", () => {
       body: "",
       text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
     } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect(getWritingStyleBlock).toHaveBeenCalledWith("owner-1");
     expect("error" in result).toBe(false);
   });
 
   it("preserves the REAL reason on a failed call - a 429 and a 400 must read differently", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce({ ok: false, status: 429, body: "Rate limit exceeded" } as never);
-    const result429 = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result429 = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
 
     vi.mocked(callLlm).mockResolvedValueOnce({ ok: false, status: 400, body: "Bad request" } as never);
-    const result400 = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result400 = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
 
     expect("error" in result429 && "error" in result400).toBe(true);
     if ("error" in result429 && "error" in result400) {
@@ -396,14 +420,14 @@ describe("draftDiscussionRepliesAction", () => {
 
   it("returns a distinct error for a successful-but-empty response", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "  ", status: 200, body: "" } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect("error" in result).toBe(true);
     if ("error" in result) expect(result.error).toContain("empty response");
   });
 
   it("returns a distinct error when the response cannot be parsed at all", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce({ ok: true, text: "complete garbage", status: 200, body: "" } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect("error" in result).toBe(true);
     if ("error" in result) expect(result.error).toContain("Could not read the drafted replies");
   });
@@ -419,7 +443,7 @@ describe("draftDiscussionRepliesAction", () => {
         { post: 3, reply: "Reply to Devon." },
       ]),
     } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect(result).toEqual({
       replies: [
         { id: "row-a", reply: "Reply to Priya." },
@@ -440,7 +464,7 @@ describe("draftDiscussionRepliesAction", () => {
         { post: 2, reply: "Reply to Marcus." },
       ]),
     } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect("replies" in result).toBe(true);
     if ("replies" in result) {
       const byId = new Map(result.replies.map((r) => [r.id, r.reply]));
@@ -461,7 +485,7 @@ describe("draftDiscussionRepliesAction", () => {
         // post 2 (Marcus) is missing from the model's response entirely.
       ]),
     } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect("replies" in result).toBe(true);
     if ("replies" in result) {
       const ids = result.replies.map((r) => r.id);
@@ -484,7 +508,7 @@ describe("draftDiscussionRepliesAction", () => {
         { reply: "Reply to Devon." },
       ]),
     } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect(result).toEqual({
       replies: [
         { id: "row-a", reply: "Reply to Priya." },
@@ -501,7 +525,7 @@ describe("draftDiscussionRepliesAction", () => {
       body: "",
       text: JSON.stringify([{ reply: "Only one reply, no post index." }]),
     } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect(result).toEqual({ replies: [] });
   });
 
@@ -516,7 +540,7 @@ describe("draftDiscussionRepliesAction", () => {
         { post: 1, reply: "Reply to Priya." },
       ]),
     } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect("replies" in result).toBe(true);
     if ("replies" in result) {
       // Exactly one reply per id - never two entries for row-b (post 2).
@@ -542,7 +566,7 @@ describe("draftDiscussionRepliesAction", () => {
         { post: 1, reply: "Valid." },
       ]),
     } as never);
-    const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     expect(result).toEqual({ replies: [{ id: "row-a", reply: "Valid." }] });
   });
 
@@ -563,7 +587,7 @@ describe("draftDiscussionRepliesAction", () => {
       posts[1],
       posts[2],
     ];
-    await draftDiscussionRepliesAction(postsWithParent, "students", "", "gemini");
+    await draftDiscussionRepliesAction(postsWithParent, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
 
     const callArgs = vi.mocked(callLlm).mock.calls[0][0];
     const promptPart = callArgs.contents[0].parts[0] as { text: string };
@@ -578,10 +602,114 @@ describe("draftDiscussionRepliesAction", () => {
       body: "",
       text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
     } as never);
-    await draftDiscussionRepliesAction(posts, "students", "", "gemini");
+    await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     const callArgs = vi.mocked(callLlm).mock.calls[0][0];
     const promptPart = callArgs.contents[0].parts[0] as { text: string };
     expect(promptPart.text).not.toContain("CONTEXT ONLY");
+  });
+
+  // docs/reply-composition-controls-acceptance-criteria.md JOB3: `composition`
+  // must reach buildReplyDraftingPrompt, and it must be coerced at the server
+  // boundary first - never trusted as-is, since it arrives from the client
+  // over the Server Action wire. `buildReplyDraftingPrompt` is spied (see the
+  // `vi.mock("@/lib/discussion-reply-prompt", ...)` block at the top of this
+  // file) so these tests inspect the EXACT argument the action hands it,
+  // rather than depending on that builder's own prompt wording.
+  describe("composition threading and server-boundary coercion", () => {
+    function mockOk() {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
+      } as never);
+    }
+
+    it("passes an already-valid composition through to buildReplyDraftingPrompt unchanged", async () => {
+      mockOk();
+      const composition: ReplyCompositionSettings = {
+        ingredients: ["insight", "resources"],
+        addressByName: false,
+        formality: "formal",
+      };
+      await draftDiscussionRepliesAction(posts, "students", "", composition, "gemini");
+      expect(buildReplyDraftingPrompt).toHaveBeenCalledTimes(1);
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      // posts, audience, courseName, styleBlock, composition - the 5th
+      // positional argument is what this test is actually pinning.
+      expect(call[4]).toEqual(composition);
+    });
+
+    it("passes DEFAULT_REPLY_COMPOSITION through unchanged (the common, un-customised case)", async () => {
+      mockOk();
+      await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect(call[4]).toEqual(DEFAULT_REPLY_COMPOSITION);
+    });
+
+    it("threads `greetingName` through to buildReplyDraftingPrompt's posts argument unchanged", async () => {
+      mockOk();
+      const postsWithGreeting = [{ ...posts[0], greetingName: "Priya" }, posts[1], posts[2]];
+      await draftDiscussionRepliesAction(postsWithGreeting, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect(call[0][0]).toEqual({ id: "row-a", author: "Priya", text: "Post one.", greetingName: "Priya" });
+    });
+
+    it("a non-array `ingredients` field coerces to the default set rather than reaching the prompt builder", async () => {
+      mockOk();
+      const bogus = { ingredients: "compliment", addressByName: true, formality: "balanced" } as unknown as ReplyCompositionSettings;
+      const result = await draftDiscussionRepliesAction(posts, "students", "", bogus, "gemini");
+      expect("error" in result).toBe(false);
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect(call[4]).toEqual(DEFAULT_REPLY_COMPOSITION);
+    });
+
+    it("an ingredient string outside the enum is dropped, not the whole selection reset to default", async () => {
+      mockOk();
+      const bogus = {
+        ingredients: ["compliment", "not-a-real-ingredient"],
+        addressByName: true,
+        formality: "balanced",
+      } as unknown as ReplyCompositionSettings;
+      await draftDiscussionRepliesAction(posts, "students", "", bogus, "gemini");
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect((call[4] as ReplyCompositionSettings).ingredients).toEqual(["compliment"]);
+    });
+
+    it("a duplicate ingredient collapses to one entry", async () => {
+      mockOk();
+      const bogus = {
+        ingredients: ["compliment", "compliment"],
+        addressByName: true,
+        formality: "balanced",
+      } as unknown as ReplyCompositionSettings;
+      await draftDiscussionRepliesAction(posts, "students", "", bogus, "gemini");
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect((call[4] as ReplyCompositionSettings).ingredients).toEqual(["compliment"]);
+    });
+
+    it("an unrecognised formality falls back to the default rather than reaching the prompt builder", async () => {
+      mockOk();
+      const bogus = {
+        ingredients: [],
+        addressByName: true,
+        formality: "extremely-formal",
+      } as unknown as ReplyCompositionSettings;
+      await draftDiscussionRepliesAction(posts, "students", "", bogus, "gemini");
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect((call[4] as ReplyCompositionSettings).formality).toBe(DEFAULT_REPLY_COMPOSITION.formality);
+    });
+
+    it("never throws on a wildly malformed composition (null, a bare string, a number) - always resolves", async () => {
+      for (const bogus of [null, "not an object at all", 42, undefined] as unknown as ReplyCompositionSettings[]) {
+        mockOk();
+        // If coerceCompositionAtBoundary ever threw instead of falling back,
+        // this `await` would reject and fail the test - no separate
+        // "does not throw" assertion is needed on top of that.
+        const result = await draftDiscussionRepliesAction(posts, "students", "", bogus, "gemini");
+        expect("error" in result).toBe(false);
+      }
+    });
   });
 });
 

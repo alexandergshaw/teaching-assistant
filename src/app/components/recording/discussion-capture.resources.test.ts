@@ -219,14 +219,30 @@ describe("tableClipboardText (reply width UX pass, section 5d #2)", () => {
 // ---------------------------------------------------------------------------
 
 describe("draftingArmSignature (redraft-signature live-bug fix)", () => {
-  const base = { rowCount: 3, audience: "students", courseId: "course-1" };
+  // docs/reply-composition-controls-acceptance-criteria.md C6: the three
+  // reply-composition fields (ingredients, addressByName, formality) join
+  // this signature the same way courseId's own addition once fixed this
+  // exact class of bug for THAT field - see the three "varying X alone"
+  // tests below for each of the three new controls.
+  const base = {
+    rowCount: 3,
+    audience: "students",
+    courseId: "course-1",
+    ingredients: ["compliment"],
+    addressByName: true,
+    formality: "balanced",
+  };
 
   it("frozen literal: base case", () => {
-    expect(draftingArmSignature(base)).toBe("3|students|course-1");
+    expect(draftingArmSignature(base)).toBe("3|students|course-1|compliment|true|balanced");
   });
 
   it("frozen literal: no course selected (courseId is an empty string)", () => {
-    expect(draftingArmSignature({ rowCount: 3, audience: "students", courseId: "" })).toBe("3|students|");
+    expect(draftingArmSignature({ ...base, courseId: "" })).toBe("3|students||compliment|true|balanced");
+  });
+
+  it("frozen literal: zero ingredients selected (C2c - legal, not the default)", () => {
+    expect(draftingArmSignature({ ...base, ingredients: [] })).toBe("3|students|course-1||true|balanced");
   });
 
   it("is deterministic - the same inputs produce the identical signature every call", () => {
@@ -251,11 +267,43 @@ describe("draftingArmSignature (redraft-signature live-bug fix)", () => {
     expect(a).not.toBe(b);
   });
 
-  it("SABOTAGE CHECK (f): the frozen base-case literal alone already pins all three fields being present, in order", () => {
-    // If draftingArmSignature dropped ANY one of the three fields, this
-    // exact literal would fail - verified by sabotage (dropping courseId,
-    // then dropping audience) in the report handed back to the dispatcher.
-    expect(draftingArmSignature({ rowCount: 7, audience: "peers", courseId: "abc" })).toBe("7|peers|abc");
+  // C6a: each of the three new reply-composition controls is tested
+  // INDEPENDENTLY - three separate assertions below, not one combined test,
+  // which would pass even if only one of the three were actually wired.
+
+  it("C6a: varying ingredients alone changes the signature", () => {
+    const a = draftingArmSignature(base);
+    const b = draftingArmSignature({ ...base, ingredients: ["compliment", "insight"] });
+    expect(a).not.toBe(b);
+  });
+
+  it("C6a: varying addressByName alone changes the signature", () => {
+    const a = draftingArmSignature(base);
+    const b = draftingArmSignature({ ...base, addressByName: false });
+    expect(a).not.toBe(b);
+  });
+
+  it("C6a: varying formality alone changes the signature", () => {
+    const a = draftingArmSignature(base);
+    const b = draftingArmSignature({ ...base, formality: "formal" });
+    expect(a).not.toBe(b);
+  });
+
+  it("SABOTAGE CHECK (f): the frozen base-case literal alone already pins all six fields being present, in order", () => {
+    // If draftingArmSignature dropped ANY one of the six fields, this exact
+    // literal would fail - verified by sabotage (dropping courseId, then
+    // dropping audience, then each of the three new fields) in the report
+    // handed back to the dispatcher.
+    expect(
+      draftingArmSignature({
+        rowCount: 7,
+        audience: "peers",
+        courseId: "abc",
+        ingredients: ["resources", "correction"],
+        addressByName: false,
+        formality: "casual",
+      })
+    ).toBe("7|peers|abc|resources,correction|false|casual");
   });
 });
 

@@ -63,6 +63,7 @@ import {
   EXTRACT_BATCH_SIZE,
   normalizeAudience,
   type DiscussionAudience,
+  type ReplyCompositionSettings,
 } from "@/lib/discussion-reply-prompt";
 // Contract/documentation block (UseDiscussionRepliesReturn, DraftQueueItem,
 // LOOP_IDLE_POLL_MS, the two localStorage helpers) and the drafting queue's
@@ -79,6 +80,7 @@ import {
   runDraftLoop as runDraftLoopStep,
   readLocalStorage,
   writeLocalStorage,
+  coerceReplyComposition,
   LOOP_IDLE_POLL_MS,
   type UseDiscussionRepliesReturn,
   type DraftQueueItem,
@@ -112,6 +114,30 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   const setSaveVideo = useCallback((v: boolean) => {
     setSaveVideoState(v);
     writeLocalStorage("ta-rec-disc-save-video", v ? "1" : "0");
+  }, []);
+
+  // --- docs/reply-composition-controls-acceptance-criteria.md C5/JOB1: the
+  // three reply-composition controls (ingredients, address-by-name,
+  // formality), stored as one ReplyCompositionSettings object in React state
+  // but persisted as THREE SEPARATE keys - ta-rec-disc-ingredients (JSON
+  // array), ta-rec-disc-address-name ("1"/"0"), ta-rec-disc-formality (the
+  // literal stop name) - the same readLocalStorage/writeLocalStorage +
+  // useState-initializer + wrapped-setter idiom as audience/courseId/
+  // saveVideo above. Coercion is `coerceReplyComposition`
+  // (discussion-draft-loop.ts), a plain exported function per C5a - never
+  // inline here, since vitest renders no hook in this repo. ---
+  const [composition, setCompositionState] = useState<ReplyCompositionSettings>(() =>
+    coerceReplyComposition(
+      readLocalStorage("ta-rec-disc-ingredients"),
+      readLocalStorage("ta-rec-disc-address-name"),
+      readLocalStorage("ta-rec-disc-formality")
+    )
+  );
+  const setComposition = useCallback((next: ReplyCompositionSettings) => {
+    setCompositionState(next);
+    writeLocalStorage("ta-rec-disc-ingredients", JSON.stringify(next.ingredients));
+    writeLocalStorage("ta-rec-disc-address-name", next.addressByName ? "1" : "0");
+    writeLocalStorage("ta-rec-disc-formality", next.formality);
   }, []);
 
   // --- Lazy course list (AC30, AC30a, AC37, AC46). Gated on `active`,
@@ -233,6 +259,13 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   useEffect(() => {
     saveVideoRef.current = saveVideo;
   }, [saveVideo]);
+
+  // C5/JOB1: mirrors audienceRef/saveVideoRef exactly - runDraftLoop reads
+  // this at dispatch time, never a closure captured before the last await.
+  const compositionRef = useRef(composition);
+  useEffect(() => {
+    compositionRef.current = composition;
+  }, [composition]);
 
   const courseNameRef = useRef("");
   useEffect(() => {
@@ -475,6 +508,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
         resourcesApiRef,
         audienceRef,
         courseNameRef,
+        compositionRef,
         pushNotice,
         draftAction: draftDiscussionRepliesAction,
       }),
@@ -737,6 +771,9 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     setSaveVideo,
     recordingUrl: capture.recordingUrl,
     recordingBytes: capture.recordingBytes,
+
+    composition,
+    setComposition,
 
     capturing: capture.capturing,
     elapsedSec: capture.elapsedSec,

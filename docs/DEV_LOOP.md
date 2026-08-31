@@ -371,6 +371,61 @@ worse than no log. So:
    directory is not sufficient; this repo has had two separate scanners report
    clean without checking anything.
 
+### It must be enough to actually debug from, by a human OR an LLM
+
+Added 2026-08-31 with the rule itself. Two requirements, both testable.
+
+**1. Self-contained enough to debug without the code in front of you.** The
+realistic use is the owner hitting a problem, downloading the log, and pasting
+it into a chat with an assistant that has never seen this repo. That reader has
+no access to the source, the settings, or the machine. So the log carries:
+
+- a **header block**: the feature, when the run started and ended (or that it is
+  still running), and the app version or commit if reachable;
+- **every setting in force for that run**, by name and value - audience,
+  provider, batch sizes, thresholds, whatever the run actually branched on. A
+  log that omits the settings cannot explain a behaviour that the settings
+  caused, which is most of them;
+- **the environment facts the behaviour depends on** - viewport or capture
+  resolution, browser, whether the tab was hidden - where the feature's own
+  correctness depends on them;
+- a **timestamp on every event**, relative to the run's start, so ordering and
+  duration are both recoverable;
+- **stable event names**. The same condition gets the same wording every time.
+  A reader pattern-matching across two runs cannot do it if the same event is
+  phrased three ways.
+
+The test: hand the log to someone who has never seen the code and ask them to
+answer the diagnostic questions the AC listed. If they need to open a source
+file, the log is incomplete.
+
+**2. Never truncate a reason.** Whatever detail the surfaced error carried, the
+log carries in full - status codes, provider messages, the failing identifier.
+Truncation is what turns a log into a second, less useful copy of the UI.
+
+Keep it pasteable. A run log that is megabytes cannot be handed to an assistant
+or read by a person; if a run can produce that much, the log summarises the
+repetitive middle and keeps every distinct failure verbatim, and says in the
+file that it did so.
+
+### It has to be findable
+
+**The download control lives on the feature's own view, visibly, near where the
+run happens** - not in a settings pane, not behind an overflow menu, not on
+another tab. A log nobody can find has the same value as a log nobody wrote,
+and this repo has already shipped four capabilities that existed and could not
+be reached.
+
+It states what it holds - a row count, an event count, the run's duration -
+rather than being a bare unlabelled icon, so it is obvious there is something in
+there worth downloading. If the feature has runs and the log is empty, say that
+too.
+
+Same visibility discipline as any other control: a real label, not an icon
+alone. The Discussion replies panel's copy button is the cautionary case - it
+shipped working, correct and effectively invisible, because it was a 13px glyph
+in a crowded cluster next to a red destructive button.
+
 ### The vetted mechanics
 
 - **Download:** `triggerFileDownload(blob, filename)` at

@@ -701,6 +701,14 @@ Requirements, so this is buildable rather than aspirational:
   context, they satisfy this rule for that surface - the requirement is that
   context is *possible before generation*, not that every surface grows a
   freeform box.
+- **The obligation belongs to the DESTINATION, never to a launcher.** A surface
+  can now be reached several ways - a tab, a bulk action carrying selected
+  pages, a FAB entry carrying nothing. Putting the context control on one
+  launcher satisfies that route and leaves every other route uncovered,
+  including the plain one where the instructor simply navigates there. So the
+  destination always offers it, and a launcher that happens to carry context
+  pre-fills it. This also keeps the rule checkable: count the destinations, not
+  the entry points.
 
 This applies to surfaces that already exist, not only new ones. Retrofitting
 them is real work and belongs in the backlog rather than being assumed done.

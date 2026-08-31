@@ -74,6 +74,7 @@ import { jsonObjectSlice } from "@/lib/json-slice";
 import { verifyItemUrls, isPlaceholderUrl, type ParsedTopicItem } from "@/lib/workflows/current-events-report";
 import { checkUrlsReachable } from "@/lib/url-reachability";
 import { sanitizeResourceUrl } from "@/lib/urls";
+import { RESOURCE_KINDS, coerceResourceKind, type ResourceKind } from "@/lib/resource-kind";
 
 const MAX_CONCEPTS_PER_RUN = 6;
 const MAX_ITEMS_PER_CONCEPT = 4;
@@ -97,7 +98,13 @@ export interface ResourceLink {
   concept: string;
   title: string;
   url: string;
-  kind: "doc" | "video" | "tutorial";
+  // The full five-way ResourceKind union (src/lib/resource-kind.ts), not
+  // just this action's own default three - see the ResourceProfile comment
+  // below. The DEFAULT call (this action's 3-argument call sites, e.g. the
+  // shipped Learning Resources page) only ever asks the model for doc,
+  // video or tutorial, so "news"/"paper" reach this field only when a
+  // caller opts in with its own resourceProfile argument.
+  kind: ResourceKind;
   /** One line on what the student gets from it. */
   whatYouGet: string;
 }
@@ -123,12 +130,100 @@ interface CandidateResourceItem {
   whatYouGet: string;
 }
 
-/** Coerce an arbitrary "kind" value from the model's JSON to the fixed
- *  three-way union, defaulting an unrecognized value to "doc" - the same
- *  tolerant-coercion posture as parseTextbookFields (never throw on a model
- *  that returns a slightly different string than asked for). */
-function coerceResourceKind(raw: unknown): ResourceLink["kind"] {
-  return raw === "video" || raw === "tutorial" ? raw : "doc";
+// coerceResourceKind used to be a private copy of this exact logic (three-
+// way union only). It is now imported from the shared leaf,
+// src/lib/resource-kind.ts, which discussion-capture.ts also imports for
+// the discussion-reply resources feature - see
+// docs/discussion-reply-resources-acceptance-criteria.md R1. Two
+// implementations of the same coercion is how the last group shipped a
+// tested-but-dead twin (REGRESSION 367 defect 4).
+
+/**
+ * Selects which kind(s) of resource this action searches for and is allowed
+ * to return, and the prose fragment describing them to the grounded call.
+ * Not exported (a "use server" module's export-shape rule technically
+ * permits `export interface`, but this module's exported type surface is
+ * deliberately kept to ResourceLink/FindResourceLinksSuccess alone) - a
+ * caller passes a structurally-matching object literal.
+ *
+ * `kinds` MUST be built from RESOURCE_KINDS (the same constant
+ * coerceResourceKind validates against), never restated as a hand-typed
+ * literal array - a coercion and the prompt that describes it disagreeing
+ * is a failure this repo has already had (R2).
+ */
+interface ResourceProfile {
+  kinds: readonly ResourceKind[];
+  /** e.g. "official documentation, video tutorials, and written tutorials" */
+  resourceTypeSentence: string;
+}
+
+// Today's exact three-kind behaviour (REGRESSION 324). This is the default
+// for every call that omits its own resourceProfile - including the
+// shipped Learning Resources page's call site
+// (learning-resources-generator.ts), which must see byte-identical prompts.
+// Derived from RESOURCE_KINDS by filtering (not a fresh `["doc","video",
+// "tutorial"]` literal) so this list can only ever name kinds the shared
+// leaf actually recognizes.
+const DEFAULT_RESOURCE_KINDS: readonly ResourceKind[] = RESOURCE_KINDS.filter(
+  (kind) => kind === "doc" || kind === "video" || kind === "tutorial"
+);
+
+const DEFAULT_RESOURCE_PROFILE: ResourceProfile = {
+  kinds: DEFAULT_RESOURCE_KINDS,
+  resourceTypeSentence: "official documentation, video tutorials, and written tutorials",
+};
+
+/** Oxford-comma join of already-formatted items - `a`, `a or b`,
+ *  `a, b, or c` - the ONE joining rule shared by every prompt line in this
+ *  file that must enumerate `profile.kinds`, so a future edit to the
+ *  separator or the "or" placement cannot land in one line and miss the
+ *  others. Every caller below supplies its own per-kind formatting first
+ *  (quoted code, or natural-language description) and hands the result
+ *  here to be joined. */
+function oxfordJoin(items: readonly string[]): string {
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} or ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, or ${items[items.length - 1]}`;
+}
+
+/** "doc|video|tutorial" - the structuring call's JSON-schema kind
+ *  alternation (`:222`), built from `kinds` so it can never drift from
+ *  what coerceResourceKind actually accepts. */
+function kindSchemaAlternation(kinds: readonly ResourceKind[]): string {
+  return kinds.join("|");
+}
+
+/** `"doc", "video", or "tutorial"` - the structuring call's prose
+ *  enumeration of the same list (`:224`), same ordering, Oxford comma
+ *  before the final "or", via the shared oxfordJoin above. */
+function kindProseList(kinds: readonly ResourceKind[]): string {
+  return oxfordJoin(kinds.map((k) => `"${k}"`));
+}
+
+/** A natural-language noun phrase per kind, for the prose call's
+ *  description of what it is classifying - never a raw kind code, since
+ *  this line reads as English, not JSON. Record<ResourceKind, string> so
+ *  adding a sixth kind to the leaf without a phrase here is a compile
+ *  error, not a silent gap. */
+const KIND_DESCRIPTION: Record<ResourceKind, string> = {
+  doc: "official documentation",
+  video: "a video tutorial",
+  tutorial: "a written tutorial",
+  news: "a news article",
+  paper: "a paper",
+};
+
+/** "official documentation, a video tutorial, or a written tutorial" - the
+ *  research call's fourth mention of the allowed kinds (previously a bare
+ *  literal a few lines below the resource-type sentence at `:257`; the AC's
+ *  R2 named only three locations, but this fourth one tells the model the
+ *  same closed set in different words and is exactly the same
+ *  coercion-versus-prompt drift risk). Built from the SAME `oxfordJoin`
+ *  used by kindProseList, so all four kind-list mentions in this file
+ *  trace back to one joining rule and one source array (`profile.kinds`,
+ *  itself derived from RESOURCE_KINDS) and cannot drift from each other. */
+function kindDescriptionList(kinds: readonly ResourceKind[]): string {
+  return oxfordJoin(kinds.map((k) => KIND_DESCRIPTION[k]));
 }
 
 // Finding 2: a gate-passing URL can still render as a dead anchor.
@@ -209,7 +304,8 @@ function parseResourceItems(text: string, maxItems: number): CandidateResourceIt
  */
 async function structureProseIntoResourceItems(
   prose: string,
-  provider: LlmProvider
+  provider: LlmProvider,
+  profile: ResourceProfile
 ): Promise<CandidateResourceItem[]> {
   if (!prose.trim()) return [];
 
@@ -219,9 +315,9 @@ RESEARCH NOTES:
 ${prose.slice(0, PER_CONCEPT_STRUCTURE_INPUT_CHAR_CAP)}
 
 Return ONLY valid JSON in this exact shape:
-{"items":[{"title":"...","url":"...","kind":"doc|video|tutorial","whatYouGet":"..."}]}
+{"items":[{"title":"...","url":"...","kind":"${kindSchemaAlternation(profile.kinds)}","whatYouGet":"..."}]}
 
-"kind" must be exactly one of "doc", "video", or "tutorial". No markdown fences, no commentary. If the notes contain no items, return {"items":[]}.`;
+"kind" must be exactly one of ${kindProseList(profile.kinds)}. No markdown fences, no commentary. If the notes contain no items, return {"items":[]}.`;
 
   const result = await callLlm(
     {
@@ -247,16 +343,17 @@ Return ONLY valid JSON in this exact shape:
 async function researchConceptOnce(
   concept: string,
   courseKind: string,
-  provider: LlmProvider
+  provider: LlmProvider,
+  profile: ResourceProfile
 ): Promise<{ items: CandidateResourceItem[]; sources: Source[] }> {
   const kindLabel = courseKind.trim() ? ` for a ${courseKind.trim()} course` : "";
   const prompt = `You are an expert educator finding learning resources${kindLabel} for a student studying one concept.
 
 CONCEPT: ${concept}
 
-Search the web first, then report up to ${MAX_ITEMS_PER_CONCEPT} real resources for a student learning this concept: official documentation, video tutorials, and written tutorials, appropriate to the course level.
+Search the web first, then report up to ${MAX_ITEMS_PER_CONCEPT} real resources for a student learning this concept: ${profile.resourceTypeSentence}, appropriate to the course level.
 
-For each resource you find, write a short paragraph in plain prose giving: the resource's title, whether it is official documentation, a video tutorial, or a written tutorial, the exact URL of the page you visited to find it, and one sentence on what a student gets from it.
+For each resource you find, write a short paragraph in plain prose giving: the resource's title, whether it is ${kindDescriptionList(profile.kinds)}, the exact URL of the page you visited to find it, and one sentence on what a student gets from it.
 
 If a web search turns up nothing relevant for this concept, say so plainly instead of inventing a resource.`;
 
@@ -274,7 +371,7 @@ If a web search turns up nothing relevant for this concept, say so plainly inste
   }
 
   const sources = grounded.sources ?? [];
-  const items = await structureProseIntoResourceItems(grounded.text, provider);
+  const items = await structureProseIntoResourceItems(grounded.text, provider, profile);
 
   return { items, sources };
 }
@@ -300,16 +397,17 @@ async function researchConceptWithRetry(
   concept: string,
   courseKind: string,
   provider: LlmProvider,
-  hasRetryBudget: () => boolean
+  hasRetryBudget: () => boolean,
+  profile: ResourceProfile
 ): Promise<{ items: CandidateResourceItem[]; sources: Source[]; retried: boolean }> {
   try {
-    const first = await researchConceptOnce(concept, courseKind, provider);
+    const first = await researchConceptOnce(concept, courseKind, provider, profile);
     if (first.items.length > 0 || !hasRetryBudget()) return { ...first, retried: false };
-    const second = await researchConceptOnce(concept, courseKind, provider);
+    const second = await researchConceptOnce(concept, courseKind, provider, profile);
     return { ...second, retried: true };
   } catch (err) {
     if (!hasRetryBudget()) throw err;
-    const second = await researchConceptOnce(concept, courseKind, provider);
+    const second = await researchConceptOnce(concept, courseKind, provider, profile);
     return { ...second, retried: true };
   }
 }
@@ -359,7 +457,19 @@ export async function findResourceLinksForConceptsAction(
   // field is meant to be passed by a real caller - both default to the real
   // clock and the real budget - so every existing 3-argument call site (the
   // sibling generator's call in lms-generation.ts) is unaffected.
-  options?: { now?: () => number; retryBudgetMs?: number }
+  options?: { now?: () => number; retryBudgetMs?: number },
+  // R2: an optional resource-profile argument selecting (a) the prose
+  // call's resource-type sentence and (b) the structuring call's allowed-
+  // kind list. Defaults to DEFAULT_RESOURCE_PROFILE (today's exact
+  // three-kind behaviour), so every existing 3- and 4-argument call site -
+  // the shipped Learning Resources page's call in
+  // learning-resources-generator.ts among them - is byte-unaffected. A
+  // widened profile (e.g. all five RESOURCE_KINDS, for the discussion-reply
+  // resources feature) is passed positionally here, never merged into
+  // `options` above - that object is a test-only clock/budget seam (see its
+  // own doc comment), and a resource-profile IS meant to be passed by a
+  // real caller.
+  resourceProfile?: ResourceProfile
 ): Promise<FindResourceLinksSuccess | { error: string }> {
   // The embedded provider makes no network call, so it can neither search
   // nor verify a link (D5) - short-circuit BEFORE any callLlm, mirroring
@@ -393,11 +503,12 @@ export async function findResourceLinksForConceptsAction(
     const retryBudgetMs = options?.retryBudgetMs ?? RETRY_BUDGET_MS;
     const startedAt = now();
     const hasRetryBudget = () => now() - startedAt < retryBudgetMs;
+    const profile = resourceProfile ?? DEFAULT_RESOURCE_PROFILE;
 
     const notes: string[] = [];
     const settled = await Promise.allSettled(
       boundedConcepts.map((concept) =>
-        researchConceptWithRetry(concept, courseKind ?? "", provider, hasRetryBudget)
+        researchConceptWithRetry(concept, courseKind ?? "", provider, hasRetryBudget, profile)
       )
     );
 

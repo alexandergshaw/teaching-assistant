@@ -13,13 +13,32 @@
 // wire-byte unit the server enforces (AC10a), so that unit is never restated.
 
 import { sumBase64WireBytes } from "@/lib/upload-budget";
+import { coerceResourceKind, type ResourceKind } from "@/lib/resource-kind";
 
 // The three constants the SERVER also enforces live in set B's
 // src/lib/discussion-reply-prompt.ts and are re-exported from there, never
 // restated here - see AC8's "split constants into the leaf" rule. This import
 // fails `tsc` until that file lands; that is expected for this wave (see
 // docs/discussion-reply-capture-acceptance-criteria.md section 12).
-export { EXTRACT_BATCH_SIZE, DRAFT_BATCH_SIZE, MAX_POST_CHARS } from "@/lib/discussion-reply-prompt";
+//
+// RESOURCE_BATCH_SIZE and RESOURCE_CONCEPT_CHARS
+// (docs/discussion-reply-resources-acceptance-criteria.md R4a/R4c) are R-C's
+// additions to the same leaf, landing concurrently in this same wave -
+// re-exported here rather than restated, for the same one-owner,
+// one-direction reason (see REGRESSION 367 defect 4 - serializeReplyTable,
+// deserializeReplyTable and moveRow each shipped twice in this same
+// feature, and the tested copy was not the one that ran).
+//
+// F2 fix (fixer pass): this file used to also import `deriveResourceConcept`
+// and wrap it in a `conceptFromPost` function whose only caller was its own
+// test - `gatherReplyResourcesAction` (src/app/actions/discussion-replies.ts,
+// a "use server" module that cannot import from a client component file
+// anyway) calls `deriveResourceConcept` directly. That made the wrapper's
+// author-exclusion test guard a function nothing ran, leaving the live path
+// unenforced. The wrapper and its import are deleted; the author-exclusion
+// guarantee is now pinned by a test against the live boundary itself, in
+// discussion-replies.test.ts.
+export { EXTRACT_BATCH_SIZE, DRAFT_BATCH_SIZE, MAX_POST_CHARS, RESOURCE_BATCH_SIZE, RESOURCE_CONCEPT_CHARS } from "@/lib/discussion-reply-prompt";
 
 // ---------------------------------------------------------------------------
 // AC8: capture-only constants. These never leave the client, so they are NOT
@@ -368,6 +387,23 @@ export function shouldTickerRun(args: {
 
 export type ReplyRowState = "pending" | "drafting" | "ready" | "failed";
 
+// ---------------------------------------------------------------------------
+// docs/discussion-reply-resources-acceptance-criteria.md R3: resources
+// attached to a reply. `resourceState` is a SECOND, ORTHOGONAL state machine
+// from `state` above - a row can be `ready` + `searching`, `ready` +
+// `failed`, `failed` + `done`. It deliberately never appears in the Status
+// badge (R3a); it renders beneath the reply instead. `note` is a UI
+// affordance for choosing between candidates and is never copied - see
+// replyClipboardText below (R9b).
+// ---------------------------------------------------------------------------
+
+export interface ReplyResource {
+  title: string;
+  url: string;
+  kind: ResourceKind;
+  note?: string;
+}
+
 export interface ReplyRow {
   id: string; // opaque, minted once: `disc-${now}-${counter}`. See AC11b.
   author: string;
@@ -379,6 +415,9 @@ export interface ReplyRow {
   error: string | null; // set only when state === "failed"
   firstSeenAt: number; // ms epoch; the "Captured" column and sort key
   order: number; // manual position; see AC14
+  resources?: ReplyResource[]; // R3
+  resourceState?: "idle" | "searching" | "done" | "failed"; // R3, R3a
+  resourceError?: string | null; // set only when resourceState === "failed", R3c
 }
 
 export type ReplySort = "captured-asc" | "captured-desc" | "name-asc" | "name-desc" | "custom";
@@ -544,6 +583,7 @@ export function moveRow(displayedRows: ReadonlyArray<ReplyRow>, currentSort: Rep
 export const DISCUSSION_TABLE_VERSION = 1;
 
 const VALID_STATES = new Set<string>(["pending", "drafting", "ready", "failed"]);
+const VALID_RESOURCE_STATES = new Set<string>(["idle", "searching", "done", "failed"]);
 
 export function serializeReplyTable(rows: ReadonlyArray<ReplyRow>): string {
   const normalized = rows.map((r) => {
@@ -554,7 +594,28 @@ export function serializeReplyTable(rows: ReadonlyArray<ReplyRow>): string {
     // `error` string left on a row that was later re-drafted successfully
     // does not resurrect itself as a mystery message after a reload.
     const state: ReplyRowState = r.state === "drafting" ? "pending" : r.state;
-    return { ...r, state, error: state === "failed" ? r.error : null };
+
+    // R3c: the same rule extended to the resource state machine. Nothing is
+    // in flight after a reload, so `searching` is written as `idle`.
+    // `resourceError` is preserved only for `failed` rows, for the same
+    // reason `error` above is - a stale message must not resurrect itself
+    // after the row's resources are later replaced successfully. A row that
+    // has never touched the resource feature at all (`resourceState` still
+    // `undefined`) writes no `resourceState`/`resourceError` keys, mirroring
+    // `postedAt`'s existing "absent stays absent" treatment of an optional
+    // field elsewhere in this same function - a row's resource fields do not
+    // spring into existence just because it went through a save/load cycle.
+    const resourceState: ReplyRow["resourceState"] = r.resourceState === "searching" ? "idle" : r.resourceState;
+    const hasResources = Array.isArray(r.resources) && r.resources.length > 0;
+
+    return {
+      ...r,
+      state,
+      error: state === "failed" ? r.error : null,
+      resources: hasResources ? r.resources : undefined, // JSON.stringify drops undefined keys - R3c "only when non-empty"
+      resourceState,
+      resourceError: resourceState === "failed" ? (r.resourceError ?? null) : resourceState === undefined ? undefined : null,
+    };
   });
   return JSON.stringify({ v: DISCUSSION_TABLE_VERSION, rows: normalized });
 }
@@ -590,11 +651,140 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
       const firstSeenAt = typeof r.firstSeenAt === "number" && Number.isFinite(r.firstSeenAt) ? r.firstSeenAt : 0;
       const order = typeof r.order === "number" && Number.isFinite(r.order) ? r.order : index;
 
-      rows.push({ id, author, post, postedAt, reply, userEdited, state, error, firstSeenAt, order });
+      const resources = coerceReplyResources(r.resources);
+
+      // R3c/R3d: `resourceState` falls back to "idle" on anything OUTSIDE the
+      // four-member set - but a row whose raw JSON never had the key at all
+      // (r.resourceState === undefined) is the "never touched the resource
+      // feature" case, not "searched and produced an invalid value", and
+      // must stay `undefined` so it round-trips identically to a row that
+      // predates this feature entirely (mirrors `postedAt`'s own
+      // absent-stays-absent treatment above).
+      let resourceState: ReplyRow["resourceState"];
+      if (r.resourceState === undefined) {
+        resourceState = undefined;
+      } else {
+        const resourceStateRaw = typeof r.resourceState === "string" ? r.resourceState : "";
+        resourceState = VALID_RESOURCE_STATES.has(resourceStateRaw) ? (resourceStateRaw as NonNullable<ReplyRow["resourceState"]>) : "idle";
+      }
+      const resourceError: ReplyRow["resourceError"] =
+        resourceState === undefined ? undefined : resourceState === "failed" && typeof r.resourceError === "string" ? r.resourceError : null;
+
+      rows.push({ id, author, post, postedAt, reply, userEdited, state, error, firstSeenAt, order, resources, resourceState, resourceError });
     });
 
     return rows;
   } catch {
     return [];
   }
+}
+
+// R3c: defensive coercion of a persisted `resources` array. Never throws -
+// follows deserializeReplyTable's own discipline. A non-array yields
+// `undefined` (not `[]`) so a row that legitimately has never had resources
+// stays distinguishable from a row an instructor emptied out (which
+// serializeReplyTable also normalizes to an absent key, not `[]` - see R3d).
+// An entry whose `title` or `url` is not a non-empty string is dropped
+// entirely; `url` is NOT re-sanitized here - it already cleared
+// `sanitizeResourceUrl` before it was written by the gathering pass.
+function coerceReplyResources(raw: unknown): ReplyResource[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ReplyResource[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const title = typeof e.title === "string" ? e.title : "";
+    const url = typeof e.url === "string" ? e.url : "";
+    if (!title || !url) continue;
+    const kind = coerceResourceKind(e.kind);
+    const note = typeof e.note === "string" && e.note ? e.note : undefined;
+    out.push(note !== undefined ? { title, url, kind, note } : { title, url, kind });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// R9b: the copy path. A PURE function, following cell-copy.ts's
+// columnTextForCopy convention, so it is testable in this node-env suite
+// even though `handleCopy` itself (which calls navigator.clipboard) is not.
+// Bare URLs on their own lines, NEVER markdown - a discussion composer
+// pastes `[title](url)` verbatim rather than rendering a link. `note` is
+// never copied - it is a UI affordance for choosing between candidates, not
+// something to paste to a student. No trailing newline in any shape.
+// ---------------------------------------------------------------------------
+
+export function replyClipboardText(row: { reply: string; resources?: ReplyResource[] }): string {
+  const resourceLines = (row.resources ?? []).map((r) => `${r.title} - ${r.url}`);
+  if (row.reply && resourceLines.length > 0) {
+    return [row.reply, "", ...resourceLines].join("\n");
+  }
+  if (row.reply) return row.reply;
+  return resourceLines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Reply width UX pass (docs, scratchpad note "reply-width-ux.md" section 5d,
+// target #2 "Copy every reply (N)"): the table-level export. CALLS
+// replyClipboardText above, never reimplements it - two implementations of
+// the same "what does one row's clipboard text look like" rule is exactly
+// the REGRESSION 367 defect 4 shape (a tested-but-dead twin), and a
+// duplicate here would also make this function's own test a tautology
+// against replyClipboardText's (the "refactors disarm tests" lesson, in
+// reverse: consolidating INTO one shared call must not make the CALLER's
+// test meaningless either, so its oracle below is frozen literal strings,
+// never re-derived from replyClipboardText's implementation).
+//
+// A row with nothing to copy (empty reply AND no resources -
+// replyClipboardText(row) === "") is skipped entirely, mirroring the
+// per-row copy button's own `disabled` condition (R9a) - a 40-row table
+// with 12 still-pending rows should not paste 12 bare author names with
+// nothing under them.
+// ---------------------------------------------------------------------------
+
+export function tableClipboardText(rows: ReadonlyArray<{ author: string; reply: string; resources?: ReplyResource[] }>): string {
+  return rows
+    .map((row) => {
+      const body = replyClipboardText(row);
+      return body ? `${row.author}\n${body}` : "";
+    })
+    .filter((block) => block.length > 0)
+    .join("\n\n");
+}
+
+// ---------------------------------------------------------------------------
+// REGRESSION 258's class, taken out of the panel and made testable. The
+// panel's `Redraft every reply` arms via `confirmArming.ts`'s
+// isConfirmArmed(armedFor, signature) - the confirm stays armed only while
+// `signature` (recomputed every render from live state) still equals the
+// value it was armed for. `redraftAll` (useDiscussionReplies.ts, not owned
+// by this file) dispatches every draft using BOTH `audienceRef.current` AND
+// `courseNameRef.current` (the latter derived from `courseId`) - so BOTH are
+// inputs the armed action actually consumes, and BOTH must be in the
+// signature or changing one after arming silently redrafts under settings
+// the user never re-confirmed. This shipped with only rowCount + audience;
+// courseId was the omitted field (the live bug this function's own fix and
+// test exist for).
+//
+// Pulled out as a named, exported, pure function - rather than left as an
+// inline template literal in DiscussionRepliesPanel.tsx - specifically so it
+// is unit-testable at all: vitest in this repo is node-env and renders no
+// component, so a template literal inside a component body has no test
+// surface, and "the panel builds this string correctly" was previously
+// something only a human reading the code could check.
+// ---------------------------------------------------------------------------
+
+export interface DraftingArmSignatureArgs {
+  rowCount: number;
+  audience: string;
+  courseId: string;
+}
+
+/** Every field is a drafting input `redraftAll` actually reads. Adding a
+ * FOURTH drafting control to the panel in the future means adding it HERE
+ * too, or it silently reopens this exact bug for that new control - this
+ * function's own test asserts that varying each current field in isolation
+ * changes the output, which is the property that would have caught the
+ * shipped defect (an omitted field), not just a wrong separator. */
+export function draftingArmSignature(args: DraftingArmSignatureArgs): string {
+  return `${args.rowCount}|${args.audience}|${args.courseId}`;
 }

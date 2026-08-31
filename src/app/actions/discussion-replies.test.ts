@@ -24,12 +24,21 @@ vi.mock("@/lib/llm", async () => {
   };
 });
 
+// gatherReplyResourcesAction reuses findResourceLinksForConceptsAction
+// wholesale rather than calling an LLM itself - mock the reused action, not
+// callLlm, for that action's own tests below.
+vi.mock("./learning-resource-links", () => ({
+  findResourceLinksForConceptsAction: vi.fn(),
+}));
+
 import { requireOwner } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./shared";
 import { callLlm } from "@/lib/llm";
+import { findResourceLinksForConceptsAction } from "./learning-resource-links";
 import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
-import { EXTRACT_BATCH_SIZE, DRAFT_BATCH_SIZE } from "@/lib/discussion-reply-prompt";
-import { extractDiscussionPostsAction, draftDiscussionRepliesAction } from "./discussion-replies";
+import { EXTRACT_BATCH_SIZE, DRAFT_BATCH_SIZE, RESOURCE_BATCH_SIZE } from "@/lib/discussion-reply-prompt";
+import { RESOURCE_KINDS } from "@/lib/resource-kind";
+import { extractDiscussionPostsAction, draftDiscussionRepliesAction, gatherReplyResourcesAction } from "./discussion-replies";
 
 const OWNER = { id: "owner-1", email: "owner@example.com" };
 
@@ -397,5 +406,229 @@ describe("draftDiscussionRepliesAction", () => {
     } as never);
     const result = await draftDiscussionRepliesAction(posts, "students", "", "gemini");
     expect(result).toEqual({ replies: [{ id: "row-a", reply: "Valid." }] });
+  });
+});
+
+describe("gatherReplyResourcesAction", () => {
+  function mockLinksOnce(links: Array<Record<string, unknown>>, degraded = false) {
+    vi.mocked(findResourceLinksForConceptsAction).mockResolvedValueOnce({
+      links,
+      degraded,
+      droppedUncorroborated: 0,
+      droppedPlaceholder: 0,
+      droppedUnreachable: 0,
+      notes: [],
+    } as never);
+  }
+
+  it("requires ownership - a rejected requireOwner is caught and returned as { error }, never thrown", async () => {
+    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
+    await expect(gatherReplyResourcesAction([{ id: "p1", text: "Recursion" }], "", "gemini")).resolves.toEqual({
+      error: "Not authorized. Sign in with an approved account.",
+    });
+    expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a batch over RESOURCE_BATCH_SIZE without calling the reused action", async () => {
+    const tooMany = Array.from({ length: RESOURCE_BATCH_SIZE + 1 }, (_, i) => ({ id: `p${i}`, text: `Post ${i}` }));
+    const result = await gatherReplyResourcesAction(tooMany, "", "gemini");
+    expect(result).toEqual({ error: "Too many posts in one batch." });
+    expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
+  });
+
+  it("R4e: short-circuits for the embedded provider without calling the reused action - degraded, empty resources for every id", async () => {
+    const result = await gatherReplyResourcesAction(
+      [
+        { id: "p1", text: "Recursion" },
+        { id: "p2", text: "Sorting" },
+      ],
+      "",
+      "embedded"
+    );
+    expect(result).toEqual({
+      resources: [
+        { id: "p1", resources: [] },
+        { id: "p2", resources: [] },
+      ],
+      degraded: true,
+    });
+    expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
+  });
+
+  it("returns an entry for every id with no call at all when every post's concept is empty", async () => {
+    const result = await gatherReplyResourcesAction(
+      [
+        { id: "p1", text: "   " },
+        { id: "p2", text: "" },
+      ],
+      "",
+      "gemini"
+    );
+    expect(result).toEqual({
+      resources: [
+        { id: "p1", resources: [] },
+        { id: "p2", resources: [] },
+      ],
+      degraded: false,
+    });
+    expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
+  });
+
+  it("R4b: keys results back by CONCEPT STRING, not array index - a dropped empty-concept entry must not shift the mapping", async () => {
+    mockLinksOnce([{ concept: "Binary search trees", title: "BST guide", url: "https://a.example/bst", kind: "doc", whatYouGet: "" }]);
+
+    const result = await gatherReplyResourcesAction(
+      [
+        { id: "p1", text: "   " }, // empty concept - dropped before the call
+        { id: "p2", text: "Binary search trees" },
+      ],
+      "",
+      "gemini"
+    );
+
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      const byId = new Map(result.resources.map((r) => [r.id, r.resources]));
+      expect(byId.get("p1")).toEqual([]);
+      expect(byId.get("p2")).toEqual([{ title: "BST guide", url: "https://a.example/bst", kind: "doc" }]);
+    }
+
+    // The reused action must only ever receive the ONE non-empty concept -
+    // the empty entry was dropped, not passed through as "".
+    expect(findResourceLinksForConceptsAction).toHaveBeenCalledWith(
+      ["Binary search trees"],
+      "",
+      "gemini",
+      undefined,
+      expect.objectContaining({ kinds: RESOURCE_KINDS })
+    );
+  });
+
+  it("R4b: two posts whose concept text is identical receive the SAME links, not different ones", async () => {
+    mockLinksOnce([
+      { concept: "Recursion basics", title: "Video A", url: "https://a.example/a", kind: "video", whatYouGet: "" },
+      { concept: "Recursion basics", title: "Doc B", url: "https://b.example/b", kind: "doc", whatYouGet: "" },
+    ]);
+
+    const result = await gatherReplyResourcesAction(
+      [
+        { id: "p1", text: "Recursion basics" },
+        { id: "p2", text: "Recursion basics" },
+      ],
+      "",
+      "gemini"
+    );
+
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      const byId = new Map(result.resources.map((r) => [r.id, r.resources]));
+      const p1 = byId.get("p1");
+      const p2 = byId.get("p2");
+      expect(p1).toEqual(p2);
+      expect(p1?.map((r) => r.title).sort()).toEqual(["Doc B", "Video A"]);
+    }
+  });
+
+  it("R4f: caps at 3 links per post even when the reused action returns more for that concept", async () => {
+    mockLinksOnce([
+      { concept: "Sorting algorithms", title: "T1", url: "https://x/1", kind: "doc", whatYouGet: "" },
+      { concept: "Sorting algorithms", title: "T2", url: "https://x/2", kind: "doc", whatYouGet: "" },
+      { concept: "Sorting algorithms", title: "T3", url: "https://x/3", kind: "doc", whatYouGet: "" },
+      { concept: "Sorting algorithms", title: "T4", url: "https://x/4", kind: "doc", whatYouGet: "" },
+      { concept: "Sorting algorithms", title: "T5", url: "https://x/5", kind: "doc", whatYouGet: "" },
+    ]);
+
+    const result = await gatherReplyResourcesAction([{ id: "p1", text: "Sorting algorithms" }], "", "gemini");
+
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      expect(result.resources[0].resources).toHaveLength(3);
+      expect(result.resources[0].resources.map((r) => r.title)).toEqual(["T1", "T2", "T3"]);
+    }
+  });
+
+  it("carries an entry for an id that yielded nothing (searched, found none) alongside one that got links", async () => {
+    mockLinksOnce([{ concept: "Photosynthesis", title: "Overview", url: "https://a/1", kind: "doc", whatYouGet: "" }]);
+
+    const result = await gatherReplyResourcesAction(
+      [
+        { id: "p1", text: "Photosynthesis" },
+        { id: "p2", text: "Mitosis" },
+      ],
+      "",
+      "gemini"
+    );
+
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      const byId = new Map(result.resources.map((r) => [r.id, r.resources]));
+      expect(byId.get("p1")).toHaveLength(1);
+      expect(byId.get("p2")).toEqual([]);
+    }
+  });
+
+  it("carries whatYouGet through as the resource's optional note, omitted (not empty-string) when blank", async () => {
+    mockLinksOnce([
+      { concept: "Something", title: "T1", url: "https://x/1", kind: "doc", whatYouGet: "Explains the whole thing simply." },
+      { concept: "Something", title: "T2", url: "https://x/2", kind: "video", whatYouGet: "" },
+    ]);
+    const result = await gatherReplyResourcesAction([{ id: "p1", text: "Something" }], "", "gemini");
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      expect(result.resources[0].resources[0].note).toBe("Explains the whole thing simply.");
+      expect(result.resources[0].resources[1].note).toBeUndefined();
+    }
+  });
+
+  it("propagates the reused action's error verbatim, with no generic message layered on top", async () => {
+    vi.mocked(findResourceLinksForConceptsAction).mockResolvedValueOnce({
+      error: "Provide at least one concept to search for learning resources.",
+    } as never);
+    const result = await gatherReplyResourcesAction([{ id: "p1", text: "Something" }], "", "gemini");
+    expect(result).toEqual({ error: "Provide at least one concept to search for learning resources." });
+  });
+
+  it("forwards degraded: true from the reused action", async () => {
+    mockLinksOnce([], true);
+    const result = await gatherReplyResourcesAction([{ id: "p1", text: "Something" }], "", "gemini");
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      expect(result.degraded).toBe(true);
+      expect(result.resources).toEqual([{ id: "p1", resources: [] }]);
+    }
+  });
+
+  it("F2: never includes the author's name in the concept sent to the resource search, even when the caller's post objects carry one", async () => {
+    // gatherReplyResourcesAction's own `posts` parameter type is
+    // `Array<{ id: string; text: string }>` (no `author` field) - this
+    // fixture is typed WIDER than that on purpose, mirroring the deleted
+    // conceptFromPost test's own technique, so passing it through a
+    // same-shaped variable (not an object literal, which TS's excess-
+    // property check would catch) proves the LIVE derivation
+    // (deriveResourceConcept(p.text) at discussion-replies.ts:258) never
+    // reads an `author` field even when one is sitting right next to `text`
+    // on the object it was handed - the guarantee AC R4c and F2 require,
+    // pinned against the boundary production actually calls.
+    mockLinksOnce([]);
+    const posts: Array<{ id: string; text: string; author: string }> = [
+      { id: "p1", text: "The trolley problem is a classic thought experiment.", author: "Maria Alvarez" },
+    ];
+    await gatherReplyResourcesAction(posts, "", "gemini");
+    expect(findResourceLinksForConceptsAction).toHaveBeenCalledTimes(1);
+    const concepts = vi.mocked(findResourceLinksForConceptsAction).mock.calls[0][0];
+    expect(concepts).toEqual(["The trolley problem is a classic thought experiment."]);
+    expect(concepts.some((c) => c.includes("Maria"))).toBe(false);
+  });
+
+  it("passes courseName through as the reused action's courseKind argument, and a five-kind resource profile derived from RESOURCE_KINDS", async () => {
+    mockLinksOnce([]);
+    await gatherReplyResourcesAction([{ id: "p1", text: "Something" }], "Intro to CS", "gemini");
+    expect(findResourceLinksForConceptsAction).toHaveBeenCalledWith(
+      ["Something"],
+      "Intro to CS",
+      "gemini",
+      undefined,
+      { kinds: RESOURCE_KINDS, resourceTypeSentence: expect.any(String) }
+    );
   });
 });

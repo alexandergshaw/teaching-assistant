@@ -8,15 +8,61 @@
 // (src/app/actions/discussion-replies.ts, for everything here). See AC35 in
 // docs/discussion-reply-capture-acceptance-criteria.md.
 //
-// EXTRACT_BATCH_SIZE, DRAFT_BATCH_SIZE and MAX_POST_CHARS live HERE rather
-// than in discussion-capture.ts specifically because the server enforces them
-// too (AC8) - one owner, one direction, no cycle. A client batching more
-// frames/posts than the server accepts would fail every single request with a
-// generic message, and no gate in this repo would catch that drift.
+// EXTRACT_BATCH_SIZE, DRAFT_BATCH_SIZE, MAX_POST_CHARS and RESOURCE_BATCH_SIZE
+// live HERE rather than in discussion-capture.ts specifically because the
+// server enforces them too (AC8) - one owner, one direction, no cycle. A
+// client batching more frames/posts than the server accepts would fail every
+// single request with a generic message, and no gate in this repo would
+// catch that drift.
 
 export const EXTRACT_BATCH_SIZE = 6;
 export const DRAFT_BATCH_SIZE = 5;
 export const MAX_POST_CHARS = 4000;
+
+// docs/discussion-reply-resources-acceptance-criteria.md R4a: the resource
+// pass's own batch size. Deliberately NOT DRAFT_BATCH_SIZE - raising DRAFT_
+// BATCH_SIZE later (say, to 7) would make gatherReplyResourcesAction's own
+// reused call (findResourceLinksForConceptsAction) silently `.slice(0,
+// MAX_CONCEPTS_PER_RUN)` the 7th concept away with no error surfaced
+// anywhere, and that post would carry no resources with nothing to explain
+// why. Must never exceed that action's own MAX_CONCEPTS_PER_RUN (6, private
+// to src/app/actions/learning-resource-links.ts).
+export const RESOURCE_BATCH_SIZE = 5;
+
+// docs/discussion-reply-resources-acceptance-criteria.md R4c: the character
+// cap `deriveResourceConcept` below truncates a post's text to, on a word
+// boundary, before it is ever sent to the resource-search action as a
+// "concept". This is the ONE implementation of that rule (normalise
+// whitespace, truncate to 400 chars on a word boundary, author name never
+// included) - this leaf owns it, and both consumers import it FROM here:
+// `discussion-capture.ts` (a client component module) re-exports
+// RESOURCE_CONCEPT_CHARS above rather than restating it, and
+// `discussion-replies.ts` (a "use server" action) imports
+// `deriveResourceConcept` directly and calls it on the live path. There used
+// to be a second, client-side wrapper (`conceptFromPost`) that restated this
+// same rule for the author-exclusion guarantee alone; it was deleted as a
+// tested-but-dead twin - nothing but its own test ever called it - and that
+// guarantee is now pinned by a test against the live boundary instead
+// (discussion-replies.test.ts). If this cap ever changes, there is exactly
+// one place to change it: here.
+export const RESOURCE_CONCEPT_CHARS = 400;
+
+/**
+ * Turn one discussion post's raw text into a search "concept": whitespace
+ * collapsed to single spaces, trimmed, then truncated to
+ * RESOURCE_CONCEPT_CHARS on a word boundary (never mid-word) when it is
+ * longer. Never includes an author name - the caller here
+ * (gatherReplyResourcesAction) is only ever handed `{ id, text }`, so there
+ * is no author field to accidentally fold in. Pure; empty input (or input
+ * that normalises to nothing) returns "".
+ */
+export function deriveResourceConcept(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= RESOURCE_CONCEPT_CHARS) return normalized;
+  const truncated = normalized.slice(0, RESOURCE_CONCEPT_CHARS);
+  const lastSpace = truncated.lastIndexOf(" ");
+  return lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
+}
 
 export type DiscussionAudience = "peers" | "students";
 

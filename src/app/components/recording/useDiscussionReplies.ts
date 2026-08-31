@@ -55,6 +55,7 @@ import {
 import { startFrameTicker, type FrameTicker } from "@/lib/frame-ticker";
 import { useDiscussionCapture } from "./useDiscussionCapture";
 import { useReplyRows } from "./useReplyRows";
+import { useReplyResources } from "./useReplyResources";
 import {
   extractDiscussionPostsAction,
   draftDiscussionRepliesAction,
@@ -115,6 +116,16 @@ export interface UseDiscussionRepliesReturn {
   redraftAll: () => void;
   clearTable: () => void;
   drafting: boolean;
+
+  // docs/discussion-reply-resources-acceptance-criteria.md R12: the three
+  // fields useReplyResources.ts (set R-D) seals in its own
+  // UseReplyResourcesReturn, forwarded straight through. `removeResource`
+  // is a plain row mutator (no queue involvement) forwarded directly from
+  // C2's useReplyRows the same way editReply/removeRow above already are.
+  resourceQueueSize: number;
+  findMissing: () => void;
+  retryResources: (id: string) => void;
+  removeResource: (id: string, url: string) => void;
 }
 
 // A drafting-queue entry. `force` bypasses `isDispatchableDraftItem`'s
@@ -495,6 +506,25 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     }
   }, [pushNotice, enqueueDrafts, waitForWake]);
 
+  // --- R-D: the resource-search queue (useReplyResources.ts). Instantiated
+  // here - ahead of runDraftLoop below - so runDraftLoop's R6 trigger can
+  // reach it through a ref the same way it already reaches rowsApi. Passed
+  // plain reactive values (capturing/pendingFrames/extracting) rather than
+  // refs: the hook mirrors them itself, the same way this file mirrors its
+  // own captureRef/rowsApiRef for its two loops. ---
+  const resourcesApi = useReplyResources({
+    rowsApi,
+    capturing: capture.capturing,
+    pendingFrames: capture.pendingFrames,
+    extracting,
+    courseNameRef,
+    pushNotice,
+  });
+  const resourcesApiRef = useRef(resourcesApi);
+  useEffect(() => {
+    resourcesApiRef.current = resourcesApi;
+  }, [resourcesApi]);
+
   // --- The drafting queue (AC25-AC28, AC52). Also runs for the hook's whole
   // lifetime, independently of the extraction loop - Next.js serializes
   // client-dispatched Server Functions anyway, so the two interleave rather
@@ -610,6 +640,11 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
           resolveEditedDuringDispatch(reply.id);
         } else {
           rowsApiRef.current.applyReply(reply.id, reply.reply);
+          // R6: the ONE trigger point - enqueue a resource search only
+          // after a model-authored reply lands. Never on the discard path
+          // above, which re-applies the user's own text and searched
+          // nothing new.
+          resourcesApiRef.current.enqueueResources([reply.id]);
         }
       }
       const missing = ids.filter((id) => !returned.has(id));
@@ -803,6 +838,13 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     rowsApiRef.current.removeRow(id);
   }, []);
 
+  // R10: a plain row mutator, forwarded the same way editReply/removeRow
+  // above are - no queue involvement, so it goes straight to C2 rather than
+  // through resourcesApi.
+  const removeResource = useCallback((id: string, url: string) => {
+    rowsApiRef.current.removeResource(id, url);
+  }, []);
+
   const retryRow = useCallback(
     (id: string) => {
       // S1: force wins here - Retry is a targeted, single-row explicit user
@@ -888,5 +930,10 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     redraftAll,
     clearTable,
     drafting,
+
+    resourceQueueSize: resourcesApi.resourceQueueSize,
+    findMissing: resourcesApi.findMissing,
+    retryResources: resourcesApi.retryResources,
+    removeResource,
   };
 }

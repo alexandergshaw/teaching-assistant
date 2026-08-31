@@ -31,6 +31,7 @@ import { callLlm } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { checkUrlsReachable } from "@/lib/url-reachability";
 import { tokenizeInline } from "@/lib/docx-blocks";
+import { RESOURCE_KINDS, type ResourceKind } from "@/lib/resource-kind";
 import { findResourceLinksForConceptsAction } from "./learning-resource-links";
 
 // The grounded call (call 1) and the structuring call (call 2) - matches
@@ -46,7 +47,7 @@ const groundedResponse = (prose: string, sources?: Array<{ title: string; uri: s
 interface ItemFixture {
   title: string;
   url?: string;
-  kind?: "doc" | "video" | "tutorial";
+  kind?: ResourceKind;
   whatYouGet?: string;
 }
 
@@ -538,6 +539,146 @@ describe("findResourceLinksForConceptsAction", () => {
       // once per concept that surfaced it.
       expect(vi.mocked(checkUrlsReachable)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(checkUrlsReachable)).toHaveBeenCalledWith([sharedUrl]);
+    });
+  });
+
+  describe("R2: resource-profile argument (docs/discussion-reply-resources-acceptance-criteria.md section 1)", () => {
+    // These pin the property that matters most for the shipped Learning
+    // Resources page: calling this action with no resourceProfile argument -
+    // exactly what every existing call site does - must keep constraining
+    // both LLM calls to doc/video/tutorial only. If this test cannot be made
+    // to fail without changing production behaviour, it isn't proving
+    // anything; sabotage run (b) below is what proves it can.
+    it("the default call (no resourceProfile argument) constrains both LLM calls to exactly doc, video, tutorial, in that order", async () => {
+      vi.mocked(callLlm)
+        .mockResolvedValueOnce(
+          groundedResponse("prose", [{ title: "real-source.test", uri: "https://real-source.test/page" }])
+        )
+        .mockResolvedValueOnce(structureResponse([{ title: "T", url: "https://real-source.test/x", kind: "doc" }]));
+
+      const result = await findResourceLinksForConceptsAction(["recursion"], "Computer Science", "gemini");
+      expect("error" in result).toBe(false);
+
+      const calls = vi.mocked(callLlm).mock.calls;
+      const groundedPrompt = calls[0][0].contents[0].parts[0];
+      const groundedText = "text" in groundedPrompt ? groundedPrompt.text : "";
+      const structurePrompt = calls[1][0].contents[0].parts[0];
+      const structureText = "text" in structurePrompt ? structurePrompt.text : "";
+
+      // The structuring call's kind list is a mechanically generated
+      // template (kindSchemaAlternation/kindProseList join a fixed array),
+      // not free-form English, so an exact-substring pin is safe here - it
+      // cannot be "rephrased" the way natural prose can, and a drift in
+      // either the separator or the derivation is exactly what this test
+      // must catch.
+      expect(structureText).toContain('"kind":"doc|video|tutorial"');
+      expect(structureText).toContain('"kind" must be exactly one of "doc", "video", or "tutorial".');
+      expect(structureText).not.toMatch(/\bnews\b/i);
+      expect(structureText).not.toMatch(/\bpaper\b/i);
+
+      // The prose call's resource-type sentence IS free-form English, so
+      // pin the FACT and the ORDERING - which kinds are named, and in what
+      // order - rather than its exact spelling (this repo has twice been
+      // burned by source-text assertions forcing contorted implementations;
+      // see AGENTS.md).
+      const docIdx = groundedText.indexOf("documentation");
+      const videoIdx = groundedText.indexOf("video");
+      const tutorialIdx = groundedText.indexOf("tutorials");
+      expect(docIdx).toBeGreaterThan(-1);
+      expect(videoIdx).toBeGreaterThan(docIdx);
+      expect(tutorialIdx).toBeGreaterThan(videoIdx);
+      expect(groundedText).not.toMatch(/\bnews\b/i);
+      expect(groundedText).not.toMatch(/\bpaper\b/i);
+
+      // The fourth mention (a few lines below the resource-type sentence,
+      // not named by the AC's R2 but the same coercion-versus-prompt drift
+      // risk): "whether it is <description>, <description>, or
+      // <description>". Built from KIND_DESCRIPTION + the same oxfordJoin
+      // helper that builds the structuring call's kind list, so it is a
+      // deterministic template for a fixed default `kinds` array - safe to
+      // pin exactly, same reasoning as the structuring-call lines above.
+      expect(groundedText).toContain(
+        "whether it is official documentation, a video tutorial, or a written tutorial,"
+      );
+      expect(groundedText).not.toMatch(/\ba news article\b/i);
+      expect(groundedText).not.toMatch(/\ba paper\b/i);
+    });
+
+    it("a widened resourceProfile changes the allowed-kind list on both calls, and a news-kind item survives to the returned link", async () => {
+      // Not imported from the production module - resourceProfile is
+      // deliberately unexported (a "use server" module's export surface
+      // here is kept to ResourceLink/FindResourceLinksSuccess only) - a
+      // real caller (e.g. the discussion-reply resources feature) passes a
+      // structurally-matching object literal exactly like this one.
+      const widenedProfile = {
+        kinds: RESOURCE_KINDS, // all five, in RESOURCE_KINDS order - never a hand-typed literal
+        resourceTypeSentence:
+          "official documentation, video tutorials, written tutorials, news articles, and papers",
+      };
+
+      vi.mocked(callLlm)
+        .mockResolvedValueOnce(
+          groundedResponse("prose", [{ title: "real-source.test", uri: "https://real-source.test/page" }])
+        )
+        .mockResolvedValueOnce(
+          structureResponse([{ title: "Recent coverage", url: "https://real-source.test/news-item", kind: "news" }])
+        );
+
+      const result = await findResourceLinksForConceptsAction(
+        ["recursion"],
+        "Computer Science",
+        "gemini",
+        undefined,
+        widenedProfile
+      );
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      const calls = vi.mocked(callLlm).mock.calls;
+      const groundedPrompt = calls[0][0].contents[0].parts[0];
+      const groundedText = "text" in groundedPrompt ? groundedPrompt.text : "";
+      const structurePrompt = calls[1][0].contents[0].parts[0];
+      const structureText = "text" in structurePrompt ? structurePrompt.text : "";
+      expect(structureText).toContain('"kind":"doc|video|tutorial|news|paper"');
+      expect(structureText).toMatch(/\bnews\b/);
+      expect(structureText).toMatch(/\bpaper\b/);
+      // The fourth mention widens along with the other three - all four
+      // trace back to the same `profile.kinds` array, so this is exactly
+      // what would catch the fourth line being left on the three-kind
+      // wording while the other three widened.
+      expect(groundedText).toContain(
+        "whether it is official documentation, a video tutorial, a written tutorial, a news article, or a paper,"
+      );
+
+      expect(result.links).toHaveLength(1);
+      expect(result.links[0].kind).toBe("news");
+    });
+
+    it("an unrecognized kind from the model still defaults to doc under a widened profile (shared leaf coercion, not a local copy)", async () => {
+      const widenedProfile = { kinds: RESOURCE_KINDS, resourceTypeSentence: "anything at all" };
+
+      vi.mocked(callLlm)
+        .mockResolvedValueOnce(
+          groundedResponse("prose", [{ title: "real-source.test", uri: "https://real-source.test/page" }])
+        )
+        .mockResolvedValueOnce(
+          structureResponse([
+            { title: "Odd kind", url: "https://real-source.test/odd", kind: "podcast" as unknown as ResourceKind },
+          ])
+        );
+
+      const result = await findResourceLinksForConceptsAction(
+        ["recursion"],
+        "Computer Science",
+        "gemini",
+        undefined,
+        widenedProfile
+      );
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.links).toHaveLength(1);
+      expect(result.links[0].kind).toBe("doc");
     });
   });
 });

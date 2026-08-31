@@ -240,7 +240,16 @@ async function findResourceLinksSafely(
   }
 }
 
-const RESOURCE_KIND_LABELS: Record<ResourceLink["kind"], string> = {
+// ResourceLink["kind"] is the full five-way ResourceKind union
+// (src/lib/resource-kind.ts) as of the discussion-reply-resources work
+// (docs/discussion-reply-resources-acceptance-criteria.md R1/R2), even
+// though this page's own call site never asks for anything but doc/video/
+// tutorial (findResourceLinksForConceptsAction defaults to that three-kind
+// profile). Partial, not Record, so this literal does not have to invent
+// labels for "news"/"paper" kinds this page can never actually receive;
+// the lookup at its one call site below already falls back to the raw
+// `link.kind` value when a label is missing.
+const RESOURCE_KIND_LABELS: Partial<Record<ResourceLink["kind"], string>> = {
   doc: "Doc",
   video: "Video",
   tutorial: "Tutorial",

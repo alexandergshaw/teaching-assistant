@@ -35056,9 +35056,137 @@ epoch.
   or not the Recording tab is ever opened, because the panel is always mounted.
   The ticker now pauses when idle, but the loops still start. Never measured for
   cost.
-- **`discussion-capture.test.ts` is at 980 of 1000 lines** - now the largest file
-  in the policed directory, ahead of `useRecorder.ts` at 961, with 20 lines of
-  headroom. The next behaviour added to `discussion-capture.ts` will not fit its
-  tests. Split it before adding to it; do not weaken the canary.
+- ~~**`discussion-capture.test.ts` is at 980 of 1000 lines**, the largest file in
+  the policed directory, with 20 lines of headroom. Split it before adding to
+  it; do not weaken the canary.~~ **SUPERSEDED by commit `bb9a657`**, which split
+  it three ways before the next group started: `discussion-capture.test.ts` 385,
+  `discussion-capture.rows.test.ts` 370, `discussion-capture.dedupe.test.ts` 291.
+  Two later surveys independently flagged this line as stale, so it is corrected
+  here rather than left to mislead a third. The ceiling advice stands for
+  `useDiscussionReplies.ts`, which was the file closest to it at 892 when this
+  entry was written - **939 as of entry 368**, which added the resource queue's
+  wiring to it. Re-measure rather than quoting either number.
 - `lib/discussion-reply-prompt.ts` and `actions/discussion-replies.ts` sit
   outside the non-recursive line canary entirely. Small today, ungoverned.
+
+## 368. Two or three real resources under every drafted reply - and the tested guard that was not the live one, twice more
+
+Ships `docs/discussion-reply-resources-acceptance-criteria.md`. Every drafted
+reply in Manual > Recording > Discussion replies now carries up to three
+resources - documentation, a video, a tutorial, a news article, a paper - found
+by a separate grounded search, corroborated, reachability-checked, and rendered
+under the reply with a one-click remove. The same group widened the reply column,
+reworked the copy affordances and fixed a live arming bug.
+
+Extends entry 367. Four waves plus a step-8 repair, a reviewer, a researcher, a
+fixer and a combined closure/regression pass.
+
+### Decisions worth re-reading
+
+- **Resources come from a SEPARATE grounded pass, never the drafting call.** The
+  obvious implementation - add `webSearch` to the drafting action - would emit
+  URLs recited from training data at a measured 51% dead-link rate. Note the
+  AC's *stated mechanism* for this was dated and is corrected in R0-1: the
+  `responseMimeType` + `google_search` 400 no longer applies to Gemini 3. The
+  decision stands on the reasons that do hold.
+- **ONE action call carrying all N concepts, never a per-post fan-out.** The
+  anti-fabrication boundary is per CONCEPT, not per CALL, so one call already
+  preserves it. Five calls would have cost five reachability budgets, five retry
+  clocks, and - because Next serializes client-dispatched Server Functions -
+  about two minutes holding the single request lane.
+- **The resource drain YIELDS while the capture pipeline is busy.** That
+  serialization premise was verified at source this time, not assumed: Next
+  documents it and `app-call-server.js` wraps every dispatch into a module-level
+  singleton queue, so even a bare `await` participates. Holding the lane during
+  a live capture would fill the 16-frame queue in ~19 seconds of scrolling and
+  drop frames silently.
+- **`ResourceKind` did not exist.** An earlier AC draft named a type with zero
+  occurrences in `src/` and pointed implementers at a module whose same-named
+  export meant something else. It is now a dependency-free leaf, and the
+  widening is inert without the prompts - so the reused action gained a
+  default-preserving resource profile, and all four kind mentions derive from
+  one source.
+- **The reply is ~93 characters per line and no longer depends on viewport
+  width**, up from a measured ~37 at 1440px - below the 45-cpl readability
+  floor. The row became two `<tr>`s with a `colSpan` continuation, a pattern the
+  borrowed stylesheet already shipped. The border-suppression selector must stay
+  compound: Next explicitly declines to guarantee stylesheet emission order, so
+  a specificity tie is undefined behaviour, not merely fragile.
+- **`Retry` became `Retry draft` and `Retry links`.** Two controls in one row
+  cannot share a label.
+
+### The defects this group caught, all with every gate green
+
+1. **The tested guard was not the live one - twice more.** A freshness guard was
+   exported, sabotage-tested and never called, while the guard production used
+   had no test: inverting it would have stopped every resource from landing,
+   suite green. And a concept-derivation wrapper was dead, which meant the
+   guarantee that **a student's name never enters a web search query** was
+   unenforced on the path that runs. That is four instances of this shape in two
+   entries. The fix in both cases: one implementation, called by production,
+   covered by the test - and the author-name guarantee is now pinned at the live
+   boundary with a deliberately widened fixture.
+2. **`note` was gathered, persisted, coerced, tested and never rendered** - the
+   one piece of evidence for deciding whether to keep a link.
+3. **The redraft confirmation omitted the settings it would use.** Arm, change
+   the audience or the course, confirm, and every reply was overwritten under
+   settings changed after the warning was read. Same class as entry 258. The
+   signature is now a pure, tested `draftingArmSignature`, sabotage-checked by
+   DROPPING a field rather than changing a separator - the shape the bug
+   actually took.
+4. A row could wedge in `searching` forever; removing a resource dropped focus
+   to `<body>`; the embedded provider surfaced through a channel the AC forbids;
+   and a comment instructed the next reader to maintain "both copies" of a
+   duplication that no longer existed.
+
+### Gates, real numbers
+
+`tsc --noEmit` 0. `eslint` 0 errors, 0 warnings. `vitest` **731 files, 15002
+tests**. `no-emojis` and `use-server-exports` green. Key canary re-derived
+independently in Node with an ordinal sort: **48/48, both set differences empty,
+zero new keys**. Ceiling: directory max 961 (`useRecorder.ts`, untouched); this
+group's max 939 (`useDiscussionReplies.ts`). An import-cycle check built a
+value-edge graph over all of `src/` and ran DFS: 13 pre-existing cycles, **none
+touching this group**.
+
+Entry 324's feature verified unharmed: the Learning Resources call site is still
+3-argument, and the generator's ripple fix is a type-only annotation over a
+byte-identical literal with a pre-existing fallback.
+
+### Limits
+
+- **No link produced by this feature was ever opened**, by a human or a test.
+- **Corroboration is HOST-level, not URL-level.** `verifyItemUrls` matches the
+  item's host against the concept's grounding hosts; the path is never checked.
+  A fabricated path on a real domain clears the gate, and reachability follows
+  redirects and cannot see a soft 404. What the pipeline guarantees is "on a
+  domain the search surfaced, and something answered" - not "this page exists
+  and is about this". `news` is the most exposed kind.
+- **The reachability checker's headers were misstated in the AC's first draft.**
+  It sends `user-agent: node` - a worse signature than none - from a serverless
+  IP, with a HEAD 403 final and no GET retry. Good resources are dropped
+  silently.
+- **`news` and `paper` were never observed coming back from a real grounded
+  call.** The type, the coercion and the prompt all admit them; nothing proves
+  the model emits them.
+- **The Learning Resources page's behaviour is ARGUED unchanged, not measured.**
+  A test pins the three-kind default; nobody opened that page.
+- **Both LLM calls run at temperature 1.0**, not the values requested -
+  `normalizeGenerationConfig` strips sub-1.0 temperatures on Gemini 3.x,
+  including for the step that transcribes URLs.
+- **The 80-second hole is real.** `callLlm` honours `Retry-After` up to 20s four
+  times, which the 40s retry budget cannot see inside, against a 60s platform
+  cap - and no `maxDuration` is declared on this action's path. Now reachable up
+  to 100 times in a 500-row sweep.
+- **Storage worst case moved from half the budget to two thirds** - ~2.68M to
+  ~3.18M characters at the 500-row ceiling, on an origin shared with **230**
+  `ta-` keys. A realistic table is ~136KB.
+- **No browser was opened.** The two-row layout, the character-per-line figures,
+  the row heights, and whether the two `<tr>`s read as one row are arithmetic on
+  CSS that was read, not measured. Every a11y property was verified by reading.
+- **THIS FEATURE HAS NO DOWNLOADABLE LOG, AND ONE IS OWED.** `docs/DEV_LOOP.md`
+  now requires one for every feature with a run. The rule postdates this group,
+  so this is a debt rather than a violation - and it lands on whoever touches
+  this surface next.
+- One residual wedge path survives at the `found === undefined` branch,
+  unreachable under the action's own contract, which guarantees an entry per id.

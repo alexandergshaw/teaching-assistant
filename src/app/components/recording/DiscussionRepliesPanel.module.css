@@ -31,14 +31,75 @@
   color: var(--text-secondary);
 }
 
+/* Reply width UX pass (scratchpad note "reply-width-ux.md" section 2b/2c):
+   one logical row is now TWO <tr>s - a compact header bar (.summaryRow:
+   Name/Captured/Status/Actions) and a full-width continuation row
+   (.bodyRow) holding the post and the reply side by side. Precedent:
+   ../workflows/AutomationRow.tsx:11-13, which spans this SAME shared skin's
+   columns for the same stated reason - what goes inside "need[s] real
+   width". Deliberately NOT reusing that stylesheet's .detailRow: its
+   card-background tint reads as "a row you opened", and this one is never
+   closed (always open, no disclosure click).
+   AutomationsTable.module.css:57-60 already dropped zebra striping because
+   a second <tr> sits between summary rows, so nothing else conflicts. */
+
+.rowBody {
+  /* Shared between the post scroller and the reply textbox so AC15a's "same
+     fixed height as the reply box" cannot drift between the two. */
+  --reply-block-height: 148px;
+
+  display: grid;
+  /* The reply grows to a capped, readable measure (~93 characters per line
+     at this app's default font) and stops; every extra pixel of a wide
+     monitor goes to the post, which is unbounded student prose. */
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 680px);
+  gap: 18px;
+  align-items: start;
+}
+
+/* 1000px reuses page.module.css:1976's existing breakpoint value rather
+   than introducing a new one. Below it the two blocks stack, POST FIRST -
+   already the DOM order, so this is a one-property change and no table
+   element's computed display is touched at any breakpoint. */
+@media (max-width: 1000px) {
+  .rowBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.postBlock,
+.replyBlock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.postBlock {
+  gap: 6px;
+}
+
+.replyBlock {
+  gap: 8px;
+}
+
+.blockHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+}
+
 /* AC15a: a FIXED-HEIGHT SCROLL region, not a three-line clamp with "Show
    more" - matches the reply textbox's minRows={6} so the row does not look
    lopsided, and is deliberately the same height on every row regardless of
    post length so the table never reflows under the reader. tabIndex on the
    element itself (set in DiscussionReplyRow.tsx, not here) is what makes a
-   scrollable region a keyboard-operable stop per WCAG 2.1.1. */
+   scrollable region a keyboard-operable stop per WCAG 2.1.1. `height`, not
+   `max-height`: a short post must not shrink the block below the shared
+   height, keeping the post and reply blocks visually aligned. */
 .postCell {
-  max-height: 148px;
+  height: var(--reply-block-height);
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -53,6 +114,53 @@
 .postCell:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* The two <tr>s of one logical row must read as ONE row: kill the divider
+   between them. Deliberately a COMPOUND selector (0,1,2 specificity) so it
+   beats AutomationsTable.module.css's `.table td` (0,1,1) regardless of
+   which module Next emits first in the build - a bare `.summaryRow td`
+   (0,1,1) would tie on specificity and resolve by stylesheet emission
+   order, which is not stable across a build. Get this wrong and every row
+   visibly splits into two boxes. */
+tr.summaryRow th,
+tr.summaryRow td {
+  border-bottom: none;
+  padding-bottom: 4px;
+}
+
+tr.bodyRow td {
+  padding-top: 4px;
+}
+
+/* Right-dock the header bar's action cluster under the Actions header.
+   Layered ON TOP of styles.ghActions (page.module.css) rather than
+   replacing it, so the app's button-row vocabulary is reused and only the
+   alignment is new. */
+.rowActions {
+  justify-content: flex-end;
+}
+
+.resourceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.resourceItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.resourceItem a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* AC61: the Redraft slot keeps its layout box even while hidden

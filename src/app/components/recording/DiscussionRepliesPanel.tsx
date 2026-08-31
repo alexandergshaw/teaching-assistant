@@ -22,9 +22,18 @@ import tableStyles from "../workflows/AutomationsTable.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
 import { fmt } from "./types";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
-import type { ReplySort } from "./discussion-capture";
+import { tableClipboardText, draftingArmSignature, type ReplySort } from "./discussion-capture";
+import { CopyIcon, CheckIcon } from "./discussion-icons";
+import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } from "./useReplyResources";
 import { useDiscussionReplies } from "./useDiscussionReplies";
 import DiscussionReplyRow from "./DiscussionReplyRow";
+// F8/F9 fixes: neither needs a new field on UseDiscussionRepliesReturn (out
+// of this fixer pass's file set) - useLlmProvider is a standalone reactive
+// store read (docs/discussion-reply-resources-acceptance-criteria.md R4e),
+// and isResourceLaneBusy is useReplyResources.ts's own already-exported,
+// already-tested predicate, applied here to the SAME three booleans this
+// panel already destructures from useDiscussionReplies below.
+import { useLlmProvider } from "@/lib/llm-provider";
 
 const DELETE_CONSEQUENCE_ID = "discussion-delete-table-consequence";
 const REDRAFT_CONSEQUENCE_ID = "discussion-redraft-consequence";
@@ -133,7 +142,18 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     redraftAll,
     clearTable,
     drafting,
+    resourceQueueSize,
+    findMissing,
+    retryResources,
+    removeResource,
   } = useDiscussionReplies(active);
+
+  // F8: R4e says the embedded-provider capability limit must be shown as a
+  // standing hint, not routed through the per-batch notice channel (which
+  // useReplyResources.ts's drain now deliberately skips for this case - see
+  // that file). Read independently here via the reactive store hook rather
+  // than threaded through useDiscussionReplies.ts's return shape.
+  const [llmProvider] = useLlmProvider();
 
   // ---- Session bookkeeping for AC7b's post-stop summary. ----
   // The pinned UseDiscussionRepliesReturn (section 12) exposes only the
@@ -198,6 +218,45 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   const [copyError, setCopyError] = useState<string | null>(null);
   const handleCopyError = useCallback((text: string) => setCopyError(text), []);
 
+  // Reply-width UX pass, section 5d target #2: "Copy every reply (N)" - the
+  // table-level export. `rows` is already display-sorted (useReplyRows.ts's
+  // own `sortReplyRows` memo), so this scopes to the CURRENT sort per the
+  // UX note's own requirement. N counts only rows that actually contribute
+  // something (mirrors AC/R9a's per-row `disabled` condition) so the label
+  // never claims a bigger export than what lands on the clipboard.
+  const copyableRows = rows.filter((r) => !!r.reply || !!r.resources?.length);
+  const [allCopied, setAllCopied] = useState(false);
+  const allCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (allCopyTimerRef.current) clearTimeout(allCopyTimerRef.current);
+    },
+    []
+  );
+  const handleCopyAll = useCallback(async () => {
+    const text = tableClipboardText(rows);
+    if (!text) return;
+    try {
+      if (!navigator.clipboard || !window.isSecureContext) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      if (allCopyTimerRef.current) clearTimeout(allCopyTimerRef.current);
+      setAllCopied(true);
+      allCopyTimerRef.current = setTimeout(() => setAllCopied(false), 1500);
+    } catch {
+      const message = "Could not copy automatically. Select the text in the reply box and copy it.";
+      announce(message);
+      setCopyError(message);
+    }
+  }, [rows, announce]);
+
+  // docs/discussion-reply-resources-acceptance-criteria.md R11/R11a:
+  // `Find resources` states the row count it is about to search - computed
+  // with the SAME eligibility predicate `findMissing()` itself uses
+  // (useReplyResources.ts's exported `isFindMissingEligible`), imported
+  // rather than re-derived, so the count on the button can never drift from
+  // what a click actually enqueues.
+  const eligibleForResources = rows.filter(isFindMissingEligible);
+
   // AC7a/AC47: one computed sentence, recomputed at most every 5 wall-clock
   // seconds. setState only happens after an await (a real gate, even a
   // zero-length one) - this repo's eslint forbids reaching setState
@@ -226,8 +285,31 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // reproduces REGRESSION entry 258. ----
   const [deleteArmedFor, setDeleteArmedFor] = useState<string | null>(null);
   const [redraftArmedFor, setRedraftArmedFor] = useState<string | null>(null);
+  // `deleteSignature` and `draftingArmSignature` are deliberately NOT the
+  // same helper: `Delete table` consumes a different pair of inputs
+  // (rowCount + whether a recording exists) than `Redraft every reply`
+  // consumes (rowCount + audience + courseId) - forcing them through one
+  // shared shape would either drop a delete-only field or add an unused one
+  // to redraft's signature, both of which are exactly this bug's class.
   const deleteSignature = `${rows.length}|${recordingUrl ? "video" : "novideo"}`;
-  const redraftSignature = `${rows.length}|${audience}`;
+  // BUG FIX (live bug, class of REGRESSION entry 258 - same one deleteSignature
+  // was written to prevent): `redraftAll` (useDiscussionReplies.ts) dispatches
+  // every draft using BOTH `audienceRef.current` AND `courseNameRef.current`
+  // (the latter derived from `courseId` via the course list) - so `courseId`
+  // is a drafting control this panel owns just as much as `audience` is.
+  // Before this fix the signature carried only `${rows.length}|${audience}`:
+  // arm "Redraft every reply", change the COURSE select, confirm, and every
+  // reply is redrafted under a course context that was never shown in the
+  // warning the user just read. Folding `courseId` in means changing EITHER
+  // drafting control disarms the confirm, exactly like changing the row
+  // count or the recording state already disarms `Delete table` above.
+  //
+  // Built through `draftingArmSignature` (discussion-capture.ts), a pure,
+  // exported, unit-tested function - rather than an inline template literal
+  // here - specifically so "does this signature actually include every
+  // drafting input" has a test surface at all (vitest renders no component
+  // in this repo).
+  const redraftSignature = draftingArmSignature({ rowCount: rows.length, audience, courseId });
   const deleteArmed = isConfirmArmed(deleteArmedFor, deleteSignature);
   const redraftArmed = isConfirmArmed(redraftArmedFor, redraftSignature);
 
@@ -509,8 +591,32 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
       <div className={styles.ghActions} ref={actionsContainerRef} tabIndex={-1}>
         {rows.length > 0 && (
           <>
+            {/* Reply-width UX pass, section 5d target #2: the biggest click
+                saving in the feature - exporting a 40-row table used to be
+                40 clicks. First in the bar, before "Draft the missing
+                replies", per the UX note's own ordering. */}
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={allCopied ? <CheckIcon /> : <CopyIcon />}
+              disabled={copyableRows.length === 0}
+              title={allCopied ? "Copied" : `Copy every reply (${copyableRows.length})`}
+              onClick={() => void handleCopyAll()}
+            >
+              {`Copy every reply (${copyableRows.length})`}
+            </Button>
             <Button size="small" variant="outlined" disabled={drafting} onClick={draftAllPending}>
               Draft the missing replies
+            </Button>
+            {/* docs/discussion-reply-resources-acceptance-criteria.md R11/
+                R11a: states the row count it is about to search. */}
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={eligibleForResources.length === 0}
+              onClick={() => findMissing()}
+            >
+              {`Find resources (${eligibleForResources.length})`}
             </Button>
             {deleteArmed ? (
               <>
@@ -534,9 +640,40 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           {`This permanently deletes all ${rows.length} row${rows.length === 1 ? "" : "s"}${recordingUrl ? " and the saved recording" : ""}. This cannot be undone.`}
         </p>
       )}
+      {/* resourceQueueSize is forwarded straight through from
+          useReplyResources.ts (R12a) for exactly this - a lightweight
+          progress line for the resource search queue, the same idea as the
+          drafting queue's own "Drafting" status badge, just at table scale.
+          F9 fix: during a live capture the drain deliberately YIELDS
+          (R0-4) without dispatching, so "Finding resources..." would sit
+          there unchanging and read as a stall - isResourceLaneBusy is the
+          SAME predicate useReplyResources.ts's drain checks before every
+          dispatch, applied to the same three booleans already destructured
+          above, and resourceQueueProgressText (also useReplyResources.ts,
+          also unit-tested) is the SAME wording function, so this line can
+          never say "finding" while the drain is actually yielded. */}
+      {rows.length > 0 && resourceQueueSize > 0 && (
+        <p className={styles.fieldHint}>
+          {resourceQueueProgressText(resourceQueueSize, isResourceLaneBusy({ capturing, pendingFrames, extracting }))}
+        </p>
+      )}
 
       {rows.length > 0 && (
         <>
+          {/* docs/discussion-reply-resources-acceptance-criteria.md R10a:
+              the standing hint, once, near the table. */}
+          <p className={styles.fieldHint}>
+            Links are found by search and checked for a response, not read. Open anything you are about to send.
+          </p>
+          {/* F8: R4e's embedded-provider capability limit, shown once as its
+              OWN standing hint rather than through the per-batch notice
+              channel (which reads as a repeated failure on every batch for
+              the whole session - exactly what R4e forbids). */}
+          {llmProvider === "embedded" && (
+            <p className={styles.fieldHint}>
+              The Embedded Deterministic Engine cannot search for resource links. Switch providers to find resources for a reply.
+            </p>
+          )}
           <div className={tableStyles.scroller}>
             <table className={tableStyles.table}>
               <caption className={panelStyles.tableCaption}>Captured discussion posts and drafted replies</caption>
@@ -554,8 +691,12 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
                       {(sort === "captured-asc" || sort === "captured-desc") && <SortGlyph asc={sort === "captured-asc"} />}
                     </button>
                   </th>
-                  <th scope="col">Post</th>
-                  <th scope="col">Reply</th>
+                  {/* AC15 amendment (reply-width UX pass): Post/Reply column
+                      headers are deleted - both now live in a full-width
+                      continuation row with no column beneath a header, and
+                      each already carries a stronger per-control accessible
+                      name (`Post by X`, `Reply to X`) than a shared column
+                      header ever gave them. */}
                   <th scope="col">Status</th>
                   <th scope="col">Actions</th>
                 </tr>
@@ -571,6 +712,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
                     onMove={moveRow}
                     onRemove={handleRemove}
                     onRetry={retryRow}
+                    onRetryResources={retryResources}
+                    onRemoveResource={removeResource}
                     registerRemoveRef={registerRemoveRef}
                     announce={announce}
                     onCopyError={handleCopyError}

@@ -51,6 +51,7 @@ import {
   deserializeReplyTable,
   type ReplyRow,
   type ReplyRowState,
+  type ReplyResource,
   type ReplySort,
 } from "./discussion-capture";
 
@@ -97,6 +98,28 @@ const VALID_SORTS: ReadonlyArray<ReplySort> = [
 
 function isReplySort(value: unknown): value is ReplySort {
   return typeof value === "string" && (VALID_SORTS as readonly string[]).includes(value);
+}
+
+// ---------------------------------------------------------------------------
+// F1 fix (fixer pass, docs/discussion-reply-resources-acceptance-criteria.md
+// R7): this used to be duplicated - a tested-but-dead copy living in
+// useReplyResources.ts (its own `describe` block, its own "SABOTAGE CHECK
+// (c)"), and this untested, ref-backed copy below in `resourcesUnchangedSince`,
+// which is the one production actually called. Inverting the untested copy's
+// `===` to `!==` discarded every drafted reply's resources with the entire
+// suite green, because nothing exercised THIS comparison directly.
+//
+// One implementation now, pulled out as a pure, exported equality check so it
+// is independently sabotage-testable (vitest in this repo renders no hook -
+// see this file's own header - so a comparison buried inside a useCallback
+// body has no test surface of its own). `resourcesUnchangedSince` below is
+// the ONLY caller in production; useReplyResources.ts's drain reaches this
+// exclusively through that mutator (`rowsApi.resourcesUnchangedSince`),
+// never by re-implementing the comparison itself.
+// ---------------------------------------------------------------------------
+
+export function isResourceBatchFresh(currentSeq: number, dispatchSnapshotSeq: number): boolean {
+  return currentSeq === dispatchSnapshotSeq;
 }
 
 // AC22/BL4: serialization is owned by discussion-capture.ts, not restated
@@ -190,6 +213,47 @@ export interface UseReplyRowsReturn {
    *  failed; null once a write succeeds again. In-memory rows keep working
    *  regardless - this never blocks a mutator. */
   persistError: string | null;
+
+  // -------------------------------------------------------------------
+  // docs/discussion-reply-resources-acceptance-criteria.md R3/R7: the
+  // resource mutators and their own generation guard. Deliberately NOT
+  // gated on tableEpochRef or editSeqRef - see the doc comments above
+  // applyResources/removeResource below for why both would be actively
+  // wrong here (R7 in the AC).
+  // -------------------------------------------------------------------
+
+  /** R3/R6. Applies a completed resource search: `resourceState` becomes
+   *  "done" whether or not `resources` is non-empty (R11 relies on "done"
+   *  meaning "searched", not "found something"). The caller MUST already
+   *  have checked `resourcesUnchangedSince` for this id before calling -
+   *  same division of responsibility as `applyReply`/`isUnchangedSince`
+   *  above; this function does not re-check it. */
+  applyResources: (id: string, resources: ReplyResource[]) => void;
+
+  /** R10. One-click remove, matched by `url` within the row's own resource
+   *  list. Bumps `resourceSeq` for this id BEFORE writing rows (mirrors
+   *  `editReply`'s own bump-before-write ordering) so a search already in
+   *  flight for this row cannot land on top of the removal and resurrect
+   *  the link. Does NOT touch `resourceState` - R11 relies on a "done" row
+   *  the instructor emptied by hand staying "done", not reverting to
+   *  "idle" and re-entering the bulk `Find resources` sweep. */
+  removeResource: (id: string, url: string) => void;
+
+  /** Flips the given ids to "searching", clearing any stale
+   *  `resourceError` - mirrors `markDrafting`. Ids absent from the current
+   *  table are dropped. */
+  markResourceSearching: (ids: string[]) => void;
+
+  /** Mirrors `markFailed` for the resource state machine. */
+  markResourceFailed: (ids: string[], error: string) => void;
+
+  // R7 - the per-row resource generation guard, mirroring editSeqRef's own
+  // three-part shape exactly. Bumped only by removeResource; the caller
+  // (useReplyResources.ts's drain) snapshots it before dispatch and checks
+  // it before calling applyResources.
+  bumpResourceSeq: (id: string) => void;
+  snapshotResourceSeq: (ids: string[]) => Map<string, number>;
+  resourcesUnchangedSince: (id: string, snapshot: Map<string, number>) => boolean;
 }
 
 export function useReplyRows(): UseReplyRowsReturn {
@@ -215,6 +279,10 @@ export function useReplyRows(): UseReplyRowsReturn {
   // bodies below, never inside a setRows updater.
   const editSeqRef = useRef<Map<string, number>>(new Map());
   const tableEpochRef = useRef(0);
+
+  // R7: the resource-search generation guard, mirroring editSeqRef exactly
+  // - see the doc comment on removeResource below for the race it closes.
+  const resourceSeqRef = useRef<Map<string, number>>(new Map());
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -375,6 +443,7 @@ export function useReplyRows(): UseReplyRowsReturn {
       const raw = rowsRef.current;
       if (!raw.some((r) => r.id === id)) return;
       editSeqRef.current.delete(id);
+      resourceSeqRef.current.delete(id);
       commitRows(raw.filter((r) => r.id !== id));
       scheduleSave(STRUCTURAL_DEBOUNCE_MS);
     },
@@ -383,6 +452,7 @@ export function useReplyRows(): UseReplyRowsReturn {
 
   const clearTable = useCallback(() => {
     editSeqRef.current.clear();
+    resourceSeqRef.current.clear();
     tableEpochRef.current += 1; // AC45 - handler body, not inside a setState updater (AC42)
     commitRows([]);
     scheduleSave(STRUCTURAL_DEBOUNCE_MS);
@@ -463,6 +533,98 @@ export function useReplyRows(): UseReplyRowsReturn {
     [commitRows, scheduleSave]
   );
 
+  // ---------------------------------------------------------------------
+  // docs/discussion-reply-resources-acceptance-criteria.md R3/R7: the
+  // resource mutators. Two guards the neighbouring drafting mutators use
+  // are DELIBERATELY NOT copied here:
+  //   - no tableEpochRef check: applyResources is an id lookup that
+  //     already returns early on a miss (so clearTable needs nothing more
+  //     - every id misses), and redraftAll bumps tableEpochRef WITHOUT
+  //     deleting anything, so an epoch guard would discard a completed
+  //     grounded search on every redraft of rows that still exist.
+  //   - no editSeqRef check: that guard counts REPLY edits. Resources are
+  //     keyed to the post, a disjoint field from `reply` - gating on it
+  //     would discard good resources because the instructor fixed a typo.
+  // ---------------------------------------------------------------------
+
+  const applyResources = useCallback(
+    (id: string, resources: ReplyResource[]) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      if (idx === -1) return; // row removed or table cleared under us
+      const next = raw.map((r, i) =>
+        i === idx ? { ...r, resources, resourceState: "done" as const, resourceError: null } : r
+      );
+      commitRows(next);
+      scheduleSave(STRUCTURAL_DEBOUNCE_MS);
+    },
+    [commitRows, scheduleSave]
+  );
+
+  const removeResource = useCallback(
+    (id: string, url: string) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      if (idx === -1) return;
+      const row = raw[idx];
+      if (!row.resources?.some((res) => res.url === url)) return; // no-op: nothing to remove
+      // R7: bump BEFORE writing rows - mirrors editReply's own ordering.
+      resourceSeqRef.current.set(id, (resourceSeqRef.current.get(id) ?? 0) + 1);
+      const next = raw.map((r, i) =>
+        i === idx ? { ...r, resources: r.resources!.filter((res) => res.url !== url) } : r
+      );
+      commitRows(next);
+      scheduleSave(STRUCTURAL_DEBOUNCE_MS);
+    },
+    [commitRows, scheduleSave]
+  );
+
+  const markResourceSearching = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      let changed = false;
+      const next = rowsRef.current.map((r) => {
+        if (!idSet.has(r.id)) return r;
+        changed = true;
+        return { ...r, resourceState: "searching" as const, resourceError: null };
+      });
+      if (!changed) return;
+      commitRows(next);
+      scheduleSave(STRUCTURAL_DEBOUNCE_MS);
+    },
+    [commitRows, scheduleSave]
+  );
+
+  const markResourceFailed = useCallback(
+    (ids: string[], error: string) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      let changed = false;
+      const next = rowsRef.current.map((r) => {
+        if (!idSet.has(r.id)) return r;
+        changed = true;
+        return { ...r, resourceState: "failed" as const, resourceError: error };
+      });
+      if (!changed) return;
+      commitRows(next);
+      scheduleSave(STRUCTURAL_DEBOUNCE_MS);
+    },
+    [commitRows, scheduleSave]
+  );
+
+  const bumpResourceSeq = useCallback((id: string) => {
+    resourceSeqRef.current.set(id, (resourceSeqRef.current.get(id) ?? 0) + 1);
+  }, []);
+  const snapshotResourceSeq = useCallback((ids: string[]) => {
+    const snap = new Map<string, number>();
+    ids.forEach((id) => snap.set(id, resourceSeqRef.current.get(id) ?? 0));
+    return snap;
+  }, []);
+  const resourcesUnchangedSince = useCallback((id: string, snapshot: Map<string, number>) => {
+    return isResourceBatchFresh(resourceSeqRef.current.get(id) ?? 0, snapshot.get(id) ?? 0);
+  }, []);
+
   const bumpEditSeq = useCallback((id: string) => {
     editSeqRef.current.set(id, (editSeqRef.current.get(id) ?? 0) + 1);
   }, []);
@@ -499,5 +661,12 @@ export function useReplyRows(): UseReplyRowsReturn {
     isUnchangedSince,
     tableEpochRef,
     persistError,
+    applyResources,
+    removeResource,
+    markResourceSearching,
+    markResourceFailed,
+    bumpResourceSeq,
+    snapshotResourceSeq,
+    resourcesUnchangedSince,
   };
 }

@@ -51,6 +51,15 @@ const STYLESHEETS: StylesheetTarget[] = [
     cssPath: path.resolve(process.cwd(), "src/app/components/workflows/AutomationsTable.module.css"),
     label: "src/app/components/workflows/AutomationsTable.module.css",
   },
+  {
+    // The Discussion replies panel's OWN stylesheet, which was unguarded until
+    // now: a CSS Module resolves an unknown key to `undefined` silently, so a
+    // typo renders the element unstyled with no error anywhere - the exact
+    // defect this whole test exists for. It is guarded here before the layout
+    // work adds roughly ten more classes to that file.
+    cssPath: path.resolve(process.cwd(), "src/app/components/recording/DiscussionRepliesPanel.module.css"),
+    label: "src/app/components/recording/DiscussionRepliesPanel.module.css",
+  },
 ];
 
 const COMPONENTS_ROOT = path.resolve(process.cwd(), "src");

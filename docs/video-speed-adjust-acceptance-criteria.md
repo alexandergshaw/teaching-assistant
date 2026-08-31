@@ -732,8 +732,22 @@ above is the part that will be got wrong.
 
 ### Group C - the surface
 
-**AC8. A new directory `src/app/components/speed-studio/`**, a sibling of
-`caption-studio/` and `slide-studio/`, holding:
+**AC8. SUPERSEDED - the files live directly in `src/app/components/recording/`,
+not in a new `speed-studio/` directory.** As built: `SpeedPanel.tsx`,
+`useVideoSpeed.ts` and `useVideoSpeed.test.ts` sit flat in `recording/`,
+matching the existing convention there (`AvatarStudioPanel.tsx`,
+`TakesPanel.tsx`, `WalkthroughPanel.tsx`).
+
+This also changes AC10b: the key is `ta-rec-speed-rate`, WITH the `ta-rec-`
+prefix, and it IS in `recording-split.structure.test.ts`'s `expectedKeys`
+(sorted between `ta-rec-source` and `ta-rec-use-countdown`). The original
+reasoning for an unprefixed key rested on the file being outside the canary's
+non-recursive scan; since it is inside `recording/` after all, the scan sees it
+and the prefixed key is both correct and covered. The line cap covers it too.
+
+The original directory proposal, retained so the reasoning is not lost:
+~~A new directory `src/app/components/speed-studio/`, a sibling of
+`caption-studio/` and `slide-studio/`, holding:~~
 
 | File | Owns |
 | --- | --- |
@@ -830,11 +844,17 @@ video is the honest number and the user is entitled to it before they start.
   - the visible line `Re-encoding at 1.5x - 40% - about 4:00 left`;
   - a `Cancel` button wired to the `AbortController` from AC1d.
 - A `role="status" aria-live="polite"` region announces **stage transitions
-  only** - started, saved, cancelled, failed. **The percentage and the countdown
-  must be `aria-hidden` or outside that region**; a per-percent live region
-  reads a hundred updates aloud. This is stated because it is the obvious wrong
-  implementation, and the sibling document's AC28 item 2 records the same
-  mistake on the elapsed timer.
+  plus roughly every 25 percent** - started, quarter marks, saved, cancelled,
+  failed. **The raw percentage and the countdown must still be `aria-hidden` or
+  outside that region**; a per-percent live region reads a hundred updates
+  aloud, which is the obvious wrong implementation and the same mistake the
+  sibling document's AC28 item 2 records on the elapsed timer.
+
+  **AMENDED**: an earlier draft said "stage transitions only". That is wrong for
+  a job that can run twenty minutes - a screen-reader user would hear "started"
+  and then nothing at all until it finished, with no way to tell progress from a
+  hang. The quarter marks are the same compromise the sibling feature's AC23b
+  reached for chunked transcription, and the two surfaces should not disagree.
 - Only one render may run at a time. While one runs, the rate buttons and the
   source picker's Import buttons are disabled.
 
@@ -906,7 +926,17 @@ anything not written here will not exist.
 4. Errors render in `role="alert"`. `styles.error` is a bare `<p>` with no role
    (`RecordingTab.tsx:144`), so a failure arriving while focus is elsewhere is
    silent today - do not inherit that.
-5. Switching to this view moves focus to its heading (`<h2 tabIndex={-1}>`),
+5. **WITHDRAWN - switching to this view must NOT move focus.** An earlier
+   draft required focus to move to the heading "matching the other inner
+   views' behaviour", and that premise was simply wrong: none of Record,
+   Caption a video, Narrate a deck or Avatar moves focus on switch. Switching
+   here is a TAB activation, so stealing focus would break arrow-key travel
+   along the tab strip and single this one view out for surprising behaviour.
+   The take-scoped panes that DO move focus (WalkthroughPanel,
+   TakeAnnouncementPanel) are a different case - they open from a button in a
+   row rather than from a tab, so focus has to go somewhere. The original
+   requirement, retained only so it is not reinstated by accident:
+   ~~Switching to this view moves focus to its heading (`<h2 tabIndex={-1}>`),~~
    matching the other inner views' behaviour.
 
 **AC17. Copy.** Sentence case, a hyphen rather than an em dash, second person,

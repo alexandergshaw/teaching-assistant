@@ -163,6 +163,7 @@ describe("recording-split structure", () => {
         "ta-rec-script-objectives",
         "ta-rec-script-topic",
         "ta-rec-source",
+        "ta-rec-speed-rate",
         "ta-rec-use-countdown",
         "ta-rec-view",
         "ta-rec-walk-keep-source-audio",

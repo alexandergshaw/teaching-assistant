@@ -34720,3 +34720,99 @@ stop plus the title/closing-card state machine.
   captureStream - where the spec is weaker than first assumed (pause "stops
   gathering data", it does not promise to elide the interval) and engine bugs of
   that exact shape exist (Firefox 1354457, Chromium 40703184).
+
+### 2026-08-30 - Change a video's speed (step 2 of the record-to-narrate chain)
+
+Group: `docs/video-speed-adjust-acceptance-criteria.md`. Two concurrent agents
+(lib, UI), then a reviewer pass and a fixer pass.
+
+**What shipped.** A fifth Recording-tab inner view, "Change speed", that takes a
+session take / backup-folder video / Files-library recording, re-encodes it at a
+chosen multiplier, and saves the copy back to the library. It is step 2 of the
+user's stated workflow: record the week's module -> change speed -> caption ->
+narrate over it, each step saving to Files and the next reading it back.
+
+**VISIBLE CHANGE TO A SHIPPED SURFACE, pinned by no test.** The Recording tab's
+inner strip went from four entries to five, and "Change speed" is inserted
+SECOND, so Caption a video, Narrate a deck and Avatar all shift right.
+`recording-split.structure.test.ts` pins three contract strings but NOT the
+strip order, so nothing but this paragraph records it. `ta-rec-view` gains the
+value `"speed"`; no new view key was needed.
+
+**Decisions worth re-reading.**
+
+1. **It lives in the Recording tab, NOT the Files tab.** `FilesTab` is
+   conditionally mounted (`page.tsx`), so it unmounts on a tab switch, while
+   `RecordingTab` is deliberately always-mounted. A re-encode runs from five to
+   eighty minutes; in a surface that unmounts it would die silently mid-job.
+   The same reading found that the Files tab's EXISTING strip-audio action
+   carries this bug today - unfixed, out of scope, worth its own item.
+2. **The multipliers are a closed set** (0.5, 0.75, 1.25, 1.5, 1.75, 2). Not a
+   free number field. Outside the browsers' supported window audio is SILENTLY
+   MUTED, and since audio is tapped through `createMediaElementSource` a muted
+   element feeds silence into the graph and the output gets a silent track with
+   no error. The set also excludes `[0.95, 1.06]`, where Chromium resamples
+   (pitch-shifting) instead of time-stretching.
+3. **Pitch correction is the DEFAULT, not the risk.** `preservesPitch` defaults
+   to `true` (Baseline since Dec 2023). `webkitPreservesPitch` is set too for
+   older Safari; `mozPreservesPitch` is deliberately NOT set (deprecated,
+   disabled by default in modern Firefox). Chipmunk audio is the avoidable case.
+4. **Saves as `kind: "recording"`**, no new kind and no migration - and here
+   that is load-bearing rather than merely cheap: `VideoSource.tsx`'s three-way
+   ternary labels any kind other than `recording`/`narrated` as "Captioned", so
+   a new kind would be mislabelled at the exact joint this chain depends on.
+5. **The re-encode was NOT bolted onto `strip-audio.ts` or `narrate-video.ts`.**
+   Neither has a test file, so a refactor there is unguarded; `video-speed.ts`
+   is a new module following their shape instead.
+6. **Switching to this view does NOT move focus.** An earlier AC draft required
+   it "matching the other inner views" - a false premise; no sibling view moves
+   focus on switch, and stealing it off a tab strip is worse than not.
+
+**Bugs the review caught that every gate passed.** The blocker is the same shape
+as the previous chunk's: `MediaRecorder`'s error path fires `error`, flushes a
+final chunk, then fires `stop` - and only `stop` was handled, so an encoder
+failure part-way through resolved as SUCCESS, saved the partial chunks, and
+labelled the row with the full computed duration. A truncated video presented as
+complete, with the success message inviting the user to caption it. Also: a
+decode failure was reported to the user as their own cancellation; capture-
+stream tracks and the recorder leaked on throw paths; an abandoned duration
+probe kept loading and seeking a long file in the background; and a fourth
+`m:ss` formatter was added despite the AC forbidding it in bold.
+
+**Gates, real numbers.** `npx tsc --noEmit` exit 0. `npx vitest run` 723 files /
+14743 tests passing. `npx next build` "Compiled successfully", then the
+documented env-dependent prerender failure. One deliberate eslint warning
+remains in `RecordingTab.tsx` (`react-hooks/exhaustive-deps` on `pipeline`) -
+load-bearing and commented; it prevents a per-render Worker restart.
+Key canary 42 -> 43 (`ta-rec-speed-rate`, sorted between `ta-rec-source` and
+`ta-rec-use-countdown`). `useRecorder.ts` was NOT touched by this chunk and
+stays at 961 lines with 39 to spare.
+
+**Limits.**
+
+- **Nothing here was run in a browser.** Node-env vitest, no component rendered,
+  no `MediaRecorder`, canvas, `AudioContext` or `HTMLVideoElement`. Only the
+  pure helpers are covered; no frame and no audio sample has been encoded.
+- **The single most important unproven assumption:** that a
+  `MediaElementAudioSourceNode` receives the TIME-STRETCHED, pitch-corrected
+  output rather than an earlier stage of the element's audio pipeline. No source
+  reachable during research states this either way. If it taps the wrong stage,
+  every sped-up lecture ships pitch-shifted with all gates green.
+- **Whether 0.5x and 2x produce audio at all** in Chrome, Firefox and Safari is
+  unverified. Silence there yields a wrong file with NO error, and nothing in
+  the code can detect it.
+- **Whether a backgrounded tab still produces frames** is unverified. The worker
+  ticker defeats timer throttling, but Chrome separately suspends video decoding
+  for non-visible elements, and the draw source here is a detached element.
+- The chain joint 2 -> 3 was traced by READING only: a saved row appears in
+  Caption Studio's picker labelled "Recording" with the output duration, but
+  only after the user presses that panel's Refresh, because its library fetch is
+  guarded on a null check and the panel stays mounted. The success copy says so.
+  **The same staleness applies to this panel's own library list and no copy
+  mentions it.**
+- Step 3 -> 4 of the workflow (captioned video into the walkthrough) exists via
+  the library shim but has never been exercised end to end.
+- Two `useVideoImport()` instances are now always mounted, so `listRecordingFiles`
+  runs twice at startup; and that hook's error path leaves `libraryVideos` null,
+  so a persistent library error re-triggers its effect indefinitely.
+  Pre-existing, now doubled.

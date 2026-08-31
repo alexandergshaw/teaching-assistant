@@ -22,6 +22,7 @@ import { useWalkthrough } from "./recording/useWalkthrough";
 import SourceDevicesPanel from "./recording/SourceDevicesPanel";
 import LectureScriptPanel from "./recording/LectureScriptPanel";
 import StagePanel from "./recording/StagePanel";
+import SpeedPanel from "./recording/SpeedPanel";
 import TakesPanel from "./recording/TakesPanel";
 import AvatarStudioPanel from "./recording/AvatarStudioPanel";
 import WalkthroughPanel from "./recording/WalkthroughPanel";
@@ -36,10 +37,10 @@ export type { Take } from "./recording/types";
 export default function RecordingTab({ active = true }: { active?: boolean }) {
   const { supabase, user } = useSupabase();
 
-  const [recView, setRecView] = useState<"record" | "captions" | "slides" | "avatar">(() => {
+  const [recView, setRecView] = useState<"record" | "speed" | "captions" | "slides" | "avatar">(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
-    return v === "captions" || v === "slides" || v === "avatar" ? v : "record";
+    return v === "speed" || v === "captions" || v === "slides" || v === "avatar" ? v : "record";
   });
 
   useEffect(() => {
@@ -493,7 +494,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       subtitle="Record video from any attached camera or your screen, preview it live, and download the takes."
     >
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
             onClick={() => setRecView(key)}>
@@ -682,7 +683,15 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
         )}
       </div>
 
-      {/* Inner views stay mounted (hidden with display:none) so navigation never kills a live preview, takes, or an in-progress caption burn. */}
+      {/* Inner views stay mounted (hidden with display:none) so navigation never kills a live preview, takes, or an in-progress caption burn.
+          "Change speed" lives here (not the Files tab) for the same reason -
+          a speed re-encode can run five to eighty minutes, and RecordingTab
+          is the always-mounted surface; FilesTab unmounts on a tab switch and
+          would silently kill the job mid-encode. */}
+      <div style={{ display: recView === "speed" ? undefined : "none" }}>
+        <SpeedPanel takes={takes.takes} backupDir={takes.backupDir} />
+      </div>
+
       <div style={{ display: recView === "captions" ? undefined : "none" }}>
         <CaptionStudio takes={takes.takes} backupDir={takes.backupDir} />
       </div>

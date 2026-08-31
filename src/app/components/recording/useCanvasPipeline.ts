@@ -4,6 +4,8 @@ import { useCallback, useRef } from "react";
 import type { FrameTicker } from "@/lib/frame-ticker";
 import { startFrameTicker } from "@/lib/frame-ticker";
 import type { Stroke } from "./types";
+import { BUBBLE_SIZE_FRACTIONS } from "./bubble-geometry";
+import { drawWebcamBubble } from "./bubble-draw";
 
 export interface UseCanvasPipelineReturn {
   pipelineCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
@@ -11,6 +13,12 @@ export interface UseCanvasPipelineReturn {
   sizeCanvases: (w: number, h: number) => void;
   startPipeline: () => void;
   stopPipeline: () => void;
+  // AC14: mounts (or unmounts, on null) the pipeline canvas into a live DOM
+  // host so the composited output - including the bubble - is visible before
+  // recording starts, not only in the recorded file. Only sets CSS size, per
+  // trap: sizeCanvases alone owns the canvas's width/height (drawing-buffer)
+  // attributes, which captureStream follows.
+  attachPipelineCanvas: (host: HTMLElement | null) => void;
 }
 
 export function useCanvasPipeline({
@@ -21,10 +29,11 @@ export function useCanvasPipeline({
   overlayCanvasRef,
   strokesRef,
   redrawOverlay,
-  sourceRef,
   pipVideoRef,
   pipEnabledRef,
   pipCornerRef,
+  bubbleShapeRef,
+  bubbleSizeRef,
   cardPhaseRef,
   cardTitleRef,
   cardSubtitleRef,
@@ -39,10 +48,14 @@ export function useCanvasPipeline({
   overlayCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   strokesRef: React.MutableRefObject<Stroke[]>;
   redrawOverlay: () => void;
-  sourceRef: React.MutableRefObject<"camera" | "screen" | "audio">;
   pipVideoRef: React.MutableRefObject<HTMLVideoElement | null>;
+  // Redefined: "the bubble is live and should be drawn", not "the checkbox is
+  // ticked". The old draw-time `sourceRef.current === "screen"` gate is gone -
+  // usePipWebcam folds that condition (via its `active` prop) into this ref.
   pipEnabledRef: React.MutableRefObject<boolean>;
   pipCornerRef: React.MutableRefObject<"br" | "bl" | "tr" | "tl">;
+  bubbleShapeRef: React.MutableRefObject<"circle" | "rounded">;
+  bubbleSizeRef: React.MutableRefObject<"sm" | "md" | "lg">;
   cardPhaseRef: React.MutableRefObject<"title" | "closing" | null>;
   cardTitleRef: React.MutableRefObject<string>;
   cardSubtitleRef: React.MutableRefObject<string>;
@@ -52,6 +65,26 @@ export function useCanvasPipeline({
 }): UseCanvasPipelineReturn {
   const pipelineCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pipelineTickerRef = useRef<FrameTicker | null>(null);
+  const pipelineHostRef = useRef<HTMLElement | null>(null);
+
+  const attachCanvasToHost = useCallback(() => {
+    const canvas = pipelineCanvasRef.current;
+    const host = pipelineHostRef.current;
+    if (!canvas || !host) return;
+    if (canvas.parentElement !== host) {
+      canvas.style.width = "100%";
+      canvas.style.maxHeight = "48vh";
+      canvas.style.objectFit = "contain";
+      canvas.style.background = "#0f172a";
+      canvas.style.display = "block";
+      host.appendChild(canvas);
+    }
+  }, []);
+
+  const attachPipelineCanvas = useCallback((host: HTMLElement | null) => {
+    pipelineHostRef.current = host;
+    attachCanvasToHost();
+  }, [attachCanvasToHost]);
 
   const sizeCanvases = useCallback((w: number, h: number) => {
     if (pipelineCanvasRef.current) {
@@ -70,7 +103,8 @@ export function useCanvasPipeline({
     if (!pipelineCanvasRef.current) {
       pipelineCanvasRef.current = document.createElement("canvas");
     }
-  }, []);
+    attachCanvasToHost();
+  }, [attachCanvasToHost]);
 
   const startPipeline = useCallback(() => {
     const canvas = pipelineCanvasRef.current;
@@ -114,56 +148,19 @@ export function useCanvasPipeline({
         ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
       }
 
-      // Picture-in-Picture bubble
+      // Loom-style webcam bubble (AC7-AC14). pipEnabledRef is "should the
+      // bubble be drawn right now" - usePipWebcam already folds in whether
+      // the checkbox is on, whether this surface is active, and whether the
+      // stream was actually acquired. Always mirrored (Loom's behaviour,
+      // AC13) - no user control for it.
       const pipV = pipVideoRef.current;
-      if (pipEnabledRef.current && pipV && pipV.readyState >= 2 && sourceRef.current === "screen") {
-        const bw = Math.round(canvas.width * 0.22);
-        const bh = Math.round(bw * (pipV.videoHeight / Math.max(1, pipV.videoWidth))) || Math.round(bw * 0.75);
-        const m = Math.round(canvas.width * 0.02);
-
-        let x = 0, y = 0;
-        const corner = pipCornerRef.current;
-        if (corner === "br") {
-          x = canvas.width - bw - m;
-          y = canvas.height - bh - m;
-        } else if (corner === "bl") {
-          x = m;
-          y = canvas.height - bh - m;
-        } else if (corner === "tr") {
-          x = canvas.width - bw - m;
-          y = m;
-        } else if (corner === "tl") {
-          x = m;
-          y = m;
-        }
-
-        ctx.save();
-        ctx.beginPath();
-        const ctxWithRoundRect = ctx as CanvasRenderingContext2D & {
-          roundRect?: (x: number, y: number, w: number, h: number, r: number) => void;
-        };
-        if (ctxWithRoundRect.roundRect) {
-          ctxWithRoundRect.roundRect(x, y, bw, bh, 16);
-        } else {
-          // Fallback for older browsers
-          ctx.rect(x, y, bw, bh);
-        }
-        ctx.clip();
-        ctx.drawImage(pipV, x, y, bw, bh);
-        ctx.restore();
-
-        // Subtle white border
-        ctx.save();
-        ctx.beginPath();
-        if (ctxWithRoundRect.roundRect) {
-          ctxWithRoundRect.roundRect(x, y, bw, bh, 16);
-        } else {
-          ctx.rect(x, y, bw, bh);
-        }
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(255,255,255,0.85)";
-        ctx.stroke();
-        ctx.restore();
+      if (pipEnabledRef.current && pipV) {
+        drawWebcamBubble(ctx, pipV, canvas.width, canvas.height, {
+          shape: bubbleShapeRef.current,
+          corner: pipCornerRef.current,
+          sizeFraction: BUBBLE_SIZE_FRACTIONS[bubbleSizeRef.current],
+          mirror: true,
+        });
       }
 
       const overlay = overlayCanvasRef.current;
@@ -173,7 +170,7 @@ export function useCanvasPipeline({
     };
     pipelineTickerRef.current?.stop();
     pipelineTickerRef.current = startFrameTicker(30, draw);
-  }, [source, mirror, applyBackgroundEffect, videoRef, overlayCanvasRef, cardPhaseRef, cardTitleRef, cardSubtitleRef, cardClosingRef, cardBgRef, cardTextRef, pipVideoRef, pipEnabledRef, pipCornerRef, sourceRef]);
+  }, [source, mirror, applyBackgroundEffect, videoRef, overlayCanvasRef, cardPhaseRef, cardTitleRef, cardSubtitleRef, cardClosingRef, cardBgRef, cardTextRef, pipVideoRef, pipEnabledRef, pipCornerRef, bubbleShapeRef, bubbleSizeRef]);
 
   const stopPipeline = useCallback(() => {
     pipelineTickerRef.current?.stop();
@@ -186,5 +183,6 @@ export function useCanvasPipeline({
     sizeCanvases,
     startPipeline,
     stopPipeline,
+    attachPipelineCanvas,
   };
 }

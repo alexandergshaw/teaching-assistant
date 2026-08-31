@@ -318,6 +318,32 @@ covered by backup-dir.test.ts, caption-burn.test.ts, recording-files.test.ts -
    (pen/highlighter/eraser, undo/clear), and title/closing cards are burned into
    the take. Audio-only records the raw stream with the audio mime fallback
    chain; video uses the mp4-then-webm fallback chain.
+
+   **AMENDED 2026-08-30** (screen-recording/bubble/walkthrough group, AC14).
+   The clause "the preview stays raw" now holds for the CAMERA and AUDIO
+   sources only. For the SCREEN source the stage shows the composited pipeline
+   canvas, so the webcam bubble can be positioned before recording starts -
+   which is the whole point of a Loom-style bubble. Three consequences worth
+   knowing before reading this area again:
+   (a) the `<video>` element stays mounted and decoding at
+       `position:absolute; width:1px; height:1px; opacity:0` and must NEVER be
+       `display:none` - it is still the pipeline's draw source, and a frozen or
+       blank frame there ruins the recording with no error;
+   (b) the pipeline's lifetime for the screen source is now the PREVIEW's, not
+       the recording's, and an effect stops it when the surface is off screen
+       while idle (never while recording - that would break check 1);
+   (c) annotations are composited into the frame AND the overlay canvas stays
+       in the DOM on top for pointer events, so they are drawn twice. Same
+       strokes, same coordinates, visually identical - recorded here as
+       intentional so it is not "discovered" later as a defect.
+
+   Also amended: the `active` prop's gating of the R/P/M shortcuts is now
+   narrowed further - they fire only on the record inner view and only when
+   neither the walkthrough nor the announcement pane is open. AC16b required
+   scoping them away from the new panes; the additional `recView === "record"`
+   term goes beyond that and is a deliberate behaviour change (previously R
+   could start a recording while the user was on Caption a video or Narrate a
+   deck).
 4. Record lifecycle: optional 3-2-1 countdown before start; pause/resume;
    auto-stop timer (5/10/15/30 min) enforced from the elapsed-seconds interval;
    REC/PAUSED badge with elapsed time and MB counter; mic mute toggles
@@ -712,6 +738,59 @@ unrecognized kind on 2026-08-06 and the outputs are quoted verbatim.
        NOT the full contract: `src/app/components/caption-studio/utils/captions.ts:11-18`
        READS eight `ta-rec-*` keys and sits outside the scan entirely, so
        renaming one of those keys passes this canary and still breaks captions.
+
+### 2026-08-30 - Client-callable announcement posting, as seen by a NEW caller
+
+Baseline taken before the Recording tab becomes a SECOND client-side caller of
+`createAnnouncementAction` (see
+`docs/screen-recording-and-walkthrough-acceptance-criteria.md`, Group D). No
+prior area baseline covers this path; the existing announcement material in this
+doc is all about the weekly-generator STEPS, which is a different surface. What
+follows is code-traced, not observed - no announcement was posted to a real
+Canvas course while writing it, and that limit is the point of recording it.
+
+1. There is exactly ONE Canvas announcement write reachable from a client
+   component: `createAnnouncementAction(courseUrl, title, message, acronym?,
+   delayedPostAt?)` (`src/app/actions/canvas-inbox.ts:233`). It returns
+   `{ announcement } | { error }` and never throws across the action boundary,
+   so `"error" in result` narrowing is mandatory. Its one existing client call
+   site is `src/app/components/canvas-tab/announcements-panel.tsx:118`, which
+   sources `courseUrl` from `CoursePicker`'s `onSelect` (a live Canvas
+   `/courses/{id}` string) and `acronym` from `useInstitutionSelection().active`.
+2. The wire shape is fixed at `src/lib/canvas/announcements.ts:229-269`:
+   `title` trimmed, `message` passed through `textToHtml`, `is_announcement`
+   `"true"`, and `delayed_post_at` only when supplied. Two guards reject before
+   the network: `An announcement needs a title.` (`:236`) and
+   `An announcement needs a message.` (`:237`). `createAnnouncement` is
+   deliberately NOT throttle-retried, unlike its scheduled siblings.
+3. `postGeneratedArtifactAction` is a DIFFERENT path and is not
+   interchangeable: it re-reads the artifact row by id and never trusts client
+   text (`lms-generation.ts:841`), and it requires a resolved `course_hub` row
+   via `resolveGenerationCourseRow`, returning `courseNotLinked: true` if there
+   is none. Anything reusing the modules-view preview modal inherits that
+   requirement; anything calling `createAnnouncementAction` directly does not.
+4. `course_hub` rows may legitimately have `canvasUrl: null` and
+   `institution: null` - these are export-only tiles. A picker that offers them
+   produces a post that cannot succeed. `listCourseHubAction()`
+   (`src/app/actions/course-hub-core.ts:12`) returns them all, unfiltered.
+5. The review-later path is `saveMessageDraftAction(summary, payload,
+   workflowId?, workflowName?)` (`src/app/actions/messaging.ts:218`) writing a
+   `MessageDraftPayload` with `kind: "announcement"`. Drafts are listed and
+   posted by `MessageDraftsTab` (`src/app/components/MessageDraftsTab.tsx:13`),
+   whose approval round-trips back to `createAnnouncementAction`
+   (`messaging.ts:289-299`). **That branch drops `delayedPostAt`** - a scheduled
+   announcement cannot survive a draft round trip, it posts immediately on
+   approval. Pre-existing; not introduced by the recording work.
+6. `src/lib/message-drafts.ts` is NOT server-only and takes an explicit
+   `SupabaseClient`, which is why `MessageDraftsTab` reads drafts straight from
+   the browser. New WRITES should still go through `saveMessageDraftAction`,
+   which uses `requireOwner()` + a service client; a browser-side
+   `createMessageDraft` would depend on RLS instead.
+7. What is NOT tested: nothing in the unit suite posts an announcement, renders
+   `announcements-panel.tsx`, or exercises a course picker. vitest here is
+   node-env and renders no components. The pure arming helpers
+   (`postConfirmArming.ts`, `generatedPreviewDrafts.ts`) ARE tested, and they
+   are the only part of the confirm story a green suite says anything about.
 
 ## Feature entries
 
@@ -34524,3 +34603,120 @@ the writer interface plus three more files.
 are further over after it - recorded rather than quietly carried; splitting
 `generateGroup` out is a separate, behaviour-neutral structural chunk.
 `useLmsGeneration.ts` went 998 -> 969 via a clean download-hook extraction.
+
+### 2026-08-30 - Screen recording, Loom bubble, walkthrough takes, announcements from a recording
+
+Group: `docs/screen-recording-and-walkthrough-acceptance-criteria.md` (AC1-AC29).
+Built by five concurrent agents on disjoint file sets, then a gap-closing pass,
+a reviewer + researcher pass, two fixers, a split, a re-review, a regression
+pass, and one regression-driven fix.
+
+**What shipped.** Screen capture already existed; most of this was repair. The
+headline defect (D1 in the AC): the selected microphone was added as a SECOND
+audio track on the display stream, and MediaRecorder encodes only the FIRST - so
+whenever system audio was present the instructor's narration never reached the
+file, silently. Audio is now mixed through one WebAudio graph into a single
+track (`audio-mix.ts`). On top of that: a circular Loom-style webcam bubble,
+lower-left by default and visible in the live preview; "walkthrough" takes that
+narrate over a finished recording; and drafting, reviewing and posting a Canvas
+announcement from a take's transcript.
+
+**Decisions worth re-reading before touching this area.**
+
+1. **No new `recording_files.kind`.** Walkthroughs save as `recording`, like the
+   existing derived audio take. The kind union is a ten-place hand-maintained
+   contract ending in a DB CHECK that nothing tests; a provenance label was not
+   worth that blast radius. Provenance rides on `Take.sourceTakeId` /
+   `sourceTakeName` instead.
+2. **`GeneratedPreviewModal` was deliberately NOT reused** for the announcement
+   review surface. It consumes a `GenerationPreviewState` backed by real
+   `generated_artifacts` rows, posts via a path needing a resolved `course_hub`
+   row, and its wiring test reads `ModulesView.tsx` as SOURCE TEXT, so adding a
+   prop for a second caller breaks it. What IS reused is the part carrying the
+   guarantee: `isConfirmArmed` / `mayPostCommit`, unmodified.
+3. **The arming signature is INVERTED relative to the modal's, on purpose.** The
+   modal excludes text because its confirm panel quotes the SAVED row. Here
+   there is no saved row - the editor's strings ARE the payload - so the
+   signature includes subject, body and the chosen course, and any edit disarms.
+   `postConfirmArming.ts`'s own comments state the opposite rule for the modal;
+   that is not a bug to "fix". `draftsDirty` is correspondingly NOT reused: with
+   no saved copy there is nothing to be dirty against.
+4. **`renderNarratedVideo` was NOT generalized** for the walkthrough. It shares
+   five surface mechanics and nothing structural - it schedules pre-decoded clips,
+   while the walkthrough needs a live mic and a user-driven transport that is
+   also the recorder transport. Neither it nor `strip-audio.ts` has a test file,
+   so a refactor there is unguarded. One shared `bubble-draw.ts` delivers the
+   guarantee that actually mattered.
+5. **The audio sidecar ROTATES.** A single blob would have been an OOM on exactly
+   the recordings this feature targets: `decodeAudioData` decodes a whole buffer
+   at once and a webm/opus fragment is not independently sliceable, so a
+   40-minute take is ~920MB in one allocation. Segments of about a minute are
+   also, conveniently, the transcription chunks.
+
+**Bugs this loop caught that every gate passed**, recorded because each is a
+repeat-shaped failure: a dead branch (`hasDisplayAudioTrack` consumed but never
+supplied, making AC5's disabled-checkbox state unreachable); a library take
+reporting `No speech was found in this recording.` because its duration probe
+fell back to 0 and zero chunks read as silence; the announcement pipeline
+running on after its panel unmounted; AC12's drop shadow never rendering because
+`ctx.clip()` was applied before the draw and a shadow paints outside the path; a
+failed `v.play()` saving a bogus take AND showing success; `sidecar.stop()` able
+to hang forever ON THE TAKE'S CRITICAL PATH; a performance fix that restarted
+the compositor's Worker every render DURING recording, worse than the leak it
+closed; `resumedState` added to detect a suspended AudioContext and then read by
+nothing, leaving a silent take silent; and finally, found by the regression pass
+itself, routing the screen-share-ended path through the card-aware stop gave the
+auto-stop interval a re-entrant entry point that cut the closing card to about
+one second.
+
+**Gates, real numbers.** `npx tsc --noEmit` exit 0. `npx vitest run` 721 files /
+14696 tests passing (baseline before this group: 718 / 14670). `npx next build`
+"Compiled successfully", then the documented env-dependent prerender failure
+from missing local Supabase keys. Key canary 36 -> 42 in sorted order.
+
+**`useRecorder.ts` is the landmine.** It went 601 -> 961 across this group, past
+its own architecture-set 850 budget, leaving 39 lines of headroom against a cap
+a test enforces. One extraction already happened (`screen-source.ts`, 122
+lines). **The next change to that file should START with a split, not an
+append.** The natural next seam is the recording lifecycle - start/pause/resume/
+stop plus the title/closing-card state machine.
+
+**Limits - what was NOT run and NOT observed.**
+
+- **Nothing in this feature was run in a browser.** vitest here is node-env,
+  collects only `src/**/*.test.ts`, and renders NO component. There is no
+  `MediaRecorder`, `getDisplayMedia`, `getUserMedia`, `AudioContext`, canvas or
+  `MediaStream` in the test environment.
+- Therefore every UI, markup, accessibility and keyboard claim in this group is
+  a READING of source text: the keep-mounted behaviour, the overflow menu's
+  keyboard operability, every `role="status"` / `aria-live` region, `aria-hidden`
+  on the elapsed timer, focus restoration through the keyed ref map, and the
+  focus-ring reset on the navy stage.
+- **No real screen share.** Whether the mic now reaches the file - the entire
+  point of the group - is unobserved. So are the composited preview, the bubble's
+  shape, the new `getDisplayMedia` constraint hints, and the "Stop sharing" path.
+- **No real camera, no real Canvas course, and no transcription was performed.**
+  `createAnnouncementAction`, `listCourseHubAction`, `saveMessageDraftAction`,
+  `transcribeLiveAudioAction` and `draftAnnouncementAction` were confirmed to be
+  CALLED correctly by reading the call sites; none was invoked.
+- `src/lib/strip-audio.ts` has no test file and `extractAudioOnly` was
+  substantially rewritten there (abort signal, restructured progress loop). That
+  rewrite is entirely unguarded.
+- The pure helpers are the ONLY genuinely covered parts: `mixAudioTracks` (via an
+  injected context), `bubbleRect`, `coverCrop`, `planTranscriptChunks`,
+  `sliceMonoSamples`, `joinTranscriptChunks`, `truncateTranscriptForPrompt`,
+  `buildTakeAnnouncementInstruction`, `takePostArmSignature`,
+  `decideRealTimeGuard`, `classifyDisplayAudioGrant`, `isClosingCardInProgress`.
+- **The real-time audio fallback is capped at 20 minutes and refuses above it.**
+  A long recording that exists only in the library cannot currently be drafted
+  from. The clean fix is to stop round-tripping through WAV at all: Gemini now
+  accepts WebM/Opus directly, so the WAV constraint is an APP fact
+  (`transcribeLiveAudioAction` hardcodes the mime) and not a provider one.
+- Unresolved browser questions, all checked 2026-08-30: whether Chrome's autoplay
+  gate accepts a `resume()` from a timer after an earlier gesture; whether a
+  MUTED element feeds silence into a Web Audio graph (asserted in a comment,
+  uncited); the second Opus encode's CPU cost at 1080p; `decodeAudioData`'s
+  resampling QUALITY into a 16kHz context; and real pause/resume sync on a canvas
+  captureStream - where the spec is weaker than first assumed (pause "stops
+  gathering data", it does not promise to elide the interval) and engine bugs of
+  that exact shape exist (Firefox 1354457, Chromium 40703184).

@@ -23,6 +23,8 @@ export interface UseRecordingSettingsReturn {
   setUseCountdown: React.Dispatch<React.SetStateAction<boolean>>;
   autoStopMin: "0" | "5" | "10" | "15" | "30";
   setAutoStopMin: React.Dispatch<React.SetStateAction<"0" | "5" | "10" | "15" | "30">>;
+  shareSystemAudio: boolean;
+  setShareSystemAudio: React.Dispatch<React.SetStateAction<boolean>>;
   sourceRef: React.MutableRefObject<"camera" | "screen" | "audio">;
   autoStopMinRef: React.MutableRefObject<"0" | "5" | "10" | "15" | "30">;
   userPickedRef: React.MutableRefObject<boolean>;
@@ -84,6 +86,15 @@ export function useRecordingSettings(): UseRecordingSettingsReturn {
     if (typeof window === "undefined") return "0";
     const saved = localStorage.getItem("ta-rec-autostop");
     return saved === "5" || saved === "10" || saved === "15" || saved === "30" ? (saved as "5" | "10" | "15" | "30") : "0";
+  });
+
+  // AC5: whether the display stream's own audio track is mixed in. Default
+  // on. The write is not here - like the source setting above, this is
+  // read-only in this hook; the paired localStorage.setItem lives in
+  // RecordingTab.tsx's persist effect.
+  const [shareSystemAudio, setShareSystemAudio] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("ta-rec-screen-audio") !== "0";
   });
 
   // Mirror source state into ref
@@ -149,6 +160,8 @@ export function useRecordingSettings(): UseRecordingSettingsReturn {
     setUseCountdown,
     autoStopMin,
     setAutoStopMin,
+    shareSystemAudio,
+    setShareSystemAudio,
     sourceRef,
     autoStopMinRef,
     userPickedRef,

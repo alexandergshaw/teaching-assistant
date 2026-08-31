@@ -125,6 +125,7 @@ describe("recording-split structure", () => {
 
       const derivedKeys = Array.from(keysSet).sort();
       const expectedKeys = [
+        "ta-rec-ann-course",
         "ta-rec-autostop",
         "ta-rec-avatar-camera",
         "ta-rec-avatar-course",
@@ -151,9 +152,12 @@ describe("recording-split structure", () => {
         "ta-rec-pen-size",
         "ta-rec-pip",
         "ta-rec-pip-corner",
+        "ta-rec-pip-shape",
+        "ta-rec-pip-size",
         "ta-rec-prompter",
         "ta-rec-prompter-size",
         "ta-rec-res",
+        "ta-rec-screen-audio",
         "ta-rec-script",
         "ta-rec-script-minutes",
         "ta-rec-script-objectives",
@@ -161,6 +165,8 @@ describe("recording-split structure", () => {
         "ta-rec-source",
         "ta-rec-use-countdown",
         "ta-rec-view",
+        "ta-rec-walk-keep-source-audio",
+        "ta-rec-walk-mode",
       ];
 
       expect(derivedKeys).toEqual(expectedKeys);

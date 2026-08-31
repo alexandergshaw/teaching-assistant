@@ -22,6 +22,26 @@ interface SourceDevicesPanelProps {
   userPickedRef: React.MutableRefObject<boolean>;
   bgImageRef: React.MutableRefObject<HTMLImageElement | null>;
   bgFileRef: React.RefObject<HTMLInputElement | null>;
+  // AC5: whether the CURRENT screen stream's display track actually carries
+  // audio. undefined = unknown (no screen stream yet, or the caller has not
+  // wired this) - in that case the checkbox stays enabled, since disabling it
+  // by default would contradict "default on". false = confirmed no display
+  // audio track on this stream, so the checkbox renders disabled and unchecked
+  // with the reason attached via aria-describedby, per AC5's third row.
+  // This is a genuine cross-agent seam this file's contract does not name:
+  // Agent E must source it from Agent A's useRecorder (alongside the already-
+  // named screenAudioNotice) and pass it through here.
+  hasDisplayAudioTrack?: boolean;
+  // S1 fix: the disabled-checkbox hint used to hard-code AC5's THIRD row
+  // ("This browser does not share system audio.") for every
+  // hasDisplayAudioTrack === false case, but useRecorder.ts correctly
+  // distinguishes that from the SECOND row ("System audio was not shared...")
+  // via browserMayOfferDisplayAudio(). On Chrome/Windows sharing a window,
+  // the stage said one thing and this panel said the other, simultaneously,
+  // with the false one attached to the checkbox via aria-describedby. Passing
+  // the real notice down and rendering it verbatim removes the second,
+  // possibly-contradictory copy of the string.
+  screenAudioNotice?: string | null;
 }
 
 export default function SourceDevicesPanel({
@@ -36,6 +56,8 @@ export default function SourceDevicesPanel({
   userPickedRef,
   bgImageRef,
   bgFileRef,
+  hasDisplayAudioTrack,
+  screenAudioNotice,
 }: SourceDevicesPanelProps) {
   const {
     source,
@@ -58,10 +80,21 @@ export default function SourceDevicesPanel({
     setUseCountdown,
     autoStopMin,
     setAutoStopMin,
+    shareSystemAudio,
+    setShareSystemAudio,
   } = settings;
 
   const { bgMode, setBgMode, bgStatus } = bg;
-  const { pipEnabled, setPipEnabled, pipCorner, setPipCorner } = pip;
+  const {
+    pipEnabled,
+    setPipEnabled,
+    pipCorner,
+    setPipCorner,
+    bubbleShape,
+    setBubbleShape,
+    bubbleSize,
+    setBubbleSize,
+  } = pip;
   const {
     cardsOn,
     setCardsOn,
@@ -79,12 +112,14 @@ export default function SourceDevicesPanel({
     setCardText,
   } = cards;
 
+  const screenAudioDisabled = hasDisplayAudioTrack === false;
+
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
         <h2 className={styles.adaptPanelTitle}>Source &amp; devices</h2>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
         <TextField
           select
           label="Source"
@@ -137,6 +172,23 @@ export default function SourceDevicesPanel({
           ))}
         </TextField>
 
+        {/* AC27: a source decision, not an option - shown in the main row so
+            it is seen before Share, not buried in the collapsed disclosure. */}
+        {source === "screen" && (
+          <FormControlLabel
+            control={
+              <Checkbox
+                size="small"
+                checked={screenAudioDisabled ? false : shareSystemAudio}
+                onChange={(e) => setShareSystemAudio(e.target.checked)}
+                disabled={screenAudioDisabled}
+                aria-describedby={screenAudioDisabled ? "screen-audio-disabled-hint" : undefined}
+              />
+            }
+            label="Share system audio"
+          />
+        )}
+
         <TextField
           select
           label="Resolution"
@@ -150,6 +202,19 @@ export default function SourceDevicesPanel({
           <MenuItem value="1080">1080p</MenuItem>
         </TextField>
       </div>
+      {source === "screen" && screenAudioDisabled && (
+        <p id="screen-audio-disabled-hint" className={styles.fieldHint} style={{ margin: "4px 0 0" }}>
+          {/* S1 fix: render the real reason useRecorder.ts computed
+              (screenAudioNotice), rather than restating a hard-coded string
+              that only ever matches AC5's THIRD row. That fixed string was
+              wrong whenever the true reason was the SECOND row ("offered,
+              none granted" - e.g. Chrome/Windows sharing a window), which
+              produced two contradictory system-audio messages on screen at
+              once. Falls back to the same third-row copy only if the caller
+              has not wired screenAudioNotice through yet. */}
+          {screenAudioNotice ?? "This browser does not share system audio. Your microphone is still being recorded."}
+        </p>
+      )}
       {devices.cameras.length > 0 && (
         <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
           {devices.cameras.length} camera{devices.cameras.length === 1 ? "" : "s"}, {devices.mics.length} mic{devices.mics.length === 1 ? "" : "s"} detected
@@ -169,21 +234,68 @@ export default function SourceDevicesPanel({
         </div>
       )}
 
+      {/* AC27: the headline feature gets its own always-visible group, not
+          hidden behind a disclosure the user has to know to open. */}
+      {source === "screen" && (
+        <div role="group" aria-label="Webcam bubble" className={styles.field} style={{ marginTop: 12 }}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={pipEnabled}
+                onChange={(e) => setPipEnabled(e.target.checked)}
+                size="small"
+              />
+            }
+            label="Webcam bubble"
+          />
+          {pipEnabled && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+              <TextField
+                select
+                label="Bubble shape"
+                value={bubbleShape}
+                onChange={(e) => setBubbleShape(e.target.value as "circle" | "rounded")}
+                size="small"
+                sx={{ minWidth: 150 }}
+              >
+                <MenuItem value="circle">Circle</MenuItem>
+                <MenuItem value="rounded">Rounded square</MenuItem>
+              </TextField>
+              <TextField
+                select
+                label="Bubble size"
+                value={bubbleSize}
+                onChange={(e) => setBubbleSize(e.target.value as "sm" | "md" | "lg")}
+                size="small"
+                sx={{ minWidth: 130 }}
+              >
+                <MenuItem value="sm">Small</MenuItem>
+                <MenuItem value="md">Medium</MenuItem>
+                <MenuItem value="lg">Large</MenuItem>
+              </TextField>
+              <TextField
+                select
+                label="Bubble corner"
+                value={pipCorner}
+                onChange={(e) => setPipCorner(e.target.value as "br" | "bl" | "tr" | "tl")}
+                size="small"
+                sx={{ minWidth: 130 }}
+              >
+                <MenuItem value="br">Bottom right</MenuItem>
+                <MenuItem value="bl">Bottom left</MenuItem>
+                <MenuItem value="tr">Top right</MenuItem>
+                <MenuItem value="tl">Top left</MenuItem>
+              </TextField>
+            </div>
+          )}
+        </div>
+      )}
+
       <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
         <summary>Recording options</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+          <label className={styles.adaptPanelSubtitle} style={{ display: "block" }}>Audio processing</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={mirror}
-                  onChange={(e) => setMirror(e.target.checked)}
-                  disabled={source !== "camera"}
-                  size="small"
-                />
-              }
-              label="Mirror preview"
-            />
             <FormControlLabel
               control={<Checkbox size="small" checked={noiseSuppression} onChange={(e) => { userPickedRef.current = true; setNoiseSuppression(e.target.checked); }} />}
               label="Noise suppression"
@@ -196,6 +308,10 @@ export default function SourceDevicesPanel({
               control={<Checkbox size="small" checked={autoGain} onChange={(e) => { userPickedRef.current = true; setAutoGain(e.target.checked); }} />}
               label="Auto gain"
             />
+          </div>
+
+          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginTop: 16 }}>Timing</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
             <FormControlLabel
               control={
                 <Checkbox
@@ -206,8 +322,6 @@ export default function SourceDevicesPanel({
               }
               label="3-2-1 countdown"
             />
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 8 }}>
             <TextField
               select
               size="small"
@@ -222,6 +336,21 @@ export default function SourceDevicesPanel({
               <MenuItem value="15">15 min</MenuItem>
               <MenuItem value="30">30 min</MenuItem>
             </TextField>
+          </div>
+
+          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginTop: 16 }}>Appearance</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={mirror}
+                  onChange={(e) => setMirror(e.target.checked)}
+                  disabled={source !== "camera"}
+                  size="small"
+                />
+              }
+              label="Mirror preview"
+            />
             <TextField
               select
               size="small"
@@ -254,32 +383,6 @@ export default function SourceDevicesPanel({
                 e.target.value = "";
               }}
             />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={pipEnabled}
-                  onChange={(e) => setPipEnabled(e.target.checked)}
-                  disabled={source !== "screen"}
-                  size="small"
-                />
-              }
-              label="Webcam bubble"
-            />
-            {pipEnabled && source === "screen" && (
-              <TextField
-                select
-                label="Bubble corner"
-                value={pipCorner}
-                onChange={(e) => setPipCorner(e.target.value as "br" | "bl" | "tr" | "tl")}
-                size="small"
-                sx={{ minWidth: 130 }}
-              >
-                <MenuItem value="br">Bottom right</MenuItem>
-                <MenuItem value="bl">Bottom left</MenuItem>
-                <MenuItem value="tr">Top right</MenuItem>
-                <MenuItem value="tl">Top left</MenuItem>
-              </TextField>
-            )}
           </div>
           {bgStatus === "loading" && <span className={styles.ghMeta}>Loading background model...</span>}
           {bgStatus === "failed" && <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>Background effects unavailable (model failed to load)</span>}
@@ -341,6 +444,7 @@ export default function SourceDevicesPanel({
           </div>
 
           <div className={styles.field} style={{ marginTop: 16 }}>
+            <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: 8 }}>Cards</label>
             <FormControlLabel
               control={<Checkbox checked={cardsOn} onChange={(e) => setCardsOn(e.target.checked)} size="small" disabled={source === "audio"} />}
               label="Add title and closing cards"

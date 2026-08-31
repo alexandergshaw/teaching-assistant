@@ -13,19 +13,25 @@
 // wire-byte unit the server enforces (AC10a), so that unit is never restated.
 
 import { sumBase64WireBytes } from "@/lib/upload-budget";
-import { coerceResourceKind, type ResourceKind } from "@/lib/resource-kind";
 
 // FIX 2 (thread-structure group, line-ceiling pass): thread-structure helpers
 // moved to discussion-thread.ts - see that file's header for the import
 // direction (this file imports FROM it, never the reverse) and for why
 // `authorsMatch` stays here rather than moving too. `resolveDraftParent` is
 // re-exported below via a thin wrapper so no existing importer changes.
-import {
-  VALID_THREAD_POSITIONS,
-  reconcileThreadPosition,
-  reconcileReplyingToAuthor,
-  resolveDraftParent as resolveDraftParentImpl,
-} from "./discussion-thread";
+import { reconcileThreadPosition, reconcileReplyingToAuthor, resolveDraftParent as resolveDraftParentImpl } from "./discussion-thread";
+
+// Serialization-block extraction (REGRESSION 372's Limits, done ahead of the
+// reply-composition-controls group): `ReplyRowState`, `ReplyResource`,
+// `ReplyRow`, `DISCUSSION_TABLE_VERSION`, `serializeReplyTable` and
+// `deserializeReplyTable` moved to discussion-serialization.ts - see that
+// file's header for the import direction (this file imports FROM it, never
+// the reverse) and for why the row types moved with the functions rather
+// than staying here with a back-import. All are re-exported below so no
+// existing importer's path changes.
+import type { ReplyRow, ReplyResource } from "./discussion-serialization";
+export type { ReplyRow, ReplyRowState, ReplyResource } from "./discussion-serialization";
+export { DISCUSSION_TABLE_VERSION, serializeReplyTable, deserializeReplyTable } from "./discussion-serialization";
 
 // The three constants the SERVER also enforces live in set B's
 // src/lib/discussion-reply-prompt.ts and are re-exported from there, never
@@ -393,56 +399,6 @@ export function shouldTickerRun(args: {
   return args.capturing || args.pendingFrames > 0 || args.extracting || args.drafting || args.draftQueueSize > 0;
 }
 
-// ---------------------------------------------------------------------------
-// AC4c: domain types.
-// ---------------------------------------------------------------------------
-
-export type ReplyRowState = "pending" | "drafting" | "ready" | "failed";
-
-// ---------------------------------------------------------------------------
-// docs/discussion-reply-resources-acceptance-criteria.md R3: resources
-// attached to a reply. `resourceState` is a SECOND, ORTHOGONAL state machine
-// from `state` above - a row can be `ready` + `searching`, `ready` +
-// `failed`, `failed` + `done`. It deliberately never appears in the Status
-// badge (R3a); it renders beneath the reply instead. `note` is a UI
-// affordance for choosing between candidates and is never copied - see
-// replyClipboardText below (R9b).
-// ---------------------------------------------------------------------------
-
-export interface ReplyResource {
-  title: string;
-  url: string;
-  kind: ResourceKind;
-  note?: string;
-}
-
-export interface ReplyRow {
-  id: string; // opaque, minted once: `disc-${now}-${counter}`. See AC11b.
-  author: string;
-  post: string;
-  postedAt?: string; // the LMS's own timestamp, as displayed. See AC11a.
-  reply: string; // "" until drafted; user edits overwrite it
-  userEdited: boolean; // a human wrote this reply. PERSISTED - see AC22.
-  state: ReplyRowState;
-  error: string | null; // set only when state === "failed"
-  firstSeenAt: number; // ms epoch; the "Captured" column and sort key
-  order: number; // manual position; see AC14
-  resources?: ReplyResource[]; // R3
-  resourceState?: "idle" | "searching" | "done" | "failed"; // R3, R3a
-  resourceError?: string | null; // set only when resourceState === "failed", R3c
-  // T2: thread-structure fields. Deliberately NOT referential (no parentId) -
-  // see T2a in docs/discussion-thread-structure-acceptance-criteria.md for
-  // why a parent pointer is the wrong shape here (parents are frequently
-  // captured AFTER their children, and a referential field would have to
-  // survive removeRow, clearTable and both serializers - the exact functions
-  // REGRESSION 367 defect 4 records as having shipped twice with the tested
-  // copy not being the live one). Absence and "unknown" render identically
-  // (T1a) - a row that has never been through extraction round-trips with
-  // neither field set, same as postedAt's own absent-stays-absent treatment.
-  threadPosition?: "root" | "reply" | "unknown";
-  replyingToAuthor?: string; // only when the LMS printed a name, exactly as shown
-}
-
 // F5 (docs/discussion-reply-sort-filter-acceptance-criteria.md): four members
 // ADDED, none removed. `name-asc`/`name-desc` (the existing whole-string
 // sort, kept as the "Name" header) MUST stay in this union - removing or
@@ -674,169 +630,6 @@ export function swapAdjacentRows(displayedRows: ReadonlyArray<ReplyRow>, current
   nextRows[indexB] = { ...rowA, order: rowB.order };
 
   return { rows: nextRows, sort: "custom", atBoundary: false };
-}
-
-// ---------------------------------------------------------------------------
-// AC22: serialization. `deserializeReplyTable` must NEVER throw, following
-// `coerceMessageDraftPayload`'s discipline (src/lib/message-drafts.ts:54):
-// drop what is malformed rather than fail the whole load.
-// ---------------------------------------------------------------------------
-
-export const DISCUSSION_TABLE_VERSION = 1;
-
-const VALID_STATES = new Set<string>(["pending", "drafting", "ready", "failed"]);
-const VALID_RESOURCE_STATES = new Set<string>(["idle", "searching", "done", "failed"]);
-// VALID_THREAD_POSITIONS is imported from ./discussion-thread (FIX 2).
-
-export function serializeReplyTable(rows: ReadonlyArray<ReplyRow>): string {
-  const normalized = rows.map((r) => {
-    // Nothing is in flight after a reload, so a `drafting` row is written as
-    // `pending`. `error` is preserved only for `failed` rows - BL4: this must
-    // actually enforce the `ReplyRow` invariant ("error is set only when
-    // state === 'failed'") rather than merely documenting it, so a stale
-    // `error` string left on a row that was later re-drafted successfully
-    // does not resurrect itself as a mystery message after a reload.
-    const state: ReplyRowState = r.state === "drafting" ? "pending" : r.state;
-
-    // R3c: the same rule extended to the resource state machine. Nothing is
-    // in flight after a reload, so `searching` is written as `idle`.
-    // `resourceError` is preserved only for `failed` rows, for the same
-    // reason `error` above is - a stale message must not resurrect itself
-    // after the row's resources are later replaced successfully. A row that
-    // has never touched the resource feature at all (`resourceState` still
-    // `undefined`) writes no `resourceState`/`resourceError` keys, mirroring
-    // `postedAt`'s existing "absent stays absent" treatment of an optional
-    // field elsewhere in this same function - a row's resource fields do not
-    // spring into existence just because it went through a save/load cycle.
-    const resourceState: ReplyRow["resourceState"] = r.resourceState === "searching" ? "idle" : r.resourceState;
-    const hasResources = Array.isArray(r.resources) && r.resources.length > 0;
-
-    return {
-      ...r,
-      state,
-      error: state === "failed" ? r.error : null,
-      resources: hasResources ? r.resources : undefined, // JSON.stringify drops undefined keys - R3c "only when non-empty"
-      resourceState,
-      resourceError: resourceState === "failed" ? (r.resourceError ?? null) : resourceState === undefined ? undefined : null,
-    };
-  });
-  return JSON.stringify({ v: DISCUSSION_TABLE_VERSION, rows: normalized });
-}
-
-export function deserializeReplyTable(raw: string | null): ReplyRow[] {
-  try {
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return [];
-    const obj = parsed as Record<string, unknown>;
-    if (obj.v !== DISCUSSION_TABLE_VERSION) return [];
-    if (!Array.isArray(obj.rows)) return [];
-
-    const rows: ReplyRow[] = [];
-    obj.rows.forEach((rawRow: unknown, index: number) => {
-      if (!rawRow || typeof rawRow !== "object") return;
-      const r = rawRow as Record<string, unknown>;
-
-      const id = typeof r.id === "string" ? r.id.trim() : "";
-      if (!id) return; // no usable primary key - this row is unrecoverable
-
-      const author = typeof r.author === "string" ? r.author : "";
-      const post = typeof r.post === "string" ? r.post : "";
-      const postedAt = typeof r.postedAt === "string" && r.postedAt ? r.postedAt : undefined;
-      const reply = typeof r.reply === "string" ? r.reply : "";
-      const userEdited = typeof r.userEdited === "boolean" ? r.userEdited : false;
-
-      const stateRaw = typeof r.state === "string" ? r.state : "";
-      let state: ReplyRowState = VALID_STATES.has(stateRaw) ? (stateRaw as ReplyRowState) : "pending";
-      if (state === "drafting") state = "pending"; // defensive: nothing is ever in flight on load
-
-      const error = state === "failed" && typeof r.error === "string" ? r.error : null;
-      const firstSeenAt = typeof r.firstSeenAt === "number" && Number.isFinite(r.firstSeenAt) ? r.firstSeenAt : 0;
-      const order = typeof r.order === "number" && Number.isFinite(r.order) ? r.order : index;
-
-      const resources = coerceReplyResources(r.resources);
-
-      // R3c/R3d: `resourceState` falls back to "idle" on anything OUTSIDE the
-      // four-member set - but a row whose raw JSON never had the key at all
-      // (r.resourceState === undefined) is the "never touched the resource
-      // feature" case, not "searched and produced an invalid value", and
-      // must stay `undefined` so it round-trips identically to a row that
-      // predates this feature entirely (mirrors `postedAt`'s own
-      // absent-stays-absent treatment above).
-      let resourceState: ReplyRow["resourceState"];
-      if (r.resourceState === undefined) {
-        resourceState = undefined;
-      } else {
-        const resourceStateRaw = typeof r.resourceState === "string" ? r.resourceState : "";
-        resourceState = VALID_RESOURCE_STATES.has(resourceStateRaw) ? (resourceStateRaw as NonNullable<ReplyRow["resourceState"]>) : "idle";
-      }
-      const resourceError: ReplyRow["resourceError"] =
-        resourceState === undefined ? undefined : resourceState === "failed" && typeof r.resourceError === "string" ? r.resourceError : null;
-
-      // T2b: `threadPosition` follows the identical R3c-i discipline as
-      // `resourceState` above - a key ABSENT from the raw JSON (a row from
-      // before this feature, or a row whose extraction never touched thread
-      // fields) stays `undefined`, not coerced to `"unknown"`. Only a key
-      // that is PRESENT and outside the three-member set falls back - and
-      // the fallback here is `undefined` rather than a default member,
-      // because `undefined` and `"unknown"` already render identically
-      // (T1a), so there is no meaningful default to fall back TO.
-      let threadPosition: ReplyRow["threadPosition"];
-      if (r.threadPosition === undefined) {
-        threadPosition = undefined;
-      } else {
-        const threadPositionRaw = typeof r.threadPosition === "string" ? r.threadPosition : "";
-        threadPosition = VALID_THREAD_POSITIONS.has(threadPositionRaw) ? (threadPositionRaw as NonNullable<ReplyRow["threadPosition"]>) : undefined;
-      }
-      const replyingToAuthor = typeof r.replyingToAuthor === "string" && r.replyingToAuthor ? r.replyingToAuthor : undefined;
-
-      rows.push({
-        id,
-        author,
-        post,
-        postedAt,
-        reply,
-        userEdited,
-        state,
-        error,
-        firstSeenAt,
-        order,
-        resources,
-        resourceState,
-        resourceError,
-        threadPosition,
-        replyingToAuthor,
-      });
-    });
-
-    return rows;
-  } catch {
-    return [];
-  }
-}
-
-// R3c: defensive coercion of a persisted `resources` array. Never throws -
-// follows deserializeReplyTable's own discipline. A non-array yields
-// `undefined` (not `[]`) so a row that legitimately has never had resources
-// stays distinguishable from a row an instructor emptied out (which
-// serializeReplyTable also normalizes to an absent key, not `[]` - see R3d).
-// An entry whose `title` or `url` is not a non-empty string is dropped
-// entirely; `url` is NOT re-sanitized here - it already cleared
-// `sanitizeResourceUrl` before it was written by the gathering pass.
-function coerceReplyResources(raw: unknown): ReplyResource[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const out: ReplyResource[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const e = entry as Record<string, unknown>;
-    const title = typeof e.title === "string" ? e.title : "";
-    const url = typeof e.url === "string" ? e.url : "";
-    if (!title || !url) continue;
-    const kind = coerceResourceKind(e.kind);
-    const note = typeof e.note === "string" && e.note ? e.note : undefined;
-    out.push(note !== undefined ? { title, url, kind, note } : { title, url, kind });
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,11 @@
 // Unit tests for the pure discussion-capture module - the reply-table side:
-// mergeCapturedPosts, sortReplyRows, swapAdjacentRows, and
-// serializeReplyTable / deserializeReplyTable.
+// mergeCapturedPosts, sortReplyRows, swapAdjacentRows.
+//
+// The serialization coverage (AC22: serializeReplyTable /
+// deserializeReplyTable) that used to live in this file moved to
+// discussion-serialization.test.ts as part of the serialization-block
+// extraction (REGRESSION 372's Limits) - see that file for the AC22 tests
+// and the frozen serialization oracle.
 //
 // Sort-filter closure re-review SHOULD-1: this file used to test a
 // `moveRow` export, a thin "which two ids are physically adjacent" wrapper
@@ -27,16 +32,7 @@
 // dispatcher for the exact sabotages run.
 
 import { describe, it, expect } from "vitest";
-import {
-  MAX_TABLE_ROWS,
-  DISCUSSION_TABLE_VERSION,
-  mergeCapturedPosts,
-  sortReplyRows,
-  swapAdjacentRows,
-  serializeReplyTable,
-  deserializeReplyTable,
-  type ReplyRow,
-} from "./discussion-capture";
+import { MAX_TABLE_ROWS, mergeCapturedPosts, sortReplyRows, swapAdjacentRows, type ReplyRow } from "./discussion-capture";
 
 // BASE_TEXT / TRUNCATED_TEXT are duplicated from discussion-capture.dedupe.test.ts
 // rather than imported, per this repo's rule against importing from another
@@ -297,84 +293,5 @@ describe("swapAdjacentRows (AC53)", () => {
     const rows = [makeRow({ id: "a", order: 0 }), makeRow({ id: "b", order: 1 }), untouched];
     const result = swapAdjacentRows(rows, "custom", "b", "a");
     expect(result.rows.find((r) => r.id === "c")).toBe(untouched);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// AC22: serializeReplyTable / deserializeReplyTable
-// ---------------------------------------------------------------------------
-
-describe("serializeReplyTable / deserializeReplyTable (AC22)", () => {
-  it("round-trips a well-formed table", () => {
-    const rows = [makeRow({ id: "a", postedAt: "Mar 12 at 9:04 PM" }), makeRow({ id: "b", state: "ready", reply: "Great point!" })];
-    const raw = serializeReplyTable(rows);
-    const restored = deserializeReplyTable(raw);
-    expect(restored).toEqual(rows);
-  });
-
-  it("normalizes a drafting row to pending on write, since nothing is in flight after a reload", () => {
-    const rows = [makeRow({ id: "a", state: "drafting" })];
-    const raw = serializeReplyTable(rows);
-    const restored = deserializeReplyTable(raw);
-    expect(restored[0].state).toBe("pending");
-  });
-
-  it("preserves the error reason for a failed row", () => {
-    const rows = [makeRow({ id: "a", state: "failed", error: "Reading the screen failed: 429" })];
-    const restored = deserializeReplyTable(serializeReplyTable(rows));
-    expect(restored[0].state).toBe("failed");
-    expect(restored[0].error).toBe("Reading the screen failed: 429");
-  });
-
-  it("preserves userEdited across the round trip", () => {
-    const rows = [makeRow({ id: "a", userEdited: true })];
-    const restored = deserializeReplyTable(serializeReplyTable(rows));
-    expect(restored[0].userEdited).toBe(true);
-  });
-
-  it("BL4: nulls a stale `error` on a non-failed row, enforcing the ReplyRow invariant (error set only when state === 'failed') even against a row that should never occur but is defended against anyway", () => {
-    // Checks serializeReplyTable's OWN raw output, not the round trip
-    // through deserializeReplyTable - deserializeReplyTable enforces this
-    // same invariant independently on read, which would mask a regression
-    // in serializeReplyTable's write-side enforcement if this test only
-    // checked the round trip.
-    const rows = [makeRow({ id: "a", state: "ready", error: "stale error from a previous failure" })];
-    const raw = JSON.parse(serializeReplyTable(rows)) as { rows: Array<{ error: string | null }> };
-    expect(raw.rows[0].error).toBeNull();
-  });
-
-  it.each([null, "", "not json at all {{{", "[]", '{"v":1}', '{"v":1,"rows":"not-an-array"}', '{"v":99,"rows":[]}'])(
-    "never throws on garbage input %j, and returns an empty array",
-    (garbage) => {
-      expect(() => deserializeReplyTable(garbage)).not.toThrow();
-      expect(deserializeReplyTable(garbage)).toEqual([]);
-    }
-  );
-
-  it("drops an individual malformed row (no usable id) but keeps the rest", () => {
-    const raw = JSON.stringify({
-      v: DISCUSSION_TABLE_VERSION,
-      rows: [{ id: "keep-me", author: "Maria", post: "hello" }, { author: "No Id Here", post: "dropped" }, null, "not an object"],
-    });
-    const restored = deserializeReplyTable(raw);
-    expect(restored.map((r) => r.id)).toEqual(["keep-me"]);
-  });
-
-  it("defaults missing order to the array index, missing firstSeenAt to 0, missing userEdited to false, and an unknown state to pending", () => {
-    const raw = JSON.stringify({
-      v: DISCUSSION_TABLE_VERSION,
-      rows: [{ id: "a", author: "Maria", post: "hello" }, { id: "b", author: "Diego", post: "world", state: "not-a-real-state" }],
-    });
-    const restored = deserializeReplyTable(raw);
-    expect(restored[0]).toMatchObject({ order: 0, firstSeenAt: 0, userEdited: false, state: "pending" });
-    expect(restored[1]).toMatchObject({ order: 1, state: "pending" });
-  });
-
-  it("SABOTAGE CHECK (d): documents that a throwing deserializeReplyTable would fail the garbage-input tests above", () => {
-    // Every garbage fixture in the it.each block above is exactly what a
-    // deserializeReplyTable that does `JSON.parse(raw)` with no try/catch
-    // (or that skips the typeof/Array.isArray guards) would throw on.
-    // Verified by sabotage - see report.
-    expect(deserializeReplyTable("{ this is not valid json")).toEqual([]);
   });
 });

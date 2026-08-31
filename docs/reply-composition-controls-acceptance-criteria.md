@@ -21,10 +21,22 @@ Four controls, all feeding `buildReplyDraftingPrompt`:
 
 | Control | Shape | Persisted | Default |
 | --- | --- | --- | --- |
-| Ingredients | multi-select, 5 fixed options | `ta-rec-disc-ingredients` | compliment + deeper question |
+| "Each reply should include" | multi-select, 5 fixed options | `ta-rec-disc-ingredients` | compliment + deeper question |
 | Address by name | toggle | `ta-rec-disc-address-name` | **ON** (owner's explicit default) |
-| Formality | 3-position slider | `ta-rec-disc-formality` | middle |
+| Formality | 3-stop slider | `ta-rec-disc-formality` | middle |
 | Paragraphs | **not a control** - see C3 | none | always on |
+
+**C0-0. Placement is load-bearing, not cosmetic: the whole cluster goes ABOVE
+`Start capture`, inline, with no disclosure.** Verified at
+`useDiscussionReplies.ts:426` - `enqueueDrafts(addedIds, draftDispatchForce("auto"))`
+fires as posts merge *during* capture, so drafting begins before the instructor
+touches anything else. A control discovered below `Start capture`, or behind a
+disclosure, is discovered *after* the first replies have already been drafted
+under defaults. Insert after the audience row and before the capture button.
+
+A disclosure is also wrong for a second reason: it would hide a toggle that is
+ON by default, so the one control that silently changes output would be the one
+control nobody sees.
 
 **C0-1. "Same for announcements" is a SECOND group, not a second file in this
 one.** The announcement surface (`useTakeAnnouncement.ts`, `take-announcement.ts`,
@@ -68,17 +80,46 @@ branches, because it was never about names:
   ...` not `Hi Maria,` on its own line.
 - toggle **OFF**: today's line, byte-identical.
 
-**C1b. The first name comes from the captured `author` string via the existing
-`person-name.ts` leaf** (built for the sort group's first/last ordering), never
-from the model. The model is told the name to use; it is never asked to derive
-one. A model-derived first name is a guess about a real person's preferred name,
-which is the same class of error T1/T3a already refuses for `replyingToAuthor`.
+**C1b. The greeting name comes from the captured `author` string, never from the
+model.** The model is told the name to use; it is never asked to derive one. A
+model-derived first name is a guess about a real person's preferred name, which
+is the same class of error T1/T3a already refuses for `replyingToAuthor`.
+
+**C1b-i. It must NOT be `deriveReplyAuthorName(...).firstName`, and an earlier
+draft of this AC was wrong to say so.** That field is a SORT KEY, not a greeting.
+`src/lib/person-name.ts:74` is `tokens.slice(0, -1).join(" ")` - everything
+except the last token - which is correct for ordering a table and wrong for
+addressing a person:
+
+| author | `.firstName` | greeting it would produce |
+| --- | --- | --- |
+| `Maria de la Cruz` | `Maria de la` | "Maria de la, your point ..." |
+| `Rajesh Kumar Patel` | `Rajesh Kumar` | "Rajesh Kumar, ..." |
+| `John Q. Public` | `John Q.` | "John Q., ..." |
+
+That behaviour is frozen and tested, so it must not be changed - the sort column
+depends on it. Add a **new** export to the same leaf, e.g.
+`greetingNameFromAuthor(author)`, returning the FIRST token (and, for a
+comma-form `Last, First`, the first token after the comma). Test it against every
+row of the table above, plus a mononym, a trailing-comma string, and an empty
+string.
+
+**C1b-ii. Derive the greeting name in `discussion-draft-loop.ts` and thread it
+per-post**, exactly as entry 372 threads `parent` - do NOT have
+`discussion-reply-prompt.ts` import `person-name.ts`. Threading it per-post
+structurally prevents the greeting being applied to the `CONTEXT ONLY` parent
+block, which has no reply of its own and must never be addressed.
 
 **C1c. A single-token author is used whole.** `person-name.ts` must not invent a
 split. If the board printed only `mchen`, the reply addresses `mchen` or, if that
 reads as a handle rather than a name, the toggle degrades to OFF **for that row
 only** - state which in the implementation and test it. Do not let a username
 leak into a greeting.
+
+**C1c-i. A degrade must be VISIBLE, not silent.** The row already computes a
+`(derived)` marker for a related case; reuse that idiom so a row whose greeting
+was skipped says so. A silent degrade is indistinguishable from the toggle being
+broken, and the instructor would only notice by reading every reply.
 
 **C1d.** The grading-feedback prompts prohibit naming the student. That is a
 different surface with a different reason, and **this change must not touch
@@ -118,9 +159,46 @@ prompt emits the ingredients block only when at least one is selected, so an
 empty selection leaves the prompt byte-identical to today's. Do not force a
 minimum selection; the owner may want exactly that.
 
+**C2c-i. But zero-selected must not LOOK broken.** An empty MUI multiple select
+renders visually identically to one that failed to load. It needs a
+`renderValue` returning a real phrase - "Nothing in particular" - pinned as a
+test fact, not left to the component's default. `renderValue` is required in
+the non-empty case too: MUI's default prints the raw enum values.
+
+**C2c-ii. Copy the existing multi-select idiom MINUS its last-item guard.** The
+established usage prevents deselecting the final option; that directly
+contradicts C2c, which requires the empty state to be reachable.
+
+**C2e. The label is "Each reply should include", not "Ingredients".** The owner
+never used a recipe metaphor, and stem-completing option labels ("a compliment
+on what the post did well", "a question that goes deeper") make C2a's
+conditionality legible in the UI itself rather than only in the prompt.
+
 **C2d.** Ingredients are a **per-table** setting, not per-row. The owner's later
 ask for a per-row resource search is a different control in a different group;
 nothing here forecloses it.
+
+**C2f. The default selection contradicts the `peers` register, and the register
+wins.** `discussion-reply-prompt.ts:186` says, for peers: *"Do not open with
+praise and do not explain the underlying concepts back to them."* The default
+set includes `compliment`. This is C1's own defect class - two contradictory
+instructions in one prompt, resolved by the model, per draft, invisibly - which
+this AC caught for names and then reproduced in its own defaults.
+
+Resolution: **the compliment clause is audience-aware.** The peers ban is on
+*opening* with praise, not on acknowledging substance, so for peers the clause
+must not produce an opening praise line; it may engage with what the post gets
+right inside the reply. For students no conflict exists - that register
+(`:178`) already mandates opening by naming something the student actually said.
+Test both registers separately; a single combined test would pass on either one
+alone.
+
+**C2g. Ordering, for students, when the name toggle is ON.** The students
+register already prescribes the opening move ("Open by naming something the
+student actually said"). The greeting precedes that move rather than replacing
+it - `Maria, your point about the second reading ...`, not a greeting line
+followed by a restart. Say so explicitly in the prompt, or the two instructions
+compete for the same sentence.
 
 ---
 
@@ -129,6 +207,13 @@ nothing here forecloses it.
 **C3.** The existing prompt asks for a paragraph break only "if you need one".
 That becomes a requirement: **a reply longer than roughly 60 words is broken into
 at least two paragraphs, separated by a blank line.**
+
+**C3-i. The existing prompt line must CHANGE, not be supplemented.**
+`discussion-reply-prompt.ts:265` currently asks for a single `\n` "if you need
+one". C3 requires a blank line (`\n\n`) between paragraphs. Leaving the old line
+in place would mean C3b's round-trip test pins a shape the prompt never actually
+requests - a test that passes while the model is being told something else. Edit
+the line; do not add a second instruction beside it.
 
 **C3a. Nothing post-processes the model's text into paragraphs.** No
 "insert a break every N sentences" pass. A mechanical split produces breaks
@@ -157,14 +242,50 @@ existing visual language rather than dropped in with defaults.
 produce a register the model can actually distinguish. Five stops would put two
 pairs of adjacent positions within noise of each other, so the control would
 appear to do nothing for two of its five values - worse than a coarser control
-that always visibly works. Stops: **Casual / Neutral / Formal.**
+that always visibly works. Stops: **Casual / Balanced / Formal.**
+
+"Balanced", not "Neutral": C4b makes the middle stop a no-op that preserves the
+students register's own explicit warmth (`discussion-reply-prompt.ts:178`), and
+"Neutral" misdescribes that - it reads as "no tone", which is not what the
+middle stop does.
+
+**C4c. The slider's mechanics, each a real trap:**
+
+- **Persist on `onChangeCommitted`, never `onChange`.** MUI's `Slider.onChange`
+  fires continuously through a drag, so persisting there writes to localStorage
+  on every pixel and can re-arm drafting mid-gesture.
+- The track needs an explicit width and horizontal padding (~`width: 220`,
+  `paddingInline: 24`). Without it the outer mark labels are centred at 0% and
+  100% and overhang the track by roughly 23px, so "Casual" and "Formal" clip at
+  narrow widths. All three labels stay visible at all widths - hiding the
+  inactive ones costs a discovery drag and buys nothing once the padding is
+  there.
+- **`getAriaValueText` is required.** Without it a screen reader announces
+  "1 of 0 to 2", which conveys nothing. It must speak the stop's name. Pair it
+  with `aria-labelledby` pointing at the visible label; `valueLabelDisplay` off.
+- **The focus ring needs an explicit `outline`.** `theme.ts` only corrects focus
+  rings on `MuiButtonBase`, and the Slider thumb is not one, so it falls back to
+  MUI's box-shadow ring - which `theme.ts`'s own comment records as invisible in
+  Windows High Contrast mode.
 
 **C4b. Formality attaches near `AUDIENCE_STANCE`, and the two must not fight.**
 The existing peers/students registers already carry tone. Read the live
 `AUDIENCE_STANCE` text before writing the formality clauses and make each stop
-*modulate* that stance rather than restate or contradict it. The middle stop must
-leave the audience register's own tone intact - so the default is a no-op against
-today's prompt, and the whole group stays inert until the owner moves something.
+*modulate* that stance rather than restate or contradict it. The middle stop
+leaves the audience register's own tone intact.
+
+**C4b-i. The DEFAULT CONFIGURATION IS NOT INERT, and this must be deliberate.**
+An earlier draft of this AC implied the group ships inert until the owner moves
+something. That is false in three of four dimensions: ingredients default to two
+selected, the name toggle defaults ON, and paragraphs are unconditional. Only the
+formality middle stop is genuinely a no-op.
+
+The owner explicitly asked for name-addressing ON by default, so that one is
+intended. The other two are hereby made intentional rather than accidental: the
+default reply gains a compliment, a deeper question, a first-name greeting and
+paragraph breaks **on the very first capture after this ships**, with no action
+taken. **The REGRESSION entry must state that plainly** - the previous group's
+review found a change to output shipping with nobody having decided it should.
 
 ---
 
@@ -183,16 +304,33 @@ exported function**, because vitest here renders no hook - an inline coercion
 inside a `useState` initializer is untestable in this repo.
 
 **C5b. The key-inventory canary goes 49 -> 52** and its expected array must be
-updated in the same commit. It is exact-set equality, so a missed key fails the
-whole suite.
+updated in the same commit. It is **ordered array equality** (stronger than set
+equality), and the order is ORDINAL - `ta-rec-card-title` precedes
+`ta-rec-cards`, which a culture-aware sort reverses. Insert each new key at its
+ordinal position, do not append.
 
-**C5c. The trap the survey found, which this AC closes.** Unlike
-`ta-rec-avatar-*`, there is **no read/write wiring check** for `ta-rec-disc-*`, so
-a key that is only ever written (or only ever read) passes the canary and ships
-silently broken - the control appears to work and then forgets on reload. Add a
-wiring assertion for all six `ta-rec-disc-*` keys: each must appear in at least
-one read AND at least one write. This is the `verify-reachability` class caught
-one layer earlier, and it retro-covers the three existing keys.
+**C5c. Add a read/write wiring check for the `ta-rec-disc-*` keys** - the canary
+proves a key EXISTS in the source, not that it is both written and read back, so
+a key with only one half passes it and ships silently broken: the control appears
+to work and forgets on reload. This is `verify-reachability` one layer earlier.
+
+**C5c-i. The existing avatar wiring check is NOT copy-pasteable, and an earlier
+draft of this AC assumed it was.** Two mismatches, either of which yields a
+screenful of red tests over correct code:
+
+- it matches `readPersisted` / `localStorage.getItem` with a **literal**
+  argument, but this surface uses the `readLocalStorage` / `writeLocalStorage`
+  helpers;
+- three of the existing disc keys are referenced through `const STORAGE_KEY_*`
+  constants, not as literals at the call site, so a literal-argument regex cannot
+  see them at all.
+
+Write the check against how THIS surface actually stores things, and prove it by
+sabotage: delete one key's write, confirm the check goes red.
+
+**C5c-ii. There are already SIX `ta-rec-disc-*` keys, not three** (`audience`,
+`course`, `filter`, `save-video`, `sort`, `table`). With the three new ones the
+check covers **nine**. An earlier draft of this AC said three.
 
 ---
 
@@ -206,6 +344,39 @@ against the OLD setting, with nothing on screen indicating it.
 **C6a.** Test the signature CHANGES for each of the three controls
 independently - three assertions, not one combined one. A single combined test
 passes when only one of the three is wired.
+
+**C6b. "Arming" does NOT mean "re-draft".** Stated because C6 is misreadable as
+"changing a control re-runs drafting", which would be alarming and is not what
+happens. Changing a control enqueues nothing and rewrites nothing; the existing
+`isDispatchableDraftItem` / `draftDispatchForce` machinery already refuses to
+overwrite a reply the instructor has edited, and the signature change only
+disarms a pending redraft confirmation. Already-drafted rows keep their text
+until the instructor explicitly redrafts. Reuse the existing armed-confirm
+consequence line as the escape hatch - do not invent a new notice.
+
+**C6c. Do not route any of this through the `notices` channel.** It is a capped,
+dismissible FAILURE channel rendered with the error style and piped to a live
+region; a settings change is neither an error nor an interruption. Discoverability
+comes from the inline placement (C0-0) plus a label that states the effect -
+"Open each reply with the student's first name" - plus one hint sentence.
+
+---
+
+## 6b. Two existing defects this group must not propagate
+
+**C6d. The audience segmented toggle has no `aria-pressed`.** Verified: the
+attribute appears exactly once in the whole `recording/` directory, in an
+unrelated panel. It is the control this AC otherwise cites as the segmented
+precedent, so copying it would propagate the defect to a second control. Since
+the formality control is a slider rather than a segmented group, the fix is
+small and belongs here: add `aria-pressed` to the audience toggle in the same
+group. In-scope, one line, and this panel is already open.
+
+**C6e. C3's paragraph requirement collides with a deliberate height match.** The
+reply textarea's `minRows` and the post block's fixed height are tuned to line
+up. Replies that are now reliably multi-paragraph will change the typical filled
+height. Check the pairing at the 1000px stacking breakpoint and adjust the match
+rather than letting the two columns drift apart.
 
 ---
 

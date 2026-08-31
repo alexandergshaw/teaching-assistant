@@ -463,10 +463,24 @@ describe("computeStoppedSessionSummary (S2 fix)", () => {
 // read (property name, assignment shape) - never on the surrounding prose,
 // per this repo's "source-text tests over-specify: pin the fact and the
 // ordering, never the spelling" rule.
-describe("useDiscussionReplies.ts / useReplyResources.ts - rawRows source guard (B1-B5, S5 fix)", () => {
+//
+// discussion-draft-loop.ts split (recording-split): runDraftLoop - one of
+// the four dispatch/lookup sites this guard exists to protect (the drafting
+// queue's own dispatch-time read, and resolveEditedDuringDispatch) - moved
+// out of useDiscussionReplies.ts into that leaf. The guard is repointed here
+// to scan BOTH files, so it keeps checking the actual code that dispatches,
+// not a file that used to contain it. Verified this repoint actually fires:
+// a temporary local edit reverting discussion-draft-loop.ts's
+// `resolveEditedDuringDispatch` read from `rowsApiRef.current.rawRows.find`
+// to `rowsApiRef.current.rows.find` was applied, `npx vitest run
+// discussion-table-view.test.ts` was re-run and failed on the new
+// discussion-draft-loop.ts assertions below, then the edit was reverted and
+// the suite re-run green again - the same sabotage-then-revert discipline
+// this file's own header already commits to.
+describe("useDiscussionReplies.ts / discussion-draft-loop.ts / useReplyResources.ts - rawRows source guard (B1-B5, S5 fix)", () => {
   const readSource = (relPath: string): string => fs.readFileSync(path.resolve(process.cwd(), relPath), "utf-8");
 
-  it("useDiscussionReplies.ts never reads a property/method off the FILTERED rowsApiRef.current.rows - B1-B4's four dispatch/lookup sites go through .rawRows", () => {
+  it("useDiscussionReplies.ts never reads a property/method off the FILTERED rowsApiRef.current.rows - B1/B2's two remaining dispatch sites (redraftAll, draftAllPending) go through .rawRows", () => {
     const src = readSource("src/app/components/recording/useDiscussionReplies.ts");
     // ".rows." (a property/method access) or a bare "= rowsApiRef.current.rows;"
     // assignment is exactly B1-B4's regressed shape; neither can match
@@ -474,7 +488,15 @@ describe("useDiscussionReplies.ts / useReplyResources.ts - rawRows source guard 
     expect(src).not.toMatch(/rowsApiRef\.current\.rows\./);
     expect(src).not.toMatch(/=\s*rowsApiRef\.current\.rows\s*;/);
     const rawRowsReads = src.match(/rowsApiRef\.current\.rawRows/g) ?? [];
-    expect(rawRowsReads.length).toBeGreaterThanOrEqual(4); // redraftAll, draftAllPending, the drafting queue, resolveEditedDuringDispatch
+    expect(rawRowsReads.length).toBeGreaterThanOrEqual(2); // redraftAll, draftAllPending
+  });
+
+  it("discussion-draft-loop.ts's runDraftLoop never reads a property/method off the FILTERED rowsApiRef.current.rows - B3/B4's two remaining dispatch sites (the drafting queue's dispatch-time read, resolveEditedDuringDispatch) go through .rawRows", () => {
+    const src = readSource("src/app/components/recording/discussion-draft-loop.ts");
+    expect(src).not.toMatch(/rowsApiRef\.current\.rows\./);
+    expect(src).not.toMatch(/=\s*rowsApiRef\.current\.rows\s*;/);
+    const rawRowsReads = src.match(/rowsApiRef\.current\.rawRows/g) ?? [];
+    expect(rawRowsReads.length).toBeGreaterThanOrEqual(2); // the drafting queue's currentRows read, resolveEditedDuringDispatch
   });
 
   it("useDiscussionReplies.ts's loop-start gate reads rawRows.length, not the filtered rows.length (S5 fix)", () => {
@@ -493,5 +515,14 @@ describe("useDiscussionReplies.ts / useReplyResources.ts - rawRows source guard 
     // Verified by sabotage - see report.
     const src = readSource("src/app/components/recording/useDiscussionReplies.ts");
     expect(src).not.toMatch(/rowsApiRef\.current\.rows\.map/);
+  });
+
+  it("SABOTAGE CHECK: fails if discussion-draft-loop.ts's drafting-queue dispatch read is reverted from rawRows back to rows", () => {
+    // Verified by sabotage (recording-split extraction pass): see this
+    // describe block's own header comment for how the repoint itself was
+    // proven to fire.
+    const src = readSource("src/app/components/recording/discussion-draft-loop.ts");
+    expect(src).not.toMatch(/const currentRows = rowsApiRef\.current\.rows;/);
+    expect(src).not.toMatch(/rowsApiRef\.current\.rows\.find/);
   });
 });

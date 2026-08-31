@@ -43,11 +43,8 @@
 // create it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReplyRow, ReplySort } from "./discussion-capture";
 import {
   EXTRACT_BATCH_WIRE_BUDGET,
-  partitionDraftOutcome,
-  isDispatchableDraftItem,
   draftDispatchForce,
   shouldLoopContinue,
   shouldTickerRun,
@@ -64,119 +61,30 @@ import { listCourseHubAction } from "@/app/actions/course-hub-core";
 import { getStoredProvider } from "@/lib/llm-provider";
 import {
   EXTRACT_BATCH_SIZE,
-  DRAFT_BATCH_SIZE,
   normalizeAudience,
   type DiscussionAudience,
 } from "@/lib/discussion-reply-prompt";
+// Contract/documentation block (UseDiscussionRepliesReturn, DraftQueueItem,
+// LOOP_IDLE_POLL_MS, the two localStorage helpers) and the drafting queue's
+// consumer loop (runDraftLoop) both live in discussion-draft-loop.ts now -
+// split out purely to stay under recording-split.structure.test.ts's
+// 1000-line ceiling (see that file's own header for why). This hook still
+// OWNS both: it returns UseDiscussionRepliesReturn below exactly as before,
+// and wraps runDraftLoop in its own useCallback, supplying the deps object -
+// see that wrapper below for why the sibling loop is imported under an
+// alias (`runDraftLoop` is also this hook's own local binding name, for the
+// same call sites - `void runDraftLoop(epoch)`, the effect's deps array -
+// that existed before this split).
+import {
+  runDraftLoop as runDraftLoopStep,
+  readLocalStorage,
+  writeLocalStorage,
+  LOOP_IDLE_POLL_MS,
+  type UseDiscussionRepliesReturn,
+  type DraftQueueItem,
+} from "./discussion-draft-loop";
 
-// --- S6: both sub-hooks' real return types are used directly - no hand-
-// written duplicate interface and no `as` assertion at the call site below.
-// A hand-written duplicate is exactly the thing that can drift silently
-// (assignable-but-wrong is still a compile error tsc would have caught;
-// `as` is what was suppressing that check). C1's `UseDiscussionCaptureReturn`
-// and C2's `UseReplyRowsReturn` (imported above) are used as-is. ---
-
-export interface UseDiscussionRepliesReturn {
-  audience: DiscussionAudience;
-  setAudience: (a: DiscussionAudience) => void;
-  courseId: string;
-  setCourseId: (id: string) => void;
-  courses: Array<{ id: string; name: string }> | null;
-  coursesLoading: boolean;
-  coursesError: string | null;
-
-  saveVideo: boolean;
-  setSaveVideo: (v: boolean) => void;
-  recordingUrl: string | null;
-  recordingBytes: number;
-
-  capturing: boolean;
-  elapsedSec: number;
-  pendingFrames: number;
-  /** AC10/F4: session-level count of frames dropped to backpressure, passed
-   *  straight through from C1 so set D can render AC7b's drop sentence
-   *  beneath the post-stop summary when this is non-zero. */
-  droppedFrames: number;
-  extracting: boolean;
-  stalled: boolean;
-  notices: Array<{ id: string; text: string }>;
-  dismissNotice: (id: string) => void;
-  previewRef: React.RefObject<HTMLVideoElement | null>;
-  start: () => Promise<void>;
-  stop: () => void;
-
-  /** Sorted AND filtered for display. See `totalCount` for the real size. */
-  rows: ReplyRow[];
-  sort: ReplySort;
-  setSort: (s: ReplySort) => void;
-  filterText: string;
-  setFilterText: (next: string) => void;
-  /** The UNFILTERED row count (F0-2/F11). Every count, progress string, empty
-   *  state and - critically - both destructive arming signatures read this,
-   *  never `rows.length`, which a filter narrows. */
-  totalCount: number;
-  /** Fixer pass (root cause): forwarded from C2's `useReplyRows` for one
-   *  consumer - the panel's post-stop session summary (S2), which cannot
-   *  diff the whole table correctly off the filtered `rows`. This file's
-   *  own bulk/dispatch code below reaches C2's `rawRows` via `rowsApiRef`
-   *  directly, not through this field. */
-  rawRows: ReplyRow[];
-  moveRow: (id: string, dir: "up" | "down") => void;
-  editReply: (id: string, text: string) => void;
-  removeRow: (id: string) => void;
-  retryRow: (id: string) => void;
-  draftAllPending: () => void;
-  redraftAll: () => void;
-  clearTable: () => void;
-  drafting: boolean;
-
-  // docs/discussion-reply-resources-acceptance-criteria.md R12: the three
-  // fields useReplyResources.ts (set R-D) seals in its own
-  // UseReplyResourcesReturn, forwarded straight through. `removeResource`
-  // is a plain row mutator (no queue involvement) forwarded directly from
-  // C2's useReplyRows the same way editReply/removeRow above already are.
-  resourceQueueSize: number;
-  findMissing: () => void;
-  retryResources: (id: string) => void;
-  removeResource: (id: string, url: string) => void;
-}
-
-// A drafting-queue entry. `force` bypasses `isDispatchableDraftItem`'s
-// userEdited guard at dispatch time (AC52) - see discussion-capture.ts's
-// `draftDispatchForce` for which of the four dispatch sites (the auto-queue
-// after extraction, Draft the missing replies, Retry, Redraft every reply)
-// force and which respect the guard, and S1 for why Retry forces even
-// though it is not a bulk/destructive action the way Redraft every reply is.
-interface DraftQueueItem {
-  id: string;
-  force: boolean;
-}
-
-// BL1: this is now only the wake-ticker's tick cadence (see the wake-
-// mechanism block below), never a literal setTimeout delay - a chained
-// main-thread setTimeout is exactly what BL1 removes from both loops.
-const LOOP_IDLE_POLL_MS = 300;
-
-function readLocalStorage(key: string): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLocalStorage(key: string, value: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Non-fatal here: the in-memory value keeps working. AC23a's dedicated
-    // storage-full message is for the table write (persistError, via C2);
-    // these three controls are small enough that a quota failure on them
-    // would only mean "the toggle doesn't survive a reload," not data loss.
-  }
-}
+export type { UseDiscussionRepliesReturn } from "./discussion-draft-loop";
 
 export function useDiscussionReplies(active: boolean): UseDiscussionRepliesReturn {
   // --- The three simple persisted controls (AC20). Keys are whole string
@@ -545,141 +453,33 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // scrolling. ---
   const [drafting, setDrafting] = useState(false);
 
-  const runDraftLoop = useCallback(async (epoch: number) => {
-    // NEW-1: see runExtractionLoop's identical comment above.
-    while (shouldLoopContinue(loopsActiveRef.current, loopEpochRef.current, epoch)) {
-      if (draftQueueRef.current.length === 0) {
-        // S8: a functional update, not a bare `setDrafting(false)` - this
-        // branch runs every idle wake (every ~300ms while anything is
-        // queued-empty), and React bails out of the re-render when the
-        // updater returns the SAME value it already holds. A bare
-        // `setDrafting(false)` schedules a state write every single time
-        // regardless of the current value.
-        setDrafting((prev) => (prev ? false : prev));
-        await waitForWake();
-        continue;
-      }
-
-      const batch = draftQueueRef.current.splice(0, DRAFT_BATCH_SIZE);
-      // NEW-2: mirror the post-splice queue length into state right away
-      // (not only once the dispatch below resolves) - a batch that turns out
-      // to have zero dispatchable items still drained the queue, and the
-      // ticker-idle effect needs to see that drain to be able to stop the
-      // ticker again.
-      setDraftQueueSize(draftQueueRef.current.length);
-      // B3 fix: `rawRows`, not `rows`. A batch spliced off the queue above
-      // must not vanish because a search-box keystroke hid its ids from the
-      // filtered array at this exact instant - never drafted, never failed,
-      // never re-enqueued. Nothing on screen was ever a selection here.
-      const currentRows = rowsApiRef.current.rawRows;
-      // AC52/S1: re-check row state at DISPATCH time, not enqueue time. A
-      // non-force entry whose row is USER-EDITED (typed into since it was
-      // queued, or already contains hand-written text) is skipped here
-      // rather than at enqueue, when it would already be baked into the
-      // batch. This is deliberately keyed on `userEdited`, not on `reply`
-      // being non-empty: a row left `failed` by a redraft that itself
-      // failed keeps its OLD machine-drafted text in `reply` with
-      // `userEdited` still false, and that text must stay dispatchable so
-      // Retry / "Draft the missing replies" can still reach it - see
-      // isDispatchableDraftItem in discussion-capture.ts.
-      const dispatchable = batch
-        .map((item) => ({ item, row: currentRows.find((r) => r.id === item.id) }))
-        .filter(
-          (x): x is { item: DraftQueueItem; row: ReplyRow } =>
-            !!x.row && isDispatchableDraftItem(x.item, x.row)
-        );
-      if (dispatchable.length === 0) continue;
-
-      setDrafting(true);
-      const ids = dispatchable.map((x) => x.row.id);
-      rowsApiRef.current.markDrafting(ids);
-      // AC44: snapshot the edit generation for every dispatched row BEFORE
-      // the request goes out.
-      const editSnap = rowsApiRef.current.snapshotEditSeq(ids);
-      const provider = getStoredProvider();
-      const audienceNow = audienceRef.current;
-      const courseName = courseNameRef.current;
-
-      let result: Awaited<ReturnType<typeof draftDiscussionRepliesAction>>;
-      try {
-        result = await draftDiscussionRepliesAction(
-          dispatchable.map((x) => ({ id: x.row.id, author: x.row.author, text: x.row.post })),
-          audienceNow,
-          courseName,
-          provider
-        );
-      } catch (err) {
-        result = { error: err instanceof Error ? err.message : "Could not draft replies." };
-      }
-      if (!loopsActiveRef.current) return;
-
-      // F10: a row edited WHILE it was "drafting" (after dispatch, before
-      // this response lands) has no path back out of "drafting" if the
-      // model's text is going to be discarded anyway - AC18 only forces
-      // pending/failed -> ready on edit, and applying a stale reply over the
-      // user's own text is exactly what the edit guard exists to prevent.
-      // AC26 says such a row is "left as the user typed it" - resolving it
-      // to "ready" on its OWN current reply (never the model's) is what
-      // actually leaves it there instead of stuck showing "Drafting"
-      // forever. partitionDraftOutcome (set A, pure and unit-tested) is
-      // shared by both the batch-error branch and the per-reply response
-      // loop below, since the same hole exists on both paths.
-      const isUnchanged = (id: string) => rowsApiRef.current.isUnchangedSince(id, editSnap);
-      const resolveEditedDuringDispatch = (id: string) => {
-        // B4 fix: `rawRows`, not `rows` - a row hidden by the filter at this
-        // instant must not stay wedged in "drafting" forever, reopening the
-        // exact wedge F10 exists to close (this function's doc comment above).
-        const current = rowsApiRef.current.rawRows.find((r) => r.id === id);
-        // S7: pass the row's OWN current `userEdited` through explicitly -
-        // this re-applies the user's own hand-typed text (never the
-        // model's), so it must keep its authorship flag. applyReply's
-        // default (userEdited=false) is for the OTHER call site below,
-        // where a real model reply is landing.
-        if (current) rowsApiRef.current.applyReply(id, current.reply, current.userEdited);
-      };
-
-      if ("error" in result) {
-        const { unchanged, editedDuringDispatch } = partitionDraftOutcome(ids, isUnchanged);
-        editedDuringDispatch.forEach(resolveEditedDuringDispatch);
-        if (unchanged.length > 0) {
-          rowsApiRef.current.markFailed(unchanged, result.error);
-        }
-        pushNotice(result.error);
-        continue;
-      }
-
-      const editedDuringDispatchSet = new Set(partitionDraftOutcome(ids, isUnchanged).editedDuringDispatch);
-      const returned = new Set<string>();
-      for (const reply of result.replies) {
-        returned.add(reply.id);
-        // AC26/AC44: apply the drafted reply only if the row is unchanged
-        // since dispatch; otherwise discard the model's text but still
-        // resolve the row to "ready" on the user's own edit (F10) rather
-        // than leaving it stuck on "drafting".
-        if (editedDuringDispatchSet.has(reply.id)) {
-          resolveEditedDuringDispatch(reply.id);
-        } else {
-          rowsApiRef.current.applyReply(reply.id, reply.reply);
-          // R6: the ONE trigger point - enqueue a resource search only
-          // after a model-authored reply lands. Never on the discard path
-          // above, which re-applies the user's own text and searched
-          // nothing new.
-          resourcesApiRef.current.enqueueResources([reply.id]);
-        }
-      }
-      const missing = ids.filter((id) => !returned.has(id));
-      if (missing.length > 0) {
-        const { unchanged: stillFailed, editedDuringDispatch: missingEdited } = partitionDraftOutcome(missing, isUnchanged);
-        // F10: the model omitted this row, but the user had already edited
-        // it while it was drafting - that is not a failure, the user has
-        // written a reply.
-        missingEdited.forEach(resolveEditedDuringDispatch);
-        if (stillFailed.length > 0) {
-          rowsApiRef.current.markFailed(stillFailed, "No reply came back for this post.");
-        }
-      }
-    }
-  }, [pushNotice, waitForWake]);
+  // Extracted to discussion-draft-loop.ts's own `runDraftLoop` (imported
+  // above as `runDraftLoopStep`, since this local binding keeps the same
+  // name every existing call site below already uses - `void
+  // runDraftLoop(epoch)` in the loop-start effect, and `runDraftLoop` in
+  // that effect's deps array). Deps here are exactly the refs/mutators/
+  // action the loop closed over before the split; the deps array stays
+  // [pushNotice, waitForWake] - unchanged from before, since every ref and
+  // setState identity below is already stable across renders, the same
+  // reasoning runExtractionLoop's own useCallback above already relies on.
+  const runDraftLoop = useCallback(
+    (epoch: number) =>
+      runDraftLoopStep(epoch, {
+        loopsActiveRef,
+        loopEpochRef,
+        draftQueueRef,
+        setDraftQueueSize,
+        setDrafting,
+        waitForWake,
+        rowsApiRef,
+        resourcesApiRef,
+        audienceRef,
+        courseNameRef,
+        pushNotice,
+        draftAction: draftDiscussionRepliesAction,
+      }),
+    [pushNotice, waitForWake]
+  );
 
   // --- NEW-2: whether either loop has anything to wake up FOR, right now.
   // Computed in render (not derived only inside an effect) so both effects

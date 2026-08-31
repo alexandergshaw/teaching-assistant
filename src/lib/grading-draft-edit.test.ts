@@ -34,6 +34,52 @@ describe("replaceAreaComment", () => {
     ],
   });
 
+  // A payload carrying the optional repo-grading log. Both call sites write
+  // this function's result straight back through
+  // updateGradingDraftPayloadAction, so a field this function drops is a
+  // field permanently destroyed in storage - see the fix comment in
+  // grading-draft-edit.ts and docs/repo-grades-activity-log-acceptance-criteria.md
+  // for why losing that log is not cosmetic.
+  const createPayloadWithRepoLog = (): GradingDraftPayload => ({
+    ...createTestPayload(),
+    repoGradingLog: {
+      entries: [
+        {
+          repo: "org/alice",
+          outcome: "graded",
+          reason: "",
+          score: "9/10",
+          at: "2026-08-24T15:04:05.000Z",
+          digestTruncated: false,
+        },
+      ],
+      attempted: 1,
+      truncated: false,
+      notReached: [],
+    },
+  });
+
+  it("carries repoGradingLog through unchanged", () => {
+    const payload = createPayloadWithRepoLog();
+    const updated = replaceAreaComment(payload, 0, 0, "Clarity", "Excellent clarity");
+
+    expect(updated.repoGradingLog).toEqual(payload.repoGradingLog);
+  });
+
+  it("carries repoGradingLog through even when the target area is not found", () => {
+    const payload = createPayloadWithRepoLog();
+    const updated = replaceAreaComment(payload, 0, 0, "NonExistent", "New comment");
+
+    expect(updated.repoGradingLog).toEqual(payload.repoGradingLog);
+  });
+
+  it("leaves repoGradingLog absent when the input had none", () => {
+    const payload = createTestPayload();
+    const updated = replaceAreaComment(payload, 0, 0, "Clarity", "Excellent clarity");
+
+    expect("repoGradingLog" in updated).toBe(false);
+  });
+
   it("replaces the targeted area comment", () => {
     const payload = createTestPayload();
     const updated = replaceAreaComment(payload, 0, 0, "Clarity", "Excellent clarity");

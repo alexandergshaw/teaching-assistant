@@ -36,5 +36,13 @@ export function replaceAreaComment(
     },
   }));
 
-  return { runs: newRuns };
+  // Spread the payload rather than reconstructing it from `runs` alone.
+  // GradingDraftPayload carries an optional `repoGradingLog` (the per-repo
+  // attempt record for a repo-grading run), and rebuilding the object as
+  // `{ runs }` silently dropped it - so editing a single rubric comment
+  // destroyed the whole run's log, permanently, because the caller writes
+  // this result straight back through updateGradingDraftPayloadAction.
+  // Spreading also means a field added to the payload later survives this
+  // function without anyone having to remember to come back here.
+  return { ...payload, runs: newRuns };
 }

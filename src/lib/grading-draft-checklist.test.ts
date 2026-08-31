@@ -185,4 +185,44 @@ describe("applyDerivedChecklist", () => {
     const [section] = buildAssignmentChecklistSections(cached);
     expect(section.needsDerivation).toBe(false);
   });
+
+  // DraftedGradesTab writes this function's result straight back through
+  // updateGradingDraftPayloadAction, so a field dropped here is destroyed in
+  // storage. `repoGradingLog` was being dropped: deriving one checklist wiped
+  // the whole run's per-repo attempt record. See
+  // docs/repo-grades-activity-log-acceptance-criteria.md for why that log
+  // matters rather than being cosmetic.
+  const REPO_LOG: NonNullable<GradingDraftPayload["repoGradingLog"]> = {
+    entries: [
+      {
+        repo: "org/alice",
+        outcome: "graded",
+        reason: "",
+        score: "9/10",
+        at: "2026-08-24T15:04:05.000Z",
+        digestTruncated: false,
+      },
+    ],
+    attempted: 1,
+    truncated: false,
+    notReached: [],
+  };
+
+  it("carries repoGradingLog through unchanged", () => {
+    const payload: GradingDraftPayload = { runs: [makeEntry()], repoGradingLog: REPO_LOG };
+    const updated = applyDerivedChecklist(payload, 0, ["A", "B", "C"]);
+    expect(updated.repoGradingLog).toEqual(REPO_LOG);
+  });
+
+  it("carries repoGradingLog through even when runIndex matches no run", () => {
+    const payload: GradingDraftPayload = { runs: [makeEntry()], repoGradingLog: REPO_LOG };
+    const updated = applyDerivedChecklist(payload, 99, ["A"]);
+    expect(updated.repoGradingLog).toEqual(REPO_LOG);
+  });
+
+  it("leaves repoGradingLog absent when the input had none", () => {
+    const payload: GradingDraftPayload = { runs: [makeEntry()] };
+    const updated = applyDerivedChecklist(payload, 0, ["A"]);
+    expect("repoGradingLog" in updated).toBe(false);
+  });
 });

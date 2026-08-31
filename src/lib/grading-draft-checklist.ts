@@ -1,4 +1,4 @@
-import type { GradingDraftPayload } from "./grading-drafts";
+﻿import type { GradingDraftPayload } from "./grading-drafts";
 import type { GradingRunEntry } from "./grade";
 
 // Pure helpers behind the drafted-grades page's per-assignment full-credit
@@ -84,7 +84,14 @@ export function applyDerivedChecklist(
   runIndex: number,
   items: string[]
 ): GradingDraftPayload {
+  // Spread the payload rather than reconstructing it from `runs` alone - see
+  // the same fix in grading-draft-edit.ts. GradingDraftPayload carries an
+  // optional `repoGradingLog`, and returning `{ runs }` silently dropped it,
+  // so deriving a checklist destroyed the run's log on the way to
+  // updateGradingDraftPayloadAction. Spreading also carries any field added
+  // to the payload later.
   return {
+    ...payload,
     runs: payload.runs.map((entry, idx) =>
       idx === runIndex
         ? { ...entry, run: { ...entry.run, fullCreditChecklist: items } }

@@ -54,8 +54,8 @@ export function BulkSelectionBar({
         <Button
           variant="outlined"
           size="small"
+          color="inherit"
           onClick={onClearSelection}
-          sx={{ color: "#fff", borderColor: "rgba(255,255,255,0.4)" }}
         >
           Clear
         </Button>
@@ -128,7 +128,7 @@ export function BulkSelectionBar({
                       ]
                     )}
                   </TextField>
-                  <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                  <div style={{ marginTop: "var(--space-2)", display: "flex", gap: "var(--space-2)" }}>
                     <Button
                       variant="contained"
                       size="small"

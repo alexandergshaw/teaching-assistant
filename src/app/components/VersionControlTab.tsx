@@ -118,7 +118,7 @@ export default function VersionControlTab() {
 
   return (
     <div className={styles.form}>
-      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Version control sections" style={{ marginBottom: 4 }}>
+      <div className={styles.lessonInnerTabs} role="tablist" aria-label="Version control sections" style={{ marginBottom: "var(--space-1)" }}>
         <button
           type="button"
           role="tab"

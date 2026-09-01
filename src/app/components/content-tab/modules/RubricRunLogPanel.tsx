@@ -127,7 +127,7 @@ export default function RubricRunLogPanel({ log, onClear }: RubricRunLogPanelPro
         </button>
       </span>
       {recent.length > 0 && (
-        <ul style={{ flex: "1 1 100%", margin: "2px 0 0", padding: 0, listStyle: "none" }}>
+        <ul style={{ flex: "1 1 100%", margin: "var(--space-1) 0 0", padding: 0, listStyle: "none" }}>
           {recent.map((entry, index) => (
             // The key pairs the timestamp with the item/rubric and the index
             // within this rendered slice: two entries CAN share a

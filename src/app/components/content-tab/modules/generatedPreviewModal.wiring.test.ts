@@ -793,9 +793,33 @@ describe("AC A/C defect fix - the new markup itself is asserted, not only the pr
     expect(consequenceIdx, "the confirm panel's consequence paragraph is missing - the panel was deleted").toBeGreaterThan(-1);
     const before = sectionSource.slice(Math.max(0, consequenceIdx - 700), consequenceIdx);
     expect(before, "the consequence paragraph should be gated on showCancelConfirm").toMatch(/showCancelConfirm\s*&&/);
-    const after = sectionSource.slice(consequenceIdx, consequenceIdx + 1200);
-    expect(after, "the confirm panel should quote confirmSubjectText, the exact value that will post").toMatch(/\{confirmSubjectText\}/);
-    expect(after, "the confirm panel should quote confirmBodyText, the exact value that will post").toMatch(/\{confirmBodyText\}/);
+    // Locality is asserted by ORDER and a generous bound, not by a tight
+    // character count. The original form sliced exactly 1200 characters after
+    // the consequence paragraph and required both markers inside it. That
+    // passed with `{confirmBodyText}` sitting at roughly 1190 - about ten
+    // characters of headroom - so it was measuring the length of the markup as
+    // much as its content. The 2026-09-01 aesthetics pass added inline style
+    // attributes to the paragraphs in between, the panel grew by ~80
+    // characters, and the assertion went red while the markup it guards was
+    // completely intact: both values still quoted, still in the same panel,
+    // still in the right order.
+    //
+    // docs/DEV_LOOP.md's rule for this is "pin the FACT and the ORDERING,
+    // never the spelling". The facts here are that both values are quoted
+    // after the consequence paragraph, that the subject comes before the body,
+    // and that both sit close enough to be in the same panel rather than
+    // somewhere else in a 900-line file. The bound below is deliberately loose
+    // enough to survive formatting and attribute churn, and is a LOCALITY
+    // check - it is not a claim about how long the markup should be.
+    const subjectIdx = sectionSource.indexOf("{confirmSubjectText}", consequenceIdx);
+    const bodyIdx = sectionSource.indexOf("{confirmBodyText}", consequenceIdx);
+    expect(subjectIdx, "the confirm panel should quote confirmSubjectText, the exact value that will post").toBeGreaterThan(-1);
+    expect(bodyIdx, "the confirm panel should quote confirmBodyText, the exact value that will post").toBeGreaterThan(-1);
+    expect(subjectIdx, "the subject should be quoted before the body, matching the order they are sent in").toBeLessThan(bodyIdx);
+    expect(
+      bodyIdx - consequenceIdx,
+      "both quoted values should sit within the same confirm panel as the consequence paragraph, not elsewhere in the file"
+    ).toBeLessThan(3000);
   });
 
   it("replaces the post button with a hint while postBlockedByDirtyEdit, rather than merely disabling it", () => {

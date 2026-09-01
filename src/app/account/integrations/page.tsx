@@ -123,83 +123,103 @@ export default function IntegrationsPage() {
           <div className={styles.section}>
             <p className={styles.sectionTitle}>Google Calendar</p>
             {loading ? (
-              <p className={styles.empty}>Loading...</p>
+              <div className={styles.loadingRow} role="status" aria-live="polite">
+                <span className={styles.spinner} aria-hidden="true" />
+                <span>Loading...</span>
+              </div>
             ) : connected ? (
-              <>
-                <p className={styles.empty}>
-                  Connected
-                  <span className={styles.pill}>Active</span>
-                </p>
-                <div className={styles.row}>
-                  <a className={styles.secondary} href="/api/google/oauth/start">Reconnect</a>
-                  <button type="button" className={styles.remove} onClick={disconnect} disabled={busy}>
-                    Disconnect
-                  </button>
+              <div className={styles.factor}>
+                <div className={styles.factorMain}>
+                  <span className={styles.factorName}>
+                    Google Calendar
+                    <span className={styles.pill}>Active</span>
+                  </span>
+                  <div className={styles.actions}>
+                    <a className={styles.secondary} href="/api/google/oauth/start">Reconnect</a>
+                    <button type="button" className={styles.remove} onClick={disconnect} disabled={busy}>
+                      Disconnect
+                    </button>
+                  </div>
                 </div>
-              </>
+              </div>
             ) : (
-              <>
-                <p className={styles.empty}>
-                  Not connected. Connecting lets the app read your free/busy and add Google Meet events on your behalf.
-                </p>
-                <div className={styles.row}>
-                  <a className={styles.primary} href="/api/google/oauth/start">Connect Google Calendar</a>
+              <div className={styles.factor}>
+                <div className={styles.factorMain}>
+                  <span className={styles.factorName}>
+                    Google Calendar
+                    <span className={`${styles.pill} ${styles.pillNeutral}`}>Not connected</span>
+                  </span>
+                  <div className={styles.actions}>
+                    <a className={styles.primary} href="/api/google/oauth/start">Connect Google Calendar</a>
+                  </div>
                 </div>
-              </>
+                <p className={styles.rowDetail}>
+                  Connecting lets the app read your free/busy and add Google Meet events on your behalf.
+                </p>
+              </div>
             )}
           </div>
 
           <div className={styles.section}>
             <p className={styles.sectionTitle}>Outlook (per school)</p>
             {loading ? (
-              <p className={styles.empty}>Loading...</p>
+              <div className={styles.loadingRow} role="status" aria-live="polite">
+                <span className={styles.spinner} aria-hidden="true" />
+                <span>Loading...</span>
+              </div>
             ) : institutions.length === 0 ? (
-              <p className={styles.empty}>Add a school in the Settings menu first, then connect its Outlook mailbox here.</p>
+              <p className={styles.emptyState}>Add a school in the Settings menu first, then connect its Outlook mailbox here.</p>
             ) : (
-              institutions.map((code) => {
-                const isConnected = outlookConnected.includes(code);
-                const canSend = outlookCanSend.includes(code);
-                return (
-                  <div key={code}>
-                    <div className={styles.row} style={{ alignItems: "center", gap: 10 }}>
-                      <span style={{ minWidth: 64, fontWeight: 600 }}>{code}</span>
-                      {isConnected ? (
-                        <>
-                          <span className={styles.pill}>Active</span>
-                          <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
-                            Reconnect
-                          </a>
-                          <button
-                            type="button"
-                            className={styles.remove}
-                            onClick={() => disconnectSchool(code)}
-                            disabled={outlookBusy === code}
-                          >
-                            Disconnect
-                          </button>
-                        </>
-                      ) : (
-                        <a className={styles.primary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
-                          Connect Outlook
-                        </a>
-                      )}
-                    </div>
-                    {isConnected && (
-                      <div className={styles.empty} style={{ marginTop: 8, fontSize: "0.9em" }}>
-                        Email sending: {canSend ? (
-                          "enabled"
-                        ) : (
-                          <>
-                            not granted - <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
-                              reconnect to enable
+              <ul className={styles.factorList}>
+                {institutions.map((code) => {
+                  const isConnected = outlookConnected.includes(code);
+                  const canSend = outlookCanSend.includes(code);
+                  return (
+                    <li key={code} className={styles.factor}>
+                      <div className={styles.factorMain}>
+                        <span className={styles.factorName}>
+                          <span className={styles.schoolCode}>{code}</span>
+                          {isConnected && <span className={styles.pill}>Active</span>}
+                        </span>
+                        <div className={styles.actions}>
+                          {isConnected ? (
+                            <>
+                              <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
+                                Reconnect
+                              </a>
+                              <button
+                                type="button"
+                                className={styles.remove}
+                                onClick={() => disconnectSchool(code)}
+                                disabled={outlookBusy === code}
+                              >
+                                Disconnect
+                              </button>
+                            </>
+                          ) : (
+                            <a className={styles.primary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
+                              Connect Outlook
                             </a>
-                          </>
-                        )}. Mailbox updates: {outlookCanMarkRead.includes(code) ? "enabled" : <>not granted - <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>reconnect to enable</a></>}.
+                          )}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })
+                      {isConnected && (
+                        <p className={styles.rowDetail}>
+                          Email sending: {canSend ? (
+                            "enabled"
+                          ) : (
+                            <>
+                              not granted - <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>
+                                reconnect to enable
+                              </a>
+                            </>
+                          )}. Mailbox updates: {outlookCanMarkRead.includes(code) ? "enabled" : <>not granted - <a className={styles.secondary} href={`/api/microsoft/oauth/start?institution=${encodeURIComponent(code)}`}>reconnect to enable</a></>}.
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
 

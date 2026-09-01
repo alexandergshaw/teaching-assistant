@@ -499,7 +499,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           reachable without hunting - mirrors
           recording/DiscussionRepliesPanel.tsx's own identical placement and
           reasoning. */}
-      <div className={styles.fieldHint} style={{ margin: "0 0 4px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
         <span>{gradingRecordingLogSummaryLine(summarizeGradingRecordingRunLog(currentGradingLog))}</span>
         <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
           Download run log (CSV)
@@ -509,7 +509,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         </Button>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-start" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)", alignItems: "flex-start" }}>
         <TextField
           select
           label="Course (for roster matching)"
@@ -530,7 +530,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           <Button variant="outlined" size="small" ref={rubricButtonRef} onClick={() => setRubricModalOpen(true)}>
             {rubricText ? "Edit rubric" : "Add rubric"}
           </Button>
-          <p className={styles.fieldHint} style={{ margin: "6px 0 0" }}>
+          <p className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
             {rubricText
               ? `Rubric set (${rubricText.trim().length} characters).`
               : "No rubric yet - you can capture submissions first and add one when you are ready to grade."}
@@ -559,7 +559,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       </div>
       <p className={styles.fieldHint}>You can also stop from your browser&apos;s sharing bar.</p>
 
-      <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap", marginBottom: 8 }}>
+      <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-3)", flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
         {/* Rendered unconditionally, never `{capturing && <video ...>}` - same
             reasoning as DiscussionRepliesPanel.tsx/LegibilityProbeModal.tsx's
             own identical comment: useDiscussionCapture's start() assigns
@@ -571,8 +571,14 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           style={{
             width: 240,
             aspectRatio: "16 / 9",
-            borderRadius: 10,
-            border: "1px solid var(--field-border)",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--card-border)",
+            // No token resolves to black - nothing renders as text over this
+            // surface, it is only the camera's "no frame yet" backdrop, and
+            // it deliberately mirrors DiscussionRepliesPanel.module.css's and
+            // LegibilityProbeModal.module.css's identical .previewVideo
+            // idiom rather than diverging from it. See this file's
+            // aesthetics-pass report for the same note.
             background: "#000",
             objectFit: "cover",
             display: capturing ? undefined : "none",
@@ -582,7 +588,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           playsInline
         />
         {capturing && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
             <span>{fmt(elapsedSec)}</span>
             <span>
               {gradingRows.totalCount === 0

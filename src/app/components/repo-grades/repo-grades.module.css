@@ -7,29 +7,46 @@
    -border variants, --text-muted, --text-secondary, --field-border,
    --field-background) is already defined in src/app/globals.css and used the
    same way throughout src/app/components/courses/*.module.css - no new
-   variables are introduced here. */
+   variables are introduced here.
+
+   2026-09-01 aesthetics pass (docs/aesthetics-pass-acceptance-criteria.md):
+   every font-size/radius/spacing/border value below now resolves to a token
+   from that contract. Table header CASE is deliberately left alone - see the
+   note on .grid thead th below - and .cellColumnLabel is the one place a
+   genuine tracked-uppercase micro-label already existed, so AM5's exact
+   idiom is pinned there. No box-shadow literal exists in this file and none
+   is added (AC4) - this view's only floating-adjacent elements are native
+   <select> dropdowns, which draw their own browser chrome. */
 
 .gridWrap {
   overflow-x: auto;
-  border: 1px solid var(--field-border);
-  border-radius: 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
 }
 
 .grid {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
 }
 
 .grid th,
 .grid td {
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid var(--field-border);
+  border-bottom: 1px solid var(--border-soft);
   white-space: nowrap;
 }
 
+/* Sticky header, opaque background (AC10). Deliberately sentence-case, not
+   the tracked-uppercase micro-label idiom (AM5): docs/repo-grades-ux-
+   overhaul-acceptance-criteria.md U26b records the owner's explicit decision
+   to follow tasks/TasksGrid.module.css - not courses/CoursesTable.module.css
+   - for this grid precisely because all-caps destroys word-shape scanning
+   across a wide header row. That decision is deliberate, not drift, and
+   AM5's "everywhere" reaches idioms already tracked-uppercase; this header
+   never was one. */
 .grid thead th {
   position: sticky;
   top: 0;
@@ -63,14 +80,14 @@
 .bindingCell {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
   min-width: 220px;
   white-space: normal;
 }
 
 .bindingDetail {
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
 }
 
 .bindingBadgeConfirmed,
@@ -80,9 +97,9 @@
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 0.78rem;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
   font-weight: 600;
   border: 1px solid transparent;
 }
@@ -90,7 +107,7 @@
 .bindingBadgeConfirmed {
   background: var(--success-surface);
   border-color: var(--success);
-  color: var(--success);
+  color: var(--success-ink);
 }
 
 .bindingBadgeSuggested {
@@ -117,27 +134,27 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .candidateItem {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   justify-content: space-between;
 }
 
 .unboundPicker {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   flex-wrap: wrap;
 }
 
 .unboundPicker select {
-  padding: 4px 6px;
+  padding: var(--space-1) var(--space-1);
   border: 1px solid var(--field-border);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--field-background);
   color: var(--text-primary);
 }
@@ -160,12 +177,12 @@
 
 .banner {
   margin: 0;
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   background: var(--warning-surface);
   border: 1px solid var(--warning-border);
   color: var(--warning-ink);
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
 }
 
 /* AC5 item 31 - the aggregate post-result announcement region in index.tsx
@@ -192,12 +209,12 @@
    report, not an interruption. */
 .statusBanner {
   margin: 0;
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   background: var(--surface-subtle);
   border: 1px solid var(--card-border);
   color: var(--text-primary);
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
 }
 
 /* AC5 items 25-26 - one column header's folder name, Canvas assignment
@@ -206,14 +223,14 @@
 .columnHeader {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
   min-width: 190px;
   white-space: normal;
   font-weight: 600;
 }
 
 .columnHeaderFolder {
-  font-size: 0.95rem;
+  font-size: var(--font-size-lg);
 }
 
 /* N4 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md) -
@@ -224,7 +241,7 @@
 .sortHeaderButton {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   background: none;
   border: none;
   padding: 0;
@@ -242,21 +259,25 @@
 
 /* N2 item 4 - the visible marker on a GUESSED first/last split. Muted and
    italic, matching this file's own .cellMissing precedent for "true but not
-   the main point" text. */
+   the main point" text. Was `0.8em` (an inherited-context relative size);
+   converted to the nearest fixed token since the parent context here is the
+   default md size, not smaller-than-default (AM14) - --font-size-2xs is
+   reserved for the tracked-uppercase micro-label idiom only, so this plain
+   italic aside maps to --font-size-xs instead. */
 .nameDerivedMark {
   color: var(--text-muted);
   font-style: italic;
-  font-size: 0.8em;
+  font-size: var(--font-size-xs);
 }
 
 .columnHeader select {
-  padding: 4px 6px;
+  padding: var(--space-1) var(--space-1);
   border: 1px solid var(--field-border);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--field-background);
   color: var(--text-primary);
   font-weight: 400;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
 }
 
 /* AC4 items 20-21 - one cell's editable score/comment plus its Grade action
@@ -264,7 +285,7 @@
 .cellControl {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   min-width: 170px;
   white-space: normal;
 }
@@ -272,7 +293,7 @@
 .cellInputs {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 /* U12.48/U12.52 - the score input stays the raw, editable "earned/possible"
@@ -283,20 +304,25 @@
 .scoreRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
+/* A score readout - tabular figures so a column of percentages lines up by
+   digit rather than by string length (aesthetics pass: the grid is a
+   gradebook, and misaligned digit columns are the clearest amateur tell on
+   this kind of surface). */
 .scorePercent {
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .cellActions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -316,15 +342,15 @@
 .rubricBreakdown {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
 }
 
 .rubricBreakdownArea {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
   align-items: baseline;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   flex-wrap: wrap;
 }
 
@@ -351,14 +377,14 @@
 .codeRunSummary {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
 }
 
 .codeRunOutput {
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid var(--field-border);
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border-soft);
 }
 
 /* docs for this feature (request 2): the per-cell Run control's own file
@@ -370,7 +396,7 @@
 .codeRunControls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   flex-wrap: wrap;
 }
 
@@ -394,7 +420,7 @@
    the actual postability check can never say different things. */
 .postReason {
   color: var(--text-muted);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   font-style: italic;
 }
 
@@ -405,18 +431,18 @@
    own convention above. */
 .postStatusPosting {
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
 }
 
 .postStatusPosted {
-  color: var(--success);
-  font-size: 0.8rem;
+  color: var(--success-ink);
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
 .postStatusError {
   color: var(--danger);
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
@@ -428,7 +454,7 @@
    background in light mode. */
 .postStatusSkipped {
   color: var(--warning-ink);
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
@@ -499,19 +525,19 @@
 
   .grid thead tr {
     display: block;
-    padding-bottom: 10px;
-    margin-bottom: 10px;
-    border-bottom: 1px solid var(--field-border);
+    padding-bottom: var(--space-2);
+    margin-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-soft);
   }
 
   .grid tbody tr {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px 12px;
-    margin-bottom: 12px;
-    border: 1px solid var(--field-border);
-    border-radius: 10px;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-3);
+    margin-bottom: var(--space-3);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
   }
 
   .grid tbody tr:last-child {
@@ -526,7 +552,7 @@
     width: 100%;
     white-space: normal;
     border-bottom: none;
-    padding: 6px 0;
+    padding: var(--space-1) 0;
   }
 
   .bindingCell,
@@ -535,14 +561,19 @@
     min-width: 0;
   }
 
+  /* AM5 - this label already uses the tracked-uppercase micro-label idiom
+     (text-transform: uppercase below), so its numeric properties are pinned
+     exactly to that idiom's spec rather than mapped to the nearest AC1
+     token: --font-size-2xs, weight 700, letter-spacing 0.06em,
+     --text-secondary. */
   .cellColumnLabel {
     display: block;
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: var(--font-size-2xs);
+    font-weight: 700;
     color: var(--text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.02em;
-    margin-bottom: 2px;
+    letter-spacing: 0.06em;
+    margin-bottom: var(--space-1);
   }
 
   /* B2 - the "Select" column header is a bare text label with no control of
@@ -588,8 +619,8 @@
    because this is a record of what already happened, not a control the
    instructor acts on. Only the three buttons are interactive. */
 .logPanel {
-  margin-top: 20px;
-  padding: 14px 16px;
+  margin-top: var(--space-5);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
   background: var(--surface-subtle);
@@ -598,14 +629,14 @@
 .logHeader {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: flex-start;
   justify-content: space-between;
 }
 
 .logTitle {
-  margin: 0 0 2px;
-  font-size: 0.95rem;
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -613,16 +644,16 @@
 .logActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .logList {
   list-style: none;
-  margin: 12px 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 /* One entry as a four-column row at full width: time, event, target,
@@ -632,10 +663,10 @@
 .logEntry {
   display: grid;
   grid-template-columns: minmax(140px, auto) minmax(110px, auto) minmax(160px, auto) 1fr;
-  gap: 10px;
-  padding: 6px 0;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
   border-top: 1px solid var(--border-soft);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
 }
 
@@ -651,7 +682,7 @@
 
 .logEntryTarget {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   overflow-wrap: anywhere;
 }
 
@@ -666,7 +697,7 @@
 @media (max-width: 700px) {
   .logEntry {
     grid-template-columns: 1fr;
-    gap: 2px;
+    gap: var(--space-1);
   }
 }
 
@@ -678,14 +709,14 @@
    .logTitle and pageStyles.fieldHint/pageStyles.error/pageStyles.linkButton
    rather than duplicating those rules. */
 .linkPanel {
-  margin-top: 20px;
-  padding: 14px 16px;
+  margin-top: var(--space-5);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
   background: var(--surface-subtle);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 /* The "nothing is bound yet" lead line (only rendered when noConfirmedRows
@@ -697,26 +728,26 @@
   margin: 0;
   color: var(--warning-ink);
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
 }
 
 .linkPanelRow {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .linkPanelLabel {
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
 }
 
 .linkPanelRow select {
-  padding: 4px 6px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--field-border);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--field-background);
   color: var(--text-primary);
 }
@@ -728,30 +759,30 @@
 .linkResult {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 4px;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
 }
 
 .linkResultLine {
   margin: 0;
   color: var(--text-primary);
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
 }
 
 .linkNoteLabel {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
 .linkNoteList {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 0.82rem;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
@@ -772,9 +803,9 @@
 .linkSourceToggle {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 8px;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--field-border);
   width: fit-content;
 }
@@ -782,9 +813,9 @@
 .linkSourceButton,
 .linkSourceButtonActive {
   font: inherit;
-  font-size: 0.85rem;
-  padding: 6px 12px;
-  border-radius: 6px;
+  font-size: var(--font-size-md);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-xs);
   border: none;
   cursor: pointer;
 }
@@ -807,8 +838,8 @@
 .linkSourceSection {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 4px;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
 }
 
 /* U11.46 - this file had zero :focus/:focus-visible/outline rules, unlike

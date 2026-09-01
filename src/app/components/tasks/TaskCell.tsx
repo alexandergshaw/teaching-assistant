@@ -542,10 +542,11 @@ export default function TaskCell({
         <IconButton
           size="small"
           aria-label={`More options for ${task.label}, ${courseName}`}
+          title={`More options for ${task.label}, ${courseName}`}
           aria-haspopup="dialog"
           aria-expanded={Boolean(anchorEl)}
           tabIndex={-1}
-          sx={{ padding: "2px" }}
+          sx={{ padding: "var(--space-1)" }}
           onClick={(e) => {
             e.stopPropagation();
             openEditor(e.currentTarget);
@@ -574,6 +575,11 @@ export default function TaskCell({
             ref={editorRef}
             tabIndex={-1}
             elevation={4}
+            sx={{
+              borderRadius: "var(--radius-md)",
+              boxShadow: "var(--shadow-md)",
+              border: "1px solid var(--card-border)",
+            }}
             className={styles.editorPopover}
             role="dialog"
             aria-label={`Status and note for ${task.label}, ${courseName}`}
@@ -672,7 +678,7 @@ export default function TaskCell({
               </button>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-1)" }}>
               <Button size="small" variant="contained" onClick={closeAndCommit}>
                 Done
               </Button>

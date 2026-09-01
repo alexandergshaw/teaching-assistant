@@ -71,13 +71,13 @@ export default function LmsCell({ course, onSave, menu }: LmsCellProps) {
 
   if (!editing) {
     return (
-      <td onClick={startEdit} title="Click to edit" style={{ cursor: "pointer" }}>
+      <td onClick={startEdit} title="Click to edit" className={tableStyles.clickToEdit}>
         {course.lms ? (
           <>
             <span className={styles.courseResourceValue}>{courseLmsLabel(course.lms)}</span>
             {course.canvasUrl && (
               course.canvasUrl.startsWith("http") ? (
-                <a className={styles.courseResourceValue} href={course.canvasUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ display: "block" }}>
+                <a className={styles.courseResourceValue} style={{ display: "block" }} href={course.canvasUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
                   Open LMS course
                 </a>
               ) : (
@@ -111,7 +111,7 @@ export default function LmsCell({ course, onSave, menu }: LmsCellProps) {
             <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
           ))}
         </TextField>
-        <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>LMS course (optional)</p>
+        <p className={`${styles.fieldHint} ${tableStyles.mt1Only}`}>LMS course (optional)</p>
         {institution ? (
           <>
             <Typeahead
@@ -122,7 +122,7 @@ export default function LmsCell({ course, onSave, menu }: LmsCellProps) {
               loading={opts === null}
               noOptionsText="No connected courses"
             />
-            {optsError && <p className={styles.fieldHint} style={{ color: "var(--danger)", margin: "6px 0 0 0" }}>{optsError}</p>}
+            {optsError && <p className={`${styles.fieldHint} ${tableStyles.dangerLink} ${tableStyles.mt1Only}`}>{optsError}</p>}
           </>
         ) : (
           <p className={styles.fieldHint}>Add an institution to pick a connected course.</p>

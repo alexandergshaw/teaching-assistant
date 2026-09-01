@@ -356,7 +356,12 @@ export default function RepoGradeCellControl({
           <TextField
             type="text"
             size="small"
-            slotProps={{ htmlInput: { inputMode: "decimal", style: { padding: "4px 8px" } } }}
+            slotProps={{
+              htmlInput: {
+                inputMode: "decimal",
+                style: { padding: "var(--space-1) var(--space-2)", fontVariantNumeric: "tabular-nums" },
+              },
+            }}
             value={edit.score}
             onChange={(e) => onScoreChange(e.target.value)}
             aria-label={`${column.folder} score for ${row.repo}`}

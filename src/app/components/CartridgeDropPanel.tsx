@@ -418,26 +418,31 @@ export default function CartridgeDropPanel() {
       </div>
 
       {/* Automatic grading control */}
-      <div style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid var(--color-border, #e5e5e5)" }}>
+      <div style={{ marginTop: "var(--space-6)", paddingTop: "var(--space-4)", borderTop: "1px solid var(--border-soft)" }}>
         {triggersError && (
           <p role="alert" className={styles.error}>
             {triggersError}
           </p>
         )}
+        {triggersLoading && (
+          <p role="status" aria-live="polite" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
+            Loading auto-grading settings...
+          </p>
+        )}
         {!triggersLoading && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-4)" }}>
             <div style={{ flex: 1 }}>
               {findAutoGradeTrigger()?.enabled ? (
                 <>
-                  <p style={{ margin: "0 0 0.25rem 0", fontWeight: 500 }}>Auto-grading is on</p>
-                  <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--color-text-secondary, #666)" }}>
+                  <p style={{ margin: "0 0 var(--space-1) 0", fontWeight: 500 }}>Auto-grading is on</p>
+                  <p style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
                     New uploads are graded automatically; grades land in Drafts and gradebook CSVs in this panel.
                   </p>
                 </>
               ) : (
                 <>
-                  <p style={{ margin: "0 0 0.25rem 0", fontWeight: 500 }}>Automatic grading</p>
-                  <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--color-text-secondary, #666)" }}>
+                  <p style={{ margin: "0 0 var(--space-1) 0", fontWeight: 500 }}>Automatic grading</p>
+                  <p style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
                     New uploads are graded automatically; grades land in Drafts and gradebook CSVs in this panel.
                   </p>
                 </>
@@ -454,6 +459,15 @@ export default function CartridgeDropPanel() {
           </div>
         )}
       </div>
+
+      {loading && (
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <span className={styles.spinner} aria-hidden="true" />
+          <div>
+            <p className={styles.loadingTitle}>Loading submissions...</p>
+          </div>
+        </div>
+      )}
 
       {/* Drops table */}
       {drops.length > 0 && (
@@ -515,7 +529,7 @@ export default function CartridgeDropPanel() {
             size="small"
             onClick={() => user && loadDrops(user.id)}
             disabled={loading}
-            sx={{ marginTop: 1 }}
+            sx={{ marginTop: "var(--space-2)" }}
           >
             Refresh
           </Button>

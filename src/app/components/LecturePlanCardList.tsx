@@ -44,7 +44,7 @@ export default function LecturePlanCardList({
   onRegenerateClick,
 }: Props) {
   return (
-    <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+    <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       {plans.map((plan, i) => {
         const badges: string[] = [];
         if (!plan.slidesFailed) {
@@ -63,11 +63,11 @@ export default function LecturePlanCardList({
             style={{
               background: "var(--field-background)",
               border: "1px solid var(--field-border)",
-              borderRadius: 10,
-              padding: "14px 18px",
+              borderRadius: "var(--radius-md)",
+              padding: "var(--space-3) var(--space-4)",
               display: "flex",
               flexDirection: "column",
-              gap: 6,
+              gap: "var(--space-1)",
             }}
           >
             <button
@@ -82,29 +82,27 @@ export default function LecturePlanCardList({
                 padding: 0,
                 display: "flex",
                 flexDirection: "column",
-                gap: 6,
+                gap: "var(--space-1)",
                 width: "100%",
               }}
             >
               <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
                 {plan.presentationTitle}
               </span>
-              <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontWeight: 500 }}>
+              <span style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", fontWeight: 500 }}>
                 {plan.assignmentName}
               </span>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+              <div style={{ display: "flex", gap: "var(--space-1)", flexWrap: "wrap", marginTop: "var(--space-1)" }}>
                 {plan.slidesFailed && (
                   <span
                     style={{
-                      fontSize: "0.72rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      padding: "2px 8px",
-                      borderRadius: 20,
-                      background: "color-mix(in srgb, #f59e0b 14%, transparent 86%)",
-                      color: "var(--warning)",
-                      border: "1px solid color-mix(in srgb, #f59e0b 35%, transparent 65%)",
+                      fontSize: "var(--font-size-xs)",
+                      fontWeight: 500,
+                      padding: "var(--space-1) var(--space-2)",
+                      borderRadius: "var(--radius-pill)",
+                      background: "color-mix(in srgb, var(--warning) 14%, transparent 86%)",
+                      color: "var(--warning-ink)",
+                      border: "1px solid color-mix(in srgb, var(--warning) 35%, transparent 65%)",
                     }}
                   >
                     Slides failed
@@ -114,12 +112,10 @@ export default function LecturePlanCardList({
                   <span
                     key={badge}
                     style={{
-                      fontSize: "0.72rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      padding: "2px 8px",
-                      borderRadius: 20,
+                      fontSize: "var(--font-size-xs)",
+                      fontWeight: 500,
+                      padding: "var(--space-1) var(--space-2)",
+                      borderRadius: "var(--radius-pill)",
                       background: "color-mix(in srgb, var(--accent) 12%, transparent 88%)",
                       color: "var(--accent-ink)",
                       border: "1px solid color-mix(in srgb, var(--accent) 25%, transparent 75%)",
@@ -145,7 +141,7 @@ export default function LecturePlanCardList({
               {regenerateButtonLabel({ regenerating: regeneratingIndex === i, confirmArmed })}
             </Button>
             {confirmArmed && (
-              <p role="alert" style={{ margin: 0, fontSize: "0.78rem", color: "var(--danger)" }}>
+              <p role="alert" style={{ margin: 0, fontSize: "var(--font-size-xs)", color: "var(--danger)" }}>
                 This module has unsaved edits. Click Regenerate again to discard them.
               </p>
             )}

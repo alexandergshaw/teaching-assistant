@@ -370,7 +370,7 @@ export default function LiveFeedPanel({
     const badge = urgencyBadge(urgencyOf(row.dueAt));
     const isUnwatched = unwatched.has(row.courseId);
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
         <div className={styles.lfDetailHead}>
           <div className={styles.lfDetailTitleRow}>
             <h2 className={styles.lfDetailTitle}>{row.title}</h2>
@@ -411,7 +411,7 @@ export default function LiveFeedPanel({
           <summary>Description &amp; rubric</summary>
           <p className={styles.fileMetaLabel}>Description</p>
           <pre className={styles.previewContent}>{row.description || "No description in Canvas."}</pre>
-          <p className={styles.fileMetaLabel} style={{ marginTop: 12 }}>
+          <p className={styles.fileMetaLabel} style={{ marginTop: "var(--space-3)" }}>
             Rubric
           </p>
           <pre className={styles.previewContent}>{row.rubricText || "No rubric in Canvas."}</pre>
@@ -451,7 +451,7 @@ export default function LiveFeedPanel({
             </div>
           </>
         ) : activeRun && activeRun.results.length === 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", alignItems: "flex-start" }}>
             <p className={styles.emptyState} style={{ margin: 0 }}>
               No submissions were found to grade for this item.
             </p>
@@ -460,7 +460,7 @@ export default function LiveFeedPanel({
             </Button>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", alignItems: "flex-start" }}>
             <Button variant="contained" size="small" onClick={() => onAutoGrade(row)} disabled={pending} sx={{ textTransform: "none" }}>
               {pending ? "Grading…" : "Auto Grade"}
             </Button>
@@ -695,7 +695,7 @@ export default function LiveFeedPanel({
             ) : (
               <div className={styles.lfDetailEmpty}>
                 <EmptyQueueIcon />
-                <p style={{ margin: 0, fontWeight: 700, color: "#fff" }}>Select an item to grade</p>
+                <p style={{ margin: 0, fontWeight: 700, color: "var(--on-navy)" }}>Select an item to grade</p>
                 <p style={{ margin: 0, maxWidth: 320 }}>
                   Pick an assignment or discussion from the queue to review and grade it here.
                 </p>

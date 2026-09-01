@@ -36,22 +36,22 @@ export function VoiceRecordingSection({
   } = voiceCloning;
 
   return (
-    <details className={styles.adaptDisclosure} style={{ marginTop: 16 }}>
+    <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-4)" }}>
       <summary>Record a voice sample</summary>
       <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
           <div>
-            <h4 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 8px 0" }}>1. Read</h4>
-            <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>Quiet room, mic at a constant distance, natural teaching pace - about 90 seconds.</p>
+            <h4 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: "0 0 var(--space-2) 0" }}>1. Read</h4>
+            <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0" }}>Quiet room, mic at a constant distance, natural teaching pace - about 90 seconds.</p>
             <div
               style={{
-                padding: "14px 18px",
-                borderRadius: 12,
+                padding: "var(--space-3) var(--space-4)",
+                borderRadius: "var(--radius-md)",
                 backgroundColor: "color-mix(in srgb, var(--field-border) 18%, transparent)",
                 whiteSpace: "pre-wrap",
                 lineHeight: 1.6,
-                fontSize: "0.95rem",
-                marginBottom: 8,
+                fontSize: "var(--font-size-lg)",
+                marginBottom: "var(--space-2)",
               }}
             >
               {VOICE_SAMPLE_SCRIPT}
@@ -68,8 +68,8 @@ export function VoiceRecordingSection({
           </div>
 
           <div>
-            <h4 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 8px 0" }}>2. Record</h4>
-            <div style={{ marginBottom: 8 }}>
+            <h4 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: "0 0 var(--space-2) 0" }}>2. Record</h4>
+            <div style={{ marginBottom: "var(--space-2)" }}>
               <TextField
                 select
                 label="Microphone"
@@ -100,8 +100,8 @@ export function VoiceRecordingSection({
                 Start recording
               </Button>
             ) : (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-2)" }}>
+                <div style={{ display: "flex", gap: "var(--space-1)", alignItems: "center" }}>
                   <span className={styles.navBadge}>REC</span>
                   <span className={styles.ghMeta}>
                     {Math.floor(sampleElapsed / 60)}:{String(sampleElapsed % 60).padStart(2, "0")}
@@ -114,7 +114,7 @@ export function VoiceRecordingSection({
             )}
             {sampleUrl && (
               <>
-                <audio controls src={sampleUrl} style={{ width: "100%", marginBottom: 8 }} />
+                <audio controls src={sampleUrl} style={{ width: "100%", marginBottom: "var(--space-2)" }} />
                 <Button variant="text" size="small" onClick={handleDiscardSample}>
                   Discard
                 </Button>
@@ -126,8 +126,8 @@ export function VoiceRecordingSection({
 
           {sampleBlob && (
             <div>
-              <h4 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 8px 0" }}>3. Create the clone</h4>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <h4 style={{ fontSize: "var(--font-size-lg)", fontWeight: 600, margin: "0 0 var(--space-2) 0" }}>3. Create the clone</h4>
+              <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
                 <TextField
                   size="small"
                   label="Voice name"

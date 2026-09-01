@@ -27,29 +27,42 @@ export default function TemplateSelector({
 }: TemplateSelectorProps) {
   const selected = [...DECK_PRESETS, ...custom].find((t) => t.id === selectedId);
 
+  const cardStyle = (isSelected: boolean): React.CSSProperties => ({
+    padding: "var(--space-3)",
+    marginBottom: "var(--space-2)",
+    cursor: "pointer",
+    borderRadius: "var(--radius-xs)",
+    border: isSelected ? "1px solid var(--card-border)" : "1px solid var(--field-border)",
+    boxShadow: isSelected ? "inset 0 0 0 2px var(--accent)" : "none",
+    backgroundColor: isSelected ? "var(--accent-soft)" : "transparent",
+    color: "inherit",
+    transition: "border-color var(--transition-fast), box-shadow var(--transition-fast)",
+  });
+
   return (
     <div style={{ flex: "0 0 280px" }}>
-      <div style={{ marginBottom: "1rem" }}>
-        <h3 style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "0.95rem", fontWeight: 600 }}>
+      <div style={{ marginBottom: "var(--space-4)" }}>
+        <h3
+          style={{
+            marginTop: 0,
+            marginBottom: "var(--space-2)",
+            fontSize: "var(--font-size-2xs)",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            color: "var(--text-secondary)",
+          }}
+        >
           Presets
         </h3>
         {DECK_PRESETS.map((t) => (
           <div
             key={t.id}
             onClick={() => onSelectId(t.id)}
-            style={{
-              padding: "0.75rem",
-              marginBottom: "0.5rem",
-              cursor: "pointer",
-              borderRadius: "4px",
-              border: selectedId === t.id ? "2px solid var(--accent)" : "1px solid var(--field-border)",
-              backgroundColor: selectedId === t.id ? "var(--accent)" : "transparent",
-              color: selectedId === t.id ? "white" : "inherit",
-              transition: "all 0.2s",
-            }}
+            style={cardStyle(selectedId === t.id)}
           >
-            <div style={{ fontWeight: 500, fontSize: "0.9rem" }}>{t.name}</div>
-            <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>
+            <div style={{ fontWeight: 500, fontSize: "var(--font-size-md)" }}>{t.name}</div>
+            <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>
               {t.slides.length} slides
             </div>
           </div>
@@ -57,11 +70,21 @@ export default function TemplateSelector({
       </div>
 
       <div>
-        <h3 style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "0.95rem", fontWeight: 600 }}>
+        <h3
+          style={{
+            marginTop: 0,
+            marginBottom: "var(--space-2)",
+            fontSize: "var(--font-size-2xs)",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            color: "var(--text-secondary)",
+          }}
+        >
           Your templates
         </h3>
         {custom.length === 0 ? (
-          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "1rem" }}>
+          <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", marginBottom: "var(--space-4)", textAlign: "center", padding: "var(--space-4) 0" }}>
             No custom templates yet.
           </div>
         ) : (
@@ -69,19 +92,10 @@ export default function TemplateSelector({
             <div
               key={t.id}
               onClick={() => onSelectId(t.id)}
-              style={{
-                padding: "0.75rem",
-                marginBottom: "0.5rem",
-                cursor: "pointer",
-                borderRadius: "4px",
-                border: selectedId === t.id ? "2px solid var(--accent)" : "1px solid var(--field-border)",
-                backgroundColor: selectedId === t.id ? "var(--accent)" : "transparent",
-                color: selectedId === t.id ? "white" : "inherit",
-                transition: "all 0.2s",
-              }}
+              style={cardStyle(selectedId === t.id)}
             >
-              <div style={{ fontWeight: 500, fontSize: "0.9rem" }}>{t.name}</div>
-              <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>
+              <div style={{ fontWeight: 500, fontSize: "var(--font-size-md)" }}>{t.name}</div>
+              <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>
                 {t.slides.length} slides
               </div>
             </div>
@@ -89,7 +103,7 @@ export default function TemplateSelector({
         )}
       </div>
 
-      <div style={{ marginTop: "1.5rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      <div style={{ marginTop: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         <Button
           variant="contained"
           size="small"
@@ -103,7 +117,7 @@ export default function TemplateSelector({
             variant="outlined"
             size="small"
             onClick={() => onDeleteTemplate(selected.id)}
-            sx={{ textTransform: "none", color: deleteConfirm === selected.id ? "red" : "inherit" }}
+            sx={{ textTransform: "none", color: deleteConfirm === selected.id ? "var(--danger)" : "inherit" }}
           >
             {deleteConfirm === selected.id ? "Confirm delete" : "Delete"}
           </Button>
@@ -121,7 +135,17 @@ export default function TemplateSelector({
       </div>
 
       {loadError && (
-        <div style={{ marginTop: "1rem", padding: "0.75rem", backgroundColor: "rgba(255,0,0,0.1)", borderRadius: "4px", fontSize: "0.85rem", color: "red" }}>
+        <div
+          style={{
+            marginTop: "var(--space-4)",
+            padding: "var(--space-3)",
+            backgroundColor: "var(--danger-surface)",
+            border: "1px solid var(--danger-border)",
+            borderRadius: "var(--radius-md)",
+            fontSize: "var(--font-size-sm)",
+            color: "var(--danger)",
+          }}
+        >
           {loadError}
         </div>
       )}

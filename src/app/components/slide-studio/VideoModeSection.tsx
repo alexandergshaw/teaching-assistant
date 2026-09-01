@@ -42,8 +42,8 @@ export function VideoModeSection({
       {applyError && <p className={styles.error}>{applyError}</p>}
       {genErrorV && <p className={styles.error}>{genErrorV}</p>}
 
-      <div className={styles.field} style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <div className={styles.field} style={{ marginTop: "var(--space-4)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
           <Button
             variant="outlined"
             size="small"
@@ -71,7 +71,7 @@ export function VideoModeSection({
             controls
             playsInline
             src={vidUrl}
-            style={{ width: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a" }}
+            style={{ width: "100%", maxHeight: 320, borderRadius: "var(--radius-md)", background: "var(--navy)" }}
           />
         </div>
       )}
@@ -86,7 +86,7 @@ export function VideoModeSection({
           multiline
           minRows={2}
         />
-        <div style={{ marginTop: 8 }}>
+        <div style={{ marginTop: "var(--space-2)" }}>
           <Button
             variant="contained"
             size="small"
@@ -100,10 +100,10 @@ export function VideoModeSection({
 
       {segments && (
         <>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
             {segments.map((seg, i) => (
-              <div key={i} style={{ padding: "12px", border: "1px solid var(--field-border)", borderRadius: 8 }}>
-                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <div key={i} style={{ padding: "var(--space-3)", border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)" }}>
+                <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: "var(--space-2)" }}>
                   <TextField
                     label="Start (s)"
                     type="number"
@@ -130,16 +130,16 @@ export function VideoModeSection({
                   minRows={2}
                   value={seg.text}
                   onChange={(e) => handleSegmentChange(i, "text", e.target.value)}
-                  style={{ marginBottom: 8 }}
+                  style={{ marginBottom: "var(--space-2)" }}
                 />
                 {segAudio[i] && (
                   <audio
                     controls
                     src={segAudio[i].url}
-                    style={{ width: "100%", height: 36, marginBottom: 8 }}
+                    style={{ width: "100%", height: 36, marginBottom: "var(--space-2)" }}
                   />
                 )}
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: "var(--space-2)" }}>
                   <Button
                     variant="text"
                     size="small"
@@ -187,7 +187,7 @@ export function VideoModeSection({
 
       {segments && (
         <div className={styles.field}>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", marginBottom: "var(--space-2)" }}>
             <TextField
               select
               label="Audio mode"
@@ -216,9 +216,9 @@ export function VideoModeSection({
           <video
             controls
             src={result.url}
-            style={{ width: "100%", maxHeight: 360, borderRadius: 12, background: "#0f172a" }}
+            style={{ width: "100%", maxHeight: 360, borderRadius: "var(--radius-md)", background: "var(--navy)" }}
           />
-          <div className={styles.ghActions} style={{ alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 12 }}>
+          <div className={styles.ghActions} style={{ alignItems: "center", flexWrap: "wrap", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
             <TextField
               label="Video name"
               size="small"

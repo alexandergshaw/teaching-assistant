@@ -4,27 +4,31 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background:
-    radial-gradient(1200px 600px at 50% -10%, rgba(37, 99, 235, 0.12), transparent 60%),
-    linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+  padding: var(--space-6);
+  /* Flat, matching --page-background everywhere else - no decorative
+     gradient wash behind the sign-in card (aesthetics pass 2026-09-01). */
+  background: var(--page-background);
 }
 
+/* One contained card - a product sign-in, not a form floating on a
+   gradient. */
 .card {
   width: 100%;
-  max-width: 400px;
-  background: var(--field-background);
-  border: 1px solid var(--border-soft);
-  border-radius: 18px;
-  padding: 40px 36px;
-  box-shadow: 0 20px 45px -20px rgba(15, 23, 42, 0.35);
+  max-width: 26rem;
+  background: var(--card-background);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-10) var(--space-8);
+  box-shadow: var(--shadow-lg);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 28px;
+  gap: var(--space-3);
+  /* Original 28px is an exact tie between --space-6 and --space-8; AM4
+     (mid-wave amendment) pins ties DOWN. */
+  margin-bottom: var(--space-6);
 }
 
 .mark {
@@ -33,9 +37,9 @@
   justify-content: center;
   width: 44px;
   height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #2563eb, #1a2744);
-  color: #ffffff;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--accent), var(--navy));
+  color: var(--text-on-accent);
   flex-shrink: 0;
 }
 
@@ -45,53 +49,62 @@
 }
 
 .brandName {
-  font-size: 1.05rem;
-  font-weight: 700;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
   color: var(--navy-ink);
   letter-spacing: -0.01em;
 }
 
 .title {
-  font-size: 1.6rem;
+  font-size: var(--font-size-2xl);
   font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
-  margin-bottom: 6px;
+  letter-spacing: -0.01em;
+  /* Original 6px ties between --space-1 and --space-2; AM4 rounds ties
+     DOWN. */
+  margin-bottom: var(--space-1);
+  line-height: var(--line-tight);
 }
 
 .subtitle {
-  font-size: 0.95rem;
+  font-size: var(--font-size-lg);
   color: var(--text-secondary);
-  margin-bottom: 28px;
+  /* Original 28px tie, rounded DOWN per AM4 (see .brand above). */
+  margin-bottom: var(--space-6);
+  line-height: var(--line-snug);
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  /* Original 18px ties between --space-4 and --space-5; AM4 rounds down. */
+  gap: var(--space-4);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--space-2);
 }
 
 .label {
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .input {
   width: 100%;
-  padding: 11px 14px;
-  font-size: 0.95rem;
+  height: var(--control-height-lg);
+  /* Original horizontal 14px ties between --space-3 and --space-4; AM4
+     rounds ties down. */
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   background: var(--field-background);
   border: 1px solid var(--field-border);
-  border-radius: 10px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast);
 }
 
 .input::placeholder {
@@ -105,17 +118,17 @@
 }
 
 .button {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   width: 100%;
-  padding: 12px 16px;
-  font-size: 0.95rem;
+  height: var(--control-height-lg);
+  font-size: var(--font-size-md);
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-on-accent);
   background: var(--accent);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.05s ease;
+  transition: background var(--transition-fast);
 }
 
 .button:hover:not(:disabled) {
@@ -126,27 +139,34 @@
   transform: translateY(1px);
 }
 
+/* AM11 (mid-wave amendment): disabled is opacity 0.5 + not-allowed,
+   uniformly across the app - never a colour swap, never a second opacity
+   value. */
 .button:disabled {
-  opacity: 0.65;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .error {
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
   color: var(--danger);
   background: var(--danger-surface);
   border: 1px solid var(--danger-border);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  /* Original 10px/12px: 10 ties down to --space-2, 12 is an exact
+     --space-3 match (AM4). */
+  padding: var(--space-2) var(--space-3);
 }
 
 .footnote {
-  margin-top: 22px;
-  padding-top: 18px;
+  /* Original 22px/18px: both tie between adjacent steps; AM4 rounds ties
+     down (--space-5, --space-4). */
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--border-soft);
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--line-normal);
 }
 
 .linkButton {
@@ -161,8 +181,4 @@
 
 .linkButton:hover {
   text-decoration: underline;
-}
-
-:global(html[data-theme="dark"]) .page {
-  background: radial-gradient(1200px 600px at 50% -10%, rgba(37, 99, 235, 0.18), transparent 60%), linear-gradient(135deg, #0b1120 0%, #111827 100%);
 }

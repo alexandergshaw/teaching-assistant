@@ -83,7 +83,7 @@ export function AutomationRunNow({ kind, id, workflowId, workflows, isWorkflowHe
   const disabled = !eligibility.eligible || busy;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", alignItems: "flex-start" }}>
       <button
         type="button"
         className={styles.linkButton}

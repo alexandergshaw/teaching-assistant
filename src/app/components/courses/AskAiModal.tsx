@@ -10,6 +10,7 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import { renderCourseFacts } from "@/lib/course-facts";
 import type { Course } from "@/lib/supabase/courses";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 import { ModalShell } from "../ui/ModalShell";
 
 const SUGGESTIONS = [
@@ -69,7 +70,7 @@ export default function AskAiModal({
           </button>
         </div>
 
-        <div style={{ padding: "0 1rem" }}>
+        <div style={{ padding: "0 var(--space-4)" }}>
           <TextField
             size="small"
             fullWidth
@@ -81,7 +82,7 @@ export default function AskAiModal({
             onChange={(e) => setQuestion(e.target.value)}
             disabled={busy}
           />
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
+          <div className={`${tableStyles.rowSm} ${tableStyles.mt2}`}>
             {SUGGESTIONS.map((s) => (
               <button
                 key={s}
@@ -97,7 +98,7 @@ export default function AskAiModal({
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.75rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
             <Button
               size="small"
               variant="contained"
@@ -107,10 +108,15 @@ export default function AskAiModal({
             >
               Ask
             </Button>
-            {busy && <CircularProgress size={18} />}
+            {busy && (
+              <>
+                <CircularProgress size={18} />
+                <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Asking...</span>
+              </>
+            )}
           </div>
           {error && (
-            <p className={styles.previewMeta} style={{ color: "var(--danger)", marginTop: "0.5rem" }}>
+            <p className={`${styles.previewMeta} ${tableStyles.dangerLink} ${tableStyles.mt2}`}>
               {error}
             </p>
           )}
@@ -118,7 +124,7 @@ export default function AskAiModal({
 
         <div className={styles.previewContent} style={{ overflow: "auto" }}>
           {answer ? (
-            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "0.9rem" }}>
+            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "var(--font-size-md)" }}>
               {answer}
             </pre>
           ) : (

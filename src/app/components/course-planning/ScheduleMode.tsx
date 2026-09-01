@@ -70,7 +70,7 @@ export default function ScheduleMode({
             }}
           />
         </div>
-        <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: -8, marginBottom: 16 }}>
+        <p style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", marginTop: "calc(var(--space-2) * -1)", marginBottom: "var(--space-4)" }}>
           Leave term, start date, weeks, and tests empty to get just an ordered topic list.
         </p>
         <div className={styles.field}>
@@ -154,11 +154,11 @@ export default function ScheduleMode({
       {scheduleTopics && scheduleTopics.length > 0 ? (
         <>
           <div className={styles.field}>
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>Course Topics</h3>
-            <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: 12 }}>
+            <h3 style={{ marginTop: 0, marginBottom: "var(--space-2)" }}>Course Topics</h3>
+            <p style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", marginBottom: "var(--space-3)" }}>
               {scheduleTopics.length} topics
             </p>
-            <ol style={{ paddingLeft: 24, lineHeight: 1.6 }}>
+            <ol style={{ paddingLeft: "var(--space-6)", lineHeight: "var(--line-normal)" }}>
               {scheduleTopics.map((topic, idx) => (
                 <li key={idx}>{topic}</li>
               ))}

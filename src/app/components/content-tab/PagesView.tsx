@@ -39,7 +39,7 @@ export function PagesView({
   const newPageGate = gateOperation(ctx, "courseWrite");
   return (
     <div className={styles.form}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "var(--space-2)" }}>
         <p className={styles.fieldHint} style={{ margin: 0 }}>
           {ctx.source === "export" ? "Pages aren't available from a stored export" : `${pages.length} page${pages.length === 1 ? "" : "s"}`}
         </p>

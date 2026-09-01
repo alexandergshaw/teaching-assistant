@@ -373,7 +373,7 @@ export default function SyllabusMode({
             <input id="adaptZipFile" type="file" accept=".zip" ref={adaptZipRef} disabled={!!adaptRepo.trim()} />
             <p>A zip of the course&apos;s codebase so the AI can suggest accurate, class-specific values.</p>
           </div>
-          <p className={styles.fieldHint} style={{ marginTop: 8 }}>or select one of your GitHub repositories:</p>
+          <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>or select one of your GitHub repositories:</p>
           <GithubRepoPicker value={adaptRepo} onChange={onAdaptRepoChange} disabled={adaptStatus === "analyzing"} branch={adaptBranch} onBranchChange={onAdaptBranchChange} />
         </div>
       </div>
@@ -381,7 +381,7 @@ export default function SyllabusMode({
       {adaptError && !adaptSections && <p className={styles.error}>{adaptError}</p>}
 
       {adaptStatus === "analyzing" && (
-        <div className={styles.loadingState}>
+        <div className={styles.loadingState} role="status" aria-live="polite">
           <div className={styles.spinner} />
           <div>
             <p className={styles.loadingTitle}>Analyzing your syllabus...</p>
@@ -554,7 +554,7 @@ export default function SyllabusMode({
                 </div>
               )}
               {placeNote && (
-                <p className={placeNote.kind === "error" ? styles.error : styles.fieldHint} style={{ marginTop: 8 }}>
+                <p className={placeNote.kind === "error" ? styles.error : styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>
                   {placeNote.text}
                 </p>
               )}

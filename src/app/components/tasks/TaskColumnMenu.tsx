@@ -827,6 +827,11 @@ export default function TaskColumnMenu({
         <Paper
           ref={rootRef}
           elevation={4}
+          sx={{
+            borderRadius: "var(--radius-md)",
+            boxShadow: "var(--shadow-md)",
+            border: "1px solid var(--card-border)",
+          }}
           role="menu"
           aria-label={menuLabel(target)}
           className={styles.colMenu}

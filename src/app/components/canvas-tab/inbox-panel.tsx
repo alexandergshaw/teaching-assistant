@@ -335,9 +335,9 @@ function InboxPanel() {
   }, [conversations, search, readFilter]);
 
   return (
-    <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: "var(--space-5)", alignItems: "flex-start", flexWrap: "wrap" }}>
       {/* Conversation list */}
-      <div style={{ flex: "1 1 300px", minWidth: 260, maxWidth: 460, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ flex: "1 1 300px", minWidth: 260, maxWidth: 460, display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         <div className={styles.resultsHeader} style={{ paddingTop: 0 }}>
           <h2>Inbox</h2>
           <Button
@@ -353,7 +353,7 @@ function InboxPanel() {
           </Button>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
           <TextField
             type="search"
             size="small"
@@ -405,7 +405,8 @@ function InboxPanel() {
                 <span className={styles.inboxAvatar} aria-hidden="true">{initials(who)}</span>
                 <span className={styles.inboxItemBody}>
                   <span className={styles.inboxItemTop}>
-                    <span className={styles.inboxItemSubject} style={{ fontWeight: unread ? 800 : 600 }}>
+                    {/* 700 is the closed weight set's ceiling (400/500/600/700) - 800 was out of bounds. */}
+                    <span className={styles.inboxItemSubject} style={{ fontWeight: unread ? 700 : 600 }}>
                       {c.subject}
                     </span>
                     <span className={styles.inboxItemTime}>{formatRelative(c.lastMessageAt)}</span>
@@ -438,11 +439,11 @@ function InboxPanel() {
       </div>
 
       {/* Thread + reply */}
-      <div style={{ flex: "2 1 360px", minWidth: 280, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ flex: "2 1 360px", minWidth: 280, display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
         {selectedId === null ? (
           <p className={styles.emptyState}>Select a conversation to read and reply.</p>
         ) : threadState.status === "loading" ? (
-          <div className={styles.loadingState}>
+          <div className={styles.loadingState} role="status" aria-live="polite">
             <span className={styles.spinner} aria-hidden="true" />
             <div>
               <p className={styles.loadingTitle}>Loading conversation…</p>
@@ -453,7 +454,7 @@ function InboxPanel() {
         ) : conversation ? (
           <>
             <h2 className={styles.lessonSlideTitle}>{conversation.subject}</h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
               {conversation.messages.map((m) => {
                 const mine = conversation.selfId != null && m.authorId === conversation.selfId;
                 return (
@@ -463,7 +464,7 @@ function InboxPanel() {
                       display: "flex",
                       flexDirection: "column",
                       alignItems: mine ? "flex-end" : "flex-start",
-                      gap: 3,
+                      gap: "var(--space-1)",
                     }}
                   >
                     <span className={styles.fieldHint}>
@@ -479,20 +480,20 @@ function InboxPanel() {
 
             <div className={styles.inboxReplyBox}>
               <div className={styles.field}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap", marginBottom: "var(--space-1)" }}>
                   <label htmlFor="canvas-reply-body" style={{ margin: 0 }}>Your reply</label>
                   {meetingHint && !plannerOpen && (
                     <span
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: 6,
+                        gap: "var(--space-1)",
                         background: "var(--accent-surface)",
                         color: "var(--accent-ink)",
-                        fontSize: 12,
+                        fontSize: "var(--font-size-xs)",
                         fontWeight: 600,
-                        padding: "3px 9px",
-                        borderRadius: 999,
+                        padding: "var(--space-1) var(--space-2)",
+                        borderRadius: "var(--radius-pill)",
                       }}
                     >
                       Looks like a meeting request
@@ -515,15 +516,15 @@ function InboxPanel() {
                   type="text"
                   size="small"
                   fullWidth
-                  sx={{ marginBottom: 1 }}
+                  sx={{ marginBottom: "var(--space-2)" }}
                   placeholder="Guidance for the draft, e.g. be encouraging and point them to office hours"
                   value={replyInstr}
                   onChange={(e) => setReplyInstr(e.target.value)}
                 />
               )}
 
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                   <Button
                     variant="outlined"
                     size="small"
@@ -582,7 +583,7 @@ function InboxPanel() {
         >
             <div className={styles.previewHeader}>
               <h3>{studentName && studentName !== "student" ? `Schedule a call with ${studentName}` : "Schedule a call"}</h3>
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
                 <Button
                   size="small"
                   variant="text"
@@ -600,12 +601,12 @@ function InboxPanel() {
               </div>
             </div>
 
-            <p className={styles.fieldHint} style={{ marginTop: 0, marginBottom: 10 }}>
+            <p className={styles.fieldHint} style={{ marginTop: 0, marginBottom: "var(--space-2)" }}>
               Highlighted times are open. Offer them all for {offerTarget} to choose from, or click one
               to book it directly.
             </p>
 
-            <div className={styles.field} style={{ marginBottom: 10, maxWidth: 280 }}>
+            <div className={styles.field} style={{ marginBottom: "var(--space-2)", maxWidth: 280 }}>
               <label htmlFor="canvas-schedule-tz">Time zone</label>
               <TextField
                 id="canvas-schedule-tz"
@@ -636,7 +637,7 @@ function InboxPanel() {
             />
 
             {selectedSlot && (
-              <div className={styles.field} style={{ marginTop: 12 }}>
+              <div className={styles.field} style={{ marginTop: "var(--space-3)" }}>
                 <label htmlFor="canvas-student-email">Student email to invite (optional)</label>
                 <TextField
                   id="canvas-student-email"
@@ -653,10 +654,10 @@ function InboxPanel() {
             <div
               style={{
                 display: "flex",
-                gap: 10,
+                gap: "var(--space-2)",
                 alignItems: "center",
-                marginTop: 14,
-                paddingTop: 14,
+                marginTop: "var(--space-3)",
+                paddingTop: "var(--space-3)",
                 borderTop: "1px solid var(--border-soft)",
                 flexWrap: "wrap",
               }}
@@ -720,7 +721,7 @@ function InboxPanel() {
                 see, or set NEXT_PUBLIC_GOOGLE_CALENDAR_EMBED_SRC.
               </p>
             )}
-            <p className={styles.fieldHint} style={{ marginTop: 8 }}>
+            <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>
               Shows your Google Calendar when you are signed into Google in this browser.
             </p>
         </ModalShell>

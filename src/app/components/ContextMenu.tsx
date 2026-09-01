@@ -47,8 +47,20 @@ export default function ContextMenu() {
           ? { top: anchor.mouseY, left: anchor.mouseX }
           : undefined
       }
+      slotProps={{
+        paper: {
+          sx: {
+            // AM3: a floating light surface now needs a border, since
+            // --shadow-md alone no longer separates from the flat page
+            // background the way it did over the old gradient.
+            borderRadius: "var(--radius-md)",
+            boxShadow: "var(--shadow-md)",
+            border: "1px solid var(--card-border)",
+          },
+        },
+      }}
     >
-      <MenuItem onClick={handleOpenAiChat}>
+      <MenuItem onClick={handleOpenAiChat} sx={{ minHeight: "var(--control-height-md)" }}>
         <ListItemIcon>
           <ChatMenuIcon />
         </ListItemIcon>

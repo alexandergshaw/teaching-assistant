@@ -244,7 +244,7 @@ export function LegibilityProbeModal({
             usable answer is exactly when this needs to be reachable without
             hunting - mirrors GradingRecordingPanel.tsx/
             DiscussionRepliesPanel.tsx's own identical placement. */}
-        <div className={styles.fieldHint} style={{ margin: "0 0 4px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
           <span>{legibilityProbeLogSummaryLine(summarizeLegibilityProbeRunLog(currentProbeLog))}</span>
           <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
             Download run log (CSV)

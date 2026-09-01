@@ -295,10 +295,21 @@ const darkAccentWash = declaration(darkBlock, "--accent-wash");
 // these is exactly how a design that only cleared 3:1 against the ORIGINAL
 // five surfaces - but not against --navy-highlight-strong (light) or dark
 // --navy-highlight-strong - passed review undetected.
+//
+// 2026-09-01 (aesthetics pass): --page-background stopped being a gradient and
+// became the flat #f5f6f8, and --card-background stopped being 0.92-alpha
+// white and became opaque #ffffff. #f5f6f8 is ADDED here because it is a real
+// surface the ring is now painted against; #f4f7fb and #e8eef7 - the deleted
+// gradient's two stops - are KEPT deliberately. This list is a frozen oracle,
+// not a mirror of the stylesheet: dropping a surface because the CSS no longer
+// names it is how an oracle quietly stops constraining anything, and both
+// values remain realistic light surfaces to hold the ring to. Any agent that
+// introduces a new opaque surface colour adds it here.
 const LIGHT_SURFACES = [
   "#ffffff",
   "#f8fafc",
   "#f1f5f9",
+  "#f5f6f8", // --page-background (flat, from 2026-09-01)
   "#f4f7fb",
   "#e8eef7",
   "#e2e8f0", // --border-soft
@@ -311,6 +322,7 @@ const DARK_SURFACES = [
   "#0e1626",
   "#1e293b",
   "#111a2e",
+  "#121b2e", // dark --card-background (opaque, from 2026-09-01)
   "#182338",
   "#2b3a5c", // dark --navy-highlight
   "#364a75", // dark --navy-highlight-strong - the binding constraint (6.18:1)

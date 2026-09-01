@@ -3,6 +3,7 @@
 import Checkbox from "@mui/material/Checkbox";
 import type { InstitutionPageNode } from "@/lib/knowledge-base";
 import styles from "../../page.module.css";
+import kbStyles from "../KnowledgeTab.module.css";
 
 interface PageTreeViewProps {
   nodes: InstitutionPageNode[];
@@ -95,7 +96,7 @@ function TreeNode({
 
   return (
     <div>
-      <div className={styles.kbNodeRow} style={{ paddingLeft: depth * 16 }}>
+      <div className={styles.kbNodeRow} style={{ paddingLeft: `calc(var(--space-4) * ${depth})` }}>
         {hasChildren ? (
           <button
             type="button"
@@ -103,8 +104,17 @@ function TreeNode({
             onClick={() => onToggleExpand(node.id)}
             aria-expanded={isOpen}
             aria-label={isOpen ? `Collapse ${node.title || "Untitled"}` : `Expand ${node.title || "Untitled"}`}
+            title={isOpen ? `Collapse ${node.title || "Untitled"}` : `Expand ${node.title || "Untitled"}`}
           >
-            {isOpen ? "▾" : "▸"}
+            {/* A single glyph that rotates on expand/collapse (see
+                .treeChevron's doc comment in KnowledgeTab.module.css) rather
+                than swapping between two different characters. */}
+            <span
+              className={isOpen ? `${kbStyles.treeChevron} ${kbStyles.treeChevronOpen}` : kbStyles.treeChevron}
+              aria-hidden="true"
+            >
+              ▸
+            </span>
           </button>
         ) : (
           <span className={styles.kbNodeToggleSpacer} aria-hidden="true" />
@@ -123,7 +133,7 @@ function TreeNode({
           onChange={() => onToggleSelect(node.id)}
           onClick={(e) => e.stopPropagation()}
           aria-label={`Select ${nodeLabel}`}
-          sx={{ padding: "2px", flexShrink: 0 }}
+          sx={{ padding: "var(--space-1)", flexShrink: 0 }}
         />
 
         {isRenaming ? (

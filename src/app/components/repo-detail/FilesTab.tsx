@@ -18,7 +18,19 @@ import styles from "../../page.module.css";
 const MonacoFileEditor = dynamic(() => import("../MonacoFileEditor"), {
   ssr: false,
   loading: () => (
-    <div style={{ padding: 16, fontSize: "0.85rem", color: "var(--text-secondary)" }}>Loading editor...</div>
+    <div role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-4)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
+      <span
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: "var(--radius-round)",
+          border: "2px solid color-mix(in srgb, var(--accent) 20%, transparent 80%)",
+          borderTopColor: "var(--accent-ink)",
+          animation: "ta-spin 0.8s linear infinite",
+        }}
+      />
+      Loading editor...
+    </div>
   ),
 });
 
@@ -102,14 +114,14 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
   return (
     <>
       {showNewFile && (
-        <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
+        <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: "var(--space-2)" }}>
           <Autocomplete
             freeSolo
             options={folderOptions}
             inputValue={newFileDest}
             onInputChange={(_, v) => setNewFileDest(v)}
             renderInput={(params) => <TextField {...params} label="Destination folder (optional)" size="small" placeholder="empty = repo root" />}
-            sx={{ "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+            sx={{ "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "var(--font-size-sm)" } }}
           />
           <TextField
             size="small"
@@ -118,7 +130,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
             value={newFilePath}
             onChange={(e) => setNewFilePath(e.target.value)}
             disabled={creatingFile}
-            sx={{ "& input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+            sx={{ "& input": { fontFamily: "monospace", fontSize: "var(--font-size-sm)" } }}
           />
           <TextField
             multiline
@@ -128,7 +140,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
             value={newFileContent}
             onChange={(e) => setNewFileContent(e.target.value)}
             disabled={creatingFile}
-            sx={{ "& textarea": { fontFamily: "monospace", fontSize: "0.8rem" } }}
+            sx={{ "& textarea": { fontFamily: "monospace", fontSize: "var(--font-size-sm)" } }}
           />
           <TextField
             size="small"
@@ -139,7 +151,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
             onKeyDown={submitOnEnter(handleCreateFile)}
             disabled={creatingFile}
           />
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
             <Button variant="contained" size="small" disabled={creatingFile || !newFilePath.trim()} onClick={handleCreateFile}>
               {creatingFile ? "Creating..." : `Create file on ${branch}`}
             </Button>
@@ -152,7 +164,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
       )}
 
       {showNewFolder && (
-        <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
+        <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: "var(--space-2)" }}>
           <FormControlLabel
             control={<Checkbox size="small" checked={bulkFolders} onChange={(e) => { setBulkFolders(e.target.checked); setNewFolderError(null); setNewFolderResult(null); }} />}
             label="Create multiple folders"
@@ -163,7 +175,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
             inputValue={newFolderDest}
             onInputChange={(_, v) => setNewFolderDest(v)}
             renderInput={(params) => <TextField {...params} label="Destination folder (optional)" size="small" placeholder="empty = repo root" />}
-            sx={{ "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+            sx={{ "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "var(--font-size-sm)" } }}
           />
           <TextField
             size="small"
@@ -173,10 +185,10 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
             onChange={(e) => setNewFolderPath(e.target.value)}
             onKeyDown={submitOnEnter(handleCreateFolder)}
             disabled={creatingFolder}
-            sx={{ "& input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+            sx={{ "& input": { fontFamily: "monospace", fontSize: "var(--font-size-sm)" } }}
           />
           {bulkFolders && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
               <TextField
                 size="small"
                 type="number"
@@ -213,7 +225,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
               ? "Use {n} in the pattern for the number (otherwise it is appended). Each folder gets a .gitkeep since Git does not track empty folders."
               : "Git does not track empty folders, so a .gitkeep file is added inside the new folder."}
           </p>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
             <Button variant="contained" size="small" disabled={creatingFolder || !newFolderPath.trim()} onClick={handleCreateFolder}>
               {creatingFolder ? "Creating..." : bulkFolders ? `Create folders on ${branch}` : `Create folder on ${branch}`}
             </Button>
@@ -227,9 +239,9 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
       )}
 
       {selectedPaths.size > 0 && (
-        <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>{selectedPaths.size} selected</span>
+        <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: "var(--space-2)" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "var(--font-size-md)", fontWeight: 500 }}>{selectedPaths.size} selected</span>
             <Button variant="outlined" size="small" color="error" disabled={bulkBusy} onClick={handleBulkDelete}>
               {bulkBusy ? "Working..." : "Delete"}
             </Button>
@@ -241,14 +253,14 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
             </Button>
           </div>
           {showMove && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
               <Autocomplete
                 freeSolo
                 options={folderOptions}
                 inputValue={moveDest}
                 onInputChange={(_, v) => setMoveDest(v)}
                 renderInput={(params) => <TextField {...params} label="Destination folder" size="small" placeholder="e.g. src/components (empty = repo root)" />}
-                sx={{ minWidth: 260, "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+                sx={{ minWidth: 260, "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "var(--font-size-sm)" } }}
               />
               <Button variant="contained" size="small" disabled={bulkBusy} onClick={handleBulkMove}>
                 {bulkBusy ? "Moving..." : `Move ${selectedPaths.size} to ${moveDest.trim() ? moveDest.trim() : "root"}`}
@@ -265,7 +277,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
 
       <div className={styles.ghSplit}>
         <div className={`${styles.ghPanel} ${styles.ghSplitTree}`} style={{ width: treeWidth }}>
-          <div className={styles.ghPanelHead} style={{ marginBottom: 10 }}>
+          <div className={styles.ghPanelHead} style={{ marginBottom: "var(--space-2)" }}>
             <label className={styles.panelTitle}>Files</label>
             <div className={styles.ghPanelHeadRight}>
               <Button
@@ -294,7 +306,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
           />
           {treeState === "ready" && entryList.length > 0 && (
             <>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
                 <Button
                   variant="text"
                   size="small"
@@ -315,14 +327,14 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                 </Button>
               </div>
               <FormControlLabel
-                sx={{ marginTop: 0.5, marginLeft: "-4px" }}
+                sx={{ marginTop: "var(--space-1)", marginLeft: "calc(var(--space-1) * -1)" }}
                 control={
                   <Checkbox
                     size="small"
                     checked={allEntriesSelected}
                     indeterminate={someEntriesSelected && !allEntriesSelected}
                     onChange={toggleSelectAll}
-                    sx={{ padding: "2px" }}
+                    sx={{ padding: "var(--space-1)" }}
                   />
                 }
                 label={
@@ -336,8 +348,9 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
           )}
           <div className={styles.ghTreeList}>
             {treeState === "loading" && (
-              <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
                 <CircularProgress size={24} />
+                <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading files...</span>
               </div>
             )}
             {treeState === "error" && <p className={styles.error}>Failed to load files</p>}
@@ -353,7 +366,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 4,
+                      gap: "var(--space-1)",
                       backgroundColor: selectedPath === entry.path ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent",
                     }}
                   >
@@ -361,7 +374,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                       size="small"
                       checked={selectedPaths.has(entry.path)}
                       onChange={() => toggleSelected(entry.path)}
-                      sx={{ padding: "2px" }}
+                      sx={{ padding: "var(--space-1)" }}
                     />
                     {entry.type === "blob" ? (
                       <>
@@ -376,7 +389,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                             flex: 1,
                             minWidth: 0,
                             fontFamily: "monospace",
-                            fontSize: "0.8rem",
+                            fontSize: "var(--font-size-sm)",
                             pl: `${indent}px`,
                           }}
                         >
@@ -405,7 +418,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                             alignItems: "center",
                             justifyContent: "center",
                             color: "var(--text-secondary)",
-                            fontSize: "0.75rem",
+                            fontSize: "var(--font-size-xs)",
                             lineHeight: "1em",
                           }}
                         >
@@ -422,13 +435,13 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                             flex: 1,
                             minWidth: 0,
                             fontFamily: "monospace",
-                            fontSize: "0.8rem",
+                            fontSize: "var(--font-size-sm)",
                             fontWeight: 600,
                             color: "var(--text-secondary)",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
-                            padding: "6px 8px",
+                            padding: "var(--space-1) var(--space-2)",
                             paddingLeft: `${indent}px`,
                             border: "none",
                             background: "transparent",
@@ -454,18 +467,19 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
           onPointerDown={startTreeResize}
         />
 
-        <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", gap: "var(--space-3)", flexWrap: "wrap", alignItems: "flex-start" }}>
           <div className={styles.ghPanel} style={{ flex: "2 1 400px", minWidth: 320 }}>
           {!selectedPath ? (
             <p className={styles.fieldHint} style={{ margin: 0 }}>Select a file to view and edit it.</p>
           ) : (
             <>
-              <p className={`${styles.ghMeta} ${styles.ghMetaMono}`} style={{ marginTop: 0, marginBottom: 10 }}>
+              <p className={`${styles.ghMeta} ${styles.ghMetaMono}`} style={{ marginTop: 0, marginBottom: "var(--space-2)" }}>
                 {selectedPath}
               </p>
               {fileState === "loading" ? (
-                <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
                   <CircularProgress size={24} />
+                  <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading file...</span>
                 </div>
               ) : (
                 <>
@@ -475,7 +489,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                     onChange={setEditContent}
                     height="60vh"
                   />
-                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-end", marginTop: "var(--space-3)", flexWrap: "wrap" }}>
                     <TextField
                       size="small"
                       fullWidth
@@ -496,11 +510,11 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                     </Button>
                   </div>
                   {commitMsg && (
-                    <p style={{ marginTop: 8, fontSize: "0.85rem", color: commitMsg.startsWith("Committed") ? "var(--success)" : "var(--danger)" }}>
+                    <p style={{ marginTop: "var(--space-2)", fontSize: "var(--font-size-md)", color: commitMsg.startsWith("Committed") ? "var(--success)" : "var(--danger)" }}>
                       {commitMsg}
                     </p>
                   )}
-                  <div style={{ marginTop: 12 }}>
+                  <div style={{ marginTop: "var(--space-3)" }}>
                     <PublishToCanvasPage filePath={selectedPath} content={editContent} />
                   </div>
                 </>

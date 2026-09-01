@@ -31,7 +31,7 @@ export function AnnouncementsExportSection({ announcements }: { announcements: C
   if (announcements.length === 0) return null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-5)" }}>
       <div>
         <h3 style={{ margin: "0 0 2px" }}>Announcements</h3>
         {/* AC6: states plainly that these are read-only, sourced from the
@@ -41,11 +41,11 @@ export function AnnouncementsExportSection({ announcements }: { announcements: C
         </p>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         {announcements.map((announcement, i) => (
           <div key={i} className={styles.ccModule}>
-            <div className={styles.ccHead} style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <div className={styles.ccHead} style={{ flexDirection: "column", alignItems: "stretch", gap: "var(--space-1)" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)", flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 600 }}>{announcement.title || "(untitled announcement)"}</span>
                 <span className={styles.ccHint}>
                   Order {announcement.order ?? "(none)"}

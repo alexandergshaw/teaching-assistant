@@ -75,9 +75,9 @@ export default function CopilotChatPanel({ filePath, fileContent }: CopilotChatP
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "60vh", border: "1px solid var(--field-border)", borderRadius: 8, overflow: "hidden" }}>
-      <div style={{ padding: 8, borderBottom: "1px solid var(--field-border)", display: "flex", gap: 8, alignItems: "center" }}>
-        <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>Copilot chat</span>
+    <div style={{ display: "flex", flexDirection: "column", height: "60vh", border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+      <div style={{ padding: "var(--space-2)", borderBottom: "1px solid var(--field-border)", display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+        <span style={{ fontSize: "var(--font-size-md)", fontWeight: 500 }}>Copilot chat</span>
         <TextField
           select
           size="small"
@@ -93,16 +93,16 @@ export default function CopilotChatPanel({ filePath, fileContent }: CopilotChatP
           ))}
         </TextField>
       </div>
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "var(--space-2)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         {messages.length === 0 && <p className={styles.fieldHint}>Ask about {filePath}. The file contents are sent as context.</p>}
         {messages.map((m, i) => (
           <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "90%" }}>
-            <div style={{ fontSize: "0.7rem", color: "var(--text-secondary)", marginBottom: 2 }}>{m.role === "user" ? "You" : "Copilot"}</div>
-            <div style={{ whiteSpace: "pre-wrap", fontSize: "0.85rem", background: m.role === "user" ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "color-mix(in srgb, var(--field-border) 30%, transparent)", border: "1px solid var(--field-border)", borderRadius: 8, padding: "6px 10px" }}>{m.content}</div>
+            <div style={{ fontSize: "var(--font-size-2xs)", color: "var(--text-secondary)", marginBottom: "var(--space-1)" }}>{m.role === "user" ? "You" : "Copilot"}</div>
+            <div style={{ whiteSpace: "pre-wrap", fontSize: "var(--font-size-md)", background: m.role === "user" ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "color-mix(in srgb, var(--field-border) 30%, transparent)", border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-1) var(--space-2)" }}>{m.content}</div>
           </div>
         ))}
         {busy && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
             <CircularProgress size={16} />
             <span className={styles.fieldHint}>Thinking...</span>
           </div>
@@ -110,12 +110,12 @@ export default function CopilotChatPanel({ filePath, fileContent }: CopilotChatP
         {error && <p className={styles.error}>{error}</p>}
       </div>
       {usage && (
-        <div style={{ padding: "4px 10px", borderTop: "1px solid var(--field-border)", fontSize: "0.72rem", color: "var(--text-secondary)" }}>
+        <div style={{ padding: "var(--space-1) var(--space-2)", borderTop: "1px solid var(--field-border)", fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>
           {usage.totalTokens != null ? `${usage.totalTokens} tokens` : ""}
           {usage.rateLimitRemaining != null ? ` - ${usage.rateLimitRemaining}${usage.rateLimitLimit ? `/${usage.rateLimitLimit}` : ""} requests left` : ""}
         </div>
       )}
-      <div style={{ padding: 8, borderTop: "1px solid var(--field-border)", display: "flex", gap: 8 }}>
+      <div style={{ padding: "var(--space-2)", borderTop: "1px solid var(--field-border)", display: "flex", gap: "var(--space-2)" }}>
         <TextField
           size="small"
           fullWidth

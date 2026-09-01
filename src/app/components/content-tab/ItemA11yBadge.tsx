@@ -27,18 +27,18 @@ export function ItemA11yBadge({ item }: { item: CanvasModuleItem }) {
         alignItems: "center",
         gap: 0.5,
         height: 24,
-        padding: "0 7px",
-        borderRadius: 0.75,
+        padding: "0 var(--space-2)",
+        borderRadius: "var(--radius-xs)",
         border: `1px solid ${color}`,
         background: "var(--field-background)",
         color,
-        fontSize: "0.74rem",
+        fontSize: "var(--font-size-xs)",
         fontWeight: 700,
         lineHeight: 1,
         cursor: "pointer",
       }}
     >
-      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />
+      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "var(--radius-round)", background: color }} />
       {issues}
     </IconButton>
   );

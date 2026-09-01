@@ -12,19 +12,21 @@
 .institutionPill {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .removeInstitutionButton {
   flex-shrink: 0;
   border: none;
   background: transparent;
-  color: var(--text-secondary, #475569);
-  font-size: 1rem;
+  color: var(--text-secondary);
+  font-size: var(--font-size-lg);
   line-height: 1;
-  padding: 2px 6px;
+  /* AM4: 6px was a tie between --space-1 (4) and --space-2 (8) - ties round
+     DOWN, so both dimensions land on --space-1. */
+  padding: var(--space-1);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 
 .removeInstitutionButton:hover {
@@ -37,6 +39,22 @@
   cursor: not-allowed;
 }
 
+/* Page-tree disclosure chevron (PageTreeView.tsx): a single glyph that
+   rotates on expand/collapse rather than swapping between two different
+   characters - the swap-glyph version reads as a flicker rather than a
+   state change, and doesn't animate under prefers-reduced-motion the way a
+   transform does (globals.css already zeroes transition-duration there).
+   .kbNodeToggle (page.module.css, read-only here) still owns the button's
+   hit box/size; this only styles its child glyph. */
+.treeChevron {
+  display: inline-block;
+  transition: transform var(--transition-base);
+}
+
+.treeChevronOpen {
+  transform: rotate(90deg);
+}
+
 /* ── Attachments panel (attach/embed feature) ────────────────────────────
    A page's uploaded files: list, upload, download, remove, and (while
    editing) insert an embed reference into the body. Lives in its own
@@ -46,23 +64,25 @@
    above for the same reasoning). */
 
 .attachmentsPanel {
-  border: 1px solid var(--field-border);
-  border-radius: 12px;
-  background: var(--field-background);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--card-background);
   overflow: hidden;
 }
 
 .attachmentsToggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 10px 14px;
+  /* AM4: 10px was a tie between --space-2 (8) and --space-3 (12); 14px was
+     a tie between --space-3 (12) and --space-4 (16) - ties round DOWN. */
+  padding: var(--space-2) var(--space-3);
   border: none;
   background: transparent;
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   text-align: left;
   cursor: pointer;
@@ -75,9 +95,9 @@
   height: 0;
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
-  border-top: 5px solid var(--text-secondary, #475569);
+  border-top: 5px solid var(--text-secondary);
   transform: rotate(-90deg);
-  transition: transform 0.15s;
+  transition: transform var(--transition-base);
 }
 
 .attachmentsChevronOpen {
@@ -87,21 +107,23 @@
 .attachmentsBody {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 0 14px 14px;
+  gap: var(--space-2);
+  /* AM4: 14px was a tie between --space-3 (12) and --space-4 (16) - ties
+     round DOWN. */
+  padding: 0 var(--space-3) var(--space-3);
 }
 
 .attachmentsUploadRow {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .attachmentsList {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -111,23 +133,23 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  padding: 8px 10px;
-  border: 1px solid var(--field-border);
-  border-radius: 8px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
   background: var(--card-background);
 }
 
 .attachmentInfo {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
 .attachmentName {
-  font-size: 0.86rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
@@ -137,13 +159,15 @@
 }
 
 .attachmentMeta {
-  font-size: 0.76rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
 .attachmentActions {
   display: flex;
-  gap: 6px;
+  /* AM4: 6px was a tie between --space-1 (4) and --space-2 (8) - ties round
+     DOWN. */
+  gap: var(--space-1);
   flex-wrap: wrap;
 }
 
@@ -162,40 +186,42 @@
 .attachmentPreviewActions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 
 .attachmentPreviewUnsupported {
   margin: 0;
-  padding: 14px;
-  border: 1px solid var(--field-border);
-  border-radius: 12px;
+  /* AM4: 14px was a tie between --space-3 (12) and --space-4 (16) - ties
+     round DOWN. */
+  padding: var(--space-3);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
   background: var(--card-background);
   color: var(--text-secondary);
-  font-size: 0.86rem;
-  line-height: 1.5;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
 }
 
 /* ── Embeds rendered inline in a page's body (PageBody.tsx) ─────────────── */
 
 .embedImage {
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .embedImage img {
   max-width: 100%;
-  border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
   display: block;
 }
 
 .embedCaption {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
@@ -203,58 +229,64 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin: 0 0 12px;
-  padding: 10px 14px;
-  border: 1px solid var(--field-border);
-  border-radius: 12px;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  /* AM4: 10px was a tie between --space-2 (8) and --space-3 (12); 14px was
+     a tie between --space-3 (12) and --space-4 (16) - ties round DOWN. */
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
   background: var(--surface-muted);
 }
 
 .embedCardInfo {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
 .embedCardName {
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .embedCardMeta {
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
 .embedCardLink {
   flex-shrink: 0;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--accent-ink);
   text-decoration: underline;
 }
 
 .embedLoading {
-  margin: 0 0 12px;
-  font-size: 0.84rem;
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   font-style: italic;
 }
 
 .embedError {
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   color: var(--danger);
 }
 
 .embedBroken {
-  margin: 0 0 12px;
-  padding: 10px 14px;
+  margin: 0 0 var(--space-3);
+  /* AM4: 10px was a tie between --space-2 (8) and --space-3 (12); 14px was
+     a tie between --space-3 (12) and --space-4 (16) - ties round DOWN. */
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--danger-border);
-  border-radius: 10px;
+  /* AM4: 10px was a tie between --radius-sm (8) and --radius-md (12) -
+     ties round DOWN. */
+  border-radius: var(--radius-sm);
   background: var(--danger-surface);
   color: var(--text-primary);
-  font-size: 0.84rem;
+  font-size: var(--font-size-sm);
 }

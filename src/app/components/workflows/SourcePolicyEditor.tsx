@@ -51,28 +51,28 @@ export default function SourcePolicyEditor({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 260 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", flex: 1, minWidth: 260 }}>
       {isDefaultShown && (
-        <p style={{ margin: 0, fontSize: "0.78rem", opacity: 0.65 }}>
+        <p style={{ margin: 0, fontSize: "var(--font-size-xs)", opacity: 0.65 }}>
           Default: live LMS, then the course export, then tile topics/description - first source that yields material.
         </p>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
         {policy.order.map((kind, i) => (
-          <div key={kind} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <div key={kind} style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
             <FormControlLabel
               control={<Checkbox size="small" checked onChange={() => toggle(kind, false)} />}
               label={SOURCE_KIND_LABELS[kind]}
               sx={{ flex: 1 }}
             />
-            <Button size="small" disabled={i === 0} onClick={() => move(kind, -1)} sx={{ minWidth: 0, padding: "2px 6px" }}>
+            <Button size="small" disabled={i === 0} onClick={() => move(kind, -1)} sx={{ minWidth: 0, padding: "var(--space-1) var(--space-2)" }}>
               Up
             </Button>
             <Button
               size="small"
               disabled={i === policy.order.length - 1}
               onClick={() => move(kind, 1)}
-              sx={{ minWidth: 0, padding: "2px 6px" }}
+              sx={{ minWidth: 0, padding: "var(--space-1) var(--space-2)" }}
             >
               Down
             </Button>
@@ -110,9 +110,9 @@ export default function SourcePolicyEditor({
             border: "none",
             padding: 0,
             font: "inherit",
-            color: "var(--link-color, #2563eb)",
+            color: "var(--link-color)",
             cursor: "pointer",
-            fontSize: "0.78rem",
+            fontSize: "var(--font-size-xs)",
           }}
         >
           Reset to default

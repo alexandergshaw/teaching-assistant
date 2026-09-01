@@ -733,7 +733,7 @@ export function ModulesView({
 
       {/* AC4 - stale additions are preserved and marked inactive, rendered here rather than dropped silently. */}
       {exportAdditions.inactive.length > 0 && (
-        <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
+        <p className={styles.ccHint} style={{ padding: "var(--space-1) var(--space-2)" }}>
           {exportAdditions.inactive.length} added item{exportAdditions.inactive.length === 1 ? "" : "s"} no longer
           match a module in this export (kept, not deleted): {exportAdditions.inactive.map((a) => a.title).join(", ")}
         </p>
@@ -751,7 +751,7 @@ export function ModulesView({
           modulesListFallbackRef.current = el;
         }}
         tabIndex={-1}
-        style={{ display: "flex", flexDirection: "column", gap: 20 }}
+        style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}
       >
         {displayModules.map((m, mi) => {
           if (!displayModuleMatches(m)) return null;

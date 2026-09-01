@@ -103,7 +103,7 @@ export default function FilePreviewModal({
               <p className={styles.previewMeta}>Type: {selectedPreview.extension}</p>
             )}
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexShrink: 0 }}>
             {isRunnable && (
               <Button
                 variant="outlined"
@@ -162,7 +162,7 @@ export default function FilePreviewModal({
           </>
         )}
         {(runResult || runError) && (
-          <div style={{ marginTop: 12, borderTop: "1px solid var(--field-border)", paddingTop: 12 }}>
+          <div style={{ marginTop: "var(--space-3)", borderTop: "1px solid var(--field-border)", paddingTop: "var(--space-3)" }}>
             <p className={styles.previewMeta}>
               Code execution{runResult && !runResult.error ? ` (${runResult.language})` : ""}
             </p>

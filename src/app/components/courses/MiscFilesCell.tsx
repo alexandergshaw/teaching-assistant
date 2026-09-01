@@ -19,8 +19,6 @@ import { uploadCourseFile, getCourseZipUrl, removeCourseZip } from "@/lib/course
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
-const POPOVER_BODY_STYLE: React.CSSProperties = { padding: 16, width: 360, maxWidth: "90vw" };
-
 export interface MiscFilesCellProps {
   course: Course;
   onCourseUpdated: (course: Course) => void;
@@ -113,7 +111,7 @@ export function MiscFilesCell({ course, onCourseUpdated, setError, menu }: MiscF
 
   return (
     <td style={{ minWidth: 190 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+      <div className={`${tableStyles.stackXs} ${tableStyles.alignStart}`}>
         <span className={count > 0 ? styles.courseResourceValue : styles.courseResourceEmpty}>{summary}</span>
         <button type="button" className={styles.linkButton} onClick={(e) => setAnchorEl(e.currentTarget)}>
           Manage
@@ -125,7 +123,7 @@ export function MiscFilesCell({ course, onCourseUpdated, setError, menu }: MiscF
         onClose={() => setAnchorEl(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
       >
-        <div style={POPOVER_BODY_STYLE}>
+        <div className={tableStyles.popoverBody}>
           <div className={styles.courseResourceHead}>
             <span className={styles.courseResourceLabel}>Misc files</span>
           </div>
@@ -138,7 +136,7 @@ export function MiscFilesCell({ course, onCourseUpdated, setError, menu }: MiscF
           <input
             ref={uploadRef}
             type="file"
-            style={{ display: "none" }}
+            className={tableStyles.hiddenInput}
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void handleUpload(f);
@@ -147,22 +145,22 @@ export function MiscFilesCell({ course, onCourseUpdated, setError, menu }: MiscF
           />
 
           {course.miscFiles.length === 0 ? (
-            <span className={styles.courseResourceEmpty} style={{ marginTop: 8, display: "block" }}>
+            <span className={`${styles.courseResourceEmpty} ${tableStyles.mt2}`} style={{ display: "block" }}>
               No files yet.
             </span>
           ) : (
-            <div style={{ marginTop: 16 }}>
+            <div className={tableStyles.mt4}>
               {course.miscFiles.map((f) => (
-                <div key={f.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div key={f.path} className={tableStyles.fileListRow}>
+                  <div className={tableStyles.fileRowHead}>
+                    <span className={tableStyles.fileRowName}>
                       {f.name} - {(f.size / 1048576).toFixed(1)} MB
                     </span>
-                    <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
+                    <span className={tableStyles.fileRowMeta}>
                       {new Date(f.addedAt).toLocaleDateString()}
                     </span>
                   </div>
-                  <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                  <div className={tableStyles.fileRowActions}>
                     <button
                       type="button"
                       className={styles.linkButton}
@@ -172,8 +170,7 @@ export function MiscFilesCell({ course, onCourseUpdated, setError, menu }: MiscF
                     </button>
                     <button
                       type="button"
-                      className={styles.linkButton}
-                      style={{ color: "var(--danger)" }}
+                      className={`${styles.linkButton} ${tableStyles.dangerLink}`}
                       disabled={removingPath === f.path}
                       onClick={() => void handleRemoveFile(f.path)}
                     >

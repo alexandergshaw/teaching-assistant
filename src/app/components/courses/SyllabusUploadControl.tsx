@@ -5,6 +5,7 @@ import { uploadSyllabusAction } from "@/app/actions";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { validateFileUpload } from "@/lib/syllabus-upload-validation";
 import { SYLLABUS_UPLOAD_BUCKET, syllabusUploadStoragePath } from "@/lib/syllabus-upload-source";
+import tableStyles from "./CoursesTable.module.css";
 
 interface SyllabusUploadControlProps {
   courseId: string;
@@ -90,19 +91,11 @@ export function SyllabusUploadControl({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+    <div className={tableStyles.stackSm}>
       <button
         onClick={() => fileInputRef.current?.click()}
         disabled={busy}
-        style={{
-          padding: "8px 12px",
-          backgroundColor: "var(--accent)",
-          color: "white",
-          border: "none",
-          borderRadius: "4px",
-          cursor: busy ? "not-allowed" : "pointer",
-          opacity: busy ? 0.6 : 1,
-        }}
+        className={tableStyles.primaryButton}
       >
         {busy ? "Uploading..." : "Upload Syllabus"}
       </button>
@@ -112,16 +105,10 @@ export function SyllabusUploadControl({
         accept=".docx,.pdf,.txt,.md"
         onChange={handleFileChange}
         disabled={busy}
-        style={{ display: "none" }}
+        className={tableStyles.hiddenInput}
       />
       {error && (
-        <div
-          style={{
-            color: "var(--danger)",
-            fontSize: "14px",
-            lineHeight: "1.5",
-          }}
-        >
+        <div className={tableStyles.errorTextPlain}>
           {error}
         </div>
       )}

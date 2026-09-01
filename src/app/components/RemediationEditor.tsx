@@ -13,6 +13,7 @@ import { applyFix, needsAiValue } from "@/lib/accessibility/remediate";
 import type { AccessibleItemType, Issue } from "@/lib/accessibility/types";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useModalDismiss } from "./ui/useModalDismiss";
+import styles from "../page.module.css";
 
 const REMEDIABLE: AccessibleItemType[] = ["page", "assignment", "quiz", "discussion", "announcement", "syllabus"];
 
@@ -121,31 +122,73 @@ export default function RemediationEditor({
   return (
     <div
       onClick={() => onClose(false)}
-      style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "color-mix(in srgb, var(--text-primary) 45%, transparent)",
+        zIndex: 10001,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "var(--space-4)",
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(720px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        style={{
+          width: "min(720px, 96vw)",
+          maxHeight: "90vh",
+          background: "var(--field-background)",
+          borderRadius: "var(--radius-md)",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "var(--shadow-lg)",
+        }}
         role="dialog"
         aria-modal="true"
         aria-label="Fix accessibility issue"
         tabIndex={-1}
         ref={containerRef}
       >
-        <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-soft)" }}>
+          <div
+            style={{
+              fontSize: "var(--font-size-2xs)",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "var(--text-secondary)",
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "var(--space-2)",
+            }}
+          >
             <span>Fix · {title}</span>
-            {progress && <span style={{ color: "var(--accent, #2563eb)" }}>{progress.index} of {progress.total}</span>}
+            {progress && <span style={{ color: "var(--accent)" }}>{progress.index} of {progress.total}</span>}
           </div>
-          <div style={{ fontSize: "0.95rem", color: "var(--text-primary)", marginTop: 2 }}>{issue.message}</div>
+          <div style={{ fontSize: "var(--font-size-lg)", color: "var(--text-primary)", marginTop: "var(--space-1)" }}>
+            {issue.message}
+          </div>
         </div>
 
-        <div style={{ padding: "14px 18px", overflowY: "auto" }}>
+        <div style={{ padding: "var(--space-3) var(--space-4)", overflowY: "auto" }}>
           {stage === "loading" ? (
-            <p style={{ color: "var(--text-secondary)" }}>Preparing the fix…</p>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>
+              <span className={styles.spinner} aria-hidden="true" />
+              Preparing the fix…
+            </div>
           ) : (
             <>
-              <p style={{ fontSize: "0.85rem", color: located ? "var(--success)" : "var(--text-secondary)", margin: "0 0 8px" }}>
+              <p
+                style={{
+                  fontSize: "var(--font-size-md)",
+                  // --success-ink (not --success): --success measures 2.95:1 on a
+                  // light surface, a contrast failure as body text - globals.css's
+                  // own note on --success-ink is exactly this case.
+                  color: located ? "var(--success-ink)" : "var(--text-secondary)",
+                  margin: "0 0 var(--space-2)",
+                }}
+              >
                 {located
                   ? "Fix pre-applied below — review the HTML and save."
                   : issue.ruleId === "broken-link"
@@ -174,18 +217,28 @@ export default function RemediationEditor({
                 size="small"
                 sx={{
                   "& .MuiOutlinedInput-root": {
-                    fontFamily: "ui-monospace, Menlo, monospace",
-                    fontSize: "0.8rem",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "var(--font-size-sm)",
                     lineHeight: 1.5,
                   },
                 }}
               />
             </>
           )}
-          {error && <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginTop: 8 }}>{error}</p>}
+          {error && (
+            <p style={{ color: "var(--danger)", fontSize: "var(--font-size-md)", marginTop: "var(--space-2)" }}>{error}</p>
+          )}
         </div>
 
-        <div style={{ padding: "12px 18px", borderTop: "1px solid var(--field-border, #e2e8f0)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <div
+          style={{
+            padding: "var(--space-3) var(--space-4)",
+            borderTop: "1px solid var(--border-soft)",
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "var(--space-2)",
+          }}
+        >
           <Button
             variant="outlined"
             size="small"

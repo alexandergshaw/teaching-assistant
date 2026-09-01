@@ -49,8 +49,8 @@ export default function TranscriptPanel({ entries }: TranscriptPanelProps) {
         style={{
           maxHeight: 320,
           overflowY: "auto",
-          padding: "12px 14px",
-          borderRadius: 12,
+          padding: "var(--space-3)",
+          borderRadius: "var(--radius-md)",
           border: "1px solid var(--field-border)",
           background: "var(--card-background)",
         }}
@@ -64,13 +64,13 @@ export default function TranscriptPanel({ entries }: TranscriptPanelProps) {
             <p
               key={entry.id}
               style={{
-                margin: "0 0 8px",
+                margin: "0 0 var(--space-2)",
                 lineHeight: 1.5,
                 color: entry.final ? "var(--text-primary)" : "var(--text-secondary)",
                 fontStyle: entry.final ? "normal" : "italic",
               }}
             >
-              <span className={styles.ghMetaMono} style={{ marginRight: 8, fontSize: "0.78rem" }}>
+              <span className={styles.ghMetaMono} style={{ marginRight: "var(--space-2)", fontSize: "var(--font-size-xs)" }}>
                 {formatOffset(entry.atMs)}
               </span>
               {entry.text}

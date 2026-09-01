@@ -324,7 +324,7 @@ export function OfficeEditorModal({
                 ],
               }))}
             />
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
               <Button
                 type="button"
                 variant="contained"
@@ -347,7 +347,7 @@ export function OfficeEditorModal({
     {movingSection && (
       <div
         onClick={() => setMovingSection(null)}
-        style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        style={{ position: "fixed", inset: 0, background: "color-mix(in srgb, var(--navy) 45%, transparent)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--space-4)" }}
       >
         <div
           ref={moveSectionContainerRef}
@@ -356,19 +356,19 @@ export function OfficeEditorModal({
           aria-modal="true"
           aria-label="Move section to another file"
           onClick={(e) => e.stopPropagation()}
-          style={{ width: "min(440px, 96vw)", maxHeight: "80vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+          style={{ width: "min(440px, 96vw)", maxHeight: "80vh", background: "var(--field-background)", border: "1px solid var(--card-border)", borderRadius: "var(--radius-md)", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-lg)" }}
         >
-          <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border)" }}>
+          <div style={{ padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--field-border)" }}>
             <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>Move section to another file</div>
-            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 2 }}>
+            <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>
               Appends &ldquo;{spansToPlainText(movingSection.spans).slice(0, 60) || "(empty)"}&rdquo; to the end of the chosen Word file.
             </div>
           </div>
-          <div style={{ padding: "10px 12px", overflowY: "auto" }}>
+          <div style={{ padding: "var(--space-2) var(--space-3)", overflowY: "auto" }}>
             {!moveFiles ? (
-              <p style={{ color: "var(--text-secondary)" }}>Loading files…</p>
+              <p role="status" aria-live="polite" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading files…</p>
             ) : moveFiles.length === 0 ? (
-              <p style={{ color: "var(--text-secondary)" }}>No other Word (.docx) files in this course.</p>
+              <p style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>No other Word (.docx) files in this course.</p>
             ) : (
               moveFiles.map((f) => (
                 <Button
@@ -384,9 +384,9 @@ export function OfficeEditorModal({
                 </Button>
               ))
             )}
-            {moveError && <p className={styles.error} style={{ marginTop: 8 }}>{moveError}</p>}
+            {moveError && <p className={styles.error} style={{ marginTop: "var(--space-2)" }}>{moveError}</p>}
           </div>
-          <div style={{ padding: "10px 18px", borderTop: "1px solid var(--field-border)", display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ padding: "var(--space-2) var(--space-4)", borderTop: "1px solid var(--field-border)", display: "flex", justifyContent: "flex-end" }}>
             <Button
               type="button"
               variant="outlined"

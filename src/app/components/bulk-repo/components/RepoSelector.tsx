@@ -28,7 +28,7 @@ export function RepoSelector({
 }: RepoSelectorProps) {
   return (
     <div>
-      <h3 style={{ margin: "0 0 12px" }}>Select repositories</h3>
+      <h3 style={{ margin: "0 0 var(--space-3)" }}>Select repositories</h3>
       <TextField
         size="small"
         fullWidth
@@ -36,10 +36,10 @@ export function RepoSelector({
         placeholder="Type to filter..."
         value={filterText}
         onChange={(e) => onFilterChange(e.target.value)}
-        sx={{ mb: 1.5 }}
+        sx={{ mb: "var(--space-3)" }}
       />
 
-      <div style={{ display: "flex", gap: 12, marginBottom: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: "var(--space-3)", marginBottom: "var(--space-2)", alignItems: "center" }}>
         <Button size="small" variant="text" onClick={onSelectAll} disabled={shown.length === 0}>
           {allShownSelected ? "Clear all shown" : "Select all shown"}
         </Button>
@@ -55,17 +55,17 @@ export function RepoSelector({
           maxHeight: 240,
           overflowY: "auto",
           border: "1px solid var(--field-border)",
-          borderRadius: 4,
-          padding: 8,
+          borderRadius: "var(--radius-xs)",
+          padding: "var(--space-2)",
         }}
       >
         {shown.length === 0 ? (
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", margin: 0 }}>No repositories match.</p>
+          <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", margin: 0 }}>No repositories match.</p>
         ) : (
           shown.map((repo) => (
             <FormControlLabel
               key={repo}
-              sx={{ display: "flex", marginBottom: 0.5 }}
+              sx={{ display: "flex", marginBottom: "var(--space-1)" }}
               control={
                 <Checkbox
                   size="small"
@@ -73,25 +73,25 @@ export function RepoSelector({
                   onChange={(e) => onToggleRepo(repo, e.target.checked)}
                 />
               }
-              label={<span style={{ fontSize: "0.85rem", fontFamily: "monospace" }}>{repo}</span>}
+              label={<span style={{ fontSize: "var(--font-size-md)", fontFamily: "monospace" }}>{repo}</span>}
             />
           ))
         )}
       </div>
 
       {selectedRepos.size > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 500, marginBottom: 6, color: "var(--text-primary)" }}>
+        <div style={{ marginTop: "var(--space-3)" }}>
+          <label style={{ display: "block", fontSize: "var(--font-size-md)", fontWeight: 500, marginBottom: "var(--space-1)", color: "var(--text-primary)" }}>
             Selected repositories ({selectedRepos.size})
           </label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1)" }}>
             {[...selectedRepos].sort().map((repo) => {
               const displayName = repo.includes("/") ? repo.split("/")[1] : repo;
               return (
                 <span
                   key={repo}
                   className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, paddingRight: 4 }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)", paddingRight: "var(--space-1)" }}
                   title={repo}
                 >
                   {displayName}
@@ -110,7 +110,7 @@ export function RepoSelector({
                       background: "none",
                       color: "inherit",
                       cursor: "pointer",
-                      fontSize: "1rem",
+                      fontSize: "var(--font-size-lg)",
                       lineHeight: 1,
                     }}
                   >
@@ -123,7 +123,7 @@ export function RepoSelector({
         </div>
       )}
       {selectedRepos.size === 0 && (
-        <p className={styles.fieldHint} style={{ marginTop: 8 }}>
+        <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>
           No repositories selected.
         </p>
       )}

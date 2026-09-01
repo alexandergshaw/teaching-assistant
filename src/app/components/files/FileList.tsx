@@ -5,6 +5,7 @@ import type { RecordingFile } from "@/lib/recording-files";
 import { groupRecordingFiles } from "@/lib/recording-file-groups";
 import { formatRelative } from "@/app/utils/time";
 import styles from "../../page.module.css";
+import filesStyles from "./files.module.css";
 import { FileRow, type FileRowSharedProps } from "./FileRow";
 
 // Extracted structurally out of FilesTab.tsx (which was at 999 of this
@@ -67,7 +68,13 @@ export function FileList({
     >
       <div className={styles.libHead}>
         <div style={{ display: "flex", alignItems: "center" }}>
-          <Checkbox size="small" checked={allShownSelected} onChange={onToggleSelectAll} disabled={shown.length === 0} />
+          <Checkbox
+            size="small"
+            checked={allShownSelected}
+            onChange={onToggleSelectAll}
+            disabled={shown.length === 0}
+            aria-label="Select all files"
+          />
         </div>
         <div>Kind</div>
         <div>Type</div>
@@ -79,7 +86,7 @@ export function FileList({
       </div>
 
       {shown.length === 0 ? (
-        <div style={{ padding: "12px", textAlign: "center", color: "var(--text-secondary)" }}>
+        <div className={filesStyles.noMatchState}>
           No files match your search.
         </div>
       ) : groupBy === "grouped" ? (
@@ -90,20 +97,12 @@ export function FileList({
               <>
                 {grouped.groups.map((group) => (
                   <div key={group.key}>
-                    <div style={{
-                      padding: "12px",
-                      backgroundColor: "var(--bg-secondary)",
-                      borderBottom: "1px solid var(--border-color)",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 12,
-                    }}>
+                    <div className={filesStyles.groupHeader}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 500 }}>
+                        <div className={filesStyles.groupHeaderName}>
                           {group.workflowName || "Workflow run"}
                         </div>
-                        <div className={styles.fieldHint} style={{ margin: "4px 0 0 0", fontSize: "0.9em" }}>
+                        <div className={filesStyles.groupHeaderMeta}>
                           {group.files.length} file{group.files.length === 1 ? "" : "s"} {formatRelative(group.newest)}
                         </div>
                       </div>
@@ -124,12 +123,7 @@ export function FileList({
                 ))}
                 {grouped.ungrouped.length > 0 && (
                   <div>
-                    <div style={{
-                      padding: "12px",
-                      backgroundColor: "var(--bg-secondary)",
-                      borderBottom: "1px solid var(--border-color)",
-                      fontWeight: 500,
-                    }}>
+                    <div className={filesStyles.otherFilesHeader}>
                       Other files
                     </div>
                     {grouped.ungrouped.map((file) => (

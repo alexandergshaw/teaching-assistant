@@ -75,7 +75,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
 
   return (
     <>
-      <p style={{ marginTop: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+      <p style={{ marginTop: 0, color: "var(--text-secondary)", lineHeight: "var(--line-normal)" }}>
         Keep an assignment&apos;s instructions in sync between Canvas and a repo file. Load both sides, then push
         Canvas to the repo (as Markdown) or pull the repo file into Canvas.
       </p>
@@ -112,13 +112,13 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
       </Button>
 
       {error && <p className={styles.error}>{error}</p>}
-      {note && <p style={{ fontSize: "0.85rem", color: "var(--success)" }}>{note}</p>}
+      {note && <p style={{ fontSize: "var(--font-size-md)", color: "var(--success-ink)" }}>{note}</p>}
 
       {loaded && (
         <>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap", marginTop: "var(--space-3)" }}>
             <div style={{ flex: "1 1 280px", minWidth: 0 }}>
-              <label style={{ fontSize: "0.82rem", fontWeight: 600 }}>Canvas — {loaded.title}</label>
+              <label style={{ fontSize: "var(--font-size-sm)", fontWeight: 600 }}>Canvas — {loaded.title}</label>
               <TextField
                 multiline
                 minRows={16}
@@ -129,7 +129,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
               />
             </div>
             <div style={{ flex: "1 1 280px", minWidth: 0 }}>
-              <label style={{ fontSize: "0.82rem", fontWeight: 600 }}>Repo — {loaded.path}</label>
+              <label style={{ fontSize: "var(--font-size-sm)", fontWeight: 600 }}>Repo — {loaded.path}</label>
               <TextField
                 multiline
                 minRows={16}
@@ -140,7 +140,7 @@ export default function GithubSyncPanel({ acronym }: { acronym?: string }) {
               />
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)", flexWrap: "wrap" }}>
             <Button type="button" variant="contained" size="small" onClick={push} disabled={!!busy}>
               {busy === "push" ? "Pushing…" : "Push Canvas → Repo"}
             </Button>

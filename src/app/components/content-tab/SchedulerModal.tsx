@@ -142,7 +142,7 @@ export function SchedulerModal({
           discussion in that module and the modules after it gets a due date, stepped by the interval.
         </p>
 
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
           <div className={styles.field} style={{ flex: "1 1 220px" }}>
             <TextField
               id="sched-anchor"
@@ -173,8 +173,8 @@ export function SchedulerModal({
             />
           </div>
           <div className={styles.field} style={{ flex: "0 0 auto" }}>
-            <label htmlFor="sched-interval" style={{ display: "block", marginBottom: 8 }}>Spacing</label>
-            <div style={{ display: "flex", gap: 8 }}>
+            <label htmlFor="sched-interval" style={{ display: "block", marginBottom: "var(--space-2)" }}>Spacing</label>
+            <div style={{ display: "flex", gap: "var(--space-2)" }}>
               <TextField
                 id="sched-interval"
                 type="number"
@@ -201,22 +201,22 @@ export function SchedulerModal({
 
         <div className={styles.field}>
           <label>Preview</label>
-          <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
             {rows.map((r) => (
               <div
                 key={r.m.id}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  gap: 12,
-                  padding: "8px 12px",
+                  gap: "var(--space-3)",
+                  padding: "var(--space-2) var(--space-3)",
                   borderTop: r.i === 0 ? "none" : "1px solid var(--field-border)",
                   opacity: r.willChange ? 1 : 0.5,
                 }}
               >
                 <span style={{ fontWeight: 600 }}>
                   {r.m.name}
-                  <span className={styles.fieldHint} style={{ fontWeight: 400, marginLeft: 8 }}>
+                  <span className={styles.fieldHint} style={{ fontWeight: 400, marginLeft: "var(--space-2)" }}>
                     {r.count === 0 ? "no assignments" : `${r.count} item${r.count === 1 ? "" : "s"}`}
                   </span>
                 </span>
@@ -240,7 +240,7 @@ export function SchedulerModal({
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
           <Button
             variant="contained"
             size="small"

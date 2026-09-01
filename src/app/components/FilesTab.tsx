@@ -753,7 +753,7 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
       {filesView === "library" && (
         <>
           {status === "loading" && (
-            <div className={styles.loadingState}>
+            <div className={styles.loadingState} role="status" aria-live="polite">
               <div className={styles.spinner} />
               <div className={styles.loadingTitle}>Loading files...</div>
             </div>

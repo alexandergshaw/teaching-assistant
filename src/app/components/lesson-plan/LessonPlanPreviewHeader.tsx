@@ -44,7 +44,7 @@ export default function LessonPlanPreviewHeader({
               onChange={(event) => onFieldDraftChange(event.target.value)}
               autoFocus
               sx={{
-                fontSize: "1.05rem",
+                fontSize: "var(--font-size-lg)",
                 fontWeight: 700,
               }}
             />

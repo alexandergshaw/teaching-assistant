@@ -15,10 +15,10 @@
 .attachmentsControl {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
   /* Accessibility review fix 5 (WCAG 1.4.11 non-text contrast): this
      control's own background is var(--field-background), which sits on an
      equally-light MUI Paper (elevation 4, this control's popover) in light
@@ -36,7 +36,7 @@
   background: var(--field-background);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-primary);
   text-align: left;
 }
@@ -49,9 +49,9 @@
 .attachmentsDropZone {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px;
-  margin-bottom: 14px;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
   /* Fix 5: 2px (was 1px) dashed var(--text-secondary) (was var(--field-
      border)) - this dialog's own Paper is elevation 24, so in light mode
      the fill was #f8fafc (--surface-subtle) on #ffffff, 1.05:1, delimited
@@ -60,7 +60,7 @@
      apply to a plain solid fill/border pair, and widening to 2px only
      helps the already-passing contrast, never hurts it. */
   border: 2px dashed var(--text-secondary);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface-subtle);
   transition: background 120ms ease-out, border-color 120ms ease-out;
 }
@@ -73,13 +73,13 @@
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-subtle));
   border-color: var(--accent-ink);
 }
-.attachmentsDropHint { font-size: 0.82rem; color: var(--text-secondary); }
-.attachmentsEmpty { margin: 8px 0; font-size: 0.85rem; color: var(--text-secondary); }
-.attachmentList { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.attachmentRow { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--field-border); }
-.attachmentName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; color: var(--text-primary); }
-.attachmentMeta { white-space: nowrap; font-size: 0.75rem; color: var(--text-secondary); }
-.attachmentActions { display: flex; gap: 4px; }
+.attachmentsDropHint { font-size: var(--font-size-sm); color: var(--text-secondary); }
+.attachmentsEmpty { margin: var(--space-2) 0; font-size: var(--font-size-md); color: var(--text-secondary); text-align: center; }
+.attachmentList { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.attachmentRow { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-1); border-bottom: 1px solid var(--border-soft); }
+.attachmentName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-md); color: var(--text-primary); }
+.attachmentMeta { white-space: nowrap; font-size: var(--font-size-xs); color: var(--text-secondary); }
+.attachmentActions { display: flex; gap: var(--space-1); }
 
 /* Accessibility review fix 4 (WCAG 1.4.3 body-text contrast): MUI's dark-
    mode Paper elevation overlay lightens this dialog's real background from
@@ -113,8 +113,8 @@ html[data-theme="dark"] .attachmentsEmpty {
    mid-announcement. */
 .attachmentsStatus {
   min-height: 1.2em;
-  margin: 0 0 10px;
-  font-size: 0.8rem;
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 .attachmentsStatus[data-tone="error"] {

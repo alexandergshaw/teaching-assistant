@@ -73,7 +73,7 @@ export default function AnnouncementCompositionControls({
   }
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", alignItems: "flex-start" }}>
       <TextField
         select
         label="This announcement should include"
@@ -106,8 +106,8 @@ export default function AnnouncementCompositionControls({
         ))}
       </TextField>
 
-      <div style={{ width: 220, paddingInline: 24 }}>
-        <p id={FORMALITY_LABEL_ID} className={styles.ghMeta} style={{ marginBottom: 8 }}>
+      <div style={{ width: 220, paddingInline: "var(--space-6)" }}>
+        <p id={FORMALITY_LABEL_ID} className={styles.ghMeta} style={{ marginBottom: "var(--space-2)" }}>
           Formality
         </p>
         <Slider

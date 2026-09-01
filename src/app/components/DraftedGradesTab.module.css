@@ -9,9 +9,9 @@
 
 .courseChips {
   display: flex;
-  gap: 5px;
+  gap: var(--space-1);
   flex-wrap: wrap;
-  margin-top: 3px;
+  margin-top: var(--space-1);
 }
 
 /* ── Per-assignment grade table ─────────────────────────────────────────── */
@@ -35,19 +35,24 @@
 
 .table th,
 .table td {
-  padding: 6px 14px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   color: var(--text-primary);
   vertical-align: top;
   overflow-wrap: anywhere;
 }
 
+/* Tracked-uppercase micro-label idiom, pinned exactly by AM11/AM5 of
+   docs/aesthetics-pass-acceptance-criteria.md: --font-size-2xs, weight 700,
+   0.06em letter-spacing, --text-secondary - the same treatment as every
+   other panel title / table header in this pass, not a locally invented
+   variant. */
 .table thead th {
-  padding: 7px 14px 6px;
-  font-size: 0.68rem;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--card-border);
@@ -73,7 +78,7 @@
 /* ── Assignment group header row (spans the table) ──────────────────────── */
 
 .groupRow td {
-  padding: 7px 14px;
+  padding: var(--space-2) var(--space-3);
   background: color-mix(in srgb, var(--field-border) 20%, transparent);
   border-top: 1px solid var(--card-border);
 }
@@ -85,9 +90,9 @@
 .groupHeader {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
 }
 
 .groupTitle {
@@ -137,7 +142,7 @@
 
 .actionsCell {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   flex-wrap: wrap;
   align-items: center;
 }

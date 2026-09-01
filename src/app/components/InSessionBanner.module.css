@@ -24,18 +24,18 @@
 .toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 8px 24px;
+  padding: var(--space-2) var(--space-6);
   border: none;
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.84rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
   text-align: left;
-  transition: color 0.15s ease;
+  transition: color var(--transition-fast);
 }
 
 .toggle:hover {
@@ -45,7 +45,7 @@
 .chevron {
   flex-shrink: 0;
   display: inline-flex;
-  transition: transform 0.15s ease;
+  transition: transform var(--transition-fast);
 }
 
 .chevronOpen {
@@ -63,41 +63,39 @@
 .label {
   display: inline-flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .labelSegment {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
-/* color is a light-theme-specific override, not var(--success) directly:
-   --success (#16a34a) on --success-surface measures 2.95:1 at this
+/* color is var(--success-ink), not var(--success) directly: --success
+   (#16a34a light) on --success-surface measures only 2.95:1 at this
    font-size (0.72rem/11.52px counts as normal text, so the AA floor is
    4.5:1) - it read fine on its own but only because nothing sat next to it
-   to invite a side-by-side comparison. #0f7a37 on the same surface measures
-   about 4.9:1. Dark theme's --success (#4ade80) already clears 6.79:1 on its
-   own --success-surface, so it is restored below rather than touched here -
-   and the global --success token itself is left alone, since other surfaces
-   in the app depend on it (SHOULD-FIX 8). */
+   to invite a side-by-side comparison. --success-ink resolves to #0f7a37 in
+   light mode (about 4.9:1 on the same surface) and to #4ade80 in dark mode -
+   the same value dark theme's --success already was (6.79:1 on its own
+   --success-surface, already fine) - so this one token covers both themes
+   with no separate dark-mode override needed. The global --success token
+   itself is left alone, since other surfaces in the app depend on it
+   (SHOULD-FIX 8). */
 .count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 20px;
   height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
   background: var(--success-surface);
-  color: #0f7a37;
-  font-size: 0.72rem;
+  color: var(--success-ink);
+  font-size: var(--font-size-xs);
   font-weight: 700;
   line-height: 1;
-}
-
-html[data-theme="dark"] .count {
-  color: var(--success);
 }
 
 /* Same shape as .count, but neutral - the strip already has one accent
@@ -110,11 +108,11 @@ html[data-theme="dark"] .count {
   justify-content: center;
   min-width: 20px;
   height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
   background: var(--surface-muted);
   color: var(--text-secondary);
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   line-height: 1;
 }
@@ -133,7 +131,7 @@ html[data-theme="dark"] .count {
 .contentWrap {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.18s ease;
+  transition: grid-template-rows var(--transition-base);
 }
 
 .contentWrapOpen {
@@ -146,7 +144,11 @@ html[data-theme="dark"] .count {
    DELAYS the visibility flip so it happens only once the 0.18s grid
    collapse has finished (closing) or not at all (opening), keeping the
    existing slide animation intact rather than having content vanish/appear
-   mid-transition.
+   mid-transition. The delay is pinned to the literal 0.18s .contentWrap
+   itself transitions over (var(--transition-base) is also 180ms today, but
+   the delay must always match THIS rule's own duration, not just happen to
+   equal a token that could change independently) - so this one stays a
+   literal rather than the token, deliberately.
 
    overflow: clip, not overflow: hidden: in the settled open state this
    element has no overflow of its own, so the choice between the two is
@@ -220,42 +222,42 @@ html[data-theme="dark"] .count {
    invariance is scrollbar-width: none together with flex-wrap: nowrap, not
    flex-wrap alone.
 
-   padding: top/bottom 5px matters for a reason beyond simple spacing
-   (round-2 finding 7's original clearance for the app-wide :focus-visible
-   ring, which paints 2px OUTSIDE the border box at a 2px offset - a 4px-wide
-   band, and 5px/5px leaves it a real 1px margin against a clip edge instead
-   of landing exactly on one). Setting overflow-x here also computes this
-   element's own overflow-y to auto (CSS Overflow Module: once either axis
-   is set to something other than visible, an axis left as visible computes
-   to auto instead) - meaning .strip is now a SECOND clipping context
-   stacked on top of .contentInner's own overflow: clip, one this layout
-   never had before it started scrolling in x. Without real vertical
-   padding here, a focused chip's own ring would land on THIS element's new
-   clip edge, not just .contentInner's - the same trap round-2 finding 7
-   fixed for the ancestor, now reachable a second time from this element's
-   own box.
+   Top/bottom padding is deliberately NOT snapped to the --space-* scale
+   (AC3's own escape hatch: these two pixels do real work, not decoration).
+   5px is the app-wide :focus-visible ring's own clearance math (the ring
+   paints 2px OUTSIDE the border box at a 2px offset - a 4px-wide band - and
+   5px/5px leaves it a real 1px margin against a clip edge instead of
+   landing exactly on one), and scroll-padding-inline below is that same
+   4px band plus a 2px margin. Snapping either to --space-1 (4px) would
+   remove that margin and reopen the exact clipped-ring bug this padding was
+   chosen to avoid - see the scroll-padding-inline comment for the rest of
+   that reasoning.
 
-   Right padding is 40px, wider than .stripFade's own 32px width just below,
-   so the fade can never wash a chip's text below the AA contrast floor at
-   the two positions scroll position alone cannot fix: the last chip at
-   maximum scroll (flexbox preserves this padding as real trailing space
-   past it) and every chip when the strip does not overflow at all (nothing
-   to scroll to, so the fade would otherwise sit over the trailing chip
-   permanently - hiding information, which is what this whole change exists
-   to stop). Keep this wider than .stripFade's width if either one changes.
+   Right padding is 40px (--space-10), wider than .stripFade's own 32px
+   (--space-8) width just below, so the fade can never wash a chip's text
+   below the AA contrast floor at the two positions scroll position alone
+   cannot fix: the last chip at maximum scroll (flexbox preserves this
+   padding as real trailing space past it) and every chip when the strip
+   does not overflow at all (nothing to scroll to, so the fade would
+   otherwise sit over the trailing chip permanently - hiding information,
+   which is what this whole change exists to stop). Keep this wider than
+   .stripFade's width if either one changes - both values are unchanged by
+   this pass, only expressed as tokens now, so that relationship still
+   holds exactly.
 
    scroll-padding-inline: 6px (the same 4px ring band plus a 2px margin as
    the vertical clearance above) matters because scroll-into-view aligns the
    scrolled element's BORDER box, which excludes the outline: without it, a
    chip Tabbed in from off-screen lands flush against the scrollport's
-   leading edge and has its focus ring clipped there. */
+   leading edge and has its focus ring clipped there. Left un-snapped for
+   the same reason as the vertical padding above. */
 .strip {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-4);
   overflow-x: auto;
-  padding: 5px 40px 5px 24px;
+  padding: 5px var(--space-10) 5px var(--space-6);
   scroll-padding-inline: 6px;
   /* Hides the scrollbar itself, not just the layout impact explained above -
      a hidden scrollbar is normally a smell (it removes a discoverability
@@ -290,7 +292,7 @@ html[data-theme="dark"] .count {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 32px;
+  width: var(--space-8);
   background: linear-gradient(to right, transparent, var(--card-background));
   pointer-events: none;
 }
@@ -311,7 +313,7 @@ html[data-theme="dark"] .count {
   flex-wrap: nowrap;
   flex-shrink: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -328,16 +330,16 @@ html[data-theme="dark"] .count {
 .courseChip {
   display: inline-flex;
   align-items: center;
-  padding: 6px 14px;
-  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -387,7 +389,7 @@ html[data-theme="dark"] .count {
   flex-wrap: nowrap;
   flex-shrink: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -450,9 +452,9 @@ html[data-theme="dark"] .count {
 .upcomingItem {
   display: inline-block;
   max-width: 28ch;
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   font: inherit;
   text-align: left;
@@ -460,7 +462,7 @@ html[data-theme="dark"] .count {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--transition-fast);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -475,14 +477,14 @@ html[data-theme="dark"] .count {
 
 .upcomingCourseName {
   color: var(--text-primary);
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
 .upcomingLabel,
 .upcomingDate {
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 500;
 }
 

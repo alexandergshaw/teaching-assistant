@@ -42,6 +42,7 @@ import {
 import type { UploadedFile } from "@/lib/llm-files";
 import type { Course } from "@/lib/supabase/courses";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface TextbookPhotoModalProps {
   course: Course;
@@ -270,7 +271,7 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
     >
       <div className={styles.previewHeader}>
         <div>
-          <DialogTitle sx={{ padding: 0, fontSize: "1.05rem", color: "var(--text-primary)", wordBreak: "break-word" }}>
+          <DialogTitle sx={{ padding: 0, fontSize: "var(--font-size-lg)", color: "var(--text-primary)", wordBreak: "break-word" }}>
             Extract from photo
           </DialogTitle>
           <p className={styles.previewMeta}>{course.name}</p>
@@ -280,7 +281,7 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
         </button>
       </div>
 
-      <DialogContent sx={{ padding: "0 1rem", overflow: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "0.9rem" }}>
+      <DialogContent sx={{ padding: "0 var(--space-4)", overflow: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -293,23 +294,21 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
             const dropped = e.dataTransfer.files?.[0];
             if (dropped) handleFile(dropped);
           }}
+          className={tableStyles.dropZone}
           style={{
             // N2: drag-active is not colour-only - the border switches from
             // a thin dashed line to a thicker solid one, so the state also
-            // reads for anyone who cannot distinguish the colour change.
+            // reads for anyone who cannot distinguish the colour change. Both
+            // the border and background genuinely depend on drag state, so
+            // they stay inline over .dropZone's static shell (radius/padding/
+            // gap/layout).
             border: dragActive ? "2px solid var(--accent)" : "1px dashed var(--field-border)",
-            borderRadius: 12,
-            padding: "1rem",
-            display: "flex",
-            alignItems: "center",
-            gap: "1rem",
-            flexWrap: "wrap",
             background: dragActive ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
           }}
         >
           {!file ? (
             <>
-              <p className={styles.fieldHint} style={{ margin: 0, flex: "1 1 220px" }}>
+              <p className={styles.fieldHint} style={{ flex: "1 1 220px" }}>
                 Drag and drop a screenshot or PDF here, paste one (Ctrl/Cmd-V) anywhere in this
                 window, or choose a file.
               </p>
@@ -334,27 +333,15 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
                   // N1: this is the user's confirmation that the right
                   // screenshot is attached, not decoration.
                   alt={`Selected image: ${file.name}`}
-                  style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: "1px solid var(--field-border)" }}
+                  className={tableStyles.thumbImage}
                 />
               ) : (
-                <div
-                  style={{
-                    width: 64,
-                    height: 64,
-                    borderRadius: 8,
-                    border: "1px solid var(--field-border)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "0.7rem",
-                    color: "var(--text-secondary)",
-                  }}
-                >
+                <div className={tableStyles.thumbPlaceholder}>
                   PDF
                 </div>
               )}
               <div style={{ flex: "1 1 200px" }}>
-                <p style={{ margin: 0, wordBreak: "break-word" }}>{file.name}</p>
+                <p style={{ wordBreak: "break-word" }}>{file.name}</p>
                 <p className={styles.previewMeta}>{formatFileSize(file.size)}</p>
               </div>
               <Button size="small" variant="outlined" onClick={removeFile} sx={{ textTransform: "none" }}>
@@ -369,7 +356,7 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
             ref={fileInputRef}
             type="file"
             accept="image/*,application/pdf"
-            style={{ display: "none" }}
+            className={tableStyles.hiddenInput}
             onChange={(e) => {
               const picked = e.target.files?.[0];
               if (picked) handleFile(picked);
@@ -378,7 +365,7 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
           />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
           <Button
             size="small"
             variant="contained"
@@ -388,7 +375,12 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
           >
             Extract details
           </Button>
-          {extracting && <CircularProgress size={18} />}
+          {extracting && (
+            <>
+              <CircularProgress size={18} />
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Extracting...</span>
+            </>
+          )}
         </div>
 
         {/* B4: always mounted (never conditional) so a screen reader
@@ -397,14 +389,14 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
             including the "no textbook details could be read" note, which
             exists specifically to explain why Save is disabled. Same rule
             A5 applies to CoursesTable.tsx's own status regions. */}
-        <p role="alert" className={styles.previewMeta} style={{ color: "var(--danger)", margin: 0 }}>
+        <p role="alert" className={`${styles.previewMeta} ${tableStyles.dangerText}`}>
           {error ?? ""}
         </p>
-        <p role="status" aria-live="polite" className={styles.fieldHint} style={{ margin: 0 }}>
+        <p role="status" aria-live="polite" className={styles.fieldHint}>
           {note ?? ""}
         </p>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+        <div className={tableStyles.stackSm}>
           {TEXTBOOK_FIELD_ORDER.map((key) => (
             <TextField
               key={key}
@@ -417,7 +409,7 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
           ))}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
           <Button
             size="small"
             variant="contained"
@@ -427,7 +419,12 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
           >
             Save to textbook
           </Button>
-          {saving && <CircularProgress size={18} />}
+          {saving && (
+            <>
+              <CircularProgress size={18} />
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Saving...</span>
+            </>
+          )}
           {saved && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Saved to Textbook</span>}
         </div>
       </DialogContent>

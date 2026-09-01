@@ -105,7 +105,7 @@ export function BulkUploadModal({
             e.preventDefault();
             onSelect(e.dataTransfer.files);
           }}
-          style={{ border: "1px dashed var(--field-border)", borderRadius: 10, padding: 14, textAlign: "center" }}
+          style={{ border: "1px dashed var(--field-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", textAlign: "center" }}
         >
           <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
             Choose files
@@ -119,7 +119,7 @@ export function BulkUploadModal({
               }}
             />
           </label>
-          <span className={styles.fieldHint} style={{ marginLeft: 8 }}>
+          <span className={styles.fieldHint} style={{ marginLeft: "var(--space-2)" }}>
             or drop them here
           </span>
         </div>
@@ -132,7 +132,7 @@ export function BulkUploadModal({
             <div
               style={{
                 border: "1px solid var(--field-border)",
-                borderRadius: 10,
+                borderRadius: "var(--radius-sm)",
                 overflow: "hidden",
                 overflowY: "auto",
                 maxHeight: "42vh",
@@ -144,8 +144,8 @@ export function BulkUploadModal({
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 10,
-                    padding: "8px 12px",
+                    gap: "var(--space-2)",
+                    padding: "var(--space-2) var(--space-3)",
                     borderTop: i === 0 ? "none" : "1px solid var(--field-border)",
                     flexWrap: "wrap",
                   }}
@@ -183,7 +183,7 @@ export function BulkUploadModal({
                   </TextField>
                   <span
                     className={styles.fieldHint}
-                    style={{ margin: 0, minWidth: 70, color: status[i] === "error" ? "var(--error, #b91c1c)" : undefined }}
+                    style={{ margin: 0, minWidth: 70, color: status[i] === "error" ? "var(--danger)" : undefined }}
                   >
                     {status[i] === "uploading"
                       ? "uploading…"
@@ -199,7 +199,7 @@ export function BulkUploadModal({
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
           <Button
             variant="contained"
             size="small"

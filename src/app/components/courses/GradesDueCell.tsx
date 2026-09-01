@@ -60,7 +60,7 @@ export default function GradesDueCell({ course, onSave, menu }: GradesDueCellPro
 
   if (!editing) {
     return (
-      <td onClick={startEdit} title="Click to edit" style={{ cursor: "pointer", minWidth: 170 }}>
+      <td onClick={startEdit} title="Click to edit" className={tableStyles.clickToEdit} style={{ minWidth: 170 }}>
         <span className={description ? styles.courseResourceValue : styles.courseResourceEmpty}>
           {description || "Not set"}
         </span>

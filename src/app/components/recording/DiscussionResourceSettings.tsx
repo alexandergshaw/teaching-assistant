@@ -43,7 +43,7 @@ export default function DiscussionResourceSettings({
   // message here rather than silently swapped or blocked at the keystroke.
   const rangeInverted = videoLengthRangeIsInverted(videoLengthMinMinutes, videoLengthMaxMinutes);
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", alignItems: "flex-start" }}>
       <TextField
         select
         label="Eligible resource kinds"
@@ -75,7 +75,7 @@ export default function DiscussionResourceSettings({
       </TextField>
 
       <div style={{ minWidth: 260 }}>
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
           <TextField
             type="number"
             label="Min video length (min)"
@@ -109,7 +109,7 @@ export default function DiscussionResourceSettings({
             doc comment for why the instructor sees this instead of a quiet
             swap. */}
         {rangeInverted ? (
-          <p id={VIDEO_LENGTH_HINT_ID} className={styles.error} style={{ margin: "4px 0 0", fontSize: "0.85rem" }}>
+          <p id={VIDEO_LENGTH_HINT_ID} className={styles.error} style={{ margin: "var(--space-1) 0 0", fontSize: "var(--font-size-md)" }}>
             Min video length is greater than max - swap them or clear one, or this preference will be dropped when
             searching for resources.
           </p>
@@ -118,7 +118,7 @@ export default function DiscussionResourceSettings({
              comments: the resource search has no way to confirm a video's
              actual runtime, so this is labelled and described as a
              preference throughout - never as a guarantee. */
-          <p id={VIDEO_LENGTH_HINT_ID} className={styles.fieldHint} style={{ margin: "4px 0 0" }}>
+          <p id={VIDEO_LENGTH_HINT_ID} className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
             Preferred video length, not a guarantee - search results do not always confirm how long a video actually
             runs.
           </p>

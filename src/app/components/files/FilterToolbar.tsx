@@ -81,7 +81,7 @@ export function FilterToolbar({
         if (containerRef) containerRef.current = el;
       }}
       tabIndex={-1}
-      style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}
+      style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap" }}
     >
       <Button
         variant="outlined"
@@ -120,7 +120,7 @@ export function FilterToolbar({
       >
         Refresh
       </Button>
-      <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
         <TextField
           size="small"
           type="search"

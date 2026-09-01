@@ -61,7 +61,7 @@ export function AssignmentPreviewModal({
     >
         <div className={styles.previewHeader}>
           <h3>{detail?.title || item.title}</h3>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
             {item.htmlUrl && (
               <a className={styles.ccBtn} href={item.htmlUrl} target="_blank" rel="noreferrer">
                 Open in Canvas
@@ -73,7 +73,7 @@ export function AssignmentPreviewModal({
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap", marginBottom: "var(--space-1)" }}>
           {item.pointsPossible != null && <span className={styles.ccDue}>{item.pointsPossible} pts</span>}
           {item.dueAt && <span className={styles.ccDue}>Due {formatDueDate(item.dueAt)}</span>}
         </div>

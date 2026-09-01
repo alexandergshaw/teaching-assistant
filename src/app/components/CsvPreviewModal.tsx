@@ -49,7 +49,7 @@ export default function CsvPreviewModal({
               {truncated ? ` - showing the first ${MAX_BODY_ROWS}` : ""}
             </p>
           </div>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
             {onEditDocument && (
               <button type="button" className={styles.previewCloseButton} onClick={onEditDocument}>
                 Edit with AI
@@ -64,14 +64,18 @@ export default function CsvPreviewModal({
           {nonEmptyRows.length === 0 ? (
             <p className={styles.previewMeta}>This schedule is empty.</p>
           ) : (
+            // fontSize left as 0.85em (AM14): this table sits inside .previewContent,
+            // already --font-size-sm (13px, below the --font-size-md default), so an
+            // em-relative size here is not eligible for the auto nearest-token
+            // conversion - reported per AM14 rather than guessed.
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
               <thead>
-                <tr style={{ borderBottom: "2px solid var(--border-soft)" }}>
+                <tr style={{ borderBottom: "1px solid var(--border-soft)" }}>
                   {nonEmptyRows[0].map((cell, j) => (
                     <th
                       key={j}
                       style={{
-                        padding: "8px",
+                        padding: "var(--space-2)",
                         textAlign: "left",
                         fontWeight: 600,
                         backgroundColor: "var(--surface-subtle)",
@@ -86,7 +90,7 @@ export default function CsvPreviewModal({
                 {bodyRows.map((row, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid var(--border-soft)" }}>
                     {row.map((cell, j) => (
-                      <td key={j} style={{ padding: "8px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <td key={j} style={{ padding: "var(--space-2)", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {cell.trim()}
                       </td>
                     ))}

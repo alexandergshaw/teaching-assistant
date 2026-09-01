@@ -68,16 +68,16 @@ export function ScheduleEditForm({
   onCreate,
 }: ScheduleEditFormProps) {
   return (
-    <div style={{ marginTop: 16, border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ marginTop: "var(--space-4)", border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       {editingScheduleId ? (
         <>
-          <span style={{ fontWeight: 600, fontSize: "0.9em" }}>
+          <span style={{ fontWeight: 600, fontSize: "var(--font-size-md)" }}>
             Editing {schedules?.find((s) => s.id === editingScheduleId)?.workflowName}&apos;s schedule
           </span>
         </>
       ) : (
         <>
-          <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Schedule {selectedDef?.name}</span>
+          <span style={{ fontWeight: 600, fontSize: "var(--font-size-md)" }}>Schedule {selectedDef?.name}</span>
           <p className={styles.fieldHint} style={{ margin: 0 }}>
             Uses the run form values as they are right now. Runs start while the app is open; an overdue schedule runs on your next visit.
           </p>
@@ -154,7 +154,7 @@ export function ScheduleEditForm({
           This workflow pauses for input, so it can only run while the app is open.
         </p>
       )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
         <TextField
           size="small"
           label="First run"
@@ -201,7 +201,7 @@ export function ScheduleEditForm({
           </>
         )}
         {scheduleForm.repeat === "weekly" && (
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "var(--space-1)", flexWrap: "wrap", alignItems: "center" }}>
             {WEEKDAY_PICKER_OPTIONS.map((opt) => (
               <FormControlLabel
                 key={opt.value}

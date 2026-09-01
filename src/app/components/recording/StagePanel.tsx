@@ -243,12 +243,24 @@ export default function StagePanel({
           style={{
             maxHeight: 180,
             overflowY: "auto",
-            padding: "14px 18px",
-            marginBottom: 10,
-            borderRadius: 12,
-            background: "#0f172a",
-            color: "#f8fafc",
-            fontSize: prompterSize === "sm" ? "1.05rem" : prompterSize === "md" ? "1.4rem" : "1.9rem",
+            padding: "var(--space-3) var(--space-4)",
+            marginBottom: "var(--space-2)",
+            borderRadius: "var(--radius-md)",
+            // A video letterbox is not a themed surface - fixed dark-neutral
+            // (the brand navy) regardless of theme, per the aesthetics
+            // pass's capture-stage rule, rather than the raw #0f172a this
+            // carried before. Foreground uses --on-navy for the same reason
+            // (this is a dark surface in both themes, not one that flips).
+            background: "var(--navy)",
+            color: "var(--on-navy)",
+            // Reported gap (see this group's report): the teleprompter is
+            // this app's one deliberately-oversized reading surface, and its
+            // "lg" size (1.9rem/30.4px) exceeds --font-size-3xl (28px), the
+            // closed scale's ceiling - there is no larger token to map to.
+            // Mapped to the NEAREST token per AC1 (sm->lg, md->2xl,
+            // lg->3xl), which compresses "lg" by about 2px; a
+            // --font-size-display tier would remove the compression.
+            fontSize: prompterSize === "sm" ? "var(--font-size-lg)" : prompterSize === "md" ? "var(--font-size-2xl)" : "var(--font-size-3xl)",
             lineHeight: 1.6,
             whiteSpace: "pre-wrap",
           }}
@@ -264,7 +276,7 @@ export default function StagePanel({
           ring reset below is no longer optional the way it once was. Set once
           on this container rather than per button - custom properties
           inherit. */}
-      <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#0f172a", "--focus-ring-color": "var(--focus-ring-on-navy)" } as React.CSSProperties}>
+      <div style={{ position: "relative", borderRadius: "var(--radius-md)", overflow: "hidden", background: "var(--navy)", "--focus-ring-color": "var(--focus-ring-on-navy)" } as React.CSSProperties}>
         <video
           ref={videoRef}
           autoPlay
@@ -291,7 +303,7 @@ export default function StagePanel({
                   width: "100%",
                   maxHeight: "48vh",
                   objectFit: "contain",
-                  background: "#0f172a",
+                  background: "var(--navy)",
                   transform: source === "camera" && mirror ? "scaleX(-1)" : undefined,
                 }
           }
@@ -312,10 +324,10 @@ export default function StagePanel({
             display, the div itself stays mounted throughout. */}
         <div
           ref={(el) => attachPipelineCanvas(el)}
-          style={{ display: source === "screen" && hasStream ? "block" : "none", width: "100%", minHeight: 200, background: "#0f172a" }}
+          style={{ display: source === "screen" && hasStream ? "block" : "none", width: "100%", minHeight: 200, background: "var(--navy)" }}
         />
         {source === "screen" && !hasStream && (
-          <div style={{ width: "100%", minHeight: 200, background: "#0f172a" }} />
+          <div style={{ width: "100%", minHeight: 200, background: "var(--navy)" }} />
         )}
         {source === "audio" && hasStream && (
           <div style={{
@@ -324,12 +336,12 @@ export default function StagePanel({
             justifyContent: "center",
             minHeight: "200px",
             maxHeight: "48vh",
-            background: "#0f172a",
-            padding: "20px",
+            background: "var(--navy)",
+            padding: "var(--space-5)",
             textAlign: "center",
           }}>
             <div>
-              <div style={{ fontSize: "1.2rem", fontWeight: 600, marginBottom: "8px", color: "#f8fafc" }}>Audio-only recording</div>
+              <div style={{ fontSize: "var(--font-size-xl)", fontWeight: 600, marginBottom: "var(--space-2)", color: "var(--on-navy)" }}>Audio-only recording</div>
               <div className={styles.ghMeta}>The microphone level meter below shows your signal.</div>
             </div>
           </div>
@@ -352,13 +364,25 @@ export default function StagePanel({
           }}
         />
         {countdown !== null && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(15,23,42,0.45)", pointerEvents: "none" }}>
-            <span style={{ fontSize: "6rem", fontWeight: 800, color: "#fff", textShadow: "0 4px 24px rgba(0,0,0,0.5)" }}>{countdown}</span>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "color-mix(in srgb, var(--navy) 45%, transparent)", pointerEvents: "none" }}>
+            {/* Reported gap (see this group's report): the 3-2-1 countdown
+                numeral is a deliberately huge, glance-from-across-the-room
+                display size (6rem/96px) with no home in the closed 8-value
+                --font-size-* scale (whose ceiling is --font-size-3xl at
+                28px) - collapsing it to the nearest token would make a live
+                recording countdown nearly illegible, which is the opposite
+                of this pass's own "legibility at a glance" goal for capture
+                surfaces. Left as a literal and flagged for a
+                --font-size-display token rather than silently degraded.
+                fontWeight 800 is outside the 400/500/600/700 set for the
+                same reason - reported alongside it rather than weakened to
+                700, which would also read as a regression on this control. */}
+            <span style={{ fontSize: "6rem", fontWeight: 800, color: "var(--on-navy)", textShadow: "0 4px 24px color-mix(in srgb, var(--navy) 50%, transparent)" }}>{countdown}</span>
           </div>
         )}
         {cardNotice && (
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "10px 16px", background: "rgba(15,23,42,0.72)", pointerEvents: "none" }}>
-            <span style={{ color: "#f8fafc", fontWeight: 600, fontSize: "0.95rem" }}>
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--space-2) var(--space-4)", background: "color-mix(in srgb, var(--navy) 72%, transparent)", pointerEvents: "none" }}>
+            <span style={{ color: "var(--on-navy)", fontWeight: 600, fontSize: "var(--font-size-lg)" }}>
               {cardNotice.kind === "title"
                 ? `Title card is recording - your video starts in ${cardNotice.secondsLeft}...`
                 : `Adding the closing card (${cardNotice.secondsLeft}s)...`}
@@ -382,9 +406,9 @@ export default function StagePanel({
               alignItems: "center",
               justifyContent: "center",
               flexWrap: "wrap",
-              gap: 8,
-              padding: "10px 16px",
-              background: "rgba(15,23,42,0.72)",
+              gap: "var(--space-2)",
+              padding: "var(--space-2) var(--space-4)",
+              background: "color-mix(in srgb, var(--navy) 72%, transparent)",
             }}
           >
             {/* FIX 6: this used to be its own role="status" aria-live="polite"
@@ -398,18 +422,18 @@ export default function StagePanel({
                 buttons, since a re-render of the buttons would no longer be
                 announced either way - keeping the split avoids re-litigating
                 that scope if a live region is ever reintroduced here.) */}
-            <span style={{ color: "#f8fafc", fontWeight: 600, fontSize: "0.95rem" }}>
+            <span style={{ color: "var(--on-navy)", fontWeight: 600, fontSize: "var(--font-size-lg)" }}>
               {`${latestTake.name} saved -`}
             </span>
             {latestTakeBusyReason ? (
-              <span style={{ color: "#f8fafc", fontSize: "0.85rem" }}>{latestTakeBusyReason}</span>
+              <span style={{ color: "var(--on-navy)", fontSize: "var(--font-size-md)" }}>{latestTakeBusyReason}</span>
             ) : (
               <>
                 {!latestTake.mimeType.startsWith("audio/") && (
                   <Button
                     variant="text"
                     size="small"
-                    sx={{ color: "#f8fafc" }}
+                    sx={{ color: "var(--on-navy)" }}
                     onClick={(e) => onTalkThrough(latestTake, e.currentTarget)}
                   >
                     Talk through this
@@ -418,7 +442,7 @@ export default function StagePanel({
                 <Button
                   variant="text"
                   size="small"
-                  sx={{ color: "#f8fafc" }}
+                  sx={{ color: "var(--on-navy)" }}
                   onClick={(e) => onDraftAnnouncement(latestTake, e.currentTarget)}
                 >
                   Draft announcement
@@ -430,13 +454,13 @@ export default function StagePanel({
       </div>
 
       {source === "screen" && pipEnabled && (
-        <p className={styles.fieldHint} style={{ margin: "6px 0 0" }}>
+        <p className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
           {`Bubble: ${BUBBLE_SHAPE_LABEL[bubbleShape]}, ${BUBBLE_SIZE_LABEL[bubbleSize]}, ${BUBBLE_CORNER_LABEL[pipCorner]}. The preview shows exactly what is recorded.`}
         </p>
       )}
 
       {hasStream && tool !== "off" && (
-        <div className={styles.ghActions} style={{ marginBottom: 16 }}>
+        <div className={styles.ghActions} style={{ marginBottom: "var(--space-4)" }}>
           <Button
             variant={tool === "pen" ? "contained" : "outlined"}
             size="small"
@@ -507,7 +531,7 @@ export default function StagePanel({
       )}
 
       {hasStream && tool === "off" && (
-        <div className={styles.ghActions} style={{ marginBottom: 16 }}>
+        <div className={styles.ghActions} style={{ marginBottom: "var(--space-4)" }}>
           <Button
             variant="outlined"
             size="small"
@@ -544,12 +568,21 @@ export default function StagePanel({
         {stageAnnouncement}
       </span>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
           {recState !== "idle" && (
             <>
               <span className={styles.navBadge} aria-hidden="true">{recState === "recording" ? "REC" : "PAUSED"}</span>
-              <span className={styles.ghMetaMono} aria-hidden="true" style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--text-primary)" }}>
+              {/* AM11/brief: an elapsed-time readout in tabular figures so the
+                  digits do not jitter as they change - font-variant-numeric
+                  was missing before. fontWeight 700 is reserved for h1/h2 and
+                  the tracked-uppercase label idiom; this is neither, so 600
+                  (the next weight down) replaces it. */}
+              <span
+                className={styles.ghMetaMono}
+                aria-hidden="true"
+                style={{ fontSize: "var(--font-size-2xl)", fontWeight: 600, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}
+              >
                 {fmt(elapsed)}
               </span>
               {autoStopMin !== "0" && <span className={styles.ghMeta}>/ {autoStopMin} min</span>}
@@ -572,7 +605,7 @@ export default function StagePanel({
           style={{
             height: 8,
             background: "color-mix(in srgb, var(--field-border) 40%, transparent)",
-            borderRadius: 999,
+            borderRadius: "var(--radius-pill)",
             width: 180,
             overflow: "hidden",
           }}
@@ -582,7 +615,7 @@ export default function StagePanel({
               width: `${Math.round(level * 100)}%`,
               height: "100%",
               background: "var(--success)",
-              borderRadius: 999,
+              borderRadius: "var(--radius-pill)",
               transition: "width 0.05s ease",
             }}
           />

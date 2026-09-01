@@ -80,12 +80,12 @@ export default function PublishToCanvasPage({ filePath, content }: PublishToCanv
         <div
           style={{
             border: "1px solid var(--field-border)",
-            borderRadius: 10,
-            padding: 12,
-            marginTop: 8,
+            borderRadius: "var(--radius-sm)",
+            padding: "var(--space-3)",
+            marginTop: "var(--space-2)",
             display: "flex",
             flexDirection: "column",
-            gap: 10,
+            gap: "var(--space-2)",
           }}
         >
           {!activeInstitution ? (
@@ -125,7 +125,7 @@ export default function PublishToCanvasPage({ filePath, content }: PublishToCanv
                 label="Publish page"
               />
 
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: "var(--space-2)" }}>
                 <Button
                   variant="contained"
                   size="small"
@@ -148,11 +148,22 @@ export default function PublishToCanvasPage({ filePath, content }: PublishToCanv
               </div>
 
               {note && (
-                <p
-                  className={
-                    note.kind === "error" ? styles.error : styles.fieldHint
-                  }
-                  style={{ marginTop: 4 }}
+                // AM11's notice idiom (inline, full width, --radius-md, a
+                // token status surface) rather than the plain-text
+                // styles.error/styles.fieldHint this used to reuse - neither
+                // of those classes carries a surface/border, and adding one
+                // requires page.module.css, which this group does not own.
+                <div
+                  role="status"
+                  style={{
+                    padding: "var(--space-2) var(--space-3)",
+                    borderRadius: "var(--radius-md)",
+                    border: `1px solid ${note.kind === "error" ? "var(--danger-border)" : "var(--accent-border-soft)"}`,
+                    background: note.kind === "error" ? "var(--danger-surface)" : "var(--accent-surface)",
+                    color: note.kind === "error" ? "var(--danger)" : "var(--text-primary)",
+                    fontSize: "var(--font-size-md)",
+                    marginTop: "var(--space-1)",
+                  }}
                 >
                   {note.text}
                   {note.url && (
@@ -167,7 +178,7 @@ export default function PublishToCanvasPage({ filePath, content }: PublishToCanv
                       </a>
                     </>
                   )}
-                </p>
+                </div>
               )}
             </>
           )}

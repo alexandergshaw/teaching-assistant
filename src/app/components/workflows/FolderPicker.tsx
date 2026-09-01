@@ -59,7 +59,7 @@ export default function FolderPicker({
       transformOrigin={{ vertical: "top", horizontal: "left" }}
       slotProps={{ paper: { sx: { width: 240, paddingTop: 1 } } }}
     >
-      <div style={{ padding: "0 8px 8px" }}>
+      <div style={{ padding: "0 var(--space-2) var(--space-2)" }}>
         <TextField
           autoFocus
           size="small"
@@ -93,7 +93,7 @@ export default function FolderPicker({
           <MenuItem key={folder} selected={folder === current} onClick={() => choose(folder)}>
             <ListItemText primary={folder} />
             {folder === current && (
-              <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Current</span>
+              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>Current</span>
             )}
           </MenuItem>
         ))}

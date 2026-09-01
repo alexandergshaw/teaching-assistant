@@ -93,7 +93,7 @@ export default function AssignmentChecklistPanel({
           {state.status === "loading" ? "Deriving checklist..." : "Derive checklist"}
         </Button>
         {state.status === "error" && (
-          <span className={styles.fieldHint} style={{ margin: 0, color: "var(--error-color)", flexBasis: "100%" }}>
+          <span className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)", flexBasis: "100%" }}>
             {state.error}
           </span>
         )}
@@ -107,11 +107,11 @@ export default function AssignmentChecklistPanel({
         {expanded ? "Hide checklist" : `Checklist (${section.checklist.length})`}
       </Button>
       {expanded && (
-        <div className={styles.draftExpand} style={{ flexBasis: "100%", marginTop: 4 }}>
+        <div className={styles.draftExpand} style={{ flexBasis: "100%", marginTop: "var(--space-1)" }}>
           <div className={styles.fieldHint} style={{ margin: 0 }}>
             For full credit, a submission should:
           </div>
-          <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+          <ul style={{ margin: 0, paddingLeft: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
             {section.checklist.map((item, idx) => (
               <li key={idx} className={styles.draftFeedback} style={{ margin: 0 }}>
                 {item}
@@ -120,7 +120,7 @@ export default function AssignmentChecklistPanel({
           </ul>
           {section.sampleAnswer && (
             <>
-              <div className={styles.fieldHint} style={{ margin: "6px 0 0" }}>
+              <div className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
                 Sample full-credit answer
               </div>
               <p className={styles.draftFeedback}>{section.sampleAnswer}</p>

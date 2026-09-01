@@ -186,9 +186,9 @@ function InputBindingRow({
             : "runtime";
 
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ marginBottom: 0, display: "flex", gap: 8, alignItems: "center" }}>
-        <label style={{ flex: 0, minWidth: "120px", fontSize: "0.85rem" }}>
+    <div style={{ marginBottom: "var(--space-3)" }}>
+      <div style={{ marginBottom: 0, display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+        <label style={{ flex: 0, minWidth: "120px", fontSize: "var(--font-size-md)" }}>
           {input.label}
         </label>
         <TextField
@@ -290,12 +290,12 @@ function InputBindingRow({
           ))}
       </div>
       {input.help && (
-        <div style={{ fontSize: "0.78rem", opacity: 0.6, marginTop: 2, marginLeft: 128, maxWidth: 560 }}>
+        <div style={{ fontSize: "var(--font-size-xs)", opacity: 0.6, marginTop: "var(--space-1)", marginLeft: 128, maxWidth: 560 }}>
           {input.help}
         </div>
       )}
       {showScopeOption && currentSource === "runtime" && (
-        <div style={{ fontSize: "0.8rem", opacity: 0.7, marginTop: 2, marginLeft: 128 }}>
+        <div style={{ fontSize: "var(--font-size-sm)", opacity: 0.7, marginTop: "var(--space-1)", marginLeft: 128 }}>
           {(() => {
             if (moduleFromScope && !isScopeable) {
               return "Taken from the workflow's scoped course.";

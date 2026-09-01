@@ -19,7 +19,7 @@ function ScopePicker({
   const isAll = value.trim() === ALL_SCOPE;
   const selected = isAll ? [] : value.split("\n").map((s) => s.trim()).filter(Boolean);
   return (
-    <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: 4 }}>
+    <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
       <FormControlLabel
         control={
           <Checkbox size="small" checked={isAll} onChange={(e) => onChange(e.target.checked ? ALL_SCOPE : "")} />

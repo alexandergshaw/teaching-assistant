@@ -16,7 +16,6 @@ import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
 import TabShell from "./TabShell";
 import type { TasksView } from "../url-state";
 import { TASK_GROUPS, TERM_TASKS, RECURRING_TASKS } from "@/lib/course-tasks-catalog";
@@ -785,10 +784,16 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
           </div>
         )}
 
+        {/* AC8: the app's existing spinner idiom (.loadingState + .spinner +
+            .loadingTitle, page.module.css) rather than a bare MUI spinner -
+            the same pattern used elsewhere in the app for a surface's
+            loading state, so every tab reads identically while data loads. */}
         {data.state === "loading" && (
-          <div style={{ display: "flex", justifyContent: "center", padding: 32 }}>
-            <CircularProgress size={22} aria-label="Loading tasks" />
-            <span className={styles.srOnly}>Loading tasks…</span>
+          <div className={pageStyles.loadingState} role="status" aria-live="polite">
+            <span className={pageStyles.spinner} aria-hidden="true" />
+            <div>
+              <p className={pageStyles.loadingTitle}>Loading tasks…</p>
+            </div>
           </div>
         )}
 

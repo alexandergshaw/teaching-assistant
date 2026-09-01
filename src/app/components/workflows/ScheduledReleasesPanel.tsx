@@ -124,7 +124,7 @@ export function ScheduledReleasesPanel() {
 
   return (
     <section>
-      <h3 style={{ margin: "0 0 10px", fontSize: "0.95rem" }}>Scheduled releases{releases ? ` (${releases.length})` : ""}</h3>
+      <h3 style={{ margin: "0 0 var(--space-2)", fontSize: "var(--font-size-xl)" }}>Scheduled releases{releases ? ` (${releases.length})` : ""}</h3>
 
       {loadError && (
         <p role="alert" className={styles.error}>
@@ -146,7 +146,7 @@ export function ScheduledReleasesPanel() {
       {releases && releases.length === 0 && (
         <>
           <p className={styles.fieldHint}>Nothing is scheduled right now.</p>
-          <p className={styles.fieldHint} style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+          <p className={styles.fieldHint} style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
             Releases are created from the Modules view&apos;s bulk bar - select modules or items, choose a release time, and commit.
           </p>
         </>
@@ -178,7 +178,7 @@ export function ScheduledReleasesPanel() {
                     <td>{formatReleaseInstant(release.releaseAt)}</td>
                     <td>
                       <span className={`${styles.ghBadge} ${badgeClass}`}>{status.label}</span>
-                      <div className={styles.fieldHint} style={{ marginTop: 4 }}>
+                      <div className={styles.fieldHint} style={{ marginTop: "var(--space-1)" }}>
                         {status.hint}
                       </div>
                     </td>

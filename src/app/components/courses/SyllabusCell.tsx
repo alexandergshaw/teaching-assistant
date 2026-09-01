@@ -141,7 +141,7 @@ export default function SyllabusCell({
   if (!editing) {
     return (
       <td style={{ minWidth: 160 }}>
-        <div onClick={startEdit} title="Click to edit" style={{ cursor: "pointer" }}>
+        <div onClick={startEdit} title="Click to edit" className={tableStyles.clickToEdit}>
           {syllabusName ? (
             <span className={styles.courseResourceValue}>{syllabusName}</span>
           ) : (
@@ -180,13 +180,13 @@ export default function SyllabusCell({
           </button>
         </div>
         {!course.syllabusTemplateId && (
-          <p className={styles.fieldHint} style={{ margin: "4px 0 0 0" }}>Choose a syllabus template for this course first.</p>
+          <p className={`${styles.fieldHint} ${tableStyles.mt1Only}`}>Choose a syllabus template for this course first.</p>
         )}
         {generateError && (
-          <p className={styles.fieldHint} style={{ margin: "4px 0 0 0", color: "var(--danger)" }}>{generateError}</p>
+          <p className={`${styles.fieldHint} ${tableStyles.mt1Only} ${tableStyles.dangerLink}`}>{generateError}</p>
         )}
         {generateNote && !generateError && (
-          <p className={styles.fieldHint} style={{ margin: "4px 0 0 0" }}>{generateNote}</p>
+          <p className={`${styles.fieldHint} ${tableStyles.mt1Only}`}>{generateNote}</p>
         )}
         {menu && <span className={tableStyles.cellMenu}>{menu}</span>}
       </td>
@@ -210,7 +210,7 @@ export default function SyllabusCell({
             Cancel
           </Button>
         </div>
-        <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>Or upload a file to save and link a new one directly:</p>
+        <p className={`${styles.fieldHint} ${tableStyles.mt1Only}`}>Or upload a file to save and link a new one directly:</p>
         <SyllabusUploadControl
           courseId={course.id}
           onUploaded={(syllabusId) => {

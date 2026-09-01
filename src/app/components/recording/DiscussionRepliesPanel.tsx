@@ -566,7 +566,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           run, since a failed or empty run (a capture that never found
           anything, a start() that threw before anything was captured) is
           exactly when this needs to be reachable without hunting. */}
-      <div className={styles.fieldHint} style={{ margin: "0 0 4px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
         <span>{discussionRepliesLogSummaryLine(summarizeDiscussionRepliesRunLog(runLog))}</span>
         <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
           Download run log (CSV)
@@ -576,7 +576,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
         </Button>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)", alignItems: "flex-end" }}>
         <TextField
           select
           label="Course"
@@ -640,7 +640,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
               <Button size="small" color="warning" onClick={() => { redraftAll(); setRedraftArmedFor(null); }} aria-describedby={REDRAFT_CONSEQUENCE_ID}>
                 Confirm redraft
               </Button>
-              <Button size="small" onClick={() => setRedraftArmedFor(null)} style={{ marginLeft: 6 }}>
+              <Button size="small" onClick={() => setRedraftArmedFor(null)} style={{ marginLeft: "var(--space-1)" }}>
                 Cancel
               </Button>
             </>

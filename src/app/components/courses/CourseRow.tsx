@@ -547,18 +547,18 @@ export default function CourseRow({
           kind="text"
           rawValue={course.name}
           display={
-            <span className={styles.courseResourceValue} style={{ fontWeight: 600 }}>
+            <span className={`${styles.courseResourceValue} ${tableStyles.courseNameStrong}`}>
               {course.name}
-              {notifTotal > 0 && <span className={styles.navBadge} style={{ marginLeft: 8 }} title="Outstanding LMS notifications">{notifTotal}</span>}
+              {notifTotal > 0 && <span className={`${styles.navBadge} ${tableStyles.notifBadgeInline}`} title="Outstanding LMS notifications">{notifTotal}</span>}
             </span>
           }
           onSave={save("name")}
           menu={cellMenuFor("name")}
         />
         {calendarBlockers.length > 0 && (
-          <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+          <div className={tableStyles.calendarBlockerList}>
             {calendarBlockers.map((blocker) => (
-              <span key={blocker} className={`${styles.ghBadge} ${styles.ghBadgeWarning}`} style={{ display: "inline-block" }}>
+              <span key={blocker} className={`${styles.ghBadge} ${styles.ghBadgeWarning} ${tableStyles.badgeBlock}`}>
                 {CALENDAR_BLOCKER_BADGE_TEXT[blocker]}
               </span>
             ))}
@@ -571,7 +571,7 @@ export default function CourseRow({
       ))}
 
       <td>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div className={tableStyles.rowActions}>
           <button type="button" className={styles.linkButton} onClick={() => onNavigate("course-planning", course)}>
             Syllabus builder
           </button>
@@ -586,8 +586,7 @@ export default function CourseRow({
           </button>
           <button
             type="button"
-            className={styles.linkButton}
-            style={{ color: "var(--danger)" }}
+            className={`${styles.linkButton} ${tableStyles.dangerLink}`}
             disabled={deleteBusy}
             onClick={() => onDelete(course)}
           >

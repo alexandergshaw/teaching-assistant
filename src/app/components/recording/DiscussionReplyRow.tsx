@@ -448,7 +448,7 @@ function DiscussionReplyRowImpl({
         <td>
           <span className={`${styles.ghBadge} ${styles[badge.variant]}`}>{badge.label}</span>
           {row.userEdited && (
-            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: 4 }}>
+            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: "var(--space-1)" }}>
               Yours
             </span>
           )}
@@ -460,7 +460,7 @@ function DiscussionReplyRowImpl({
               absent BOTH render nothing here - never as if the post were
               known to be top-level. */}
           {row.threadPosition === "reply" && (
-            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: 4 }}>
+            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: "var(--space-1)" }}>
               Reply
             </span>
           )}
@@ -479,7 +479,7 @@ function DiscussionReplyRowImpl({
               with no Reply badge in that case - not an oversight, so do not
               "fix" it by adding a threadPosition check here. */}
           {row.replyingToAuthor && (
-            <p className={styles.ghMeta} style={{ marginTop: 4 }}>
+            <p className={styles.ghMeta} style={{ marginTop: "var(--space-1)" }}>
               Replying to {row.replyingToAuthor}
             </p>
           )}
@@ -487,7 +487,7 @@ function DiscussionReplyRowImpl({
               to five rows at once and five assertive interruptions in a row
               is the exact defect this avoids. */}
           {row.state === "failed" && row.error && (
-            <p className={styles.error} style={{ marginTop: 6 }}>
+            <p className={styles.error} style={{ marginTop: "var(--space-1)" }}>
               {row.error}
             </p>
           )}
@@ -685,7 +685,7 @@ function DiscussionReplyRowImpl({
                     // adding a class to DiscussionRepliesPanel.module.css,
                     // which is out of this fixer pass's file set.
                     <li key={r.url} className={panelStyles.resourceItem} style={{ flexDirection: "column", alignItems: "stretch" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", minWidth: 0 }}>
                         <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>{RESOURCE_KIND_LABELS[r.kind]}</span>
                         <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ minWidth: 0 }}>
                           {r.title}

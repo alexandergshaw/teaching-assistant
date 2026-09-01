@@ -104,7 +104,7 @@ export default function BulkRepoActionsPanel({ repos, active = true }: BulkRepoA
   }, [handlePreviewPrs, selectedRepos]);
 
   return (
-    <div className={styles.form} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div className={styles.form} style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
       <RepoSelector
         filterText={filterText}
         onFilterChange={setFilterText}

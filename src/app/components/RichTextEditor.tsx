@@ -76,7 +76,7 @@ export function spansToHtml(spans: RunSpan[]): string {
       // A preserved hyperlink: shown as a link in the editor and carried through
       // serialization via data-wlink so the rebuild can re-wrap it.
       if (s.link) {
-        html = `<a data-wlink="${escapeAttr(s.link)}" style="color:#2563eb;text-decoration:underline">${html}</a>`;
+        html = `<a data-wlink="${escapeAttr(s.link)}" style="color:var(--accent);text-decoration:underline">${html}</a>`;
       }
       return html;
     })
@@ -230,7 +230,7 @@ export function FormattingToolbar({ style }: { style?: CSSProperties }) {
         e.preventDefault();
         exec(command);
       }}
-      sx={{ minWidth: "auto", padding: "4px 8px" }}
+      sx={{ minWidth: "auto", height: "var(--control-height-sm)", padding: "0 var(--space-2)" }}
     >
       <span style={labelStyle}>{label}</span>
     </Button>
@@ -258,7 +258,10 @@ export function FormattingToolbar({ style }: { style?: CSSProperties }) {
           const selectEl = document.querySelector('[aria-label="Font size"]') as HTMLSelectElement;
           if (selectEl) selectEl.selectedIndex = 0;
         }}
-        sx={{ minWidth: "100px" }}
+        sx={{
+          minWidth: "100px",
+          "& .MuiOutlinedInput-root": { height: "var(--control-height-sm)", fontSize: "var(--font-size-sm)" },
+        }}
       >
         <MenuItem value="" disabled>
           Size
@@ -334,7 +337,12 @@ export function RichTextEditor({
       contentEditable
       suppressContentEditableWarning
       className={`${styles.rteField}${changed ? ` ${styles.rteFieldChanged}` : ""}`}
-      style={style}
+      // A prose measure (AC "editing surface"): rich text otherwise runs the
+      // full width of whatever panel hosts it, which reads wrong on a wide
+      // monitor. Callers can still override via `style` (spread after this
+      // default), since none of the two current call sites (OfficeEditorModal,
+      // SyllabusMode) pass their own maxWidth.
+      style={{ maxWidth: "48rem", ...style }}
       onInput={emit}
       onBlur={emit}
     />

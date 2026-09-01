@@ -110,7 +110,7 @@ export function ImportCourseExportControl({ onImported }: ImportCourseExportCont
         Pick a Canvas or Common Cartridge export (.imscc/.zip) to work with it here - no live Canvas connection needed.
       </p>
       {error && <p className={styles.error}>{error}</p>}
-      {success && <p style={{ fontSize: "0.85rem", color: "var(--success)" }}>{success}</p>}
+      {success && <p style={{ fontSize: "var(--font-size-md)", color: "var(--success-ink)" }}>{success}</p>}
     </div>
   );
 }

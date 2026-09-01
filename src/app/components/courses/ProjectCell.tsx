@@ -113,7 +113,7 @@ export function ProjectCell({
         </span>
       </div>
 
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+      <div className={`${tableStyles.rowStart} ${tableStyles.mt1}`}>
         <button type="button" className={styles.linkButton} onClick={() => setEditing((v) => !v)}>
           {editing ? "Close" : set ? "Edit" : "Set up"}
         </button>
@@ -135,7 +135,7 @@ export function ProjectCell({
       </div>
 
       {editing && (
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div className={`${tableStyles.stackXs} ${tableStyles.mt2}`}>
           <TextField
             size="small"
             fullWidth
@@ -147,7 +147,7 @@ export function ProjectCell({
             onChange={(e) => setDefinition(e.target.value)}
             disabled={busy !== null}
           />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div className={tableStyles.rowSm}>
             <Button
               size="small"
               variant="contained"
@@ -169,15 +169,21 @@ export function ProjectCell({
             {set && (
               <button
                 type="button"
-                className={styles.linkButton}
-                style={{ color: "var(--danger)" }}
+                className={`${styles.linkButton} ${tableStyles.dangerLink}`}
                 disabled={busy !== null}
                 onClick={() => void handleClear()}
               >
                 Clear project
               </button>
             )}
-            {busy !== null && <CircularProgress size={16} />}
+            {busy !== null && (
+              <>
+                <CircularProgress size={16} />
+                <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)" }}>
+                  {busy === "generate" ? "Generating..." : "Clearing..."}
+                </span>
+              </>
+            )}
           </div>
           {!weeks && (
             <p className={styles.fieldHint}>

@@ -56,9 +56,9 @@ export function RunStepCard({
     <div
       style={{
         border: "1px solid var(--field-border)",
-        borderRadius: 12,
-        padding: 12,
-        marginTop: 8,
+        borderRadius: "var(--radius-md)",
+        padding: "var(--space-3)",
+        marginTop: "var(--space-2)",
         background: "var(--field-background)",
       }}
     >
@@ -66,14 +66,14 @@ export function RunStepCard({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
-          marginBottom: 8,
+          gap: "var(--space-2)",
+          marginBottom: "var(--space-2)",
         }}
       >
         <span>
           {index + 1}. {stepDef?.name ?? ""}
           {origin && (
-            <span style={{ marginLeft: 6, opacity: 0.75 }}>
+            <span style={{ marginLeft: "var(--space-1)", opacity: 0.75 }}>
               (from {origin})
             </span>
           )}
@@ -92,7 +92,7 @@ export function RunStepCard({
       )}
 
       {summary && (
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: "var(--space-3)" }}>
           {summary}
         </div>
       )}

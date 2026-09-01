@@ -266,16 +266,16 @@ export function AddItemRow({
         )}
 
         {addType[mc.id] === "VideoLibrary" && videoPickerModuleId === mc.id && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "1 1 100%", maxWidth: "100%" }}>
-            {videoPickerLoading && <span style={{ fontSize: "0.875rem", color: "var(--muted-text, #666)" }}>Loading your library...</span>}
-            {videoPickerError && <span style={{ fontSize: "0.875rem", color: "var(--error, #b91c1c)" }}>{videoPickerError}</span>}
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", flex: "1 1 100%", maxWidth: "100%" }}>
+            {videoPickerLoading && <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading your library...</span>}
+            {videoPickerError && <span style={{ fontSize: "var(--font-size-md)", color: "var(--danger)" }}>{videoPickerError}</span>}
             {!videoPickerLoading && videoPickerFiles && videoPickerFiles.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
                 {videoPickerFiles.map((file) => (
-                  <div key={file.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, border: "1px solid var(--border-color, #ddd)", borderRadius: 4 }}>
+                  <div key={file.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-2)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius-xs)" }}>
                     <div style={{ flex: "1 1 100%" }}>
-                      <div style={{ fontWeight: 500, fontSize: "0.9rem" }}>{file.name}</div>
-                      <div style={{ fontSize: "0.8rem", color: "var(--muted-text, #666)" }}>
+                      <div style={{ fontWeight: 500, fontSize: "var(--font-size-md)" }}>{file.name}</div>
+                      <div style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>
                         {file.kind === "recording" ? "Recording" : "Captioned"} - {(file.sizeBytes / 1048576).toFixed(1)} MB - {new Date(file.createdAt).toLocaleDateString()}
                       </div>
                     </div>
@@ -298,9 +298,9 @@ export function AddItemRow({
         )}
 
         {addType[mc.id] === "RepoLink" && repoPickerModuleId === mc.id && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "1 1 100%", maxWidth: "100%" }}>
-            {repoPickerLoading && <span style={{ fontSize: "0.875rem", color: "var(--muted-text, #666)" }}>Loading your repositories...</span>}
-            {repoPickerError && <span style={{ fontSize: "0.875rem", color: "var(--error, #b91c1c)" }}>{repoPickerError}</span>}
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", flex: "1 1 100%", maxWidth: "100%" }}>
+            {repoPickerLoading && <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading your repositories...</span>}
+            {repoPickerError && <span style={{ fontSize: "var(--font-size-md)", color: "var(--danger)" }}>{repoPickerError}</span>}
             {!repoPickerLoading && ownedRepos && (
               <>
                 <Autocomplete
@@ -327,7 +327,7 @@ export function AddItemRow({
                   onChange={(e) => setAddRepoTitle((p) => ({ ...p, [mc.id]: e.target.value }))}
                   disabled={repoPickerBusy || busy}
                 />
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: "var(--space-2)" }}>
                   <Button
                     variant="contained"
                     size="small"
@@ -394,12 +394,12 @@ export function AddItemRow({
         </label>
       </div>
       {(uploads[mc.id] ?? []).length > 0 && (
-        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ marginTop: "var(--space-1)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
           {(uploads[mc.id] ?? []).map((row, idx) => (
             <span
               key={`${mc.id}-up-${idx}`}
               className={styles.ccHint}
-              style={{ color: row.status === "error" ? "var(--error, #b91c1c)" : undefined }}
+              style={{ color: row.status === "error" ? "var(--danger)" : undefined }}
             >
               {row.name}:{" "}
               {row.status === "uploading"

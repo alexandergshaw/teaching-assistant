@@ -403,7 +403,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       )}
 
       {status === "loading" && (
-        <div className={styles.loadingState}>
+        <div className={styles.loadingState} role="status" aria-live="polite">
           <div className={styles.spinner} />
           <div className={styles.loadingTitle}>Loading drafted grades...</div>
         </div>
@@ -415,7 +415,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
 
       {status === "ready" && drafts !== null && (
         <>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
             <Button
               variant="outlined"
               size="small"
@@ -437,7 +437,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                 {sections.every((s) => collapsedDrafts.has(s.draft.id)) ? "Expand all" : "Collapse all"}
               </Button>
             )}
-            <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
               <TextField
                 size="small"
                 type="search"
@@ -496,7 +496,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                 <div key={draft.id} className={styles.draftSection}>
                   <div className={styles.draftSectionHead}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                         <button
                           type="button"
                           className={styles.linkButton}
@@ -522,7 +522,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           ))}
                         </div>
                       )}
-                      <div className={styles.draftSectionMeta} style={{ marginTop: 3 }}>
+                      <div className={styles.draftSectionMeta} style={{ marginTop: "var(--space-1)" }}>
                         {formatDraftTimestamp(draft.createdAt)} · {gradeCount} grade{gradeCount === 1 ? "" : "s"}
                         {draft.workflowId && draft.workflowName && onOpenWorkflow && (
                           <>
@@ -646,7 +646,14 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                                 setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), totalScore: e.target.value } }))
                                               }
                                               sx={{ width: 74 }}
-                                              slotProps={{ htmlInput: { style: { padding: "4px 6px" } } }}
+                                              slotProps={{
+                                                htmlInput: {
+                                                  style: {
+                                                    padding: "var(--space-1) var(--space-1)",
+                                                    fontVariantNumeric: "tabular-nums",
+                                                  },
+                                                },
+                                              }}
                                             />
                                           ) : (
                                             <span className={local.score}>{result.totalScore || "—"}</span>
@@ -661,7 +668,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                               onChange={(e) =>
                                                 setEdits((prev) => ({ ...prev, [expandKey]: { ...(prev[expandKey] ?? { totalScore: result.totalScore, overallComment: result.overallComment }), overallComment: e.target.value } }))
                                               }
-                                              slotProps={{ htmlInput: { style: { padding: "4px 6px" } } }}
+                                              slotProps={{ htmlInput: { style: { padding: "var(--space-1) var(--space-1)" } } }}
                                             />
                                           ) : (
                                             <span className={local.comment} title={result.overallComment}>
@@ -697,7 +704,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                           <td colSpan={4} className={local.detailCell}>
                                             <div className={styles.draftExpand}>
                                               {result.gradedRepo && (
-                                                <div className={styles.fieldHint} style={{ margin: "0 0 6px" }}>
+                                                <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)" }}>
                                                   Graded from: {result.gradedRepo} @ {(result.gradedRef ?? "").slice(0, 12)}
                                                 </div>
                                               )}
@@ -717,7 +724,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                                         {areaPercent && (
                                                           <span className={styles.draftRubricAreaPercent}>{areaPercent}</span>
                                                         )}
-                                                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flex: 1 }}>
+                                                        <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-2)", flex: 1 }}>
                                                           <span className={styles.fieldHint} style={{ margin: 0, flex: 1 }}>
                                                             {area.comment}
                                                           </span>
@@ -764,7 +771,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                             <div className={styles.draftExpand}>
                                               {(() => {
                                                 const sub = submissions[expandKey];
-                                                if (!sub || sub.status === "loading") return <span className={styles.fieldHint}>Loading submission...</span>;
+                                                if (!sub || sub.status === "loading") return <span className={styles.fieldHint} role="status" aria-live="polite">Loading submission...</span>;
                                                 if (sub.status === "error") return <div className={styles.error}>{sub.error || "Could not load the submission."}</div>;
                                                 const d = sub.data!;
                                                 const isGithubSubmission = !!d.url && looksLikeGithubUrl(d.url);
@@ -781,8 +788,8 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                                       <span className={styles.fieldHint}>No submission content.</span>
                                                     )}
                                                     {d.url && isGithubSubmission && (
-                                                      <div style={{ marginTop: 4 }}>
-                                                        <div className={styles.fieldHint} style={{ margin: "0 0 6px" }}>
+                                                      <div style={{ marginTop: "var(--space-1)" }}>
+                                                        <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)" }}>
                                                           Submitted link: {d.url}
                                                         </div>
                                                         <SubmissionCodePanel submissionUrl={d.url} />
@@ -797,7 +804,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                                       </div>
                                                     )}
                                                     {d.speedGraderUrl && (
-                                                      <a href={d.speedGraderUrl} target="_blank" rel="noreferrer" className={styles.linkButton} style={{ marginTop: 4 }}>
+                                                      <a href={d.speedGraderUrl} target="_blank" rel="noreferrer" className={styles.linkButton} style={{ marginTop: "var(--space-1)" }}>
                                                         Open in SpeedGrader
                                                       </a>
                                                     )}

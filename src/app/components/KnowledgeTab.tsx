@@ -567,7 +567,7 @@ export default function KnowledgeTab({
             <div className={styles.kbTreeToolbar}>
               <FormControlLabel
                 className={styles.fieldHint}
-                style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0 }}
+                style={{ display: "inline-flex", gap: "var(--space-2)", alignItems: "center", margin: 0 }}
                 control={
                   <Checkbox
                     size="small"
@@ -626,7 +626,7 @@ export default function KnowledgeTab({
             </div>
           )}
 
-          {loadState === "loading" && <p className={styles.fieldHint}>Loading {active} pages…</p>}
+          {loadState === "loading" && <p className={styles.fieldHint} role="status" aria-live="polite">Loading {active} pages…</p>}
           {loadState === "error" && <p className={styles.error}>{loadError}</p>}
 
           {loadState === "idle" && (

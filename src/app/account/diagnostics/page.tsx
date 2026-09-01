@@ -201,7 +201,7 @@ export default function DiagnosticsPage() {
             <p className={styles.sectionTitle}>Canvas import jobs</p>
 
             {institutions.length === 0 ? (
-              <p className={styles.empty}>
+              <p className={styles.emptyState}>
                 No school is configured yet. Add one from the Settings menu, then come back here to pick a course.
               </p>
             ) : (
@@ -220,15 +220,18 @@ export default function DiagnosticsPage() {
                 </div>
 
                 {!courseUrl ? (
-                  <p className={styles.empty}>Choose a course above to see its Canvas import jobs.</p>
+                  <p className={styles.emptyState}>Choose a course above to see its Canvas import jobs.</p>
                 ) : loadState === "error" ? (
                   <p role="alert" className={styles.error}>
                     {error}
                   </p>
                 ) : loadState === "loading" && migrations.length === 0 ? (
-                  <p className={styles.empty}>Loading...</p>
+                  <div className={styles.loadingRow} role="status" aria-live="polite">
+                    <span className={styles.spinner} aria-hidden="true" />
+                    <span>Loading...</span>
+                  </div>
                 ) : migrations.length === 0 ? (
-                  <p className={styles.empty}>No content migrations found for this course.</p>
+                  <p className={styles.emptyState}>No content migrations found for this course.</p>
                 ) : (
                   <ul className={styles.factorList}>
                     {migrations.map((row) => {

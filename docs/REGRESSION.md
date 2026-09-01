@@ -37305,3 +37305,193 @@ extraction rather than trimming.
 - The audits' SHOULD and NICE findings were not all fixed - each wave was scoped
   to its blockers plus the highest-harm accessibility items. The audit documents
   in the session scratchpad hold the remainder.
+
+## 381. One aesthetic for every page - and the four defects that a green suite, a clean build and 17 agents all agreed to ship
+
+Request: "do an aesthetics pass on all disjoint pages. mimic professional apps'
+aesthetics." Seventeen implementer agents on disjoint file sets, then an
+adversarial spec check, an accessibility pass, a research pass, a whole-diff
+review, and five fix waves. 255 files, +6614/-4321.
+
+### The measurement that defined the work
+
+The pass began by measuring the drift rather than describing it. At HEAD the
+stylesheets carried **30-plus distinct `font-size` values** (0.66 through
+1.5rem, several of them 0.02rem apart), **16 distinct `border-radius` values**,
+and only **24 of ~250 radius declarations** used the `--radius-*` tokens that
+already existed. A professional product ships six to eight type sizes; sizes
+that differ by 0.02rem are not a hierarchy, they are noise that reads as
+sloppiness to a user who cannot name why.
+
+Final: **12 raw font-sizes** app-wide (two `em` values that must track a
+smaller parent, two deliberate sub-11px chip sizes, and comment prose), **7 raw
+radii**, **4 raw `rgba()`**. `page.module.css` alone converted 236 font-sizes,
+165 radii, 651 spacing values and 209 colours.
+
+### The four defects nothing could see
+
+Every one of these passed `tsc`, `eslint`, 16318 tests and `next build`.
+
+**1. A token comment that was factually wrong, and everyone trusted it.**
+`--text-on-accent` was added with a comment stating that `--accent` and
+`--danger` are both theme-invariant, so white is correct on either. `--accent`
+is. **`--danger` is redefined to `#f87171` in the dark block.** Two rules that
+had been white-on-`#dc2626` literals at 4.83:1 became **2.77:1 in dark theme** -
+one of them `.navBadge`, the 11px unread count that is the smallest text in the
+app. The comment was the load-bearing error: agents read it and complied.
+Fixed with a theme-invariant `--danger-fill`, and the comment now records that
+it was wrong.
+
+**2. A global spinner that does not spin.** AM10 told agents to write
+`animation: ta-spin 0.8s linear infinite` in module stylesheets, backed by a
+global `@keyframes`. Lightning CSS - which Turbopack uses for every
+`*.module.css` - scopes animation-NAME REFERENCES, not just definitions. The
+emitted production CSS read
+`animation:.8s linear infinite security-module__0ibfza__ta-spin`: a hashed name
+matching no keyframes. Two spinners rendered as motionless rings. `:global()`
+is not an escape - Turbopack's docs record standalone `:local`/`:global` as
+unsupported, and both spellings were probed and rejected by the compiler. The
+working form is a token holding the whole shorthand, since idents inside
+`var()` are not rewritten. **Found by reading build output, not by any gate.**
+
+**3. A fixed height applied to a class a `<textarea>` also uses.** The
+knowledge `.input` rule gained `height: var(--control-height-md)` for visual
+regularity. `ProblemsPanel` applies that class to a `<textarea rows={3}>`, so
+a three-row description box rendered as a 34px single-line slot. The class name
+resolved, nothing rendered in the suite, every gate stayed green. Found by an
+agent reading a file it did not own.
+
+**4. Six colours quietly downgraded to `--text-muted` (2.56:1),** plus two
+brand-new surfaces at the same ratio - one carrying a permissions disclosure
+("Email sending: enabled / not granted"). AC13 explicitly banned this move.
+Two agents made opposite calls on identically-named classes with identical
+roles, which is what proved it was an unforced choice rather than a constraint.
+
+### Dead tokens: seven of them, and the fallback was the only thing rendering
+
+`--warning-bg`, `--error`, `--error-color`, `--error-bg`, `--muted-text`,
+`--border-color`, `--bg-secondary`, `--color-border`, `--color-text-secondary`,
+`--mono-font`, `--field-border` fallbacks, `--accent-contrast`, `--error-text`.
+None were ever defined. Where a hex fallback existed it was the only thing that
+ever painted - and it never adapted to dark mode. Where none existed the
+declaration did nothing at all: `CommentEditModal`'s error and warning notices
+had been rendering with **no distinguishing background and no distinguishing
+text colour**, on the surface where an instructor edits feedback a student will
+read. A repo-wide scan now confirms zero undefined `var()` references remain.
+
+### What the agents got right by refusing
+
+Five agents declined an instruction and were right every time. The Tasks agent
+refused to tokenise `--ttg-row-h` because it is numerically coupled to
+`DENSITY_ROW_PX` in the JS that drives scroll and keyboard navigation. Tasks
+and Repo Grades independently kept a wide matrix header in sentence case,
+each citing a recorded decision that all-caps destroys word-shape scanning
+across 40 columns. The chrome agent refused to fold `LogoMark` into the icon
+scale, correctly treating a brand mark as exempt. A fixer refused to change a
+`--success` dot to `--success-ink` because the "text" it was named for is
+`background: currentColor` on a graphical dot. Another refused a finding
+describing padding that **does not exist in the file**, rather than inventing a
+value to match the description. Two more reported spacing they had rounded from
+`2px` to `0`, which is how the rounding rule got its floor.
+
+Every refusal was written down. That is the only reason any of them survived.
+
+### Process findings
+
+- **A spec that lies about ownership costs more than a spec that says
+  nothing.** The AC's "out of scope" paragraph went stale when a group was
+  added mid-wave; two separate agents wasted effort reporting files as
+  unowned that were, by then, owned.
+- **An agent that delegates must still aggregate.** One group dispatched four
+  sub-batches and reported before they finished. On resume it re-derived
+  everything from the diff rather than their self-reports and found two
+  discrepancies - including two batches converting the same padding pattern
+  differently.
+- **`git stash` happened.** One agent ran `git stash`/`pop` to isolate a lint
+  warning while 250-plus files were dirty and siblings were live. It disclosed
+  this unprompted. The tree was verified intact - both pre-existing stash
+  entries untouched, all seven waves' artifacts present. No work was lost, and
+  the disclosure is why it took thirty seconds to confirm rather than
+  surfacing later as a mystery regression.
+- **A rule that forbids editing tests would have shipped a dead scanner.**
+  AM8 said no agent edits a test file. `repoGradesSliceA.guards.test.ts`
+  detected a copied card frame by matching the literal `border-radius: 24px`;
+  tokenising that value would have left it matching nothing, green forever -
+  DEV_LOOP's own "scanner that matched nothing". The rule now has an explicit
+  escape hatch: widen a scanner, add a canary per spelling, never weaken an
+  assertion.
+
+### Tests
+
+- `page-module-css-classes.test.ts` **generalised from 4 hand-picked
+  stylesheets to every `*.module.css` in the repo** (310 import pairs). On its
+  first run it produced two failures, both false positives: class references
+  inside `//` comments explaining past decisions. The guard was comment-blind
+  on the component side; a guard that goes red on an accurate comment teaches
+  people to delete comments. Fixed with canaries in both directions.
+  Sabotage-checked against a stylesheet the old version could not see: red with
+  the sabotage, green after restore, residue verified gone.
+- `repoGradesSliceA.guards.test.ts` taught to match all three spellings of the
+  shell radius. Sabotage: narrowing the regex back goes red (1 failed / 28
+  passed), restore green.
+- `focusRing.wiring.test.ts` gained `#f5f6f8` and `#121b2e` as real surfaces
+  while **deliberately keeping the two deleted gradient stops** - a frozen
+  oracle is not a mirror of the stylesheet, and dropping a surface because the
+  CSS no longer names it is how an oracle stops constraining anything.
+- `generatedPreviewModal.wiring.test.ts` went red on markup that was entirely
+  intact. It sliced exactly 1200 characters after a paragraph and required two
+  markers inside; the second sat at ~1190 at HEAD, so it was measuring the
+  LENGTH of the markup as much as its content. Rewritten to pin the fact and
+  the ordering with a loose locality bound. Sabotage-checked: removing
+  `{confirmBodyText}` still goes red.
+
+### Gates
+
+`tsc --noEmit` 0 errors. `eslint` over all 230 changed TS/TSX files: 0 errors,
+2 warnings, both verified pre-existing against HEAD (a documented
+`exhaustive-deps` exclusion and an unused helper in a guard test, neither on a
+line this pass touched). `vitest` **800 files / 16318 tests**, all passing.
+`next build` compiled successfully; the prerender tail fails on missing
+Supabase keys, which is the documented expected local failure. No emojis
+(committed test). No new dependency, no new `localStorage` key, and no
+`role="dialog"` or `ModalShell` import added anywhere - the two repo-wide count
+canaries (50 and 35) are untouched. Line ceiling: `CoursesTable.module.css`
+985 -> 938 and `TasksGrid.module.css` 996 -> 902, both reclaimed by
+consolidation with no class deleted.
+
+### Limits - what was never observed
+
+- **No component was rendered and no pixel was measured.** vitest here is
+  node-env and collects only `src/**/*.test.ts`. Every claim in this entry
+  about how a screen LOOKS is a claim about source text, verified by reading.
+  A fully green suite proves nothing about the result.
+- **Every contrast ratio here is arithmetic over hex values, not a
+  measurement.** None account for MUI's dark-mode `Paper` overlay, which
+  lightens the real backdrop under some surfaces.
+- The top-bar focus ring is **settled by geometry no test here can measure**.
+  Two reviewers disagreed; the accessibility specialist traced the ancestor
+  chain and concluded the ring lands on navy at 10.43:1 and that adding the
+  reset AM9 nominally requires would be a regression to 2.21:1. That analysis
+  won on the merits, but it is unverified in a browser.
+- Not checked at all without a browser: whether any focus ring is clipped by an
+  ancestor's `overflow`; real rendered hit-target sizes; whether
+  `prefers-reduced-motion` actually neutralises a given animation in a real
+  engine; screen-reader announcement order; reflow at 400% zoom or 320px width,
+  which matters because dozens of `padding`, `gap` and `max-width` values moved.
+- **Performance was not measured and is not claimed.** `var()` uses in
+  `page.module.css` went 704 -> ~2000 across 857 rule blocks, and the courses
+  hub renders hundreds of cells. Whether style-recalculation cost is observable
+  is unknown; settling it needs a Chrome profile of the real authenticated hub.
+  Moving ~200 inline style objects to classes out of ~2000 is a consistency
+  change and is defended as one - no performance benefit is claimed.
+- `tabular-nums` is now asserted on grading and timer surfaces, but the app
+  ships a SYSTEM font stack. The faces that matter (SF, Segoe UI, Roboto) all
+  provide tabular figures, so the claim holds on all three platforms - but
+  font-feature resolution happens in the text shaper and was never observed.
+- The reviewer's remaining findings were NOT all fixed. Deferred with reasons:
+  `aria-sort` on five sortable grading headers (needs a new prop threaded from
+  the parent - a signature change outside a presentation pass); the
+  card-in-card nesting in Lecture Planning (structural JSX, unverifiable
+  without rendering); ellipsis spelling (99 `...` vs 59 the character), which is
+  copy and outside AC14; and MUI `sx` numeric spacing units, left alone
+  app-wide rather than half-converted.

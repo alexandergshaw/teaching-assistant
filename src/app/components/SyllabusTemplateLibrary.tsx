@@ -161,9 +161,9 @@ export default function SyllabusTemplateLibrary({ activeTemplateId, onUse }: Syl
   };
 
   return (
-    <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-md)", padding: "var(--space-3)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       {state === "loading" && (
-        <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+        <div style={{ display: "flex", justifyContent: "center", padding: "var(--space-3)" }}>
           <CircularProgress size={20} />
         </div>
       )}
@@ -181,16 +181,17 @@ export default function SyllabusTemplateLibrary({ activeTemplateId, onUse }: Syl
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
+                gap: "var(--space-2)",
                 flexWrap: "wrap",
-                padding: "6px 0",
+                // 6px rounds down to the 4px step (AM4 tie rule).
+                padding: "var(--space-1) 0",
                 borderTop: "1px solid var(--field-border)",
                 background: active ? "color-mix(in srgb, var(--accent) 8%, transparent)" : "transparent",
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontWeight: 600 }}>{t.name}</span>
-                <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", fontFamily: "monospace" }}>{t.fileName}</div>
+                <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", fontFamily: "monospace" }}>{t.fileName}</div>
               </div>
               <Button variant="contained" size="small" disabled={busyId === t.id} onClick={() => handleUse(t)}>
                 {active ? "In use" : "Use"}
@@ -213,7 +214,7 @@ export default function SyllabusTemplateLibrary({ activeTemplateId, onUse }: Syl
           );
         })}
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid var(--field-border)", paddingTop: 10 }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", borderTop: "1px solid var(--field-border)", paddingTop: "var(--space-2)" }}>
         <TextField size="small" placeholder="New template name" value={newName} onChange={(e) => setNewName(e.target.value)} disabled={creating} sx={{ flex: "1 1 180px" }} />
         <input ref={createFileRef} type="file" accept=".docx" disabled={creating} />
         <Button variant="outlined" size="small" onClick={handleCreate} disabled={creating || !newName.trim()}>

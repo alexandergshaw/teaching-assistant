@@ -21,20 +21,20 @@ import styles from "../../../page.module.css";
 
 function CodeOutputBlock({ label, text }: { label: string; text: string }) {
   return (
-    <div style={{ marginBottom: "8px" }}>
-      <div style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginBottom: "4px" }}>{label}</div>
+    <div style={{ marginBottom: "var(--space-2)" }}>
+      <div style={{ fontSize: "var(--font-size-xs)", color: "var(--hint-text)", marginBottom: "var(--space-1)" }}>{label}</div>
       <pre
         style={{
           fontFamily: "monospace",
-          fontSize: "0.8rem",
+          fontSize: "var(--font-size-sm)",
           whiteSpace: "pre-wrap",
           margin: "0",
           maxHeight: 240,
           overflow: "auto",
-          padding: 8,
+          padding: "var(--space-2)",
           background: "var(--card-background)",
           border: "1px solid var(--field-border)",
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
         }}
       >
         {text}
@@ -63,10 +63,12 @@ export function RunInputRowDetail({ colSpan, detail, DetailSectionsView, onRunCo
         className={styles.workflowDetailCell}
         style={{
           borderBottom: "1px solid var(--field-border)",
-          padding: "10px 12px 10px 20px",
+          padding: "var(--space-2) var(--space-3) var(--space-2) var(--space-5)",
         }}
       >
-        {detail.status === "loading" && <div>Loading submission...</div>}
+        {detail.status === "loading" && (
+          <div className={styles.fieldHint} role="status" aria-live="polite">Loading submission...</div>
+        )}
         {detail.status === "error" && (
           <div style={{ color: "var(--danger)" }}>{detail.error}</div>
         )}
@@ -76,12 +78,12 @@ export function RunInputRowDetail({ colSpan, detail, DetailSectionsView, onRunCo
               style={{
                 maxHeight: 300,
                 overflow: "auto",
-                fontSize: "0.85rem",
-                padding: "10px 12px",
+                fontSize: "var(--font-size-md)",
+                padding: "var(--space-2) var(--space-3)",
                 background: "var(--card-background)",
                 border: "1px solid var(--field-border)",
-                borderRadius: "6px",
-                marginBottom: "12px",
+                borderRadius: "var(--radius-xs)",
+                marginBottom: "var(--space-3)",
               }}
             >
               <DetailSectionsView text={detail.detail.text} />
@@ -93,12 +95,12 @@ export function RunInputRowDetail({ colSpan, detail, DetailSectionsView, onRunCo
                     ? decodeSubmissionFileText(file.base64)
                     : "(binary file - download via SpeedGrader)";
                   return (
-                    <div key={file.name} className={styles.workflowCard} style={{ marginTop: "8px" }}>
-                      <div style={{ fontWeight: "bold", marginBottom: "4px" }}>{file.name}</div>
+                    <div key={file.name} className={styles.workflowCard} style={{ marginTop: "var(--space-2)" }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "var(--space-1)" }}>{file.name}</div>
                       <pre
                         style={{
                           fontFamily: "monospace",
-                          fontSize: "0.8rem",
+                          fontSize: "var(--font-size-sm)",
                           whiteSpace: "pre-wrap",
                           margin: 0,
                           maxHeight: 240,
@@ -115,13 +117,13 @@ export function RunInputRowDetail({ colSpan, detail, DetailSectionsView, onRunCo
                   variant="outlined"
                   disabled={detail.run?.status === "running"}
                   onClick={onRunCode}
-                  style={{ marginTop: "8px" }}
+                  style={{ marginTop: "var(--space-2)" }}
                 >
                   {detail.run?.status === "running" ? "Running..." : detail.run?.result ? "Run again" : "Run code"}
                 </Button>
                 {detail.run?.result && (
-                  <div className={styles.workflowCard} style={{ marginTop: "12px" }}>
-                    <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
+                  <div className={styles.workflowCard} style={{ marginTop: "var(--space-3)" }}>
+                    <div style={{ fontWeight: "bold", marginBottom: "var(--space-2)" }}>
                       {detail.run.result.language} - {detail.run.result.ran ? `ran (exit ${detail.run.result.exitCode})` : `failed${detail.run.result.exitCode !== null ? ` (exit ${detail.run.result.exitCode})` : ""}`}
                     </div>
                     {detail.run.result.error && (
@@ -140,11 +142,11 @@ export function RunInputRowDetail({ colSpan, detail, DetailSectionsView, onRunCo
                 )}
                 {detail.run?.result === null && detail.run?.status === "done" && (
                   detail.run.error ? (
-                    <div style={{ marginTop: "12px", color: "var(--danger)", fontSize: "0.85rem" }}>
+                    <div style={{ marginTop: "var(--space-3)", color: "var(--danger)", fontSize: "var(--font-size-md)" }}>
                       Run failed: {detail.run.error}
                     </div>
                   ) : (
-                    <div style={{ marginTop: "12px", color: "var(--hint-text)", fontSize: "0.85rem" }}>
+                    <div style={{ marginTop: "var(--space-3)", color: "var(--hint-text)", fontSize: "var(--font-size-md)" }}>
                       No runnable code detected.
                     </div>
                   )

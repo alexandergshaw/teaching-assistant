@@ -51,7 +51,7 @@ export default function WorkflowScopeControl({
     const isAll = value.trim() === ALL_SCOPE;
     const selected = isAll ? [] : value.split("\n").map((s) => s.trim()).filter(Boolean);
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
         <FormControlLabel
           control={
             <Checkbox size="small" checked={isAll} onChange={(e) => onVal(e.target.checked ? ALL_SCOPE : "")} />
@@ -76,29 +76,29 @@ export default function WorkflowScopeControl({
     );
   };
 
-  const cell = { display: "flex", flexDirection: "column" as const, gap: 4, minWidth: 240, flex: 1 };
-  const labelStyle = { fontSize: "0.85rem", fontWeight: 500 };
+  const cell = { display: "flex", flexDirection: "column" as const, gap: "var(--space-1)", minWidth: 240, flex: 1 };
+  const labelStyle = { fontSize: "var(--font-size-md)", fontWeight: 500 };
 
   return (
     <div
       style={{
         border: "1px solid var(--field-border)",
-        borderRadius: 10,
-        padding: 12,
-        marginBottom: 16,
+        borderRadius: "var(--radius-sm)",
+        padding: "var(--space-3)",
+        marginBottom: "var(--space-4)",
         display: "flex",
         flexDirection: "column",
-        gap: 10,
+        gap: "var(--space-2)",
       }}
     >
-      <span style={{ fontWeight: 600, fontSize: "0.9em" }}>This workflow is for</span>
-      <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+      <span style={{ fontWeight: 600, fontSize: "var(--font-size-md)" }}>This workflow is for</span>
+      <p className="fieldHint" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
         Set the targets once - every step uses them, so a scheduled or triggered run needs no prompt. Leave a field blank to be asked for it at run time.
       </p>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap" }}>
         <div style={cell}>
           <span style={labelStyle}>Institution</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
             <FormControlLabel
               control={
                 <Checkbox
@@ -139,7 +139,7 @@ export default function WorkflowScopeControl({
         <div style={cell}>
           <span style={labelStyle}>Canvas courses</span>
           {institutionAll ? (
-            <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+            <p style={{ margin: 0, fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>
               Taken from each institution automatically when running for all institutions.
             </p>
           ) : activeInstitution ? (
@@ -151,7 +151,7 @@ export default function WorkflowScopeControl({
               lmsCourseOptions === null
             )
           ) : (
-            <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+            <p style={{ margin: 0, fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>
               Pick an institution in the top bar to choose live courses.
             </p>
           )}
@@ -168,7 +168,7 @@ export default function WorkflowScopeControl({
         </div>
         <div style={cell}>
           <span style={labelStyle}>Looking ahead</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
             {(() => {
               const { value: displayValue, unit: displayUnit } = decomposeCanonicalDays(
                 scope.lookahead ?? ""
@@ -193,7 +193,7 @@ export default function WorkflowScopeControl({
                 }
               };
               return (
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start" }}>
                   <TextField
                     type="number"
                     size="small"
@@ -219,14 +219,14 @@ export default function WorkflowScopeControl({
                 </div>
               );
             })()}
-            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <p className="fieldHint" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
               Fills every step that looks ahead (deadlines, weekly generators).
             </p>
           </div>
         </div>
         <div style={cell}>
           <span style={labelStyle}>Modules ahead</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
             <TextField
               type="number"
               size="small"
@@ -243,14 +243,14 @@ export default function WorkflowScopeControl({
               slotProps={{ htmlInput: { min: 0 } }}
               sx={{ width: 80 }}
             />
-            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <p className="fieldHint" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
               Fills every step that targets a module offset.
             </p>
           </div>
         </div>
         <div style={cell}>
           <span style={labelStyle}>Concepts</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
             <TextField
               multiline
               minRows={3}
@@ -263,23 +263,23 @@ export default function WorkflowScopeControl({
               size="small"
               sx={{ flex: 1 }}
             />
-            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <p className="fieldHint" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
               Fills every step that targets concepts to loop over.
             </p>
           </div>
         </div>
         <div style={cell}>
           <span style={labelStyle}>Material sources</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
             <SourcePolicyEditor value={scope.sourcePolicy ?? ""} onChange={(v) => set({ sourcePolicy: v })} />
-            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <p className="fieldHint" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
               Fills every lecture-building step&apos;s material-source policy.
             </p>
           </div>
         </div>
         <div style={cell}>
           <span style={labelStyle}>Current module</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
             {/* A live module picker would need a single concrete course tile
                 chosen at scope level, but "Course tiles" above supports one,
                 several, or all - so this is a name instead: it is matched by
@@ -295,7 +295,7 @@ export default function WorkflowScopeControl({
                 set({ lmsModule: name.trim() ? nameModuleValue(name) : "" });
               }}
             />
-            <p className="fieldHint" style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <p className="fieldHint" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
               Fills every module input, matched by name wherever the step reads modules. Blank leaves each step to resolve its own current module.
             </p>
           </div>

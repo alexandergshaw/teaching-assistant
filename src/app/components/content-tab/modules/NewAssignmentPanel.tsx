@@ -107,7 +107,7 @@ export function NewAssignmentPanel({
     <>
       <div className={styles.field}>
         <label htmlFor="content-new-module">Add a module</label>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
           <TextField
             id="content-new-module"
             size="small"
@@ -131,7 +131,7 @@ export function NewAssignmentPanel({
       </div>
 
       <div className={styles.field}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
           <Button
             variant="outlined"
             size="small"
@@ -152,8 +152,8 @@ export function NewAssignmentPanel({
           </Button>
         </div>
         {showNewAssignment && (
-          <div style={{ border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", display: "flex", flexDirection: "column", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
               <TextField
                 size="small"
                 label="Assignment name"
@@ -194,7 +194,7 @@ export function NewAssignmentPanel({
                 sx={{ width: 210 }}
               />
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
               <TextField
                 size="small"
                 type="datetime-local"
@@ -228,7 +228,7 @@ export function NewAssignmentPanel({
                 <MenuItem value="5">5</MenuItem>
               </TextField>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
               <TextField
                 select
                 size="small"
@@ -304,7 +304,7 @@ export function NewAssignmentPanel({
               value={naDescription}
               onChange={(e) => setNaDescription(e.target.value)}
             />
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
               <Button
                 variant="text"
                 size="small"
@@ -313,11 +313,11 @@ export function NewAssignmentPanel({
               >
                 {naDrafting ? "Drafting…" : "Draft with AI"}
               </Button>
-              <span style={{ fontSize: "0.875rem", color: "var(--text-secondary, rgba(0,0,0,0.6))" }}>
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
                 Uses the assignment name plus whatever is already in the description as guidance.
               </span>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: "var(--space-2)" }}>
               <Button
                 variant="contained"
                 size="small"

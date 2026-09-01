@@ -47,7 +47,7 @@ export default function SessionSetupPanel({
         </p>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
         <TextField
           select
           slotProps={floatingWindowSelectSlotProps}
@@ -116,7 +116,7 @@ export default function SessionSetupPanel({
       {settings.coursesError && <p className={styles.error}>{settings.coursesError}</p>}
 
       {mics.length === 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
           <p className={styles.fieldHint} style={{ margin: 0 }}>
             Microphones appear here after the browser grants access.
           </p>
@@ -154,8 +154,8 @@ export default function SessionSetupPanel({
             AudioContext.
           </p>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
               <input
                 type="checkbox"
                 checked={settings.noiseSuppression}
@@ -163,7 +163,7 @@ export default function SessionSetupPanel({
               />
               Noise suppression
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
               <input
                 type="checkbox"
                 checked={settings.echoCancellation}
@@ -171,7 +171,7 @@ export default function SessionSetupPanel({
               />
               Echo cancellation
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
               <input
                 type="checkbox"
                 checked={settings.autoGain}
@@ -191,7 +191,7 @@ export default function SessionSetupPanel({
       <details className={styles.adaptDisclosure}>
         <summary>Notifications</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
             <input
               type="checkbox"
               checked={settings.answerSound}

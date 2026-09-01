@@ -71,10 +71,10 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
       </div>
 
       <div className={styles.field}>
-        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>
+        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
           1. Video source
         </p>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
           <Button variant="outlined" size="small" disabled={speed.busy} onClick={() => fileInputRef.current?.click()}>
             Choose video
           </Button>
@@ -99,17 +99,17 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
 
         {videoImport.importError && <p className={styles.error}>{videoImport.importError}</p>}
 
-        <div style={{ marginTop: 16 }}>
-          <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
+        <div style={{ marginTop: "var(--space-4)" }}>
+          <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0" }}>
             Or import a saved video:
           </p>
 
-          <div style={{ marginTop: 8 }}>
-            <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>
+          <div style={{ marginTop: "var(--space-2)" }}>
+            <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
               From the Files tab
             </p>
             {videoImport.libraryBusy && !videoImport.libraryVideos && (
-              <p className={styles.fieldHint} style={{ margin: 0 }}>Loading your library...</p>
+              <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>Loading your library...</p>
             )}
             {videoImport.libraryVideos && videoImport.libraryVideos.length === 0 && (
               <p className={styles.fieldHint} style={{ margin: 0 }}>
@@ -120,7 +120,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
               {videoImport.libraryBusy ? "Loading..." : "Refresh"}
             </Button>
             {videoImport.libraryVideos && videoImport.libraryVideos.map((v) => (
-              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
                 <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
                   {v.name} - {getDisplayKind(v).label}
                   {v.durationSec !== null && ` - ${fmt(Math.round(v.durationSec))}`}
@@ -140,12 +140,12 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
           </div>
 
           {takes.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>
+            <div style={{ marginTop: "var(--space-2)" }}>
+              <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
                 From current session
               </p>
               {takes.map((take) => (
-                <div key={take.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                <div key={take.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
                   <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
                     {take.name} - {(take.sizeBytes / 1048576).toFixed(1)} MB
                   </span>
@@ -163,8 +163,8 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
           )}
 
           {backupDir && (
-            <div style={{ marginTop: 8 }}>
-              <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>
+            <div style={{ marginTop: "var(--space-2)" }}>
+              <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
                 From backup folder ({backupDir.name})
               </p>
               <Button
@@ -179,7 +179,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
                 <p className={styles.fieldHint} style={{ margin: 0 }}>No videos found.</p>
               )}
               {videoImport.folderVideos && videoImport.folderVideos.map((v) => (
-                <div key={v.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                <div key={v.name} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
                   <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {v.name} - {(v.sizeBytes / 1048576).toFixed(1)} MB
                   </span>
@@ -200,23 +200,23 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
 
       {/* AC9 item 2: the "watch it back" half of the request - playbackRate
           set on this same element previews the chosen speed live. */}
-      <div style={{ borderRadius: 12, overflow: "hidden", background: "#0f172a" }}>
+      <div style={{ borderRadius: "var(--radius-md)", overflow: "hidden", background: "var(--navy)" }}>
         <video
           ref={previewRef}
           controls
           src={videoImport.videoUrl ?? undefined}
           onLoadedMetadata={applyPreviewRate}
-          style={{ width: "100%", maxHeight: "48vh", display: hasSource ? "block" : "none", background: "#0f172a" }}
+          style={{ width: "100%", maxHeight: "48vh", display: hasSource ? "block" : "none", background: "var(--navy)" }}
         />
         {!hasSource && (
-          <p className={styles.fieldHint} style={{ margin: 0, padding: 16 }}>
+          <p className={styles.fieldHint} style={{ margin: 0, padding: "var(--space-4)" }}>
             Pick a video above to watch it back here.
           </p>
         )}
       </div>
 
       <div className={styles.field}>
-        <p id="speed-rate-heading" className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>
+        <p id="speed-rate-heading" className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
           2. Playback speed
         </p>
         <div role="group" aria-labelledby="speed-rate-heading" className={styles.ghActions}>
@@ -252,7 +252,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
             style={{
               height: 8,
               background: "color-mix(in srgb, var(--field-border) 40%, transparent)",
-              borderRadius: 999,
+              borderRadius: "var(--radius-pill)",
               overflow: "hidden",
             }}
           >
@@ -261,7 +261,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
                 width: `${speed.progress?.pct ?? 0}%`,
                 height: "100%",
                 background: "var(--success)",
-                borderRadius: 999,
+                borderRadius: "var(--radius-pill)",
                 transition: "width 0.05s ease",
               }}
             />

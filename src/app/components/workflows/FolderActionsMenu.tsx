@@ -57,7 +57,7 @@ export default function FolderActionsMenu({
           e.stopPropagation();
           setAnchorEl(e.currentTarget);
         }}
-        sx={{ padding: "2px", color: "var(--text-secondary)" }}
+        sx={{ padding: "var(--space-1)", color: "var(--text-secondary)" }}
       >
         <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
           <circle cx="7" cy="3" r="1.2" fill="currentColor" />
@@ -111,7 +111,7 @@ export default function FolderActionsMenu({
       </Menu>
 
       <Dialog open={renaming} onClose={() => setRenaming(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontSize: "1rem" }}>Rename folder</DialogTitle>
+        <DialogTitle sx={{ fontSize: "var(--font-size-lg)" }}>Rename folder</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus

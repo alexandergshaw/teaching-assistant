@@ -27,7 +27,10 @@ const DAYS_PER_PAGE = 5;
 // Brand palette (matches the rest of the app).
 const ACCENT = "var(--accent)";
 const ACCENT_BG = "var(--accent-surface)";
-const BUSY_BG = "var(--border-soft)";
+// The whole-cell tint an event's row(s) sit on - kept subtle (surface-muted,
+// not border-soft) now that the event's own title renders as a small chip
+// (AC "events as radius-xs chips") rather than filling the cell itself.
+const BUSY_BG = "var(--surface-muted)";
 const BUSY_TEXT = "var(--text-secondary)";
 const BORDER = "var(--border-soft)";
 const MUTED = "var(--text-muted)";
@@ -139,16 +142,35 @@ export default function WeekCalendar({
   for (let m = workStartHour * 60; m + slotMinutes <= workEndHour * 60; m += slotMinutes) rows.push(m);
 
   if (model.orderedKeys.length === 0) {
-    return <p style={{ color: MUTED }}>No open times in your working hours over the next couple of weeks.</p>;
+    return (
+      <p
+        style={{
+          margin: 0,
+          padding: "var(--space-6) var(--space-4)",
+          textAlign: "center",
+          color: "var(--text-secondary)",
+          fontSize: "var(--font-size-md)",
+        }}
+      >
+        No open times in your working hours over the next couple of weeks.
+      </p>
+    );
   }
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "var(--space-2)",
+        }}
+      >
         <Button variant="outlined" size="small" onClick={() => setPageOverride(page - 1)} disabled={page <= 0}>
           ‹ Earlier
         </Button>
-        <span style={{ fontSize: 13, color: BUSY_TEXT }}>
+        <span style={{ fontSize: "var(--font-size-sm)", color: BUSY_TEXT }}>
           Pick a highlighted time. Shaded blocks are existing events.
         </span>
         <Button variant="outlined" size="small" onClick={() => setPageOverride(page + 1)} disabled={page >= maxPage}>
@@ -162,7 +184,22 @@ export default function WeekCalendar({
             <tr>
               <th style={{ width: 64 }} />
               {pageKeys.map((key) => (
-                <th key={key} style={{ padding: "6px 4px", fontSize: 13, fontWeight: 600, borderBottom: `1px solid ${BORDER}` }}>
+                <th
+                  key={key}
+                  style={{
+                    padding: "var(--space-1)",
+                    // AM5's tracked-uppercase micro-label idiom, pinned
+                    // exactly: font-size-2xs, weight 700, 0.06em tracking,
+                    // text-secondary - not the ad hoc 13px/600/no-tracking
+                    // this used before.
+                    fontSize: "var(--font-size-2xs)",
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "var(--text-secondary)",
+                    borderBottom: `1px solid ${BORDER}`,
+                  }}
+                >
                   {model.days.get(key)?.label}
                 </th>
               ))}
@@ -171,7 +208,22 @@ export default function WeekCalendar({
           <tbody>
             {rows.map((m) => (
               <tr key={m}>
-                <td style={{ fontSize: 11, color: MUTED, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", height: 30 }}>
+                <td
+                  style={{
+                    // AC1 nearest-token would land on --font-size-2xs (exact
+                    // 11px match), but that size is reserved for the tracked-
+                    // uppercase micro-label idiom (AM5) and this is a plain
+                    // (non-uppercase) axis label - table meta is --font-size-
+                    // xs's stated purpose, so that wins over pure numeric
+                    // distance. Reported as a judgment call.
+                    fontSize: "var(--font-size-xs)",
+                    color: MUTED,
+                    textAlign: "right",
+                    paddingRight: "var(--space-2)",
+                    whiteSpace: "nowrap",
+                    height: 30,
+                  }}
+                >
                   {m % 60 === 0 ? minuteLabel(m) : ""}
                 </td>
                 {pageKeys.map((key) => {
@@ -182,7 +234,7 @@ export default function WeekCalendar({
 
                   if (iso) {
                     return (
-                      <td key={key} style={{ borderTop: `1px solid ${BORDER}`, padding: 2 }}>
+                      <td key={key} style={{ borderTop: `1px solid ${BORDER}`, padding: "var(--space-1)" }}>
                         <button
                           type="button"
                           onClick={() => onSelect(iso)}
@@ -192,15 +244,22 @@ export default function WeekCalendar({
                             height: 26,
                             cursor: "pointer",
                             border: `1px solid ${ACCENT}`,
-                            borderRadius: 6,
+                            borderRadius: "var(--radius-xs)",
                             background: isSelected ? ACCENT : ACCENT_BG,
-                            color: isSelected ? "#fff" : ACCENT,
+                            // --text-on-accent (not a raw "#fff" fallback):
+                            // the filled-accent case this token was added
+                            // for mid-wave - see globals.css's "Foreground on
+                            // a filled surface" note.
+                            color: isSelected ? "var(--text-on-accent)" : ACCENT,
+                            // AM6: 10px is below the 0.68rem density floor
+                            // inside a fixed-width table column - left as a
+                            // literal on purpose, not raised to a token.
                             fontSize: 10,
                             fontWeight: 600,
                             whiteSpace: "nowrap",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
-                            padding: "0 2px",
+                            padding: "0 var(--space-1)",
                           }}
                         >
                           {slotRangeLabel(m, m + slotMinutes)}
@@ -215,18 +274,38 @@ export default function WeekCalendar({
                         key={key}
                         style={{
                           borderTop: `1px solid ${BORDER}`,
+                          // A subtle whole-span tint (not the old solid
+                          // border-soft fill) so an event's duration is still
+                          // visible across every row it covers, while the
+                          // event's own label renders as a small chip below -
+                          // "events as radius-xs chips", not a whole-cell
+                          // tint carrying the text.
                           background: BUSY_BG,
-                          color: BUSY_TEXT,
-                          fontSize: 11,
-                          padding: "2px 6px",
+                          padding: "var(--space-1)",
                           overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          textOverflow: "ellipsis",
-                          maxWidth: 0,
                         }}
                         title={busy.title}
                       >
-                        {isStart ? busy.title : ""}
+                        {isStart && (
+                          <span
+                            style={{
+                              display: "block",
+                              maxWidth: "100%",
+                              overflow: "hidden",
+                              whiteSpace: "nowrap",
+                              textOverflow: "ellipsis",
+                              padding: "0 var(--space-1)",
+                              borderRadius: "var(--radius-xs)",
+                              border: `1px solid ${BORDER}`,
+                              background: "var(--card-background)",
+                              color: BUSY_TEXT,
+                              fontSize: "var(--font-size-xs)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {busy.title}
+                          </span>
+                        )}
                       </td>
                     );
                   }

@@ -42,7 +42,7 @@ export function CopilotAgentsSection({
 }: CopilotAgentsSectionProps) {
   return (
     <div>
-      <h3 style={{ margin: "0 0 12px" }}>Start Copilot agents</h3>
+      <h3 style={{ margin: "0 0 var(--space-3)" }}>Start Copilot agents</h3>
 
       <TextField
         size="small"
@@ -51,7 +51,7 @@ export function CopilotAgentsSection({
         value={copilotTitle}
         onChange={(e) => onCopilotTitleChange(e.target.value)}
         disabled={copilotRunning}
-        sx={{ mb: 1.5 }}
+        sx={{ mb: "var(--space-3)" }}
       />
 
       <TextField
@@ -64,10 +64,10 @@ export function CopilotAgentsSection({
         value={copilotBody}
         onChange={(e) => onCopilotBodyChange(e.target.value)}
         disabled={copilotRunning}
-        sx={{ mb: 1.5 }}
+        sx={{ mb: "var(--space-3)" }}
       />
 
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: "var(--space-2)" }}>
         <Button
           type="button"
           variant="contained"
@@ -85,9 +85,9 @@ export function CopilotAgentsSection({
       </div>
 
       {copilotRows.length > 0 && (
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: "var(--space-3)" }}>
           {copilotRunning && (
-            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: 8 }}>
+            <p style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", marginBottom: "var(--space-2)" }}>
               Starting {copilotRows.filter((r) => r.status !== "pending").length} of {copilotRows.length}...
             </p>
           )}
@@ -96,8 +96,8 @@ export function CopilotAgentsSection({
               maxHeight: 240,
               overflowY: "auto",
               border: "1px solid var(--field-border)",
-              borderRadius: 4,
-              padding: 8,
+              borderRadius: "var(--radius-xs)",
+              padding: "var(--space-2)",
             }}
           >
             {copilotRows.map((row) => (
@@ -106,10 +106,10 @@ export function CopilotAgentsSection({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 8,
-                  fontSize: "0.85rem",
-                  marginBottom: 6,
-                  paddingBottom: 6,
+                  gap: "var(--space-2)",
+                  fontSize: "var(--font-size-md)",
+                  marginBottom: "var(--space-1)",
+                  paddingBottom: "var(--space-1)",
                   borderBottom: "1px solid var(--field-border)",
                 }}
               >
@@ -128,12 +128,12 @@ export function CopilotAgentsSection({
                   {row.status}
                 </span>
                 {row.detail && row.status === "done" && (
-                  <a href={row.detail} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)", fontSize: "0.75rem" }}>
-                    view
+                  <a href={row.detail} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)", fontSize: "var(--font-size-xs)" }}>
+                    View
                   </a>
                 )}
                 {row.detail && row.status === "failed" && (
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }} title={row.detail}>
+                  <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }} title={row.detail}>
                     {row.detail.split("\n")[0].slice(0, 40)}...
                   </span>
                 )}
@@ -143,14 +143,14 @@ export function CopilotAgentsSection({
         </div>
       )}
 
-      <p className={styles.fieldHint} style={{ marginTop: 8 }}>
+      <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>
         Each repo gets a Copilot coding-agent task with these instructions.
       </p>
 
-      <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
-        <h4 style={{ margin: "0 0 12px" }}>Running agents</h4>
+      <div style={{ marginTop: "var(--space-5)", paddingTop: "var(--space-3)", borderTop: "1px solid var(--field-border)" }}>
+        <h4 style={{ margin: "0 0 var(--space-3)" }}>Running agents</h4>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
           <Button
             type="button"
             variant="outlined"
@@ -168,7 +168,7 @@ export function CopilotAgentsSection({
         </div>
 
         {checkedAt !== null && (
-          <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: 8 }}>
+          <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", marginBottom: "var(--space-2)" }}>
             Checked at {new Date(checkedAt).toLocaleString()}{!lastRunManual && " (auto)"}
           </p>
         )}
@@ -194,22 +194,22 @@ function AgentStatusList({ agentStatus }: AgentStatusListProps) {
         maxHeight: 400,
         overflowY: "auto",
         border: "1px solid var(--field-border)",
-        borderRadius: 4,
-        padding: 8,
+        borderRadius: "var(--radius-xs)",
+        padding: "var(--space-2)",
       }}
     >
       {Object.entries(agentStatus).map(([repo, tasks]) => (
         <div key={repo}>
-          <div style={{ fontSize: "0.85rem", fontWeight: 500, marginBottom: 8, color: "var(--text-primary)" }}>
+          <div style={{ fontSize: "var(--font-size-md)", fontWeight: 500, marginBottom: "var(--space-2)", color: "var(--text-primary)" }}>
             <span style={{ fontFamily: "monospace" }}>{repo}</span>
           </div>
 
           {tasks.length === 0 ? (
-            <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: 12 }}>
+            <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", marginBottom: "var(--space-3)" }}>
               No agent tasks found.
             </p>
           ) : (
-            <div style={{ marginBottom: 12, marginLeft: 12 }}>
+            <div style={{ marginBottom: "var(--space-3)", marginLeft: "var(--space-3)" }}>
               {tasks.map((task) => {
                 const taskState =
                   task.state === "OPEN" && (!task.pr || task.pr.isDraft)
@@ -231,14 +231,14 @@ function AgentStatusList({ agentStatus }: AgentStatusListProps) {
                     style={{
                       display: "flex",
                       flexDirection: "column",
-                      gap: 4,
-                      fontSize: "0.8rem",
-                      marginBottom: 10,
-                      paddingBottom: 10,
+                      gap: "var(--space-1)",
+                      fontSize: "var(--font-size-sm)",
+                      marginBottom: "var(--space-2)",
+                      paddingBottom: "var(--space-2)",
                       borderBottom: "1px solid var(--field-border)",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
                       <a
                         href={task.htmlUrl}
                         target="_blank"
@@ -255,8 +255,8 @@ function AgentStatusList({ agentStatus }: AgentStatusListProps) {
                     </div>
 
                     {task.pr && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginLeft: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", marginLeft: "var(--space-2)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
                           <a
                             href={task.pr.url}
                             target="_blank"
@@ -310,7 +310,7 @@ function AgentStatusList({ agentStatus }: AgentStatusListProps) {
                         <div
                           className={styles.ghMetaMono}
                           style={{
-                            fontSize: "0.75rem",
+                            fontSize: "var(--font-size-xs)",
                             color: "var(--text-secondary)",
                           }}
                         >

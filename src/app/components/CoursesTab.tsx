@@ -30,6 +30,7 @@ import RecommendTextbooksModal from "./courses/RecommendTextbooksModal";
 import TextbookPhotoModal from "./courses/TextbookPhotoModal";
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
+import tableStyles from "./courses/CoursesTable.module.css";
 import { useCoursesData } from "./courses/useCoursesData";
 import { useCourseImportActions } from "./courses/useCourseImportActions";
 import { useInlineFieldSave } from "./courses/useInlineFieldSave";
@@ -287,13 +288,13 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
           row, AC9), and which errored, without one bad course hiding the
           rest of the term's results. */}
       {calendarSyncResult && !formState && (
-        <div className={styles.syllabusSectionCard} style={{ marginBottom: 16 }}>
-          <p className={styles.syllabusSectionHeading} style={{ margin: 0 }}>
+        <div className={styles.syllabusSectionCard} style={{ marginBottom: "var(--space-4)" }}>
+          <p className={styles.syllabusSectionHeading}>
             Calendar sync - {calendarSyncResult.calendarName}
           </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className={tableStyles.stackXs}>
             {calendarSyncResult.perCourse.map((c) => (
-              <div key={c.courseId} style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+              <div key={c.courseId} style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-2)", flexWrap: "wrap" }}>
                 <span
                   className={`${styles.ghBadge} ${
                     c.outcome === "synced" ? styles.ghBadgeSuccess : c.outcome === "error" ? styles.ghBadgeDanger : styles.ghBadgeNeutral
@@ -301,8 +302,8 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
                 >
                   {c.outcome === "synced" ? "Synced" : c.outcome === "error" ? "Error" : "Skipped"}
                 </span>
-                <span style={{ fontWeight: 600 }}>{c.courseName}</span>
-                <span className={styles.fieldHint} style={{ margin: 0 }}>
+                <span className={tableStyles.courseNameStrong}>{c.courseName}</span>
+                <span className={styles.fieldHint}>
                   {c.outcome === "synced"
                     ? `${c.created} created, ${c.updated} updated, ${c.deleted} deleted`
                     : c.outcome === "error"

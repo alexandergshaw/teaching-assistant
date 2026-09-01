@@ -122,7 +122,7 @@ export default function CommentEditModal({
           </button>
         </div>
 
-        <div style={{ padding: "16px", borderBottom: "1px solid var(--field-border)" }}>
+        <div style={{ padding: "var(--space-4)", borderBottom: "1px solid var(--border-soft)" }}>
           <p className={styles.previewMeta}>Preview</p>
           <pre
             className={styles.previewContent}
@@ -132,7 +132,7 @@ export default function CommentEditModal({
           </pre>
         </div>
 
-        <div style={{ padding: "16px" }}>
+        <div style={{ padding: "var(--space-4)" }}>
           <label htmlFor="comment-edit" className={styles.previewMeta}>
             Edit
           </label>
@@ -146,11 +146,11 @@ export default function CommentEditModal({
             style={{
               width: "100%",
               minHeight: "120px",
-              padding: "8px",
+              padding: "var(--space-2)",
               border: "1px solid var(--field-border)",
-              borderRadius: "4px",
+              borderRadius: "var(--radius-xs)",
               fontFamily: "inherit",
-              fontSize: "14px",
+              fontSize: "var(--font-size-md)",
               resize: "vertical",
             }}
             disabled={saving}
@@ -158,17 +158,17 @@ export default function CommentEditModal({
         </div>
 
         {error && (
-          <div style={{ padding: "16px", borderTop: "1px solid var(--field-border)", backgroundColor: "var(--error-bg)" }}>
-            <p style={{ margin: 0, color: "var(--error-color)", fontSize: "14px" }}>
+          <div style={{ padding: "var(--space-4)", borderTop: "1px solid var(--danger-border)", backgroundColor: "var(--danger-surface)" }}>
+            <p style={{ margin: 0, color: "var(--danger)", fontSize: "var(--font-size-md)" }}>
               {error}
             </p>
           </div>
         )}
 
         {discardConfirm && (
-          <div style={{ padding: "16px", borderTop: "1px solid var(--field-border)", backgroundColor: "var(--warning-bg)" }}>
-            <p style={{ margin: "0 0 8px 0", fontSize: "14px" }}>Discard changes?</p>
-            <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ padding: "var(--space-4)", borderTop: "1px solid var(--warning-border)", backgroundColor: "var(--warning-surface)" }}>
+            <p style={{ margin: "0 0 var(--space-2) 0", fontSize: "var(--font-size-md)" }}>Discard changes?</p>
+            <div style={{ display: "flex", gap: "var(--space-2)" }}>
               <Button
                 size="small"
                 variant="outlined"
@@ -189,7 +189,7 @@ export default function CommentEditModal({
           </div>
         )}
 
-        <div style={{ padding: "16px", display: "flex", gap: "8px", justifyContent: "flex-end", borderTop: "1px solid var(--field-border)" }}>
+        <div style={{ padding: "var(--space-4)", display: "flex", gap: "var(--space-2)", justifyContent: "flex-end", borderTop: "1px solid var(--border-soft)" }}>
           <Button
             variant="outlined"
             size="small"

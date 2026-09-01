@@ -316,7 +316,7 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
               those buys nothing and costs a real migration/rename risk). */}
           <span>Checklist Overview</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center" }}>
+        <div className={tableStyles.headerActions}>
           <button
             type="button"
             className={styles.selectionChatClose}
@@ -363,7 +363,7 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
 
       <div className={tableStyles.windowBody}>
         {loadState === "loading" && (
-          <div className={tableStyles.stateMessage} style={{ alignItems: "center", flexDirection: "row" }}>
+          <div className={`${tableStyles.stateMessage} ${tableStyles.stateMessageRow}`} role="status" aria-live="polite">
             <CircularProgress size={18} />
             <span className={styles.previewMeta}>Loading checklist items…</span>
           </div>
@@ -371,7 +371,7 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
 
         {loadState === "error" && (
           <div className={tableStyles.stateMessage}>
-            <p className={styles.previewMeta} style={{ color: "var(--danger)" }}>
+            <p className={`${styles.previewMeta} ${tableStyles.dangerText}`}>
               {error ?? "Could not load your courses."}
             </p>
             <Button size="small" variant="outlined" onClick={refresh}>

@@ -78,7 +78,7 @@ export function CartridgeToCanvasModal({ cartridge, courseName, onClose, restore
         </button>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "72vh", overflowY: "auto" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", maxHeight: "72vh", overflowY: "auto" }}>
         <p className={styles.fieldHint} style={{ margin: 0 }}>
           Starts a Canvas content migration in {courseName || "the live course"} and imports the cartridge into it -
           this is separate from importing a cartridge into this app (see the &quot;Import cartridge&quot; button).
@@ -160,7 +160,7 @@ export function CartridgeToCanvasModal({ cartridge, courseName, onClose, restore
         {cartridge.phase === "selecting" ? (
           <div className={styles.field}>
             <label>Content types to import</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
               {cartridge.copyTypes.map((t) => (
                 <FormControlLabel
                   key={t.key}
@@ -173,7 +173,7 @@ export function CartridgeToCanvasModal({ cartridge, courseName, onClose, restore
             <Button
               variant="contained"
               size="small"
-              style={{ alignSelf: "flex-start", marginTop: 8 }}
+              style={{ alignSelf: "flex-start", marginTop: "var(--space-2)" }}
               onClick={cartridge.submitSelectedTypes}
               disabled={cartridge.chosenTypes.size === 0}
             >
@@ -181,7 +181,7 @@ export function CartridgeToCanvasModal({ cartridge, courseName, onClose, restore
             </Button>
           </div>
         ) : (
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap", paddingTop: "var(--space-2)", borderTop: "1px solid var(--card-border)" }}>
             <Button variant="contained" size="small" onClick={cartridge.start} disabled={!cartridge.canStart || busy}>
               {busy ? "Working…" : "Upload to Canvas"}
             </Button>
@@ -190,7 +190,7 @@ export function CartridgeToCanvasModal({ cartridge, courseName, onClose, restore
         )}
 
         {cartridge.error && <p className={styles.error}>{cartridge.error}</p>}
-        {cartridge.phase === "done" && <p style={{ fontSize: "0.85rem", color: "var(--success)", margin: 0 }}>Uploaded successfully.</p>}
+        {cartridge.phase === "done" && <p style={{ fontSize: "var(--font-size-md)", color: "var(--success-ink)", margin: 0 }}>Uploaded successfully.</p>}
       </div>
     </ModalShell>
   );

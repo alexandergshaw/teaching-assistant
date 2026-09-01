@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
+import styles from "../page.module.css";
 
 // Map a file extension (or special filename) to a Monaco language id.
 const LANGUAGE_BY_EXT: Record<string, string> = {
@@ -68,15 +69,34 @@ export default function MonacoFileEditor({ path, value, onChange, height = "60vh
   }, []);
 
   return (
-    <div style={{ border: "1px solid var(--field-border)", borderRadius: 8, overflow: "hidden" }}>
+    <div style={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
       <Editor
         height={height}
         language={languageForPath(path)}
         value={value}
         onChange={(v) => onChange(v ?? "")}
         theme={theme}
-        loading={<div style={{ padding: 16, fontSize: "0.85rem", color: "var(--text-secondary)" }}>Loading editor...</div>}
+        loading={
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-2)",
+              padding: "var(--space-4)",
+              fontSize: "var(--font-size-md)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            <span className={styles.spinner} aria-hidden="true" />
+            Loading editor...
+          </div>
+        }
         options={{
+          // Monaco's own rendering metric (a canvas pixel size passed to a
+          // third-party engine), not a CSS font-size on an owned stylesheet
+          // or inline style - it takes a plain number, not a custom-property
+          // string, so this is left as a literal. See the group report for
+          // why (AC1 governs CSS/JSX font-size, not this option).
           fontSize: 13,
           minimap: { enabled: true },
           scrollBeyondLastLine: false,

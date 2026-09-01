@@ -139,7 +139,7 @@ export function ExportAddItemRow({ m, sourceContext, courseId, provider, addItem
         Add
       </Button>
       {aiError && (
-        <span className={styles.ccHint} style={{ color: "var(--error, #b91c1c)" }}>
+        <span className={styles.ccHint} style={{ color: "var(--danger)" }}>
           {aiError}
         </span>
       )}

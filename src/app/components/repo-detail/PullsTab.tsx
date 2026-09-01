@@ -79,7 +79,7 @@ export function PullsTab({
   } = pullsTab;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", marginTop: "var(--space-3)" }}>
       <details className={styles.adaptDisclosure} style={{ marginTop: 0 }}>
         <summary>Open a pull request</summary>
         <div className={styles.adaptDisclosureBody}>
@@ -91,9 +91,9 @@ export function PullsTab({
           onChange={(e) => setPrTitle(e.target.value)}
           onKeyDown={submitOnEnter(handleCreatePr)}
           disabled={prBusy}
-          sx={{ marginBottom: 1 }}
+          sx={{ marginBottom: "var(--space-2)" }}
         />
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 1, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-2)", flexWrap: "wrap" }}>
           <div style={{ minWidth: 180 }}>
             <Typeahead
               options={branches.map((b) => ({ value: b, label: b }))}
@@ -102,7 +102,7 @@ export function PullsTab({
               placeholder="head (compare)"
             />
           </div>
-          <span style={{ fontSize: "0.9rem" }}>into</span>
+          <span style={{ fontSize: "var(--font-size-md)" }}>into</span>
           <div style={{ minWidth: 180 }}>
             <Typeahead
               options={branches.map((b) => ({ value: b, label: b }))}
@@ -121,7 +121,7 @@ export function PullsTab({
           value={prBody}
           onChange={(e) => setPrBody(e.target.value)}
           disabled={prBusy}
-          sx={{ marginBottom: 1 }}
+          sx={{ marginBottom: "var(--space-2)" }}
         />
         <Button
           variant="contained"
@@ -138,8 +138,8 @@ export function PullsTab({
         <p
           style={{
             margin: 0,
-            fontSize: "0.85rem",
-            color: prMsg.startsWith("Error") ? "var(--danger)" : "var(--success)",
+            fontSize: "var(--font-size-md)",
+            color: prMsg.startsWith("Error") ? "var(--danger)" : "var(--success-ink)",
           }}
         >
           {prMsg}
@@ -150,7 +150,7 @@ export function PullsTab({
         <div className={styles.ghPanelHead}>
           <label className={styles.panelTitle}>
             Pull requests
-            {attentionPrs > 0 && <span className={styles.navBadge} style={{ marginLeft: 8 }}>{attentionPrs}</span>}
+            {attentionPrs > 0 && <span className={styles.navBadge} style={{ marginLeft: "var(--space-2)" }}>{attentionPrs}</span>}
           </label>
           <TextField
             select
@@ -166,8 +166,9 @@ export function PullsTab({
         </div>
 
         {pullsState === "loading" && (
-          <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
             <CircularProgress size={24} />
+            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading pull requests...</span>
           </div>
         )}
         {pullsState === "error" && <p className={styles.error}>{pullsError}</p>}
@@ -189,13 +190,13 @@ export function PullsTab({
                       <a href={p.htmlUrl} target="_blank" rel="noreferrer" className={styles.ghRowNum}>
                         #{p.number}
                       </a>
-                      <span style={{ marginLeft: 8 }} className={styles.ghRowName}>{p.title}</span>
+                      <span style={{ marginLeft: "var(--space-2)" }} className={styles.ghRowName}>{p.title}</span>
                     </div>
-                    <div className={`${styles.ghMeta} ${styles.ghMetaMono}`} style={{ marginTop: 4 }}>
+                    <div className={`${styles.ghMeta} ${styles.ghMetaMono}`} style={{ marginTop: "var(--space-1)" }}>
                       {p.head} → {p.base}
                       {p.user ? ` · ${p.user}` : ""}
                     </div>
-                    <div className={styles.ghBadges} style={{ marginTop: 8 }}>
+                    <div className={styles.ghBadges} style={{ marginTop: "var(--space-2)" }}>
                       <span className={`${styles.ghBadge} ${p.draft ? styles.ghBadgeNeutral : isOpen ? styles.ghBadgeSuccess : styles.ghBadgeNeutral}`}>
                         {p.draft ? "Draft" : isOpen ? "Open" : "Closed"}
                       </span>
@@ -276,10 +277,11 @@ export function PullsTab({
                 </div>
 
                 {expandedPr === p.number && (
-                  <div style={{ marginTop: 10 }}>
+                  <div style={{ marginTop: "var(--space-2)" }}>
                     {filesLoadingPr === p.number && (
-                      <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-3)" }} role="status" aria-live="polite">
                         <CircularProgress size={20} />
+                        <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading file changes...</span>
                       </div>
                     )}
                     {files && files.length === 0 && <p className={styles.fieldHint}>No file changes.</p>}
@@ -289,7 +291,7 @@ export function PullsTab({
                           <div className={styles.prFileHead}>
                             <span className={styles.prFileName}>{f.filename}</span>
                             <span className={styles.prFileStat}>
-                              <span style={{ color: "var(--success)" }}>+{f.additions}</span>{" "}
+                              <span style={{ color: "var(--success-ink)" }}>+{f.additions}</span>{" "}
                               <span style={{ color: "var(--danger)" }}>-{f.deletions}</span>{" "}
                               <span style={{ color: "var(--text-secondary)" }}>{f.status}</span>
                             </span>
@@ -303,7 +305,7 @@ export function PullsTab({
                               ))}
                             </pre>
                           ) : (
-                            <p className={styles.fieldHint} style={{ margin: "6px 10px" }}>
+                            <p className={styles.fieldHint} style={{ margin: "var(--space-1) var(--space-2)" }}>
                               No inline diff (binary or too large).
                             </p>
                           )}

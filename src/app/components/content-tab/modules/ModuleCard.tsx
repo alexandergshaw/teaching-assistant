@@ -237,14 +237,14 @@ export function ModuleCard({
             {m.items.length} item{m.items.length === 1 ? "" : "s"}
           </span>
         </div>
-        <div className={styles.ccHint} style={{ padding: "4px 6px" }}>
+        <div className={styles.ccHint} style={{ padding: "var(--space-1) var(--space-2)" }}>
           {moduleGate.reason}
         </div>
 
         {exportOpen && (
           <div className={styles.ccItems}>
             {m.items.length === 0 && (
-              <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
+              <p className={styles.ccHint} style={{ padding: "var(--space-1) var(--space-2)" }}>
                 No items in this module.
               </p>
             )}
@@ -307,7 +307,7 @@ export function ModuleCard({
       }}
       style={{
         opacity: moduleDrag === mc.id ? 0.55 : 1,
-        boxShadow: moduleDrag === mc.id ? "0 8px 20px rgba(15, 23, 42, 0.16)" : undefined,
+        boxShadow: moduleDrag === mc.id ? "var(--shadow-md)" : undefined,
         outline:
           dragOverModuleRow === mc.id && moduleDrag !== null && moduleDrag !== mc.id
             ? "2px solid var(--accent)"
@@ -426,7 +426,7 @@ export function ModuleCard({
       {open && (
         <div className={styles.ccItems}>
           {mc.items.length === 0 && (
-            <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
+            <p className={styles.ccHint} style={{ padding: "var(--space-1) var(--space-2)" }}>
               No items in this module.
             </p>
           )}

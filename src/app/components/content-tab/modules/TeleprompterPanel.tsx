@@ -112,7 +112,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
   const runningLong = running && expectedDurationMs > 0 && elapsedMs > expectedDurationMs;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
       {/* T2: plainly states nothing is being recorded, so an instructor is
           never unsure. */}
       <p className={styles.previewMeta} style={{ margin: 0, fontWeight: 600 }}>
@@ -120,7 +120,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
         leave teleprompter mode.
       </p>
 
-      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap" }}>
         {/* Camera preview column (T7: the canvas painted from
             useCameraPreview's own frame loop is what is mounted here - not
             the raw <video>, which stays off-screen and only feeds the
@@ -132,7 +132,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
             style={{
               width: "100%",
               aspectRatio: "16 / 9",
-              borderRadius: 8,
+              borderRadius: "var(--radius-sm)",
               border: "1px solid var(--field-border)",
               background: "#000",
               display: "block",
@@ -152,7 +152,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
             </p>
           )}
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
             <TextField
               select
               size="small"
@@ -225,7 +225,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
           </div>
 
           {(devices.cameras.length === 0 || devices.mics.length === 0) && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginTop: "var(--space-2)", flexWrap: "wrap" }}>
               <span className={styles.fieldHint}>Cameras and microphones appear here after the browser grants access.</span>
               <Button variant="outlined" size="small" onClick={requestDeviceAccess}>
                 Grant access
@@ -245,8 +245,8 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
         </div>
 
         {/* Script + feedback column. */}
-        <div style={{ flex: "2 1 420px", minWidth: 320, display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: "2 1 420px", minWidth: 320, display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
             {/* T12: elapsed-since-start, formatted with the existing tested
                 fmt() - never a second time-formatting implementation - and
                 the expected duration alongside it so running long is visible
@@ -254,7 +254,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
             <span
               style={{
                 fontFamily: "var(--font-mono, monospace)",
-                fontSize: "1.05rem",
+                fontSize: "var(--font-size-lg)",
                 color: runningLong ? "var(--warning-ink)" : undefined,
               }}
             >
@@ -291,7 +291,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
           </div>
 
           {manualOverride && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
               <span className={styles.fieldHint}>Auto-scroll paused - you scrolled manually.</span>
               <Button size="small" variant="text" onClick={() => setManualOverride(false)}>
                 Resume auto-scroll
@@ -306,22 +306,22 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
               maxHeight: 360,
               overflowY: "auto",
               border: "1px solid var(--field-border)",
-              borderRadius: 8,
-              padding: "1rem",
+              borderRadius: "var(--radius-sm)",
+              padding: "var(--space-4)",
             }}
           >
             {script.trim() === "" ? (
               <p className={styles.previewMeta}>This version has no text.</p>
             ) : (
-              <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "1.05rem", lineHeight: 1.6 }}>
+              <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "var(--font-size-lg)", lineHeight: 1.6 }}>
                 {script}
               </pre>
             )}
           </div>
 
-          <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-5)", flexWrap: "wrap" }}>
             <div>
-              <strong style={{ fontSize: "0.8rem" }}>Pace</strong>
+              <strong style={{ fontSize: "var(--font-size-sm)" }}>Pace</strong>
               {/* T10: an explicit "not enough data" state - never a wild
                   number computed from one or two words. */}
               <p className={styles.fieldHint} style={{ margin: 0 }}>
@@ -337,7 +337,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
               </p>
             </div>
             <div>
-              <strong style={{ fontSize: "0.8rem" }}>Filler words</strong>
+              <strong style={{ fontSize: "var(--font-size-sm)" }}>Filler words</strong>
               {/* T11: an explicit unsupported state - never a zero that
                   looks like a measurement. */}
               <p className={styles.fieldHint} style={{ margin: 0 }}>

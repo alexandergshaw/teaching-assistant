@@ -69,7 +69,7 @@ export default function SyllabusPreviewModal({
             <h3>{name}</h3>
             <p className={styles.previewMeta}>Syllabus preview</p>
           </div>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
             {onEditDocument && (
               <button type="button" className={styles.previewCloseButton} onClick={onEditDocument}>
                 Edit with AI

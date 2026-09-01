@@ -3,10 +3,10 @@
   flex: 1;
   align-items: flex-start;
   justify-content: center;
-  padding: 40px 24px 56px;
+  padding: var(--space-10) var(--space-6) var(--space-12);
   background: var(--page-background);
-  font-size: 16px;
-  line-height: 1.5;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-normal);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -19,7 +19,7 @@
   gap: 0;
   background: var(--card-background);
   border: 1px solid var(--card-border);
-  border-radius: 24px;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   /* clip (not hidden) keeps the rounded-corner clipping without making this a
      scroll container, which would stop the sticky tabs from sticking. */
@@ -31,39 +31,59 @@
   max-width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  padding: 36px;
+  gap: var(--space-6);
+  padding: var(--space-6);
 }
 
 .header {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-bottom: 18px;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
   border-bottom: 1px solid color-mix(in srgb, var(--field-border) 72%, transparent 28%);
 }
 
 .eyebrow {
-  font-size: 0.85rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  /* AM18: a page-level kicker above a title keeps the accent treatment;
+     only a group-naming micro-label (panel title, section label, column
+     header) is --text-secondary. */
   color: var(--accent-ink);
 }
 
 /* Section heading inside a panel: the app's tracked-uppercase label idiom,
    applied consistently across the Version Control panels. */
 .panelTitle {
-  font-size: 0.72rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 
 .header h1 {
-  font-size: 1.75rem;
-  line-height: 1.15;
+  /* AM16: in-app page/tab titles are --font-size-2xl; --font-size-3xl is
+     reserved for the auth/login hero and full-screen empty states. Every tab
+     in the app inherits this rule via .header h1. */
+  font-size: var(--font-size-2xl);
+  line-height: var(--line-tight);
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* X3 (mid-wave amendment AM24): a duplicate-<h1> accessibility fix demoted a
+   nested title to <h2>, and `.header` had no h2 rule at all - it fell through
+   to the UA default (18px looked like 22px's sibling on screen but rendered
+   at the browser default, no negative tracking, no color rule). Mirrors
+   `.header h1` above exactly except for size: one step down the type scale,
+   same tight line-height, same tracking, same weight and color. */
+.header h2 {
+  font-size: var(--font-size-xl);
+  line-height: var(--line-tight);
   letter-spacing: -0.02em;
   font-weight: 700;
   color: var(--text-primary);
@@ -71,60 +91,70 @@
 
 .header p {
   max-width: 58rem;
-  font-size: 1rem;
-  line-height: 1.65;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-normal);
   color: var(--text-secondary);
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .loadingState {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 14px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--field-border) 65%);
   background: color-mix(in srgb, var(--field-background) 84%, var(--accent) 16%);
 }
 
+/* X6: THE canonical spinner recipe for the whole app. The same recipe was
+   written five times across the codebase, one copy in a different color -
+   this is the reference implementation every other stylesheet's spinner
+   aligns to: border `2px solid color-mix(in srgb, var(--accent) 20%,
+   transparent)`, `border-top-color: var(--accent-ink)`, `animation:
+   var(--ta-spin-animation)` (the shared rotation keyframe - see globals.css's
+   --ta-spin-animation comment for why the whole shorthand must be routed
+   through a token rather than a bare `animation: ta-spin ...` reference). Do
+   not fork this rule - if a spinner needs a different size or color, add a
+   new class that still uses these three declarations verbatim. */
 .spinner {
   width: 16px;
   height: 16px;
-  margin-top: 4px;
-  border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--accent) 20%, transparent 80%);
+  margin-top: var(--space-1);
+  border-radius: var(--radius-round);
+  border: 2px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-top-color: var(--accent-ink);
-  animation: spin 0.8s linear infinite;
+  animation: var(--ta-spin-animation);
 }
 
 .loadingTitle {
-  font-size: 0.92rem;
+  font-size: var(--font-size-md);
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .loadingText {
-  margin-top: 4px;
-  font-size: 0.9rem;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--line-normal);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .field label {
-  font-size: 0.72rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -133,15 +163,15 @@
 .field textarea {
   width: 100%;
   border: 1px solid var(--field-border);
-  border-radius: 18px;
+  border-radius: var(--radius-sm);
   background: var(--field-background);
 }
 
 .fileField {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 20px;
+  gap: var(--space-2);
+  padding: var(--space-5);
   border-style: dashed;
 }
 
@@ -151,27 +181,27 @@
 }
 
 .fileField input::file-selector-button {
-  margin-right: 16px;
-  padding: 10px 16px;
+  margin-right: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-weight: 600;
   cursor: pointer;
 }
 
 .fileField p {
-  font-size: 0.95rem;
+  font-size: var(--font-size-lg);
   color: var(--text-secondary);
 }
 
 .savedFileNote {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
 }
 
@@ -184,9 +214,9 @@
   border: 1px solid var(--field-border);
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 0.8rem;
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -198,11 +228,11 @@
 
 .field textarea {
   min-height: 220px;
-  padding: 16px 18px;
+  padding: var(--space-4) var(--space-4);
   resize: vertical;
   font: inherit;
   color: var(--text-primary);
-  line-height: 1.55;
+  line-height: var(--line-normal);
 }
 
 .field textarea::placeholder {
@@ -211,14 +241,14 @@
 
 .textInput {
   width: 100%;
-  padding: 14px 18px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 18px;
+  border-radius: var(--radius-sm);
   background: var(--field-background);
   font: inherit;
-  font-size: 1rem;
+  font-size: var(--font-size-lg);
   color: var(--text-primary);
-  line-height: 1.55;
+  line-height: var(--line-normal);
 }
 
 .textInput::placeholder {
@@ -227,7 +257,7 @@
 
 .fieldHint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
 }
 
@@ -275,14 +305,14 @@
 .field input[type="time"],
 .field input:not([type]) {
   width: 100%;
-  padding: 14px 18px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 18px;
+  border-radius: var(--radius-sm);
   background: var(--field-background);
   font: inherit;
-  font-size: 1rem;
+  font-size: var(--font-size-lg);
   color: var(--text-primary);
-  line-height: 1.55;
+  line-height: var(--line-normal);
 }
 
 .field input[type="text"]::placeholder,
@@ -314,19 +344,20 @@
 .syllabusSectionCard {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 20px 24px;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-6);
   border: 1px solid var(--field-border);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   background: var(--field-background);
 }
 
 .syllabusSectionHeading {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  /* AM18: page-level kicker above a title - keeps the accent treatment. */
   color: var(--accent-ink);
 }
 
@@ -334,13 +365,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .syllabusSectionActions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .syllabusSectionActionButton {
@@ -350,7 +381,7 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
@@ -376,8 +407,8 @@
 
 .syllabusSectionContent {
   margin: 0;
-  font-size: 0.95rem;
-  line-height: 1.65;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-normal);
   color: var(--text-secondary);
   white-space: pre-wrap;
 }
@@ -386,25 +417,25 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .fieldEditWrap {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .fieldEditArea {
   width: 100%;
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--field-border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--field-background);
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.93rem;
-  line-height: 1.6;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   resize: vertical;
   min-height: 60px;
   box-sizing: border-box;
@@ -418,18 +449,18 @@
 
 .fieldEditActions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
   justify-content: flex-end;
 }
 
 .fieldEditSaveBtn {
-  padding: 5px 14px;
-  border-radius: 8px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -439,13 +470,13 @@
 }
 
 .fieldEditCancelBtn {
-  padding: 5px 12px;
-  border-radius: 8px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   cursor: pointer;
 }
 
@@ -466,15 +497,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 148px;
-  padding: 12px 22px;
+  padding: var(--space-3) var(--space-5);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font: inherit;
-  font-size: 0.92rem;
+  font-size: var(--font-size-md);
   font-weight: 650;
   letter-spacing: 0.01em;
   cursor: pointer;
@@ -486,9 +517,9 @@
   width: 15px;
   height: 15px;
   flex-shrink: 0;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  border-top-color: #fff;
+  border-radius: var(--radius-round);
+  border: 2px solid color-mix(in srgb, var(--text-on-accent) 40%, transparent);
+  border-top-color: var(--text-on-accent);
   animation: spin 0.8s linear infinite;
 }
 
@@ -506,30 +537,30 @@
 
 .error {
   color: var(--danger);
-  font-size: 0.95rem;
+  font-size: var(--font-size-lg);
 }
 
 .emptyState {
   color: var(--text-secondary);
-  font-size: 0.95rem;
+  font-size: var(--font-size-lg);
 }
 
 .checklistCard {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 18px 20px;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--field-border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
 }
 
 .generatedRubricCard {
-  padding: 14px 18px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
 }
 
@@ -540,7 +571,7 @@
   list-style: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   user-select: none;
 }
 
@@ -555,27 +586,27 @@
 }
 
 .generatedRubricBody {
-  margin: 12px 0 0;
-  padding: 12px 14px;
-  border-radius: 10px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
   border: 1px solid var(--field-border);
   background: color-mix(in srgb, var(--field-background) 94%, var(--accent) 6%);
-  font-size: 0.84rem;
-  line-height: 1.55;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
   white-space: pre-wrap;
   color: var(--text-primary);
 }
 
 .generatedRubricTable {
-  margin-top: 12px;
+  margin-top: var(--space-3);
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.84rem;
+  font-size: var(--font-size-sm);
 }
 
 .generatedRubricTable th,
 .generatedRubricTable td {
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   border: 1px solid var(--field-border);
   vertical-align: top;
@@ -583,9 +614,9 @@
 
 .generatedRubricTable th {
   font-weight: 700;
-  font-size: 0.78rem;
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
   color: var(--text-secondary);
 }
@@ -621,7 +652,7 @@
 
 .generatedRubricTable td:last-child {
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--line-normal);
 }
 
 .rubricSubcategoryList {
@@ -630,9 +661,9 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 0.84rem;
-  line-height: 1.45;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-snug);
 }
 
 .rubricSubcategoryList li strong {
@@ -645,19 +676,19 @@
 }
 
 .courseScheduleWrap {
-  margin-top: 16px;
+  margin-top: var(--space-4);
   overflow-x: auto;
 }
 
 .courseScheduleTable {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
 }
 
 .courseScheduleTable th,
 .courseScheduleTable td {
-  padding: 9px 13px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   border: 1px solid var(--field-border);
   vertical-align: top;
@@ -665,9 +696,9 @@
 
 .courseScheduleTable th {
   font-weight: 700;
-  font-size: 0.78rem;
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
   color: var(--text-secondary);
   white-space: nowrap;
@@ -689,12 +720,12 @@
 
 .courseScheduleTable td:nth-child(3) {
   color: var(--text-primary);
-  line-height: 1.5;
+  line-height: var(--line-normal);
 }
 
 .courseScheduleTable td:last-child {
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--line-normal);
   width: 200px;
 }
 
@@ -704,24 +735,24 @@
 
 .scheduleActions {
   display: flex;
-  gap: 10px;
-  margin-top: 18px;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
   flex-wrap: wrap;
 }
 
 .scheduleModeToggle {
   display: flex;
   gap: 0;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-5);
   border: 1px solid var(--field-border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   width: fit-content;
 }
 
 .scheduleModeBtn {
-  padding: 8px 20px;
-  font-size: 0.88rem;
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--font-size-md);
   font-weight: 600;
   background: var(--field-background);
   color: var(--text-secondary);
@@ -743,13 +774,13 @@
 .adaptIntro {
   margin-top: 0;
   color: var(--text-secondary);
-  line-height: 1.6;
+  line-height: var(--line-normal);
 }
 
 .adaptTemplateNote {
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  margin: 8px 0 0;
+  margin: var(--space-2) 0 0;
 }
 
 /* An inline text button styled as a link (e.g. "clear"). Regression fix:
@@ -792,9 +823,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  margin-top: 22px;
+  margin-top: var(--space-5);
 }
 
 .adaptSectionsHeading {
@@ -806,18 +837,18 @@
 /* Action bar shown beneath the reviewed sections (download / save / etc.). */
 .adaptActionBar {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
   align-items: center;
-  margin-top: 14px;
+  margin-top: var(--space-3);
 }
 
 /* Collapsible panel (native <details>) for optional secondary actions such as
    "Add to a Canvas module", so it doesn't crowd the review step. */
 .adaptDisclosure {
-  margin-top: 14px;
+  margin-top: var(--space-3);
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
 }
 
@@ -826,8 +857,8 @@
   list-style: none;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -851,20 +882,20 @@
 }
 
 .adaptDisclosureBody {
-  padding: 0 16px 16px;
+  padding: 0 var(--space-4) var(--space-4);
 }
 
 /* A horizontal, wrapping row of inputs that bottom-align (the Canvas placement
    controls). */
 .adaptRow {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
   align-items: flex-end;
 }
 
 .adaptRow + .adaptRow {
-  margin-top: 10px;
+  margin-top: var(--space-2);
 }
 
 /* A titled stage of the syllabus form (Start from a base / Course details /
@@ -872,25 +903,25 @@
 .adaptPanel {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 22px 24px;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
   border: 1px solid var(--field-border);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   background: var(--field-background);
 }
 
 .adaptPanelHeader {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .adaptPanelTitle {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -901,18 +932,18 @@
   justify-content: center;
   min-width: 24px;
   height: 24px;
-  padding: 0 7px;
-  border-radius: 999px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent-ink);
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 700;
 }
 
 .adaptPanelSubtitle {
   margin: 0;
-  font-size: 0.85rem;
-  line-height: 1.5;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   color: var(--text-secondary);
 }
 
@@ -920,7 +951,7 @@
 .adaptFieldGrid2,
 .adaptFieldGrid3 {
   display: grid;
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .adaptFieldGrid2 {
@@ -943,22 +974,22 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--field-border);
-  border-radius: 12px;
-  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
 }
 
 .finalizedLoading {
   display: flex;
   justify-content: center;
-  padding: 14px;
+  padding: var(--space-3);
 }
 
 .finalizedRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  padding: 10px 0;
+  padding: var(--space-2) 0;
   border-top: 1px solid var(--field-border);
 }
 
@@ -977,7 +1008,7 @@
 }
 
 .finalizedMeta {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   font-family: var(--font-mono);
   word-break: break-all;
@@ -987,16 +1018,16 @@
 .courseGrid {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .courseCard {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 20px 22px;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5);
   border: 1px solid var(--field-border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   background: var(--field-background);
 }
 
@@ -1004,40 +1035,40 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
 .courseCardTitle {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .courseCardSub {
-  margin: 2px 0 0;
-  font-size: 0.85rem;
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--line-normal);
 }
 
 .courseCardActions {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 
 .courseResourceGroup {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .courseResourceGroupLabel {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -1045,21 +1076,21 @@
 .courseResources {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .courseResource {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-3);
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--field-background) 94%, var(--accent) 4%);
 }
 
 .courseResourceLabel {
-  font-size: 0.68rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1067,7 +1098,7 @@
 }
 
 .courseResourceValue {
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   word-break: break-word;
   text-align: left;
@@ -1086,7 +1117,7 @@ button.courseResourceValue {
   border: none;
   padding: 0;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
 }
 
 a.courseResourceValue:hover,
@@ -1101,7 +1132,7 @@ button.courseResourceValue:disabled {
 }
 
 .courseResourceEmpty {
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
   font-style: italic;
   color: var(--text-secondary);
 }
@@ -1110,20 +1141,20 @@ button.courseResourceValue:disabled {
 .courseNotif {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .notifSub {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  font-size: 0.85rem;
+  gap: var(--space-2);
+  font-size: var(--font-size-md);
   color: var(--text-primary);
 }
 
 .notifZero {
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -1131,18 +1162,18 @@ button.courseResourceValue:disabled {
 /* One repository row in the course form: the picker plus a Remove button. */
 .courseRepoRow {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-start;
 }
 
 .courseRepoRow + .courseRepoRow {
-  margin-top: 10px;
+  margin-top: var(--space-2);
 }
 
 /* Preview / Download links under a course's linked syllabus. */
 .courseResourceActions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
 }
 
@@ -1151,7 +1182,7 @@ button.courseResourceValue:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .tileEditBtn {
@@ -1162,7 +1193,7 @@ button.courseResourceValue:disabled {
   height: 22px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-secondary);
   opacity: 0.55;
@@ -1198,13 +1229,14 @@ button.courseResourceValue:disabled {
   justify-content: center;
   width: 18px;
   height: 18px;
-  margin-right: 4px;
+  margin-right: var(--space-1);
   padding: 0;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-secondary);
   opacity: 0;
+  pointer-events: none;
   cursor: pointer;
   vertical-align: -1px;
 }
@@ -1212,6 +1244,7 @@ button.courseResourceValue:disabled {
 .courseResource:hover .tileHideBtn,
 .tileHideBtn:focus-visible {
   opacity: 0.55;
+  pointer-events: auto;
 }
 
 .courseResource .tileHideBtn:hover {
@@ -1220,11 +1253,21 @@ button.courseResourceValue:disabled {
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
+/* Touch devices report no hover state at all, so a hover-only reveal would
+   make this control permanently unreachable there - keep it always visible
+   instead (same pattern as CoursesTable.module.css's .cellMenu). */
+@media (hover: none) {
+  .tileHideBtn {
+    opacity: 0.55;
+    pointer-events: auto;
+  }
+}
+
 /* Drag-and-drop tiles: grab handle, drag ghost, insertion indicator, group target. */
 .tileGrabHandle {
   display: inline-flex;
   align-items: center;
-  margin-right: 6px;
+  margin-right: var(--space-1);
   vertical-align: -1px;
   color: var(--text-secondary);
   opacity: 0.45;
@@ -1256,20 +1299,32 @@ button.courseResourceValue:disabled {
 .courseResourceGroupHead {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   min-height: 22px;
 }
 
 .courseResourceGroupActions {
   display: inline-flex;
-  gap: 10px;
+  gap: var(--space-2);
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 
 .courseResourceGroup:hover .courseResourceGroupActions,
 .courseResourceGroup:focus-within .courseResourceGroupActions {
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* Touch devices report no hover state at all, so a hover-only reveal would
+   make this cluster permanently unreachable there - keep it always visible
+   instead (same pattern as CoursesTable.module.css's .cellMenu). */
+@media (hover: none) {
+  .courseResourceGroupActions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* Per-institution "Common fields" panel above a section's course cards. */
@@ -1277,18 +1332,18 @@ button.courseResourceValue:disabled {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .instFieldChip {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   min-width: 150px;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--field-border);
-  border-radius: 10px;
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--field-background) 94%, var(--accent) 4%);
   cursor: pointer;
 }
@@ -1298,7 +1353,7 @@ button.courseResourceValue:disabled {
 }
 
 .instFieldLabel {
-  font-size: 0.68rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1306,7 +1361,7 @@ button.courseResourceValue:disabled {
 }
 
 .instFieldValue {
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   word-break: break-word;
 }
@@ -1323,43 +1378,43 @@ a.instFieldValue:hover {
 .tileEditor {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .tileEditorActions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 /* Expanded roster list inside a course tile. */
 .rosterPreview {
-  margin-top: 6px;
+  margin-top: var(--space-1);
   max-height: 160px;
   overflow-y: auto;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--field-border) 18%, transparent);
-  font-size: 0.8rem;
-  line-height: 1.6;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
   color: var(--text-primary);
 }
 
 /* Expanded topics list inside a course tile. */
 .topicsList {
-  margin: 10px 0 0;
-  padding: 8px 12px 8px 30px;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-6);
   max-height: 220px;
   overflow-y: auto;
   border: 1px solid var(--field-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--field-border) 10%, transparent);
-  font-size: 0.85rem;
-  line-height: 1.55;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   color: var(--text-primary);
 }
 
 .topicsList li {
-  padding: 3px 0;
+  padding: var(--space-1) 0;
 }
 
 .topicsList li + li {
@@ -1368,33 +1423,33 @@ a.instFieldValue:hover {
 
 .topicsList li::marker {
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
 }
 
 /* Extract topics panel inside a course tile. */
 .topicsExtract {
-  margin-top: 10px;
-  padding: 10px 12px;
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--field-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--field-border) 8%, transparent);
 }
 
 /* "Open in ..." row at the foot of a course card. */
 .courseOpenBar {
   display: flex;
-  gap: 14px;
+  gap: var(--space-3);
   align-items: center;
   flex-wrap: wrap;
-  padding-top: 12px;
+  padding-top: var(--space-3);
   border-top: 1px solid var(--field-border);
 }
 
 /* Pull-request changed-file diffs (Version Control > Repos > Pull requests). */
 .prFile {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   border: 1px solid var(--field-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -1402,10 +1457,10 @@ a.instFieldValue:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
   background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 4%);
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
 }
 
 .prFileName {
@@ -1425,13 +1480,13 @@ a.instFieldValue:hover {
   max-height: 360px;
   overflow: auto;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
-  line-height: 1.5;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-normal);
   background: var(--field-background);
 }
 
 .prDiff > div {
-  padding: 0 10px;
+  padding: 0 var(--space-2);
   white-space: pre;
 }
 
@@ -1455,8 +1510,8 @@ a.instFieldValue:hover {
 /* ── Shared GitHub panel / row / badge styling (Pull requests + Copilot) ── */
 .ghPanel {
   border: 1px solid var(--field-border);
-  border-radius: 14px;
-  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-4);
   background: var(--field-background);
 }
 
@@ -1464,22 +1519,22 @@ a.instFieldValue:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .ghPanelHeadRight {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .ghRow {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 0;
+  gap: var(--space-1);
+  padding: var(--space-3) 0;
   border-top: 1px solid var(--field-border);
 }
 
@@ -1487,7 +1542,7 @@ a.instFieldValue:hover {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
@@ -1508,7 +1563,7 @@ a.instFieldValue:hover {
 }
 
 .ghMeta {
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
@@ -1518,7 +1573,7 @@ a.instFieldValue:hover {
 
 .ghActions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
   flex: none;
@@ -1526,7 +1581,7 @@ a.instFieldValue:hover {
 
 .ghBadges {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
   align-items: center;
   flex-wrap: wrap;
 }
@@ -1534,11 +1589,15 @@ a.instFieldValue:hover {
 .ghBadge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 2px 9px;
-  border-radius: 999px;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  /* 600, not AM11's badge-default 500: this is the shared class behind run
+     status, Enabled/Disabled, grade band and Done/Open/Overdue, and at 12px
+     on a tinted fill, weight is the strongest non-colour cue on the app's
+     primary status primitive (accessibility pass 2026-09-01). */
+  font-weight: 600;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   white-space: nowrap;
 }
 
@@ -1549,22 +1608,29 @@ a.instFieldValue:hover {
 
 /* C5: plain `var(--success)` text on this badge's own tinted background
    measured ~2.8:1 in light mode (fails WCAG AA's 4.5:1 for normal text -
-   ~11.5px bold still counts as normal text, not "large"). No `--success-ink`
-   token exists in globals.css to swap to (unlike --warning-ink below), and
-   this file's edit scope here is limited to these two rules' text colour -
-   so the ink is derived in place from the two tokens that already exist and
-   already adapt per theme (--success, --text-primary), rather than adding a
-   new custom property. Measured against this badge's own rendered
-   background (var(--card-background) tinted 15% with --success, matching
-   how the badge actually renders): ~6.7:1 in light mode, ~8.7:1 in dark
-   mode - both comfortably clear 4.5:1. */
+   ~11.5px bold still counts as normal text, not "large"). --success-ink
+   (globals.css) is the token this codebase defines for exactly this case -
+   0.0f7a37 measures 4.8:1 on a light surface, and the dark block flips it to
+   --success's own dark value, already light enough to read on a dark
+   surface - see .ghBadgeWarning below, which uses the equivalent
+   --warning-ink for the same reason. Measured against this badge's own
+   rendered background (var(--card-background) tinted 15% with --success,
+   matching how the badge actually renders): comfortably clears 4.5:1 in both
+   themes. */
 .ghBadgeSuccess {
-  color: color-mix(in srgb, var(--success) 50%, var(--text-primary) 50%);
+  color: var(--success-ink);
   background: color-mix(in srgb, var(--success) 15%, transparent);
 }
 
+/* Accessibility pass 2026-09-01: plain `var(--danger)` text on this badge's
+   own tinted background measured 3.81:1 - fails WCAG AA's 4.5:1. X4 (AM24):
+   --danger-ink now exists in globals.css (#b91c1c light / #f87171 dark,
+   6.13:1 on white) - completing the ink set alongside --success-ink and
+   --warning-ink - so this uses that token directly instead of deriving the
+   colour in place the way .ghBadgeSuccess had to before --success-ink
+   existed. */
 .ghBadgeDanger {
-  color: var(--danger);
+  color: var(--danger-ink);
   background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 
@@ -1579,21 +1645,30 @@ a.instFieldValue:hover {
   background: color-mix(in srgb, var(--warning) 18%, transparent);
 }
 
+/* Accessibility pass 2026-09-01: `var(--accent-ink)` text on this badge's own
+   tinted background measured 4.20:1 - still short of WCAG AA's 4.5:1. Same
+   fix as .ghBadgeDanger above: derive the ink from 50% accent, 50%
+   --text-primary rather than the accent-ink token alone. */
 .ghBadgeAccent {
-  color: var(--accent-ink);
+  color: color-mix(in srgb, var(--accent) 50%, var(--text-primary) 50%);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
-/* GitHub's "merged" purple, the one status without an app token. */
+/* GitHub's "merged" purple, the one status without an app token - a
+   deliberate carve-out since it is GitHub's brand colour, not ours (see
+   globals.css's --merged-ink comment). As 12px badge text, the raw hex
+   measured 4.12:1 on the light card and 2.96:1 on the dark one - both below
+   WCAG AA's 4.5:1 - so only the text moves to --merged-ink; the fill keeps
+   the brand hex. */
 .ghBadgeMerged {
-  color: #8250df;
+  color: var(--merged-ink);
   background: color-mix(in srgb, #8250df 15%, transparent);
 }
 
 .ghDot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: currentColor;
   flex: none;
 }
@@ -1602,35 +1677,35 @@ a.instFieldValue:hover {
 .ghPanelStack {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 /* Indented nested detail block (a run's jobs/artifacts) with a left rail. */
 .ghSubList {
-  margin-top: 8px;
-  margin-left: 4px;
-  padding-left: 14px;
-  border-left: 2px solid var(--field-border);
+  margin-top: var(--space-2);
+  margin-left: var(--space-1);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border-soft);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 /* A horizontal metadata strip under a row title. */
 .ghMetaRow {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
 /* Resizable two-column split (file tree | editor) with a draggable divider. */
 .ghSplit {
   display: flex;
-  gap: 8px;
-  margin-top: 16px;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
   align-items: stretch;
 }
 
@@ -1642,7 +1717,7 @@ a.instFieldValue:hover {
 .ghSplitDivider {
   flex: none;
   width: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: col-resize;
   background: transparent;
   transition: background 0.15s ease;
@@ -1671,15 +1746,15 @@ a.instFieldValue:hover {
 
 /* Repo identity header: name, visibility/template badges, description, meta. */
 .ghRepoHead {
-  margin-top: 14px;
-  padding: 16px 18px;
+  margin-top: var(--space-3);
+  padding: var(--space-4) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--field-background) 95%, var(--accent) 5%);
 }
 
 .ghRepoName {
-  font-size: 1.08rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
@@ -1695,7 +1770,7 @@ a.instFieldValue:hover {
 .ghTreeList {
   max-height: 58vh;
   overflow-y: auto;
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
   flex-direction: column;
 }
@@ -1705,53 +1780,53 @@ a.instFieldValue:hover {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px 16px 16px;
-  border-radius: 12px;
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  border-radius: var(--radius-md);
   border: 1px solid var(--field-border);
   background: var(--field-background);
-  line-height: 1.6;
+  line-height: var(--line-normal);
   color: var(--text-primary);
 }
 
 .spBody {
-  margin: 0 0 10px;
-  font-size: 0.95rem;
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-lg);
 }
 
 .spTitle {
-  margin: 4px 0 14px;
-  font-size: 1.5rem;
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: var(--font-size-2xl);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
 .spH1 {
-  margin: 18px 0 8px;
-  font-size: 1.25rem;
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--font-size-xl);
   font-weight: 700;
 }
 
 .spH2 {
-  margin: 14px 0 6px;
-  font-size: 1.1rem;
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--font-size-xl);
   font-weight: 700;
 }
 
 .spH3 {
-  margin: 12px 0 6px;
-  font-size: 1rem;
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--font-size-lg);
   font-weight: 700;
 }
 
 .spH4 {
-  margin: 10px 0 6px;
-  font-size: 0.95rem;
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--text-secondary);
 }
 
 .checklistCard h2 {
-  font-size: 1.05rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
@@ -1759,33 +1834,33 @@ a.instFieldValue:hover {
 
 .checklistCard ul {
   margin: 0;
-  padding-left: 20px;
+  padding-left: var(--space-5);
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .checklistCard li {
-  line-height: 1.45;
+  line-height: var(--line-snug);
 }
 
 .results {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .resultsHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding-top: 6px;
+  gap: var(--space-4);
+  padding-top: var(--space-1);
 }
 
 .results h2 {
-  font-size: 1.05rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
@@ -1796,16 +1871,16 @@ a.instFieldValue:hover {
 .resultsChecklist {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 18px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
 }
 
 .resultsChecklist h3 {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
@@ -1813,27 +1888,27 @@ a.instFieldValue:hover {
 
 .resultsChecklist ul {
   margin: 0;
-  padding-left: 20px;
+  padding-left: var(--space-5);
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .resultsChecklist li {
-  line-height: 1.5;
+  line-height: var(--line-normal);
 }
 
 .downloadButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 9px 14px;
-  border-radius: 999px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   font-weight: 650;
   letter-spacing: 0.01em;
   cursor: pointer;
@@ -1850,29 +1925,29 @@ a.instFieldValue:hover {
 .resultFiles {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 20px;
+  gap: var(--space-2);
+  padding: var(--space-5);
   border: 1px solid var(--field-border);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   background: var(--field-background);
 }
 
 .resultFiles h3 {
-  font-size: 1rem;
+  font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--text-primary);
   word-break: break-all;
 }
 
 .mergeInfo {
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
 }
 
 .fileMetaLabel {
-  font-size: 0.82rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -1880,7 +1955,7 @@ a.instFieldValue:hover {
 .fileList {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1890,21 +1965,21 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-md);
   border: 1px solid var(--field-border);
   background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
-  font-size: 0.86rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
 }
 
 .fileExtension {
-  padding: 3px 8px;
-  border-radius: 999px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--field-border);
   background: var(--field-background);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-secondary);
   text-transform: lowercase;
@@ -1916,7 +1991,7 @@ a.instFieldValue:hover {
   overflow-y: auto;
   max-height: 65vh;
   border: 1px solid var(--field-border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--field-background);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--field-background) 80%, var(--field-border) 20%);
   /* Smooth, contained horizontal scroll so the dense grading table is usable on
@@ -1929,7 +2004,7 @@ a.instFieldValue:hover {
 
 .libTable {
   border: 1px solid var(--card-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -1937,14 +2012,14 @@ a.instFieldValue:hover {
 .libRow {
   display: grid;
   grid-template-columns: 36px 92px 72px minmax(180px, 1fr) 70px 84px 150px auto;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
 }
 
 .libHead {
   background: color-mix(in srgb, var(--field-border) 14%, transparent);
-  font-size: 0.72rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1954,7 +2029,7 @@ a.instFieldValue:hover {
 
 .libRow {
   border-bottom: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
-  font-size: 0.86rem;
+  font-size: var(--font-size-md);
 }
 
 .libRow:last-child {
@@ -1974,14 +2049,14 @@ a.instFieldValue:hover {
 
 .libActions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
   justify-content: flex-end;
   flex-wrap: wrap;
 }
 
 .libExpand {
   grid-column: 1 / -1;
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
   background: color-mix(in srgb, var(--field-border) 6%, transparent);
 }
@@ -2012,14 +2087,16 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
+/* X8 (AM24): 26px was outside the closed control-height set; snapped to the
+   nearest token. */
 .automationRunsLimitSelect {
-  height: 26px;
-  padding: 0 6px;
-  font-size: 0.75rem;
-  border-radius: 6px;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-1);
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-xs);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
@@ -2028,26 +2105,26 @@ a.instFieldValue:hover {
 
 .automationRunsTable {
   border: 1px solid var(--field-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
 }
 
 .automationRunsHead,
 .automationRunsRow {
   display: grid;
   grid-template-columns: minmax(120px, 1.2fr) 70px 70px 110px minmax(150px, 1.6fr) 48px;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: start;
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
 }
 
 .automationRunsHead {
   background: color-mix(in srgb, var(--field-border) 14%, transparent);
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  font-size: 0.66rem;
+  font-size: var(--font-size-2xs);
   color: var(--text-secondary);
   border-bottom: 1px solid var(--field-border);
 }
@@ -2063,7 +2140,7 @@ a.instFieldValue:hover {
 .automationRunsArtifactList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 @media (max-width: 700px) {
@@ -2073,7 +2150,7 @@ a.instFieldValue:hover {
 
   .automationRunsRow {
     grid-template-columns: 1fr;
-    gap: 2px;
+    gap: var(--space-1);
   }
 }
 
@@ -2082,18 +2159,18 @@ a.instFieldValue:hover {
 .weekNav {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .weekNavBtn {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
-  font-size: 1.1rem;
+  font-size: var(--font-size-xl);
   line-height: 1;
   cursor: pointer;
 }
@@ -2104,7 +2181,7 @@ a.instFieldValue:hover {
 }
 
 .weekNavLabel {
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   color: var(--text-secondary);
 }
@@ -2112,14 +2189,14 @@ a.instFieldValue:hover {
 .deckTitleInput {
   width: 100%;
   font: inherit;
-  font-size: 1.1rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--text-primary);
   background: var(--field-background);
   border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 6px 8px;
-  margin-top: 4px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  margin-top: var(--space-1);
 }
 
 .deckTitleInput:hover {
@@ -2135,30 +2212,30 @@ a.instFieldValue:hover {
 .editorToolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
-  padding: 10px 0;
+  padding: var(--space-2) 0;
   border-bottom: 1px solid var(--field-border);
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .editorFieldLabel {
-  font-size: 0.72rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
-  margin-top: 6px;
+  margin-top: var(--space-1);
 }
 
 .editorCodeArea {
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
 }
 
 .docEditWrap {
   display: flex;
-  gap: 16px;
+  gap: var(--space-4);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -2168,14 +2245,14 @@ a.instFieldValue:hover {
   flex: 1 1 50%;
   min-width: 0;
   resize: none;
-  padding: 14px 16px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.9rem;
-  line-height: 1.55;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
 }
 
 .docEditArea:focus {
@@ -2188,9 +2265,9 @@ a.instFieldValue:hover {
   flex: 1 1 50%;
   min-width: 0;
   overflow-y: auto;
-  padding: 14px 18px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
 }
 
@@ -2198,9 +2275,9 @@ a.instFieldValue:hover {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 22px;
+  padding: var(--space-4) var(--space-5);
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
 }
 
@@ -2210,38 +2287,47 @@ a.instFieldValue:hover {
 }
 
 .docPreviewTitle {
-  margin: 0 0 12px;
-  font-size: 1.5rem;
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-2xl);
   font-weight: 700;
   color: var(--navy-ink);
   border-bottom: 2px solid var(--navy-ink);
-  padding-bottom: 6px;
+  padding-bottom: var(--space-1);
 }
 
+/* X9 (AM24): the app's uppercase CONTENT HEADING idiom - distinct from the
+   tracked-uppercase MICRO-LABEL idiom (--font-size-2xs, 700, 0.06em,
+   --text-secondary) used for section/group labels like .panelTitle above.
+   This one is for real content headings (this doc preview heading,
+   .introTitle, .introHeading): uppercase, weight 700, 0.03em tracking - less
+   than the micro-label's 0.06em, since a bigger size needs less tracking to
+   read the same way - and --text-primary ink, with font-size the only thing
+   that varies per level. Do not "fix" these into the micro-label idiom; they
+   are deliberately larger and are headings, not group labels. */
 .docPreviewHeading {
-  margin: 22px 0 8px;
-  font-size: 0.95rem;
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: var(--font-size-lg);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--navy-ink);
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
   border-bottom: 1px solid var(--field-border);
-  padding-bottom: 4px;
+  padding-bottom: var(--space-1);
 }
 
 .docPreviewBody {
-  margin: 0 0 10px;
-  font-size: 0.92rem;
-  line-height: 1.6;
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   color: var(--text-primary);
 }
 
 .docPreviewListItem {
   display: flex;
-  gap: 8px;
-  margin: 0 0 6px;
-  font-size: 0.92rem;
-  line-height: 1.55;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   color: var(--text-primary);
 }
 
@@ -2272,7 +2358,7 @@ a.instFieldValue:hover {
 .tabLabelWrap {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
 }
 
 .navBadge {
@@ -2281,11 +2367,11 @@ a.instFieldValue:hover {
   justify-content: center;
   min-width: 18px;
   height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: #dc2626;
-  color: #ffffff;
-  font-size: 0.68rem;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--danger-fill);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   line-height: 1;
 }
@@ -2296,41 +2382,44 @@ a.instFieldValue:hover {
   width: 100%;
   overflow-x: auto;
   border: 1px solid var(--card-border);
-  border-radius: 14px;
-  background: var(--navy, #1a2744);
+  border-radius: var(--radius-lg);
+  background: var(--navy);
 }
 
 .liveFeedTable {
   width: 100%;
   border-collapse: collapse;
   min-width: 820px;
-  color: #ffffff;
+  color: var(--on-navy);
 }
 
 .liveFeedTable th,
 .liveFeedTable td {
-  padding: 11px 13px;
+  /* X7 (AM24): was 11px 13px pre-tokenization, then over-corrected to
+     var(--space-3) both ways (12px vertical) - taller rows on a pass whose
+     AC11 asks for density. 8px vertical matches the app's other tables. */
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-  color: #ffffff;
+  border-bottom: 1px solid color-mix(in srgb, var(--on-navy) 14%, transparent);
+  color: var(--on-navy);
 }
 
 .liveFeedTable th {
-  font-size: 0.74rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #ffffff;
+  letter-spacing: 0.06em;
+  color: var(--on-navy-muted);
 }
 
 .liveFeedTable a {
-  color: #ffffff;
+  color: var(--on-navy);
   text-decoration: underline;
 }
 
 .liveFeedTable summary {
-  color: #ffffff;
+  color: var(--on-navy);
   cursor: pointer;
 }
 
@@ -2339,38 +2428,38 @@ a.instFieldValue:hover {
 }
 
 .liveFeedSub {
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   opacity: 0.85;
-  margin-top: 2px;
+  margin-top: var(--space-1);
 }
 
 .liveFeedSub a {
-  color: #ffffff;
+  color: var(--on-navy);
   text-decoration: underline;
 }
 
 .liveFeedGroupRow td {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--on-navy) 8%, transparent);
   font-weight: 700;
-  font-size: 0.74rem;
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
 }
 
 .liveFeedGhostButton {
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 40%, transparent);
   background: transparent;
-  color: #ffffff;
-  border-radius: 999px;
-  padding: 7px 12px;
+  color: var(--on-navy);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-3);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
 }
 
 .liveFeedGhostButton:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--on-navy) 12%, transparent);
 }
 
 /* ── Live Feed toolbar + grading banner ───────────────────────────────────── */
@@ -2378,17 +2467,17 @@ a.instFieldValue:hover {
 .liveFeedToolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
 }
 
 .gradingBanner {
-  padding: 10px 14px;
-  border-radius: 12px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--field-background) 80%, var(--accent) 20%);
   border: 1px solid var(--accent);
   color: var(--text-primary);
-  font-size: 0.92rem;
+  font-size: var(--font-size-md);
 }
 
 /* ── Live Feed (master-detail triage) ─────────────────────────────────────── */
@@ -2398,7 +2487,7 @@ a.instFieldValue:hover {
 .lfLayout {
   display: grid;
   grid-template-columns: minmax(300px, 410px) minmax(320px, 1fr);
-  gap: 22px;
+  gap: var(--space-5);
   align-items: start;
 }
 
@@ -2411,13 +2500,13 @@ a.instFieldValue:hover {
 .lfRail {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   min-width: 0;
-  background: var(--navy, #1a2744);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 16px;
-  color: #fff;
+  background: var(--navy);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 8%, transparent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  color: var(--on-navy);
   /* Same local --focus-ring-color override as TopBar.module.css .bar - the
      app-wide #1d4ed8 ring only measures 2.21:1 on --navy (an exhaustive
      search of the 24-bit colour space found zero colours clearing 3:1
@@ -2431,48 +2520,48 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
 .lfRailHeader h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfRailHeaderActions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
   flex-wrap: wrap;
 }
 
 .lfRailHint {
   margin: 0;
-  font-size: 0.82rem;
-  color: rgba(255, 255, 255, 0.72);
+  font-size: var(--font-size-sm);
+  color: var(--on-navy-muted);
   display: inline-flex;
-  gap: 6px;
+  gap: var(--space-1);
   align-items: center;
 }
 
 .lfGhostBtn {
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 40%, transparent);
   background: transparent;
-  color: #fff;
-  border-radius: 999px;
-  padding: 7px 14px;
+  color: var(--on-navy);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-3);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease;
 }
 
 .lfGhostBtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--on-navy) 12%, transparent);
 }
 
 .lfGhostBtn:disabled {
@@ -2484,26 +2573,26 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px 10px;
+  gap: var(--space-1) var(--space-2);
   margin: 0;
-  font-size: 0.82rem;
-  color: rgba(255, 255, 255, 0.72);
+  font-size: var(--font-size-sm);
+  color: var(--on-navy-muted);
 }
 
 .lfSummary b {
-  color: #fff;
+  color: var(--on-navy);
   font-weight: 700;
 }
 
 .lfSummaryOverdue {
-  color: #fca5a5;
+  color: color-mix(in srgb, var(--danger) 45%, var(--on-navy) 55%);
   font-weight: 700;
 }
 
 .lfDot {
   width: 3px;
   height: 3px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: currentColor;
   opacity: 0.5;
 }
@@ -2511,16 +2600,16 @@ a.instFieldValue:hover {
 .lfSearch {
   width: 100%;
   font: inherit;
-  font-size: 0.9rem;
-  padding: 9px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  font-size: var(--font-size-md);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 18%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--on-navy) 8%, transparent);
+  color: var(--on-navy);
 }
 
 .lfSearch::placeholder {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--on-navy-muted);
 }
 
 .lfSearch:focus {
@@ -2532,44 +2621,44 @@ a.instFieldValue:hover {
 .lfChips {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: var(--space-2);
   align-items: center;
 }
 
 .lfChip {
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  padding: 5px 13px;
-  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 28%, transparent);
   background: transparent;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--on-navy);
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
 .lfChip:hover {
-  border-color: rgba(255, 255, 255, 0.6);
-  color: #fff;
+  border-color: color-mix(in srgb, var(--on-navy) 60%, transparent);
+  color: var(--on-navy);
 }
 
 .lfChipActive,
 .lfChipActive:hover {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfSort {
   max-width: 190px;
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
   font: inherit;
-  font-size: 0.8rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 18%, transparent);
+  background: color-mix(in srgb, var(--on-navy) 8%, transparent);
+  color: var(--on-navy);
   cursor: pointer;
 }
 
@@ -2580,66 +2669,66 @@ a.instFieldValue:hover {
 .lfBulkBar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--on-navy) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 18%, transparent);
 }
 
 .lfBulkCount {
   margin-right: auto;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 700;
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfRailLoading {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.8);
+  gap: var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--on-navy);
 }
 
 .lfRailEmpty {
   margin: 0;
-  font-size: 0.88rem;
-  color: rgba(255, 255, 255, 0.65);
-  padding: 4px 2px;
+  font-size: var(--font-size-md);
+  color: var(--on-navy-muted);
+  padding: var(--space-1) var(--space-1);
 }
 
 .lfRailError {
   margin: 0;
-  font-size: 0.88rem;
-  color: #fca5a5;
+  font-size: var(--font-size-md);
+  color: color-mix(in srgb, var(--danger) 45%, var(--on-navy) 55%);
 }
 
 .lfCardList {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .lfCard {
   position: relative;
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: flex-start;
-  padding: 13px 15px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 10%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--on-navy) 5%, transparent);
+  color: var(--on-navy);
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .lfCard:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.09);
+  border-color: color-mix(in srgb, var(--on-navy) 30%, transparent);
+  background: color-mix(in srgb, var(--on-navy) 9%, transparent);
 }
 
 .lfCardSelected,
@@ -2658,12 +2747,12 @@ a.instFieldValue:hover {
   top: 10px;
   bottom: 10px;
   width: 3px;
-  border-radius: 0 999px 999px 0;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
   background: var(--accent);
 }
 
 .lfCheckbox {
-  margin-top: 3px;
+  margin-top: var(--space-1);
   width: 16px;
   height: 16px;
   accent-color: var(--accent);
@@ -2679,37 +2768,37 @@ a.instFieldValue:hover {
 .lfCardTitleRow {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .lfCardTitle {
   font-weight: 650;
-  font-size: 0.92rem;
-  color: #fff;
+  font-size: var(--font-size-md);
+  color: var(--on-navy);
 }
 
 .lfCardMeta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 5px 8px;
-  margin-top: 4px;
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.64);
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--on-navy-muted);
 }
 
 .lfGradeBtn {
   flex-shrink: 0;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 650;
-  padding: 7px 15px;
-  border-radius: 999px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
   border: 0;
   cursor: pointer;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-navy);
   transition: background 0.15s ease;
 }
 
@@ -2725,25 +2814,27 @@ a.instFieldValue:hover {
 .lfBadge {
   display: inline-flex;
   align-items: center;
-  font-size: 0.66rem;
-  font-weight: 700;
+  font-size: var(--font-size-xs);
+  /* 600, not AM11's badge-default 500 - see .ghBadge's comment above
+     (accessibility pass 2026-09-01). */
+  font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  line-height: 1.6;
-  padding: 1px 8px;
-  border-radius: 999px;
+  line-height: var(--line-normal);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
 }
 
 .lfBadgeOverdue {
-  background: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #fca5a5;
+  background: var(--danger-surface);
+  color: color-mix(in srgb, var(--danger) 50%, var(--text-primary) 50%);
+  border: 1px solid var(--danger-border);
 }
 
 .lfBadgeSoon {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
+  background: var(--warning-surface);
+  color: var(--warning-ink);
+  border: 1px solid var(--warning-border);
 }
 
 .lfBadgeKind {
@@ -2756,13 +2847,13 @@ a.instFieldValue:hover {
 }
 
 .lfDetail {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
-  background: var(--navy, #1a2744);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 8%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--navy);
   box-shadow: var(--shadow-md);
-  padding: 22px 24px;
+  padding: var(--space-5) var(--space-6);
   min-width: 0;
-  color: #fff;
+  color: var(--on-navy);
   /* Local --focus-ring-color override - see .lfRail above. */
   --focus-ring-color: var(--focus-ring-on-navy);
 }
@@ -2770,74 +2861,74 @@ a.instFieldValue:hover {
 .lfDetailHead {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--space-1);
 }
 
 .lfDetailTitleRow {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .lfDetailTitle {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
-  line-height: 1.3;
-  color: #fff;
+  line-height: var(--line-tight);
+  color: var(--on-navy);
 }
 
 .lfDetailMeta {
   margin: 0;
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.72);
+  font-size: var(--font-size-md);
+  color: var(--on-navy-muted);
 }
 
 .lfDetailLinks {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  margin-top: 6px;
+  margin-top: var(--space-1);
 }
 
 .lfLink {
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
-  padding: 5px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 30%, transparent);
   background: transparent;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--on-navy);
   text-decoration: none;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
 .lfLink:hover {
-  border-color: rgba(255, 255, 255, 0.6);
-  color: #fff;
-  background: rgba(255, 255, 255, 0.08);
+  border-color: color-mix(in srgb, var(--on-navy) 60%, transparent);
+  color: var(--on-navy);
+  background: color-mix(in srgb, var(--on-navy) 8%, transparent);
 }
 
 .lfFooter {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
-  padding-top: 16px;
-  margin-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  padding-top: var(--space-4);
+  margin-top: var(--space-1);
+  border-top: 1px solid color-mix(in srgb, var(--on-navy) 14%, transparent);
 }
 
 .lfSeq {
   margin-left: auto;
-  font-size: 0.82rem;
-  color: rgba(255, 255, 255, 0.7);
+  font-size: var(--font-size-sm);
+  color: var(--on-navy-muted);
 }
 
 .lfDetailEmpty {
@@ -2846,13 +2937,13 @@ a.instFieldValue:hover {
   align-items: center;
   justify-content: center;
   text-align: center;
-  gap: 10px;
+  gap: var(--space-2);
   min-height: 280px;
-  padding: 32px;
-  color: rgba(255, 255, 255, 0.7);
-  background: var(--navy, #1a2744);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
+  padding: var(--space-6);
+  color: var(--on-navy-muted);
+  background: var(--navy);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 8%, transparent);
+  border-radius: var(--radius-lg);
 }
 
 .lfDetailEmpty svg {
@@ -2865,132 +2956,134 @@ a.instFieldValue:hover {
    pane. Scoped to .lfDetail so the classic ZIP / Single-Assignment flow (which
    renders the same component on a light card) keeps its light styling. */
 .lfDetail .lfBadgeKind {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.85);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, var(--on-navy) 12%, transparent);
+  color: var(--on-navy);
+  border-color: color-mix(in srgb, var(--on-navy) 20%, transparent);
 }
 
 .lfDetail .results h2 {
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfDetail .fieldHint {
-  color: rgba(255, 255, 255, 0.68);
+  color: var(--on-navy-muted);
 }
 
 .lfDetail .emptyState {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--on-navy-muted);
 }
 
 .lfDetail .downloadButton {
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 40%, transparent);
   background: transparent;
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfDetail .downloadButton:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.6);
+  background: color-mix(in srgb, var(--on-navy) 12%, transparent);
+  border-color: color-mix(in srgb, var(--on-navy) 60%, transparent);
 }
 
 .lfDetail .loadingState {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 18%, transparent);
+  background: color-mix(in srgb, var(--on-navy) 6%, transparent);
 }
 
 .lfDetail .loadingTitle {
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfDetail .loadingText {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--on-navy-muted);
 }
 
 .lfDetail .generatedRubricCard {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 14%, transparent);
+  background: color-mix(in srgb, var(--on-navy) 5%, transparent);
+  color: var(--on-navy);
 }
 
 .lfDetail .generatedRubricCard summary {
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfDetail .resultsChecklist {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 14%, transparent);
+  background: color-mix(in srgb, var(--on-navy) 5%, transparent);
 }
 
 .lfDetail .resultsChecklist h3 {
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfDetail .resultsChecklist ul {
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--on-navy);
 }
 
 .lfDetail .fileMetaLabel {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--on-navy-muted);
 }
 
 .lfDetail .previewContent {
-  background: rgba(0, 0, 0, 0.22);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.88);
+  background: color-mix(in srgb, var(--navy) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 12%, transparent);
+  color: var(--on-navy);
 }
 
 .lfDetail .matrixWrap {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: var(--navy, #1a2744);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 14%, transparent);
+  background: var(--navy);
 }
 
 .lfDetail .matrix th,
 .lfDetail .matrix td {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  color: #fff;
+  border-bottom: 1px solid color-mix(in srgb, var(--on-navy) 12%, transparent);
+  color: var(--on-navy);
 }
 
 .lfDetail .matrix th {
-  background: #243357;
+  background: var(--navy-soft);
 }
 
 .lfDetail .matrix td:first-child {
-  background: var(--navy, #1a2744);
-  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.12);
+  background: var(--navy);
+  /* Zero-blur, so out of scope for AC4/elevation (AM2) - this is a frozen-
+     column edge line, not a shadow. Colour still tokenised per AC5/AM1. */
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--on-navy) 12%, transparent);
 }
 
 .lfDetail .matrix tbody tr:nth-child(even) td,
 .lfDetail .matrix tbody tr:nth-child(even) td:first-child {
-  background: #1e2a49;
+  background: color-mix(in srgb, var(--navy) 60%, var(--navy-soft) 40%);
 }
 
 .lfDetail .matrixFileName,
 .lfDetail .matrixCellDetail p {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--on-navy);
 }
 
 .lfDetail .copyIconButton,
 .lfDetail .fileIconButton {
-  color: rgba(255, 255, 255, 0.72);
-  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--on-navy-muted);
+  border-color: color-mix(in srgb, var(--on-navy) 25%, transparent);
 }
 
 .lfDetail .copyIconButton:hover,
 .lfDetail .fileIconButton:hover {
-  color: #fff;
+  color: var(--on-navy);
 }
 
 .lfDetail input,
 .lfDetail textarea,
 .lfDetail .textInput {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: color-mix(in srgb, var(--on-navy) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--on-navy) 20%, transparent);
+  color: var(--on-navy);
 }
 
 .lfDetail input::placeholder,
 .lfDetail textarea::placeholder {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--on-navy-muted);
 }
 
 .lfDetail input:focus,
@@ -3005,9 +3098,9 @@ a.instFieldValue:hover {
 
 .announcementPreview {
   border: 1px solid var(--field-border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
-  padding: 16px 18px;
+  padding: var(--space-4) var(--space-4);
 }
 
 /* ── Inbox list + thread ──────────────────────────────────────────────────── */
@@ -3016,7 +3109,7 @@ a.instFieldValue:hover {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--field-border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
   overflow: hidden;
 }
@@ -3031,12 +3124,12 @@ a.instFieldValue:hover {
 
 .inboxItemMain {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: flex-start;
   text-align: left;
   background: transparent;
   border: none;
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-3);
   cursor: pointer;
   font: inherit;
   color: var(--text-primary);
@@ -3046,20 +3139,20 @@ a.instFieldValue:hover {
   flex-shrink: 0;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--accent);
-  color: #ffffff;
-  font-size: 0.76rem;
+  color: var(--text-on-accent);
+  font-size: var(--font-size-xs);
   font-weight: 700;
 }
 
 .inboxItemBody {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
   min-width: 0;
   flex: 1;
 }
@@ -3068,12 +3161,12 @@ a.instFieldValue:hover {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .inboxItemSubject {
   color: var(--text-primary);
-  font-size: 0.92rem;
+  font-size: var(--font-size-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3081,13 +3174,13 @@ a.instFieldValue:hover {
 
 .inboxItemTime {
   flex-shrink: 0;
-  font-size: 0.74rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
 .inboxItemMeta,
 .inboxItemPreview {
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3096,8 +3189,8 @@ a.instFieldValue:hover {
 
 .inboxItemActions {
   display: flex;
-  gap: 8px;
-  padding: 0 14px 10px 58px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-2) var(--space-6);
 }
 
 .inboxReplyBox {
@@ -3105,8 +3198,8 @@ a.instFieldValue:hover {
   bottom: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
   background: var(--card-background);
   border-top: 1px solid var(--field-border);
 }
@@ -3121,10 +3214,10 @@ a.instFieldValue:hover {
 
 .matrix th,
 .matrix td {
-  padding: 12px 10px;
+  padding: var(--space-3) var(--space-2);
   text-align: left;
   border-bottom: 1px solid var(--field-border);
-  font-size: 0.86rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   vertical-align: top;
   min-width: 0;
@@ -3156,7 +3249,7 @@ a.instFieldValue:hover {
 .sortButton {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   border: 0;
   background: transparent;
   padding: 0;
@@ -3191,19 +3284,19 @@ a.instFieldValue:hover {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 2px;
-  padding-right: 30px;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+  padding-right: var(--space-6);
   min-width: 0;
 }
 
 .matrixFileList {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-4);
   list-style-position: outside;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .matrixFileItem {
@@ -3211,14 +3304,14 @@ a.instFieldValue:hover {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .matrixFileName {
   flex: 1;
   min-width: 0;
-  font-size: 0.84rem;
-  line-height: 1.35;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-snug);
   word-break: break-word;
   color: var(--text-primary);
 }
@@ -3231,12 +3324,12 @@ a.instFieldValue:hover {
 .rubricAreaCell {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .rubricAreaPercent {
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -3244,8 +3337,8 @@ a.instFieldValue:hover {
 .fileIconGroup {
   display: flex;
   flex-shrink: 0;
-  gap: 3px;
-  padding-top: 1px;
+  gap: var(--space-1);
+  padding-top: var(--space-1);
 }
 
 .fileIconButton {
@@ -3255,7 +3348,7 @@ a.instFieldValue:hover {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-secondary);
@@ -3283,7 +3376,7 @@ a.instFieldValue:hover {
 .chipRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -3292,11 +3385,12 @@ a.instFieldValue:hover {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  padding: 4px 9px;
-  border-radius: 999px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--field-border);
-  font-size: 0.78rem;
-  line-height: 1.2;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  line-height: var(--line-tight);
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -3332,8 +3426,8 @@ a.instFieldValue:hover {
 
 .matrixCellDetail p {
   margin: 0;
-  font-size: 0.84rem;
-  line-height: 1.45;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-snug);
   color: var(--text-secondary);
 }
 
@@ -3347,7 +3441,7 @@ a.instFieldValue:hover {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
@@ -3374,17 +3468,19 @@ a.instFieldValue:hover {
 
 .scoreBadge {
   align-self: flex-start;
-  padding: 3px 8px;
-  border-radius: 999px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--field-border);
   background: var(--field-background);
-  font-size: 0.78rem;
-  font-weight: 700;
+  font-size: var(--font-size-xs);
+  /* 600, not AM11's badge-default 500 - see .ghBadge's comment above
+     (accessibility pass 2026-09-01). */
+  font-weight: 600;
   color: var(--text-primary);
 }
 
 .scoreBadgeDeducted {
-  border-color: #fca5a5;
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--on-navy) 55%);
   background: var(--danger-surface);
   color: var(--danger);
 }
@@ -3392,30 +3488,30 @@ a.instFieldValue:hover {
 .overallFeedbackCell {
   margin: 0;
   min-width: 0;
-  font-size: 0.84rem;
-  line-height: 1.5;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
 .overallFeedbackWrap {
   position: relative;
-  padding-top: 2px;
-  padding-right: 30px;
+  padding-top: var(--space-1);
+  padding-right: var(--space-6);
 }
 
 /* Readable feedback textareas in the results table. Only layout/typography is
    set here (no colors) so the dark Live Feed pane's own theming still wins. */
 .feedbackText {
   width: 100%;
-  padding: 9px 11px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--field-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.9rem;
-  line-height: 1.6;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   resize: vertical;
 }
 
@@ -3431,8 +3527,8 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, 0.55);
+  padding: var(--space-6);
+  background: color-mix(in srgb, var(--navy) 55%, transparent);
   /* Above the app chrome: the top bar is z-index 50 (TopBar.module.css), the
      in-session banner 45 (InSessionBanner.module.css), the Tabs strip 40
      (page.tsx) and .ccStickyHeader 30 (this file). The 9999 this value beats
@@ -3451,12 +3547,12 @@ a.instFieldValue:hover {
   height: min(90vh, 860px);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 18px;
-  border-radius: 18px;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--field-border);
   background: var(--field-background);
-  box-shadow: 0 20px 56px rgba(15, 23, 42, 0.25);
+  box-shadow: var(--shadow-lg);
   /* GradingResults.tsx's two preview overlays (expanded feedback, code output)
      render inline here (no createPortal), and LiveFeedPanel's renderDetail
      mounts GradingResults inside .lfDetail - so this white surface can sit
@@ -3472,50 +3568,50 @@ a.instFieldValue:hover {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 8px;
+  gap: var(--space-4);
+  padding-bottom: var(--space-2);
   border-bottom: 1px solid color-mix(in srgb, var(--field-border) 80%, transparent 20%);
 }
 
 .previewHeader h3 {
-  font-size: 1.05rem;
+  font-size: var(--font-size-lg);
   color: var(--text-primary);
   word-break: break-word;
 }
 
 .previewMeta {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
 .previewCloseButton {
-  padding: 8px 12px;
-  border-radius: 999px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
 }
 
 .previewNotice {
   margin: 0;
-  font-size: 0.84rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
 .previewContent {
   margin: 0;
-  padding: 14px;
-  border-radius: 12px;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
   border: 1px solid var(--field-border);
   background: color-mix(in srgb, var(--field-background) 94%, var(--accent) 6%);
   color: var(--text-primary);
-  font-size: 0.84rem;
-  line-height: 1.5;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
   white-space: pre-wrap;
   overflow: auto;
   max-height: min(66vh, 620px);
@@ -3526,7 +3622,7 @@ a.instFieldValue:hover {
   min-height: 0;
   width: 100%;
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
 }
 
 .previewImageWrap {
@@ -3536,15 +3632,15 @@ a.instFieldValue:hover {
   align-items: flex-start;
   justify-content: center;
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--field-background) 94%, var(--accent) 6%);
-  padding: 12px;
+  padding: var(--space-3);
 }
 
 .previewImage {
   max-width: 100%;
   height: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   display: block;
 }
 
@@ -3553,12 +3649,12 @@ a.instFieldValue:hover {
   max-height: min(90vh, 860px);
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px;
-  border-radius: 18px;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--field-border);
   background: var(--field-background);
-  box-shadow: 0 20px 56px rgba(15, 23, 42, 0.25);
+  box-shadow: var(--shadow-lg);
 }
 
 .lessonSlideList {
@@ -3566,7 +3662,7 @@ a.instFieldValue:hover {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3575,57 +3671,58 @@ a.instFieldValue:hover {
 .lessonSlideCard {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
-  border-radius: 12px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   border: 1px solid var(--field-border);
   background: var(--card-background);
 }
 
 .lessonSlideNum {
-  font-size: 0.7rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
+  /* AM18: page-level kicker above a title - keeps the accent treatment. */
   color: var(--accent-ink);
 }
 
 .lessonSlideTitle {
   margin: 0;
-  font-size: 0.97rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--text-primary);
-  line-height: 1.3;
+  line-height: var(--line-tight);
 }
 
 .lessonSlideBullets {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   color: var(--text-secondary);
-  font-size: 0.86rem;
-  line-height: 1.5;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
 }
 
 .lessonInnerTabs {
   display: flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 10px;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--field-border) 40%, transparent 60%);
   width: fit-content;
 }
 
 .lessonInnerTab {
-  padding: 6px 16px;
+  padding: var(--space-1) var(--space-4);
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
@@ -3642,60 +3739,67 @@ a.instFieldValue:hover {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .assignmentOverview {
   margin: 0;
-  font-size: 0.93rem;
-  line-height: 1.6;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   color: var(--text-secondary);
 }
 
 .assignmentSection {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .assignmentSectionLabel {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
+  /* AM18: page-level kicker above a title - keeps the accent treatment. */
   color: var(--accent-ink);
 }
 
 .introText {
   margin: 0;
-  font-size: 0.95rem;
-  line-height: 1.65;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-normal);
   color: var(--text-secondary);
 }
 
+/* X9 (AM24): shares the uppercase CONTENT HEADING idiom - see
+   .docPreviewHeading's comment above for why this is 0.03em tracking, not
+   the micro-label idiom's 0.06em. */
 .introTitle {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--font-size-2xl);
   font-weight: 700;
-  line-height: 1.3;
+  line-height: var(--line-tight);
   text-transform: uppercase;
+  letter-spacing: 0.03em;
   color: var(--text-primary);
 }
 
+/* X9 (AM24): same content-heading idiom, one step down the type scale. */
 .introHeading {
   margin: 1.5em 0 0;
-  font-size: 1.15rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
-  line-height: 1.35;
+  line-height: var(--line-snug);
   text-transform: uppercase;
+  letter-spacing: 0.03em;
   color: var(--text-primary);
 }
 
 .assignmentStepList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3705,14 +3809,14 @@ a.instFieldValue:hover {
 .assignmentStepCard {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  border-radius: 10px;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
   border: 1px solid var(--field-border);
   background: var(--card-background);
   counter-increment: step-counter;
   position: relative;
-  padding-left: 44px;
+  padding-left: var(--space-6);
 }
 
 .assignmentStepCard::before {
@@ -3722,10 +3826,10 @@ a.instFieldValue:hover {
   top: 12px;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--accent);
-  color: #fff;
-  font-size: 0.72rem;
+  color: var(--text-on-accent);
+  font-size: var(--font-size-xs);
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -3734,34 +3838,34 @@ a.instFieldValue:hover {
 
 .assignmentStepTitle {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .assignmentStepDesc {
   margin: 0;
-  font-size: 0.84rem;
-  line-height: 1.5;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
   color: var(--text-secondary);
 }
 
 .assignmentList {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  font-size: 0.88rem;
-  line-height: 1.5;
+  gap: var(--space-1);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   color: var(--text-secondary);
 }
 
 /* ── Examples tab ──────────────────────────────────────────────────────── */
 
 .exampleConceptHeader {
-  margin: 0 0 4px;
-  font-size: 0.8rem;
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -3771,7 +3875,7 @@ a.instFieldValue:hover {
 .exampleList {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3781,9 +3885,9 @@ a.instFieldValue:hover {
 .exampleCard {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 12px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   border: 1px solid var(--field-border);
   background: var(--card-background);
   counter-increment: example-counter;
@@ -3791,7 +3895,7 @@ a.instFieldValue:hover {
 
 .exampleTitle {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -3799,28 +3903,28 @@ a.instFieldValue:hover {
 .exampleSection {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .exampleProblemText {
   margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.65;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   color: var(--text-primary);
   white-space: pre-wrap;
 }
 
 .exampleCodeWrap {
   position: relative;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--field-border) 80%, transparent 20%);
 }
 
 .exampleCodeLang {
   display: block;
-  padding: 4px 12px;
-  font-size: 0.72rem;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -3831,10 +3935,10 @@ a.instFieldValue:hover {
 
 .exampleCodeBlock {
   margin: 0;
-  padding: 14px 16px;
+  padding: var(--space-3) var(--space-4);
   font-family: var(--font-mono);
-  font-size: 0.82rem;
-  line-height: 1.6;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
   color: var(--text-primary);
   background: color-mix(in srgb, var(--field-background) 60%, var(--surface-muted) 40%);
   overflow-x: auto;
@@ -3846,29 +3950,29 @@ a.instFieldValue:hover {
 .lessonPreviewFooter {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding-top: 4px;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
   border-top: 1px solid color-mix(in srgb, var(--field-border) 80%, transparent 20%);
 }
 
 .lessonRevisionRow {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding-top: 12px;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
   border-top: 1px solid color-mix(in srgb, var(--field-border) 80%, transparent 20%);
 }
 
 .lessonRevisionArea {
   flex: 1;
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
-  line-height: 1.5;
+  line-height: var(--line-normal);
   resize: none;
 }
 
@@ -3887,23 +3991,29 @@ a.instFieldValue:hover {
 .selectionAiButton {
   position: fixed;
   z-index: 9999;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
+  /* X8 (AM24): 30px was outside the closed control-height set; snapped to
+     the nearest token (kept equal on both axes to stay circular). */
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  border-radius: var(--radius-round);
   border: none;
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.45);
+  /* X2: was a bespoke blurred accent glow - AM2's inset/zero-blur exemption
+     doesn't cover a drop shadow like this one. This button floats above
+     selected text the way a menu/popover floats above a page, so it takes
+     the "md" elevation token. */
+  box-shadow: var(--shadow-md);
   transition: background 0.15s, transform 0.1s;
 }
 
 .selectionAiButton:hover {
-  background: #1d4ed8;
+  background: var(--accent-hover);
   transform: scale(1.1);
 }
 
@@ -3917,9 +4027,9 @@ a.instFieldValue:hover {
   display: flex;
   flex-direction: column;
   background: var(--field-background);
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   font-family: inherit;
   resize: both;
@@ -3942,12 +4052,12 @@ a.instFieldValue:hover {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 16px;
+  padding: var(--space-4);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: 2px dashed var(--accent);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   pointer-events: none;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--accent);
 }
@@ -3956,9 +4066,9 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 11px 14px;
+  padding: var(--space-3) var(--space-3);
   background: var(--surface-subtle);
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   flex-shrink: 0;
   cursor: grab;
   user-select: none;
@@ -3972,9 +4082,9 @@ a.instFieldValue:hover {
 .selectionChatHeaderLeft {
   display: flex;
   align-items: center;
-  gap: 7px;
-  color: #2563eb;
-  font-size: 0.875rem;
+  gap: var(--space-2);
+  color: var(--accent-ink);
+  font-size: var(--font-size-md);
   font-weight: 600;
 }
 
@@ -3982,24 +4092,24 @@ a.instFieldValue:hover {
   background: none;
   border: none;
   cursor: pointer;
-  color: #64748b;
-  font-size: 1.25rem;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xl);
   line-height: 1;
-  padding: 1px 6px;
-  border-radius: 6px;
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-xs);
 }
 
 .selectionChatClose:hover {
-  background: rgba(15, 23, 42, 0.07);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   color: var(--text-primary);
 }
 
 .selectionChatContext {
-  padding: 8px 14px;
-  font-size: 0.8rem;
-  color: #64748b;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
   background: var(--surface-subtle);
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 6%, transparent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4016,7 +4126,7 @@ a.instFieldValue:hover {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
-  line-height: 1.4;
+  line-height: var(--line-snug);
 }
 
 .toneStatusChipActive {
@@ -4039,30 +4149,30 @@ a.instFieldValue:hover {
 .selectionChatMessages {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   min-height: 72px;
 }
 
 .selectionChatEmpty {
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   text-align: center;
-  padding: 12px 0;
+  padding: var(--space-3) 0;
   margin: 0;
 }
 
 .selectionChatUserMsg {
   align-self: flex-end;
-  background: #2563eb;
-  color: #fff;
-  padding: 8px 12px;
-  border-radius: 12px 12px 2px 12px;
-  font-size: 0.875rem;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md) var(--radius-md) 2px var(--radius-md);
+  font-size: var(--font-size-md);
   max-width: 88%;
-  line-height: 1.45;
+  line-height: var(--line-snug);
   white-space: pre-wrap;
   word-break: break-word;
   font-weight: normal;
@@ -4074,11 +4184,11 @@ a.instFieldValue:hover {
   align-self: flex-start;
   background: var(--surface-muted);
   color: var(--text-primary);
-  padding: 8px 12px;
-  border-radius: 12px 12px 12px 2px;
-  font-size: 0.875rem;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-md) 2px;
+  font-size: var(--font-size-md);
   max-width: 92%;
-  line-height: 1.5;
+  line-height: var(--line-normal);
   white-space: pre-wrap;
   word-break: break-word;
   font-weight: normal;
@@ -4094,20 +4204,20 @@ a.instFieldValue:hover {
 .selectionChatMsgGroup {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
 }
 
 .selectionChatMsgActionsAi {
   display: flex;
   align-items: center;
-  padding-left: 4px;
+  padding-left: var(--space-1);
 }
 
 .selectionChatMsgActionsUser {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding-right: 4px;
+  padding-right: var(--space-1);
 }
 
 .selectionChatMsgAction {
@@ -4115,8 +4225,8 @@ a.instFieldValue:hover {
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  padding: 2px 4px;
-  border-radius: 4px;
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-xs);
   display: flex;
   align-items: center;
   line-height: 1;
@@ -4125,7 +4235,7 @@ a.instFieldValue:hover {
 
 .selectionChatMsgAction:hover:not(:disabled) {
   color: var(--text-secondary);
-  background: rgba(15, 23, 42, 0.06);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
 .selectionChatMsgAction:disabled {
@@ -4143,7 +4253,7 @@ a.instFieldValue:hover {
 .liveRecordingDot {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--danger);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 25%, transparent);
   animation: selectionChatPulse 1.4s ease-in-out infinite;
@@ -4172,12 +4282,12 @@ a.instFieldValue:hover {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px 5px 8px;
-  border-radius: 999px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   background: var(--danger-surface);
   border: 1px solid var(--danger-border);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.2);
+  box-shadow: var(--shadow-md);
   pointer-events: none;
   max-width: min(220px, calc(100vw - 16px));
   overflow: hidden;
@@ -4186,7 +4296,7 @@ a.instFieldValue:hover {
 
 .fabLiveBadgeTime {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 0.02em;
@@ -4213,20 +4323,20 @@ a.instFieldValue:hover {
   justify-content: center;
   min-width: 20px;
   height: 20px;
-  padding: 0 5px;
-  border-radius: 999px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
   background: var(--accent);
-  color: #fff;
-  font-size: 0.7rem;
+  color: var(--text-on-accent);
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   line-height: 1;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.35);
+  box-shadow: var(--shadow-sm);
   pointer-events: none;
 }
 
 .selectionChatError {
-  color: #dc2626;
-  font-size: 0.8rem;
+  color: var(--danger);
+  font-size: var(--font-size-sm);
   margin: 0;
 }
 
@@ -4237,17 +4347,17 @@ a.instFieldValue:hover {
 .selectionChatMsgAttachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-1);
   justify-content: flex-end;
-  padding-right: 2px;
+  padding-right: var(--space-1);
 }
 
 .selectionChatMsgAttachmentName {
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
   background: var(--surface-muted);
-  border-radius: 999px;
-  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-2);
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4260,8 +4370,8 @@ a.instFieldValue:hover {
 .attachmentChips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 12px 0;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) 0;
   background: var(--surface-subtle);
   flex-shrink: 0;
 }
@@ -4269,12 +4379,12 @@ a.instFieldValue:hover {
 .attachmentChip {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   background: var(--field-background);
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  padding: 3px 6px 3px 10px;
-  font-size: 0.78rem;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
   color: var(--text-primary);
   max-width: 180px;
 }
@@ -4292,13 +4402,13 @@ a.instFieldValue:hover {
    text-only pill's 10px) since the thumbnail itself now supplies that
    breathing room. */
 .attachmentChipWithThumb {
-  padding-left: 3px;
+  padding-left: var(--space-1);
 }
 
 .attachmentChipThumb {
   width: 22px;
   height: 22px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   object-fit: cover;
   flex-shrink: 0;
   display: block;
@@ -4312,7 +4422,7 @@ a.instFieldValue:hover {
   width: 16px;
   height: 16px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: none;
   color: var(--text-muted);
   cursor: pointer;
@@ -4321,7 +4431,7 @@ a.instFieldValue:hover {
 }
 
 .attachmentChipRemove:hover {
-  background: rgba(15, 23, 42, 0.08);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
   color: var(--text-primary);
 }
 
@@ -4330,35 +4440,35 @@ a.instFieldValue:hover {
    ignored, so "I uploaded it and it did not help" is diagnosable. */
 .attachmentSkippedNotice {
   color: var(--text-muted);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   margin: 0;
-  padding: 0 12px;
+  padding: 0 var(--space-3);
 }
 
 .selectionChatInputRow {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   background: var(--surface-subtle);
   flex-shrink: 0;
 }
 
 .selectionChatInput {
   flex: 1;
-  padding: 8px 11px;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
   background: var(--field-background);
   font: inherit;
-  font-size: 0.875rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   resize: none;
   min-height: 36px;
   max-height: 96px;
   overflow-y: auto;
-  line-height: 1.4;
+  line-height: var(--line-snug);
 }
 
 .selectionChatInput::placeholder {
@@ -4368,17 +4478,17 @@ a.instFieldValue:hover {
 .selectionChatInput:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-color: #2563eb;
+  border-color: var(--accent);
 }
 
 .selectionChatSend {
   flex-shrink: 0;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: none;
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4388,11 +4498,11 @@ a.instFieldValue:hover {
 }
 
 .selectionChatSend:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--accent-hover);
 }
 
 .selectionChatSend:disabled {
-  background: #cbd5e1;
+  background: var(--field-border);
   cursor: not-allowed;
 }
 
@@ -4401,20 +4511,20 @@ a.instFieldValue:hover {
 .suggestionBubbles {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 12px 4px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  border-top: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   background: var(--surface-subtle);
   flex-shrink: 0;
 }
 
 .suggestionBubble {
   background: var(--field-background);
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  padding: 4px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   color: var(--text-primary);
   cursor: pointer;
   white-space: nowrap;
@@ -4422,17 +4532,17 @@ a.instFieldValue:hover {
   text-overflow: ellipsis;
   max-width: 100%;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
-  line-height: 1.5;
+  line-height: var(--line-normal);
 }
 
 .suggestionBubble:hover {
   background: var(--accent-surface);
-  border-color: #93c5fd;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--field-background) 55%);
   color: var(--accent-ink);
 }
 
 .suggestionBubble:active {
-  background: #dbeafe;
+  background: var(--accent-surface);
 }
 
 @keyframes spin {
@@ -4450,7 +4560,7 @@ a.instFieldValue:hover {
 .deadlinesHeaderActions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .deadlinesAddIconBtn {
@@ -4460,40 +4570,40 @@ a.instFieldValue:hover {
   background: none;
   border: none;
   cursor: pointer;
-  color: #64748b;
-  padding: 3px 6px;
-  border-radius: 6px;
+  color: var(--text-secondary);
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-xs);
   transition: color 0.1s, background 0.1s;
 }
 
 .deadlinesAddIconBtn:hover {
-  background: rgba(15, 23, 42, 0.07);
-  color: #2563eb;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--accent-ink);
 }
 
 .deadlinesAddForm {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   background: var(--surface-subtle);
   flex-shrink: 0;
 }
 
 .deadlinesInputRow {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .deadlinesInput {
   width: 100%;
-  padding: 6px 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
   background: var(--field-background);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   color: var(--text-primary);
   box-sizing: border-box;
 }
@@ -4501,45 +4611,45 @@ a.instFieldValue:hover {
 .deadlinesInput:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
-  border-color: #2563eb;
+  border-color: var(--accent);
 }
 
 .deadlinesFormActions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   justify-content: flex-end;
 }
 
 .deadlinesAddBtn {
-  padding: 5px 16px;
-  border-radius: 8px;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-sm);
   border: none;
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-on-accent);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .deadlinesAddBtn:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--accent-hover);
 }
 
 .deadlinesAddBtn:disabled {
-  background: #cbd5e1;
+  background: var(--field-border);
   cursor: not-allowed;
 }
 
 .deadlinesCancelBtn {
-  padding: 5px 14px;
-  border-radius: 8px;
-  border: 1px solid #cbd5e1;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -4551,19 +4661,19 @@ a.instFieldValue:hover {
 .deadlinesTextarea {
   resize: vertical;
   min-height: 100px;
-  line-height: 1.4;
+  line-height: var(--line-snug);
 }
 
 .deadlinesUploadStatus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin: 8px 12px 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 0.8rem;
-  line-height: 1.35;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-snug);
   background: var(--accent-surface);
   color: var(--accent-ink);
   /* This wants the translucent WASH, not the focus ring - they were the same
@@ -4573,29 +4683,33 @@ a.instFieldValue:hover {
 
 .deadlinesUploadStatus[data-kind="success"] {
   background: var(--success-surface);
-  color: var(--success);
-  border-color: rgba(16, 185, 129, 0.25);
+  /* X5 (AM24): --success as body text measures 2.95:1, the exact contrast
+     failure globals.css documents for --success-ink's own comment. Fill and
+     border stay on --success (a tinted background and a hairline are fine);
+     only the text moves to --success-ink. */
+  color: var(--success-ink);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--field-background));
 }
 
 .deadlinesUploadStatus[data-kind="error"] {
   background: var(--danger-surface);
   color: var(--danger);
-  border-color: rgba(239, 68, 68, 0.25);
+  border-color: var(--danger-border);
 }
 
 .deadlinesUploadStatusClose {
   background: transparent;
   border: none;
-  font-size: 1rem;
+  font-size: var(--font-size-lg);
   line-height: 1;
   cursor: pointer;
   color: inherit;
-  padding: 0 2px;
+  padding: 0 var(--space-1);
 }
 
 .deadlineItemSchool {
-  font-size: 0.72rem;
-  color: var(--text-secondary, #475569);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -4603,55 +4717,57 @@ a.instFieldValue:hover {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   background: var(--surface-subtle);
-  border: 1px solid rgba(15, 23, 42, 0.07);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 .deadlineItemLeft {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
 .deadlineItemTitle {
-  font-size: 0.875rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .deadlineItemDate {
-  font-size: 0.78rem;
-  color: #64748b;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
 }
 
 .deadlineItemDesc {
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 
 .deadlineItemBadge {
   display: inline-block;
-  font-size: 0.68rem;
-  font-weight: 700;
+  font-size: var(--font-size-xs);
+  /* 600, not AM11's badge-default 500 - see .ghBadge's comment above
+     (accessibility pass 2026-09-01). */
+  font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-pill);
   width: fit-content;
 }
 
 .deadlineBadge {
-  background: rgba(220, 38, 38, 0.1);
-  color: #dc2626;
+  background: var(--danger-surface);
+  color: var(--danger);
 }
 
 .eventBadge {
-  background: rgba(37, 99, 235, 0.1);
-  color: #2563eb;
+  background: var(--accent-surface);
+  color: var(--accent-ink);
 }
 
 .deadlineDeleteBtn {
@@ -4659,17 +4775,17 @@ a.instFieldValue:hover {
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 1.1rem;
-  padding: 0 3px;
-  border-radius: 4px;
+  font-size: var(--font-size-xl);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
   line-height: 1;
   transition: color 0.1s, background 0.1s;
 }
 
 .deadlineDeleteBtn:hover {
-  color: #dc2626;
-  background: rgba(220, 38, 38, 0.06);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
 
 @media (max-width: 1024px) {
@@ -4679,8 +4795,8 @@ a.instFieldValue:hover {
 
   .matrix th,
   .matrix td {
-    padding: 10px 8px;
-    font-size: 0.84rem;
+    padding: var(--space-2) var(--space-2);
+    font-size: var(--font-size-sm);
   }
 
   .resultsHeader {
@@ -4690,16 +4806,16 @@ a.instFieldValue:hover {
 
 @media (max-width: 600px) {
   .page {
-    padding: 24px 16px;
+    padding: var(--space-6) var(--space-4);
   }
 
   .card {
-    padding: 24px;
-    border-radius: 20px;
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
   }
 
   .header {
-    padding-bottom: 14px;
+    padding-bottom: var(--space-3);
   }
 
   .field textarea {
@@ -4728,24 +4844,29 @@ a.instFieldValue:hover {
   z-index: 9999;
   width: 52px;
   height: 52px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   border: none;
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: grab;
   padding: 0;
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.45), 0 2px 6px rgba(0, 0, 0, 0.12);
+  /* X2: was a bespoke accent glow at rest layered with --shadow-sm, then a
+     bigger glow layered with --shadow-md on hover - two elevation systems on
+     one element. This is a floating action button (the same role as a menu
+     or popover), so rest takes the "md" token; hover lifts it one step
+     further to "lg", since that is the only larger token available. */
+  box-shadow: var(--shadow-md);
   transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
   user-select: none;
   -webkit-user-select: none;
 }
 
 .fab:hover {
-  background: #1d4ed8;
-  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.55), 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-lg);
   transform: scale(1.06);
 }
 
@@ -4763,9 +4884,9 @@ a.instFieldValue:hover {
   display: flex;
   flex-direction: column;
   background: var(--field-background);
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   font-family: inherit;
   resize: both;
@@ -4775,9 +4896,9 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 11px 14px;
+  padding: var(--space-3) var(--space-3);
   background: var(--surface-subtle);
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   flex-shrink: 0;
   cursor: grab;
   user-select: none;
@@ -4791,9 +4912,9 @@ a.instFieldValue:hover {
 .chatModalHeaderLeft {
   display: flex;
   align-items: center;
-  gap: 7px;
-  color: #2563eb;
-  font-size: 0.875rem;
+  gap: var(--space-2);
+  color: var(--accent-ink);
+  font-size: var(--font-size-md);
   font-weight: 600;
 }
 
@@ -4801,46 +4922,46 @@ a.instFieldValue:hover {
   background: none;
   border: none;
   cursor: pointer;
-  color: #64748b;
-  font-size: 1.25rem;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xl);
   line-height: 1;
-  padding: 1px 6px;
-  border-radius: 6px;
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
 }
 
 .chatModalClose:hover {
-  background: rgba(15, 23, 42, 0.07);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   color: var(--text-primary);
 }
 
 .chatModalMessages {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   min-height: 0;
 }
 
 .chatModalEmpty {
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   text-align: center;
-  padding: 12px 0;
+  padding: var(--space-3) 0;
   margin: 0;
 }
 
 .chatModalUserMsg {
   align-self: flex-end;
-  background: #2563eb;
-  color: #fff;
-  padding: 8px 12px;
-  border-radius: 12px 12px 2px 12px;
-  font-size: 0.875rem;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md) var(--radius-md) 2px var(--radius-md);
+  font-size: var(--font-size-md);
   max-width: 88%;
-  line-height: 1.45;
+  line-height: var(--line-snug);
   white-space: pre-wrap;
   word-break: break-word;
   font-weight: normal;
@@ -4852,11 +4973,11 @@ a.instFieldValue:hover {
   align-self: flex-start;
   background: var(--surface-muted);
   color: var(--text-primary);
-  padding: 8px 12px;
-  border-radius: 12px 12px 12px 2px;
-  font-size: 0.875rem;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-md) 2px;
+  font-size: var(--font-size-md);
   max-width: 92%;
-  line-height: 1.5;
+  line-height: var(--line-normal);
   white-space: pre-wrap;
   word-break: break-word;
   font-weight: normal;
@@ -4872,25 +4993,25 @@ a.instFieldValue:hover {
 .chatModalInputRow {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   background: var(--surface-subtle);
   flex-shrink: 0;
 }
 
 .chatModalInput {
   flex: 1;
-  padding: 8px 11px;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
   background: var(--field-background);
   font: inherit;
-  font-size: 0.875rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   min-height: 36px;
   outline: none;
-  line-height: 1.4;
+  line-height: var(--line-snug);
 }
 
 .chatModalInput::placeholder {
@@ -4900,33 +5021,33 @@ a.instFieldValue:hover {
 .chatModalInput:focus {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
-  border-color: #2563eb;
+  border-color: var(--accent);
 }
 
 .chatModalSend {
   flex-shrink: 0;
   height: 34px;
-  padding: 0 14px;
-  border-radius: 10px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
   border: none;
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 0.875rem;
+  font-size: var(--font-size-md);
   font-weight: 500;
   transition: background 0.15s;
   white-space: nowrap;
 }
 
 .chatModalSend:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--accent-hover);
 }
 
 .chatModalSend:disabled {
-  background: #cbd5e1;
+  background: var(--field-border);
   cursor: not-allowed;
 }
 
@@ -4937,9 +5058,9 @@ a.instFieldValue:hover {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--card-border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--card-background);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.1);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -4947,10 +5068,10 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 9px 14px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   background: var(--navy);
-  color: #fff;
+  color: var(--on-navy);
   /* Local --focus-ring-color override - see .lfRail above. */
   --focus-ring-color: var(--focus-ring-on-navy);
 }
@@ -4974,7 +5095,7 @@ a.instFieldValue:hover {
 }
 
 .bulkCount {
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   font-weight: 650;
   letter-spacing: 0.02em;
 }
@@ -4982,9 +5103,9 @@ a.instFieldValue:hover {
 .bulkRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
 }
 
 .bulkRow + .bulkRow {
@@ -4993,9 +5114,9 @@ a.instFieldValue:hover {
 
 .bulkLabel {
   flex: 0 0 76px;
-  font-size: 0.66rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -5023,14 +5144,14 @@ a.instFieldValue:hover {
 .bulkField {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .bulkHint {
   flex: 1 1 240px;
   min-width: 240px;
-  margin: 1px 0 0;
-  font-size: 0.73rem;
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
@@ -5044,15 +5165,15 @@ a.instFieldValue:hover {
 .bulkError {
   flex: 1 1 240px;
   min-width: 240px;
-  margin: 1px 0 0;
-  font-size: 0.73rem;
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--danger);
 }
 
 /* Small inline caption inside a bulk field (e.g. "Due", "then every"). */
 .bulkFieldLabel {
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -5079,7 +5200,7 @@ a.instFieldValue:hover {
 .bulkGroupStatic + .bulkGroup,
 .bulkGroup + .bulkGroupStatic,
 .bulkGroupStatic + .bulkGroupStatic {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 /* The non-collapsible twin of .bulkGroup: the same card treatment, but for a
@@ -5096,7 +5217,7 @@ a.instFieldValue:hover {
    in their place - see that same scoped rule's own comment. */
 .bulkGroupStatic {
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
 }
 
@@ -5111,7 +5232,7 @@ a.instFieldValue:hover {
 .bulkGroupHeading {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -5133,7 +5254,7 @@ a.instFieldValue:hover {
 .bulkGroupStatic > summary,
 .bulkGroupStatic > .bulkGroupHeading {
   list-style: none;
-  padding: 14px 16px;
+  padding: var(--space-3) var(--space-4);
   cursor: default;
 }
 
@@ -5144,7 +5265,7 @@ a.instFieldValue:hover {
 .bulkGroupBody {
   display: flex;
   flex-direction: column;
-  padding: 0 16px 16px;
+  padding: 0 var(--space-4) var(--space-4);
 }
 
 /* An always-visible consequence label on a high-tier group's heading (I5:
@@ -5156,10 +5277,12 @@ a.instFieldValue:hover {
 .bulkGroupTag {
   display: inline-flex;
   align-items: center;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 0.68rem;
-  font-weight: 700;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  /* 600, not AM11's badge-default 500 - see .ghBadge's comment above
+     (accessibility pass 2026-09-01). */
+  font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
   color: var(--warning-ink);
@@ -5211,7 +5334,7 @@ a.instFieldValue:hover {
 .bulkRowStacked {
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 /* The indented detail block under one of that modal's review rows - the
@@ -5220,8 +5343,8 @@ a.instFieldValue:hover {
 .carryReviewDetail {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-left: 28px;
+  gap: var(--space-1);
+  padding-left: var(--space-6);
 }
 
 /* Row-list container for that modal - same reset-list shape .fileList/
@@ -5234,14 +5357,14 @@ a.instFieldValue:hover {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 /* Groups a labelled block - a small-caps .bulkLabel heading plus its list -
    with breathing room below it, e.g. that modal's "Refused (not included)"
    group above the per-item rows. */
 .carrySection {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-2);
 }
 
 /* That modal's Cancel/Apply footer row. Joins the previewHeader/previewMeta/
@@ -5252,8 +5375,8 @@ a.instFieldValue:hover {
 .previewFooter {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 8px 0;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
 }
 
 /* ── Course-content toolbar ───────────────────────────────────────────────────
@@ -5264,22 +5387,22 @@ a.instFieldValue:hover {
 .ccBar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  padding: 2px 0;
+  padding: var(--space-1) 0;
 }
 
 .ccBarGroup {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .ccBarLabel {
-  font-size: 0.6rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
   opacity: 0.75;
@@ -5305,12 +5428,16 @@ a.instFieldValue:hover {
   z-index: 30;
   display: flex;
   flex-direction: column;
-  padding: 10px 0 0;
+  padding: var(--space-2) 0 0;
   background: var(--card-background);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--card-border);
-  box-shadow: 0 8px 18px -12px rgba(15, 23, 42, 0.3);
+  /* X2: was a bespoke blurred literal - AM2's inset/zero-blur exemption
+     doesn't cover it. This header is a card separating itself from the
+     module list scrolling beneath it, so it takes the "sm" elevation token
+     (a card that must separate from a busy background). */
+  box-shadow: var(--shadow-sm);
 }
 
 /* The header's controls. When the user drags the resize handle shorter, this body
@@ -5318,8 +5445,8 @@ a.instFieldValue:hover {
 .ccHeaderBody {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-bottom: 10px;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
 }
 
 /* Drag handle pinned at the header's bottom edge (outside the scrolling body). */
@@ -5337,7 +5464,7 @@ a.instFieldValue:hover {
   content: "";
   width: 40px;
   height: 3px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--card-border);
   transition: background-color 0.15s ease, width 0.15s ease;
 }
@@ -5351,13 +5478,13 @@ a.instFieldValue:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
 .ccCourseTitle {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -5369,7 +5496,7 @@ a.instFieldValue:hover {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--card-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
   transition: box-shadow 0.15s ease, opacity 0.15s ease, outline-color 0.15s ease;
 }
@@ -5377,9 +5504,9 @@ a.instFieldValue:hover {
 .ccHead {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  padding: 9px 12px;
+  padding: var(--space-2) var(--space-3);
 }
 
 /* Groups the module checkbox with its "Select items" button as one visual
@@ -5398,20 +5525,20 @@ a.instFieldValue:hover {
 .ccSelectGroup {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px 2px 2px;
-  border-radius: 999px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+  border-radius: var(--radius-pill);
   background: var(--surface-subtle);
   border: 1px solid var(--border-soft);
 }
 
 .ccGrip {
   cursor: grab;
-  color: #9aa6b8;
+  color: var(--text-muted);
   user-select: none;
-  padding: 0 2px;
+  padding: 0 var(--space-1);
   flex-shrink: 0;
-  font-size: 1rem;
+  font-size: var(--font-size-lg);
   line-height: 1;
   transition: color 0.15s ease;
 }
@@ -5433,10 +5560,10 @@ a.instFieldValue:hover {
   height: 28px;
   flex-shrink: 0;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   cursor: pointer;
   text-decoration: none;
   transition: background-color 0.15s ease, color 0.15s ease;
@@ -5457,12 +5584,12 @@ a.instFieldValue:hover {
   flex: 1 1 200px;
   min-width: 140px;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 var(--space-2);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   font: inherit;
-  font-size: 0.96rem;
+  font-size: var(--font-size-lg);
   font-weight: 650;
   color: var(--text-primary);
 }
@@ -5476,7 +5603,7 @@ a.instFieldValue:hover {
 
 .ccCount {
   flex-shrink: 0;
-  font-size: 0.74rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -5485,12 +5612,12 @@ a.instFieldValue:hover {
   display: inline-flex;
   align-items: center;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--field-border);
-  border-radius: 7px;
+  border-radius: var(--radius-xs);
   background: var(--field-background);
   color: var(--text-primary);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -5522,33 +5649,33 @@ a.instFieldValue:hover {
 .ccBtnDanger {
   border-color: transparent;
   background: transparent;
-  color: #a8403d;
+  color: color-mix(in srgb, var(--danger) 55%, var(--text-primary) 45%);
 }
 
 .ccBtnDanger:hover:not(:disabled) {
-  background: color-mix(in srgb, #a8403d 8%, #fff);
+  background: var(--danger-surface);
 }
 
 .ccPublish {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--space-1);
   height: 28px;
   /* Fixed width so "Published" and "Unpublished" occupy the same space and never
      shift the surrounding columns. */
   min-width: 112px;
   flex-shrink: 0;
-  padding: 0 11px;
+  padding: 0 var(--space-3);
   border: 1px solid var(--field-border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--field-background);
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
   cursor: pointer;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--transition-fast);
   /* NO --focus-ring-color reset here, deliberately, and it is NOT the same
      shape as .previewModal / .ccDueInput despite also painting
      --field-background. Those two CONTAIN the element that takes focus, so a
@@ -5565,26 +5692,26 @@ a.instFieldValue:hover {
   content: "";
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: currentColor;
 }
 
 .ccPublishOn {
-  color: #15803d;
-  border-color: color-mix(in srgb, #15803d 32%, var(--field-border));
+  color: color-mix(in srgb, var(--success) 50%, var(--text-primary) 50%);
+  border-color: color-mix(in srgb, var(--success) 32%, var(--field-border));
 }
 
 .ccPublishOff {
-  color: #b45309;
-  border-color: color-mix(in srgb, #b45309 32%, var(--field-border));
+  color: var(--warning-ink);
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--field-border));
 }
 
 .ccItems {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   border-top: 1px solid var(--card-border);
-  padding: 6px 10px 10px;
+  padding: var(--space-1) var(--space-2) var(--space-2);
   /* When the viewport is too narrow for all columns, scroll horizontally rather
      than wrapping, so the columns stay aligned. */
   overflow-x: auto;
@@ -5593,11 +5720,11 @@ a.instFieldValue:hover {
 .ccItem {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   /* No wrap: the title field absorbs shrink, keeping every column in one row. */
   flex-wrap: nowrap;
-  padding: 4px 6px;
-  border-radius: 8px;
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-md);
   transition: background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
 
@@ -5612,22 +5739,22 @@ a.instFieldValue:hover {
 
 /* The highlighted row is dark navy, so its contents switch to light. */
 .ccItem:hover .ccGrip {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--on-navy-muted);
 }
 .ccItem:hover .ccItemName {
-  color: #fff;
+  color: var(--on-navy);
 }
 .ccItem:hover .ccItemName:focus {
   color: var(--text-primary);
 }
 .ccItem:hover .ccIconBtn {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--on-navy);
 }
 .ccItem:hover .ccBtnDanger {
-  color: #fca5a5;
+  color: color-mix(in srgb, var(--danger) 45%, var(--on-navy) 55%);
 }
 .ccItem:hover .ccDueEmpty {
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--on-navy-muted);
 }
 
 /* The trailing controls (reorder / indent / publish / edit / open / remove) are
@@ -5636,21 +5763,21 @@ a.instFieldValue:hover {
 .ccItemActions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex-shrink: 0;
-  margin-left: 2px;
+  margin-left: var(--space-1);
 }
 
 .ccActionsSep {
   width: 1px;
   align-self: stretch;
   min-height: 18px;
-  margin: 0 3px;
+  margin: 0 var(--space-1);
   background: var(--card-border);
 }
 
 .ccItem:hover .ccActionsSep {
-  background: rgba(255, 255, 255, 0.25);
+  background: color-mix(in srgb, var(--on-navy) 25%, transparent);
 }
 
 .ccType {
@@ -5658,14 +5785,18 @@ a.instFieldValue:hover {
   /* Fixed width so every row's title field starts at the same x (column align). */
   width: 96px;
   text-align: center;
+  /* AM6: fixed 96px chip, text ellipsises. 0.62rem is deliberately below the
+     --font-size-2xs (11px) floor - a density device, not drift. Raising it
+     grows the text inside a fixed width and would make the narrow-viewport
+     rule below (0.56rem) redundant. Left as a literal rem value; reported. */
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #fff;
+  color: var(--on-navy);
   background: var(--navy-chip);
-  border-radius: 5px;
-  padding: 3px 7px;
+  border-radius: var(--radius-xs);
+  padding: var(--space-1) var(--space-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5675,12 +5806,12 @@ a.instFieldValue:hover {
   flex: 1 1 90px;
   min-width: 70px;
   height: 30px;
-  padding: 0 9px;
+  padding: 0 var(--space-2);
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-xs);
   background: transparent;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
 }
 
@@ -5693,40 +5824,40 @@ a.instFieldValue:hover {
 
 .ccAddRow {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
   align-items: center;
-  margin-top: 8px;
-  padding-top: 10px;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
   border-top: 1px solid var(--card-border);
 }
 
 .ccDrop {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   border: 1px dashed var(--field-border);
-  border-radius: 9px;
-  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
 .ccDropEnd {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   border: 1px dashed var(--field-border);
-  border-radius: 8px;
-  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
   text-align: center;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   transition: padding 0.15s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
 .ccDropEndActive {
-  padding: 14px 12px;
+  padding: var(--space-3) var(--space-3);
   border-color: var(--accent);
   background: var(--accent-soft-strong);
   color: var(--accent-ink);
@@ -5734,7 +5865,7 @@ a.instFieldValue:hover {
 
 .ccHint {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
@@ -5743,12 +5874,12 @@ a.instFieldValue:hover {
   align-items: center;
   flex-shrink: 0;
   height: 26px;
-  padding: 0 9px;
+  padding: 0 var(--space-2);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--navy-chip);
-  color: #fff;
-  font-size: 0.72rem;
+  color: var(--on-navy);
+  font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -5772,19 +5903,21 @@ a.instFieldValue:hover {
 }
 
 .ccDueOverdue {
-  background: #a8403d;
-  color: #fff;
+  background: var(--danger-fill);
+  color: var(--text-on-accent);
 }
 
 .ccDueInput {
   flex-shrink: 0;
-  height: 28px;
-  padding: 0 8px;
+  /* X8 (AM24): 28px already matched the closed set - token-ized rather than
+     left as a literal. */
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
   border: 1px solid var(--navy);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--field-background);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-primary);
   /* .ccDueInput is a className on a MUI TextField, so it lands on the
      FormControl ROOT div - which is what carries the white background above,
@@ -5828,6 +5961,7 @@ a.instFieldValue:hover {
 @media (max-width: 760px) {
   .ccType {
     width: 74px;
+    /* AM6: leave below the token floor - see the base rule's comment. */
     font-size: 0.56rem;
   }
   .ccDueSlot {
@@ -5838,15 +5972,15 @@ a.instFieldValue:hover {
   }
   .ccPublish {
     min-width: 94px;
-    padding: 0 8px;
-    font-size: 0.7rem;
+    padding: 0 var(--space-2);
+    font-size: var(--font-size-2xs);
   }
   .ccBtn {
-    padding: 0 8px;
-    font-size: 0.74rem;
+    padding: 0 var(--space-2);
+    font-size: var(--font-size-xs);
   }
   .ccHead {
-    gap: 6px;
+    gap: var(--space-1);
   }
 }
 
@@ -5857,21 +5991,21 @@ a.instFieldValue:hover {
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex-wrap: wrap;
-  padding: 6px 8px;
-  margin-bottom: 8px;
+  padding: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-2);
   border: 1px solid var(--field-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface-subtle);
 }
 .rteToolbarBtn {
   min-width: 30px;
   height: 28px;
-  padding: 0 8px;
-  font-size: 0.9rem;
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-md);
   line-height: 1;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
@@ -5883,14 +6017,17 @@ a.instFieldValue:hover {
 .rteToolbarSep {
   width: 1px;
   align-self: stretch;
-  margin: 2px 4px;
+  margin: var(--space-1) var(--space-1);
   background: var(--field-border);
 }
+/* X8 (AM24): .rteSizeSelect and .rteStyleSelect sit in the same rich-text
+   toolbar cluster and must share one control height - both on
+   var(--control-height-sm). */
 .rteSizeSelect {
-  height: 28px;
-  padding: 0 6px;
-  font-size: 0.85rem;
-  border-radius: 6px;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-1);
+  font-size: var(--font-size-md);
+  border-radius: var(--radius-xs);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-primary);
@@ -5899,25 +6036,41 @@ a.instFieldValue:hover {
 .rteField {
   width: 100%;
   min-height: 38px;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
   border: 1px solid var(--field-border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--field-background);
   color: var(--text-primary);
   font: inherit;
-  line-height: 1.5;
+  line-height: var(--line-normal);
   outline: none;
   overflow-wrap: anywhere;
 }
 .rteField:focus {
   border-color: var(--accent);
 }
+/* CSS Modules inject after globals.css, so this file's own `outline: none`
+   above beats the global `:focus-visible` rule - give this field a real
+   focus indicator locally rather than relying on the (defeated) global one. */
+.rteField:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
 .rteFieldChanged {
-  background: rgba(37, 99, 235, 0.08);
+  background: var(--accent-surface);
+}
+/* content-tab/HtmlEditor.tsx's contentEditable surface sets its layout via
+   an inline style object, which cannot express a `:focus-visible` rule - this
+   class supplies just that. The inline style previously set `outline: "none"`
+   with no focus styling anywhere, so a keyboard user editing course HTML had
+   no focus indicator at all; that literal is removed and replaced by this. */
+.htmlEditableFocus:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
 }
 .rteField:empty::before {
   content: attr(data-placeholder);
-  color: #9aa5b1;
+  color: var(--text-muted);
   pointer-events: none;
 }
 
@@ -5925,28 +6078,28 @@ a.instFieldValue:hover {
 .rteSectionList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: var(--space-1);
 }
 .rteSectionListBordered {
-  margin-top: 12px;
-  padding: 16px 18px;
+  margin-top: var(--space-3);
+  padding: var(--space-4) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--field-background);
 }
 .rteSectionHeading {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 .rteSectionRow {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-start;
 }
 .rteSectionMain {
@@ -5954,26 +6107,27 @@ a.instFieldValue:hover {
   min-width: 0;
 }
 .rteSectionLabel {
-  margin: 0 0 2px;
-  font-size: 0.7rem;
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-2xs);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  /* AM18: page-level kicker above a title - keeps the accent treatment. */
   color: var(--accent-ink);
 }
 .rteSectionActions {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 .rteSectionActionBtn {
   width: 26px;
   height: 24px;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   line-height: 1;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   color: var(--text-secondary);
@@ -5993,17 +6147,19 @@ a.instFieldValue:hover {
 .rteSectionTop {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 0 4px;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
 }
+/* X8 (AM24): same toolbar cluster as .rteSizeSelect above - shares its
+   var(--control-height-sm), not its own one-off 24px. */
 .rteStyleSelect {
-  height: 24px;
-  padding: 0 6px;
-  font-size: 0.75rem;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-1);
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-secondary);
   border: 1px solid var(--field-border);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--field-background);
   cursor: pointer;
 }
@@ -6018,8 +6174,8 @@ a.instFieldValue:hover {
 .copyTreeRow {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
   min-height: 28px;
 }
 
@@ -6042,16 +6198,16 @@ a.instFieldValue:hover {
 
 .copyTreeToolbar {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
-  padding: 4px 0;
+  padding: var(--space-1) 0;
 }
 
 .copySummary {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 /* ── Responsive modules view: narrower viewports ──────────────────────────────
@@ -6059,40 +6215,40 @@ a.instFieldValue:hover {
 
 @media (max-width: 1100px) {
   .ccBar {
-    row-gap: 12px;
+    row-gap: var(--space-3);
   }
 
   .bulkRow {
-    row-gap: 10px;
+    row-gap: var(--space-2);
   }
 
   .ccBarGroup {
     flex-wrap: wrap;
-    row-gap: 8px;
+    row-gap: var(--space-2);
   }
 
   .ccItem {
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-1);
   }
 
   .ccItemActions {
     flex-basis: 100%;
-    margin-top: 4px;
+    margin-top: var(--space-1);
   }
 }
 
 @media (max-width: 800px) {
   .ccBar {
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
     align-items: flex-start;
   }
 
   .ccBarGroup {
     flex-wrap: wrap;
     width: 100%;
-    row-gap: 8px;
+    row-gap: var(--space-2);
   }
 
   .ccBarDivider {
@@ -6101,13 +6257,13 @@ a.instFieldValue:hover {
 
   .ccBarLabel {
     width: 100%;
-    margin-bottom: 4px;
+    margin-bottom: var(--space-1);
     order: -1;
   }
 
   .bulkRow {
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
   }
 
   .bulkLabel {
@@ -6134,7 +6290,7 @@ a.instFieldValue:hover {
 
   .ccItemActions {
     flex-basis: 100%;
-    margin-top: 6px;
+    margin-top: var(--space-1);
   }
 
   .ccStickyHeader {
@@ -6153,13 +6309,13 @@ a.instFieldValue:hover {
    matching the rest of the file. */
 
 .workflowReviewHeading {
-  margin: 0 0 2px;
-  font-size: 1.05rem;
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-lg);
   font-weight: 700;
 }
 
 .workflowActionBar {
-  padding-top: 12px;
+  padding-top: var(--space-3);
   border-top: 1px solid var(--field-border);
 }
 
@@ -6189,22 +6345,22 @@ a.instFieldValue:hover {
 }
 
 .workflowDetailSectionHeader {
-  margin: 0 0 4px;
-  font-size: 0.8rem;
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-sm);
   font-weight: 700;
   color: var(--text-secondary);
 }
 
 .workflowDetailSectionDivider {
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
   border-top: 1px solid var(--field-border);
 }
 
 .workflowCard {
   border: 1px solid var(--field-border);
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
   background: var(--card-background);
 }
 
@@ -6212,12 +6368,12 @@ a.instFieldValue:hover {
 .draftList {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .draftSection {
   border: 1px solid var(--card-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -6225,46 +6381,46 @@ a.instFieldValue:hover {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   background: color-mix(in srgb, var(--field-border) 14%, transparent);
   border-bottom: 1px solid var(--card-border);
   flex-wrap: wrap;
 }
 
 .draftSectionTitle {
-  font-size: 0.95rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .draftSectionMeta {
-  margin-top: 2px;
-  font-size: 0.8rem;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
 .draftSectionActions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
 }
 
 .draftExpand {
-  padding: 10px 16px 14px;
+  padding: var(--space-2) var(--space-4) var(--space-3);
   background: color-mix(in srgb, var(--field-background) 60%, transparent);
   border-top: 1px solid color-mix(in srgb, var(--card-border) 55%, transparent);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .draftRubricArea {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: baseline;
-  font-size: 0.84rem;
+  font-size: var(--font-size-sm);
   flex-wrap: wrap;
 }
 
@@ -6285,25 +6441,25 @@ a.instFieldValue:hover {
    repo-grades.module.css, never a progress bar or meter. */
 .draftRubricAreaPercent {
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .draftFeedback {
   white-space: pre-wrap;
-  font-size: 0.84rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   margin: 0;
 }
 
 .manualSubnav {
-  padding: 20px 36px 0;
+  padding: var(--space-5) var(--space-6) 0;
 }
 
 @media (max-width: 600px) {
   .manualSubnav {
-    padding: 16px 24px 0;
+    padding: var(--space-4) var(--space-6) 0;
   }
 }
 
@@ -6317,7 +6473,7 @@ a.instFieldValue:hover {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .kbInstitutionPicker {
@@ -6325,20 +6481,20 @@ a.instFieldValue:hover {
   align-items: center;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 4px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-1);
 }
 
 .kbAddInstitution {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .kbLayout {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(360px, 1fr);
-  gap: 22px;
+  gap: var(--space-5);
   align-items: start;
 }
 
@@ -6351,40 +6507,40 @@ a.instFieldValue:hover {
 .kbTreePane {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   min-width: 0;
   border: 1px solid var(--field-border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   background: var(--field-background);
-  padding: 16px;
+  padding: var(--space-4);
 }
 
 .kbTreeToolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .kbTreeScroll {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   max-height: 560px;
   overflow-y: auto;
 }
 
 .kbTreeEmpty {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
-  padding: 6px 8px;
+  padding: var(--space-1) var(--space-2);
 }
 
 .kbNodeRow {
   display: flex;
   align-items: center;
-  gap: 4px;
-  border-radius: 8px;
+  gap: var(--space-1);
+  border-radius: var(--radius-md);
 }
 
 .kbNodeRow:hover {
@@ -6403,7 +6559,7 @@ a.instFieldValue:hover {
   color: var(--text-secondary);
   cursor: pointer;
   padding: 0;
-  font-size: 0.7rem;
+  font-size: var(--font-size-2xs);
 }
 
 .kbNodeToggleSpacer {
@@ -6415,14 +6571,14 @@ a.instFieldValue:hover {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   min-width: 0;
-  padding: 6px 8px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid transparent;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
@@ -6444,13 +6600,13 @@ a.instFieldValue:hover {
 .kbRenameInput {
   flex: 1;
   min-width: 0;
-  padding: 4px 8px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--field-background);
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.86rem;
+  font-size: var(--font-size-md);
 }
 
 .kbRenameInput:focus {
@@ -6461,11 +6617,11 @@ a.instFieldValue:hover {
 .kbSearchPanel {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   border: 1px solid var(--accent-border-soft);
   background: var(--accent-surface);
-  border-radius: 12px;
-  padding: 8px;
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
   max-height: 280px;
   overflow-y: auto;
 }
@@ -6473,9 +6629,9 @@ a.instFieldValue:hover {
 .kbSearchHit {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  border-radius: 8px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
   cursor: pointer;
   text-align: left;
   border: none;
@@ -6488,39 +6644,39 @@ a.instFieldValue:hover {
 }
 
 .kbSearchHitTitle {
-  font-size: 0.86rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .kbSearchHitSnippet {
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
-  line-height: 1.4;
+  line-height: var(--line-snug);
 }
 
 .kbWarnBanner {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 12px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
   border: 1px solid var(--danger-border);
   background: var(--danger-surface);
   color: var(--text-primary);
-  font-size: 0.86rem;
-  line-height: 1.5;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
 }
 
 .kbWarnActions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .kbDetailPane {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-3);
   min-width: 0;
 }
 
@@ -6529,21 +6685,21 @@ a.instFieldValue:hover {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-height: 260px;
   border: 1px dashed var(--field-border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   color: var(--text-secondary);
   text-align: center;
-  padding: 24px;
+  padding: var(--space-6);
 }
 
 .kbBreadcrumb {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
-  font-size: 0.8rem;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
@@ -6552,7 +6708,7 @@ a.instFieldValue:hover {
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   cursor: pointer;
   padding: 0;
 }
@@ -6566,58 +6722,58 @@ a.instFieldValue:hover {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
 .kbTitle {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: var(--font-size-2xl);
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .kbActions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .kbMeta {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
 .kbTags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .kbTag {
   display: inline-flex;
   align-items: center;
-  padding: 3px 10px;
-  border-radius: 999px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   background: var(--surface-muted);
   border: 1px solid var(--field-border);
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
   color: var(--text-secondary);
 }
 
 .kbEditTextarea {
   width: 100%;
   min-height: 320px;
-  padding: 14px 16px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   background: var(--field-background);
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 0.88rem;
-  line-height: 1.6;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
   resize: vertical;
 }
 
@@ -6629,14 +6785,19 @@ a.instFieldValue:hover {
 
 .kbBodyEmpty {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
   color: var(--text-muted);
   font-style: italic;
 }
 
 .kbBody {
-  font-size: 0.94rem;
-  line-height: 1.65;
+  /* Reading measure: without this, .kbBody runs the full width of
+     .kbDetailPane's minmax(360px, 1fr) grid column, which is unreadable on a
+     wide monitor (docs/DEV_LOOP.md's step-4 "4K monitor" catch). Capped here,
+     not on the pane, so the pane's own toolbars/chrome keep the full width. */
+  max-width: 46rem;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-normal);
   color: var(--text-primary);
 }
 
@@ -6644,39 +6805,42 @@ a.instFieldValue:hover {
 .kbBody h2,
 .kbBody h3,
 .kbBody h4 {
-  margin: 20px 0 8px;
+  margin: var(--space-5) 0 var(--space-2);
   font-weight: 700;
   color: var(--text-primary);
 }
 
+/* AM16: 3xl is reserved for the auth/login hero and full-screen empty
+   states, not an in-app article heading - so this local h1-h4 scale tops
+   out at 2xl, one step below what it used before that amendment landed. */
 .kbBody h1 {
-  font-size: 1.3rem;
+  font-size: var(--font-size-2xl);
 }
 
 .kbBody h2 {
-  font-size: 1.15rem;
+  font-size: var(--font-size-xl);
 }
 
 .kbBody h3 {
-  font-size: 1.02rem;
+  font-size: var(--font-size-lg);
 }
 
 .kbBody h4 {
-  font-size: 0.96rem;
+  font-size: var(--font-size-md);
 }
 
 .kbBody p {
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
 }
 
 .kbBody ul,
 .kbBody ol {
-  margin: 0 0 12px;
-  padding-left: 22px;
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
 }
 
 .kbBody li {
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .kbBody a {
@@ -6689,17 +6853,17 @@ a.instFieldValue:hover {
   font-family: var(--font-mono);
   font-size: 0.85em;
   background: var(--surface-muted);
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-xs);
 }
 
 .kbBody pre {
   background: var(--surface-muted);
   border: 1px solid var(--field-border);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-3);
   overflow-x: auto;
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
 }
 
 .kbBody pre code {

@@ -467,7 +467,7 @@ export default function PowerPointDesignTab() {
         subtitle="Build a reusable slide template - tag each slide with a role and let the assistant fill the specifics later."
       />
 
-      <div style={{ display: "flex", gap: "2rem", marginTop: "2rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-8)", marginTop: "var(--space-8)" }}>
         <TemplateSelector
           custom={custom}
           selectedId={selected.id}
@@ -483,22 +483,23 @@ export default function PowerPointDesignTab() {
           <div style={{ flex: 1, minHeight: "100vh" }}>
             {isReadOnly && (
               <div style={{
-                padding: "1rem",
-                marginBottom: "1.5rem",
-                backgroundColor: "rgba(0,0,0,0.03)",
-                borderRadius: "4px",
+                padding: "var(--space-4)",
+                marginBottom: "var(--space-6)",
+                backgroundColor: "var(--surface-muted)",
+                border: "1px solid var(--border-soft)",
+                borderRadius: "var(--radius-md)",
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
               }}>
-                <span style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>
+                <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
                   This is a built-in preset. Duplicate it to edit.
                 </span>
                 <Button
                   variant="outlined"
                   size="small"
                   onClick={() => handleDuplicateTemplate(selected)}
-                  sx={{ textTransform: "none", marginLeft: "1rem" }}
+                  sx={{ textTransform: "none", marginLeft: "var(--space-4)" }}
                 >
                   Duplicate
                 </Button>

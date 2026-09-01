@@ -143,7 +143,7 @@ export function BulkCreateModulesModal({
           skipped, so running this again is always safe.
         </p>
 
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
           <div className={styles.field} style={{ flex: "1 1 140px" }}>
             <TextField
               id="bulk-create-count"
@@ -193,7 +193,7 @@ export function BulkCreateModulesModal({
           <div
             style={{
               border: "1px solid var(--field-border)",
-              borderRadius: 10,
+              borderRadius: "var(--radius-sm)",
               overflow: "hidden",
               maxHeight: "40vh",
               overflowY: "auto",
@@ -205,8 +205,8 @@ export function BulkCreateModulesModal({
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  gap: 12,
-                  padding: "8px 12px",
+                  gap: "var(--space-3)",
+                  padding: "var(--space-2) var(--space-3)",
                   borderTop: i === 0 ? "none" : "1px solid var(--field-border)",
                   opacity: entry.action === "create" ? 1 : 0.5,
                 }}
@@ -220,7 +220,7 @@ export function BulkCreateModulesModal({
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
           <Button
             variant="contained"
             size="small"

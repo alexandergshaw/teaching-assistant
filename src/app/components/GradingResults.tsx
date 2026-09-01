@@ -447,7 +447,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       {banner}
       <div className={styles.resultsHeader}>
         <h2>Grading Results</h2>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
           {canvasGradable && (
             <Button variant="contained" size="small" onClick={() => handlePostGrades()} disabled={posting}>
               {posting ? "Posting…" : `Post ${gradableResults.length} grade(s) to Canvas`}
@@ -483,7 +483,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
 
       {run.sampleAnswer && run.sampleAnswer.trim() && (
         <section className={styles.resultsChecklist}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-2)" }}>
             <h3 style={{ margin: 0 }}>Sample correct answer</h3>
             <IconButton
               size="small"
@@ -494,7 +494,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               <CopyIcon />
             </IconButton>
           </div>
-          <div style={{ whiteSpace: "pre-wrap", marginTop: "0.5rem" }}>{run.sampleAnswer}</div>
+          <div style={{ whiteSpace: "pre-wrap", marginTop: "var(--space-2)" }}>{run.sampleAnswer}</div>
         </section>
       )}
 
@@ -522,13 +522,13 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                         target="_blank"
                         rel="noopener noreferrer"
                         className={styles.fieldHint}
-                        style={{ display: "inline-block", marginTop: 2 }}
+                        style={{ display: "inline-block", marginTop: "var(--space-1)" }}
                       >
                         Open in SpeedGrader
                       </a>
                     )}
                     {canPostRow && (
-                      <div style={{ marginTop: 6 }}>
+                      <div style={{ marginTop: "var(--space-1)" }}>
                         <Button
                           variant="outlined"
                           size="small"
@@ -545,7 +545,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                         style={{
                           color:
                             status.status === "error"
-                              ? "var(--error, #b91c1c)"
+                              ? "var(--danger)"
                               : status.status === "skipped"
                                 ? "var(--warning-ink)"
                                 : undefined,
@@ -579,21 +579,21 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                               ? "Code: ran cleanly"
                               : "Code: errors";
                       return (
-                        <div style={{ marginTop: 6 }}>
+                        <div style={{ marginTop: "var(--space-1)" }}>
                           {label && (
                             <div
                               className={styles.fieldHint}
                               style={{
                                 color:
                                   cr && !cr.error && !cr.neededStdin && !cr.ran
-                                    ? "var(--error, #b91c1c)"
+                                    ? "var(--danger)"
                                     : undefined,
                               }}
                             >
                               {label}
                             </div>
                           )}
-                          <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                          <div style={{ display: "flex", gap: "var(--space-1)", marginTop: "var(--space-1)" }}>
                             <Button
                               variant="outlined"
                               size="small"
@@ -681,7 +681,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                           variant="text"
                           size="small"
                           onClick={() => setBrowseFilesFor(result)}
-                          sx={{ minWidth: 0, textTransform: "none", p: "2px 6px", mt: 0.5 }}
+                          sx={{ minWidth: 0, textTransform: "none", p: "var(--space-1) var(--space-1)", mt: 0.5 }}
                         >
                           Browse all files
                         </Button>
@@ -717,7 +717,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                               onChange={(e) => updateArea(result.student, areaName, { score: e.target.value })}
                               aria-label={`${areaName} score for ${result.student}`}
                               sx={{ width: 84 }}
-                              slotProps={{ htmlInput: { style: { padding: "4px 8px" } } }}
+                              slotProps={{
+                                htmlInput: {
+                                  style: {
+                                    padding: "var(--space-1) var(--space-2)",
+                                    fontVariantNumeric: "tabular-nums",
+                                  },
+                                },
+                              }}
                             />
                             {areaPercent && <span className={styles.rubricAreaPercent}>{areaPercent}</span>}
                           </div>
@@ -734,7 +741,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                       onChange={(e) => updateEdit(result.student, { total: e.target.value })}
                       aria-label={`Grade for ${result.student}`}
                       sx={{ width: 92 }}
-                      slotProps={{ htmlInput: { style: { padding: "4px 8px" } } }}
+                      slotProps={{
+                        htmlInput: {
+                          style: {
+                            padding: "var(--space-1) var(--space-2)",
+                            fontVariantNumeric: "tabular-nums",
+                          },
+                        },
+                      }}
                     />
                   </td>
                   <td>

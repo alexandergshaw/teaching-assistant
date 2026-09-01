@@ -553,7 +553,7 @@ export default function LecturePlanningTab() {
   return (
     <section className={styles.card}>
       <div className={styles.header}>
-        <h1>Lecture Planning</h1>
+        <h2 style={{ fontSize: "var(--font-size-xl)" }}>Lecture Planning</h2>
         <p>
           Upload a zip of your template course repository to generate lecture materials — slide
           decks, module intros, and assignment instructions ready to teach from. Choose{" "}
@@ -606,10 +606,10 @@ export default function LecturePlanningTab() {
             Maximum upload size for now: ~{formatMB(maxFileBytesForWireBudget())} zip. Larger course
             repositories are not yet supported in a single upload.
           </p>
-          <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: "8px 0 4px" }}>
+          <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", margin: "var(--space-2) 0 var(--space-1)" }}>
             or load one of your GitHub repositories:
           </p>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start", flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 220px", minWidth: 0 }}>
               <GithubRepoPicker
                 value={githubRepo}
@@ -699,7 +699,7 @@ export default function LecturePlanningTab() {
 
       <div className={styles.field}>
         <label id="scopeGroupLabel">Scope</label>
-        <div role="group" aria-labelledby="scopeGroupLabel" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div role="group" aria-labelledby="scopeGroupLabel" style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
           {(["all", "single"] as const).map((opt) => (
             <Button
               key={opt}
@@ -714,11 +714,11 @@ export default function LecturePlanningTab() {
           ))}
         </div>
         {scope === "single" && (
-          <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: "var(--space-2)" }}>
             {!zipFile ? (
-              <p>Select a course zip above to choose an assignment.</p>
+              <p className={styles.fieldHint}>Select a course zip above to choose an assignment.</p>
             ) : foldersLoading ? (
-              <p>Reading assignments…</p>
+              <p className={styles.fieldHint} role="status" aria-live="polite">Reading assignments…</p>
             ) : foldersError ? (
               <p className={styles.error} role="alert">
                 {foldersError}
@@ -739,7 +739,7 @@ export default function LecturePlanningTab() {
                 ))}
               </TextField>
             ) : (
-              <p>No assignments found in the zip.</p>
+              <p className={styles.fieldHint}>No assignments found in the zip.</p>
             )}
           </div>
         )}
@@ -761,30 +761,37 @@ export default function LecturePlanningTab() {
       </Button>
 
       {generateArmed && (
-        <p role="alert" className={styles.error} style={{ marginTop: 6 }}>
+        <p role="alert" className={styles.error} style={{ marginTop: "var(--space-1)" }}>
           {generateConfirmMessage(plans.length)}
         </p>
       )}
 
       {status === "loading" && (
-        <p aria-live="polite" style={{ marginTop: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-          {scope === "single" ? "Generating this module…" : "Generating your lecture plans…"} This can take
-          several minutes for a large course repository. Keep this tab open — closing it or navigating away
-          cancels the request and you will lose the result.
-        </p>
+        <div className={styles.loadingState} role="status" aria-live="polite">
+          <div className={styles.spinner} />
+          <div>
+            <p className={styles.loadingTitle}>
+              {scope === "single" ? "Generating this module…" : "Generating your lecture plans…"}
+            </p>
+            <p className={styles.loadingText}>
+              This can take several minutes for a large course repository. Keep this tab open — closing it or
+              navigating away cancels the request and you will lose the result.
+            </p>
+          </div>
+        </div>
       )}
 
       {status === "done" && plans.length === 0 && courseEngineMaterials && (
         <div
           style={{
-            marginTop: 8,
-            padding: "12px 16px",
-            borderRadius: 10,
+            marginTop: "var(--space-2)",
+            padding: "var(--space-3) var(--space-4)",
+            borderRadius: "var(--radius-md)",
             background: "var(--field-background)",
             border: "1px solid var(--field-border)",
           }}
         >
-          <p style={{ margin: "0 0 10px", color: "var(--text-primary)" }}>
+          <p style={{ margin: "0 0 var(--space-2)", color: "var(--text-primary)" }}>
             {courseEngineDoneMessage(courseEngineMaterials.fileName)}
           </p>
           <Button
@@ -804,8 +811,8 @@ export default function LecturePlanningTab() {
       )}
 
       {plans.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 20, marginTop: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)", marginTop: "var(--space-2)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "var(--space-3)" }}>
             <p style={{ margin: 0, fontWeight: 600, color: "var(--text-primary)" }}>
               Generated {plans.length} lecture plan{plans.length !== 1 ? "s" : ""}
             </p>
@@ -826,13 +833,13 @@ export default function LecturePlanningTab() {
               <div
                 role="alert"
                 style={{
-                  padding: "12px 16px",
-                  borderRadius: 10,
-                  background: "color-mix(in srgb, #f59e0b 12%, transparent 88%)",
-                  border: "1px solid color-mix(in srgb, #f59e0b 35%, transparent 65%)",
+                  padding: "var(--space-3) var(--space-4)",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--warning-surface)",
+                  border: "1px solid var(--warning-border)",
                   color: "var(--text-primary)",
-                  fontSize: "0.9rem",
-                  lineHeight: 1.5,
+                  fontSize: "var(--font-size-md)",
+                  lineHeight: "var(--line-normal)",
                 }}
               >
                 <strong>Slides could not be generated for {failed.length} assignment{failed.length !== 1 ? "s" : ""}:</strong>{" "}

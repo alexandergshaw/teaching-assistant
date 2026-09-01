@@ -220,8 +220,8 @@ export default function ProblemsPanel() {
 
       {error && <p className={styles.error}>{error}</p>}
 
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: "var(--space-4)" }}>
+        <div style={{ marginBottom: "var(--space-2)" }}>
           <input
             className={styles.input}
             type="text"
@@ -237,7 +237,7 @@ export default function ProblemsPanel() {
             }}
           />
         </div>
-        <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: "var(--space-2)" }}>
           <textarea
             className={styles.input}
             placeholder="Additional details (optional)"
@@ -256,7 +256,7 @@ export default function ProblemsPanel() {
         </button>
       </div>
 
-      <div style={{ marginBottom: 12, display: "flex", gap: 8 }}>
+      <div style={{ marginBottom: "var(--space-3)", display: "flex", gap: "var(--space-2)" }}>
         {(["open", "resolved", "all"] as const).map((f) => (
           <button
             key={f}
@@ -269,13 +269,49 @@ export default function ProblemsPanel() {
       </div>
 
       {loading ? (
-        <p className={styles.status}>Loading problems…</p>
+        // A real spinner (AM10/AM11: anything over ~400ms), not bare text -
+        // .status stays plain deliberately (see knowledge.module.css's own
+        // comment on that class) since it is shared with this panel's static
+        // empty-state uses just below, so the spinner is built inline here
+        // instead, matching the exact page.module.css .spinner recipe.
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "var(--space-2)",
+            padding: "var(--space-6) var(--space-4)",
+            color: "var(--text-secondary)",
+            fontSize: "var(--font-size-md)",
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: 16,
+              height: 16,
+              flexShrink: 0,
+              borderRadius: "var(--radius-round)",
+              border: "2px solid color-mix(in srgb, var(--accent) 20%, transparent 80%)",
+              borderTopColor: "var(--accent-ink)",
+              animation: "ta-spin 0.8s linear infinite",
+            }}
+          />
+          Loading problems…
+        </div>
       ) : filteredProblems.length === 0 ? (
         <p className={styles.status}>No {filter === "all" ? "" : filter} problems yet.</p>
       ) : (
         <ul className={styles.list}>
           {filteredProblems.map((problem) => (
-            <li key={problem.id} className={styles.card} style={{ marginBottom: 12 }}>
+            // No inline marginBottom here - .list already sets `gap:
+            // var(--space-3)` between cards; stacking a second margin on top
+            // doubled the rhythm between problems (and left a trailing gap
+            // after the last one). AC11: reduce chrome that carries no
+            // information.
+            <li key={problem.id} className={styles.card}>
               <div className={styles.cardHeader}>
                 <h3 className={styles.cardTitle}>{problem.title}</h3>
                 <span className={`${styles.badge} ${problem.status === "resolved" ? styles.badgeResolved : styles.badgeOpen}`}>
@@ -283,9 +319,16 @@ export default function ProblemsPanel() {
                 </span>
               </div>
 
-              {problem.detail && <p style={{ margin: "8px 0" }}>{problem.detail}</p>}
+              {problem.detail && <p style={{ margin: "var(--space-2) 0" }}>{problem.detail}</p>}
 
-              <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 8 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "var(--space-2)",
+                  marginTop: "var(--space-2)",
+                  marginBottom: "var(--space-2)",
+                }}
+              >
                 {problem.status === "open" && (
                   <button
                     className={styles.secondaryButton}
@@ -324,16 +367,31 @@ export default function ProblemsPanel() {
               </div>
 
               {expandedProblem === problem.id && solutions[problem.id] && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #ddd" }}>
+                <div
+                  style={{
+                    marginTop: "var(--space-2)",
+                    paddingTop: "var(--space-2)",
+                    borderTop: "1px solid var(--border-soft)",
+                  }}
+                >
                   {solutions[problem.id].length === 0 ? (
                     <p className={styles.status}>No solutions proposed yet.</p>
                   ) : (
                     <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                       {solutions[problem.id].map((sol) => (
-                        <li key={sol.id} style={{ marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid #f0f0f0" }}>
-                          <p style={{ margin: "0 0 4px 0", fontWeight: "bold" }}>{sol.title}</p>
-                          <p style={{ margin: "0 0 4px 0", fontSize: "0.9em" }}>{sol.approach}</p>
-                          <p style={{ margin: 0, fontSize: "0.85em", color: "#666" }}>
+                        <li
+                          key={sol.id}
+                          style={{
+                            marginBottom: "var(--space-3)",
+                            paddingBottom: "var(--space-2)",
+                            borderBottom: "1px solid var(--border-soft)",
+                          }}
+                        >
+                          <p style={{ margin: "0 0 var(--space-1) 0", fontWeight: 700 }}>{sol.title}</p>
+                          <p style={{ margin: "0 0 var(--space-1) 0", fontSize: "var(--font-size-md)" }}>
+                            {sol.approach}
+                          </p>
+                          <p style={{ margin: 0, fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>
                             Proposed {formatRelative(sol.createdAt)}
                           </p>
                         </li>

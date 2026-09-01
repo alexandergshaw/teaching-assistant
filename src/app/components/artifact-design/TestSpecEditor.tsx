@@ -34,7 +34,7 @@ export default function TestSpecEditor({ spec, disabled, onChange }: TestSpecEdi
   const modeHint = TEST_MODES.find((m) => m.value === spec.mode)?.hint ?? "";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       <TextField
         label="Goal"
         size="small"
@@ -76,7 +76,7 @@ export default function TestSpecEditor({ spec, disabled, onChange }: TestSpecEdi
         ))}
       </TextField>
 
-      <div style={{ display: "flex", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)" }}>
         <TextField
           select
           label="Technical aptitude"
@@ -129,23 +129,34 @@ export default function TestSpecEditor({ spec, disabled, onChange }: TestSpecEdi
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            marginBottom: "0.5rem",
+            marginBottom: "var(--space-2)",
           }}
         >
-          <h4 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600 }}>Sections</h4>
-          <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+          <h4
+            style={{
+              margin: 0,
+              fontSize: "var(--font-size-2xs)",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "var(--text-secondary)",
+            }}
+          >
+            Sections
+          </h4>
+          <span style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>
             {testQuestionCount(spec)} question(s), {testTotalPoints(spec)} point(s) total
           </span>
         </div>
 
         {spec.sections.length === 0 && (
-          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "0.5rem" }}>
+          <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-4) 0", marginBottom: "var(--space-2)" }}>
             No sections yet - a test with no sections generates no questions.
           </div>
         )}
 
         {spec.sections.map((section, i) => (
-          <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem", alignItems: "center" }}>
+          <div key={i} style={{ display: "flex", gap: "var(--space-2)", marginBottom: "var(--space-2)", alignItems: "center" }}>
             <TextField
               select
               label="Question kind"
@@ -186,6 +197,7 @@ export default function TestSpecEditor({ spec, disabled, onChange }: TestSpecEdi
               size="small"
               disabled={disabled}
               aria-label="Remove section"
+              title="Remove section"
               onClick={() =>
                 set(
                   "sections",
@@ -219,7 +231,7 @@ export default function TestSpecEditor({ spec, disabled, onChange }: TestSpecEdi
         onChange={(items) => set("allowedResources", items)}
       />
 
-      <div style={{ display: "flex", gap: "1.5rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-6)" }}>
         <FormControlLabel
           control={
             <Checkbox

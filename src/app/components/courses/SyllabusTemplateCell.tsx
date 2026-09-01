@@ -134,7 +134,7 @@ export default function SyllabusTemplateCell({ course, templates, onSave, onTemp
   if (!editing) {
     return (
       <td style={{ minWidth: 200 }}>
-        <div onClick={startEdit} title="Click to edit" style={{ cursor: "pointer" }}>
+        <div onClick={startEdit} title="Click to edit" className={tableStyles.clickToEdit}>
           <span className={course.syllabusTemplateId ? styles.courseResourceValue : styles.courseResourceEmpty}>
             {templateName}
           </span>
@@ -153,7 +153,7 @@ export default function SyllabusTemplateCell({ course, templates, onSave, onTemp
             <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
           ))}
         </TextField>
-        <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>Or upload a new .docx to add it to the library and select it here:</p>
+        <p className={`${styles.fieldHint} ${tableStyles.mt1Only}`}>Or upload a new .docx to add it to the library and select it here:</p>
         <button
           type="button"
           className={styles.linkButton}
@@ -168,10 +168,10 @@ export default function SyllabusTemplateCell({ course, templates, onSave, onTemp
           accept=".docx"
           onChange={handleFileChange}
           disabled={uploading}
-          style={{ display: "none" }}
+          className={tableStyles.hiddenInput}
         />
         {uploadError && (
-          <p className={styles.fieldHint} style={{ margin: "6px 0 0 0", color: "var(--danger)" }}>{uploadError}</p>
+          <p className={`${styles.fieldHint} ${tableStyles.mt1Only} ${tableStyles.dangerLink}`}>{uploadError}</p>
         )}
         <div className={styles.tileEditorActions}>
           <Button variant="contained" size="small" disabled={saving || uploading} onClick={() => void commit()}>

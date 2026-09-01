@@ -96,7 +96,7 @@ export default function EditableCell({
               <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
             ))}
           </TextField>
-          {hint && <p className={styles.fieldHint} style={{ margin: 0 }}>{hint}</p>}
+          {hint && <p className={styles.fieldHint}>{hint}</p>}
           <div className={styles.tileEditorActions}>
             <Button variant="contained" size="small" disabled={saving} onClick={() => void commit()}>
               {saving ? "Saving…" : "Save"}
@@ -111,7 +111,7 @@ export default function EditableCell({
   }
 
   return (
-    <td onClick={startEdit} title="Click to edit" style={{ cursor: "pointer" }}>
+    <td onClick={startEdit} title="Click to edit" className={tableStyles.clickToEdit}>
       {display ?? (rawValue ? <span className={styles.courseResourceValue}>{rawValue}</span> : <span className={styles.courseResourceEmpty}>{emptyLabel}</span>)}
       {actions}
       {menu && <span className={tableStyles.cellMenu}>{menu}</span>}

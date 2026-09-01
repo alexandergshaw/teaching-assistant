@@ -73,8 +73,8 @@ export function TriggerSection({
 }: TriggerSectionProps) {
   return (
     <>
-      <h3 style={{ fontSize: "0.95rem", margin: "24px 0 4px 0", paddingTop: 16, borderTop: "1px solid var(--field-border)" }}>Triggers</h3>
-      <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
+      <h3 style={{ fontSize: "var(--font-size-md)", margin: "var(--space-6) 0 var(--space-1) 0", paddingTop: "var(--space-4)", borderTop: "1px solid var(--field-border)" }}>Triggers</h3>
+      <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0" }}>
         Run this workflow automatically when an event happens - a submission, a message, a repo push, another workflow finishing, or an inbound webhook.
       </p>
       <Button
@@ -126,9 +126,9 @@ export function TriggerSection({
       {triggerError && <p className={styles.error}>{triggerError}</p>}
 
       {webhookSetup && (
-        <div style={{ padding: "12px", marginBottom: "12px", borderRadius: "4px", backgroundColor: webhookSetup.ok ? "var(--success-bg, rgba(76, 175, 80, 0.1))" : "var(--field-bg)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: "12px" }}>
-            <p style={{ margin: 0, fontSize: "0.9em", lineHeight: "1.4" }}>
+        <div style={{ padding: "var(--space-3)", marginBottom: "var(--space-3)", borderRadius: "var(--radius-xs)", backgroundColor: webhookSetup.ok ? "var(--success-bg)" : "var(--field-bg)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: "var(--space-3)" }}>
+            <p style={{ margin: 0, fontSize: "var(--font-size-md)", lineHeight: "var(--line-snug)" }}>
               {webhookSetup.ok && !webhookSetup.alreadyExisted && (
                 <>Instant push webhook registered on <strong>{webhookSetup.org}</strong>. Pushes now fire this trigger immediately.</>
               )}
@@ -137,7 +137,7 @@ export function TriggerSection({
               )}
               {!webhookSetup.ok && (
                 <>
-                  Could not auto-register the instant webhook ({webhookSetup.error}). The trigger still works via the periodic poller. To enable instant firing, add a webhook under {webhookSetup.org} org settings with Payload URL <code style={{ backgroundColor: "var(--field-bg)", padding: "2px 6px", borderRadius: "2px", wordBreak: "break-all" }}>{webhookSetup.url}</code> (shown selectable), Content type application/json, Secret set to your GITHUB_WEBHOOK_SECRET value, and only the push event.
+                  Could not auto-register the instant webhook ({webhookSetup.error}). The trigger still works via the periodic poller. To enable instant firing, add a webhook under {webhookSetup.org} org settings with Payload URL <code style={{ backgroundColor: "var(--field-bg)", padding: "var(--space-1) var(--space-2)", borderRadius: "var(--radius-xs)", wordBreak: "break-all" }}>{webhookSetup.url}</code> (shown selectable), Content type application/json, Secret set to your GITHUB_WEBHOOK_SECRET value, and only the push event.
                 </>
               )}
             </p>
@@ -150,7 +150,7 @@ export function TriggerSection({
                 cursor: "pointer",
                 padding: 0,
                 flex: "none",
-                fontSize: "0.85em",
+                fontSize: "var(--font-size-md)",
               }}
             >
               Dismiss
@@ -160,7 +160,7 @@ export function TriggerSection({
       )}
 
       {(triggers ?? []).some((t) => t.workflowId === selectedDef?.id) && (
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: "var(--space-4)" }}>
           {(triggers ?? []).filter((t) => t.workflowId === selectedDef?.id).map((t) => {
             const courseName = t.courseId
               ? hubCourses?.find((c) => c.id === t.courseId)?.name ?? "course"
@@ -172,8 +172,8 @@ export function TriggerSection({
                 : null;
             const chip = lastRunChip(t.lastRunStatus, t.lastFiredAt);
             return (
-              <div key={t.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
-                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div key={t.id} style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", padding: "var(--space-2) 0", borderTop: "1px solid var(--field-border)", fontSize: "var(--font-size-md)" }}>
+                <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 600 }}>{t.workflowName}</span>
                   {t.unattended && (
                     <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
@@ -187,7 +187,7 @@ export function TriggerSection({
                     {attachment ? ` - ${attachment}` : ""}
                     {t.lastFiredAt ? ` - last fired ${new Date(t.lastFiredAt).toLocaleString()}` : ""}
                   </span>
-                  <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)" }}>
                     <button
                       type="button"
                       className={styles.linkButton}
@@ -221,7 +221,7 @@ export function TriggerSection({
                   </span>
                 </div>
                 {webhookUrl && (
-                  <code style={{ flexBasis: "100%", fontSize: "0.8em", color: "var(--text-secondary)", wordBreak: "break-all" }}>{webhookUrl}</code>
+                  <code style={{ flexBasis: "100%", fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", wordBreak: "break-all" }}>{webhookUrl}</code>
                 )}
                 {t.lastRunDetail && (
                   <span className={styles.fieldHint} style={{ margin: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.lastRunDetail}>

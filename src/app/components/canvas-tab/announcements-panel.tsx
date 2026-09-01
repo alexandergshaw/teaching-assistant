@@ -155,7 +155,7 @@ function AnnouncementsPanel() {
         courseName={courseName}
       />
       {loadState.status === "loading" && (
-        <p className={styles.fieldHint}>Loading announcements…</p>
+        <p className={styles.fieldHint} role="status" aria-live="polite">Loading announcements…</p>
       )}
 
       {courseUrl && (
@@ -179,7 +179,7 @@ function AnnouncementsPanel() {
             announcements.map((a) => (
               <div key={a.id} className={styles.syllabusSectionCard}>
                 <div className={styles.syllabusSectionTopRow}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flex: 1 }}>
                     {!a.postedAt && a.delayedPostAt && (
                       <span className={styles.navBadge}>Scheduled</span>
                     )}
@@ -231,7 +231,7 @@ function AnnouncementsPanel() {
           size="small"
           onClick={handleDraft}
           disabled={drafting || !draftPrompt.trim()}
-          sx={{ alignSelf: "flex-start", marginTop: 1 }}
+          sx={{ alignSelf: "flex-start", marginTop: "var(--space-2)" }}
         >
           {drafting ? "Drafting…" : "Draft with AI"}
         </Button>

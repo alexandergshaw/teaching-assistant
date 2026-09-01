@@ -200,7 +200,7 @@ export function GradableEditorModal({
           </button>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
         {loading ? (
           <div className={styles.loadingState} role="status" aria-live="polite">
             <span className={styles.spinner} aria-hidden="true" />
@@ -224,7 +224,7 @@ export function GradableEditorModal({
               />
             </div>
 
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
               <div className={styles.field} style={{ flex: "1 1 220px" }}>
                 <TextField
                   id="gradable-due"
@@ -237,7 +237,7 @@ export function GradableEditorModal({
                   slotProps={{ inputLabel: { shrink: true } }}
                 />
                 {due && (
-                  <Button type="button" size="small" variant="outlined" style={{ alignSelf: "flex-start", marginTop: 6 }} onClick={() => setDue("")}>
+                  <Button type="button" size="small" variant="outlined" style={{ alignSelf: "flex-start", marginTop: "var(--space-1)" }} onClick={() => setDue("")}>
                     Clear due date
                   </Button>
                 )}
@@ -290,7 +290,7 @@ export function GradableEditorModal({
               />
             )}
 
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
               <Button variant="contained" size="small" onClick={handleSave} disabled={busy || !title.trim()}>
                 {saving ? "Saving…" : "Save to Canvas"}
               </Button>
@@ -299,11 +299,11 @@ export function GradableEditorModal({
             <div
               style={{
                 display: "flex",
-                gap: 8,
+                gap: "var(--space-2)",
                 alignItems: "center",
                 flexWrap: "wrap",
-                paddingTop: 12,
-                marginTop: 4,
+                paddingTop: "var(--space-3)",
+                marginTop: "var(--space-1)",
                 borderTop: "1px solid var(--field-border)",
               }}
             >

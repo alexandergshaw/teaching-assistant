@@ -26,7 +26,7 @@ export default function LessonPlanPreviewFooter({
 }: LessonPlanPreviewFooterProps) {
   return (
     <div className={styles.lessonPreviewFooter}>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start", flexWrap: "wrap" }}>
         <Button
           variant="contained"
           size="small"
@@ -35,7 +35,7 @@ export default function LessonPlanPreviewFooter({
           Download ZIP
         </Button>
         {onAttach && attachCourses && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
             <Autocomplete
               options={attachCourses ?? []}
               value={selectedCourse}
@@ -73,7 +73,7 @@ export default function LessonPlanPreviewFooter({
         </Button>
       </div>
       {attachNote && (
-        <p style={{ margin: "8px 0 0 0", fontSize: "0.875rem", color: attachNote.kind === "error" ? "var(--danger)" : "var(--success)" }}>
+        <p style={{ margin: "var(--space-2) 0 0 0", fontSize: "var(--font-size-md)", color: attachNote.kind === "error" ? "var(--danger)" : "var(--success-ink)" }}>
           {attachNote.text}
         </p>
       )}

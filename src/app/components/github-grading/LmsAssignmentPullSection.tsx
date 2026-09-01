@@ -101,7 +101,7 @@ export default function LmsAssignmentPullSection({
       {hubCoursesState === "error" && <p className={styles.error}>Could not load your courses.</p>}
 
       {pullCourse && !pullCourseSources.live && !pullCourseSources.export && (
-        <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 6 }}>
+        <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>
           &quot;{pullCourse.name}&quot; has no live Canvas connection and no saved export - add one on the course tile to pull from it here.
         </p>
       )}
@@ -109,7 +109,7 @@ export default function LmsAssignmentPullSection({
       {pullCourse && (pullCourseSources.live || pullCourseSources.export) && (
         <>
           {pullCourseSources.live && pullCourseSources.export && (
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
               <Button
                 type="button"
                 size="small"
@@ -130,7 +130,7 @@ export default function LmsAssignmentPullSection({
           )}
 
           {pullSource === "live" && pullCourseSources.live && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: "var(--space-2)" }}>
               <TextField
                 select
                 size="small"
@@ -157,12 +157,12 @@ export default function LmsAssignmentPullSection({
               >
                 {livePulling ? "Pulling…" : "Pull instructions + rubric"}
               </Button>
-              {livePullNote && <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 6 }}>{livePullNote}</p>}
+              {livePullNote && <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>{livePullNote}</p>}
             </div>
           )}
 
           {pullSource === "export" && pullCourseSources.export && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: "var(--space-2)" }}>
               <TextField
                 select
                 size="small"
@@ -189,17 +189,17 @@ export default function LmsAssignmentPullSection({
               >
                 Pull instructions
               </Button>
-              {exportPullNote && <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 6 }}>{exportPullNote}</p>}
+              {exportPullNote && <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>{exportPullNote}</p>}
 
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-soft)" }}>
-                <label style={{ display: "block", marginBottom: 4 }}>Course rubric (optional)</label>
-                <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "0 0 6px" }}>
+              <div style={{ marginTop: "var(--space-3)", paddingTop: "var(--space-3)", borderTop: "1px solid var(--border-soft)" }}>
+                <label style={{ display: "block", marginBottom: "var(--space-1)" }}>Course rubric (optional)</label>
+                <p style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", margin: "0 0 var(--space-1)" }}>
                   A course export has no record of which rubric belongs to which assignment - this is every rubric
                   in the export, by title. Pick one only if you judge it matches this assignment; the pairing is
                   your call, not the export&apos;s.
                 </p>
                 {exportRubricOptions.length === 0 ? (
-                  <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>This export has no saved rubrics.</p>
+                  <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>This export has no saved rubrics.</p>
                 ) : (
                   <>
                     <TextField
@@ -226,7 +226,7 @@ export default function LmsAssignmentPullSection({
                     >
                       Use this rubric
                     </Button>
-                    {exportRubricNote && <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 6 }}>{exportRubricNote}</p>}
+                    {exportRubricNote && <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>{exportRubricNote}</p>}
                   </>
                 )}
               </div>

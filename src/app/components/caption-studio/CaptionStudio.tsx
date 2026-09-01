@@ -147,7 +147,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               playsInline
               preload="auto"
               src={videoImport.videoUrl}
-              style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a", display: "block" }}
+              style={{ maxWidth: "100%", maxHeight: 320, borderRadius: "var(--radius-md)", background: "var(--navy)", display: "block" }}
               onError={() => captionGen.setError("The browser could not decode this video. Try re-importing it, or convert it to MP4/WebM.")}
               onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)}
               onSeeked={(e) => setPlayhead(e.currentTarget.currentTime)}
@@ -175,11 +175,11 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
                   >
                     <span
                       style={{
-                        background: "rgba(15,23,42,0.78)",
-                        color: "#f8fafc",
-                        padding: "4px 10px",
-                        borderRadius: 8,
-                        fontSize: "0.9rem",
+                        background: "color-mix(in srgb, var(--navy) 78%, transparent)",
+                        color: "var(--on-navy)",
+                        padding: "var(--space-1) var(--space-2)",
+                        borderRadius: "var(--radius-sm)",
+                        fontSize: "var(--font-size-md)",
                         fontWeight: 600,
                         maxWidth: "88%",
                         textAlign: "center",
@@ -197,10 +197,10 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
       )}
 
       <div className={styles.field}>
-        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>
+        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
           2. Captions
         </p>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start", flexWrap: "wrap", marginBottom: "var(--space-4)" }}>
           <TextField
             label="Context (optional)"
             placeholder="e.g. Demonstrating how to submit an assignment in Canvas"
@@ -232,10 +232,10 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
         </div>
         <FormControlLabel
           control={<Checkbox size="small" checked={recordingContext.usePageContext} onChange={(e) => recordingContext.setUsePageContext(e.target.checked)} />}
-          label={<span style={{ fontSize: "0.85rem" }}>Use context from this Recording page</span>}
+          label={<span style={{ fontSize: "var(--font-size-md)" }}>Use context from this Recording page</span>}
         />
         {recordingContext.usePageContext && (
-          <p className={styles.fieldHint} style={{ margin: "4px 0 0 0" }}>
+          <p className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0 0" }}>
             {recordingContext.pageContextSummary ? `Found: ${recordingContext.pageContextSummary}.` : "No page context found yet - set a lecture script or title cards on the Record view and it will be used automatically."}
           </p>
         )}

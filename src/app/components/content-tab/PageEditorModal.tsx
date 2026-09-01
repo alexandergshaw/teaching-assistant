@@ -190,7 +190,7 @@ export function PageEditorModal({
                 }}
                 label="Revise with AI (optional)"
               />
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+              <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
                 <Button
                   type="button"
                   variant="outlined"
@@ -220,7 +220,7 @@ export function PageEditorModal({
               </p>
             </div>
 
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap" }}>
               <div className={styles.field} style={{ flex: "1 1 360px", minWidth: 280 }}>
                 <label>Page body</label>
                 <HtmlEditor value={body} onChange={setBody} minHeight={260} ariaLabel="Page body" />
@@ -235,7 +235,7 @@ export function PageEditorModal({
                     width: "100%",
                     minHeight: 360,
                     border: "1px solid var(--field-border)",
-                    borderRadius: 8,
+                    borderRadius: "var(--radius-sm)",
                     background: "var(--field-background)",
                   }}
                 />
@@ -245,11 +245,11 @@ export function PageEditorModal({
             <div
               style={{
                 display: "flex",
-                gap: 12,
+                gap: "var(--space-3)",
                 alignItems: "center",
                 flexWrap: "wrap",
-                marginTop: 14,
-                paddingTop: 14,
+                marginTop: "var(--space-3)",
+                paddingTop: "var(--space-3)",
                 borderTop: "1px solid var(--field-border)",
               }}
             >
@@ -281,7 +281,7 @@ export function PageEditorModal({
             </div>
 
             {note && (
-              <p className={note.kind === "error" ? styles.error : styles.fieldHint} style={{ marginTop: 10 }}>
+              <p className={note.kind === "error" ? styles.error : styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>
                 {note.text}
               </p>
             )}

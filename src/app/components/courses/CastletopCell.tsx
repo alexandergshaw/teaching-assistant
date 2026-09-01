@@ -13,8 +13,6 @@ import { uploadCourseFile, getCourseZipUrl, removeCourseZip } from "@/lib/course
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
-const POPOVER_BODY_STYLE: React.CSSProperties = { padding: 16, width: 360, maxWidth: "90vw" };
-
 export interface CastletopCellProps {
   course: Course;
   onCourseUpdated: (course: Course) => void;
@@ -201,7 +199,7 @@ export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellPr
 
   return (
     <td style={{ minWidth: 200 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+      <div className={`${tableStyles.stackXs} ${tableStyles.alignStart}`}>
         <span className={course.castletopFiles.length > 0 ? styles.courseResourceValue : styles.courseResourceEmpty}>
           {summary}
         </span>
@@ -215,7 +213,7 @@ export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellPr
         onClose={() => setAnchorEl(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
       >
-        <div style={POPOVER_BODY_STYLE}>
+        <div className={tableStyles.popoverBody}>
           <div className={styles.courseResourceHead}>
             <span className={styles.courseResourceLabel}>Castletop</span>
           </div>
@@ -225,12 +223,12 @@ export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellPr
             size="small"
             disabled={generating}
             onClick={handleGenerate}
-            style={{ marginBottom: 12 }}
+            className={tableStyles.mb3}
           >
             {generating ? "Generating..." : "Generate"}
           </Button>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+          <div className={`${tableStyles.stackSm} ${tableStyles.mb3}`}>
             <TextField
               label="Instructor"
               size="small"
@@ -288,22 +286,22 @@ export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellPr
           </div>
 
           {course.castletopFiles.length === 0 ? (
-            <span className={styles.courseResourceEmpty} style={{ marginTop: 8, display: "block" }}>
+            <span className={`${styles.courseResourceEmpty} ${tableStyles.mt2}`} style={{ display: "block" }}>
               No files yet.
             </span>
           ) : (
-            <div style={{ marginTop: 16 }}>
+            <div className={tableStyles.mt4}>
               {course.castletopFiles.map((file) => (
-                <div key={file.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div key={file.path} className={tableStyles.fileListRow}>
+                  <div className={tableStyles.fileRowHead}>
+                    <span className={tableStyles.fileRowName}>
                       {file.name} - {(file.size / 1048576).toFixed(1)} MB
                     </span>
-                    <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
+                    <span className={tableStyles.fileRowMeta}>
                       {new Date(file.addedAt).toLocaleDateString()}
                     </span>
                   </div>
-                  <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                  <div className={tableStyles.fileRowActions}>
                     <button
                       type="button"
                       className={styles.linkButton}
@@ -313,8 +311,7 @@ export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellPr
                     </button>
                     <button
                       type="button"
-                      className={styles.linkButton}
-                      style={{ color: "var(--danger)" }}
+                      className={`${styles.linkButton} ${tableStyles.dangerLink}`}
                       disabled={removingPath === file.path}
                       onClick={() => handleRemoveFile(file.path)}
                     >
@@ -327,13 +324,13 @@ export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellPr
           )}
 
           {popoverError && (
-            <div style={{ color: "var(--danger)", marginTop: 8, fontSize: "0.875rem" }}>
+            <div className={tableStyles.errorNote}>
               {popoverError}
             </div>
           )}
 
           {generationNotes.length > 0 && (
-            <div style={{ marginTop: 8, fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+            <div className={tableStyles.noteText}>
               {generationNotes.map((note, i) => (
                 <div key={i}>{note}</div>
               ))}

@@ -353,10 +353,10 @@ export default function LinkUsernamesPanel({
             </p>
           )}
 
-          {assignmentsLoading && <p className={pageStyles.fieldHint}>Loading the course&apos;s Canvas assignments...</p>}
+          {assignmentsLoading && <p className={pageStyles.fieldHint} role="status" aria-live="polite">Loading the course&apos;s Canvas assignments...</p>}
           {assignmentsError && <p className={pageStyles.error}>{assignmentsError}</p>}
           {exportAssignmentsLoading && (
-            <p className={pageStyles.fieldHint}>Loading the saved export&apos;s assignments...</p>
+            <p className={pageStyles.fieldHint} role="status" aria-live="polite">Loading the saved export&apos;s assignments...</p>
           )}
           {exportAssignmentsError && <p className={pageStyles.error}>{exportAssignmentsError}</p>}
           {linkError && <p className={pageStyles.error}>{linkError}</p>}

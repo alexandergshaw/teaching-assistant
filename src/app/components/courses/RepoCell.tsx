@@ -59,7 +59,7 @@ export default function RepoCell({ course, ownedRepos, onSave, menu }: RepoCellP
             sx={{ width: "100%" }}
             renderInput={(params) => <TextField {...params} size="small" label="Add repository" placeholder="owner/name" />}
           />
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, alignItems: "center" }}>
+          <div className={`${tableStyles.rowSm} ${tableStyles.mt1}`}>
             <TextField
               size="small"
               label="Branch (optional)"
@@ -92,7 +92,7 @@ export default function RepoCell({ course, ownedRepos, onSave, menu }: RepoCellP
             onChange={(e) => setDraft(e.target.value)}
             sx={{ marginTop: 2 }}
           />
-          <p className={styles.fieldHint} style={{ margin: 0 }}>One repository per line: owner/repo or owner/repo#branch.</p>
+          <p className={styles.fieldHint}>One repository per line: owner/repo or owner/repo#branch.</p>
           <div className={styles.tileEditorActions}>
             <Button variant="contained" size="small" disabled={saving} onClick={() => void commit()}>
               {saving ? "Saving…" : "Save"}

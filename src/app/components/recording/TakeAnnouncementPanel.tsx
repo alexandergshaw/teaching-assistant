@@ -187,7 +187,7 @@ export default function TakeAnnouncementPanel({
     triggerFileDownload(new Blob([text], { type: mimeType }), filename);
   };
   const downloadLogRow = (
-    <div className={styles.fieldHint} style={{ margin: "0 0 4px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+    <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
       <span>{announcementLogSummaryLine(summarizeAnnouncementRunLog(currentAnnouncementLog))}</span>
       <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
         Download run log (CSV)
@@ -288,9 +288,9 @@ export default function TakeAnnouncementPanel({
       )}
 
       {needsRealTimeConfirm && (
-        <div style={{ padding: "0.75rem 1rem", border: "1px solid var(--field-border)", background: "var(--warning-bg)" }}>
-          <p style={{ margin: "0 0 8px 0" }}>{realTimeConfirmMessage}</p>
-          <div style={{ display: "flex", gap: "0.75rem" }}>
+        <div style={{ padding: "var(--space-3) var(--space-4)", border: "1px solid var(--field-border)", background: "var(--warning-surface)" }}>
+          <p style={{ margin: "0 0 var(--space-2) 0" }}>{realTimeConfirmMessage}</p>
+          <div style={{ display: "flex", gap: "var(--space-3)" }}>
             <Button size="small" variant="contained" onClick={confirmRealTimeExtraction}>
               Play it back
             </Button>
@@ -304,7 +304,7 @@ export default function TakeAnnouncementPanel({
       {stage.phase === "failed" && (
         <div role="alert">
           <p>{stage.message}</p>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
             {stage.stage === "audio" && (
               <Button size="small" variant="outlined" onClick={retryAudio}>
                 Try again
@@ -336,7 +336,7 @@ export default function TakeAnnouncementPanel({
 
       {stage.phase === "noSpeech" && (
         <div>
-          <p>No speech was found in this recording.</p>
+          <p className={styles.fieldHint}>No speech was found in this recording.</p>
           <Button size="small" variant="outlined" onClick={retryAudio}>
             Try again
           </Button>
@@ -377,11 +377,11 @@ export default function TakeAnnouncementPanel({
               join), so a visible, explicit "Regenerate" action is what makes
               the controls reachable rather than dead. */}
           <div>
-            <p className={styles.ghMeta} style={{ marginBottom: 8 }}>
+            <p className={styles.ghMeta} style={{ marginBottom: "var(--space-2)" }}>
               Announcement style
             </p>
             <AnnouncementCompositionControls composition={composition} onChange={setComposition} disabled={busy || posting} />
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginTop: "var(--space-2)", flexWrap: "wrap" }}>
               <Button size="small" variant="outlined" onClick={retryDraft} disabled={busy || posting}>
                 Regenerate announcement
               </Button>
@@ -431,10 +431,10 @@ export default function TakeAnnouncementPanel({
               regardless - useful on its own, and the fallback when the
               upload fails. */}
           <div>
-            <p className={styles.ghMeta} style={{ marginBottom: 8 }}>
+            <p className={styles.ghMeta} style={{ marginBottom: "var(--space-2)" }}>
               Image
             </p>
-            <p className={styles.fieldHint} style={{ marginBottom: 8 }}>
+            <p className={styles.fieldHint} style={{ marginBottom: "var(--space-2)" }}>
               A ready image posts with the announcement automatically (with
               alt text for screen readers) - the Subject and Message fields
               above stay plain text either way. If the upload to Canvas
@@ -453,9 +453,9 @@ export default function TakeAnnouncementPanel({
                 <img
                   src={`data:${imageMimeType};base64,${imageBase64}`}
                   alt=""
-                  style={{ display: "block", maxWidth: "320px", width: "100%", borderRadius: 4, marginBottom: 8 }}
+                  style={{ display: "block", maxWidth: "320px", width: "100%", borderRadius: "var(--radius-xs)", marginBottom: "var(--space-2)" }}
                 />
-                <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
                   <Button size="small" variant="outlined" onClick={downloadImage}>
                     Download image
                   </Button>
@@ -481,7 +481,7 @@ export default function TakeAnnouncementPanel({
             {imageState === "idle" && (
               <div>
                 <span className={styles.fieldHint}>No image yet.</span>
-                <div style={{ marginTop: 8 }}>
+                <div style={{ marginTop: "var(--space-2)" }}>
                   <Button size="small" variant="outlined" onClick={regenerateImage} disabled={busy || posting}>
                     Generate image
                   </Button>
@@ -497,15 +497,15 @@ export default function TakeAnnouncementPanel({
           )}
 
           {armed && (
-            <div style={{ padding: "0.75rem 1rem", borderTop: "1px solid var(--field-border)", background: "var(--warning-bg)" }}>
-              <p id={POST_CONFIRM_CONSEQUENCE_ID} role="status" aria-live="polite" style={{ margin: "0 0 8px 0", fontSize: "14px" }}>
+            <div style={{ padding: "var(--space-3) var(--space-4)", borderTop: "1px solid var(--field-border)", background: "var(--warning-surface)" }}>
+              <p id={POST_CONFIRM_CONSEQUENCE_ID} role="status" aria-live="polite" style={{ margin: "0 0 var(--space-2) 0", fontSize: "var(--font-size-md)" }}>
                 Posting publishes this announcement to every student in {courses?.find((c) => c.id === courseId)?.name ?? "the course"} immediately - Canvas has no unpublished state for an announcement - and this app cannot recall or delete it afterward.
               </p>
-              <p className={styles.previewMeta} style={{ margin: "0 0 4px" }}>
+              <p className={styles.previewMeta} style={{ margin: "0 0 var(--space-1) 0" }}>
                 Subject that will be sent:
               </p>
-              <code style={{ display: "block", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.85rem" }}>{subject}</code>
-              <p className={styles.previewMeta} style={{ margin: "8px 0 4px" }}>
+              <code style={{ display: "block", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "var(--font-size-md)" }}>{subject}</code>
+              <p className={styles.previewMeta} style={{ margin: "var(--space-2) 0 var(--space-1) 0" }}>
                 Body that will be sent:
               </p>
               <code
@@ -513,7 +513,7 @@ export default function TakeAnnouncementPanel({
                   display: "block",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
-                  fontSize: "0.85rem",
+                  fontSize: "var(--font-size-md)",
                   maxHeight: "180px",
                   overflow: "auto",
                 }}
@@ -529,7 +529,7 @@ export default function TakeAnnouncementPanel({
             </p>
           )}
 
-          <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
             {armed && (
               <Button size="small" variant="text" onClick={cancelPostConfirm} disabled={posting}>
                 Cancel

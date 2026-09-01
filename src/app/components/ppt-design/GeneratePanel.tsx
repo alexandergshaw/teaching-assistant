@@ -57,14 +57,23 @@ export default function GeneratePanel({
   onDiscardSlideEdit,
 }: GeneratePanelProps) {
   return (
-    <div style={{ padding: "1.5rem", backgroundColor: "var(--field-bg)", borderRadius: "4px", marginBottom: "1.5rem" }}>
-      <h3 style={{ margin: "0 0 1rem 0", fontSize: "0.95rem", fontWeight: 600 }}>
-        Generate Deck
+    <div style={{ padding: "var(--space-6)", backgroundColor: "var(--field-bg)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius-md)", marginBottom: "var(--space-6)" }}>
+      <h3
+        style={{
+          margin: "0 0 var(--space-4) 0",
+          fontSize: "var(--font-size-2xs)",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--text-secondary)",
+        }}
+      >
+        Generate deck
       </h3>
 
       {!generatedDeck ? (
         <>
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "1.5rem" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", marginBottom: "var(--space-6)" }}>
             <TextField
               label="Subject / topic"
               value={subject}
@@ -85,20 +94,28 @@ export default function GeneratePanel({
             {selected && selected.loops.map((group) => (
               <div key={group.id}>
                 {group.source === "literal" && (
-                  <div style={{ padding: "0.75rem", backgroundColor: "rgba(0,0,0,0.02)", borderRadius: "4px" }}>
-                    <div style={{ fontSize: "0.85rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+                  <div style={{ padding: "var(--space-3)", backgroundColor: "var(--surface-muted)", borderRadius: "var(--radius-xs)" }}>
+                    <div style={{ fontSize: "var(--font-size-md)", fontWeight: 500, marginBottom: "var(--space-2)" }}>
                       {group.label}
                     </div>
                     {group.items.length > 0 ? (
-                      <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                      <div style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
                         {group.items.map((item, i) => (
-                          <span key={i} style={{ backgroundColor: "rgba(0,0,0,0.1)", padding: "0.25rem 0.5rem", borderRadius: "3px" }}>
+                          <span
+                            key={i}
+                            style={{
+                              backgroundColor: "var(--field-background)",
+                              border: "1px solid var(--border-soft)",
+                              padding: "var(--space-1) var(--space-2)",
+                              borderRadius: "var(--radius-xs)",
+                            }}
+                          >
                             {item}
                           </span>
                         ))}
                       </div>
                     ) : (
-                      <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                      <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
                         No items defined
                       </div>
                     )}
@@ -120,8 +137,8 @@ export default function GeneratePanel({
                 )}
 
                 {group.source === "courseTopics" && (
-                  <div style={{ padding: "0.75rem", backgroundColor: "rgba(0,0,0,0.02)", borderRadius: "4px" }}>
-                    <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "0.75rem" }}>
+                  <div style={{ padding: "var(--space-3)", backgroundColor: "var(--surface-muted)", borderRadius: "var(--radius-xs)" }}>
+                    <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", marginBottom: "var(--space-3)" }}>
                       Course topics not wired yet - type them here
                     </div>
                     <TextField
@@ -141,7 +158,17 @@ export default function GeneratePanel({
           </div>
 
           {generateError && (
-            <div style={{ padding: "0.75rem", backgroundColor: "rgba(255,0,0,0.1)", borderRadius: "4px", fontSize: "0.85rem", color: "red", marginBottom: "1rem" }}>
+            <div
+              style={{
+                padding: "var(--space-3)",
+                backgroundColor: "var(--danger-surface)",
+                border: "1px solid var(--danger-border)",
+                borderRadius: "var(--radius-md)",
+                fontSize: "var(--font-size-sm)",
+                color: "var(--danger)",
+                marginBottom: "var(--space-4)",
+              }}
+            >
               {generateError}
             </div>
           )}
@@ -153,9 +180,9 @@ export default function GeneratePanel({
             sx={{ textTransform: "none" }}
           >
             {generateBusy ? (
-              <>
-                <CircularProgress size={16} sx={{ marginRight: "0.5rem" }} /> Generating...
-              </>
+              <span role="status" aria-live="polite">
+                <CircularProgress size={16} sx={{ marginRight: "var(--space-2)" }} /> Generating...
+              </span>
             ) : (
               "Generate deck"
             )}
@@ -163,8 +190,17 @@ export default function GeneratePanel({
         </>
       ) : (
         <>
-          <div style={{ marginBottom: "1.5rem" }}>
-            <h4 style={{ margin: "0 0 1rem 0", fontSize: "0.9rem", fontWeight: 600 }}>
+          <div style={{ marginBottom: "var(--space-6)" }}>
+            <h4
+              style={{
+                margin: "0 0 var(--space-4) 0",
+                fontSize: "var(--font-size-2xs)",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "var(--text-secondary)",
+              }}
+            >
               Preview ({editedSlides.length} slides)
             </h4>
             {editedSlides.map((slide, idx) => {
@@ -178,10 +214,10 @@ export default function GeneratePanel({
               // classic-only map isn't enough; needsOnNavyFocusRing derives it
               // from the actual colour(s) painted (checking both stops for a
               // gradient, since a control can sit anywhere along it).
-              const classicFill = "#1a2744";
+              const classicFill = "var(--navy)";
               const fillColors =
                 selected.theme.backgroundKind === "classic"
-                  ? [classicFill]
+                  ? ["#1a2744"]
                   : selected.theme.backgroundKind === "gradient"
                     ? [selected.theme.backgroundColor, selected.theme.backgroundColor2]
                     : [selected.theme.backgroundColor];
@@ -189,7 +225,7 @@ export default function GeneratePanel({
                 ? "var(--focus-ring-on-navy)"
                 : "var(--focus-ring-default)";
               const slideStyle = selected.theme.backgroundKind === "classic"
-                ? { background: classicFill, color: "#ffffff", "--focus-ring-color": focusRingColor }
+                ? { background: classicFill, color: "var(--on-navy)", "--focus-ring-color": focusRingColor }
                 : {
                     background: selected.theme.backgroundKind === "gradient"
                       ? `linear-gradient(${selected.theme.gradientAngle}deg, ${selected.theme.backgroundColor}, ${selected.theme.backgroundColor2})`
@@ -198,7 +234,7 @@ export default function GeneratePanel({
                     "--focus-ring-color": focusRingColor,
                   };
               return (
-              <Card key={idx} style={{ marginBottom: "1rem", ...slideStyle }}>
+              <Card key={idx} variant="outlined" style={{ marginBottom: "var(--space-4)", ...slideStyle }}>
                 <CardContent>
                   {editingSlideIdx === idx ? (
                     <>
@@ -208,7 +244,7 @@ export default function GeneratePanel({
                         onChange={(e) => onEditSlide(idx, { title: e.target.value })}
                         fullWidth
                         size="small"
-                        style={{ marginBottom: "1rem" }}
+                        style={{ marginBottom: "var(--space-4)" }}
                       />
                       <TextField
                         label="Bullets (one per line)"
@@ -218,7 +254,7 @@ export default function GeneratePanel({
                         multiline
                         rows={3}
                         size="small"
-                        style={{ marginBottom: "1rem" }}
+                        style={{ marginBottom: "var(--space-4)" }}
                       />
                       {slide.code && (
                         <TextField
@@ -229,10 +265,10 @@ export default function GeneratePanel({
                           multiline
                           rows={4}
                           size="small"
-                          style={{ marginBottom: "1rem", fontFamily: "monospace" }}
+                          style={{ marginBottom: "var(--space-4)", fontFamily: "monospace" }}
                         />
                       )}
-                      <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <div style={{ display: "flex", gap: "var(--space-2)" }}>
                         <Button
                           variant="contained"
                           size="small"
@@ -253,8 +289,8 @@ export default function GeneratePanel({
                     </>
                   ) : (
                     <>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "0.75rem" }}>
-                        <h5 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 600 }}>{slide.title}</h5>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "var(--space-3)" }}>
+                        <h5 style={{ margin: 0, fontSize: "var(--font-size-md)", fontWeight: 600 }}>{slide.title}</h5>
                         <Button
                           variant="text"
                           size="small"
@@ -265,15 +301,30 @@ export default function GeneratePanel({
                         </Button>
                       </div>
                       {slide.bullets.length > 0 && (
-                        <ul style={{ margin: "0.5rem 0", paddingLeft: "1.5rem", fontSize: "0.9rem" }}>
+                        <ul style={{ margin: "var(--space-2) 0", paddingLeft: "var(--space-6)", fontSize: "var(--font-size-md)" }}>
                           {slide.bullets.map((bullet, i) => (
                             <li key={i}>{bullet}</li>
                           ))}
                         </ul>
                       )}
                       {slide.code && (
-                        <div style={{ marginTop: "0.75rem", padding: "0.75rem", backgroundColor: "rgba(0,0,0,0.05)", borderRadius: "4px", fontFamily: "monospace", fontSize: "0.8rem", overflow: "auto", maxHeight: "150px", color: "var(--text-secondary)" }}>
-                          {slide.codeLanguage && <div style={{ fontSize: "0.75rem", fontWeight: 500, marginBottom: "0.25rem" }}>{slide.codeLanguage.toUpperCase()}</div>}
+                        <div
+                          style={{
+                            marginTop: "var(--space-3)",
+                            padding: "var(--space-3)",
+                            // Overlay darken atop the slide's own (arbitrary,
+                            // user-chosen) theme background - not page chrome,
+                            // so no page surface token applies here. See report.
+                            backgroundColor: "rgba(0,0,0,0.05)",
+                            borderRadius: "var(--radius-xs)",
+                            fontFamily: "monospace",
+                            fontSize: "var(--font-size-sm)",
+                            overflow: "auto",
+                            maxHeight: "150px",
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          {slide.codeLanguage && <div style={{ fontSize: "var(--font-size-xs)", fontWeight: 500, marginBottom: "var(--space-1)" }}>{slide.codeLanguage.toUpperCase()}</div>}
                           <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{slide.code}</pre>
                         </div>
                       )}
@@ -288,23 +339,24 @@ export default function GeneratePanel({
           {draftNote && (
             <div
               style={{
-                padding: "0.75rem",
-                marginBottom: "1rem",
+                padding: "var(--space-3)",
+                marginBottom: "var(--space-4)",
                 backgroundColor:
                   draftNote.kind === "error"
-                    ? "rgba(220, 38, 38, 0.1)"
-                    : "rgba(16, 185, 129, 0.1)",
+                    ? "var(--danger-surface)"
+                    : "var(--success-surface)",
+                border: `1px solid ${draftNote.kind === "error" ? "var(--danger-border)" : "color-mix(in srgb, var(--success) 30%, var(--field-background))"}`,
                 color:
-                  draftNote.kind === "error" ? "#991b1b" : "#065f46",
-                borderRadius: "4px",
-                fontSize: "0.9rem",
+                  draftNote.kind === "error" ? "var(--danger)" : "var(--success-ink)",
+                borderRadius: "var(--radius-md)",
+                fontSize: "var(--font-size-md)",
               }}
             >
               {draftNote.text}
             </div>
           )}
 
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", marginBottom: "var(--space-4)" }}>
             <Button
               variant="contained"
               size="small"

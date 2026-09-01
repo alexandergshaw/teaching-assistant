@@ -52,14 +52,31 @@ export default function LiveStatusBar({
         background: "var(--danger-surface)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
           <span aria-hidden className={styles.liveRecordingDot} />
+          {/* Reported exception to the weight rule (700 only for h1/h2 and
+              the tracked-uppercase label idiom): this is the persistent,
+              unmistakable recording indicator (U3) - the file's own header
+              comment records that the user explicitly required it stay
+              obvious without scrolling, with no consent gate softening it.
+              It is tracked-uppercase but is a live status alarm, not a panel
+              title/table header/section label, so AM5's micro-label spec
+              (2xs / text-secondary) does not fit either - shrinking and
+              muting it to that idiom would directly undercut the one
+              requirement this control exists to satisfy. Kept at weight 700
+              rather than silently weakened. */}
           <span style={{ fontWeight: 700, color: "var(--text-primary)", letterSpacing: "0.02em" }}>
             RECORDING &amp; TRANSCRIBING LIVE
           </span>
         </div>
-        <span className={styles.ghMetaMono} style={{ fontSize: "1.3rem", fontWeight: 700, color: "var(--text-primary)" }}>
+        {/* Elapsed-time readout in tabular figures so the digits do not
+            jitter; fontWeight 600 (not 700 - reserved for h1/h2 and the
+            label idiom, and this is neither). */}
+        <span
+          className={styles.ghMetaMono}
+          style={{ fontSize: "var(--font-size-2xl)", fontWeight: 600, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}
+        >
           {formatElapsed(elapsedSeconds)}
         </span>
         <span className={styles.ghMeta}>

@@ -333,8 +333,8 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
   };
 
   return (
-    <div style={{ marginTop: 20 }}>
-      <h3 style={{ margin: "0 0 4px" }}>Manage {org}</h3>
+    <div style={{ marginTop: "var(--space-5)" }}>
+      <h3 style={{ margin: "0 0 var(--space-1)" }}>Manage {org}</h3>
 
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Organization management">
         {([["students", "Student management"], ["management", "Org management"]] as const).map(([key, label]) => (
@@ -347,16 +347,16 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
       </div>
 
       <div style={{ display: orgView === "students" ? undefined : "none" }}>
-        <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+        <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
           <summary>Members</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-          {membersState === "loading" && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Loading members...</p>}
+          {membersState === "loading" && <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>Loading members...</p>}
           {membersState === "error" && membersError && <p className={styles.error}>{membersError}</p>}
-          {membersState === "ready" && members.length === 0 && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>No members.</p>}
+          {membersState === "ready" && members.length === 0 && <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>No members.</p>}
           {membersState === "ready" &&
             members.map((member) => (
-              <div key={member.login} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: "0.95rem", flex: 1 }}>{member.login}</span>
+              <div key={member.login} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", marginBottom: "var(--space-2)" }}>
+                <span style={{ fontWeight: 600, fontSize: "var(--font-size-lg)", flex: 1 }}>{member.login}</span>
                 <TextField
                   select
                   size="small"
@@ -369,7 +369,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 </TextField>
               </div>
             ))}
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", marginTop: "var(--space-3)", paddingTop: "var(--space-3)", borderTop: "1px solid var(--field-border)" }}>
             <TextField
               size="small"
               fullWidth
@@ -400,11 +400,11 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
               {inviteBusy ? "Inviting..." : "Invite"}
             </Button>
           </div>
-          {inviteMsg && (inviteMsg.startsWith("Error:") ? <p className={styles.error}>{inviteMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{inviteMsg}</p>)}
+          {inviteMsg && (inviteMsg.startsWith("Error:") ? <p className={styles.error}>{inviteMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-1)" }}>{inviteMsg}</p>)}
         </div>
       </details>
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+      <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
         <summary>Repository access</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           <Typeahead
@@ -417,11 +417,11 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
 
           {accessRepo && (
             <>
-              {collaboratorsLoading && <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Loading collaborators...</p>}
+              {collaboratorsLoading && <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>Loading collaborators...</p>}
               {!collaboratorsLoading &&
                 collaborators.map((collab) => (
-                  <div key={collab.login} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
-                    <span style={{ fontWeight: 600, fontSize: "0.95rem", flex: 1 }}>{collab.login}</span>
+                  <div key={collab.login} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", marginBottom: "var(--space-2)" }}>
+                    <span style={{ fontWeight: 600, fontSize: "var(--font-size-lg)", flex: 1 }}>{collab.login}</span>
                     <TextField
                       select
                       size="small"
@@ -446,7 +446,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                   </div>
                 ))}
 
-              <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
+              <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", marginTop: "var(--space-3)", paddingTop: "var(--space-3)", borderTop: "1px solid var(--field-border)" }}>
                 <TextField
                   size="small"
                   fullWidth
@@ -480,7 +480,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                   {accessBusy ? "Applying..." : "Apply"}
                 </Button>
               </div>
-              {accessMsg && (accessMsg.startsWith("Error:") ? <p className={styles.error}>{accessMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{accessMsg}</p>)}
+              {accessMsg && (accessMsg.startsWith("Error:") ? <p className={styles.error}>{accessMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-1)" }}>{accessMsg}</p>)}
             </>
           )}
         </div>
@@ -488,7 +488,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
       </div>
 
       <div style={{ display: orgView === "management" ? undefined : "none" }}>
-        <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+        <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
           <summary>Create pull request</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           <Typeahead
@@ -501,7 +501,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
 
           {prRepo && (
             <>
-              <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+              <div style={{ display: "flex", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}>
                 <div style={{ flex: 1 }}>
                   <Typeahead
                     options={prBranches.map((b) => ({ value: b, label: b }))}
@@ -530,7 +530,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 onChange={(e) => setPrTitle(e.target.value)}
                 onKeyDown={submitOnEnter(handleCreatePr)}
                 disabled={prBusy}
-                sx={{ mb: 1.5 }}
+                sx={{ mb: "var(--space-3)" }}
               />
 
               <TextField
@@ -542,7 +542,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 value={prBody}
                 onChange={(e) => setPrBody(e.target.value)}
                 disabled={prBusy}
-                sx={{ mb: 1.5 }}
+                sx={{ mb: "var(--space-3)" }}
               />
 
               <Button
@@ -555,9 +555,9 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 {prBusy ? "Creating..." : "Create PR"}
               </Button>
 
-              {prMsg && (prMsg.startsWith("Error:") ? <p className={styles.error}>{prMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{prMsg}</p>)}
+              {prMsg && (prMsg.startsWith("Error:") ? <p className={styles.error}>{prMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-2)" }}>{prMsg}</p>)}
               {prResult && (
-                <p style={{ fontSize: "0.85rem", marginTop: 8, color: "var(--text-secondary)" }}>
+                <p style={{ fontSize: "var(--font-size-md)", marginTop: "var(--space-2)", color: "var(--text-secondary)" }}>
                   PR{" "}
                   <a href={prResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)", fontWeight: 600 }}>
                     #{prResult.number}
@@ -570,7 +570,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
         </div>
       </details>
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+      <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
         <summary>Branch protection</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           <Typeahead
@@ -591,15 +591,15 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 noOptionsText="No branches"
               />
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
                 <FormControlLabel
                   control={<Checkbox checked={bpRequirePr} onChange={(e) => setBpRequirePr(e.target.checked)} disabled={bpBusy} size="small" />}
                   label="Require pull request reviews"
                 />
 
                 {bpRequirePr && (
-                  <div style={{ marginLeft: 24, display: "flex", alignItems: "center", gap: 8 }}>
-                    <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Required approvals:</label>
+                  <div style={{ marginLeft: "var(--space-6)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                    <label style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Required approvals:</label>
                     <TextField
                       type="number"
                       size="small"
@@ -618,7 +618,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 />
 
                 {bpRequireChecks && (
-                  <div style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ marginLeft: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
                     <TextField
                       size="small"
                       fullWidth
@@ -656,16 +656,16 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 {bpBusy ? "Applying..." : "Apply protection"}
               </Button>
 
-              {bpMsg && (bpMsg.startsWith("Error:") ? <p className={styles.error}>{bpMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 8 }}>{bpMsg}</p>)}
+              {bpMsg && (bpMsg.startsWith("Error:") ? <p className={styles.error}>{bpMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-2)" }}>{bpMsg}</p>)}
             </>
           )}
         </div>
       </details>
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: 12 }}>
+      <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
         <summary>Delete repositories</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-          <p className={styles.fieldHint} style={{ margin: "0 0 8px" }}>
+          <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2)" }}>
             Permanently deletes repositories from {org} on GitHub, including all code, issues, and history. This cannot be undone. The token needs the delete_repo scope.
           </p>
           <TextField size="small" fullWidth placeholder="Filter repositories" value={delFilter} onChange={(e) => setDelFilter(e.target.value)} />
@@ -675,7 +675,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
             return (
               <>
                 <FormControlLabel
-                  sx={{ marginTop: 0.5 }}
+                  sx={{ marginTop: "var(--space-1)" }}
                   control={
                     <Checkbox
                       size="small"
@@ -691,13 +691,13 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                       }
                     />
                   }
-                  label={<span style={{ fontSize: "0.85rem" }}>Select all{delFilter.trim() ? " (filtered)" : ""} ({filtered.length})</span>}
+                  label={<span style={{ fontSize: "var(--font-size-md)" }}>Select all{delFilter.trim() ? " (filtered)" : ""} ({filtered.length})</span>}
                 />
                 <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column" }}>
                   {filtered.map((r) => (
                     <FormControlLabel
                       key={r.fullName}
-                      sx={{ marginLeft: 1 }}
+                      sx={{ marginLeft: "var(--space-2)" }}
                       control={
                         <Checkbox
                           size="small"
@@ -713,9 +713,9 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                         />
                       }
                       label={
-                        <span style={{ fontSize: "0.85rem", fontFamily: "monospace" }}>
+                        <span style={{ fontSize: "var(--font-size-md)", fontFamily: "monospace" }}>
                           {r.name}
-                          <span style={{ color: "var(--text-secondary)", marginLeft: 8, fontSize: "0.75rem" }}>
+                          <span style={{ color: "var(--text-secondary)", marginLeft: "var(--space-2)", fontSize: "var(--font-size-xs)" }}>
                             {r.private ? "private" : "public"}{r.isTemplate ? " · template" : ""}
                           </span>
                         </span>
@@ -724,13 +724,13 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                   ))}
                   {filtered.length === 0 && <p className={styles.fieldHint}>No repositories match.</p>}
                 </div>
-                <div style={{ marginTop: 8 }}>
+                <div style={{ marginTop: "var(--space-2)" }}>
                   <Button variant="contained" size="small" color="error" disabled={delBusy || delSelected.size === 0} onClick={handleDeleteRepos}>
                     {delBusy ? "Deleting..." : `Delete ${delSelected.size || ""} selected`.replace("  ", " ")}
                   </Button>
                 </div>
                 {delNote && (
-                  <p className={delNote.startsWith("Error") || delNote.includes("Failed:") ? styles.error : styles.fieldHint} style={{ marginTop: 8 }}>
+                  <p className={delNote.startsWith("Error") || delNote.includes("Failed:") ? styles.error : styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>
                     {delNote}
                   </p>
                 )}

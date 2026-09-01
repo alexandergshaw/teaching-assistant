@@ -377,7 +377,7 @@ export default function CopyRepoPanel({
 
   const renderTreeNode = (node: TreeNode, depth: number = 0): (React.ReactElement | React.ReactNode)[] => {
     const checkState = getCheckboxState(node);
-    const indent = depth * 14 + 8;
+    const indent = depth * 12 + 8;
     const isExpanded = expanded.has(node.path);
 
     const renderRow = (
@@ -388,13 +388,15 @@ export default function CopyRepoPanel({
           indeterminate={checkState === "indeterminate"}
           onChange={(e) => handleCheckboxChange(node, e.target.checked)}
           slotProps={{ input: { "aria-label": node.path } }}
-          sx={{ padding: "2px" }}
+          sx={{ padding: "var(--space-1)" }}
         />
         {node.type === "tree" && (
           <Button
             variant="text"
             size="small"
             aria-expanded={isExpanded}
+            aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+            title={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
             onClick={() =>
               setExpanded((prev) => {
                 const next = new Set(prev);
@@ -405,8 +407,8 @@ export default function CopyRepoPanel({
             }
             sx={{
               minWidth: "auto",
-              padding: "0 4px",
-              fontSize: "0.8rem",
+              padding: "0 var(--space-1)",
+              fontSize: "var(--font-size-sm)",
               color: "var(--text-secondary)",
             }}
           >
@@ -420,7 +422,7 @@ export default function CopyRepoPanel({
               fontWeight: 600,
               color: "var(--text-secondary)",
               flex: 1,
-              fontSize: "0.82rem",
+              fontSize: "var(--font-size-sm)",
             }}
           >
             {node.name}/
@@ -430,7 +432,7 @@ export default function CopyRepoPanel({
             className={styles.copyTreeName}
             style={{
               flex: 1,
-              fontSize: "0.82rem",
+              fontSize: "var(--font-size-sm)",
               fontFamily: "var(--font-mono)",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -443,10 +445,10 @@ export default function CopyRepoPanel({
         )}
         {node.type === "blob" && node.size !== undefined && (
           <span className={styles.copyTreeSize} style={{
-            fontSize: "0.75rem",
+            fontSize: "var(--font-size-xs)",
             color: "var(--text-secondary)",
             flex: "none",
-            marginLeft: 8,
+            marginLeft: "var(--space-2)",
             minWidth: 60,
             textAlign: "right",
           }}>
@@ -542,12 +544,12 @@ export default function CopyRepoPanel({
   }, [filteredNodes]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", marginTop: "var(--space-3)" }}>
       <div className={styles.ghPanel + " " + styles.ghPanelStack}>
         <label className={styles.panelTitle} style={{ display: "block" }}>
           Destination
         </label>
-        <div className={styles.scheduleModeToggle} style={{ marginBottom: 12 }}>
+        <div className={styles.scheduleModeToggle} style={{ marginBottom: "var(--space-3)" }}>
           {(["new", "existing"] as const).map((mode) => (
             <button
               key={mode}
@@ -677,10 +679,10 @@ export default function CopyRepoPanel({
         {treeState === "ready" && filteredBlobCount > 0 && (
           <div className={styles.copyTreeToolbar} style={{
             display: "flex",
-            gap: 8,
+            gap: "var(--space-2)",
             alignItems: "center",
             flexWrap: "wrap",
-            fontSize: "0.85rem",
+            fontSize: "var(--font-size-md)",
           }}>
             <Button
               variant="outlined"
@@ -708,18 +710,19 @@ export default function CopyRepoPanel({
             maxHeight: "46vh",
             overflowY: "auto",
             border: "1px solid var(--field-border)",
-            borderRadius: 12,
+            borderRadius: "var(--radius-md)",
             backgroundColor: "var(--field-background)",
-            padding: "8px 0",
+            padding: "var(--space-2) 0",
           }}
         >
           {treeState === "loading" && (
-            <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
               <CircularProgress size={24} />
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading files...</span>
             </div>
           )}
           {treeState === "error" && (
-            <p style={{ padding: 16, color: "var(--danger)", fontSize: "0.85rem" }}>
+            <p style={{ padding: "var(--space-4)", color: "var(--danger)", fontSize: "var(--font-size-md)" }}>
               Failed to load files.
               <Button
                 variant="text"
@@ -741,7 +744,7 @@ export default function CopyRepoPanel({
             </p>
           )}
           {treeState === "ready" && filteredBlobCount === 0 && (
-            <p style={{ padding: 16, color: "var(--text-secondary)", fontSize: "0.85rem" }}>
+            <p style={{ padding: "var(--space-4)", color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>
               {search.trim()
                 ? "No matching files."
                 : "This repository has no files on this branch."}
@@ -752,7 +755,7 @@ export default function CopyRepoPanel({
             filteredNodes.flatMap((node) => renderTreeNode(node))}
         </div>
 
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap" }}>
           <FormControlLabel
             control={
               <Checkbox
@@ -766,7 +769,7 @@ export default function CopyRepoPanel({
                 <div>Include GitHub Actions workflows</div>
                 <div
                   style={{
-                    fontSize: "0.75rem",
+                    fontSize: "var(--font-size-xs)",
                     color: "var(--text-secondary)",
                   }}
                 >
@@ -816,9 +819,9 @@ export default function CopyRepoPanel({
         <div
           className={styles.copySummary}
           style={{
-            fontSize: "0.85rem",
+            fontSize: "var(--font-size-md)",
             color: "var(--text-secondary)",
-            padding: "12px 0",
+            padding: "var(--space-3) 0",
           }}
         >
           {copyDestMode === "new" ? (
@@ -830,7 +833,7 @@ export default function CopyRepoPanel({
                 </strong>{" "}
                 · {visibility}
               </div>
-              <div style={{ marginTop: 4 }}>
+              <div style={{ marginTop: "var(--space-1)" }}>
                 {selection.size} file{selection.size !== 1 ? "s" : ""} · Workflows:{" "}
                 {includeWorkflows ? "yes" : "no"} · Topics: {copyTopics ? "yes" : "no"} ·
                 Labels: {copyLabels ? "yes" : "no"}
@@ -844,7 +847,7 @@ export default function CopyRepoPanel({
                 </strong>{" "}
                 · {copyDestBranch || "(branch required)"}
               </div>
-              <div style={{ marginTop: 4 }}>
+              <div style={{ marginTop: "var(--space-1)" }}>
                 {selection.size} file{selection.size !== 1 ? "s" : ""}{copyDestPrefix ? ` · Folder: ${copyDestPrefix}` : ""}
               </div>
             </>
@@ -865,18 +868,18 @@ export default function CopyRepoPanel({
         </Button>
 
         {copyError && (
-          <p style={{ color: "var(--danger)", fontSize: "0.85rem", margin: 0 }}>
+          <p style={{ color: "var(--danger)", fontSize: "var(--font-size-md)", margin: 0 }}>
             Error: {copyError}
           </p>
         )}
 
         {copyResult && (
-          <div style={{ fontSize: "0.85rem" }}>
+          <div style={{ fontSize: "var(--font-size-md)" }}>
             {"repo" in copyResult ? (
               <p
                 style={{
-                  color: "var(--success)",
-                  margin: "0 0 6px",
+                  color: "var(--success-ink)",
+                  margin: "0 0 var(--space-1)",
                 }}
               >
                 Copied{" "}
@@ -894,8 +897,8 @@ export default function CopyRepoPanel({
             ) : (
               <p
                 style={{
-                  color: "var(--success)",
-                  margin: "0 0 6px",
+                  color: "var(--success-ink)",
+                  margin: "0 0 var(--space-1)",
                 }}
               >
                 {copyResult.copiedFiles} file{copyResult.copiedFiles !== 1 ? "s" : ""} copied{" "}
@@ -915,7 +918,7 @@ export default function CopyRepoPanel({
               </p>
             )}
             {copyResult.warnings.length > 0 && (
-              <ul style={{ margin: "6px 0 0", color: "var(--text-secondary)" }}>
+              <ul style={{ margin: "var(--space-1) 0 0", color: "var(--text-secondary)" }}>
                 {copyResult.warnings.map((w, i) => (
                   <li key={i}>{w}</li>
                 ))}

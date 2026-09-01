@@ -39,8 +39,8 @@ function DanglingOutputRows({
   }
 
   return (
-    <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--field-border)" }}>
-      <div style={{ fontSize: "0.875rem", fontWeight: 500, marginBottom: 8 }}>
+    <div style={{ marginTop: "var(--space-3)", paddingTop: "var(--space-3)", borderTop: "1px solid var(--field-border)" }}>
+      <div style={{ fontSize: "var(--font-size-md)", fontWeight: 500, marginBottom: "var(--space-2)" }}>
         Wire outputs from skipped steps:
       </div>
       {dangling.map((d) => (
@@ -149,9 +149,9 @@ function DanglingOutputRow({
         : "runtime";
 
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ marginBottom: 0, display: "flex", gap: 8, alignItems: "center" }}>
-        <label style={{ flex: 0, minWidth: "200px", fontSize: "0.85rem" }}>
+    <div style={{ marginBottom: "var(--space-3)" }}>
+      <div style={{ marginBottom: 0, display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+        <label style={{ flex: 0, minWidth: "200px", fontSize: "var(--font-size-md)" }}>
           Source step {danglingOutput.droppedIndex + 1}&apos;s&nbsp;{danglingOutput.outputLabel} comes from
         </label>
         <TextField

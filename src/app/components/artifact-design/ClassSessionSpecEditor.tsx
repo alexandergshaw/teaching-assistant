@@ -30,11 +30,22 @@ export default function ClassSessionSpecEditor({ spec, disabled, onChange }: Cla
     TECHNICAL_APTITUDES.find((a) => a.value === spec.assignment.aptitude)?.hint ?? "";
 
   const heading = (text: string) => (
-    <h4 style={{ margin: "0.5rem 0 0", fontSize: "0.9rem", fontWeight: 600 }}>{text}</h4>
+    <h4
+      style={{
+        margin: "var(--space-2) 0 0",
+        fontSize: "var(--font-size-2xs)",
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        color: "var(--text-secondary)",
+      }}
+    >
+      {text}
+    </h4>
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       <TextField
         select
         label="Course type"
@@ -53,7 +64,7 @@ export default function ClassSessionSpecEditor({ spec, disabled, onChange }: Cla
       </TextField>
 
       {heading("Case study")}
-      <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start" }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -87,7 +98,7 @@ export default function ClassSessionSpecEditor({ spec, disabled, onChange }: Cla
         onChange={(e) => setDiscussion({ prompt: e.target.value })}
         helperText="Blank asks students to respond to the week's case study."
       />
-      <div style={{ display: "flex", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)" }}>
         <TextField
           label="Minimum words"
           size="small"
@@ -128,7 +139,7 @@ export default function ClassSessionSpecEditor({ spec, disabled, onChange }: Cla
         value={spec.assignment.goal}
         onChange={(e) => setAssignment({ goal: e.target.value })}
       />
-      <div style={{ display: "flex", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)" }}>
         <TextField
           select
           label="Technical aptitude"
@@ -166,7 +177,7 @@ export default function ClassSessionSpecEditor({ spec, disabled, onChange }: Cla
           onChange={(e) => setAssignment({ points: Math.max(0, Number(e.target.value) || 0) })}
         />
       </div>
-      <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start" }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -192,7 +203,7 @@ export default function ClassSessionSpecEditor({ spec, disabled, onChange }: Cla
       </div>
 
       {heading("Quiz")}
-      <div style={{ display: "flex", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)" }}>
         <TextField
           label="Questions"
           size="small"

@@ -600,7 +600,7 @@ export function GeneratedPreviewModal({
               previewHeader's own space-between layout still sees exactly
               two children - see this file's own header comment for why
               this lives here rather than in the footer. */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
             {/* T1: offered only for a kind meant to be spoken aloud, gated
                 through kindDeliveredAloud - see this file's own import
                 comment. Hidden once teleprompter mode is open (the header
@@ -617,7 +617,7 @@ export function GeneratedPreviewModal({
               </Button>
             )}
             {downloadFormats.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
                 {downloadFormats.map((format) => {
                   const label = artifactDownloadFormatLabel(format);
                   return (
@@ -656,19 +656,19 @@ export function GeneratedPreviewModal({
         {discardConfirm && (
           <div
             style={{
-              padding: "0.75rem 1rem",
+              padding: "var(--space-3) var(--space-4)",
               borderTop: "1px solid var(--field-border)",
-              backgroundColor: "var(--warning-bg)",
+              backgroundColor: "var(--warning-surface)",
             }}
           >
-            <p style={{ margin: "0 0 8px 0", fontSize: "14px" }}>
+            <p style={{ margin: "0 0 var(--space-2) 0", fontSize: "var(--font-size-md)" }}>
               {pendingVersion === null
                 ? "Discard your unsaved changes and close?"
                 : pendingVersion === "regenerate"
                   ? "Discard your unsaved changes and regenerate?"
                   : `Discard your unsaved changes and switch to v${pendingVersion}?`}
             </p>
-            <div style={{ display: "flex", gap: "8px" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)" }}>
               <Button
                 size="small"
                 variant="outlined"
@@ -725,7 +725,7 @@ export function GeneratedPreviewModal({
             "knowledgeChecks" get a short on-screen reason instead of a
             second, disagreeing editing surface. */}
         {canEditText ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0 0 0.5rem", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "0 0 var(--space-2)", flexWrap: "wrap" }}>
             <Button size="small" variant="text" onClick={() => setEditing((v) => !v)} sx={{ textTransform: "none" }}>
               {editing ? "Preview" : "Edit"}
             </Button>
@@ -751,7 +751,7 @@ export function GeneratedPreviewModal({
             )}
           </div>
         ) : (
-          <p className={styles.previewMeta} style={{ padding: "0 0 0.5rem" }}>
+          <p className={styles.previewMeta} style={{ padding: "0 0 var(--space-2)" }}>
             Editing text isn&apos;t available for this kind - its saved content depends on structured data (slides or
             quiz questions) that hand-edited text can&apos;t update. Use &quot;Ask for changes&quot; below instead.
           </p>
@@ -820,18 +820,18 @@ export function GeneratedPreviewModal({
                 setDiscardConfirm(false);
                 setPendingVersion(null);
               }}
-              slotProps={{ input: { style: { fontFamily: "var(--font-mono, monospace)", fontSize: "0.85rem" } } }}
+              slotProps={{ input: { style: { fontFamily: "var(--font-mono, monospace)", fontSize: "var(--font-size-md)" } } }}
             />
           ) : displayText.trim() === "" ? (
             <p className={styles.previewMeta}>This version has no text.</p>
           ) : (
-            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "0.9rem" }}>
+            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "var(--font-size-md)" }}>
               {displayText}
             </pre>
           )}
         </div>
 
-        <div style={{ paddingTop: "0.75rem", borderTop: "1px solid var(--field-border)" }}>
+        <div style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--field-border)" }}>
           <TextField
             size="small"
             fullWidth
@@ -843,7 +843,7 @@ export function GeneratedPreviewModal({
             onChange={(e) => onInstructionsChange(e.target.value)}
             disabled={busy !== ""}
           />
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
             <Button
               size="small"
               variant="contained"

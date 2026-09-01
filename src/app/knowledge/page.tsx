@@ -75,7 +75,10 @@ export default function KnowledgeReviewPage() {
         {error && <p className={styles.error}>{error}</p>}
 
         {loading ? (
-          <p className={styles.status}>Loading learned entries…</p>
+          <div className={styles.loadingRow} role="status" aria-live="polite">
+            <span className={styles.loadingSpinner} aria-hidden="true" />
+            Loading learned entries…
+          </div>
         ) : entries.length === 0 && !error ? (
           <p className={styles.status}>
             Nothing awaiting review. New entries appear here as the research loop learns topics.

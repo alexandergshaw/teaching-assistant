@@ -36,7 +36,7 @@ export function WorkflowDescription({ description }: { description: string }) {
 
   if (trimmed.length <= CLAMP_LENGTH) {
     return (
-      <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
+      <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0" }}>
         {trimmed}
       </p>
     );
@@ -45,7 +45,7 @@ export function WorkflowDescription({ description }: { description: string }) {
   const preview = truncateAtWordBoundary(trimmed, CLAMP_LENGTH);
 
   return (
-    <div style={{ margin: "0 0 8px 0" }}>
+    <div style={{ margin: "0 0 var(--space-2) 0" }}>
       <p className={styles.fieldHint} style={{ margin: 0 }}>
         {open ? trimmed : `${preview}...`}
       </p>

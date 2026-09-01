@@ -71,14 +71,14 @@ export function TriggerEditForm({
     ? editingIsHeadlessSafe && !!source?.serverEvaluable
     : selectedHeadlessSafe && !!source?.serverEvaluable;
   return (
-    <div style={{ marginTop: 16, border: "1px solid var(--field-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ marginTop: "var(--space-4)", border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       {editingTriggerId ? (
-        <span style={{ fontWeight: 600, fontSize: "0.9em" }}>
+        <span style={{ fontWeight: 600, fontSize: "var(--font-size-md)" }}>
           Editing {editingTrigger?.workflowName}&apos;s trigger
         </span>
       ) : (
         <>
-          <span style={{ fontWeight: 600, fontSize: "0.9em" }}>Trigger {selectedDef?.name} on an event</span>
+          <span style={{ fontWeight: 600, fontSize: "var(--font-size-md)" }}>Trigger {selectedDef?.name} on an event</span>
           <p className={styles.fieldHint} style={{ margin: 0 }}>
             Uses the run form values as they are right now. Events are checked about every {MIN_INTERVAL_MINUTES} minutes while the app is open; unattended triggers are also checked in the cloud.
           </p>
@@ -149,7 +149,7 @@ export function TriggerEditForm({
             ? []
             : val.split(",").map((s) => s.trim()).filter(Boolean);
           return (
-            <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 300 }}>
+            <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", minWidth: 300 }}>
               <FormControlLabel
                 control={
                   <Checkbox
@@ -221,7 +221,7 @@ export function TriggerEditForm({
             );
           }
           return (
-            <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 260 }}>
+            <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", minWidth: 260 }}>
               <span className={styles.fieldHint}>{field.label}</span>
               <CoursePicker
                 activeInstitution={activeInstitution}
@@ -236,7 +236,7 @@ export function TriggerEditForm({
         }
         if (field.type === "org") {
           return (
-            <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+            <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", minWidth: 220 }}>
               <span className={styles.fieldHint}>{field.label}</span>
               <Typeahead
                 options={(orgs ?? []).map((o) => ({ value: o, label: o }))}
@@ -298,7 +298,7 @@ export function TriggerEditForm({
         </p>
       ) : null}
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
         <TextField select size="small" label="Course (optional)" value={triggerForm.courseId} onChange={(e) => setTriggerForm((p) => (p ? { ...p, courseId: e.target.value } : p))} sx={{ minWidth: 180 }}>
           <MenuItem value="">None</MenuItem>
           {(hubCourses ?? []).map((c) => (

@@ -63,8 +63,8 @@ export function ScheduleSection({
 }: ScheduleSectionProps) {
   return (
     <>
-      <h3 style={{ fontSize: "0.95rem", margin: "0 0 4px 0" }}>Schedule</h3>
-      <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
+      <h3 style={{ fontSize: "var(--font-size-md)", margin: "0 0 var(--space-1) 0" }}>Schedule</h3>
+      <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0" }}>
         Run this workflow at a set time, optionally repeating.
       </p>
       <Button
@@ -106,8 +106,8 @@ export function ScheduleSection({
       {scheduleError && <p className={styles.error}>{scheduleError}</p>}
 
       {schedules && schedules.length > 0 && (
-        <div style={{ marginTop: 20 }}>
-          <h3 style={{ fontSize: "0.9rem", margin: "0 0 8px 0" }}>Scheduled runs</h3>
+        <div style={{ marginTop: "var(--space-5)" }}>
+          <h3 style={{ fontSize: "var(--font-size-md)", margin: "0 0 var(--space-2) 0" }}>Scheduled runs</h3>
           {schedules.map((s) => {
             const courseName = s.courseId
               ? hubCourses?.find((c) => c.id === s.courseId)?.name ?? "course"
@@ -115,8 +115,8 @@ export function ScheduleSection({
             const attachment = [courseName, s.institution].filter(Boolean).join(", ");
             const chip = lastRunChip(s.lastRunStatus, s.lastRunAt);
             return (
-              <div key={s.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0", borderTop: "1px solid var(--field-border)", fontSize: "0.85em" }}>
-                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div key={s.id} style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", padding: "var(--space-2) 0", borderTop: "1px solid var(--field-border)", fontSize: "var(--font-size-md)" }}>
+                <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 600 }}>{s.workflowName}</span>
                   {s.unattended && (
                     <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Unattended</span>
@@ -130,7 +130,7 @@ export function ScheduleSection({
                       : "disabled"}
                     {attachment ? ` - ${attachment}` : ""}
                   </span>
-                  <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)" }}>
                     {workflows.find((w) => w.id === s.workflowId) ? (
                       <button
                         type="button"

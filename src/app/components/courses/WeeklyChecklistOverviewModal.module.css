@@ -16,30 +16,37 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 0 0 10px;
+  /* AM4: 10px is a tie - rounds DOWN to --space-2. */
+  padding: 0 0 var(--space-2);
 }
 
 .scroller {
   width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--field-border);
-  border-radius: 14px;
+  /* AM7: this border bounds a horizontal scroll region, not a nested card -
+     out of scope for AC11's "collapse nested borders." Structural
+     separation, so --border-soft (not --field-border). */
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
 }
 
+/* AC10/aesthetics pass: one row height, one cell padding - matches
+   CoursesTable.module.css's own .table so every sortable table in the app
+   reads as the same system. */
 .table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm);
 }
 
 .table th,
 .table td {
-  padding: 9px 13px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid var(--field-border);
-  border-right: 1px solid var(--field-border);
+  border-bottom: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border-soft);
 }
 
 .table th:last-child,
@@ -57,9 +64,11 @@
 
 .table th {
   font-weight: 700;
-  font-size: 0.78rem;
+  /* AM5: the tracked-uppercase micro-label idiom is pinned exactly -
+     font-size-2xs / weight 700 / letter-spacing 0.06em / text-secondary. */
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
   color: var(--text-secondary);
   white-space: nowrap;
@@ -94,15 +103,33 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  /* AM4: 14px is a tie between --space-3/--space-4 - ties round DOWN. */
+  gap: var(--space-3);
   flex-wrap: wrap;
-  padding: 0 1rem;
+  padding: 0 var(--space-4);
 }
 
 .stateMessage {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 4px;
+  /* AM4: 10px is a tie - rounds DOWN to --space-2. */
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1);
+}
+
+/* WeeklyChecklistOverviewModal.tsx's header-right button cluster (Refresh +
+   Close) and the loading state's row layout (spinner beside its label). */
+.headerActions {
+  display: flex;
+  align-items: center;
+}
+
+.stateMessageRow {
+  align-items: center;
+  flex-direction: row;
+}
+
+.dangerText {
+  color: var(--danger);
 }

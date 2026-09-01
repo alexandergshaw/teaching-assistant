@@ -60,12 +60,29 @@ export default function Typeahead({
       fullWidth
       size="small"
       noOptionsText={noOptionsText}
+      slotProps={{
+        paper: {
+          sx: {
+            // AM3: a floating light surface now needs a border, since
+            // --shadow-md alone no longer separates from the flat page
+            // background the way it did over the old gradient.
+            borderRadius: "var(--radius-md)",
+            boxShadow: "var(--shadow-md)",
+            border: "1px solid var(--card-border)",
+          },
+        },
+        listbox: {
+          sx: {
+            "& .MuiAutocomplete-option": { minHeight: "var(--control-height-md)" },
+          },
+        },
+      }}
       renderOption={(props, o) => (
         <li {...(props as React.HTMLAttributes<HTMLLIElement>)} key={o.value}>
           <span style={{ display: "flex", flexDirection: "column" }}>
             <span>{o.label}</span>
             {o.hint ? (
-              <span style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>{o.hint}</span>
+              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>{o.hint}</span>
             ) : null}
           </span>
         </li>

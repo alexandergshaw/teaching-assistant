@@ -702,11 +702,11 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             </div>
             {libraryError && <p role="alert" className={styles.error}>{libraryError}</p>}
             {libraryBusy && libraryFiles === null ? (
-              <p className={styles.fieldHint}>Loading your recording library...</p>
+              <p className={styles.fieldHint} role="status" aria-live="polite">Loading your recording library...</p>
             ) : libraryFiles && libraryFiles.length === 0 ? (
               <p className={styles.fieldHint}>Nothing in your recording library yet.</p>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
                 <TextField
                   select
                   label="Library recording"

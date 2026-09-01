@@ -10,8 +10,14 @@
 
   /* Shared UI theme tokens (also used inside page.module.css). Defined here so
      app-wide chrome like the top bar matches even when rendered outside .page. */
-  --page-background: linear-gradient(180deg, #f4f7fb 0%, #e8eef7 100%);
-  --card-background: rgba(255, 255, 255, 0.92);
+  /* Flat, not a gradient (aesthetics pass 2026-09-01, AC "Surfaces"): a
+     decorative vertical wash behind every screen is the clearest dated-web-app
+     tell, and it also made the translucent card below sit on a background that
+     changed colour down the page. */
+  --page-background: #f5f6f8;
+  /* Opaque, not 0.92 alpha: page texture bleeding through card text costs
+     contrast for no visual gain now that the page behind it is flat. */
+  --card-background: #ffffff;
   --card-border: rgba(15, 23, 42, 0.08);
   --text-primary: #0f172a;
   --text-secondary: #475569;
@@ -58,11 +64,58 @@
   --surface-subtle: #f8fafc;
   --surface-muted: #f1f5f9;
 
+  /* Type scale. Closed set - eight sizes, nothing between them. Before the
+     2026-09-01 aesthetics pass the stylesheets carried 30-plus distinct
+     font-size values, several of them 0.02rem apart, which is noise rather
+     than hierarchy. See docs/aesthetics-pass-acceptance-criteria.md. */
+  --font-size-2xs: 0.6875rem; /* 11px - tracked uppercase micro-labels only */
+  --font-size-xs: 0.75rem; /* 12px - badges, chips, table meta, helper text */
+  --font-size-sm: 0.8125rem; /* 13px - dense table cells, secondary rows */
+  --font-size-md: 0.875rem; /* 14px - DEFAULT UI text: controls, panel copy */
+  --font-size-lg: 1rem; /* 16px - prose paragraphs, panel lead-ins */
+  --font-size-xl: 1.125rem; /* 18px - panel and card titles */
+  --font-size-2xl: 1.375rem; /* 22px - section and modal titles */
+  --font-size-3xl: 1.75rem; /* 28px - page h1 */
+
+  /* Line heights. Headings tight, dense UI snug, prose normal. */
+  --line-tight: 1.25;
+  --line-snug: 1.4;
+  --line-normal: 1.55;
+
+  /* Spacing scale, 4px grid. Every padding/margin/gap resolves to one of
+     these; the odd 6/7/9/10/14/18/26/28/36px values they replaced are what
+     made two adjacent panels look subtly misaligned. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Control heights. Every button/input/select in one cluster shares one. */
+  --control-height-sm: 28px;
+  --control-height-md: 34px;
+  --control-height-lg: 40px;
+
+  /* Motion. prefers-reduced-motion below already neutralizes both; do not add
+     a second mechanism. */
+  --transition-fast: 120ms ease;
+  --transition-base: 180ms ease;
+
   /* Radius tokens */
+  --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  --radius-xl: 24px;
+  /* 20px, down from 24px: the app shell reads as a surface rather than a
+     bubble. This is the only pre-existing token whose value the aesthetics
+     pass changed. */
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+  --radius-round: 50%;
 
   /* Focus and shadow tokens */
   /* WCAG 1.4.11 (AA) needs 3:1 against ADJACENT colours. The old wash
@@ -99,14 +152,33 @@
      them (.lfRail) - a shared token would have repainted the selected
      card. */
   --accent-wash: color-mix(in srgb, var(--accent) 20%, transparent);
+  /* Four elevations, and each one means something: xs = a resting row lifting
+     under the pointer, sm = a card that must separate from a busy background,
+     md = something that floats (menu, popover, dropdown), lg = a modal. An
+     inline card inside a panel gets a border, not a shadow. */
+  --shadow-xs: 0 1px 1px rgba(15, 23, 42, 0.04);
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 12px 32px rgba(15, 23, 42, 0.18);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.12);
   --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.12);
 
   /* New tokens for dark mode */
   --accent-ink: #2563eb;
   --navy-ink: var(--navy);
   --warning-ink: #92400e;
+  /* Success as TEXT, not as a fill. --success (#16a34a) measures 3.30:1 on a
+     light surface - fine as a dot or a bar, a contrast failure as body text.
+     #0f7a37 measures 5.44:1 on white. (Both ratios in this comment were
+     recomputed on 2026-09-01 against the WCAG formula; the first draft said
+     2.95:1 and 4.8:1, which were conservative but did not reproduce. A
+     comment carrying an unreproducible number is the same defect class as an
+     AC citing a type that does not exist.) InSessionBanner.module.css had been
+     carrying this exact value as a hand-written literal with a comment
+     explaining the override; the aesthetics pass found it while looking for a
+     token to replace it with and there was none, which is how a documented
+     contrast fix ends up looking like drift. Mirrors --accent-ink's split.
+     The dark block below flips it to --success's own dark value, which is
+     already light enough to be read on a dark surface. */
+  --success-ink: #0f7a37;
   --scrollbar-thumb: #cbd5e1;
   --scrollbar-thumb-hover: #94a3b8;
   /* Adaptive status surfaces - defined ONCE, auto-adapt via scheme-dependent tokens */
@@ -128,6 +200,80 @@
      WorkflowPanel.tsx, RunInputPrompt.tsx, and the ppt-design panels) starts
      resolving to the correct, theme-adaptive color with no change to any of
      those files - this is a globals.css-only fix. */
+  /* Text and icons sitting ON a filled ACCENT surface. Defined once in :root
+     with no dark-theme override on purpose: --accent (#2563eb) is genuinely
+     theme-invariant, so white is the correct foreground in both themes and a
+     flipped value here would put dark text on a dark button. Added 2026-09-01
+     because the aesthetics pass found call sites falling back to a raw #fff
+     or the `white` keyword for want of a token.
+
+     CORRECTED 2026-09-01, same day, by the accessibility pass: this comment
+     originally claimed --danger was theme-invariant too. It is NOT - the dark
+     block below redefines it to #f87171. Two rules had taken white on
+     var(--danger) at 4.83:1 (their pre-pass literals) down to 2.77:1 in dark
+     theme, on the smallest text in the app. Use --danger-fill below for a
+     filled danger surface that carries --text-on-accent. --danger itself
+     stays theme-adaptive and is for danger TEXT and borders on a normal
+     background, where a light-on-dark flip is what you want. */
+  --text-on-accent: #ffffff;
+  /* A filled danger surface that will carry --text-on-accent, e.g. a count
+     badge or an overdue chip. :root only and deliberately theme-invariant,
+     for the same reason --on-navy and --focus-ring-on-navy are: the fill is
+     the same colour in both themes, so its white foreground stays correct.
+     Measures 4.83:1 against --text-on-accent. */
+  --danger-fill: #dc2626;
+  /* GitHub's "merged" purple as INK. The raw brand hex (#8250df) is the one
+     status colour with no app token - a deliberate carve-out, since it is
+     GitHub's colour and not ours. But used directly as 12px badge text it
+     measures 4.12:1 on the light card and 2.96:1 on the dark one (the opaque
+     --card-background made the dark case slightly worse), so the badge needs
+     an ink pair the way --success and --warning already have one. The fill
+     and border keep the brand hex; only the text moves. */
+  --merged-ink: #6b3fa0;
+  /* Danger as TEXT, completing the ink set. --accent-ink, --navy-ink,
+     --warning-ink and --success-ink all existed; --danger-ink did not, so
+     page.module.css derived it in place with a color-mix and a comment saying
+     the token was missing. #b91c1c measures 6.13:1 on white. --danger itself
+     stays the adaptive fill/border colour; --danger-fill above is the
+     theme-invariant filled surface. Three roles, three tokens, because
+     conflating them is what produced the 2.77:1 dark-theme badge. */
+  --danger-ink: #b91c1c;
+  /* Foreground on the NAVY chrome (top bar, Live Feed rail and detail slab,
+     bulk bar, modules row chips). Same reasoning as --focus-ring-on-navy
+     directly above: the chrome is navy in BOTH themes, so these need exactly
+     one value and are defined in :root only - a dark-theme override would
+     paint #121b2e text on #1a2744, which measures 1.1:1 and is invisible.
+     Added 2026-09-01: page.module.css carried 121 raw #fff / rgba(255,255,
+     255,a) foregrounds and TopBar.module.css 10 more, and the aesthetics
+     pass's "no raw hex" rule had no legal replacement for any of them - the
+     only tokens that resolve to white in light mode (--card-background,
+     --field-background, --background) all flip dark. --on-navy-muted
+     (#c7d2e8) measures 9.74:1 on --navy for secondary text and hints
+     (recomputed 2026-09-01; the first draft said 9.3:1). */
+  --on-navy: #ffffff;
+  --on-navy-muted: #c7d2e8;
+  /* The app's one spinner rotation, as a whole `animation` shorthand VALUE.
+     This exists because `@keyframes ta-spin` alone was not enough, which was
+     only discovered by reading the emitted production CSS.
+
+     Lightning CSS (which Turbopack uses for *.module.css - see
+     node_modules/next/dist/docs/01-app/03-api-reference/08-turbopack.md)
+     scopes animation-NAME REFERENCES inside a module, not just @keyframes
+     definitions. So a module writing `animation: ta-spin 0.8s linear infinite`
+     compiled to `animation: .8s linear infinite <hash>__ta-spin`, matching no
+     keyframes at all - two spinners added by the 2026-09-01 aesthetics pass
+     rendered as motionless rings. `:global()` is not an option either:
+     Turbopack's own docs record that standalone :local/:global pseudo-classes
+     are unsupported, and both spellings were probed and rejected by the
+     compiler.
+
+     Idents inside var() are NOT rewritten, so routing the whole shorthand
+     through a token is what actually works. Module stylesheets write
+     `animation: var(--ta-spin-animation)`. Custom properties themselves are
+     never scoped (dashedIdents is off), so this token resolves everywhere.
+     The same trap applies to any ident shared across stylesheets - grid-area
+     names included. */
+  --ta-spin-animation: ta-spin 0.8s linear infinite;
   --link-color: var(--accent-ink);
   --field-bg: var(--field-background);
   --success-bg: var(--success-surface);
@@ -138,8 +284,9 @@ html[data-theme="dark"] {
   color-scheme: dark;
   --background: #0b1120;
   --foreground: #ededed;
-  --page-background: linear-gradient(180deg, #0b1120 0%, #0e1626 100%);
-  --card-background: rgba(15, 23, 42, 0.92);
+  /* Flat and opaque, matching the light theme's change. */
+  --page-background: #0b1120;
+  --card-background: #121b2e;
   --card-border: rgba(148, 163, 184, 0.12);
   --text-primary: #e2e8f0;
   --text-secondary: #94a3b8;
@@ -155,6 +302,9 @@ html[data-theme="dark"] {
   --accent-ink: #60a5fa;
   --navy-ink: #a7b9e0;
   --warning-ink: #fcd34d;
+  --success-ink: #4ade80;
+  --merged-ink: #c4a7f5;
+  --danger-ink: #f87171;
   --navy-highlight: #2b3a5c;
   --navy-highlight-strong: #364a75;
   --scrollbar-thumb: #334155;
@@ -176,8 +326,9 @@ html[data-theme="dark"] {
      them (.lfRail) - a shared token would have repainted the selected
      card. */
   --accent-wash: color-mix(in srgb, var(--accent-ink) 35%, transparent);
+  --shadow-xs: 0 1px 1px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
 }
 
@@ -244,6 +395,19 @@ a {
 ::selection {
   background: color-mix(in srgb, var(--accent) 24%, var(--background));
   color: var(--text-primary);
+}
+
+/* The app's ONE spinner rotation, defined globally on purpose.
+   page.module.css already had `@keyframes spin`, but a CSS Module scopes its
+   keyframe names, so no other stylesheet in the app can reference it - which
+   is why 38 bare "Loading..." strings exist across surfaces whose authors had
+   no reachable spinner to use. This name is global, so any module stylesheet
+   can write `animation: ta-spin 0.8s linear infinite`. The reduced-motion
+   block below already neutralizes it. */
+@keyframes ta-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

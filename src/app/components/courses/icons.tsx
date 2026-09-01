@@ -1,3 +1,10 @@
+// AM11 follow-up: PencilIcon, CrossIcon and GrabDotsIcon below have zero
+// import sites anywhere in src/ (verified by grep) - dead code, not wired
+// into any surface. AM11 sizing is picked from where an icon actually
+// renders; with no render site to read, sizing these three would be a
+// guess, not a read, so their old ad hoc 11/13px boxes are left exactly as
+// they were rather than invented into a tier. Reported, not fixed - see
+// this wave's own report for the full note.
 export function PencilIcon() {
   return (
     <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" aria-hidden="true" focusable="false">
@@ -31,9 +38,21 @@ export function GrabDotsIcon() {
 // F3/F4: the per-cell / per-column-header "Actions" menu trigger
 // (CellMenu.tsx) - three horizontal lines, same shape/props as the icons
 // above (@mui/icons-material is not a dependency in this repo).
+//
+// AM11 icon-size pin: both real render sites are dense-grid row triggers -
+// CellMenu.tsx's own per-cell/per-column-header trigger (this table's body
+// cells and header cells are both part of the same dense grid, not a
+// toolbar or a page header) and TaskCell.tsx's per-cell trigger, which its
+// own comment says is modelled directly on this file's `.cellMenu` reveal
+// pattern. Neither is a toolbar/button-cluster or a page/panel header, so
+// this is the 16px "dense table rows" tier, not 20px or 24px. viewBox and
+// path data are unchanged (AM11 follow-up's own constraint) - only the
+// rendered box grew from the old ad hoc 13px to the pinned 16px. No stroke
+// attribute exists on this icon (solid `fill`, not an outline/stroke
+// glyph), so AM11's "stroke weight 1.5" has nothing to apply to here.
 export function HamburgerIcon() {
   return (
-    <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" aria-hidden="true" focusable="false">
+    <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true" focusable="false">
       <rect x="3" y="5" width="14" height="1.6" rx="0.8" />
       <rect x="3" y="9.2" width="14" height="1.6" rx="0.8" />
       <rect x="3" y="13.4" width="14" height="1.6" rx="0.8" />

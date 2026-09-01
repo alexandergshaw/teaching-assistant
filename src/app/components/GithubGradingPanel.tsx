@@ -54,19 +54,24 @@ const QUEUE_KEY = "ta-github-grading-queue";
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 function TestStatusCell({ test }: { test: TestState }) {
-  if (test.status === "idle") return <span style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>—</span>;
+  if (test.status === "idle") return <span style={{ color: "var(--text-muted)", fontSize: "var(--font-size-sm)" }}>—</span>;
   if (test.status === "error")
-    return <span style={{ color: "var(--danger)", fontSize: "0.82rem" }}>{test.message ?? "Error"}</span>;
+    return <span style={{ color: "var(--danger)", fontSize: "var(--font-size-sm)" }}>{test.message ?? "Error"}</span>;
   const ok = test.conclusion === "success";
   const failed = test.conclusion === "failure" || test.conclusion === "timed_out";
-  const color = test.status === "running" ? "var(--accent)" : ok ? "var(--success)" : failed ? "var(--danger)" : "var(--text-secondary)";
+  // Dot uses --success (fine as a small graphical indicator); the TEXT next
+  // to it uses --success-ink instead of the same --success - globals.css's
+  // own comment on --success-ink says --success measures 2.95:1 on a light
+  // surface, a contrast failure as body text, and this label is body text.
+  const dotColor = test.status === "running" ? "var(--accent)" : ok ? "var(--success)" : failed ? "var(--danger)" : "var(--text-secondary)";
+  const textColor = test.status === "running" ? "var(--accent)" : ok ? "var(--success-ink)" : failed ? "var(--danger)" : "var(--text-secondary)";
   const base = test.status === "running" ? "Running…" : ok ? "Passed" : failed ? "Failed" : test.conclusion ?? "Done";
   const s = test.summary;
   const counts = s ? ` ${s.passed}/${s.tests}${s.skipped ? ` (+${s.skipped} skipped)` : ""}` : "";
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.82rem" }}>
-      <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: color }} />
-      <strong style={{ color }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-sm)" }}>
+      <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "var(--radius-round)", background: dotColor }} />
+      <strong style={{ color: textColor, fontVariantNumeric: "tabular-nums" }}>
         {base}
         {counts}
       </strong>
@@ -474,7 +479,7 @@ export default function GithubGradingPanel() {
 
   return (
     <>
-      <p style={{ marginTop: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+      <p style={{ marginTop: 0, color: "var(--text-secondary)", lineHeight: "var(--line-normal)" }}>
         Queue students&apos; repositories, grade them all against one rubric, and run each repo&apos;s unit tests
         via GitHub Actions. Running tests needs a <code>workflow_dispatch</code> workflow in each repo.
       </p>
@@ -483,7 +488,7 @@ export default function GithubGradingPanel() {
       <div className={styles.field}>
         <label>Add a student repository</label>
         <GithubRepoPicker value={pickRepo} onChange={setPickRepo} branch={pickBranch} onBranchChange={setPickBranch} disabled={!!busy} />
-        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)", flexWrap: "wrap" }}>
           <TextField
             size="small"
             value={pickLabel}
@@ -506,7 +511,7 @@ export default function GithubGradingPanel() {
       {orgs.length > 0 && (
         <div className={styles.field}>
           <label>Or import every repo from an organization</label>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 200px" }}>
               <Typeahead
                 options={orgs.map((o) => ({ value: o, label: o }))}
@@ -534,33 +539,33 @@ export default function GithubGradingPanel() {
               {importing ? "Importing…" : "Import"}
             </Button>
           </div>
-          <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "6px 0 0" }}>
+          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", margin: "var(--space-1) 0 0" }}>
             With a prefix, the student label is taken from the rest of the repo name (e.g. <code>lab1-jsmith</code> → <code>jsmith</code>).
           </p>
-          {importNote && <p style={{ fontSize: "0.8rem", color: "var(--success)", marginTop: 4 }}>{importNote}</p>}
+          {importNote && <p style={{ fontSize: "var(--font-size-sm)", color: "var(--success-ink)", marginTop: "var(--space-1)" }}>{importNote}</p>}
         </div>
       )}
 
       {/* Queue table */}
       {queue.length > 0 && (
         <div className={styles.field}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-2)", flexWrap: "wrap" }}>
             <label style={{ margin: 0 }}>Queue ({queue.length})</label>
             <Button type="button" variant="contained" size="small" onClick={runAllTests}>
               Run all tests
             </Button>
           </div>
-          <div style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8, marginTop: 6 }}>
+          <div style={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", marginTop: "var(--space-1)" }}>
             {queue.map((row, i) => (
               <div
                 key={row.id}
-                style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 10px", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", flexWrap: "wrap" }}
+                style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", padding: "var(--space-2) var(--space-2)", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", flexWrap: "wrap" }}
               >
                 <div style={{ flex: "1 1 200px", minWidth: 0 }}>
-                  <div style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: "var(--font-size-md)", fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {row.label || row.repoRef}
                   </div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {row.repoRef}
                     {row.branch ? ` @ ${row.branch}` : ""}
                   </div>
@@ -590,7 +595,7 @@ export default function GithubGradingPanel() {
               </div>
             ))}
           </div>
-          <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: 6 }}>
+          <p style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>
             Workflow file to run (optional, applies to all):{" "}
             <TextField
               size="small"
@@ -601,12 +606,12 @@ export default function GithubGradingPanel() {
             />
           </p>
 
-          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-soft)" }}>
-            <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "0 0 6px" }}>
+          <div style={{ marginTop: "var(--space-2)", paddingTop: "var(--space-2)", borderTop: "1px solid var(--border-soft)" }}>
+            <p style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", margin: "0 0 var(--space-1)" }}>
               No <code>workflow_dispatch</code> workflow yet? Push a standard one (runs tests + uploads a JUnit
               report) into every queued repo. Needs the token&apos;s <code>workflow</code> scope.
             </p>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
               <TextField
                 select
                 size="small"
@@ -632,7 +637,7 @@ export default function GithubGradingPanel() {
                 {busy === "setup" ? "Adding…" : "Add test workflow to all repos"}
               </Button>
             </div>
-            {setupNote && <p style={{ fontSize: "0.8rem", color: "var(--success)", marginTop: 6 }}>{setupNote}</p>}
+            {setupNote && <p style={{ fontSize: "var(--font-size-sm)", color: "var(--success-ink)", marginTop: "var(--space-1)" }}>{setupNote}</p>}
           </div>
         </div>
       )}
@@ -640,7 +645,7 @@ export default function GithubGradingPanel() {
       {/* AC A: one common folder scopes grading for the whole queue. */}
       <div className={styles.field}>
         <label>Grading folder (applies to every repo in the queue)</label>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start", flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 240px" }}>
             <Autocomplete
               freeSolo
@@ -664,10 +669,10 @@ export default function GithubGradingPanel() {
             {folderScanning ? "Scanning…" : "Scan folders"}
           </Button>
         </div>
-        <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 6 }}>
+        <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>
           {describeGradingFolder(normalizeGradingFolder(gradingFolder))}
         </p>
-        {folderScanNote && <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: 2 }}>{folderScanNote}</p>}
+        {folderScanNote && <p style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>{folderScanNote}</p>}
       </div>
 
       {/* AC B: pull instructions/rubric from a live Canvas assignment or a
@@ -763,10 +768,10 @@ export default function GithubGradingPanel() {
       {error && <p className={styles.error}>{error}</p>}
 
       {run && (run.results.length > 0 || noSubmissionRepos.length > 0 || undeterminedRepos.length > 0) && (
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: "var(--space-4)" }}>
           {/* AC A5: ties the scope description to what THIS run actually
               covered, even if the folder box above has since been edited. */}
-          <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", margin: "0 0 8px" }}>
+          <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", margin: "0 0 var(--space-2)" }}>
             {describeGradingFolder(normalizeGradingFolder(lastGradedFolder ?? ""))}
           </p>
           {/* FIX 2 (entry 370): repos that had nothing student-authored to
@@ -784,14 +789,14 @@ export default function GithubGradingPanel() {
               <div
                 role="status"
                 style={{
-                  margin: "0 0 10px",
-                  padding: "10px 14px",
+                  margin: "0 0 var(--space-2)",
+                  padding: "var(--space-2) var(--space-3)",
                   border: "1px solid var(--warning-border)",
                   background: "var(--warning-surface)",
-                  borderRadius: 8,
+                  borderRadius: "var(--radius-sm)",
                 }}
               >
-                <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--warning-ink)" }}>{notice}</p>
+                <p style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--warning-ink)" }}>{notice}</p>
               </div>
             );
           })()}
@@ -812,14 +817,14 @@ export default function GithubGradingPanel() {
               <div
                 role="status"
                 style={{
-                  margin: "0 0 10px",
-                  padding: "10px 14px",
+                  margin: "0 0 var(--space-2)",
+                  padding: "var(--space-2) var(--space-3)",
                   border: "1px solid var(--warning-border)",
                   background: "var(--warning-surface)",
-                  borderRadius: 8,
+                  borderRadius: "var(--radius-sm)",
                 }}
               >
-                <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--warning-ink)" }}>{notice}</p>
+                <p style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--warning-ink)" }}>{notice}</p>
               </div>
             );
           })()}
@@ -829,9 +834,9 @@ export default function GithubGradingPanel() {
             const notice = describeGithubGradingTruncation(run.results, truncatedRepos);
             if (!notice) return null;
             return (
-              <div style={{ margin: "0 0 10px" }}>
+              <div style={{ margin: "0 0 var(--space-2)" }}>
                 {notice.ingestMessage && (
-                  <p role="status" className={styles.fieldHint} style={{ margin: "0 0 4px" }}>
+                  <p role="status" className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)" }}>
                     {notice.ingestMessage}
                   </p>
                 )}
@@ -861,7 +866,7 @@ export default function GithubGradingPanel() {
                 // may act on stale scores elsewhere believing they just
                 // produced them.
                 runIsRestored && gradedAt ? (
-                  <p role="status" className={styles.fieldHint} style={{ margin: "0 0 10px" }}>
+                  <p role="status" className={styles.fieldHint} style={{ margin: "0 0 var(--space-2)" }}>
                     {describeRestoredGithubGradingRun(gradedAt)}
                   </p>
                 ) : undefined

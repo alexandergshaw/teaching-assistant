@@ -203,7 +203,7 @@ export default function AttachmentPreviewModal({
           another application.
         </p>
       ) : status === "loading" ? (
-        <p className={styles.previewMeta}>Loading preview...</p>
+        <p className={styles.previewMeta} role="status" aria-live="polite">Loading preview...</p>
       ) : status === "error" ? (
         <p className={styles.error}>{error}</p>
       ) : mode === "image" && objectUrl ? (

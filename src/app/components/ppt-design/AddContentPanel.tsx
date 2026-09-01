@@ -15,9 +15,28 @@ export default function AddContentPanel({
   onAddLoop,
 }: AddContentPanelProps) {
   return (
-    <div style={{ marginBottom: "1.5rem", padding: "1rem", backgroundColor: "var(--field-bg)", borderRadius: "4px" }}>
-      <h4 style={{ margin: "0 0 1rem 0", fontSize: "0.9rem" }}>Add content</h4>
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+    <div
+      style={{
+        marginBottom: "var(--space-6)",
+        padding: "var(--space-4)",
+        backgroundColor: "var(--field-bg)",
+        border: "1px solid var(--border-soft)",
+        borderRadius: "var(--radius-md)",
+      }}
+    >
+      <h4
+        style={{
+          margin: "0 0 var(--space-4) 0",
+          fontSize: "var(--font-size-2xs)",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--text-secondary)",
+        }}
+      >
+        Add content
+      </h4>
+      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
         <Select
           defaultValue="concept"
           disabled={isReadOnly}

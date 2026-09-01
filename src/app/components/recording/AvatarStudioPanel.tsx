@@ -132,7 +132,7 @@ export default function AvatarStudioPanel({
   const disableDeviceSelects = captureState !== "idle";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       {configured === false && (
         <div className={styles.adaptPanel}>
           <p className={styles.error} style={{ margin: 0 }}>
@@ -158,7 +158,7 @@ export default function AvatarStudioPanel({
 
         {captureError && <p className={styles.error}>{captureError}</p>}
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
           <TextField
             select
             label="Camera"
@@ -204,7 +204,7 @@ export default function AvatarStudioPanel({
           )}
         </div>
 
-        <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#0f172a" }}>
+        <div style={{ position: "relative", borderRadius: "var(--radius-md)", overflow: "hidden", background: "var(--navy)" }}>
           <video
             ref={videoRef}
             autoPlay
@@ -215,14 +215,14 @@ export default function AvatarStudioPanel({
               width: "100%",
               maxHeight: "48vh",
               objectFit: "contain",
-              background: "#0f172a",
+              background: "var(--navy)",
             }}
           />
           {captureState === "reviewing" && reviewUrl && (
             <video
               controls
               src={reviewUrl}
-              style={{ width: "100%", maxHeight: "48vh", background: "#0f172a", display: "block" }}
+              style={{ width: "100%", maxHeight: "48vh", background: "var(--navy)", display: "block" }}
             />
           )}
         </div>
@@ -236,9 +236,9 @@ export default function AvatarStudioPanel({
         </p>
 
         {(captureState === "recording") && (
-          <div role="group" aria-labelledby="avatar-stage-heading" className={styles.field} style={{ gap: 8 }}>
+          <div role="group" aria-labelledby="avatar-stage-heading" className={styles.field} style={{ gap: "var(--space-2)" }}>
             <div aria-live="polite">
-              <h3 id="avatar-stage-heading" style={{ margin: 0, fontSize: "1rem" }}>
+              <h3 id="avatar-stage-heading" style={{ margin: 0, fontSize: "var(--font-size-lg)" }}>
                 {`Stage ${stageIndex + 1} of ${AVATAR_SCRIPT_STAGES.length}: ${stage.label}`}
               </h3>
             </div>
@@ -249,8 +249,8 @@ export default function AvatarStudioPanel({
                 style={{
                   maxHeight: 160,
                   overflowY: "auto",
-                  padding: "12px 16px",
-                  borderRadius: 10,
+                  padding: "var(--space-3) var(--space-4)",
+                  borderRadius: "var(--radius-sm)",
                   background: "color-mix(in srgb, var(--field-border) 18%, transparent)",
                   whiteSpace: "pre-wrap",
                   lineHeight: 1.6,
@@ -259,7 +259,10 @@ export default function AvatarStudioPanel({
                 {stage.body}
               </div>
             )}
-            <p aria-describedby="avatar-stage-heading" className={styles.ghMetaMono} style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700 }}>
+            {/* fontWeight 700 is reserved for h1/h2 and the tracked-uppercase
+                label idiom; this elapsed-time readout is neither, so 600
+                (the next weight down) replaces it. */}
+            <p aria-describedby="avatar-stage-heading" className={styles.ghMetaMono} style={{ margin: 0, fontSize: "var(--font-size-xl)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
               {`Elapsed ${fmt(stageElapsed)} of target ${fmt(stage.targetSeconds)}`}
             </p>
           </div>
@@ -447,6 +450,9 @@ export default function AvatarStudioPanel({
       <div className={styles.ghPanel}>
         <h2 className={styles.adaptPanelTitle}>Your likenesses</h2>
         {likenessesError && <p className={styles.error}>{likenessesError}</p>}
+        {!likenessesLoaded && !likenessesError && (
+          <p className={styles.fieldHint} role="status" aria-live="polite">Loading your likenesses...</p>
+        )}
         {likenessesLoaded && likenesses.length === 0 && !likenessesError && (
           <p className={styles.fieldHint}>No likenesses yet - record and save a sample above to train one.</p>
         )}
@@ -467,7 +473,7 @@ export default function AvatarStudioPanel({
                 </Button>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
               <span className={styles.ghMeta}>{likenessStatusText(l)}</span>
               {l.isDefault && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Default</span>}
               {l.status === "ready" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Ready</span>}
@@ -494,7 +500,7 @@ export default function AvatarStudioPanel({
           </p>
         )}
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
           <TextField
             select
             label="Course"

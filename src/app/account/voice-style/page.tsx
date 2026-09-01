@@ -322,7 +322,10 @@ export default function VoiceStylePage() {
           {notice && <p className={styles.notice}>{notice}</p>}
 
           {loading ? (
-            <p className={styles.empty}>Loading your settings…</p>
+            <div className={styles.loadingRow} role="status" aria-live="polite">
+              <span className={styles.spinner} aria-hidden="true" />
+              <span>Loading your settings…</span>
+            </div>
           ) : (
             <>
               {/* Voice Card */}
@@ -340,13 +343,13 @@ export default function VoiceStylePage() {
                 </div>
 
                 {userStyle?.hasVoiceSample && sampleUrl && (
-                  <div style={{ marginTop: 12 }}>
+                  <div className={styles.stack}>
                     <p className={styles.label}>Recorded sample</p>
-                    <audio controls style={{ width: "100%", marginTop: 6 }} src={sampleUrl} />
+                    <audio controls className={styles.audioPlayer} src={sampleUrl} />
                   </div>
                 )}
 
-                <div style={{ marginTop: 14 }}>
+                <div className={styles.stack}>
                   <label className={styles.label} htmlFor="voice-upload">
                     {userStyle?.voiceId ? "Replace your voice" : "Upload a voice sample"}
                   </label>
@@ -360,22 +363,20 @@ export default function VoiceStylePage() {
                     multiple
                     onChange={handleVoiceFileSelect}
                     className={styles.input}
-                    style={{ padding: 12 }}
                   />
                 </div>
 
                 {voiceUploadedFiles.length > 0 && (
-                  <div style={{ marginTop: 12 }}>
+                  <div className={styles.stack}>
                     <p className={styles.help}>
                       {voiceUploadedFiles.length} file(s) selected. Name your voice:
                     </p>
                     <input
                       type="text"
-                      className={styles.input}
+                      className={`${styles.input} ${styles.spacedTop}`}
                       placeholder="e.g., My Voice"
                       value={voiceName}
                       onChange={(e) => setVoiceName(e.target.value)}
-                      style={{ marginTop: 8 }}
                     />
                   </div>
                 )}
@@ -429,7 +430,7 @@ export default function VoiceStylePage() {
                   stripped before your style is learned.
                 </p>
 
-                <div style={{ marginTop: 14 }}>
+                <div className={styles.stack}>
                   <label htmlFor="prompt-select" className={styles.label}>
                     Writing prompt
                   </label>
@@ -452,16 +453,15 @@ export default function VoiceStylePage() {
                   </select>
                   <button
                     type="button"
-                    className={styles.secondary}
+                    className={`${styles.secondary} ${styles.spacedTop}`}
                     onClick={handleInsertPrompt}
-                    style={{ marginTop: 10 }}
                     disabled={selectedPromptIndex === null || selectedPromptIndex < 0}
                   >
                     Insert prompt
                   </button>
                 </div>
 
-                <div style={{ marginTop: 14 }}>
+                <div className={styles.stack}>
                   <label htmlFor="writing-sample" className={styles.label}>
                     Your writing sample
                   </label>
@@ -472,26 +472,21 @@ export default function VoiceStylePage() {
                     placeholder="Paste your responses to the prompts above…"
                     value={writingText}
                     onChange={(e) => setWritingText(e.target.value)}
-                    style={{ fontFamily: "inherit", resize: "vertical" }}
                   />
-                  <div className={styles.help} style={{ marginTop: 8, display: "flex", justifyContent: "space-between" }}>
+                  <div className={`${styles.help} ${styles.charCountRow}`}>
                     <span>
                       Character count: {charCount.toLocaleString()} / 20,000
                     </span>
-                    <div style={{ width: "150px", height: "6px", background: "var(--field-border)", borderRadius: "3px", overflow: "hidden" }}>
+                    <div className={styles.progressTrack}>
                       <div
-                        style={{
-                          width: `${Math.min(charPercentage, 100)}%`,
-                          height: "100%",
-                          background: charPercentage > 100 ? "var(--danger)" : "var(--accent)",
-                          transition: "width 0.2s",
-                        }}
+                        className={`${styles.progressFill}${charPercentage > 100 ? ` ${styles.progressFillOver}` : ""}`}
+                        style={{ width: `${Math.min(charPercentage, 100)}%` }}
                       />
                     </div>
                   </div>
                 </div>
 
-                <p className={styles.help} style={{ marginTop: 12 }}>
+                <p className={styles.help}>
                   Your writing style is used in: announcements, message replies, student nudges,
                   lecture scripts, and generated documents.
                 </p>

@@ -252,7 +252,7 @@ function LiteralEditor({
     };
 
     return (
-      <div style={{ flex: 1, minWidth: 200, display: "flex", gap: 8 }}>
+      <div style={{ flex: 1, minWidth: 200, display: "flex", gap: "var(--space-2)" }}>
         <TextField
           type="number"
           size="small"

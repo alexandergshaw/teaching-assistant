@@ -115,7 +115,7 @@ export default function BreaksCell({ course, onSave, menu }: BreaksCellProps) {
 
   if (!editing) {
     return (
-      <td onClick={startEdit} title="Click to edit" style={{ cursor: "pointer" }}>
+      <td onClick={startEdit} title="Click to edit" className={tableStyles.clickToEdit}>
         {description ? (
           <span className={styles.courseResourceValue}>{truncateForCell(description, 60)}</span>
         ) : (
@@ -131,9 +131,9 @@ export default function BreaksCell({ course, onSave, menu }: BreaksCellProps) {
       <div className={styles.tileEditor}>
         {rows ? (
           <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className={tableStyles.stackSm}>
               {rows.map((r, i) => (
-                <div key={i} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div key={i} className={tableStyles.rowStart}>
                   <TextField
                     size="small"
                     label="Start"
@@ -174,7 +174,7 @@ export default function BreaksCell({ course, onSave, menu }: BreaksCellProps) {
                   <Button
                     variant="text"
                     size="small"
-                    style={{ color: "var(--danger)" }}
+                    className={tableStyles.dangerLink}
                     disabled={rows.length <= 1}
                     onClick={() => removeRow(i)}
                   >
@@ -183,26 +183,26 @@ export default function BreaksCell({ course, onSave, menu }: BreaksCellProps) {
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 8 }}>
+            <div className={tableStyles.mt2}>
               <button type="button" className={styles.linkButton} onClick={addRow}>
                 Add break
               </button>
             </div>
             {issues.length > 0 && (
-              <div style={{ marginTop: 8 }}>
+              <div className={tableStyles.mt2}>
                 {issues.map((issue, i) => (
-                  <p key={i} className={styles.fieldHint} style={{ margin: "2px 0", color: "var(--danger)" }}>
+                  <p key={i} className={`${styles.fieldHint} ${tableStyles.issueLine}`}>
                     {issue.message}
                   </p>
                 ))}
               </div>
             )}
             {hasIncompleteRow && issues.length === 0 && (
-              <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
+              <p className={`${styles.fieldHint} ${tableStyles.mt2Only}`}>
                 Every break needs both a start and an end date.
               </p>
             )}
-            <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
+            <p className={`${styles.fieldHint} ${tableStyles.mt2Only}`}>
               <button type="button" className={styles.linkButton} onClick={switchToRawText}>
                 Edit as plain text instead
               </button>

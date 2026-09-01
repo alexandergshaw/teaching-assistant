@@ -137,7 +137,7 @@ export function AutomationsPanel({
             list and a dead cron are unrelated problems. */}
         <CronHeartbeatStatus />
         <p className={styles.fieldHint}>No workflows are scheduled or have triggers yet.</p>
-        <p className={styles.fieldHint} style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+        <p className={styles.fieldHint} style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
           Open a workflow in the Workflows tab and use the Automate panel to add schedules or triggers.
         </p>
         {/* F11.4: scheduled releases are an independent concern from
@@ -177,7 +177,7 @@ export function AutomationsPanel({
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-8)" }}>
       {/* The scheduler's own status, above both groups (H3 item 13) - this
           is the view that already answers "what is set to run
           automatically", so "is the runner alive at all" belongs at its
@@ -200,7 +200,7 @@ export function AutomationsPanel({
       )}
 
       <section>
-        <h3 style={{ margin: "0 0 10px", fontSize: "0.95rem" }}>Scheduled ({scheduled.length})</h3>
+        <h3 style={{ margin: "0 0 var(--space-2)", fontSize: "var(--font-size-xl)" }}>Scheduled ({scheduled.length})</h3>
         {scheduled.length === 0 ? (
           <p className={styles.fieldHint}>No workflows are scheduled yet.</p>
         ) : (
@@ -238,7 +238,7 @@ export function AutomationsPanel({
       </section>
 
       <section>
-        <h3 style={{ margin: "0 0 10px", fontSize: "0.95rem" }}>Triggered ({triggered.length})</h3>
+        <h3 style={{ margin: "0 0 var(--space-2)", fontSize: "var(--font-size-xl)" }}>Triggered ({triggered.length})</h3>
         {triggered.length === 0 ? (
           <p className={styles.fieldHint}>No triggered workflows yet.</p>
         ) : (

@@ -119,7 +119,7 @@ export default function SourceDevicesPanel({
       <div className={styles.adaptPanelHeader}>
         <h2 className={styles.adaptPanelTitle}>Source &amp; devices</h2>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
         <TextField
           select
           label="Source"
@@ -203,7 +203,7 @@ export default function SourceDevicesPanel({
         </TextField>
       </div>
       {source === "screen" && screenAudioDisabled && (
-        <p id="screen-audio-disabled-hint" className={styles.fieldHint} style={{ margin: "4px 0 0" }}>
+        <p id="screen-audio-disabled-hint" className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
           {/* S1 fix: render the real reason useRecorder.ts computed
               (screenAudioNotice), rather than restating a hard-coded string
               that only ever matches AC5's THIRD row. That fixed string was
@@ -216,7 +216,7 @@ export default function SourceDevicesPanel({
         </p>
       )}
       {devices.cameras.length > 0 && (
-        <p className={styles.fieldHint} style={{ margin: "8px 0 0" }}>
+        <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0" }}>
           {devices.cameras.length} camera{devices.cameras.length === 1 ? "" : "s"}, {devices.mics.length} mic{devices.mics.length === 1 ? "" : "s"} detected
           {cameraId
             ? ` - using: ${devices.cameras.find((d) => d.deviceId === cameraId)?.label ?? "previous camera (reselect)"}`
@@ -224,7 +224,7 @@ export default function SourceDevicesPanel({
         </p>
       )}
       {(devices.cameras.length === 0 || devices.mics.length === 0) && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
           <p className={styles.fieldHint} style={{ margin: 0 }}>
             Cameras and microphones appear here after the browser grants access.
           </p>
@@ -237,7 +237,7 @@ export default function SourceDevicesPanel({
       {/* AC27: the headline feature gets its own always-visible group, not
           hidden behind a disclosure the user has to know to open. */}
       {source === "screen" && (
-        <div role="group" aria-label="Webcam bubble" className={styles.field} style={{ marginTop: 12 }}>
+        <div role="group" aria-label="Webcam bubble" className={styles.field} style={{ marginTop: "var(--space-3)" }}>
           <FormControlLabel
             control={
               <Checkbox
@@ -249,7 +249,7 @@ export default function SourceDevicesPanel({
             label="Webcam bubble"
           />
           {pipEnabled && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
               <TextField
                 select
                 label="Bubble shape"
@@ -291,11 +291,11 @@ export default function SourceDevicesPanel({
         </div>
       )}
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: 4 }}>
+      <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-1)" }}>
         <summary>Recording options</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
           <label className={styles.adaptPanelSubtitle} style={{ display: "block" }}>Audio processing</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
             <FormControlLabel
               control={<Checkbox size="small" checked={noiseSuppression} onChange={(e) => { userPickedRef.current = true; setNoiseSuppression(e.target.checked); }} />}
               label="Noise suppression"
@@ -310,8 +310,8 @@ export default function SourceDevicesPanel({
             />
           </div>
 
-          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginTop: 16 }}>Timing</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginTop: "var(--space-4)" }}>Timing</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
             <FormControlLabel
               control={
                 <Checkbox
@@ -338,8 +338,8 @@ export default function SourceDevicesPanel({
             </TextField>
           </div>
 
-          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginTop: 16 }}>Appearance</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginTop: "var(--space-4)" }}>Appearance</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
             <FormControlLabel
               control={
                 <Checkbox
@@ -384,18 +384,18 @@ export default function SourceDevicesPanel({
               }}
             />
           </div>
-          {bgStatus === "loading" && <span className={styles.ghMeta}>Loading background model...</span>}
+          {bgStatus === "loading" && <span className={styles.ghMeta} role="status" aria-live="polite">Loading background model...</span>}
           {bgStatus === "failed" && <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>Background effects unavailable (model failed to load)</span>}
           {bgMode !== "none" && bgStatus === "ready" && <span className={styles.ghMeta}>Effect is applied to the recording; the preview stays raw.</span>}
 
-          <div className={styles.field} style={{ marginTop: 16 }}>
-            <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: 8 }}>Backup</label>
+          <div className={styles.field} style={{ marginTop: "var(--space-4)" }}>
+            <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: "var(--space-2)" }}>Backup</label>
             {!backupSupported() ? (
               <p className={styles.fieldHint}>Automatic backup needs Chrome or Edge (File System Access API). Takes can still be downloaded manually.</p>
             ) : backupDir ? (
               <>
                 <span className={styles.ghMeta}>Backing up to: <strong>{backupDir.name}</strong></span>
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
                   <Button
                     variant="outlined"
                     size="small"
@@ -438,20 +438,20 @@ export default function SourceDevicesPanel({
                 >
                   Choose backup folder
                 </Button>
-                <p className={styles.fieldHint} style={{ marginTop: 8 }}>Every finished recording is automatically saved there.</p>
+                <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>Every finished recording is automatically saved there.</p>
               </>
             )}
           </div>
 
-          <div className={styles.field} style={{ marginTop: 16 }}>
-            <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: 8 }}>Cards</label>
+          <div className={styles.field} style={{ marginTop: "var(--space-4)" }}>
+            <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: "var(--space-2)" }}>Cards</label>
             <FormControlLabel
               control={<Checkbox checked={cardsOn} onChange={(e) => setCardsOn(e.target.checked)} size="small" disabled={source === "audio"} />}
               label="Add title and closing cards"
             />
             {cardsOn && (
               <>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
                   <TextField
                     label="Title"
                     value={cardTitle}
@@ -485,7 +485,7 @@ export default function SourceDevicesPanel({
                     <MenuItem value="3">3 s</MenuItem>
                     <MenuItem value="5">5 s</MenuItem>
                   </TextField>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
                     Background
                     <input
                       type="color"
@@ -495,7 +495,7 @@ export default function SourceDevicesPanel({
                       aria-label="Card background color"
                     />
                   </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
                     Text
                     <input
                       type="color"
@@ -506,7 +506,7 @@ export default function SourceDevicesPanel({
                     />
                   </label>
                 </div>
-                <p className={styles.fieldHint} style={{ marginTop: 8 }}>Cards are added around your video: the title card records first (mic muted) and a notice on the preview counts down until your video starts; the closing card is appended after you press Stop.</p>
+                <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>Cards are added around your video: the title card records first (mic muted) and a notice on the preview counts down until your video starts; the closing card is appended after you press Stop.</p>
               </>
             )}
           </div>

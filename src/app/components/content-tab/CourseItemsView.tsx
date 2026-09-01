@@ -623,7 +623,7 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
 
   return (
     <div className={styles.form}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
         <Button variant="outlined" size="small" onClick={() => void reload()} disabled={busy}>
           Refresh
         </Button>
@@ -651,7 +651,7 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
           actually answer (due date, points), plus quiz kind on the Quizzes
           tab only (D1's isNewQuiz), never a facet invented past what a
           BulkItem carries. */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
         <TextField
           select
           size="small"
@@ -898,7 +898,7 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
         <div className={styles.ccModule}>
           <FormControlLabel
             className={styles.fieldHint}
-            style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, padding: "8px 12px" }}
+            style={{ display: "inline-flex", gap: "var(--space-1)", alignItems: "center", margin: 0, padding: "var(--space-2) var(--space-3)" }}
             control={
               <Checkbox
                 size="small"
@@ -918,7 +918,7 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
               // search and/or facets have narrowed them all out - worded
               // according to which is actually active, and pointing straight
               // at the clear-filters affordance when a facet is involved.
-              <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
+              <p className={styles.ccHint} style={{ padding: "var(--space-1) var(--space-2)" }}>
                 No {kindLabelPlural} match{" "}
                 {search.trim() && filtersActive
                   ? "your search and filters"
@@ -927,7 +927,7 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
                     : "your search"}
                 .
                 {filtersActive && (
-                  <Button variant="text" size="small" onClick={clearFilters} style={{ marginLeft: 8 }}>
+                  <Button variant="text" size="small" onClick={clearFilters} style={{ marginLeft: "var(--space-2)" }}>
                     Clear filters
                   </Button>
                 )}

@@ -13,7 +13,7 @@ import type { SubmissionRepoFile } from "@/lib/submission-repo";
 const MonacoFileEditor = dynamic(() => import("../MonacoFileEditor"), {
   ssr: false,
   loading: () => (
-    <div style={{ padding: 16, fontSize: "0.85rem", color: "var(--text-secondary)" }}>Loading editor...</div>
+    <div style={{ padding: "var(--space-4)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading editor...</div>
   ),
 });
 
@@ -91,14 +91,14 @@ export default function SubmissionCodePanel({ submissionUrl }: { submissionUrl: 
   }
 
   if (state.status === "loading") {
-    return <span className={styles.fieldHint}>Loading code from GitHub...</span>;
+    return <span className={styles.fieldHint} role="status" aria-live="polite">Loading code from GitHub...</span>;
   }
 
   if (state.status === "error") {
     return (
       <div>
         <div className={styles.error}>{state.error}</div>
-        <Button variant="outlined" size="small" onClick={() => void load()} style={{ marginTop: 6 }}>
+        <Button variant="outlined" size="small" onClick={() => void load()} style={{ marginTop: "var(--space-1)" }}>
           Try again
         </Button>
       </div>
@@ -109,7 +109,7 @@ export default function SubmissionCodePanel({ submissionUrl }: { submissionUrl: 
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
         <span className={`${styles.ghBadge} ${styles.ghBadgeWarning}`}>
           Live from GitHub - may not be the code this draft was graded against
         </span>
@@ -123,7 +123,7 @@ export default function SubmissionCodePanel({ submissionUrl }: { submissionUrl: 
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-2)", flexWrap: "wrap" }}>
         <TextField
           select
           size="small"
@@ -153,7 +153,7 @@ export default function SubmissionCodePanel({ submissionUrl }: { submissionUrl: 
       )}
 
       {(runResult || runError) && (
-        <div style={{ marginTop: 12, borderTop: "1px solid var(--field-border)", paddingTop: 12 }}>
+        <div style={{ marginTop: "var(--space-3)", borderTop: "1px solid var(--border-soft)", paddingTop: "var(--space-3)" }}>
           <p className={styles.previewMeta}>
             Code execution{runResult && !runResult.error ? ` (${runResult.language})` : ""}
           </p>

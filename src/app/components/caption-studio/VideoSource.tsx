@@ -49,10 +49,10 @@ export function VideoSource({
 }: VideoSourceProps) {
   return (
     <div className={styles.field}>
-      <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>
+      <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
         1. Video source
       </p>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
         <Button variant="outlined" size="small" onClick={() => fileInputRef.current?.click()}>
           Choose video
         </Button>
@@ -71,17 +71,17 @@ export function VideoSource({
       {importError && <p className={styles.error}>{importError}</p>}
 
       {(takes.length > 0 || backupDir || libraryVideos !== undefined) && (
-        <div style={{ marginTop: 16 }}>
-          <p className={styles.fieldHint} style={{ margin: "0 0 8px 0" }}>
+        <div style={{ marginTop: "var(--space-4)" }}>
+          <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0" }}>
             Or import a saved video:
           </p>
 
           {libraryVideos !== undefined && (
-            <div style={{ marginTop: 8 }}>
-              <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>
+            <div style={{ marginTop: "var(--space-2)" }}>
+              <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
                 From the Files tab
               </p>
-              {libraryBusy && !libraryVideos && <p className={styles.fieldHint} style={{ margin: 0 }}>Loading your library...</p>}
+              {libraryBusy && !libraryVideos && <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>Loading your library...</p>}
               {libraryVideos && libraryVideos.length === 0 && (
                 <p className={styles.fieldHint} style={{ margin: 0 }}>
                   No saved videos yet - record one on the Recording tab or upload on the Files tab.
@@ -91,7 +91,7 @@ export function VideoSource({
                 {libraryBusy ? "Loading..." : "Refresh"}
               </Button>
               {libraryVideos && libraryVideos.map((v) => (
-                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
                   <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
                     {v.name} - {v.kind === "recording" ? "Recording" : v.kind === "narrated" ? "Narrated" : "Captioned"}
                     {v.durationSec && ` - ${fmtTime(v.durationSec)}`}
@@ -112,12 +112,12 @@ export function VideoSource({
           )}
 
           {takes.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>
+            <div style={{ marginTop: "var(--space-2)" }}>
+              <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
                 From current session
               </p>
               {takes.map((take) => (
-                <div key={take.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                <div key={take.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
                   <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
                     {take.name} - {fmtTime(take.durationSec)} - {(take.sizeBytes / 1048576).toFixed(1)} MB
                   </span>
@@ -135,8 +135,8 @@ export function VideoSource({
           )}
 
           {backupDir && (
-            <div style={{ marginTop: 8 }}>
-              <p className={styles.fieldHint} style={{ margin: "0 0 8px 0", fontWeight: 600 }}>
+            <div style={{ marginTop: "var(--space-2)" }}>
+              <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
                 From backup folder ({backupDir.name})
               </p>
               <Button variant="text" size="small" disabled={folderBusy} onClick={() => void onBrowseFolder()}>
@@ -144,7 +144,7 @@ export function VideoSource({
               </Button>
               {folderVideos && folderVideos.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No videos found.</p>}
               {folderVideos && folderVideos.map((v) => (
-                <div key={v.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 0" }}>
+                <div key={v.name} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
                   <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {v.name} - {(v.sizeBytes / 1048576).toFixed(1)} MB - {new Date(v.lastModified).toLocaleString()}
                   </span>

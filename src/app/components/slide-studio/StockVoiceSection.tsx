@@ -26,13 +26,13 @@ export function StockVoiceSection({
   } = voiceCloning;
 
   return (
-    <details className={styles.adaptDisclosure} style={{ marginTop: 16 }}>
+    <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-4)" }}>
       <summary>Use a ready-made voice</summary>
       <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
         <p className={styles.fieldHint}>
           No cloning on your plan? Pick a ready-made ElevenLabs voice - captions, video narration, and deck narration all work with it.
         </p>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
           <TextField
             select
             label="Voice"

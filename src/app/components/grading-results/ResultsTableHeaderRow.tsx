@@ -24,7 +24,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
           variant="text"
           size="small"
           onClick={() => onSort({ kind: "student" })}
-          sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}
+          sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "var(--space-1) var(--space-1)" }}
         >
           Student <span>{sortLabel({ kind: "student" })}</span>
         </Button>
@@ -34,7 +34,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
           variant="text"
           size="small"
           onClick={() => onSort({ kind: "files" })}
-          sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}
+          sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "var(--space-1) var(--space-1)" }}
         >
           Files <span>{sortLabel({ kind: "files" })}</span>
         </Button>
@@ -45,7 +45,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
             variant="text"
             size="small"
             onClick={() => onSort({ kind: "rubric", area })}
-            sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}
+            sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "var(--space-1) var(--space-1)" }}
           >
             {area} <span>{sortLabel({ kind: "rubric", area })}</span>
           </Button>
@@ -56,7 +56,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
           variant="text"
           size="small"
           onClick={() => onSort({ kind: "total" })}
-          sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}
+          sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "var(--space-1) var(--space-1)" }}
         >
           Total <span>{sortLabel({ kind: "total" })}</span>
         </Button>
@@ -66,7 +66,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
           variant="text"
           size="small"
           onClick={() => onSort({ kind: "overall" })}
-          sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "2px 6px" }}
+          sx={{ minWidth: 0, textTransform: "none", color: "inherit", fontWeight: 600, p: "var(--space-1) var(--space-1)" }}
         >
           Feedback <span>{sortLabel({ kind: "overall" })}</span>
         </Button>

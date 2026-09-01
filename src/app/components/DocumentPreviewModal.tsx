@@ -123,7 +123,7 @@ export default function DocumentPreviewModal({
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", padding: "0 1rem", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", padding: "0 var(--space-4)", flexWrap: "wrap" }}>
           <Button size="small" variant="text" onClick={() => setEditing((v) => !v)} sx={{ textTransform: "none" }}>
             {editing ? "Preview" : "Edit"}
           </Button>
@@ -166,18 +166,18 @@ export default function DocumentPreviewModal({
               minRows={18}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              slotProps={{ input: { style: { fontFamily: "var(--font-mono, monospace)", fontSize: "0.85rem" } } }}
+              slotProps={{ input: { style: { fontFamily: "var(--font-mono, monospace)", fontSize: "var(--font-size-md)" } } }}
             />
           ) : draft.trim() === "" ? (
             <p className={styles.previewMeta}>This document has no text to preview.</p>
           ) : (
-            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "0.9rem" }}>
+            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: "var(--font-size-md)" }}>
               {draft}
             </pre>
           )}
         </div>
 
-        <div style={{ padding: "0.75rem 1rem", borderTop: "1px solid var(--border-soft)" }}>
+        <div style={{ padding: "var(--space-3) var(--space-4)", borderTop: "1px solid var(--border-soft)" }}>
           <TextField
             size="small"
             fullWidth
@@ -189,7 +189,7 @@ export default function DocumentPreviewModal({
             onChange={(e) => setInstructions(e.target.value)}
             disabled={busy !== null}
           />
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
             <Button
               size="small"
               variant="contained"
@@ -207,12 +207,12 @@ export default function DocumentPreviewModal({
             )}
           </div>
           {error && (
-            <p className={styles.previewMeta} style={{ color: "var(--danger)", marginTop: "0.5rem" }}>
+            <p className={styles.previewMeta} style={{ color: "var(--danger)", marginTop: "var(--space-2)" }}>
               {error}
             </p>
           )}
           {note && !error && (
-            <p className={styles.previewMeta} style={{ marginTop: "0.5rem" }}>
+            <p className={styles.previewMeta} style={{ marginTop: "var(--space-2)" }}>
               {note}
             </p>
           )}

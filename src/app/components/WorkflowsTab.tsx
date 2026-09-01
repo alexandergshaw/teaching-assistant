@@ -798,7 +798,7 @@ export default function WorkflowsTab() {
         subtitle="Kick off multi-step jobs that chain the app's tools together: schedules, repos, lecture materials, and LMS population in one run."
       />
 
-      <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-5)", alignItems: "flex-start", flexWrap: "wrap" }}>
         <WorkflowListSidebar
           workflows={workflows}
           selectedWorkflowId={selectedWorkflowId}

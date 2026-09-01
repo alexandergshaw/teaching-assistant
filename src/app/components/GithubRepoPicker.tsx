@@ -107,7 +107,7 @@ export default function GithubRepoPicker({
 
   if (state === "unconfigured") {
     return (
-      <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", margin: 0 }}>
+      <p style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", margin: 0 }}>
         GitHub isn&apos;t configured. Set the <code>GITHUB_TOKEN</code> environment variable to enable repository features.
       </p>
     );
@@ -137,11 +137,11 @@ export default function GithubRepoPicker({
           />
         )}
       />
-      {state === "error" && error && <p style={{ fontSize: "0.8rem", color: "var(--danger)", marginTop: 4 }}>{error}</p>}
+      {state === "error" && error && <p style={{ fontSize: "var(--font-size-sm)", color: "var(--danger)", marginTop: "var(--space-1)" }}>{error}</p>}
 
       {onBranchChange && value.trim() && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-          <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Branch</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+          <span style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>Branch</span>
           <Typeahead
             options={branches.map((b, i) => ({ value: b, label: i === 0 ? b + " (default)" : b }))}
             value={branch ?? ""}

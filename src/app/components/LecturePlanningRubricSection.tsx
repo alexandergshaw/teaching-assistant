@@ -42,12 +42,12 @@ export default function LecturePlanningRubricSection({
   onDownloadCsv,
 }: Props) {
   return (
-    <div style={{ borderTop: "1px solid var(--field-border)", marginTop: 32, paddingTop: 28 }}>
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: "0 0 6px", fontSize: "1.1rem", fontWeight: 700, color: "var(--text-primary)" }}>
+    <div style={{ borderTop: "1px solid var(--border-soft)", marginTop: "var(--space-8)", paddingTop: "var(--space-6)" }}>
+      <div style={{ marginBottom: "var(--space-4)" }}>
+        <h2 style={{ margin: "0 0 var(--space-1)", fontSize: "var(--font-size-xl)", fontWeight: 700, color: "var(--text-primary)" }}>
           Course-Wide Rubric
         </h2>
-        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-secondary)" }}>
+        <p style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
           {provider === "other"
             ? "The grading rubric is produced together with the lecture package above — generate it there and it will appear here. It can be copied and pasted into the Grading tab."
             : "Generate a universal grading rubric derived from all assignment instructions in the uploaded zip. This rubric can be copied and pasted into the Grading tab."}
@@ -72,10 +72,16 @@ export default function LecturePlanningRubricSection({
             {rubricStatus === "loading" ? "Generating Rubric…" : "Generate Course Rubric"}
           </Button>
           {rubricStatus === "loading" && (
-            <p aria-live="polite" style={{ margin: "0 0 12px", fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-              This can take a few minutes for a large course. Keep this tab open — closing it or navigating away
-              cancels the request.
-            </p>
+            <div className={styles.loadingState} role="status" aria-live="polite">
+              <div className={styles.spinner} />
+              <div>
+                <p className={styles.loadingTitle}>Generating Rubric…</p>
+                <p className={styles.loadingText}>
+                  This can take a few minutes for a large course. Keep this tab open — closing it or navigating
+                  away cancels the request.
+                </p>
+              </div>
+            </div>
           )}
         </>
       )}
@@ -83,12 +89,12 @@ export default function LecturePlanningRubricSection({
       {rubricStatus === "done" && generatedRubric && (() => {
         const rows = parseGeneratedRubric(generatedRubric);
         return (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-              <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-primary)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "var(--space-2)" }}>
+              <span style={{ fontWeight: 600, fontSize: "var(--font-size-md)", color: "var(--text-primary)" }}>
                 Generated rubric — applies to all assignments
               </span>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: "var(--space-2)" }}>
                 <Button variant="outlined" size="small" onClick={onCopy}>
                   {rubricCopied ? "Copied!" : "Copy Rubric"}
                 </Button>

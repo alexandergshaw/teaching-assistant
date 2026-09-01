@@ -30,8 +30,17 @@ export default function SlidesPanel({
   onUngroupLoop,
 }: SlidesPanelProps) {
   return (
-    <div style={{ marginBottom: "1.5rem" }}>
-      <h3 style={{ margin: "0 0 1rem 0", fontSize: "0.95rem", fontWeight: 600 }}>
+    <div style={{ marginBottom: "var(--space-6)" }}>
+      <h3
+        style={{
+          margin: "0 0 var(--space-4) 0",
+          fontSize: "var(--font-size-2xs)",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--text-secondary)",
+        }}
+      >
         Slides ({selected.slides.length})
       </h3>
 
@@ -62,14 +71,14 @@ export default function SlidesPanel({
                 key={`loop-${gid}-${idx}`}
                 style={{
                   border: "1px solid var(--field-border)",
-                  borderRadius: "4px",
+                  borderRadius: "var(--radius-xs)",
                   backgroundColor: "var(--field-bg)",
-                  marginBottom: "1rem",
+                  marginBottom: "var(--space-4)",
                   overflow: "hidden",
                 }}
               >
-                <div style={{ padding: "1rem", borderBottom: "1px solid var(--field-border)" }}>
-                  <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+                <div style={{ padding: "var(--space-4)", borderBottom: "1px solid var(--field-border)" }}>
+                  <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start", marginBottom: "var(--space-3)", flexWrap: "wrap" }}>
                     <TextField
                       label="Label"
                       value={group?.label || ""}
@@ -78,12 +87,12 @@ export default function SlidesPanel({
                       size="small"
                       sx={{ flex: "1 1 200px", minWidth: "150px" }}
                     />
-                    <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", paddingTop: "0.75rem" }}>
+                    <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", paddingTop: "var(--space-3)" }}>
                       Repeats these {members.length} slides for each item
                     </div>
                   </div>
 
-                  <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+                  <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap", marginBottom: "var(--space-3)" }}>
                     <Select
                       value={group?.source || "runtime"}
                       onChange={(e) => onUpdateLoopGroup(gid, { source: e.target.value as LoopSourceKind })}
@@ -110,7 +119,7 @@ export default function SlidesPanel({
                     </Select>
                   </div>
                   {group && (
-                    <FormHelperText style={{ marginBottom: "0.75rem" }}>
+                    <FormHelperText style={{ marginBottom: "var(--space-3)" }}>
                       {SECTION_BREADTHS.find((b) => b.breadth === group.breadth)?.hint}
                     </FormHelperText>
                   )}
@@ -125,7 +134,7 @@ export default function SlidesPanel({
                       multiline
                       rows={3}
                       size="small"
-                      style={{ marginBottom: "0.75rem" }}
+                      style={{ marginBottom: "var(--space-3)" }}
                     />
                   )}
 
@@ -137,18 +146,18 @@ export default function SlidesPanel({
                       disabled={isReadOnly}
                       fullWidth
                       size="small"
-                      style={{ marginBottom: "0.75rem" }}
+                      style={{ marginBottom: "var(--space-3)" }}
                       placeholder="e.g., Concepts"
                     />
                   )}
 
                   {group?.source === "courseTopics" && (
-                    <FormHelperText style={{ marginBottom: "0.75rem" }}>
+                    <FormHelperText style={{ marginBottom: "var(--space-3)" }}>
                       You will pick a course when you generate.
                     </FormHelperText>
                   )}
 
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
                     <Button
                       variant="outlined"
                       size="small"
@@ -179,11 +188,21 @@ export default function SlidesPanel({
                   </div>
                 </div>
 
-                <div style={{ padding: "0.75rem" }}>
+                <div style={{ padding: "var(--space-3)" }}>
                   {members.map((member, memberIdx) => (
-                    <Card key={member.id} style={{ marginBottom: "0.75rem" }}>
+                    <Card
+                      key={member.id}
+                      elevation={0}
+                      style={{
+                        marginBottom: "var(--space-3)",
+                        border: "none",
+                        borderTop: "1px solid var(--border-soft)",
+                        borderRadius: 0,
+                        backgroundColor: "transparent",
+                      }}
+                    >
                       <CardContent>
-                        <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", gap: "var(--space-4)", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
                           <Select
                             value={member.role}
                             onChange={(e) => onUpdateSlide(member.id, { role: e.target.value as SlideRole })}
@@ -220,7 +239,7 @@ export default function SlidesPanel({
                           disabled={isReadOnly}
                           fullWidth
                           size="small"
-                          style={{ marginBottom: "1rem" }}
+                          style={{ marginBottom: "var(--space-4)" }}
                         />
 
                         <TextField
@@ -232,7 +251,7 @@ export default function SlidesPanel({
                           multiline
                           rows={3}
                           size="small"
-                          style={{ marginBottom: "1rem" }}
+                          style={{ marginBottom: "var(--space-4)" }}
                           placeholder={getSlideRole(member.role)?.hint}
                         />
 
@@ -252,7 +271,7 @@ export default function SlidesPanel({
                             />
                           }
                           label="Include code"
-                          style={{ marginBottom: "1rem" }}
+                          style={{ marginBottom: "var(--space-4)" }}
                         />
 
                         {member.includeCode && (
@@ -263,7 +282,7 @@ export default function SlidesPanel({
                             disabled={isReadOnly}
                             fullWidth
                             size="small"
-                            style={{ marginBottom: "1rem" }}
+                            style={{ marginBottom: "var(--space-4)" }}
                             placeholder="python"
                           />
                         )}
@@ -276,12 +295,12 @@ export default function SlidesPanel({
                           disabled={isReadOnly}
                           fullWidth
                           size="small"
-                          style={{ marginBottom: "1rem" }}
+                          style={{ marginBottom: "var(--space-4)" }}
                           slotProps={{ htmlInput: { min: 0 } }}
                           helperText={`Role default: ${getSlideRole(member.role)?.maxBulletsDefault ?? "N/A"}`}
                         />
 
-                        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "1rem" }}>
+                        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", marginTop: "var(--space-4)" }}>
                           <Button
                             variant="outlined"
                             size="small"
@@ -324,7 +343,7 @@ export default function SlidesPanel({
                   ))}
                 </div>
 
-                <div style={{ padding: "0.75rem", borderTop: "1px solid var(--field-border)", backgroundColor: "rgba(0,0,0,0.01)" }}>
+                <div style={{ padding: "var(--space-3)", borderTop: "1px solid var(--field-border)", backgroundColor: "var(--surface-muted)" }}>
                   <Button
                     variant="outlined"
                     size="small"
@@ -343,9 +362,9 @@ export default function SlidesPanel({
             const canMoveDown = idx < selected.slides.length - 1 && !selected.slides[idx + 1].loopGroupId;
 
             items.push(
-              <Card key={slide.id} style={{ marginBottom: "1rem" }}>
+              <Card key={slide.id} variant="outlined" style={{ marginBottom: "var(--space-4)" }}>
                 <CardContent>
-                  <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: "var(--space-4)", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
                     <Select
                       value={slide.role}
                       onChange={(e) => onUpdateSlide(slide.id, { role: e.target.value as SlideRole })}
@@ -382,7 +401,7 @@ export default function SlidesPanel({
                     disabled={isReadOnly}
                     fullWidth
                     size="small"
-                    style={{ marginBottom: "1rem" }}
+                    style={{ marginBottom: "var(--space-4)" }}
                   />
 
                   <TextField
@@ -394,7 +413,7 @@ export default function SlidesPanel({
                     multiline
                     rows={3}
                     size="small"
-                    style={{ marginBottom: "1rem" }}
+                    style={{ marginBottom: "var(--space-4)" }}
                     placeholder={getSlideRole(slide.role)?.hint}
                   />
 
@@ -414,7 +433,7 @@ export default function SlidesPanel({
                       />
                     }
                     label="Include code"
-                    style={{ marginBottom: "1rem" }}
+                    style={{ marginBottom: "var(--space-4)" }}
                   />
 
                   {slide.includeCode && (
@@ -425,7 +444,7 @@ export default function SlidesPanel({
                       disabled={isReadOnly}
                       fullWidth
                       size="small"
-                      style={{ marginBottom: "1rem" }}
+                      style={{ marginBottom: "var(--space-4)" }}
                       placeholder="python"
                     />
                   )}
@@ -438,12 +457,12 @@ export default function SlidesPanel({
                     disabled={isReadOnly}
                     fullWidth
                     size="small"
-                    style={{ marginBottom: "1rem" }}
+                    style={{ marginBottom: "var(--space-4)" }}
                     slotProps={{ htmlInput: { min: 0 } }}
                     helperText={`Role default: ${getSlideRole(slide.role)?.maxBulletsDefault ?? "N/A"}`}
                   />
 
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "1rem" }}>
+                  <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", marginTop: "var(--space-4)" }}>
                     <Button
                       variant="outlined"
                       size="small"

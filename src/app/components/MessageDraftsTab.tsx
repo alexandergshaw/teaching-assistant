@@ -305,7 +305,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       )}
 
       {status === "loading" && (
-        <div className={styles.loadingState}>
+        <div className={styles.loadingState} role="status" aria-live="polite">
           <div className={styles.spinner} />
           <div className={styles.loadingTitle}>Loading drafted messages...</div>
         </div>
@@ -317,7 +317,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
 
       {status === "ready" && drafts !== null && (
         <>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-4)" }}>
             <Button
               variant="outlined"
               size="small"
@@ -360,7 +360,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                         <button
                           type="button"
                           className={styles.linkButton}
-                          style={{ marginTop: 4 }}
+                          style={{ marginTop: "var(--space-1)" }}
                           onClick={() => onOpenWorkflow(draft.workflowId!)}
                         >
                           From workflow: {draft.workflowName}
@@ -440,7 +440,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                     </div>
                   </div>
 
-                  <div style={{ padding: "10px 16px" }}>
+                  <div style={{ padding: "var(--space-2) var(--space-4)" }}>
                     {editingId === draft.id ? (
                       <>
                         {/* B3: shown for every kind now, not only
@@ -470,7 +470,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
 
                     {draft.payload.context && (
                       <>
-                        <div className={styles.fieldHint} style={{ margin: 0, marginTop: 12 }}>
+                        <div className={styles.fieldHint} style={{ margin: 0, marginTop: "var(--space-3)" }}>
                           Original thread
                         </div>
                         {expanded.has(draft.id) ? (
@@ -480,7 +480,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           size="small"
                           variant="text"
                           onClick={() => toggleExpand(draft.id)}
-                          style={{ marginTop: 8 }}
+                          style={{ marginTop: "var(--space-2)" }}
                         >
                           {expanded.has(draft.id) ? "Hide" : "Show"}
                         </Button>
@@ -494,7 +494,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                         kbWarnBanner/kbWarnActions shell (its own delete
                         confirmation) rather than inventing a second one. */}
                     {armedAction && (
-                      <div className={styles.kbWarnBanner} role="alertdialog" aria-label={armedConfirmLabel(armedAction)} style={{ marginTop: 12 }}>
+                      <div className={styles.kbWarnBanner} role="alertdialog" aria-label={armedConfirmLabel(armedAction)} style={{ marginTop: "var(--space-3)" }}>
                         <span>{armedBannerText(draft, armedAction)}</span>
                         <div className={styles.kbWarnActions}>
                           <Button

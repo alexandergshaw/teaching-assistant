@@ -44,12 +44,12 @@ export function BranchesTab({
   handleFork: () => void;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", marginTop: "var(--space-3)" }}>
       <div className={styles.ghPanel}>
-        <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
+        <label className={styles.panelTitle} style={{ display: "block", marginBottom: "var(--space-3)" }}>
           Fork this repository
         </label>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start", flexWrap: "wrap" }}>
           <TextField
             size="small"
             placeholder="Target org (optional, blank = your account)"
@@ -68,12 +68,12 @@ export function BranchesTab({
           </Button>
         </div>
         {forkMsg && (
-          <p style={{ marginTop: 8, fontSize: "0.85rem", color: forkMsg.startsWith("Error:") ? "var(--danger)" : "var(--success)" }}>
+          <p style={{ marginTop: "var(--space-2)", fontSize: "var(--font-size-md)", color: forkMsg.startsWith("Error:") ? "var(--danger)" : "var(--success)" }}>
             {forkMsg}
           </p>
         )}
         {forkResult && (
-          <p style={{ marginTop: 8, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+          <p style={{ marginTop: "var(--space-2)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
             Forked to{" "}
             <a href={forkResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
               {forkResult.fullName}
@@ -83,10 +83,10 @@ export function BranchesTab({
       </div>
 
       <div className={styles.ghPanel}>
-        <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
+        <label className={styles.panelTitle} style={{ display: "block", marginBottom: "var(--space-3)" }}>
           Create a branch
         </label>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start", flexWrap: "wrap" }}>
           <TextField
             size="small"
             placeholder="new-branch-name"
@@ -94,7 +94,7 @@ export function BranchesTab({
             onChange={(e) => setNewBranch(e.target.value)}
             onKeyDown={submitOnEnter(handleCreateBranch)}
           />
-          <span style={{ paddingTop: 8 }}>from</span>
+          <span style={{ paddingTop: "var(--space-2)" }}>from</span>
           <div style={{ minWidth: 200 }}>
             <Typeahead
               options={branches.map((b) => ({ value: b, label: b }))}
@@ -115,7 +115,7 @@ export function BranchesTab({
       </div>
 
       <div className={styles.ghPanel}>
-        <label className={styles.panelTitle} style={{ display: "block", marginBottom: 12 }}>
+        <label className={styles.panelTitle} style={{ display: "block", marginBottom: "var(--space-3)" }}>
           Branches
         </label>
         <div>
@@ -126,9 +126,9 @@ export function BranchesTab({
               <div key={b} className={styles.ghRow}>
                 <div className={styles.ghRowTop}>
                   <div className={styles.ghRowTitle}>
-                    <span className={`${styles.ghRowName} ${styles.ghMetaMono}`} style={{ fontSize: "0.85rem" }}>{b}</span>
+                    <span className={`${styles.ghRowName} ${styles.ghMetaMono}`} style={{ fontSize: "var(--font-size-md)" }}>{b}</span>
                     {b === defaultBranch && (
-                      <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`} style={{ marginLeft: 8 }}>default</span>
+                      <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`} style={{ marginLeft: "var(--space-2)" }}>default</span>
                     )}
                   </div>
                   <div className={styles.ghActions}>
@@ -148,7 +148,7 @@ export function BranchesTab({
           )}
         </div>
         {branchMsg && (
-          <p style={{ marginTop: 12, fontSize: "0.85rem", color: branchMsg.startsWith("Error:") ? "var(--danger)" : "var(--success)" }}>
+          <p style={{ marginTop: "var(--space-3)", fontSize: "var(--font-size-md)", color: branchMsg.startsWith("Error:") ? "var(--danger)" : "var(--success)" }}>
             {branchMsg}
           </p>
         )}

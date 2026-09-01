@@ -61,7 +61,7 @@ function TakeOverflowMenu({
         aria-label={`More actions for ${take.name}`}
         title="More actions"
         onClick={(e) => setAnchorEl(e.currentTarget)}
-        sx={{ padding: "4px", color: "var(--text-secondary)" }}
+        sx={{ padding: "var(--space-1)", color: "var(--text-secondary)" }}
       >
         <svg width="16" height="16" viewBox="0 0 14 14" aria-hidden="true">
           <circle cx="7" cy="3" r="1.2" fill="currentColor" />
@@ -187,7 +187,7 @@ export default function TakesPanel({
                 />
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center", marginTop: "var(--space-2)" }}>
               <span className={styles.ghMeta}>
                 {fmt(take.durationSec)} · {(take.sizeBytes / 1048576).toFixed(1)} MB · {new Date(take.createdAt).toLocaleString()}
               </span>
@@ -205,7 +205,7 @@ export default function TakesPanel({
               {take.dbSave === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library...</span>}
               {posted && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Announcement posted</span>}
             </div>
-            <details style={{ marginTop: 8 }}>
+            <details style={{ marginTop: "var(--space-2)" }}>
               <summary style={{ cursor: "pointer", color: "var(--accent-ink)", fontWeight: 600 }}>
                 Play
               </summary>
@@ -215,7 +215,7 @@ export default function TakesPanel({
                   src={take.url}
                   style={{
                     width: "100%",
-                    marginTop: 8,
+                    marginTop: "var(--space-2)",
                   }}
                 />
               ) : (
@@ -224,9 +224,13 @@ export default function TakesPanel({
                   src={take.url}
                   style={{
                     maxWidth: "100%",
-                    borderRadius: 8,
-                    marginTop: 8,
-                    background: "#0f172a",
+                    borderRadius: "var(--radius-sm)",
+                    marginTop: "var(--space-2)",
+                    // A video letterbox is not a themed surface - fixed
+                    // dark-neutral (the brand navy) regardless of theme, per
+                    // the aesthetics pass's capture-stage rule, rather than
+                    // the raw #0f172a this carried before.
+                    background: "var(--navy)",
                   }}
                 />
               )}

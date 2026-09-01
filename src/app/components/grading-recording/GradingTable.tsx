@@ -50,7 +50,7 @@ function CloseIcon() {
 function SortGlyph({ asc }: { asc: boolean }) {
   const points = asc ? "10,4 16,15 4,15" : "10,16 16,5 4,5";
   return (
-    <svg width={10} height={10} viewBox="0 0 20 20" aria-hidden="true" focusable="false" style={{ marginLeft: 4 }}>
+    <svg width={10} height={10} viewBox="0 0 20 20" aria-hidden="true" focusable="false" style={{ marginLeft: "var(--space-1)" }}>
       <polygon points={points} fill="currentColor" />
     </svg>
   );
@@ -99,7 +99,7 @@ export default function GradingTable({
 
   return (
     <>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
         <TextField
           type="search"
           size="small"

@@ -25,7 +25,7 @@ export default function SlideStudio() {
         <p className={styles.adaptPanelSubtitle}>
           Upload a deck, let AI draft what you would say on each slide, then generate audio - or audio and video - of the walkthrough.
         </p>
-        <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
           <Button
             variant={mode === "deck" ? "contained" : "outlined"}
             size="small"

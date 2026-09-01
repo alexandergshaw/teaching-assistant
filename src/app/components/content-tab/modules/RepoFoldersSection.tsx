@@ -82,7 +82,7 @@ export interface RepoFoldersSectionProps {
   setSelectedModules: React.Dispatch<React.SetStateAction<Set<string>>>;
 }
 
-const mutedHint: React.CSSProperties = { fontSize: "0.82rem", color: "var(--text-secondary)", margin: 0 };
+const mutedHint: React.CSSProperties = { fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", margin: 0 };
 const dangerHint: React.CSSProperties = { ...mutedHint, color: "var(--danger)" };
 
 function moduleNameById(courseModules: readonly RepoModuleMappingModule[], moduleId: string): string {
@@ -218,14 +218,14 @@ export function RepoFoldersSection({
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 14,
-        padding: "18px 20px",
+        gap: "var(--space-3)",
+        padding: "var(--space-4) var(--space-5)",
         border: "1px solid var(--card-border)",
-        borderRadius: 16,
+        borderRadius: "var(--radius-lg)",
         background: "var(--card-background)",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
         <span className={styles.panelTitle}>Paired repository</span>
         <p style={mutedHint}>
           Pick a code repo to pair with this course. Its assignment folders are matched to modules by number, and the
@@ -258,7 +258,7 @@ export function RepoFoldersSection({
       )}
 
       {(githubState === "ready" || githubState === "loading") && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ flex: "1 1 260px" }}>
             <Typeahead
               options={repoOptions}
@@ -301,7 +301,7 @@ export function RepoFoldersSection({
       )}
 
       {repoRef.trim() && treeState === "ready" && folders.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
           {folders.map((folder) => {
             const pairing = mapping.pairings.find((p) => p.folderPath === folder.path);
             const moduleKey = repoModuleKey(folder.path);
@@ -354,7 +354,7 @@ export function RepoFoldersSection({
                     {folder.files.length} file{folder.files.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                <div className={styles.ccHint} style={{ padding: "0 6px 6px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div className={styles.ccHint} style={{ padding: "0 var(--space-1) var(--space-1)", display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
                   <span>{pairingBadgeText(pairing, inactiveHere, courseModules)}</span>
                   {courseModules.length > 0 && (
                     <TextField

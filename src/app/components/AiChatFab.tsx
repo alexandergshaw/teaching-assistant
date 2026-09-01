@@ -498,9 +498,12 @@ export default function AiChatFab() {
           zIndex: 9999,
           "& .MuiSpeedDial-fab": {
             background: "var(--accent)",
-            color: "#fff",
-            boxShadow:
-              "0 4px 16px rgba(37, 99, 235, 0.45), 0 2px 6px rgba(0, 0, 0, 0.12)",
+            color: "var(--text-on-accent)",
+            // A permanently-floating trigger gets the strongest elevation
+            // tier (docs/aesthetics-pass-acceptance-criteria.md's shadow
+            // scale reserves --shadow-lg for "floating windows" - the FAB is
+            // the entry point for exactly those).
+            boxShadow: "var(--shadow-lg)",
             "&:hover": { background: "var(--accent-hover)" },
           },
         }}
@@ -780,7 +783,7 @@ function RecordingDiscussionsIcon() {
       <path
         d="M6 8H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h.5v2.5L8.5 19H12a2 2 0 0 0 2-2v-1"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
@@ -797,7 +800,7 @@ function LegibilityProbeIcon() {
       <path
         d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
         strokeLinejoin="round"
         fill="none"
       />
@@ -812,12 +815,12 @@ function LegibilityProbeIcon() {
 function RecordingGradingIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-      <rect x="4" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.6" fill="none" />
-      <path d="M7.5 8h7M7.5 11.5h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <rect x="4" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+      <path d="M7.5 8h7M7.5 11.5h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <path
         d="M14.5 14.5l1.7 1.7L20 12.6"
         stroke="currentColor"
-        strokeWidth="1.8"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
@@ -838,7 +841,7 @@ function RecordingAnnouncementIcon() {
       <path
         d="M19 9a4 4 0 0 1 0 6"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
         strokeLinecap="round"
         fill="none"
       />

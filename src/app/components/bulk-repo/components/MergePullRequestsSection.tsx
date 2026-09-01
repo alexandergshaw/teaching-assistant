@@ -53,9 +53,9 @@ export function MergePullRequestsSection({
 }: MergePullRequestsSectionProps) {
   return (
     <div>
-      <h3 style={{ margin: "0 0 12px" }}>Merge pull requests</h3>
+      <h3 style={{ margin: "0 0 var(--space-3)" }}>Merge pull requests</h3>
 
-      <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-3)", marginBottom: "var(--space-3)", flexWrap: "wrap" }}>
         <TextField
           size="small"
           label="Title contains"
@@ -98,11 +98,11 @@ export function MergePullRequestsSection({
         </TextField>
       </div>
 
-      <p className={styles.fieldHint} style={{ marginBottom: 12 }}>
+      <p className={styles.fieldHint} style={{ marginBottom: "var(--space-3)" }}>
         Draft pull requests (for example from Copilot agents) are listed too - merging marks them ready for review first.
       </p>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
         <Button
           type="button"
           variant="outlined"
@@ -120,14 +120,14 @@ export function MergePullRequestsSection({
       </div>
 
       {prMatches.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: "var(--space-3)" }}>
           <div
             style={{
               maxHeight: 300,
               overflowY: "auto",
               border: "1px solid var(--field-border)",
-              borderRadius: 4,
-              padding: 8,
+              borderRadius: "var(--radius-xs)",
+              padding: "var(--space-2)",
             }}
           >
             {prMatches.map((match) => (
@@ -136,10 +136,10 @@ export function MergePullRequestsSection({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 8,
-                  fontSize: "0.85rem",
-                  marginBottom: 8,
-                  paddingBottom: 8,
+                  gap: "var(--space-2)",
+                  fontSize: "var(--font-size-md)",
+                  marginBottom: "var(--space-2)",
+                  paddingBottom: "var(--space-2)",
                   borderBottom: "1px solid var(--field-border)",
                 }}
               >
@@ -193,11 +193,11 @@ export function MergePullRequestsSection({
                   </span>
                 )}
                 {match.mergeOutcome === "failed" && match.mergeError && (
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }} title={match.mergeError}>
+                  <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }} title={match.mergeError}>
                     {match.mergeError.split("\n")[0].slice(0, 60)}
                   </span>
                 )}
-                <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
                   {match.pr.user} ({match.pr.head} → {match.pr.base})
                 </span>
               </div>
@@ -214,7 +214,7 @@ export function MergePullRequestsSection({
 
       {prMatches.length > 0 && (
         <>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
             <Button
               type="button"
               variant="contained"
@@ -245,7 +245,7 @@ export function MergePullRequestsSection({
             )}
           </div>
           {mergeSummary && (
-            <p className={styles.fieldHint} style={{ marginTop: 8 }}>
+            <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>
               {mergeSummary}
             </p>
           )}

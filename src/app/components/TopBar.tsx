@@ -105,13 +105,28 @@ function InstitutionsSection({
               addInstitution();
             }
           }}
-          sx={{ flex: 1 }}
+          sx={{
+            flex: 1,
+            "& .MuiInputBase-root": {
+              height: "var(--control-height-md)",
+              borderRadius: "var(--radius-sm)",
+              fontSize: "var(--font-size-md)",
+            },
+          }}
         />
         <Button
           variant="outlined"
           size="small"
           onClick={addInstitution}
           disabled={!newAcronym.trim()}
+          sx={{
+            height: "var(--control-height-md)",
+            padding: "0 var(--space-3)",
+            borderRadius: "var(--radius-sm)",
+            fontSize: "var(--font-size-md)",
+            fontWeight: 600,
+            textTransform: "none",
+          }}
         >
           Add
         </Button>
@@ -159,7 +174,7 @@ function InstitutionsSection({
 // Universal-access glyph (head + arms-out body), tinted by severity.
 function AccessIcon({ color }: { color: string }) {
   return (
-    <svg width="17" height="17" viewBox="0 0 24 24" style={{ fill: color }} aria-hidden="true" focusable="false">
+    <svg width="20" height="20" viewBox="0 0 24 24" style={{ fill: color }} aria-hidden="true" focusable="false">
       <circle cx="12" cy="4.2" r="2.1" />
       <path d="M21 8.6a1 1 0 0 1-.72 1.18l-4.28 1.07V21a1 1 0 1 1-2 0v-5h-2v5a1 1 0 1 1-2 0V10.85L3.72 9.78A1 1 0 1 1 4.28 7.86l5.06 1.27c.43.1.88.16 1.32.16h2.68c.44 0 .89-.06 1.32-.16l5.06-1.27A1 1 0 0 1 21 8.6Z" />
     </svg>
@@ -175,6 +190,13 @@ function AccessibilityPill() {
   const issues = a11y.errorCount + a11y.warningCount;
   const scanning = a11y.status === "scanning";
   const color = a11y.errorCount > 0 ? "var(--danger)" : a11y.warningCount > 0 ? "var(--warning)" : "var(--success)";
+  // Text needs 4.5:1, not the graphical object's 3:1 that `color` above (the
+  // icon fill) is tuned for. --danger already clears 4.5:1 as text (it's
+  // symmetric with --danger-fill's 4.83:1 white-on-danger measurement), but
+  // --warning and --success measured 3.19:1 and 3.30:1 as text on this white
+  // pill - use their -ink counterparts instead (accessibility pass
+  // 2026-09-01).
+  const textColor = a11y.errorCount > 0 ? "var(--danger)" : a11y.warningCount > 0 ? "var(--warning-ink)" : "var(--success-ink)";
   const label = scanning && issues === 0 ? "Scanning accessibility" : `${issues} accessibility issue${issues === 1 ? "" : "s"}`;
   return (
     <Button
@@ -186,14 +208,15 @@ function AccessibilityPill() {
       sx={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 0.75,
-        height: 34,
-        padding: "0 11px",
-        borderRadius: 1.125,
-        border: "1px solid var(--field-border, #cbd5e1)",
+        // AM11: icon-to-label gap is pinned to var(--space-2) everywhere.
+        gap: "var(--space-2)",
+        height: "var(--control-height-md)",
+        padding: "0 var(--space-3)",
+        borderRadius: "var(--radius-sm)",
+        border: "1px solid var(--field-border)",
         background: "var(--field-background)",
         color: "var(--text-secondary)",
-        fontSize: "0.85rem",
+        fontSize: "var(--font-size-md)",
         fontWeight: 600,
         textTransform: "none",
         "&:hover": {
@@ -203,11 +226,11 @@ function AccessibilityPill() {
     >
       <AccessIcon color={color} />
       {scanning && issues === 0 ? (
-        <span style={{ color: "var(--text-muted)" }}>…</span>
+        <span style={{ color: "var(--text-secondary)" }}>…</span>
       ) : issues > 0 ? (
-        <span style={{ color }}>{issues}</span>
+        <span style={{ color: textColor }}>{issues}</span>
       ) : (
-        <span style={{ color: "var(--success)" }}>OK</span>
+        <span style={{ color: "var(--success-ink)" }}>OK</span>
       )}
     </Button>
   );
@@ -238,18 +261,25 @@ function LogoMark() {
 
 function GearIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
       <path
         d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -323,7 +353,37 @@ function SettingsMenu({ guardKbUnsavedEdits }: { guardKbUnsavedEdits: (code: str
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
-        sx={{ textTransform: "none" }}
+        // className restores this Button's link to .settingsButton (it was
+        // dead - never referenced - before this pass). Which of sx/className
+        // wins is actually decided by emotion's injection order, not by
+        // specificity (both are single-class selectors) - this repo has no
+        // StyledEngineProvider injectFirst, so sx currently wins, but that is
+        // an order dependency, not a guarantee. To remove the dependency,
+        // .settingsButton in TopBar.module.css was trimmed to only the
+        // properties sx does not itself express (cursor, font: inherit, the
+        // transition, and the child svg rule below sx's own specificity) so
+        // the two sources no longer disagree on any single-authored
+        // property regardless of which one the browser applies first.
+        className={styles.settingsButton}
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--space-2)",
+          height: "var(--control-height-md)",
+          padding: "0 var(--space-3)",
+          borderRadius: "var(--radius-sm)",
+          border: "1px solid var(--field-border)",
+          background: "var(--field-background)",
+          color: "var(--text-secondary)",
+          fontSize: "var(--font-size-md)",
+          fontWeight: 600,
+          textTransform: "none",
+          "&:hover, &[aria-expanded='true']": {
+            borderColor: "var(--accent)",
+            color: "var(--text-primary)",
+            background: "var(--field-background)",
+          },
+        }}
       >
         <GearIcon />
         Settings
@@ -423,7 +483,32 @@ export default function TopBar({ guardKbUnsavedEdits = ALWAYS_ALLOW, onSelectCou
           <AccessibilityPill />
           <SettingsMenu guardKbUnsavedEdits={guardKbUnsavedEdits} />
           {user && (
-            <Button variant="outlined" size="small" onClick={handleSignOut} sx={{ textTransform: "none" }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleSignOut}
+              // Restores this Button's link to .signout (dead before this
+              // pass) - see the Settings Button's own comment above for why
+              // .signout was trimmed to only what sx does not itself
+              // express, so the two sources never disagree.
+              className={styles.signout}
+              sx={{
+                height: "var(--control-height-md)",
+                padding: "0 var(--space-3)",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--field-border)",
+                background: "var(--field-background)",
+                color: "var(--text-secondary)",
+                fontSize: "var(--font-size-md)",
+                fontWeight: 600,
+                textTransform: "none",
+                "&:hover": {
+                  borderColor: "var(--accent)",
+                  color: "var(--text-primary)",
+                  background: "var(--field-background)",
+                },
+              }}
+            >
               Sign out
             </Button>
           )}

@@ -79,7 +79,7 @@ export default function DiscussionReplyControls({
   }
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", alignItems: "flex-start" }}>
       <TextField
         select
         label="Each reply should include"
@@ -142,11 +142,11 @@ export default function DiscussionReplyControls({
         </p>
       </div>
 
-      <div style={{ width: 220, paddingInline: 24 }}>
+      <div style={{ width: 220, paddingInline: "var(--space-6)" }}>
         {/* Same small-label idiom as the "Replying to:" span above this
             cluster (styles.ghMeta) - visible, not a floating MUI label,
             since the Slider itself has no label slot of its own. */}
-        <p id={FORMALITY_LABEL_ID} className={styles.ghMeta} style={{ marginBottom: 8 }}>
+        <p id={FORMALITY_LABEL_ID} className={styles.ghMeta} style={{ marginBottom: "var(--space-2)" }}>
           Formality
         </p>
         <Slider

@@ -53,7 +53,7 @@ function renderAnswerBody(answer: string): ReactNode[] {
     if (bulletBuffer.length === 0) return;
     const items = bulletBuffer;
     blocks.push(
-      <ul key={`ul-${blocks.length}`} style={{ margin: "6px 0", paddingLeft: 20, lineHeight: 1.55, color: "var(--text-primary)" }}>
+      <ul key={`ul-${blocks.length}`} style={{ margin: "var(--space-1) 0", paddingLeft: "var(--space-5)", lineHeight: 1.55, color: "var(--text-primary)" }}>
         {items.map((text, i) => (
           <li key={i}>{text}</li>
         ))}
@@ -66,7 +66,7 @@ function renderAnswerBody(answer: string): ReactNode[] {
     if (paragraphBuffer.length === 0) return;
     const text = paragraphBuffer.join(" ");
     blocks.push(
-      <p key={`p-${blocks.length}`} style={{ margin: "6px 0", lineHeight: 1.55, color: "var(--text-primary)" }}>
+      <p key={`p-${blocks.length}`} style={{ margin: "var(--space-1) 0", lineHeight: 1.55, color: "var(--text-primary)" }}>
         {text}
       </p>
     );
@@ -90,7 +90,7 @@ function renderAnswerBody(answer: string): ReactNode[] {
 
   if (blocks.length === 0) {
     blocks.push(
-      <p key="p-empty" style={{ margin: "6px 0", lineHeight: 1.55, color: "var(--text-primary)" }}>
+      <p key="p-empty" style={{ margin: "var(--space-1) 0", lineHeight: 1.55, color: "var(--text-primary)" }}>
         {answer}
       </p>
     );
@@ -106,14 +106,14 @@ function renderAnswerBody(answer: string): ReactNode[] {
 function AnswerLinksRow({ links }: { links: AnswerLink[] }) {
   if (!links || links.length === 0) return null;
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", margin: "2px 0 6px" }}>
+    <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center", margin: "var(--space-1) 0 var(--space-1)" }}>
       {links.map((link) => (
         <a
           key={link.url}
           href={link.url}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "var(--accent-ink)", textDecoration: "none" }}
+          style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-sm)", color: "var(--accent-ink)", textDecoration: "none" }}
         >
           <span className={`${styles.ghBadge} ${link.kind === "visualizer" ? styles.ghBadgeAccent : styles.ghBadgeNeutral}`}>
             {link.kind === "visualizer" ? "Visualizer" : "Docs"}
@@ -220,13 +220,13 @@ export default function AnswersPanel({
       <h3 className={styles.adaptPanelTitle}>
         Questions &amp; answers
         {pendingCount > 0 && (
-          <span className={styles.ghMeta} style={{ marginLeft: 8, fontWeight: 400 }}>
+          <span className={styles.ghMeta} style={{ marginLeft: "var(--space-2)", fontWeight: 400 }}>
             answering {pendingCount}...
           </span>
         )}
       </h3>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start" }}>
         <TextField
           size="small"
           fullWidth
@@ -277,7 +277,7 @@ export default function AnswersPanel({
               </div>
               {renderAnswerBody(entry.answer)}
               <AnswerLinksRow links={entry.links} />
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
                 <span className={styles.ghMeta}>
                   Asked {formatOffset(entry.askedAtMs)} - answered {formatOffset(entry.answeredAtMs)}
                 </span>

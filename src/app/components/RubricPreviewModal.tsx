@@ -45,7 +45,7 @@ export default function RubricPreviewModal({
             <h3>{name}</h3>
             <p className={styles.previewMeta}>{metaLabel}</p>
           </div>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
             {onEditDocument && (
               <button type="button" className={styles.previewCloseButton} onClick={onEditDocument}>
                 Edit with AI
@@ -58,12 +58,17 @@ export default function RubricPreviewModal({
         </div>
         <div className={styles.previewContent} style={{ overflow: "auto" }}>
           {rows && rows.length > 0 ? (
+            // fontSize left as 0.85em / 0.9em below (AM14): this table sits inside
+            // .previewContent, already --font-size-sm (13px, below the
+            // --font-size-md default), so an em-relative size here is not
+            // eligible for the auto nearest-token conversion - reported per
+            // AM14 rather than guessed.
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85em" }}>
               <thead>
-                <tr style={{ borderBottom: "2px solid var(--border-soft)" }}>
+                <tr style={{ borderBottom: "1px solid var(--border-soft)" }}>
                   <th
                     style={{
-                      padding: "8px",
+                      padding: "var(--space-2)",
                       textAlign: "left",
                       fontWeight: 600,
                       backgroundColor: "var(--surface-subtle)",
@@ -73,7 +78,7 @@ export default function RubricPreviewModal({
                   </th>
                   <th
                     style={{
-                      padding: "8px",
+                      padding: "var(--space-2)",
                       textAlign: "left",
                       fontWeight: 600,
                       backgroundColor: "var(--surface-subtle)",
@@ -83,7 +88,7 @@ export default function RubricPreviewModal({
                   </th>
                   <th
                     style={{
-                      padding: "8px",
+                      padding: "var(--space-2)",
                       textAlign: "left",
                       fontWeight: 600,
                       backgroundColor: "var(--surface-subtle)",
@@ -96,12 +101,12 @@ export default function RubricPreviewModal({
               <tbody>
                 {rows.map((row, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid var(--border-soft)" }}>
-                    <td style={{ padding: "8px", fontWeight: 500 }}>{row.area}</td>
-                    <td style={{ padding: "8px" }}>{row.weight}</td>
-                    <td style={{ padding: "8px" }}>
+                    <td style={{ padding: "var(--space-2)", fontWeight: 500 }}>{row.area}</td>
+                    <td style={{ padding: "var(--space-2)" }}>{row.weight}</td>
+                    <td style={{ padding: "var(--space-2)" }}>
                       <div>{row.description}</div>
                       {row.subcategories && row.subcategories.length > 0 && (
-                        <ul style={{ margin: "6px 0 0 0", paddingLeft: "20px", fontSize: "0.9em" }}>
+                        <ul style={{ margin: "var(--space-1) 0 0 0", paddingLeft: "var(--space-5)", fontSize: "0.9em" }}>
                           {row.subcategories.map((sub, j) => (
                             <li key={j}>
                               <strong>{sub.label}:</strong> {sub.description}

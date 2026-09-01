@@ -273,17 +273,20 @@ export default function Home() {
             top: "calc(var(--topbar-height) + var(--in-session-banner-height, 0px))",
             zIndex: 40,
             backgroundColor: "var(--card-background)",
-            borderBottom: "1px solid var(--field-border)",
+            // Structural separator under the tab strip, not an input
+            // affordance - --border-soft matches AC6's own distinction
+            // (--field-border is reserved for input affordances).
+            borderBottom: "1px solid var(--border-soft)",
             marginBottom: "0",
             "& .MuiTabs-indicator": { backgroundColor: "var(--accent)" },
             "& .MuiTab-root": {
               fontFamily: "inherit",
-              fontSize: "0.9rem",
+              fontSize: "var(--font-size-md)",
               fontWeight: 500,
               textTransform: "none",
               color: "var(--text-secondary)",
               minHeight: 44,
-              padding: "10px 20px",
+              padding: "var(--space-2) var(--space-5)",
             },
             "& .Mui-selected": {
               color: "var(--accent-ink) !important",

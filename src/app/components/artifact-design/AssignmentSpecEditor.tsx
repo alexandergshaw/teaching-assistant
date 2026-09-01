@@ -22,7 +22,7 @@ export default function AssignmentSpecEditor({ spec, disabled, onChange }: Assig
   const groupingHint = GROUPINGS.find((g) => g.value === spec.grouping)?.hint ?? "";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       <TextField
         label="Goal"
         size="small"
@@ -47,7 +47,7 @@ export default function AssignmentSpecEditor({ spec, disabled, onChange }: Assig
         helperText="What they actually do."
       />
 
-      <div style={{ display: "flex", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)" }}>
         <TextField
           select
           label="Technical aptitude"
@@ -77,7 +77,7 @@ export default function AssignmentSpecEditor({ spec, disabled, onChange }: Assig
         />
       </div>
 
-      <div style={{ display: "flex", gap: "1rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)" }}>
         <TextField
           select
           label="Grouping"
@@ -119,7 +119,7 @@ export default function AssignmentSpecEditor({ spec, disabled, onChange }: Assig
         onChange={(items) => set("deliverables", items)}
       />
 
-      <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start" }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -142,7 +142,7 @@ export default function AssignmentSpecEditor({ spec, disabled, onChange }: Assig
         />
       </div>
 
-      <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start" }}>
         <FormControlLabel
           control={
             <Checkbox

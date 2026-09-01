@@ -27,7 +27,7 @@ export function DisclosureToggle({
       aria-expanded={open}
       style={{
         textAlign: "left",
-        padding: "8px 0",
+        padding: "var(--space-2) 0",
         borderRadius: 0,
         border: "none",
         borderTop: "1px solid var(--field-border)",
@@ -35,12 +35,12 @@ export function DisclosureToggle({
         background: "transparent",
         color: "var(--text-primary)",
         fontWeight: 600,
-        fontSize: "0.9em",
+        fontSize: "var(--font-size-md)",
         display: "flex",
         alignItems: "center",
-        gap: 6,
+        gap: "var(--space-2)",
         width: "100%",
-        marginTop: 12,
+        marginTop: "var(--space-3)",
       }}
     >
       <span

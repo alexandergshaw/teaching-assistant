@@ -30,7 +30,7 @@
 // This file carries none of those markers, so it stays invisible to that
 // scan entirely, the same way the block it came from always was. The new
 // confirm PANEL follows the same rule: a plain `<div>`, styled like the
-// modal's existing "Discard changes?" panel (inline `var(--warning-bg)`,
+// modal's existing "Discard changes?" panel (inline `var(--warning-surface)`,
 // same padding/borderTop) rather than a second confirm idiom - AC E18, as
 // corrected by AC 25 (the discard panel itself carries no `role`/
 // `aria-live`, so the live-region behaviour below is copied from
@@ -178,7 +178,7 @@ export function GeneratedPostSection({
           idiom (inline-styled divider + row) the "Ask for changes"
           block just above already uses. */}
       {offersPost && (
-        <div style={{ paddingTop: "0.75rem", borderTop: "1px solid var(--field-border)" }}>
+        <div style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--field-border)" }}>
           {/* AC3/AC4 (defect fix): posting is a real Canvas write, so an
               export selection (no live Canvas connection) shows the SAME
               reason gateOperation(ctx, "courseWrite") already gives every
@@ -190,7 +190,7 @@ export function GeneratedPostSection({
             <>
               {/* AC 9-11 - THE CONFIRM PANEL. Sits directly ABOVE the
                   control row below, styled exactly like the modal's own
-                  "Discard changes?" panel (same inline `var(--warning-bg)`
+                  "Discard changes?" panel (same inline `var(--warning-surface)`
                   background, same padding/borderTop) rather than a second
                   confirm idiom (AC E18). NOT a nested modal: a plain `<div>`,
                   no `role="dialog"`, no portal - see this file's own header
@@ -202,9 +202,9 @@ export function GeneratedPostSection({
               {showCancelConfirm && (
                 <div
                   style={{
-                    padding: "0.75rem 1rem",
+                    padding: "var(--space-3) var(--space-4)",
                     borderTop: "1px solid var(--field-border)",
-                    backgroundColor: "var(--warning-bg)",
+                    backgroundColor: "var(--warning-surface)",
                   }}
                 >
                   {/* AC 25: `role="status" aria-live="polite"` on THIS
@@ -218,7 +218,7 @@ export function GeneratedPostSection({
                     id={POST_CONFIRM_CONSEQUENCE_ID}
                     role="status"
                     aria-live="polite"
-                    style={{ margin: "0 0 8px 0", fontSize: "14px" }}
+                    style={{ margin: "0 0 var(--space-2) 0", fontSize: "var(--font-size-md)" }}
                   >
                     Posting publishes this announcement to every student in the course immediately - Canvas has no
                     unpublished state for an announcement - and this app cannot recall or delete it afterward.
@@ -227,13 +227,13 @@ export function GeneratedPostSection({
                       written to Canvas as:" idiom. Quoted content sits in a
                       <code> block with a scroll cap, never
                       dangerouslySetInnerHTML. */}
-                  <p className={styles.previewMeta} style={{ margin: "0 0 4px" }}>
+                  <p className={styles.previewMeta} style={{ margin: "0 0 var(--space-1)" }}>
                     Subject that will be sent:
                   </p>
-                  <code style={{ display: "block", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.85rem" }}>
+                  <code style={{ display: "block", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "var(--font-size-md)" }}>
                     {confirmSubjectText}
                   </code>
-                  <p className={styles.previewMeta} style={{ margin: "8px 0 4px" }}>
+                  <p className={styles.previewMeta} style={{ margin: "var(--space-2) 0 var(--space-1)" }}>
                     Body that will be sent:
                   </p>
                   <code
@@ -241,7 +241,7 @@ export function GeneratedPostSection({
                       display: "block",
                       whiteSpace: "pre-wrap",
                       wordBreak: "break-word",
-                      fontSize: "0.85rem",
+                      fontSize: "var(--font-size-md)",
                       maxHeight: "180px",
                       overflow: "auto",
                     }}
@@ -251,7 +251,7 @@ export function GeneratedPostSection({
                 </div>
               )}
 
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
                 {/* No module picker at all for a "course-level" kind
                     (announcements) - it has no module to choose
                     (postNeedsModuleTarget's own doc comment,

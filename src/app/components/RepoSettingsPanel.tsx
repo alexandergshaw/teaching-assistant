@@ -74,7 +74,7 @@ export default function RepoSettingsPanel({ repo, onUpdated }: { repo: GithubRep
 
   return (
     <div className={`${styles.field} ${styles.ghPanel}`}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
         <FormControlLabel
           control={
             <Checkbox
@@ -100,7 +100,7 @@ export default function RepoSettingsPanel({ repo, onUpdated }: { repo: GithubRep
         />
 
         <div>
-          <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 4 }}>
+          <label style={{ display: "block", fontSize: "var(--font-size-2xs)", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: "var(--space-1)" }}>
             Repository name
           </label>
           <TextField
@@ -112,14 +112,14 @@ export default function RepoSettingsPanel({ repo, onUpdated }: { repo: GithubRep
             placeholder="repository-name"
           />
           {editName.trim() !== repo.name && (
-            <p className={styles.fieldHint} style={{ marginTop: 4 }}>
+            <p className={styles.fieldHint} style={{ marginTop: "var(--space-1)" }}>
               Renaming changes the repository URL; GitHub redirects the old name.
             </p>
           )}
         </div>
 
         <div>
-          <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 4 }}>
+          <label style={{ display: "block", fontSize: "var(--font-size-2xs)", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: "var(--space-1)" }}>
             Description
           </label>
           <TextField
@@ -155,14 +155,14 @@ export default function RepoSettingsPanel({ repo, onUpdated }: { repo: GithubRep
         size="small"
         onClick={handleSave}
         disabled={saveBusy}
-        sx={{ mt: 1.5 }}
+        sx={{ mt: "var(--space-3)" }}
       >
         {saveBusy ? "Saving..." : "Save changes"}
       </Button>
 
       {saveMsg && (
         saveMsg.startsWith("No changes") || saveMsg === "Saved." ? (
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: 6 }}>{saveMsg}</p>
+          <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-1)" }}>{saveMsg}</p>
         ) : (
           <p className={styles.error}>{saveMsg}</p>
         )

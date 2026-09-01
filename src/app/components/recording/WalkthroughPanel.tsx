@@ -102,9 +102,13 @@ export default function WalkthroughPanel({
       <div
         style={{
           position: "relative",
-          borderRadius: 12,
+          borderRadius: "var(--radius-md)",
           overflow: "hidden",
-          background: "#0f172a",
+          // A video letterbox is not a themed surface - fixed dark-neutral
+          // (the brand navy) regardless of theme, per the aesthetics pass's
+          // capture-stage rule, rather than the raw #0f172a this carried
+          // before.
+          background: "var(--navy)",
           display: "flex",
           justifyContent: "center",
         }}
@@ -115,7 +119,7 @@ export default function WalkthroughPanel({
             width: "100%",
             maxHeight: "48vh",
             display: "block",
-            background: "#0f172a",
+            background: "var(--navy)",
           }}
         />
       </div>
@@ -124,7 +128,7 @@ export default function WalkthroughPanel({
         <p className={styles.fieldHint} style={{ margin: 0 }}>{bubbleDescription}</p>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
         <div role="status" aria-live="polite" style={{ fontWeight: 600, color: "var(--text-primary)" }}>
           {stageStatusText(stage, savedTakeName)}
         </div>
@@ -138,7 +142,7 @@ export default function WalkthroughPanel({
         style={{
           height: 8,
           background: "color-mix(in srgb, var(--field-border) 40%, transparent)",
-          borderRadius: 999,
+          borderRadius: "var(--radius-pill)",
           overflow: "hidden",
         }}
       >
@@ -151,7 +155,7 @@ export default function WalkthroughPanel({
             width: `${progressPct}%`,
             height: "100%",
             background: "var(--success)",
-            borderRadius: 999,
+            borderRadius: "var(--radius-pill)",
             transition: "width 0.05s ease",
           }}
         />

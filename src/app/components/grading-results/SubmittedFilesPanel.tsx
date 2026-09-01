@@ -25,7 +25,7 @@ import type { GradeRow } from "./gradingResultsHelpers";
 const MonacoFileEditor = dynamic(() => import("../MonacoFileEditor"), {
   ssr: false,
   loading: () => (
-    <div style={{ padding: 16, fontSize: "0.85rem", color: "var(--text-secondary)" }}>Loading editor...</div>
+    <div style={{ padding: "var(--space-4)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading editor...</div>
   ),
 });
 
@@ -98,7 +98,7 @@ export default function SubmittedFilesPanel({ student, files, submissionTruncate
         </p>
       )}
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-2)", flexWrap: "wrap" }}>
         <TextField
           select
           size="small"

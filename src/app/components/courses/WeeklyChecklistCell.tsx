@@ -505,12 +505,11 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
       </div>
 
       {calendarBlockers.length > 0 && (
-        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+        <div className={tableStyles.calendarBlockerListLoose}>
           {calendarBlockers.map((blocker) => (
             <span
               key={blocker}
-              className={`${styles.ghBadge} ${styles.ghBadgeWarning}`}
-              style={{ display: "inline-block", whiteSpace: "normal", textAlign: "left" }}
+              className={`${styles.ghBadge} ${styles.ghBadgeWarning} ${tableStyles.badgeWrap}`}
             >
               {CHECKLIST_CALENDAR_BLOCKER_MESSAGES[blocker]}
             </span>
@@ -519,19 +518,13 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
       )}
 
       {items.length === 0 ? (
-        <span className={styles.courseResourceEmpty} style={{ marginTop: 8, display: "block" }}>
+        <span className={`${styles.courseResourceEmpty} ${tableStyles.mt2}`} style={{ display: "block" }}>
           No items yet.
         </span>
       ) : (
         <div
-          style={{
-            maxHeight: ITEM_LIST_MAX_HEIGHT,
-            overflowY: "auto",
-            marginTop: 8,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
+          className={tableStyles.itemList}
+          style={{ "--item-list-max-height": `${ITEM_LIST_MAX_HEIGHT}px` } as React.CSSProperties}
         >
           {items.map((item, index) => {
             const overdue = isWeeklyChecklistItemOverdue(item, nowMs);
@@ -543,17 +536,17 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
             // keep showing as done forever after its day rolls over.
             const checkedNow = isChecklistItemCheckedNow(item, nowMs);
             return (
-              <div key={item.id} style={{ paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
+              <div key={item.id} className={tableStyles.checklistItemRow}>
+                <div className={tableStyles.itemHeadRow}>
                   <Checkbox
                     size="small"
                     checked={checkedNow}
                     disabled={saving}
                     aria-label={`Mark "${item.label}" done`}
-                    sx={{ padding: "2px", marginTop: "1px" }}
+                    sx={{ padding: "var(--space-1)", marginTop: "var(--space-1)" }}
                     onChange={() => void toggle(item)}
                   />
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className={tableStyles.itemBody}>
                     {editingLabelId === item.id ? (
                       <TextField
                         size="small"
@@ -579,11 +572,10 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
                           }
                         }}
                         title={item.label}
+                        className={tableStyles.itemLabel}
                         style={{
-                          cursor: "pointer",
                           textDecoration: checkedNow ? "line-through" : "none",
                           color: checkedNow ? "var(--text-secondary)" : undefined,
-                          wordBreak: "break-word",
                         }}
                       >
                         {item.label}
@@ -591,12 +583,12 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
                     )}
 
                     {overdue && (
-                      <div style={{ marginTop: 2 }}>
-                        <span style={{ color: "var(--danger)", fontWeight: 600, fontSize: "0.85em" }}>Overdue</span>
+                      <div className={tableStyles.mt1}>
+                        <span className={tableStyles.overdueText}>Overdue</span>
                       </div>
                     )}
 
-                    <div style={{ marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <div className={tableStyles.deadlineControlsRow}>
                       <TextField
                         select
                         size="small"
@@ -683,7 +675,7 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
                       />
                     </div>
 
-                    <div style={{ marginTop: 4, display: "flex", gap: 8 }}>
+                    <div className={tableStyles.itemButtonsRow}>
                       <button
                         type="button"
                         className={styles.linkButton}
@@ -702,8 +694,7 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
                       </button>
                       <button
                         type="button"
-                        className={styles.linkButton}
-                        style={{ color: "var(--danger)" }}
+                        className={`${styles.linkButton} ${tableStyles.dangerLink}`}
                         disabled={saving}
                         onClick={() => removeItem(item)}
                       >
@@ -718,7 +709,7 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
         </div>
       )}
 
-      <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
+      <div className={tableStyles.addItemRow}>
         <TextField
           size="small"
           placeholder="New item…"
@@ -815,16 +806,16 @@ export function WeeklyChecklistCell({ course, onCourseUpdated, setError, googleC
         </Button>
       </div>
       {atCap && (
-        <p className={styles.fieldHint} style={{ margin: "4px 0 0" }}>
+        <p className={`${styles.fieldHint} ${tableStyles.mt1Only}`}>
           Checklist is full ({WEEKLY_CHECKLIST_MAX_ITEMS} items max).
         </p>
       )}
 
       {checkedCount > 0 && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-color)" }}>
+        <div className={tableStyles.resetSection}>
           {resetConfirm ? (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className={styles.fieldHint} style={{ margin: 0 }}>
+            <div className={tableStyles.rowSm}>
+              <span className={styles.fieldHint}>
                 Uncheck all {checkedCount} checked item{checkedCount !== 1 ? "s" : ""}?
               </span>
               <Button size="small" variant="contained" color="error" disabled={saving} onClick={confirmResetAll}>

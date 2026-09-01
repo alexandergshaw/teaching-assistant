@@ -107,7 +107,7 @@ export function RowFeedbackBoxes({
           size="small"
           onClick={() => onCopy(allKey, copyAllFeedbackText(edit))}
           aria-label={allCopied ? "Copied" : copyAllLabel}
-          sx={{ textTransform: "none", minWidth: 0, p: "2px 6px" }}
+          sx={{ textTransform: "none", minWidth: 0, p: "var(--space-1) var(--space-1)" }}
         >
           {allCopied ? "Copied" : "Copy all feedback"}
         </Button>
@@ -126,7 +126,7 @@ export function RowFeedbackBoxes({
           ? `${namePrefix} ${meta.descriptorLower} for ${student}`
           : `${meta.descriptorCapitalized} for ${student}`;
         return (
-          <div key={field} className={styles.overallFeedbackWrap} style={{ marginTop: 6 }}>
+          <div key={field} className={styles.overallFeedbackWrap} style={{ marginTop: "var(--space-1)" }}>
             <IconButton
               size="small"
               title={copied ? "Copied" : meta.copyTitle}

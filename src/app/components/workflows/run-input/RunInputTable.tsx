@@ -56,12 +56,12 @@ export function RunInputTable({
   const hasDetail = rowDetail !== undefined;
 
   return (
-    <div style={{ maxHeight: "min(65vh, 720px)", overflow: "auto", marginTop: 8 }}>
+    <div style={{ maxHeight: "min(65vh, 720px)", overflow: "auto", marginTop: "var(--space-2)" }}>
       <table
         style={{
           width: "100%",
           borderCollapse: "collapse",
-          fontSize: "0.85rem",
+          fontSize: "var(--font-size-sm)",
         }}
       >
         <thead>
@@ -72,7 +72,7 @@ export function RunInputTable({
                 style={{
                   textAlign: "center",
                   borderBottom: "1px solid var(--field-border)",
-                  padding: "8px 10px",
+                  padding: "var(--space-2) var(--space-2)",
                   fontWeight: "bold",
                   width: 32,
                   position: "sticky",
@@ -129,7 +129,7 @@ export function RunInputTable({
                   style={{
                     textAlign: "left",
                     borderBottom: "1px solid var(--field-border)",
-                    padding: "8px 10px",
+                    padding: "var(--space-2) var(--space-2)",
                     fontWeight: "bold",
                     width: col.width,
                     position: "sticky",
@@ -152,12 +152,12 @@ export function RunInputTable({
                         color: "inherit",
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: 4,
+                        gap: "var(--space-1)",
                       }}
                     >
                       {col.label}
                       {isSorted && (
-                        <span style={{ fontSize: "0.7em", color: "var(--hint-text)" }}>
+                        <span style={{ fontSize: "var(--font-size-xs)", color: "var(--hint-text)" }}>
                           {sort!.dir === "asc" ? "(asc)" : "(desc)"}
                         </span>
                       )}
@@ -172,7 +172,7 @@ export function RunInputTable({
                 style={{
                   textAlign: "center",
                   borderBottom: "1px solid var(--field-border)",
-                  padding: "8px 10px",
+                  padding: "var(--space-2) var(--space-2)",
                   fontWeight: "bold",
                   width: 80,
                   position: "sticky",
@@ -290,7 +290,7 @@ export function RunInputTable({
                     <td
                       style={{
                         borderBottom: "1px solid var(--field-border)",
-                        padding: "8px 10px",
+                        padding: "var(--space-2) var(--space-2)",
                         textAlign: "center",
                       }}
                     >
@@ -312,7 +312,7 @@ export function RunInputTable({
                       key={col.key}
                       style={{
                         borderBottom: "1px solid var(--field-border)",
-                        padding: "8px 10px",
+                        padding: "var(--space-2) var(--space-2)",
                         width: col.width,
                       }}
                     >
@@ -356,7 +356,7 @@ export function RunInputTable({
                         row[col.key] ?? ""
                       )}
                       {tableHasGrade && col.key === "grade" && (
-                        <div style={{ marginTop: 4 }}>
+                        <div style={{ marginTop: "var(--space-1)" }}>
                           <GradeBadge row={row} />
                         </div>
                       )}
@@ -366,7 +366,7 @@ export function RunInputTable({
                     <td
                       style={{
                         borderBottom: "1px solid var(--field-border)",
-                        padding: "8px 10px",
+                        padding: "var(--space-2) var(--space-2)",
                         textAlign: "center",
                         whiteSpace: "nowrap",
                       }}
@@ -374,7 +374,7 @@ export function RunInputTable({
                       {rowDirty && (
                         <button
                           className={styles.linkButton}
-                          style={{ marginRight: 8 }}
+                          style={{ marginRight: "var(--space-2)" }}
                           title="Restore this row's original values"
                           onClick={() => {
                             setState((prev) => ({

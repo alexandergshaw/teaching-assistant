@@ -47,7 +47,7 @@ export function RunInputTableToolbar({
       <h3 className={styles.workflowReviewHeading}>
         {tableHasGrade ? "Grade review" : "Review table"}
       </h3>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
         <TextField
           size="small"
           placeholder="Search rows..."
@@ -56,7 +56,7 @@ export function RunInputTableToolbar({
           sx={{ width: 220 }}
         />
         {tableGradeStats && (
-          <span style={{ fontSize: "0.8rem", color: "var(--hint-text)" }}>
+          <span style={{ fontSize: "var(--font-size-sm)", color: "var(--hint-text)" }}>
             {tableGradeStats.avg !== null
               ? `avg ${tableGradeStats.avg.toFixed(1)} - median ${tableGradeStats.median!.toFixed(1)} - min ${tableGradeStats.min} - max ${tableGradeStats.max}`
               : "no valid grades yet"}
@@ -77,7 +77,7 @@ export function RunInputTableToolbar({
               display: "flex",
               height: 8,
               width: 140,
-              borderRadius: 999,
+              borderRadius: "var(--radius-pill)",
               overflow: "hidden",
               background: "var(--surface-subtle)",
               flex: "none",
@@ -96,7 +96,7 @@ export function RunInputTableToolbar({
               ))}
           </div>
         )}
-        <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+        <span style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)" }}>
           {tableHasGrade && tableGradeStats && tableGradeStats.invalid > 0 && selectable && (
             <button type="button" className={styles.linkButton} onClick={onUncheckInvalid}>
               Uncheck invalid
@@ -123,7 +123,7 @@ export function RunInputTableToolbar({
         </span>
       </div>
       {search.trim() && (
-        <p className={styles.fieldHint} style={{ margin: "6px 0 0 0" }}>
+        <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 0" }}>
           Showing {tableDisplay.length} of {rows.length} row(s); selection actions and the CSV export cover only the visible rows.
         </p>
       )}

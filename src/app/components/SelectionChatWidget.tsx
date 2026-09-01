@@ -210,9 +210,11 @@ export default function SelectionChatWidget() {
   );
 }
 
+// 20px (AM11's "toolbars and buttons" tier) - this is a standalone click
+// target, not a dense-row action.
 function SparkleIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+    <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
       <path
         d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5L8 1z"
         fill="currentColor"

@@ -47,7 +47,7 @@ export function StepOverviewRow({
       style={{
         display: "flex",
         alignItems: "flex-start",
-        gap: 2,
+        gap: "var(--space-1)",
         opacity: disabled ? 0.6 : 1,
       }}
     >
@@ -60,39 +60,39 @@ export function StepOverviewRow({
             ? "Enable this step for your runs"
             : "Disable this step for your runs"
         }
-        style={{ padding: 2, marginTop: -3 }}
+        style={{ padding: "var(--space-1)", marginTop: "calc(var(--space-1) * -1)" }}
       />
       <div>
         <span style={{ textDecoration: disabled ? "line-through" : undefined }}>
           {index + 1}. {stepDef?.name ?? step.type}
         </span>
         {origin && (
-          <span style={{ marginLeft: 6, opacity: 0.75 }}>
+          <span style={{ marginLeft: "var(--space-1)", opacity: 0.75 }}>
             (from {origin})
           </span>
         )}
         {bindings && (
-          <span style={{ marginLeft: 8 }}>({bindings})</span>
+          <span style={{ marginLeft: "var(--space-2)" }}>({bindings})</span>
         )}
         {/* B3: every StepDefinition already carries a description - this used
             to render only the step's bare name and its raw bindings, leaving
             "what will this step actually DO" (e.g. "posts an announcement to
             Canvas" vs. "drafts a file") unstated before Run is clicked. */}
         {stepDef?.description && (
-          <div className={styles.fieldHint} style={{ marginTop: 2 }}>
+          <div className={styles.fieldHint} style={{ marginTop: "var(--space-1)" }}>
             {stepDef.description}
           </div>
         )}
         {disabled && (
           <span
             className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}
-            style={{ marginLeft: 8 }}
+            style={{ marginLeft: "var(--space-2)" }}
           >
             Disabled
           </span>
         )}
         {disabled && dependencyWarning && (
-          <div style={{ fontSize: "0.9em", opacity: 0.85 }}>
+          <div style={{ fontSize: "var(--font-size-sm)", opacity: 0.85 }}>
             A later enabled step depends on this step&apos;s output and will
             be skipped when you run.
           </div>

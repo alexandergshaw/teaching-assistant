@@ -53,7 +53,7 @@ export function CreateRepoPanel({
   handleCreateFromTemplate: () => void;
 }) {
   return (
-    <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: 8 }}>
+    <div className={`${styles.ghPanel} ${styles.ghPanelStack}`} style={{ marginTop: "var(--space-2)" }}>
       <TextField
         size="small"
         fullWidth
@@ -70,7 +70,7 @@ export function CreateRepoPanel({
         onChange={(e) => setCreateDescription(e.target.value)}
         onKeyDown={submitOnEnter(handleCreateRepo)}
       />
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap" }}>
         <FormControlLabel
           control={<Checkbox size="small" checked={createPrivate} onChange={(e) => setCreatePrivate(e.target.checked)} />}
           label="Private"
@@ -94,7 +94,7 @@ export function CreateRepoPanel({
             noOptionsText="No repositories"
           />
           {templateSource && !repos.find((r) => r.fullName === templateSource)?.isTemplate && (
-            <p className={styles.fieldHint} style={{ color: "var(--warning)", marginTop: 4 }}>
+            <p className={styles.fieldHint} style={{ color: "var(--warning)", marginTop: "var(--space-1)" }}>
               This repo isn&apos;t marked as a template yet — creating will mark it as a template first.
             </p>
           )}
@@ -108,7 +108,7 @@ export function CreateRepoPanel({
           placeholder="GitHub Copilot prompt (optional)"
           value={createPrompt}
           onChange={(e) => setCreatePrompt(e.target.value)}
-          sx={{ "& textarea": { fontFamily: "monospace", fontSize: "0.82rem" } }}
+          sx={{ "& textarea": { fontFamily: "monospace", fontSize: "var(--font-size-sm)" } }}
         />
       )}
       <Button
@@ -126,12 +126,12 @@ export function CreateRepoPanel({
               : "Create repository"}
       </Button>
       {createMsg && (
-        <p style={{ fontSize: "0.85rem", color: createMsg.startsWith("Error") ? "var(--danger)" : "var(--text-secondary)", marginTop: 4 }}>
+        <p style={{ fontSize: "var(--font-size-md)", color: createMsg.startsWith("Error") ? "var(--danger)" : "var(--text-secondary)", marginTop: "var(--space-1)" }}>
           {createMsg}
         </p>
       )}
       {createResult && (
-        <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 4 }}>
+        <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>
           <p style={{ margin: 0 }}>
             Created{" "}
             <a href={createResult.htmlUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
@@ -139,7 +139,7 @@ export function CreateRepoPanel({
             </a>
           </p>
           {createResult.issueUrl && (
-            <p style={{ margin: "4px 0 0" }}>
+            <p style={{ margin: "var(--space-1) 0 0" }}>
               Copilot is building it —{" "}
               <a href={createResult.issueUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-ink)" }}>
                 view the issue
@@ -148,7 +148,7 @@ export function CreateRepoPanel({
             </p>
           )}
           {createResult.copilotNote && (
-            <p style={{ margin: "4px 0 0", color: "var(--warning)" }}>{createResult.copilotNote}</p>
+            <p style={{ margin: "var(--space-1) 0 0", color: "var(--warning)" }}>{createResult.copilotNote}</p>
           )}
         </div>
       )}

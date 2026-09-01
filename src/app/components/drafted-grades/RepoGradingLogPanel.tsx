@@ -63,10 +63,10 @@ export default function RepoGradingLogPanel({ draft }: RepoGradingLogPanelProps)
   };
 
   return (
-    <div className={styles.fieldHint} style={{ margin: "4px 0 0", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+    <div className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
       <span>
         Repo grading run: {repoGradingLogSummaryLine(log)}
-        {truncationNote && <strong style={{ color: "var(--error-color)", marginLeft: 4 }}>{truncationNote}</strong>}
+        {truncationNote && <strong style={{ color: "var(--danger)", marginLeft: "var(--space-1)" }}>{truncationNote}</strong>}
       </span>
       <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownload("csv")}>
         Download run log (CSV)

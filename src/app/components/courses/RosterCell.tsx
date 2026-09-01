@@ -84,22 +84,22 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
       </div>
       {editing ? (
         <div className={styles.tileEditor}>
-          <div style={{ display: "flex", gap: 6 }}>
-            <span className={styles.ghMeta} style={{ flex: 1 }}>Student</span>
-            <span className={styles.ghMeta} style={{ width: 150 }}>GitHub username</span>
+          <div className={tableStyles.editorHeadRow}>
+            <span className={`${styles.ghMeta} ${tableStyles.flex1}`}>Student</span>
+            <span className={`${styles.ghMeta} ${tableStyles.w150}`}>GitHub username</span>
             <span style={{ width: 24 }} />
           </div>
-          <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className={tableStyles.editorRowsScroll}>
             {rows.map((r, i) => (
-              <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <div key={i} className={tableStyles.editorRow}>
                 <TextField size="small" value={r.student} onChange={(e) => updateRow(i, { student: e.target.value })} sx={{ flex: 1 }} placeholder="Smith, John" />
                 <TextField size="small" value={r.username} onChange={(e) => updateRow(i, { username: e.target.value })} sx={{ width: 150 }} placeholder="jsmith-gh" />
-                <button type="button" className={styles.linkButton} title="Remove student" onClick={() => setRows(rows.filter((_, idx) => idx !== i))} style={{ width: 24, color: "var(--danger)" }}>
+                <button type="button" className={`${styles.linkButton} ${tableStyles.dangerLink}`} style={{ width: 24 }} title="Remove student" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}>
                   x
                 </button>
               </div>
             ))}
-            {rows.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No students yet.</p>}
+            {rows.length === 0 && <p className={styles.fieldHint}>No students yet.</p>}
           </div>
           <div>
             <Button variant="text" size="small" onClick={() => setRows([...rows, { student: "New student", username: "" }])}>
@@ -228,31 +228,31 @@ export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps
       </div>
       {editing ? (
         <div className={styles.tileEditor}>
-          <div style={{ display: "flex", gap: 6 }}>
-            <span className={styles.ghMeta} style={{ flex: 1 }}>Student</span>
-            <span className={styles.ghMeta} style={{ width: 150 }}>Canvas user id</span>
-            <span className={styles.ghMeta} style={{ flex: 1 }}>Repo</span>
+          <div className={tableStyles.editorHeadRow}>
+            <span className={`${styles.ghMeta} ${tableStyles.flex1}`}>Student</span>
+            <span className={`${styles.ghMeta} ${tableStyles.w150}`}>Canvas user id</span>
+            <span className={`${styles.ghMeta} ${tableStyles.flex1}`}>Repo</span>
             <span style={{ width: 24 }} />
           </div>
-          <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className={tableStyles.editorRowsScroll}>
             {rows.map((r, i) => (
-              <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <div key={i} className={tableStyles.editorRow}>
                 <TextField size="small" value={r.student} onChange={(e) => updateRow(i, { student: e.target.value })} sx={{ flex: 1 }} placeholder="Smith, John" />
                 <TextField size="small" value={r.canvasUserId} onChange={(e) => updateRow(i, { canvasUserId: e.target.value })} sx={{ width: 150 }} placeholder="canvas-id" />
                 <TextField size="small" value={r.repo} onChange={(e) => updateRow(i, { repo: e.target.value })} sx={{ flex: 1 }} placeholder="owner/repo" />
-                <button type="button" className={styles.linkButton} title="Remove student" onClick={() => setRows(rows.filter((_, idx) => idx !== i))} style={{ width: 24, color: "var(--danger)" }}>
+                <button type="button" className={`${styles.linkButton} ${tableStyles.dangerLink}`} style={{ width: 24 }} title="Remove student" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}>
                   x
                 </button>
               </div>
             ))}
-            {rows.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No student repos yet.</p>}
+            {rows.length === 0 && <p className={styles.fieldHint}>No student repos yet.</p>}
           </div>
           <div>
             <Button variant="text" size="small" onClick={() => setRows([...rows, { student: "New student", canvasUserId: "", repo: "" }])}>
               Add student
             </Button>
           </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div className={tableStyles.editorRow}>
             <TextField
               size="small"
               value={orgPrefix}
@@ -271,9 +271,9 @@ export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps
               {pulling ? "Pulling..." : "Pull repos from org"}
             </button>
           </div>
-          {!githubOrg && <p className={styles.fieldHint} style={{ margin: 0 }}>Set the course&apos;s Organization first.</p>}
-          {pullError && <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>{pullError}</p>}
-          {pullNote && !pullError && <p className={styles.fieldHint} style={{ margin: 0 }}>{pullNote}</p>}
+          {!githubOrg && <p className={styles.fieldHint}>Set the course&apos;s Organization first.</p>}
+          {pullError && <p className={`${styles.fieldHint} ${tableStyles.dangerLink}`}>{pullError}</p>}
+          {pullNote && !pullError && <p className={styles.fieldHint}>{pullNote}</p>}
           <div className={styles.tileEditorActions}>
             <Button variant="contained" size="small" disabled={saving} onClick={() => void commit()}>
               {saving ? "Saving…" : "Save"}

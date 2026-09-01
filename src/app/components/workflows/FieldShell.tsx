@@ -127,9 +127,13 @@ export function FieldShell({ field, error, variant = "label", children }: FieldS
             // a <legend> is a different element, so that descendant selector
             // does not reach it; this keeps a group's heading looking
             // identical to every single-control field's <label> above it.
-            fontSize: "0.72rem",
+            // Pinned exactly per the aesthetics-pass AM5 amendment: the
+            // tracked-uppercase micro-label idiom is font-size-2xs / weight
+            // 700 / letter-spacing 0.06em / text-secondary, everywhere -
+            // this is not a "nearest token" choice.
+            fontSize: "var(--font-size-2xs)",
             fontWeight: 700,
-            letterSpacing: "0.07em",
+            letterSpacing: "0.06em",
             textTransform: "uppercase",
             color: "var(--text-secondary)",
           }}

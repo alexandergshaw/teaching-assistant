@@ -47,7 +47,7 @@ export function DeckModeSection({
       {error && <p className={styles.error}>{error}</p>}
 
       <div className={styles.field}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
           <Button variant="outlined" size="small" onClick={() => document.getElementById("pptx-input")?.click()}>
             Choose PowerPoint
           </Button>
@@ -64,7 +64,7 @@ export function DeckModeSection({
 
       {slides && (
         <>
-          <div className={styles.field} style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <div className={styles.field} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
             <TextField
               select
               label="Output"
@@ -88,9 +88,9 @@ export function DeckModeSection({
 
           {narrations && (
             <>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
                 {narrations.map((n, i) => (
-                  <div key={i} style={{ padding: "8px 0", borderTop: "1px solid var(--field-border)" }}>
+                  <div key={i} style={{ padding: "var(--space-2) 0", borderTop: "1px solid var(--field-border)" }}>
                     <span className={styles.ghMeta}>
                       <strong>Slide {n.slide}</strong> - {n.title}
                     </span>
@@ -101,16 +101,16 @@ export function DeckModeSection({
                       minRows={2}
                       value={n.narration}
                       onChange={(e) => handleNarrationChange(i, e.target.value)}
-                      style={{ marginTop: 8 }}
+                      style={{ marginTop: "var(--space-2)" }}
                     />
                     {audioBySlide[n.slide] && (
                       <audio
                         controls
                         src={audioBySlide[n.slide]}
-                        style={{ width: "100%", height: 36, marginTop: 6 }}
+                        style={{ width: "100%", height: 36, marginTop: "var(--space-1)" }}
                       />
                     )}
-                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                    <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-1)" }}>
                       <Button
                         variant="text"
                         size="small"
@@ -174,9 +174,9 @@ export function DeckModeSection({
                   <video
                     controls
                     src={stitchUrl}
-                    style={{ width: "100%", maxHeight: 360, borderRadius: 12, background: "#0f172a" }}
+                    style={{ width: "100%", maxHeight: 360, borderRadius: "var(--radius-md)", background: "var(--navy)" }}
                   />
-                  <div className={styles.ghActions} style={{ alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                  <div className={styles.ghActions} style={{ alignItems: "center", flexWrap: "wrap", gap: "var(--space-3)" }}>
                     <TextField
                       label="Video name"
                       size="small"
@@ -200,7 +200,7 @@ export function DeckModeSection({
                   <video
                     controls
                     src={avatarUrl}
-                    style={{ width: "100%", maxHeight: 360, borderRadius: 12, background: "#0f172a" }}
+                    style={{ width: "100%", maxHeight: 360, borderRadius: "var(--radius-md)", background: "var(--navy)" }}
                   />
                   <div className={styles.ghActions}>
                     <a

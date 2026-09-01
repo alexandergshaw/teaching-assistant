@@ -118,7 +118,7 @@ export function QuizQuestionsEditor({
   };
 
   return (
-    <div className={styles.field} style={{ gap: 8 }}>
+    <div className={styles.field} style={{ gap: "var(--space-2)" }}>
       <label>Questions</label>
       {loading ? (
         <div className={styles.loadingState} role="status" aria-live="polite">
@@ -130,15 +130,15 @@ export function QuizQuestionsEditor({
       ) : loadError ? (
         <p className={styles.error}>{loadError}</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
           {questions.length === 0 && <p className={styles.fieldHint}>This quiz has no questions yet.</p>}
             {questions.map((q, qi) => {
               const single = q.type === "multiple_choice_question" || q.type === "true_false_question";
               const showAnswers = q.type !== "essay_question";
               const editableAnswers = q.type === "multiple_choice_question" || q.type === "short_answer_question";
               return (
-                <div key={q.key} style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div key={q.key} style={{ border: "1px solid var(--card-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                     <span className={styles.ccCount}>Q{qi + 1}</span>
                     <TextField
                       select
@@ -196,10 +196,10 @@ export function QuizQuestionsEditor({
                     }}
                   />
                   {showAnswers && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
                       <span className={styles.ccCount}>{q.type === "short_answer_question" ? "Accepted answers" : "Answers"}</span>
                       {q.answers.map((a, ai) => (
-                        <div key={ai} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <div key={ai} style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                           {q.type !== "short_answer_question" && (
                             single ? (
                               <Radio
@@ -263,7 +263,7 @@ export function QuizQuestionsEditor({
                 </div>
               );
             })}
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
               <Button variant="contained" size="small" onClick={addQuestion}>
                 Add question
               </Button>

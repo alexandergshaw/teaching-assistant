@@ -106,7 +106,7 @@ function GradingTableRowImpl({ row, onEditField, onRemove }: GradingTableRowProp
         <td>
           <span className={`${styles.ghBadge} ${styles[matchBadge.variant]}`}>{matchBadge.label}</span>
           {showCandidates && (
-            <p className={rowStyles.rosterCandidates} style={{ marginTop: 4 }}>
+            <p className={rowStyles.rosterCandidates} style={{ marginTop: "var(--space-1)" }}>
               {row.nameMatch === "ambiguous" ? "Could be: " : "Roster: "}
               {row.rosterCandidates.join(", ")}
             </p>
@@ -115,7 +115,7 @@ function GradingTableRowImpl({ row, onEditField, onRemove }: GradingTableRowProp
         <td>
           <span className={`${styles.ghBadge} ${styles[stateBadge.variant]}`}>{stateBadge.label}</span>
           {row.userEdited && (
-            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: 4 }}>
+            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: "var(--space-1)" }}>
               Yours
             </span>
           )}
@@ -124,7 +124,7 @@ function GradingTableRowImpl({ row, onEditField, onRemove }: GradingTableRowProp
               and an assertive interruption per row is exactly the defect
               that convention avoids. */}
           {row.state === "failed" && row.error && (
-            <p className={styles.error} style={{ marginTop: 6 }}>
+            <p className={styles.error} style={{ marginTop: "var(--space-1)" }}>
               {row.error}
             </p>
           )}
@@ -155,7 +155,7 @@ function GradingTableRowImpl({ row, onEditField, onRemove }: GradingTableRowProp
             </Button>
           )}
           {removeArmed && (
-            <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: "4px 0 0" }}>
+            <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: "var(--space-1) 0 0" }}>
               {`This will lose the feedback you typed for ${row.studentName}. Click Remove again to confirm.`}
             </p>
           )}

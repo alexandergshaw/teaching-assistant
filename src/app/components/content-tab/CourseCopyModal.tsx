@@ -384,8 +384,8 @@ export function CourseCopyModal({
     const hasChildren = node.subItems.length > 0;
     const open = expanded.has(node.property);
     return (
-      <div key={node.property} style={{ marginLeft: depth * 16 }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "2px 0" }}>
+      <div key={node.property} style={{ marginLeft: `calc(${depth} * var(--space-4))` }}>
+        <div style={{ display: "flex", gap: "var(--space-1)", alignItems: "center", padding: "var(--space-1) 0" }}>
           {hasChildren ? (
             <IconButton size="small" onClick={() => setExpanded((s) => toggleIn(s, node.property))} aria-label={open ? "Collapse" : "Expand"} sx={{ width: 28, height: 28 }}>
               {open ? "▾" : "▸"}
@@ -396,7 +396,7 @@ export function CourseCopyModal({
           <FormControlLabel
             control={<Checkbox size="small" checked={props.has(node.property)} onChange={() => setProps((s) => toggleIn(s, node.property))} />}
             label={
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
                 {node.title}
                 {typeof node.count === "number" && node.count > 0 && <span className={styles.ccCount}>({node.count})</span>}
               </span>
@@ -427,7 +427,7 @@ export function CourseCopyModal({
           </button>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "68vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", maxHeight: "68vh", overflowY: "auto" }}>
           {phase === "done" ? (
             <>
               <p className={styles.fieldHint}>{statusText}</p>
@@ -446,14 +446,14 @@ export function CourseCopyModal({
                 const shownNodes = focus ? (() => { const f = nodes.filter((n) => n.type === "wiki_pages" || n.type === "attachments" || /wiki_pages|attachments/.test(n.property)); return f.length > 0 ? f : nodes; })() : nodes;
                 return (
                   <>
-                    <div style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 10, maxHeight: "44vh", overflowY: "auto" }}>
+                    <div style={{ border: "1px solid var(--card-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-2)", maxHeight: "44vh", overflowY: "auto" }}>
                       {shownNodes.length === 0 ? <p className={styles.fieldHint}>Canvas returned no selectable items.</p> : shownNodes.map((n) => renderNode(n, 0))}
                     </div>
                     {focus && <p className={styles.fieldHint} style={{ margin: 0 }}>Showing this course&apos;s pages and files. Expand a group and tick the items to copy.</p>}
                   </>
                 );
               })()}
-              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
+              <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap", paddingTop: "var(--space-2)", borderTop: "1px solid var(--card-border)" }}>
                 <Button variant="contained" size="small" onClick={() => void submitItems()} disabled={running || props.size === 0 || purgeBlocked}>
                   {running
                     ? "Working…"
@@ -476,7 +476,7 @@ export function CourseCopyModal({
                 ) : courses.length === 0 ? (
                   <p className={styles.fieldHint}>No other courses on this institution.</p>
                 ) : (
-                  <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid var(--field-border)", borderRadius: 10, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-2)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
                     {courses.map((c) => (
                       <FormControlLabel
                         key={c.id}
@@ -519,7 +519,7 @@ export function CourseCopyModal({
               )}
 
               {granularity === "types" && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
                   {COURSE_COPY_TYPES.map((t) => (
                     <FormControlLabel
                       key={t.key}
@@ -548,7 +548,7 @@ export function CourseCopyModal({
                   />
                   {purgeEnabled && (
                     <>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
                         {PURGE_TYPES.map((t) => (
                           <FormControlLabel
                             key={t.key}
@@ -566,14 +566,14 @@ export function CourseCopyModal({
                             before copying. This cannot be undone.
                           </span>
                         }
-                        style={{ marginTop: 8, alignItems: "flex-start" }}
+                        style={{ marginTop: "var(--space-2)", alignItems: "flex-start" }}
                       />
                     </>
                   )}
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
+              <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap", paddingTop: "var(--space-2)", borderTop: "1px solid var(--card-border)" }}>
                 <Button variant="contained" size="small" onClick={() => void start()} disabled={running || selectedCourses.size === 0 || purgeBlocked}>
                   {running
                     ? "Working…"

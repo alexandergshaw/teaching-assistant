@@ -30,6 +30,7 @@ import { formatTextbookValue, type TextbookRecommendation } from "@/lib/textbook
 import type { Source } from "@/lib/llm";
 import type { Course } from "@/lib/supabase/courses";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface RecommendTextbooksModalProps {
   course: Course;
@@ -113,7 +114,7 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
     >
       <div className={styles.previewHeader}>
         <div>
-          <DialogTitle sx={{ padding: 0, fontSize: "1.05rem", color: "var(--text-primary)", wordBreak: "break-word" }}>
+          <DialogTitle sx={{ padding: 0, fontSize: "var(--font-size-lg)", color: "var(--text-primary)", wordBreak: "break-word" }}>
             Recommend textbooks
           </DialogTitle>
           <p className={styles.previewMeta}>{course.name}</p>
@@ -123,8 +124,8 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
         </button>
       </div>
 
-      <DialogContent sx={{ padding: "0 1rem", overflow: "auto", flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+      <DialogContent sx={{ padding: "0 var(--space-4)", overflow: "auto", flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }} role="status" aria-live="polite">
           <Button
             size="small"
             variant="contained"
@@ -134,13 +135,18 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
           >
             {results ? "Search again" : "Find Cengage MindTap textbooks"}
           </Button>
-          {busy && <CircularProgress size={18} />}
+          {busy && (
+            <>
+              <CircularProgress size={18} />
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Searching...</span>
+            </>
+          )}
         </div>
 
         {/* AC3: says so plainly and keeps the search button disabled - a
             search is never run against an empty description. */}
         {!description && (
-          <p className={styles.fieldHint} style={{ marginTop: "0.75rem" }}>
+          <p className={`${styles.fieldHint} ${tableStyles.mt3}`}>
             This course has no description recorded yet. Add one before requesting textbook
             recommendations - the search is grounded in the course description.
           </p>
@@ -151,10 +157,10 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
             actually announces the arrival of an error, a notice, or search
             results - the same rule A5 applies to CoursesTable.tsx's own
             status regions. */}
-        <p role="alert" className={styles.previewMeta} style={{ color: "var(--danger)", margin: error ? "0.75rem 0 0" : 0 }}>
+        <p role="alert" className={`${styles.previewMeta} ${tableStyles.dangerText}`} style={{ margin: error ? "var(--space-3) 0 0" : 0 }}>
           {error ?? ""}
         </p>
-        <p role="status" aria-live="polite" className={styles.fieldHint} style={{ margin: note ? "0.75rem 0 0" : 0 }}>
+        <p role="status" aria-live="polite" className={styles.fieldHint} style={{ margin: note ? "var(--space-3) 0 0" : 0 }}>
           {note ?? ""}
         </p>
 
@@ -162,21 +168,19 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
           <>
             {results && results.length > 0 && (
               <ul
+                className={tableStyles.stackMd}
                 style={{
                   listStyle: "none",
-                  margin: "0.9rem 0 0",
+                  margin: "var(--space-4) 0 0",
                   padding: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.75rem",
                 }}
               >
                 {results.map((rec, index) => (
                   <li
                     key={`${rec.title}-${index}`}
-                    style={{ border: "1px solid var(--field-border)", borderRadius: 12, padding: "0.85rem" }}
+                    style={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-md)", padding: "var(--space-3)" }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "flex-start" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-3)", alignItems: "flex-start" }}>
                       <div>
                         <strong>{rec.title}</strong>
                         {rec.authors && <p className={styles.previewMeta}>{rec.authors}</p>}
@@ -187,24 +191,24 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
                     </div>
 
                     {metaLine(rec) && (
-                      <p className={styles.previewMeta} style={{ marginTop: "0.4rem" }}>
+                      <p className={`${styles.previewMeta} ${tableStyles.mt2}`}>
                         {metaLine(rec)}
                       </p>
                     )}
 
-                    {rec.whyItFits && <p style={{ marginTop: "0.5rem" }}>{rec.whyItFits}</p>}
+                    {rec.whyItFits && <p className={tableStyles.mt2}>{rec.whyItFits}</p>}
 
                     {/* AC6: a fabricated/uncorroborated URL is never rendered as a
                         working link - only shown when applyUrlCorroboration kept it. */}
                     {!rec.unverified && rec.url && (
-                      <p style={{ marginTop: "0.4rem", wordBreak: "break-word" }}>
+                      <p className={tableStyles.mt2} style={{ wordBreak: "break-word" }}>
                         <a href={rec.url} target="_blank" rel="noreferrer" className={styles.linkButton}>
                           {rec.url}
                         </a>
                       </p>
                     )}
 
-                    <div style={{ marginTop: "0.65rem", display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                    <div style={{ marginTop: "var(--space-3)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                       <Button
                         size="small"
                         variant="outlined"
@@ -214,7 +218,12 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
                       >
                         Use this textbook
                       </Button>
-                      {savingIndex === index && <CircularProgress size={16} />}
+                      {savingIndex === index && (
+                        <>
+                          <CircularProgress size={16} />
+                          <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Saving...</span>
+                        </>
+                      )}
                       {savedIndex === index && (
                         <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Saved to Textbook</span>
                       )}
@@ -225,9 +234,9 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
             )}
 
             {sources.length > 0 && (
-              <div style={{ marginTop: "1.1rem", borderTop: "1px solid var(--field-border)", paddingTop: "0.75rem" }}>
+              <div style={{ marginTop: "var(--space-4)", borderTop: "1px solid var(--field-border)", paddingTop: "var(--space-3)" }}>
                 <p className={styles.fieldHint}>Grounding sources</p>
-                <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.1rem" }}>
+                <ul className={tableStyles.mt2} style={{ paddingLeft: "var(--space-4)" }}>
                   {sources.map((s, i) => (
                     <li key={`${s.uri}-${i}`}>
                       <a href={s.uri} target="_blank" rel="noreferrer" className={styles.linkButton}>

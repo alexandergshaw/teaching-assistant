@@ -12,6 +12,7 @@ import { readCachedSelectorLabel, writeCachedSelectorLabel, resolveSelectorLabel
 import Typeahead from "./ui/Typeahead";
 import { ImportCourseExportControl } from "./content-tab/ImportCourseExportControl";
 import styles from "../page.module.css";
+import tableStyles from "./courses/CoursesTable.module.css";
 
 const SAVED_COURSES_KEY = "ta-canvas-saved-courses";
 
@@ -277,7 +278,7 @@ export default function CoursePicker({
     <>
       <div className={styles.field}>
         <label>Course</label>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div className={tableStyles.rowSm}>
           <div style={{ flex: "1 1 260px" }}>
             <Typeahead
               options={typeaheadOptions}
@@ -336,7 +337,7 @@ export default function CoursePicker({
           <label>Courses with a saved export</label>
           {exportSectionState.kind === "ready" && (
             <>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div className={tableStyles.rowSm}>
                 {exportSectionState.courses.map((c) => (
                   <Chip
                     key={c.id}
@@ -374,7 +375,7 @@ export default function CoursePicker({
       {savedCourses.length > 0 && (
         <div className={styles.field}>
           <label>Saved courses</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div className={tableStyles.rowSm}>
             {savedCourses.map((c) => (
               <Chip
                 key={c.id}

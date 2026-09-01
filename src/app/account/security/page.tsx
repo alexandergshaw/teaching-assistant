@@ -127,26 +127,33 @@ export default function SecurityPage() {
           <div className={styles.section}>
             <p className={styles.sectionTitle}>Your authenticators</p>
             {loading ? (
-              <p className={styles.empty}>Loading…</p>
+              <div className={styles.loadingRow} role="status" aria-live="polite">
+                <span className={styles.spinner} aria-hidden="true" />
+                <span>Loading…</span>
+              </div>
             ) : factors.length === 0 ? (
-              <p className={styles.empty}>
+              <p className={styles.emptyState}>
                 None yet. Add one below to turn on two-factor authentication.
               </p>
             ) : (
               <ul className={styles.factorList}>
                 {factors.map((f) => (
                   <li key={f.id} className={styles.factor}>
-                    <span className={styles.factorName}>
-                      {f.friendly_name || "Authenticator"}
-                      <span
-                        className={`${styles.pill}${f.status !== "verified" ? ` ${styles.pillPending}` : ""}`}
-                      >
-                        {f.status === "verified" ? "Active" : f.status}
+                    <div className={styles.factorMain}>
+                      <span className={styles.factorName}>
+                        {f.friendly_name || "Authenticator"}
+                        <span
+                          className={`${styles.pill}${f.status !== "verified" ? ` ${styles.pillPending}` : ""}`}
+                        >
+                          {f.status === "verified" ? "Active" : f.status}
+                        </span>
                       </span>
-                    </span>
-                    <button type="button" className={styles.remove} onClick={() => remove(f.id)}>
-                      Remove
-                    </button>
+                      <div className={styles.actions}>
+                        <button type="button" className={styles.remove} onClick={() => remove(f.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
                   </li>
                 ))}
               </ul>

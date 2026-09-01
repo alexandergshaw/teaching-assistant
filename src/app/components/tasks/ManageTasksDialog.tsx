@@ -274,7 +274,7 @@ export default function ManageTasksDialog({
         )}
 
         <div className={styles.dialogSection}>
-          <strong style={{ fontSize: "0.85rem" }}>Add a task</strong>
+          <strong style={{ fontSize: "var(--font-size-md)" }}>Add a task</strong>
           <div className={styles.dialogFormRow}>
             <TextField
               size="small"
@@ -434,8 +434,9 @@ export default function ManageTasksDialog({
         )}
 
         {busy && (
-          <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-2)" }} role="status" aria-live="polite">
             <CircularProgress size={18} />
+            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Saving...</span>
           </div>
         )}
       </DialogContent>

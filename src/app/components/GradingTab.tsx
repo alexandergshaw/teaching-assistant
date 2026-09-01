@@ -278,7 +278,7 @@ export default function GradingTab({
             {canvasMeta.status !== "idle" && (
               <p
                 className={styles.fieldHint}
-                style={{ color: canvasMeta.status === "error" ? "var(--error, #b91c1c)" : undefined }}
+                style={{ color: canvasMeta.status === "error" ? "var(--danger)" : undefined }}
               >
                 {canvasMeta.message}
               </p>
@@ -357,10 +357,10 @@ export default function GradingTab({
       )}
 
       {testState.result && (
-        <p style={{ marginTop: "0.5rem", color: "green" }}>Gemini responded: {testState.result}</p>
+        <p style={{ marginTop: "var(--space-2)", color: "var(--success-ink)" }}>Gemini responded: {testState.result}</p>
       )}
       {testState.error && (
-        <p style={{ marginTop: "0.5rem", color: "red" }}>Gemini error: {testState.error}</p>
+        <p style={{ marginTop: "var(--space-2)", color: "var(--danger)" }}>Gemini error: {testState.error}</p>
       )}
 
       {source !== "livefeed" && run && run.results.length === 0 && (

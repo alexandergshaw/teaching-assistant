@@ -268,7 +268,7 @@ export default function TasksToolbar({
         <div className={styles.toolbarDivider} />
 
         <div className={styles.toolbarGroup}>
-          <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Density</span>
+          <span style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>Density</span>
           <ToggleButtonGroup
             size="small"
             exclusive
@@ -316,7 +316,7 @@ export default function TasksToolbar({
           onClose={() => setColumnsAnchor(null)}
           anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
         >
-          <div className={styles.columnList} style={{ padding: "4px 8px" }} aria-label="Choose visible columns">
+          <div className={styles.columnList} style={{ padding: "var(--space-1) var(--space-2)" }} aria-label="Choose visible columns">
             <button type="button" className={styles.taskRow} onClick={onShowAllColumns}>
               <ListItemText primary="Show all columns" />
             </button>
@@ -367,7 +367,16 @@ export default function TasksToolbar({
           onClose={() => setHelpAnchor(null)}
           anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
         >
-          <div style={{ padding: 14, maxWidth: 320, display: "flex", flexDirection: "column", gap: 6, fontSize: "0.8rem" }}>
+          <div
+            style={{
+              padding: "var(--space-3)",
+              maxWidth: 320,
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-1)",
+              fontSize: "var(--font-size-sm)",
+            }}
+          >
             <strong>Keyboard shortcuts</strong>
             <span>Arrow keys / Home / End / Page Up / Page Down - move around the grid</span>
             <span>Enter or Space - cycle a cell&apos;s status</span>

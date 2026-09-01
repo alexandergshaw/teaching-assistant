@@ -17,18 +17,18 @@
 .instructionSection {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--field-border);
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
 }
 
 /* The short "this course only" / "institution-wide" caption placed directly
    above each field (AC5 item 20 - "each labelled with its own scope"). */
 .scopeLabel {
-  font-size: 0.68rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
   margin: 0;
 }
@@ -40,20 +40,20 @@
    between an instructor and unknowingly rewriting every course at an
    institution from what looks like a single cell's own note. */
 .scopeText {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--accent-ink);
   margin: 0;
-  line-height: 1.35;
+  line-height: var(--line-snug);
 }
 
 /* AC5 item 22: the one-line explanation shown INSTEAD OF an editor when
    there is nothing to attach an instruction to - never a disabled control
    with no explanation. */
 .noInstructionNote {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   margin: 0;
-  line-height: 1.35;
+  line-height: var(--line-snug);
 }
 
 /* TaskColumnMenu's "several institutions" picker (AC5 item 21) - the
@@ -68,6 +68,6 @@
 .instructionField {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px 12px 8px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3) var(--space-2);
 }

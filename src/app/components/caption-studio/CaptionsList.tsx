@@ -48,11 +48,11 @@ export function CaptionsList({
 
   return (
     <div>
-      <div className={styles.field} style={{ marginTop: 16 }}>
-        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>
+      <div className={styles.field} style={{ marginTop: "var(--space-4)" }}>
+        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
           Edit captions
         </p>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
           <TextField
             type="number"
             size="small"
@@ -86,16 +86,16 @@ export function CaptionsList({
           )}
         </div>
         {gatherRecordingContext().cardSeconds > 0 && (
-          <p className={styles.fieldHint} style={{ margin: "0 0 16px 0" }}>
+          <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-4) 0" }}>
             This video was recorded with a title card - if captions look early, shift them right by the card length.
           </p>
         )}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
         {captions.map((c, i) => (
-          <div key={i} style={{ border: "1px solid var(--field-border)", borderRadius: 8, padding: "12px", display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div key={i} style={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
               <span className={styles.ghMetaMono} style={{ flexShrink: 0 }}>
                 {fmtTimeMs(c.start)}-{fmtTimeMs(c.end)}
               </span>
@@ -201,7 +201,7 @@ export function CaptionsList({
               sx={{ minWidth: 0 }}
             />
 
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
               <Button
                 variant="text"
                 size="small"
@@ -234,7 +234,7 @@ export function CaptionsList({
         Add caption at playhead
       </Button>
 
-      <div className={styles.ghActions} style={{ marginTop: 16, display: "flex", gap: 12 }}>
+      <div className={styles.ghActions} style={{ marginTop: "var(--space-4)", display: "flex", gap: "var(--space-3)" }}>
         <Button variant="contained" size="small" onClick={onDownloadVtt}>
           Download .vtt
         </Button>

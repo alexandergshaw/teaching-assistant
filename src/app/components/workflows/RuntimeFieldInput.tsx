@@ -46,7 +46,7 @@ import styles from "../../page.module.css";
 // resize: vertical is untouched (still governed by the shared .field
 // textarea rule), so the box stays user-resizable.
 const COMPACT_TEXTAREA_MIN_ROWS = 2;
-const COMPACT_TEXTAREA_STYLE = { minHeight: "72px", padding: "8px 12px" };
+const COMPACT_TEXTAREA_STYLE = { minHeight: "72px", padding: "var(--space-2) var(--space-3)" };
 
 // Field-type families delegated to a sibling file (docs/HANDOFF.md CHUNK E's
 // line-cap ratchet - this file was 1012 lines, split MECHANICALLY, no
@@ -366,7 +366,7 @@ export function RuntimeFieldInput({
     return (
       <FieldShell field={field}>
         {({ id, required, "aria-describedby": ariaDescribedBy }) => (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
             <TextField
               id={id}
               required={required}
@@ -534,7 +534,7 @@ export function RuntimeFieldInput({
               Upload files
             </Button>
             {files.length > 0 && (
-              <ul className={styles.fieldHint} style={{ margin: "8px 0 0 16px" }}>
+              <ul className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 var(--space-4)" }}>
                 {files.map((f, idx) => (
                   <li
                     key={idx}
@@ -542,7 +542,7 @@ export function RuntimeFieldInput({
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      gap: 8,
+                      gap: "var(--space-2)",
                     }}
                   >
                     {f.name}
@@ -556,7 +556,9 @@ export function RuntimeFieldInput({
                           ) ?? [],
                         }));
                       }}
-                      style={{ padding: 0, marginLeft: 4 }}
+                      aria-label={`Remove ${f.name}`}
+                      title={`Remove ${f.name}`}
+                      style={{ padding: 0, marginLeft: "var(--space-1)" }}
                     >
                       x
                     </button>
@@ -594,7 +596,7 @@ export function RuntimeFieldInput({
               }
             />
             {lmsModuleFromExport && (
-              <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+              <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 0" }}>
                 {lmsModuleCanvasUrl
                   ? "The live LMS is unavailable - these modules come from the course's LMS export."
                   : "No live LMS connection - these modules come from the course's LMS export."}

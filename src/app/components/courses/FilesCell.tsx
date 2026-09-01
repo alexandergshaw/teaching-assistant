@@ -29,8 +29,6 @@ import {
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
-const POPOVER_BODY_STYLE: React.CSSProperties = { padding: 16, width: 360, maxWidth: "90vw" };
-
 export interface MaterialsCellProps {
   course: Course;
   onCourseUpdated: (course: Course) => void;
@@ -129,7 +127,7 @@ export function MaterialsCell({ course, onCourseUpdated, setError, menu }: Mater
 
   return (
     <td style={{ minWidth: 190 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+      <div className={`${tableStyles.stackXs} ${tableStyles.alignStart}`}>
         <span className={course.materialsZipPath ? styles.courseResourceValue : styles.courseResourceEmpty}>{summary}</span>
         <button type="button" className={styles.linkButton} onClick={(e) => setAnchorEl(e.currentTarget)}>
           Manage
@@ -141,7 +139,7 @@ export function MaterialsCell({ course, onCourseUpdated, setError, menu }: Mater
         onClose={() => setAnchorEl(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
       >
-        <div style={POPOVER_BODY_STYLE}>
+        <div className={tableStyles.popoverBody}>
           <div className={styles.courseResourceHead}>
             <span className={styles.courseResourceLabel}>Materials</span>
           </div>
@@ -164,12 +162,12 @@ export function MaterialsCell({ course, onCourseUpdated, setError, menu }: Mater
                 <button type="button" className={styles.linkButton} disabled={uploadingMaterials} onClick={() => materialsUploadRef.current?.click()}>
                   {uploadingMaterials ? "Uploading…" : "Replace"}
                 </button>
-                <button type="button" className={styles.linkButton} style={{ color: "var(--danger)" }} onClick={() => setMaterialsRemoveConfirm((v) => !v)}>
+                <button type="button" className={`${styles.linkButton} ${tableStyles.dangerLink}`} onClick={() => setMaterialsRemoveConfirm((v) => !v)}>
                   {materialsRemoveConfirm ? "Confirm" : "Remove"}
                 </button>
               </div>
               {materialsRemoveConfirm && (
-                <div style={{ marginTop: 8 }}>
+                <div className={tableStyles.confirmRow}>
                   <Button variant="outlined" size="small" color="error" onClick={() => void removeMaterials()}>
                     Delete materials
                   </Button>
@@ -184,7 +182,7 @@ export function MaterialsCell({ course, onCourseUpdated, setError, menu }: Mater
             ref={materialsUploadRef}
             type="file"
             accept=".zip,application/zip"
-            style={{ display: "none" }}
+            className={tableStyles.hiddenInput}
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void handleMaterialsUpload(f);
@@ -192,18 +190,18 @@ export function MaterialsCell({ course, onCourseUpdated, setError, menu }: Mater
             }}
           />
           {course.materialsFiles.length > 0 && (
-            <div style={{ marginTop: 16 }}>
+            <div className={tableStyles.mt4}>
               {course.materialsFiles.map((f) => (
-                <div key={f.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div key={f.path} className={tableStyles.fileListRow}>
+                  <div className={tableStyles.fileRowHead}>
+                    <span className={tableStyles.fileRowName}>
                       {f.name} - {(f.size / 1048576).toFixed(1)} MB
                     </span>
-                    <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
+                    <span className={tableStyles.fileRowMeta}>
                       {new Date(f.addedAt).toLocaleDateString()}
                     </span>
                   </div>
-                  <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                  <div className={tableStyles.fileRowActions}>
                     <button
                       type="button"
                       className={styles.linkButton}
@@ -225,8 +223,7 @@ export function MaterialsCell({ course, onCourseUpdated, setError, menu }: Mater
                     </button>
                     <button
                       type="button"
-                      className={styles.linkButton}
-                      style={{ color: "var(--danger)" }}
+                      className={`${styles.linkButton} ${tableStyles.dangerLink}`}
                       disabled={removingMaterialFile === f.path}
                       onClick={() => void handleRemoveMaterialFile(f.path)}
                     >
@@ -359,7 +356,7 @@ export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, expo
 
   return (
     <td style={{ minWidth: 190 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+      <div className={`${tableStyles.stackXs} ${tableStyles.alignStart}`}>
         <span className={course.exportFiles.length > 0 ? styles.courseResourceValue : styles.courseResourceEmpty}>{summary}</span>
         <button type="button" className={styles.linkButton} onClick={(e) => setAnchorEl(e.currentTarget)}>
           Manage
@@ -371,11 +368,11 @@ export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, expo
         onClose={() => setAnchorEl(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
       >
-        <div style={POPOVER_BODY_STYLE}>
+        <div className={tableStyles.popoverBody}>
           <div className={styles.courseResourceHead}>
             <span className={styles.courseResourceLabel}>LMS Exports</span>
             {course.exportFiles.length > 0 && (
-              <span style={{ marginLeft: "auto", fontSize: "0.85em", color: "var(--text-secondary)" }}>{course.exportFiles.length} file(s)</span>
+              <span className={tableStyles.exportCountMeta}>{course.exportFiles.length} file(s)</span>
             )}
           </div>
           {course.exportFiles.length === 0 ? (
@@ -394,37 +391,36 @@ export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, expo
             </>
           ) : (
             <>
-              <div style={{ marginTop: 8 }}>
+              <div className={tableStyles.mt2}>
                 {course.exportFiles.map((f) => (
-                  <div key={f.path} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border-color)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9em" }}>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div key={f.path} className={tableStyles.fileListRow}>
+                    <div className={tableStyles.fileRowHead}>
+                      <span className={tableStyles.fileRowName}>
                         {f.name} - {(f.size / 1048576).toFixed(1)} MB
                       </span>
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.85em", marginLeft: 8 }}>
+                      <span className={tableStyles.fileRowMeta}>
                         {new Date(f.addedAt).toLocaleDateString()}
                       </span>
                     </div>
                     {f.generated && (
-                      <div style={{ marginTop: 4, fontSize: "0.85em", color: "var(--text-secondary)" }}>
+                      <div className={`${tableStyles.mt1} ${tableStyles.metaCompact}`}>
                         Generated by Course Build
                       </div>
                     )}
-                    <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                    <div className={tableStyles.fileRowActions}>
                       <button type="button" className={styles.linkButton} onClick={() => void handleDownloadExportFile(f)}>
                         Download
                       </button>
                       <button
                         type="button"
-                        className={styles.linkButton}
-                        style={{ color: "var(--danger)" }}
+                        className={`${styles.linkButton} ${tableStyles.dangerLink}`}
                         onClick={() => setExportRemoveConfirm(exportRemoveConfirm === f.path ? null : f.path)}
                       >
                         {exportRemoveConfirm === f.path ? "Confirm" : "Remove"}
                       </button>
                     </div>
                     {exportRemoveConfirm === f.path && (
-                      <div style={{ marginTop: 8 }}>
+                      <div className={tableStyles.confirmRow}>
                         <Button variant="outlined" size="small" color="error" onClick={() => void handleRemoveExportFile(f)}>
                           Delete export
                         </Button>
@@ -436,7 +432,7 @@ export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, expo
                   </div>
                 ))}
               </div>
-              <div className={styles.courseResourceActions} style={{ marginTop: 12 }}>
+              <div className={`${styles.courseResourceActions} ${tableStyles.mt3}`}>
                 <Button variant="outlined" size="small" disabled={uploadingExport} onClick={openUploadPicker}>
                   {uploadingExport ? "Uploading..." : "Upload export"}
                 </Button>

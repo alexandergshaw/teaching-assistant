@@ -105,7 +105,7 @@ export function RunInputPrompt({
     : 0;
 
   return (
-    <div style={{ marginTop: 12 }}>
+    <div style={{ marginTop: "var(--space-3)" }}>
       <p className={styles.fieldHint}>{runInput.message}</p>
 
       {runInput.kind === "text" && (
@@ -121,7 +121,7 @@ export function RunInputPrompt({
               setState((prev) => ({ ...prev, text: newValue }));
             }}
             disabled={state.busy}
-            style={{ marginTop: 8 }}
+            style={{ marginTop: "var(--space-2)" }}
           />
           {runInput.regenerate && (
             <Button
@@ -142,13 +142,13 @@ export function RunInputPrompt({
                   setState((prev) => ({ ...prev, busy: false }));
                 }
               }}
-              style={{ marginTop: 8 }}
+              style={{ marginTop: "var(--space-2)" }}
             >
               Regenerate with AI
             </Button>
           )}
           {state.error && (
-            <p className={styles.error} style={{ marginTop: 8 }}>
+            <p className={styles.error} style={{ marginTop: "var(--space-2)" }}>
               {state.error}
             </p>
           )}
@@ -165,7 +165,7 @@ export function RunInputPrompt({
             const newValue = e.target.value;
             setState((prev) => ({ ...prev, choice: newValue }));
           }}
-          style={{ marginTop: 8 }}
+          style={{ marginTop: "var(--space-2)" }}
         >
           <MenuItem value="" disabled>
             Choose...
@@ -196,12 +196,12 @@ export function RunInputPrompt({
               };
               input.click();
             }}
-            style={{ marginTop: 8 }}
+            style={{ marginTop: "var(--space-2)" }}
           >
             Choose zip...
           </Button>
           {state.files.length > 0 && (
-            <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+            <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 0" }}>
               {state.files.map((f) => f.name).join(", ")}
             </p>
           )}
@@ -228,8 +228,8 @@ export function RunInputPrompt({
         className={runInput.kind === "table" ? styles.workflowActionBar : undefined}
         style={{
           display: "flex",
-          gap: 8,
-          marginTop: 8,
+          gap: "var(--space-2)",
+          marginTop: "var(--space-2)",
           alignItems: "center",
           flexWrap: "wrap",
         }}
@@ -300,7 +300,7 @@ export function RunInputPrompt({
           </Button>
         )}
         {runInput.kind === "table" && runInput.selectable && (
-          <span style={{ fontSize: "0.75rem", color: "var(--hint-text)", marginLeft: "auto" }}>
+          <span style={{ fontSize: "var(--font-size-xs)", color: "var(--hint-text)", marginLeft: "auto" }}>
             {state.checked.filter(Boolean).length} of {state.rows.length} row(s) selected
             {tableCheckedInvalid > 0 && (
               <span style={{ color: "var(--danger)" }}>

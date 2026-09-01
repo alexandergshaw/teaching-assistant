@@ -243,11 +243,11 @@ export function ModuleItemRow({
                 display: "inline-flex",
                 alignItems: "center",
                 height: 22,
-                padding: "0 7px",
-                borderRadius: 4,
+                padding: "0 var(--space-2)",
+                borderRadius: "var(--radius-xs)",
                 border: "1px solid var(--accent)",
                 color: "var(--accent-ink, var(--accent))",
-                fontSize: "0.72rem",
+                fontSize: "var(--font-size-xs)",
                 fontWeight: 700,
                 lineHeight: 1,
                 whiteSpace: "nowrap",
@@ -262,7 +262,7 @@ export function ModuleItemRow({
             </Button>
           )}
         </div>
-        <div className={styles.ccHint} style={{ padding: "0 6px 6px" }}>
+        <div className={styles.ccHint} style={{ padding: "0 var(--space-1) var(--space-1)" }}>
           <span id={rowReasonId}>{itemGate.reason}</span>
           {degradedNote && <> {degradedNote}</>}
           {/* AC9 - an added item is deliberately excluded from selection
@@ -323,7 +323,7 @@ export function ModuleItemRow({
           dragOverItem === itc.id
             ? "inset 0 2px 0 var(--accent)"
             : isDraggingItem(mc.id, itc.id)
-              ? "0 4px 12px rgba(15, 23, 42, 0.12)"
+              ? "var(--shadow-sm)"
               : undefined,
         background:
           dragOverItem === itc.id
@@ -669,7 +669,7 @@ export function ModuleItemRow({
     {!itemGate.allowed && (
       <div
         className={styles.ccHint}
-        style={{ padding: "0 6px 6px", marginLeft: indentAvailable ? itc.indent * 18 : 0 }}
+        style={{ padding: "0 var(--space-1) var(--space-1)", marginLeft: indentAvailable ? itc.indent * 18 : 0 }}
       >
         <span id={rowReasonId}>{itemGate.reason}</span>
         {degradedNote && <> {degradedNote}</>}

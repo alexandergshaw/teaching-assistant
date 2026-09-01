@@ -24,6 +24,7 @@ import { COURSE_LMS_OPTIONS } from "@/lib/course-lms-options";
 import { COURSE_KINDS } from "@/lib/course-kind";
 import GithubRepoPicker from "../GithubRepoPicker";
 import styles from "../../page.module.css";
+import tableStyles from "./CoursesTable.module.css";
 
 export interface AddCourseFormProps {
   editing: Course | null;
@@ -311,7 +312,7 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
         {form.repos.length === 0 && <p className={styles.fieldHint}>No repositories linked yet.</p>}
         {form.repos.map((r, i) => (
           <div key={i} className={styles.courseRepoRow}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className={tableStyles.itemBody}>
               <GithubRepoPicker value={r.repo} onChange={(v) => updateRepo(i, { repo: v })} branch={r.branch} onBranchChange={(v) => updateRepo(i, { branch: v })} />
             </div>
             <Button variant="text" size="small" color="error" onClick={() => removeRepo(i)} title="Remove this repository">
@@ -342,7 +343,7 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
             ref={syllabusUploadRef}
             type="file"
             accept=".docx"
-            style={{ display: "none" }}
+            className={tableStyles.hiddenInput}
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void handleUploadSyllabus(f);
@@ -373,7 +374,7 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
             type="file"
             accept="image/*"
             multiple
-            style={{ display: "none" }}
+            className={tableStyles.hiddenInput}
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
               if (files.length) void handleTextbookPhotos(files);
@@ -432,6 +433,9 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
       {formNote && <p className={styles.fieldHint}>{formNote}</p>}
       {error && <p className={styles.error}>{error}</p>}
 
+      {/* marginTop: 0 overrides page.module.css's .adaptActionBar (margin-top:
+          14px) - see CoursesTable.tsx's identical override for why this
+          stays inline rather than a same-specificity CSS class. */}
       <div className={styles.adaptActionBar} style={{ marginTop: 0 }}>
         <Button variant="contained" size="small" onClick={() => void handleSave()} disabled={saving || !form.name.trim()}>
           {saving ? "Saving…" : form.id ? "Save changes" : "Create course"}

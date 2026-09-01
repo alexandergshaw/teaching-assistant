@@ -2,11 +2,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 24px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6);
   /* Brand navy chrome, consistent with the auth pages. */
-  background: var(--navy, #1a2744);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--navy);
+  /* var(--on-navy) (#ffffff), added to globals.css :root for exactly this -
+     a hairline on the navy chrome, expressed as a color-mix over the token
+     rather than the bare `white` keyword now that one exists (AC5/AM1). */
+  border-bottom: 1px solid color-mix(in srgb, var(--on-navy) 10%, transparent);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -34,7 +37,7 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .mark {
@@ -43,9 +46,15 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, #2563eb, #1a2744);
-  color: #ffffff;
+  border-radius: var(--radius-sm);
+  /* Same two brand colours as before (--accent, --navy resolve to the exact
+     #2563eb/#1a2744 this replaced) - only the raw hex is gone, so this stays
+     a token reference rather than a literal (AC5). */
+  background: linear-gradient(135deg, var(--accent), var(--navy));
+  /* var(--on-navy) - the foreground token for the navy chrome (AM1),
+     replacing the `white` keyword this used as a stopgap before the token
+     existed. */
+  color: var(--on-navy);
   flex-shrink: 0;
 }
 
@@ -55,33 +64,29 @@
 }
 
 .name {
-  font-weight: 700;
-  font-size: 1rem;
-  color: #f8fafc;
+  font-weight: 600;
+  font-size: var(--font-size-lg);
+  color: var(--on-navy);
   letter-spacing: -0.01em;
 }
 
 .actions {
   display: flex;
   align-items: center;
-  gap: 18px;
+  /* 18px was a tie between --space-4 (16) and --space-5 (20); AM4 pins ties
+     to round DOWN. */
+  gap: var(--space-4);
 }
 
+/* Now applied to the Sign out Button (className, alongside its sx). Carries
+   only what the sx prop does NOT express - the sx is single-authored and
+   wins on every duplicated property regardless of injection order (see
+   TopBar.tsx's comment on this Button), so this class no longer declares
+   padding/color/background/border/etc. that would silently disagree with
+   sx if injection order ever changed. */
 .signout {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-secondary, #475569);
-  background: var(--field-background, #ffffff);
-  border: 1px solid var(--field-border, #cbd5e1);
-  border-radius: 8px;
-  padding: 6px 13px;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-
-.signout:hover {
-  border-color: var(--accent, #2563eb);
-  color: var(--text-primary, #0f172a);
+  transition: border-color var(--transition-fast), color var(--transition-fast);
 }
 
 /* ── Settings dropdown ─────────────────────────────────────────────────────── */
@@ -90,48 +95,46 @@
   position: relative;
 }
 
+/* Now applied to the Settings Button (className, alongside its sx). Carries
+   only what the sx prop does NOT express - the sx is single-authored and
+   wins on every duplicated property regardless of injection order (see
+   TopBar.tsx's comment on this Button), so this class no longer declares
+   layout/color/background/border/etc. that would silently disagree with
+   sx if injection order ever changed. The svg rule below is the exception:
+   it is untouched because it is what actually delivers AM11's 20px icon,
+   on its own specificity, independent of sx or injection order. */
 .settingsButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
   font: inherit;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-secondary, #475569);
-  background: var(--field-background, #ffffff);
-  border: 1px solid var(--field-border, #cbd5e1);
-  border-radius: 8px;
-  padding: 6px 13px;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
 }
 
-.settingsButton:hover,
-.settingsButton[aria-expanded="true"] {
-  border-color: var(--accent, #2563eb);
-  color: var(--text-primary, #0f172a);
-}
-
+/* AM11: a toolbar/button icon (this button lives in the top bar's actions
+   cluster), so 20px, not the 16px "dense row" bucket. */
 .settingsButton svg {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
 }
 
 .menu {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + var(--space-2));
   right: 0;
   min-width: 280px;
   max-height: 70vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px;
-  background: var(--field-background, #ffffff);
-  border: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  gap: var(--space-1);
+  /* 10px was a tie between --space-2 (8) and --space-3 (12); AM4 pins ties
+     to round DOWN. */
+  padding: var(--space-2);
+  background: var(--field-background);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  /* A floating dropdown, not an inline card - shadow, not a border-only
+     treatment (AC4). */
+  box-shadow: var(--shadow-md);
   z-index: 60;
   /* This is a light surface (var(--field-background), white in light theme)
      nested inside .bar, which is navy and sets --focus-ring-color to
@@ -147,32 +150,34 @@
 }
 
 .menuHint {
-  font-size: 0.8rem;
-  color: var(--text-secondary, #475569);
-  line-height: 1.4;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: var(--line-snug);
 }
 
 .menuError {
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   color: var(--danger);
-  line-height: 1.4;
+  line-height: var(--line-snug);
 }
 
 .instAddRow {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
+/* Not currently applied by TopBar.tsx (the acronym field is a plain MUI
+   TextField instead - see .signout's comment above). */
 .instInput {
   flex: 1;
   min-width: 0;
-  padding: 6px 10px;
-  border: 1px solid var(--field-border, #cbd5e1);
-  border-radius: 8px;
-  background: var(--field-background, #ffffff);
-  color: var(--text-primary, #0f172a);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  background: var(--field-background);
+  color: var(--text-primary);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   text-transform: uppercase;
 }
 
@@ -182,15 +187,17 @@
   border-color: var(--accent);
 }
 
+/* Not currently applied by TopBar.tsx (the "Add" control is a plain MUI
+   Button instead - see .signout's comment above). */
 .instAddBtn {
   flex-shrink: 0;
-  padding: 6px 12px;
-  border-radius: 8px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
   border: none;
-  background: var(--accent, #2563eb);
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-on-accent);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -202,45 +209,47 @@
 
 .instList {
   list-style: none;
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .instItem {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--card-border);
 }
 
 .instCode {
   font-weight: 700;
-  font-size: 0.85rem;
-  color: var(--text-primary, #0f172a);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
 }
 
 .instStatus {
   margin-left: auto;
-  font-size: 0.74rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary);
 }
 
+/* Not currently applied by TopBar.tsx (removal uses a plain MUI IconButton
+   instead - see .signout's comment above). */
 .instRemove {
   flex-shrink: 0;
   border: none;
   background: transparent;
-  color: var(--text-secondary, #475569);
-  font-size: 1.05rem;
+  color: var(--text-secondary);
+  font-size: var(--font-size-lg);
   line-height: 1;
-  padding: 0 4px;
+  padding: 0 var(--space-1);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 
 .instRemove:hover {
@@ -250,49 +259,53 @@
 .menuSection {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 6px 8px 10px;
+  gap: var(--space-2);
+  /* Bottom was 10px, a tie between --space-2 (8) and --space-3 (12); AM4
+     pins ties to round DOWN. */
+  padding: var(--space-1) var(--space-2) var(--space-2);
 }
 
 .menuLabel {
-  font-size: 0.7rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary);
 }
 
 .menuItem {
-  font-size: 0.9rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
-  color: var(--text-primary, #0f172a);
-  padding: 9px 8px;
-  border-radius: 8px;
-  border-top: 1px solid var(--card-border, rgba(15, 23, 42, 0.08));
-  transition: background 0.15s ease, color 0.15s ease;
+  color: var(--text-primary);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  /* Structural divider between stacked menu items, not a card boundary -
+     --border-soft, matching AC6's separation-vs-card distinction. */
+  border-top: 1px solid var(--border-soft);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .menuItem:hover {
-  background: color-mix(in srgb, var(--field-background, #fff) 88%, var(--accent, #2563eb) 12%);
-  color: var(--accent, #2563eb);
+  background: color-mix(in srgb, var(--field-background) 88%, var(--accent) 12%);
+  color: var(--accent);
 }
 
 .themeRow {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .themeOption {
   flex: 1;
-  padding: 6px 8px;
-  border: 1px solid var(--field-border, #cbd5e1);
-  border-radius: 8px;
-  background: var(--field-background, #ffffff);
-  color: var(--text-secondary, #475569);
-  font-size: 0.82rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  background: var(--field-background);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+  transition: border-color var(--transition-fast), color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .themeOption:focus-visible {
@@ -301,7 +314,7 @@
 }
 
 .themeOptionActive {
-  border-color: var(--accent, #2563eb);
-  color: var(--accent, #2563eb);
-  background: var(--accent-surface, color-mix(in srgb, var(--field-background, #fff) 92%, var(--accent, #2563eb) 8%));
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-surface, color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%));
 }

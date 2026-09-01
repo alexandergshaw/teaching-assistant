@@ -60,11 +60,11 @@ function FieldValuesSnapshot({ fieldValues }: { fieldValues: Record<string, stri
 
 const detailBoxStyle: React.CSSProperties = {
   border: "1px solid var(--field-border)",
-  borderRadius: 10,
-  padding: 12,
+  borderRadius: "var(--radius-sm)",
+  padding: "var(--space-3)",
   display: "flex",
   flexDirection: "column",
-  gap: 6,
+  gap: "var(--space-1)",
 };
 
 /** Name cell: the workflow link plus its category badge, if any. Repeats per
@@ -84,7 +84,7 @@ function NameCell({
   const category = workflows.find((w) => w.id === workflowId)?.category;
   return (
     <td>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", alignItems: "flex-start" }}>
         <button
           type="button"
           className={styles.linkButton}
@@ -94,7 +94,7 @@ function NameCell({
           {workflowName}
         </button>
         {category && (
-          <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ fontSize: "0.7rem" }}>
+          <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ fontSize: "var(--font-size-xs)" }}>
             {category}
           </span>
         )}
@@ -169,7 +169,7 @@ function ActionsCell({
 }) {
   return (
     <td>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "flex-start" }}>
         <button type="button" className={styles.linkButton} onClick={onToggleExpanded}>
           {expanded ? "Hide" : "Details"}
         </button>

@@ -17,7 +17,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
           style={{
             width: "100%",
             borderCollapse: "collapse",
-            fontSize: "0.85rem",
+            fontSize: "var(--font-size-sm)",
           }}
         >
           <thead>
@@ -25,7 +25,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
               <th
                 scope="col"
                 style={{
-                  padding: "6px 10px",
+                  padding: "var(--space-1) var(--space-2)",
                   borderBottom: "1px solid var(--field-border)",
                   textAlign: "left",
                   fontWeight: 600,
@@ -36,7 +36,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
               <th
                 scope="col"
                 style={{
-                  padding: "6px 10px",
+                  padding: "var(--space-1) var(--space-2)",
                   borderBottom: "1px solid var(--field-border)",
                   textAlign: "left",
                   fontWeight: 600,
@@ -47,7 +47,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
               <th
                 scope="col"
                 style={{
-                  padding: "6px 10px",
+                  padding: "var(--space-1) var(--space-2)",
                   borderBottom: "1px solid var(--field-border)",
                   textAlign: "left",
                   fontWeight: 600,
@@ -58,7 +58,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
               <th
                 scope="col"
                 style={{
-                  padding: "6px 10px",
+                  padding: "var(--space-1) var(--space-2)",
                   borderBottom: "1px solid var(--field-border)",
                   textAlign: "left",
                   fontWeight: 600,
@@ -69,7 +69,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
               <th
                 scope="col"
                 style={{
-                  padding: "6px 10px",
+                  padding: "var(--space-1) var(--space-2)",
                   borderBottom: "1px solid var(--field-border)",
                   textAlign: "left",
                   fontWeight: 600,
@@ -84,7 +84,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
               <tr key={week.week}>
                 <td
                   style={{
-                    padding: "6px 10px",
+                    padding: "var(--space-1) var(--space-2)",
                     borderBottom: "1px solid var(--field-border)",
                   }}
                 >
@@ -92,7 +92,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
                 </td>
                 <td
                   style={{
-                    padding: "6px 10px",
+                    padding: "var(--space-1) var(--space-2)",
                     borderBottom: "1px solid var(--field-border)",
                   }}
                 >
@@ -100,7 +100,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
                 </td>
                 <td
                   style={{
-                    padding: "6px 10px",
+                    padding: "var(--space-1) var(--space-2)",
                     borderBottom: "1px solid var(--field-border)",
                   }}
                 >
@@ -108,7 +108,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
                 </td>
                 <td
                   style={{
-                    padding: "6px 10px",
+                    padding: "var(--space-1) var(--space-2)",
                     borderBottom: "1px solid var(--field-border)",
                   }}
                 >
@@ -116,7 +116,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
                 </td>
                 <td
                   style={{
-                    padding: "6px 10px",
+                    padding: "var(--space-1) var(--space-2)",
                     borderBottom: "1px solid var(--field-border)",
                   }}
                 >
@@ -129,8 +129,8 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
         <div
           style={{
             display: "flex",
-            gap: 8,
-            marginTop: 12,
+            gap: "var(--space-2)",
+            marginTop: "var(--space-3)",
             flexWrap: "wrap",
           }}
         >
@@ -165,7 +165,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
           </Button>
         </div>
         {summary.notes && (
-          <p className={styles.fieldHint} style={{ marginTop: 8 }}>
+          <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>
             {summary.notes}
           </p>
         )}
@@ -189,8 +189,8 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
   if (summary.kind === "list") {
     return (
       <>
-        <p style={{ fontWeight: 600, marginBottom: 4 }}>{summary.label}</p>
-        <ul className={styles.fieldHint} style={{ margin: "4px 0 0 16px" }}>
+        <p style={{ fontWeight: 600, marginBottom: "var(--space-1)" }}>{summary.label}</p>
+        <ul className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0 var(--space-4)" }}>
           {summary.items.map((item, idx) => (
             <li key={idx}>{item}</li>
           ))}

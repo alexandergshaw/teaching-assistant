@@ -151,11 +151,11 @@ export function AutomationRunsSection({
   };
 
   return (
-    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ marginTop: "var(--space-2)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
       <div className={styles.automationRunsHeader}>
-        <span style={{ fontWeight: 600, fontSize: "0.78rem", color: "var(--text-secondary)" }}>Recent runs</span>
+        <span style={{ fontWeight: 600, fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>Recent runs</span>
         <label
-          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.75rem", color: "var(--text-secondary)" }}
+          style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}
         >
           Show
           <select
@@ -173,7 +173,7 @@ export function AutomationRunsSection({
       </div>
 
       {status === "loading" && (
-        <p className={styles.fieldHint} style={{ margin: 0 }}>
+        <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>
           Loading recent runs...
         </p>
       )}

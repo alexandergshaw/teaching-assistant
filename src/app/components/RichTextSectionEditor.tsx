@@ -133,6 +133,7 @@ export function RichTextSectionEditor({
                     variant="outlined"
                     size="small"
                     title={a.title}
+                    aria-label={a.title}
                     onClick={a.onClick}
                     disabled={a.disabled}
                     className={TONE_CLASS[a.tone ?? "default"]}

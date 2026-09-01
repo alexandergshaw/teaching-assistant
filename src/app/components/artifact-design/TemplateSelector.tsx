@@ -30,19 +30,20 @@ function TemplateRow({
     <div
       onClick={onSelect}
       style={{
-        padding: "0.75rem",
-        marginBottom: "0.5rem",
+        padding: "var(--space-3)",
+        marginBottom: "var(--space-2)",
         cursor: "pointer",
-        borderRadius: "4px",
-        border: selected ? "2px solid var(--accent)" : "1px solid var(--field-border)",
-        backgroundColor: selected ? "var(--accent)" : "transparent",
-        color: selected ? "white" : "inherit",
-        transition: "all 0.2s",
+        borderRadius: "var(--radius-xs)",
+        border: selected ? "1px solid var(--card-border)" : "1px solid var(--field-border)",
+        boxShadow: selected ? "inset 0 0 0 2px var(--accent)" : "none",
+        backgroundColor: selected ? "var(--accent-soft)" : "transparent",
+        color: "inherit",
+        transition: "border-color var(--transition-fast), box-shadow var(--transition-fast)",
       }}
     >
-      <div style={{ fontWeight: 500, fontSize: "0.9rem" }}>{template.name || "Untitled"}</div>
+      <div style={{ fontWeight: 500, fontSize: "var(--font-size-md)" }}>{template.name || "Untitled"}</div>
       {template.description && (
-        <div style={{ fontSize: "0.75rem", opacity: 0.7 }}>{template.description}</div>
+        <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>{template.description}</div>
       )}
     </div>
   );
@@ -65,12 +66,22 @@ export default function TemplateSelector({
 
   return (
     <div style={{ flex: "0 0 280px" }}>
-      <div style={{ marginBottom: "1rem" }}>
-        <h3 style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "0.95rem", fontWeight: 600 }}>
+      <div style={{ marginBottom: "var(--space-4)" }}>
+        <h3
+          style={{
+            marginTop: 0,
+            marginBottom: "var(--space-2)",
+            fontSize: "var(--font-size-2xs)",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            color: "var(--text-secondary)",
+          }}
+        >
           Presets
         </h3>
         {presets.length === 0 ? (
-          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "1rem" }}>
+          <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", marginBottom: "var(--space-4)", textAlign: "center", padding: "var(--space-4) 0" }}>
             No built-in templates for this kind yet.
           </div>
         ) : (
@@ -86,15 +97,25 @@ export default function TemplateSelector({
       </div>
 
       <div>
-        <h3 style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "0.95rem", fontWeight: 600 }}>
+        <h3
+          style={{
+            marginTop: 0,
+            marginBottom: "var(--space-2)",
+            fontSize: "var(--font-size-2xs)",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            color: "var(--text-secondary)",
+          }}
+        >
           Your templates
         </h3>
         {loading ? (
-          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "1rem" }}>
+          <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", marginBottom: "var(--space-4)", textAlign: "center", padding: "var(--space-4) 0" }}>
             Loading...
           </div>
         ) : custom.length === 0 ? (
-          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "1rem" }}>
+          <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", marginBottom: "var(--space-4)", textAlign: "center", padding: "var(--space-4) 0" }}>
             No custom templates yet.
           </div>
         ) : (
@@ -109,7 +130,7 @@ export default function TemplateSelector({
         )}
       </div>
 
-      <div style={{ marginTop: "1.5rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      <div style={{ marginTop: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         <Button variant="contained" size="small" onClick={onNewTemplate} sx={{ textTransform: "none" }}>
           New template
         </Button>
@@ -118,7 +139,7 @@ export default function TemplateSelector({
             variant="outlined"
             size="small"
             onClick={() => onDeleteTemplate(selected.id)}
-            sx={{ textTransform: "none", color: deleteConfirm === selected.id ? "red" : "inherit" }}
+            sx={{ textTransform: "none", color: deleteConfirm === selected.id ? "var(--danger)" : "inherit" }}
           >
             {deleteConfirm === selected.id ? "Confirm delete" : "Delete"}
           </Button>
@@ -138,12 +159,13 @@ export default function TemplateSelector({
       {loadError && (
         <div
           style={{
-            marginTop: "1rem",
-            padding: "0.75rem",
-            backgroundColor: "rgba(255,0,0,0.1)",
-            borderRadius: "4px",
-            fontSize: "0.85rem",
-            color: "red",
+            marginTop: "var(--space-4)",
+            padding: "var(--space-3)",
+            backgroundColor: "var(--danger-surface)",
+            border: "1px solid var(--danger-border)",
+            borderRadius: "var(--radius-md)",
+            fontSize: "var(--font-size-sm)",
+            color: "var(--danger)",
           }}
         >
           {loadError}

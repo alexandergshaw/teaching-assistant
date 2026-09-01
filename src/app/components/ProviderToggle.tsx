@@ -23,11 +23,11 @@ export default function ProviderToggle() {
       style={{
         display: "inline-flex",
         flexWrap: "wrap",
-        gap: 2,
-        padding: 2,
-        borderRadius: 8,
+        gap: "var(--space-1)",
+        padding: "var(--space-1)",
+        borderRadius: "var(--radius-sm)",
         border: "1px solid var(--field-border)",
-        background: "var(--field-bg, transparent)",
+        background: "var(--field-bg)",
       }}
     >
       {OPTIONS.map((opt) => {
@@ -41,14 +41,25 @@ export default function ProviderToggle() {
             onClick={() => setProvider(opt.value)}
             style={{
               font: "inherit",
-              fontSize: "0.8rem",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "var(--control-height-sm)",
+              fontSize: "var(--font-size-sm)",
               fontWeight: active ? 600 : 500,
-              padding: "4px 12px",
-              borderRadius: 6,
+              padding: "0 var(--space-3)",
+              borderRadius: "var(--radius-xs)",
               border: "none",
               cursor: "pointer",
-              color: active ? "var(--accent-contrast, #fff)" : "var(--text-secondary)",
-              background: active ? "var(--accent)" : "transparent",
+              // Selected = --accent-soft fill + a 2px inset accent ring
+              // (AM11), not a solid accent fill: the old solid fill needed
+              // white text with no legal spelling until --text-on-accent was
+              // added mid-wave for exactly this call site (globals.css
+              // 2026-09-01 note) - moving to accent-soft sidesteps it and
+              // matches the segmented-control idiom other surfaces use.
+              color: active ? "var(--accent-hover)" : "var(--text-secondary)",
+              background: active ? "var(--accent-soft)" : "transparent",
+              boxShadow: active ? "inset 0 0 0 2px var(--accent)" : "none",
             }}
           >
             {opt.label}

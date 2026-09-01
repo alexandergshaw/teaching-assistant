@@ -285,7 +285,7 @@ const CHECKBOX_LABEL_SX = {
     textTransform: "none",
     letterSpacing: "normal",
     fontWeight: 500,
-    fontSize: "0.9rem",
+    fontSize: "var(--font-size-md)",
     color: "var(--text-primary)",
   },
 } as const;
@@ -359,7 +359,7 @@ export default function RepoGradesControls({
       {showOrgPrefixFilter && (
         <div className={styles.field}>
           <label htmlFor="repo-grades-org-prefix">Repo name filter (optional)</label>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
             <TextField
               size="small"
               id="repo-grades-org-prefix"

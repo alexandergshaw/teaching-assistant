@@ -1,113 +1,238 @@
+/* Shared settings-area stylesheet. Security, Integrations, Voice & Style and
+   Diagnostics all import this file so the account area reads as ONE surface:
+   same header shape, same row shape, same pill, same button vocabulary
+   (aesthetics pass 2026-09-01, AC9). */
+
 .page {
   flex: 1;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
-  padding: 40px 24px 56px;
-  /* Brand navy chrome, matching the top bar. The white card keeps the form readable. */
-  background: var(--navy, #1a2744);
+  padding: var(--space-10) var(--space-6) var(--space-12);
+  /* Flat neutral, matching every other page - not a navy backdrop behind a
+     floating white card. */
+  background: var(--page-background);
 }
 
+/* Single column, left-aligned, max ~48rem - not a centred card floating in
+   space. No border/background of its own: sections separate with hairline
+   rules, not nested card chrome (AC11). */
 .card {
   width: 100%;
-  max-width: 600px;
-  background: var(--field-background);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 18px;
-  box-shadow: 0 20px 45px -24px rgba(15, 23, 42, 0.28);
-  padding: 32px 34px 36px;
+  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .title {
-  font-size: 1.5rem;
+  font-size: var(--font-size-2xl);
   font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
+  line-height: var(--line-tight);
 }
 
 .subtitle {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
-  font-size: 0.95rem;
-  margin-top: 6px;
+  line-height: var(--line-snug);
 }
 
 .section {
-  margin-top: 28px;
+  /* Original single 28px gap is an exact tie between --space-6 and
+     --space-8; AM4 (mid-wave amendment) pins ties DOWN. */
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-soft);
 }
 
+/* Tracked-uppercase micro-label idiom - pinned exactly by AM4: var(--font-size-2xs) /
+   weight 700 / letter-spacing 0.06em / var(--text-secondary). Same idiom
+   .label below uses (AC7, AM5). */
 .sectionTitle {
-  font-size: 0.78rem;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-secondary);
-  margin-bottom: 12px;
+  /* Original 12px is an exact --space-3 match - AM4: an on-grid value keeps
+     its own token, never rounds up. */
+  margin-bottom: var(--space-3);
 }
 
+/* Informational one-liner (connection status, current selection) - not an
+   empty-list state. */
 .empty {
   color: var(--text-secondary);
-  font-size: 0.92rem;
+  font-size: var(--font-size-md);
+  line-height: var(--line-snug);
+}
+
+/* Empty-list state (AC8): centred, muted, one sentence saying what would be
+   here. Used only where a list genuinely has nothing in it. */
+.emptyState {
+  text-align: center;
+  padding: var(--space-8) var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+}
+
+/* Loading state (AC8): the app's spinner idiom, never a bare paragraph. */
+.loadingRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-round);
+  border: 2px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  border-top-color: var(--accent-ink);
+  /* AM10 (mid-wave amendment, corrected): page.module.css's own @keyframes
+     spin is CSS-Modules-scoped and unreachable here. A bare
+     `animation: ta-spin ...` would ALSO be scoped by Lightning CSS (it
+     rewrites the animation-name reference, not just @keyframes
+     definitions), producing a hashed name that matches no keyframes -
+     globals.css now defines the whole shorthand as --ta-spin-animation,
+     which is not scoped because idents inside var() are untouched. */
+  animation: var(--ta-spin-animation);
+  flex-shrink: 0;
 }
 
 .factorList {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
-.factor {
+/* One row recipe shared by every connection/list row across all four
+   settings pages (AC9/AC10): same border, radius, padding and hover. */
+.factor,
+.migrationRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  transition: background var(--transition-fast);
+}
+
+.factor:hover,
+.migrationRow:hover {
+  background: var(--surface-muted);
+}
+
+/* The row's own top line: identity + status pill on the left, actions
+   right-aligned - the single biggest "professional" tell on a settings
+   screen (per this pass's brief). */
+.factorMain,
+.migrationHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: var(--surface-subtle);
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .factorName {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-weight: 600;
   color: var(--text-primary);
+  font-size: var(--font-size-md);
 }
 
+/* Secondary detail line under a row (mailbox permissions, progress text). */
+.rowDetail {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: var(--line-snug);
+}
+
+/* Counts/badges idiom per AM11: --radius-pill, --font-size-xs, weight 500,
+   token surface + matching ink - deliberately NOT the tracked-uppercase
+   micro-label idiom (AM5 reserves that for section/field labels only). */
 .pill {
-  display: inline-block;
-  margin-left: 8px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #dcfce7;
-  color: var(--success);
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--success-surface);
+  color: var(--success-ink);
 }
 
 .pillPending {
-  background: #fef9c3;
-  color: #854d0e;
+  background: var(--warning-surface);
+  color: var(--warning-ink);
+}
+
+/* Neutral state (not connected / not configured) - deliberately NOT the
+   warning colour: absence of a connection is not itself a problem. */
+.pillNeutral {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
 }
 
 .label {
   display: block;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
-  margin-bottom: 7px;
-  margin-top: 14px;
+  margin-bottom: var(--space-2);
+  /* Original 14px ties between --space-3 and --space-4; AM4 rounds down. */
+  margin-top: var(--space-3);
+}
+
+/* A small top-margin utility for the one-off cases below a helper line
+   (original inline styles used 8px/10px, both of which resolve to
+   --space-2 - 8 exactly, 10 as an AM4 tie rounded down). */
+.spacedTop {
+  margin-top: var(--space-2);
 }
 
 .input {
   width: 100%;
-  padding: 10px 13px;
-  font-size: 0.95rem;
+  height: var(--control-height-lg);
+  /* Original horizontal 13px is nearest --space-3, not --space-4. */
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   background: var(--field-background);
   border: 1px solid var(--field-border);
-  border-radius: 10px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast);
+}
+
+textarea.input {
+  height: auto;
+  /* Textarea had no padding override originally - it inherited the base
+     .input padding (10px/13px: 10 ties down to --space-2, 13 is nearest
+     --space-3). */
+  padding: var(--space-2) var(--space-3);
+  line-height: var(--line-normal);
+  font-family: inherit;
+  resize: vertical;
+}
+
+input[type="file"].input {
+  height: auto;
+  /* Original inline override was a uniform 12px - an exact --space-3
+     match. */
+  padding: var(--space-3);
 }
 
 .input:focus {
@@ -116,44 +241,52 @@
   border-color: var(--accent);
 }
 
+/* Standalone action row below a field/section. */
 .row {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
-  margin-top: 16px;
+  margin-top: var(--space-4);
+}
+
+/* Action cluster nested inside a row - same gap, no extra top margin. */
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.primary,
+.secondary,
+.remove {
+  height: var(--control-height-md);
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
 .primary {
-  padding: 10px 18px;
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: #ffffff;
+  padding: 0 var(--space-4);
+  color: var(--text-on-accent);
   background: var(--accent);
   border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.15s ease;
 }
 
 .primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
-.primary:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
 .secondary {
-  padding: 10px 16px;
-  font-size: 0.92rem;
-  font-weight: 600;
+  padding: 0 var(--space-4);
   color: var(--text-secondary);
   background: transparent;
   border: 1px solid var(--field-border);
-  border-radius: 10px;
-  cursor: pointer;
 }
 
 .secondary:hover:not(:disabled) {
@@ -162,26 +295,31 @@
 }
 
 .remove {
-  font-size: 0.82rem;
-  font-weight: 600;
+  padding: 0 var(--space-3);
   color: var(--danger);
   background: transparent;
   border: 1px solid var(--danger-border);
-  border-radius: 8px;
-  padding: 5px 11px;
-  cursor: pointer;
 }
 
-.remove:hover {
+.remove:hover:not(:disabled) {
   background: var(--danger-surface);
+}
+
+/* AM11: disabled is opacity 0.5 + not-allowed, uniformly - never a colour
+   swap, never a second opacity value. */
+.primary:disabled,
+.secondary:disabled,
+.remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .qrFrame {
   display: inline-block;
-  padding: 12px;
+  padding: var(--space-3);
   background: var(--field-background);
   border: 1px solid var(--border-soft);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
 }
 
 .qr {
@@ -192,98 +330,143 @@
 
 .secret {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  font-size: var(--font-size-xs);
   background: var(--surface-muted);
-  padding: 2px 7px;
-  border-radius: 6px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-xs);
   color: var(--text-primary);
 }
 
 .help {
+  /* Original 6px is an exact tie between --space-1 and --space-2; AM4
+     rounds down. */
+  margin-top: var(--space-1);
   color: var(--text-secondary);
-  font-size: 0.88rem;
-  margin-top: 6px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-snug);
 }
 
 .tip {
-  margin-top: 16px;
+  margin-top: var(--space-4);
   color: var(--text-secondary);
-  font-size: 0.88rem;
-  line-height: 1.5;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-normal);
   background: var(--surface-subtle);
   border: 1px dashed var(--field-border);
-  border-radius: 10px;
-  padding: 11px 13px;
+  border-radius: var(--radius-md);
+  /* Original 11px/13px both round to --space-3 (nearest, not a tie). */
+  padding: var(--space-3);
 }
 
 .error {
-  margin-top: 16px;
-  font-size: 0.9rem;
+  margin-top: var(--space-4);
+  font-size: var(--font-size-md);
   color: var(--danger);
   background: var(--danger-surface);
   border: 1px solid var(--danger-border);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  /* Original 10px/12px: 10 ties down to --space-2, 12 is an exact
+     --space-3 match. */
+  padding: var(--space-2) var(--space-3);
 }
 
 .notice {
-  margin-top: 16px;
-  font-size: 0.9rem;
-  color: var(--success);
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 10px;
-  padding: 10px 12px;
+  margin-top: var(--space-4);
+  font-size: var(--font-size-md);
+  color: var(--success-ink);
+  background: var(--success-surface);
+  /* --success has no dedicated *-border token in globals.css (only accent/
+     danger/warning do) - color-mix() over the existing --success and
+     --field-background tokens mirrors --danger-border's own formula and
+     stays fully theme-adaptive, per AC5's "token or color-mix() over
+     tokens" rule. */
+  border: 1px solid color-mix(in srgb, var(--success) 30%, var(--field-background));
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
 }
 
-/* Canvas diagnostics screen (Settings -> Diagnostics). Every value below
-   reuses a token already defined above - nothing here introduces a new
-   colour. */
-
-.migrationRow {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: var(--surface-subtle);
-}
-
-.migrationHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
+/* Canvas diagnostics screen (Settings -> Diagnostics). */
 
 .migrationBadge {
-  display: inline-block;
-  margin-left: 8px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   background: var(--surface-muted);
   color: var(--text-secondary);
 }
 
 .migrationSentence {
   color: var(--text-primary);
-  font-size: 0.88rem;
-  line-height: 1.5;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-snug);
 }
 
 .cancelBox {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   color: var(--text-primary);
-  font-size: 0.88rem;
-  line-height: 1.5;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-snug);
   background: var(--danger-surface);
   border: 1px dashed var(--danger-border);
-  border-radius: 10px;
-  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  /* Original 11px/13px both round to --space-3 (nearest, not a tie) - same
+     conversion as .tip above. */
+  padding: var(--space-3);
+}
+
+/* Voice & Style page: structural helpers replacing inline style={{}} hacks
+   (AC3/AC5). A plain top-margin wrapper, not a flex/gap container: the
+   original inline styles only ever set a top margin on the OUTER div and
+   left each child's own spacing (label/help's own margin rules) doing the
+   rest, so keeping the same block-flow model here converts the literal
+   faithfully instead of introducing a second, additive spacing mechanism.
+   Original margins were 12px/14px - both an exact match or a tie that
+   rounds down to --space-3. */
+.stack {
+  margin-top: var(--space-3);
+}
+
+.audioPlayer {
+  width: 100%;
+  /* Original inline style was 6px - an exact tie rounded down to
+     --space-1. */
+  margin-top: var(--space-1);
+}
+
+.charCountRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.progressTrack {
+  width: 150px;
+  height: 6px;
+  background: var(--field-border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--transition-base);
+}
+
+.progressFillOver {
+  background: var(--danger);
+}
+
+/* Integrations page: fixed-width school code in a connection row. */
+
+.schoolCode {
+  min-width: 64px;
+  font-weight: 600;
+  color: var(--text-primary);
 }

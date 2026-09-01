@@ -27,26 +27,9 @@
 /* ---------------------------------------------------------------------- */
 /* Toolbar */
 
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin: 4px 0 12px;
-}
-
-.toolbarGroup {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.toolbarDivider {
-  width: 1px;
-  align-self: stretch;
-  background: var(--field-border);
-  margin: 2px 4px;
-}
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-1) 0 var(--space-3); }
+.toolbarGroup { display: flex; align-items: center; gap: var(--space-1); }
+.toolbarDivider { width: 1px; align-self: stretch; background: var(--border-soft); margin: var(--space-1) var(--space-1); }
 
 /* AC-E item 225: the active-filter chip row, under the toolbar - reuses the
    toolbar's own gap/wrap rhythm (.toolbar above) rather than inventing a
@@ -54,29 +37,22 @@
    unfiltered one, so this row is the one place every active constraint
    (search/institution/term/outstanding-only/column filters) is listed
    together, regardless of which control set it. */
-.filterChipRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 10px;
-}
+.filterChipRow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin: 0 0 var(--space-2); }
 
 .filterChip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 4px 3px 10px;
-  border-radius: 999px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent) 10%, var(--field-background));
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--field-border));
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
   color: var(--text-primary);
 }
 
-.filterChipLabel {
-  white-space: nowrap;
-}
+.filterChipLabel { white-space: nowrap; }
 
 .filterChipRemove {
   display: inline-flex;
@@ -86,25 +62,22 @@
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
 }
 
-.filterChipRemove:hover {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--text-primary);
-}
+.filterChipRemove:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text-primary); }
 
 .filterChipClearAll {
   border: 0;
   background: transparent;
   color: var(--accent-ink);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   cursor: pointer;
-  padding: 3px 6px;
+  padding: var(--space-1) var(--space-1);
   text-decoration: underline;
 }
 
@@ -112,59 +85,40 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px 16px;
-  margin: 0 0 8px;
-  font-size: 0.85rem;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
 }
 
-.summaryFigure {
-  font-weight: 700;
-  color: var(--text-primary);
-}
+.summaryFigure { font-weight: 700; color: var(--text-primary); }
 
 /* BLOCKER 2 (Tasks-tab UX audit): the visible counterpart of the tab's
    srOnly announcement region - a bulk-action outcome, a sort/filter change,
    etc. used to reach a sighted instructor nowhere else, so a partial bulk
    failure looked identical to a full success. */
-.bulkStatusLine {
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-}
+.bulkStatusLine { color: var(--text-secondary); font-size: var(--font-size-md); }
 
 /* SHOULD 6 (Tasks-tab UX audit): Manage Tasks dialog's Retire-arming status
    line - visible (not only role="status"-announced), matching the visible
    treatment BLOCKER 2 already applies to .bulkStatusLine above. */
-.inlineStatus {
-  margin: 0 0 12px;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}
+.inlineStatus { margin: 0 0 var(--space-3); font-size: var(--font-size-md); color: var(--text-secondary); }
 
-.periodCaption {
-  margin: 0 0 10px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  font-style: italic;
-}
+.periodCaption { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); color: var(--text-secondary); font-style: italic; }
 
-.emptyState {
-  padding: 32px 16px;
-  text-align: center;
-  color: var(--text-secondary);
-}
+.emptyState { padding: var(--space-8) var(--space-4); text-align: center; color: var(--text-secondary); font-size: var(--font-size-md); }
 
 .errorBanner {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm, 8px);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
   background: var(--danger-surface);
   border: 1px solid var(--danger-border);
   color: var(--danger);
-  font-size: 0.85rem;
-  margin: 0 0 10px;
+  font-size: var(--font-size-md);
+  margin: 0 0 var(--space-2);
 }
 
 /* Visually-hidden live region for bulk-action/save-failure announcements
@@ -188,9 +142,7 @@
    required - a horizontally-scrolling region with only one or two of them
    is exactly the anti-pattern item 115a calls out. */
 
-.scrollRegionWrap {
-  position: relative;
-}
+.scrollRegionWrap { position: relative; }
 
 .scrollRegion {
   /* S3: the containing block for the two scroll-shadow overlays below - an
@@ -205,8 +157,8 @@
   position: relative;
   width: 100%;
   overflow: auto;
-  border: 1px solid var(--field-border);
-  border-radius: 14px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
   max-height: calc(100vh - var(--topbar-height, 58px) - var(--in-session-banner-height, 0px) - 300px);
   min-height: 260px;
 }
@@ -269,7 +221,7 @@
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   /* Density (AC15 item 106): the switcher writes this attribute on .table
      itself, and every row-height-bearing rule below reads the variable it
      sets rather than repeating three copies of every rule. */
@@ -294,7 +246,7 @@
 .table td {
   height: var(--ttg-row-h);
   box-sizing: border-box;
-  border-bottom: 1px solid var(--field-border);
+  border-bottom: 1px solid var(--border-soft);
   vertical-align: middle;
   overflow: hidden;
 }
@@ -302,9 +254,7 @@
 /* AC15 item 111: vertical dividers only at group boundaries and the frozen
    seam (a shadow there instead - see .scrollShadowLeft), never on every
    column - 40 full-height verticals produce a moire. */
-.groupBoundary {
-  border-left: 1px solid var(--field-border);
-}
+.groupBoundary { border-left: 1px solid var(--border-soft); }
 
 /* AC15 item 112: no zebra striping (diverges from CoursesTable.module.css's
    :nth-child(even) banding - deliberate, not an oversight: zebra rows
@@ -312,9 +262,7 @@
    five-plus competing greys on top of them). A faint rule every 5 rows keeps
    horizontal tracking legible across a wide matrix without that collision. */
 .table tbody tr:nth-child(5n) td,
-.table tbody tr:nth-child(5n) th {
-  border-bottom-color: color-mix(in srgb, var(--field-border) 60%, var(--text-secondary) 40%);
-}
+.table tbody tr:nth-child(5n) th { border-bottom-color: color-mix(in srgb, var(--border-soft) 60%, var(--text-secondary) 40%); }
 
 /* ---------------------------------------------------------------------- */
 /* Header rows (sticky top, z-index 2) and the frozen corner (z-index 3) */
@@ -326,27 +274,19 @@
   background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
   color: var(--text-secondary);
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   text-align: center;
   /* AC15 item 108: sentence case, NOT uppercase - all-caps destroys the
      word-shape scanning a 40-column header row depends on. This is a
      deliberate divergence from CoursesTable.module.css's uppercase th. */
 }
 
-.headerRow1 th {
-  top: 0;
-}
-
-.headerRow2 th {
-  top: var(--ttg-row-h);
-}
-
-.groupBandCell {
-  padding: 6px 8px;
-}
+.headerRow1 th { top: 0; }
+.headerRow2 th { top: var(--ttg-row-h); }
+.groupBandCell { padding: var(--space-1) var(--space-2); }
 
 .taskHeaderCell {
-  padding: 4px 6px;
+  padding: var(--space-1) var(--space-1);
   display: table-cell;
   /* No `position: relative` here - it would be dead weight if added: this
      selector's specificity loses to `.headerRow2 th`'s own
@@ -357,12 +297,7 @@
      supply one. */
 }
 
-.taskHeaderInner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
+.taskHeaderInner { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); }
 
 .taskHeaderLabel {
   font-weight: 600;
@@ -378,14 +313,7 @@
    below the task label rather than beside it - the label already clamps to
    3 lines at its own width, and a fixed-height row here keeps every task
    header the same height whether or not it currently shows an indicator. */
-.taskHeaderIndicators {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  min-height: 11px;
-  color: var(--accent-ink);
-}
+.taskHeaderIndicators { display: flex; align-items: center; justify-content: center; gap: var(--space-1); min-height: 11px; color: var(--accent-ink); }
 
 .cornerCell {
   position: sticky;
@@ -396,7 +324,7 @@
   text-align: left;
   padding: 0;
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
@@ -408,16 +336,16 @@
 .cornerHeaderButton {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   width: 100%;
   height: 100%;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   text-align: left;
   cursor: pointer;
 }
@@ -442,8 +370,8 @@
   width: 260px;
   min-width: 260px;
   max-width: 260px;
-  padding: 6px 12px;
-  font-size: 13px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-sm);
   font-weight: 500;
 }
 
@@ -456,8 +384,8 @@
   width: 88px;
   min-width: 88px;
   max-width: 88px;
-  padding: 4px 8px;
-  border-left: 1px solid var(--field-border);
+  padding: var(--space-1) var(--space-2);
+  border-left: 1px solid var(--border-soft);
 }
 
 .courseName {
@@ -469,7 +397,7 @@
 }
 
 .courseMeta {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -477,23 +405,23 @@
 }
 
 .progressText {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   text-align: center;
 }
 
 .progressBarTrack {
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
   background: var(--border-soft);
-  margin-top: 3px;
+  margin-top: var(--space-1);
   overflow: hidden;
 }
 
 .progressBarFill {
   height: 100%;
   background: var(--success);
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -512,13 +440,7 @@
   text-align: center;
 }
 
-.rollupCell {
-  width: 72px;
-  min-width: 72px;
-  max-width: 72px;
-  padding: 0;
-  text-align: center;
-}
+.rollupCell { width: 72px; min-width: 72px; max-width: 72px; padding: 0; text-align: center; }
 
 .statusButton {
   width: 100%;
@@ -534,25 +456,13 @@
   font: inherit;
 }
 
-.statusButton:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-.rollupButton {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
+/* Same hover tint as .rollupButton:hover below - identical bodies, one rule. */
+.statusButton:hover,
 .rollupButton:hover {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
+
+.rollupButton { width: 100%; height: 100%; border: 0; background: transparent; cursor: pointer; font: inherit; font-size: var(--font-size-xs); font-weight: 600; color: var(--text-secondary); }
 
 /* AC15 item 91: an optional, off-by-default, low-contrast REDUNDANT tint -
    the glyph still carries the meaning on its own. Toggled by a data
@@ -674,7 +584,7 @@
   pointer-events: none;
   color: var(--text-secondary);
   background: var(--field-background);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   line-height: 0;
 }
 
@@ -732,11 +642,11 @@
   bottom: 0;
   z-index: 2;
   background: color-mix(in srgb, var(--field-background) 92%, var(--accent) 8%);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-secondary);
   text-align: center;
-  border-top: 1px solid var(--field-border);
+  border-top: 1px solid var(--border-soft);
   border-bottom: none;
 }
 
@@ -794,43 +704,46 @@
 .columnList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   max-height: 340px;
   overflow-y: auto;
 }
 
 .groupHeading {
-  font-size: 11px;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
-  margin: 10px 0 2px;
-  padding: 0 4px;
+  margin: var(--space-2) 0 var(--space-1);
+  padding: 0 var(--space-1);
 }
 
 .taskRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 4px;
-  border-radius: 6px;
+  gap: var(--space-2);
+  height: var(--control-height-md);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
 }
 
-.taskRow:hover {
+/* Same hover tint as .colMenuItem:hover below - identical bodies, one rule. */
+.taskRow:hover,
+.colMenuItem:hover {
   background: var(--surface-subtle);
 }
 
 .taskRowLabel {
   flex: 1;
-  font-size: 0.85rem;
+  font-size: var(--font-size-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .taskRowMeta {
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
@@ -842,36 +755,36 @@
 .dialogSection {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
 .dialogFormRow {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-end;
   flex-wrap: wrap;
 }
 
 .inlineError {
   color: var(--danger);
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   margin: 0;
 }
 
 /* Non-modal cell editor content (AC15 item 100; S1: Popper + ClickAwayListener,
    not Popover - see TaskCell.tsx) */
 .editorPopover {
-  padding: 12px;
+  padding: var(--space-3);
   width: 260px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .editorStatusRow {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .editorStatusButton {
@@ -879,14 +792,14 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 8px 4px;
-  border-radius: 8px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-1);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--field-border);
   background: var(--field-background);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
@@ -897,7 +810,7 @@
 }
 
 .editorMeta {
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   margin: 0;
 }
@@ -909,7 +822,7 @@
    fits a panel this shape). Reuses .editorPopover's own width/padding
    rhythm rather than inventing a second one. */
 .colMenu {
-  padding: 6px 0;
+  padding: var(--space-1) 0;
   width: 240px;
   max-height: 70vh;
   overflow-y: auto;
@@ -920,35 +833,34 @@
 .colMenuSection {
   display: flex;
   flex-direction: column;
-  padding: 2px 0;
+  padding: var(--space-1) 0;
 }
 
 .colMenuSectionLabel {
-  font-size: 11px;
+  font-size: var(--font-size-2xs);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
-  padding: 6px 12px 2px;
+  padding: var(--space-1) var(--space-3) var(--space-1);
 }
 
+/* 34px item height (--control-height-md), one row height for every item in
+   this menu regardless of icon/checkmark content. */
 .colMenuItem {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 6px 12px;
+  height: var(--control-height-md);
+  padding: 0 var(--space-3);
   border: 0;
   background: transparent;
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--font-size-sm);
   text-align: left;
   cursor: pointer;
-}
-
-.colMenuItem:hover {
-  background: var(--surface-subtle);
 }
 
 .colMenuItem[data-active="true"] {
@@ -957,9 +869,8 @@
 }
 
 .colMenuItem:disabled {
-  color: var(--text-secondary);
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 /* ---------------------------------------------------------------------- */

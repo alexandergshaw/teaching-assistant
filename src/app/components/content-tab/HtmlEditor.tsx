@@ -156,7 +156,7 @@ export function HtmlEditor({
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
       {/* The toolbar always renders so the HTML toggle can exit source mode;
           only the formatting controls are hidden while viewing source. */}
       <div className={styles.rteToolbar} role="toolbar" aria-label="Text formatting">
@@ -206,13 +206,14 @@ export function HtmlEditor({
 
           <span className={styles.rteToolbarSep} aria-hidden="true" />
 
-          <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Text:</span>
+          <div style={{ display: "flex", gap: "var(--space-1)", alignItems: "center" }}>
+            <span style={{ fontSize: "var(--font-size-sm)", color: "var(--text-muted)" }}>Text:</span>
             {textColorSwatches.map((swatch) => (
               <button
                 key={swatch.color}
                 type="button"
                 title={`Text color: ${swatch.label}`}
+                aria-label={`Text color: ${swatch.label}`}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   handleTextColor(swatch.color);
@@ -221,22 +222,23 @@ export function HtmlEditor({
                   width: 16,
                   height: 16,
                   padding: 0,
-                  border: "1px solid #999",
+                  border: "1px solid var(--field-border)",
                   backgroundColor: swatch.color,
                   cursor: "pointer",
-                  borderRadius: 2,
+                  borderRadius: "var(--radius-xs)",
                 }}
               />
             ))}
           </div>
 
-          <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Highlight:</span>
+          <div style={{ display: "flex", gap: "var(--space-1)", alignItems: "center" }}>
+            <span style={{ fontSize: "var(--font-size-sm)", color: "var(--text-muted)" }}>Highlight:</span>
             {highlightSwatches.map((swatch) => (
               <button
                 key={swatch.color}
                 type="button"
                 title={`Highlight: ${swatch.label}`}
+                aria-label={`Highlight: ${swatch.label}`}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   handleHighlight(swatch.color);
@@ -245,10 +247,10 @@ export function HtmlEditor({
                   width: 16,
                   height: 16,
                   padding: 0,
-                  border: "1px solid #999",
+                  border: "1px solid var(--field-border)",
                   backgroundColor: swatch.color === "none" ? "transparent" : swatch.color,
                   cursor: "pointer",
-                  borderRadius: 2,
+                  borderRadius: "var(--radius-xs)",
                 }}
               />
             ))}
@@ -273,13 +275,13 @@ export function HtmlEditor({
           style={{
             width: "100%",
             minHeight: `${minHeight}px`,
-            padding: "10px 12px",
+            padding: "var(--space-2) var(--space-3)",
             border: "1px solid var(--field-border)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-sm)",
             backgroundColor: "var(--field-background)",
             color: "var(--text-primary)",
             fontFamily: "var(--font-mono, monospace)",
-            fontSize: "0.9rem",
+            fontSize: "var(--font-size-md)",
             lineHeight: 1.5,
             resize: "vertical",
             overflowY: "auto",
@@ -293,17 +295,17 @@ export function HtmlEditor({
           contentEditable
           suppressContentEditableWarning
           onInput={handleEditableInput}
+          className={styles.htmlEditableFocus}
           style={{
             width: "100%",
             minHeight: `${minHeight}px`,
-            padding: "10px 12px",
+            padding: "var(--space-2) var(--space-3)",
             border: "1px solid var(--field-border)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-sm)",
             backgroundColor: "var(--field-background)",
             color: "var(--text-primary)",
             lineHeight: 1.5,
             overflowY: "auto",
-            outline: "none",
           }}
           aria-label={ariaLabel}
           role="textbox"

@@ -158,33 +158,75 @@ export default function DocStructureEditor({
   return (
     <div
       onClick={() => onClose()}
-      style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "color-mix(in srgb, var(--text-primary) 45%, transparent)",
+        zIndex: 10001,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "var(--space-4)",
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(680px, 96vw)", maxHeight: "90vh", background: "var(--field-background)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 18px 50px rgba(15,23,42,0.3)" }}
+        style={{
+          width: "min(680px, 96vw)",
+          maxHeight: "90vh",
+          background: "var(--field-background)",
+          borderRadius: "var(--radius-md)",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "var(--shadow-lg)",
+        }}
         role="dialog"
         aria-modal="true"
         aria-label="Fix document structure"
         tabIndex={-1}
         ref={containerRef}
       >
-        <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ padding: "var(--space-3) var(--space-5)", borderBottom: "1px solid var(--field-border)" }}>
+          <div
+            style={{
+              fontSize: "var(--font-size-2xs)",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "var(--text-secondary)",
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "var(--space-2)",
+            }}
+          >
             <span>Document structure · {title}</span>
-            {progress && <span style={{ color: "var(--accent, #2563eb)" }}>{progress.index} of {progress.total}</span>}
+            {progress && <span style={{ color: "var(--accent)" }}>{progress.index} of {progress.total}</span>}
           </div>
-          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: 4 }}>
+          <div style={{ fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", marginTop: "var(--space-1)" }}>
             Give the file a title and mark its section headings, then save back to Canvas.
           </div>
         </div>
 
-        <div style={{ padding: "14px 18px", overflowY: "auto" }}>
+        <div style={{ padding: "var(--space-3) var(--space-5)", overflowY: "auto" }}>
           {stage === "loading" ? (
-            <p style={{ color: "var(--text-secondary)" }}>Loading document…</p>
+            <p role="status" aria-live="polite" style={{ color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: "var(--radius-round)",
+                  border: "2px solid color-mix(in srgb, var(--accent) 20%, transparent)",
+                  borderTopColor: "var(--accent-ink)",
+                  display: "inline-block",
+                  animation: "ta-spin 0.8s linear infinite",
+                }}
+              />
+              Loading document…
+            </p>
           ) : (
             <>
-              <div style={{ marginBottom: 16 }}>
+              <div style={{ marginBottom: "var(--space-4)" }}>
                 <TextField
                   fullWidth
                   size="small"
@@ -201,17 +243,17 @@ export default function DocStructureEditor({
                     },
                   }}
                   error={!titleTrimmed}
-                  sx={{ "& .MuiOutlinedInput-root": { fontSize: "0.9rem" } }}
+                  sx={{ "& .MuiOutlinedInput-root": { fontSize: "var(--font-size-md)" } }}
                 />
               </div>
 
               {paragraphs.length > 0 && (
                 <>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-2)", marginBottom: "var(--space-1)" }}>
                     <FormControlLabel
                       control={<Checkbox checked={allSelected} onChange={toggleSelectAll} size="small" aria-label="Select all lines" />}
                       label="Headings"
-                      sx={{ fontSize: "0.82rem", fontWeight: 600 }}
+                      sx={{ fontSize: "var(--font-size-sm)", fontWeight: 600 }}
                     />
                     <Button
                       variant="outlined"
@@ -223,8 +265,19 @@ export default function DocStructureEditor({
                   </div>
 
                   {selected.size > 0 && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 10px", background: "var(--surface-muted)", borderRadius: 8, marginBottom: 6 }}>
-                      <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-secondary)" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "var(--space-2)",
+                        flexWrap: "wrap",
+                        padding: "var(--space-2)",
+                        background: "var(--surface-muted)",
+                        borderRadius: "var(--radius-sm)",
+                        marginBottom: "var(--space-1)",
+                      }}
+                    >
+                      <span style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--text-secondary)" }}>
                         {selected.size} selected — set to
                       </span>
                       {LEVELS.map((l) => (
@@ -233,7 +286,7 @@ export default function DocStructureEditor({
                           variant="outlined"
                           size="small"
                           onClick={() => applyToSelected(l.value)}
-                          sx={{ fontSize: "0.78rem" }}
+                          sx={{ fontSize: "var(--font-size-xs)" }}
                         >
                           {l.label}
                         </Button>
@@ -242,14 +295,14 @@ export default function DocStructureEditor({
                         variant="text"
                         size="small"
                         onClick={() => setSelected(new Set())}
-                        sx={{ marginLeft: "auto", fontSize: "0.78rem" }}
+                        sx={{ marginLeft: "auto", fontSize: "var(--font-size-xs)" }}
                       >
                         Clear
                       </Button>
                     </div>
                   )}
 
-                  <div style={{ border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 8 }}>
+                  <div style={{ border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)" }}>
                     {paragraphs.map((p, i) => {
                       const lvl = levelOf(p);
                       const isHeading = /^Heading[1-9]$/.test(lvl);
@@ -257,7 +310,7 @@ export default function DocStructureEditor({
                       return (
                         <div
                           key={p.id}
-                          style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 10px", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", background: isSelected ? "var(--accent-surface)" : undefined }}
+                          style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", padding: "var(--space-1) var(--space-2)", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", background: isSelected ? "var(--accent-surface)" : undefined }}
                         >
                           <Checkbox
                             checked={isSelected}
@@ -268,7 +321,7 @@ export default function DocStructureEditor({
                           />
                           <span
                             title={p.text}
-                            style={{ flex: 1, minWidth: 0, fontSize: "0.85rem", color: isHeading ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: isHeading ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            style={{ flex: 1, minWidth: 0, fontSize: "var(--font-size-md)", color: isHeading ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: isHeading ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                           >
                             {p.text}
                           </span>
@@ -292,16 +345,16 @@ export default function DocStructureEditor({
                   </div>
                 </>
               )}
-              {error && <p style={{ color: "var(--danger)", fontSize: "0.85rem", marginTop: 10 }}>{error}</p>}
+              {error && <p style={{ color: "var(--danger)", fontSize: "var(--font-size-md)", marginTop: "var(--space-2)" }}>{error}</p>}
             </>
           )}
         </div>
 
-        <div style={{ padding: "12px 18px", borderTop: "1px solid var(--field-border, #e2e8f0)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: "0.8rem", color: headingCount > 0 ? "var(--success)" : "var(--warning)" }}>
+        <div style={{ padding: "var(--space-3) var(--space-4)", borderTop: "1px solid var(--field-border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-2)" }}>
+          <span style={{ fontSize: "var(--font-size-sm)", color: headingCount > 0 ? "var(--success)" : "var(--warning)" }}>
             {headingCount > 0 ? `${headingCount} heading${headingCount === 1 ? "" : "s"} marked` : "No headings marked yet"}
           </span>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
             <Button
               variant="outlined"
               size="small"

@@ -114,8 +114,8 @@ export function WorkflowListSidebar({
   const [folderPicker, setFolderPicker] = useState<{ id: string; anchor: HTMLElement } | null>(null);
 
   return (
-    <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: 4 }}>Workflows</div>
+    <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+      <div style={{ fontWeight: 600, fontSize: "var(--font-size-md)", marginBottom: "var(--space-1)" }}>Workflows</div>
       <TextField
         size="small"
         value={workflowSearch}
@@ -134,19 +134,19 @@ export function WorkflowListSidebar({
           below, which instead go `aria-disabled` + a no-op click handler so
           they stay reachable by keyboard and screen reader. */}
       {runningWorkflow && (
-        <p className={styles.fieldHint} role="status" style={{ margin: "0 0 4px", fontStyle: "italic" }}>
+        <p className={styles.fieldHint} role="status" style={{ margin: "0 0 var(--space-1)", fontStyle: "italic" }}>
           Switching workflows is locked while one is running.
         </p>
       )}
 
       {groups.length === 0 && !workflowSearch && (
-        <div style={{ fontSize: "0.85em", color: "var(--text-secondary)", padding: "4px 8px" }}>
+        <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", padding: "var(--space-1) var(--space-2)" }}>
           No workflows available.
         </div>
       )}
 
       {groups.length === 0 && workflowSearch && (
-        <div style={{ fontSize: "0.85em", color: "var(--text-secondary)", padding: "4px 8px" }}>
+        <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", padding: "var(--space-1) var(--space-2)" }}>
           No workflows match your search.
         </div>
       )}
@@ -172,21 +172,24 @@ export function WorkflowListSidebar({
               onClick={() => toggleGroup(group.title)}
               style={{
                 textAlign: "left",
-                padding: "6px 8px",
+                padding: "var(--space-2)",
                 borderRadius: 0,
                 border: "none",
                 cursor: "pointer",
                 background: "transparent",
                 color: "var(--text-secondary)",
-                fontWeight: 600,
-                fontSize: "0.75rem",
+                // Tracked-uppercase micro-label idiom, pinned exactly per
+                // the aesthetics-pass AM5 amendment (font-size-2xs / weight
+                // 700 / letter-spacing 0.06em / text-secondary, everywhere).
+                fontWeight: 700,
+                fontSize: "var(--font-size-2xs)",
                 display: "flex",
                 alignItems: "center",
-                gap: 6,
+                gap: "var(--space-2)",
                 width: "100%",
-                marginBottom: 2,
+                marginBottom: "var(--space-1)",
                 textTransform: "uppercase",
-                letterSpacing: "0.5px",
+                letterSpacing: "0.06em",
               }}
             >
               <span
@@ -232,7 +235,7 @@ export function WorkflowListSidebar({
                 onMouseLeave={() =>
                   setHoveredWorkflowId((prev) => (prev === w.id ? null : prev))
                 }
-                style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}
+                style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", marginBottom: "var(--space-1)" }}
               >
                 <button
                   type="button"
@@ -245,18 +248,18 @@ export function WorkflowListSidebar({
                   style={{
                     flex: 1,
                     textAlign: "left",
-                    padding: "6px 8px",
-                    borderRadius: 8,
+                    padding: "var(--space-2)",
+                    borderRadius: "var(--radius-sm)",
                     border: "none",
                     cursor: runningWorkflow ? "default" : "pointer",
                     background:
                       w.id === selectedWorkflowId ? "var(--field-background)" : "transparent",
                     color: "var(--text-primary)",
                     fontWeight: w.id === selectedWorkflowId ? 600 : 400,
-                    fontSize: "0.9em",
+                    fontSize: "var(--font-size-md)",
                     display: "flex",
                     alignItems: "center",
-                    gap: 6,
+                    gap: "var(--space-1)",
                     minWidth: 0,
                   }}
                 >
@@ -302,7 +305,7 @@ export function WorkflowListSidebar({
                     type="button"
                     onClick={(e) => setFolderPicker({ id: w.id, anchor: e.currentTarget })}
                     className={styles.ghBadge}
-                    style={{ padding: "4px 8px", fontSize: "0.75em", whiteSpace: "nowrap", flex: "none" }}
+                    style={{ padding: "var(--space-1) var(--space-2)", fontSize: "var(--font-size-xs)", whiteSpace: "nowrap", flex: "none" }}
                     title={`Put ${w.name} in a folder`}
                     aria-label={`Put ${w.name} in a folder`}
                   >
@@ -320,8 +323,8 @@ export function WorkflowListSidebar({
                     className={styles.ghBadge}
                     aria-disabled={runningWorkflow}
                     style={{
-                      padding: "4px 8px",
-                      fontSize: "0.75em",
+                      padding: "var(--space-1) var(--space-2)",
+                      fontSize: "var(--font-size-xs)",
                       whiteSpace: "nowrap",
                       flex: "none",
                       opacity: runningWorkflow ? 0.6 : 1,
@@ -346,7 +349,7 @@ export function WorkflowListSidebar({
           if (runningWorkflow) return;
           onNewWorkflow();
         }}
-        style={{ marginTop: 8, opacity: runningWorkflow ? 0.6 : 1 }}
+        style={{ marginTop: "var(--space-2)", opacity: runningWorkflow ? 0.6 : 1 }}
       >
         New workflow
       </Button>

@@ -84,12 +84,12 @@ export function ScheduleCsvCell({
         <span className={styles.courseResourceLabel}>Schedule of Topics</span>
         <span
           className={course.csvData && course.csvData.trim() ? styles.courseResourceValue : styles.courseResourceEmpty}
-          style={{ marginLeft: 8, fontSize: "0.85em" }}
+          style={{ marginLeft: "var(--space-2)", fontSize: "var(--font-size-xs)" }}
         >
           {course.csvData && course.csvData.trim() ? "Set" : "Not set"}
         </span>
         {course.csvData && course.csvData.trim() && (
-          <span className={styles.navBadge} style={{ marginLeft: 8 }}>
+          <span className={`${styles.navBadge} ${tableStyles.notifBadgeInline}`}>
             {(() => {
               const lines = course.csvData.split("\n").map((l) => l.trim()).filter(Boolean);
               const count = lines.length > 1 ? lines.length - 1 : lines.length;
@@ -120,7 +120,7 @@ export function ScheduleCsvCell({
             ref={csvUploadRef}
             type="file"
             accept=".csv,text/csv"
-            style={{ display: "none" }}
+            className={tableStyles.hiddenInput}
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void handleCsvUpload(f);
@@ -158,7 +158,7 @@ export function ScheduleCsvCell({
             <button type="button" className={styles.linkButton} disabled={uploadingCsv} onClick={() => csvUploadRef.current?.click()}>
               {uploadingCsv ? "Uploading…" : "Replace"}
             </button>
-            <button type="button" className={styles.linkButton} style={{ color: "var(--danger)" }} onClick={() => setCsvRemoveConfirm((v) => !v)}>
+            <button type="button" className={`${styles.linkButton} ${tableStyles.dangerLink}`} onClick={() => setCsvRemoveConfirm((v) => !v)}>
               {csvRemoveConfirm ? "Confirm" : "Remove"}
             </button>
             {canLms && (
@@ -173,7 +173,7 @@ export function ScheduleCsvCell({
             )}
           </div>
           {csvRemoveConfirm && (
-            <div style={{ marginTop: 8 }}>
+            <div className={tableStyles.mt2}>
               <Button variant="outlined" size="small" color="error" onClick={() => void removeCsv()}>
                 Delete CSV
               </Button>
@@ -186,7 +186,7 @@ export function ScheduleCsvCell({
             ref={csvUploadRef}
             type="file"
             accept=".csv,text/csv"
-            style={{ display: "none" }}
+            className={tableStyles.hiddenInput}
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void handleCsvUpload(f);
@@ -279,12 +279,12 @@ export function RubricCell({
         <span className={styles.courseResourceLabel}>Rubric</span>
         <span
           className={course.rubricData && course.rubricData.trim() ? styles.courseResourceValue : styles.courseResourceEmpty}
-          style={{ marginLeft: 8, fontSize: "0.85em" }}
+          style={{ marginLeft: "var(--space-2)", fontSize: "var(--font-size-xs)" }}
         >
           {course.rubricData && course.rubricData.trim() ? "Set" : "Not set"}
         </span>
         {course.rubricData && course.rubricData.trim() && (
-          <span className={styles.navBadge} style={{ marginLeft: 8 }}>
+          <span className={`${styles.navBadge} ${tableStyles.notifBadgeInline}`}>
             {(() => {
               const rows = parseGeneratedRubric(course.rubricData ?? "");
               const count = rows?.length ?? 0;
@@ -342,7 +342,7 @@ export function RubricCell({
             <button type="button" className={styles.linkButton} disabled={uploadingRubric} onClick={openRubricPicker}>
               {uploadingRubric ? "Uploading…" : "Replace"}
             </button>
-            <button type="button" className={styles.linkButton} style={{ color: "var(--danger)" }} onClick={() => setRubricRemoveConfirm((v) => !v)}>
+            <button type="button" className={`${styles.linkButton} ${tableStyles.dangerLink}`} onClick={() => setRubricRemoveConfirm((v) => !v)}>
               {rubricRemoveConfirm ? "Confirm" : "Remove"}
             </button>
             {canLms && (
@@ -357,7 +357,7 @@ export function RubricCell({
             )}
           </div>
           {rubricRemoveConfirm && (
-            <div style={{ marginTop: 8 }}>
+            <div className={tableStyles.mt2}>
               <Button variant="outlined" size="small" color="error" onClick={() => void removeRubric()}>
                 Delete rubric
               </Button>

@@ -66,10 +66,10 @@ export function PreviewExport({
 
   return (
     <div className={styles.field}>
-      <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 8 }}>
+      <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
         3. Preview & export
       </p>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
         <Button
           variant="outlined"
           size="small"
@@ -100,7 +100,7 @@ export function PreviewExport({
 
       {voError && <p className={styles.error}>{voError}</p>}
 
-      <div className={styles.ghActions} style={{ marginTop: 12, alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+      <div className={styles.ghActions} style={{ marginTop: "var(--space-3)", alignItems: "center", flexWrap: "wrap", gap: "var(--space-3)" }}>
         <Button
           variant="contained"
           size="small"
@@ -125,14 +125,14 @@ export function PreviewExport({
       </div>
 
       {previewing && (
-        <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+        <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 0" }}>
           Previewing with {voMode === "original" ? "the original audio" : voMode === "voiceover" ? "AI voiceover only" : voMode === "mix" ? "original audio plus voiceover" : "no audio"}.
           {(voMode === "voiceover" || voMode === "mix") && Object.keys(cueAudio).length === 0 && " No generated voices yet - captions will be silent. Use Generate all voices."}
         </p>
       )}
 
       {burning && (
-        <p className={styles.fieldHint} style={{ margin: "8px 0 0 0" }}>
+        <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 0" }}>
           The video plays through once (silently) while the captions are rendered in.
         </p>
       )}
@@ -140,16 +140,16 @@ export function PreviewExport({
       {burnError && <p className={styles.error}>{burnError}</p>}
 
       {burned && (
-        <div className={styles.field} style={{ marginTop: 12 }}>
+        <div className={styles.field} style={{ marginTop: "var(--space-3)" }}>
           <video
             key={burned.url}
             controls
             playsInline
             src={burned.url}
-            style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, background: "#0f172a" }}
+            style={{ maxWidth: "100%", maxHeight: 320, borderRadius: "var(--radius-md)", background: "var(--navy)" }}
           />
           {burnedRow && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: "var(--space-2)" }}>
               <TextField
                 size="small"
                 label="Name"
@@ -170,16 +170,16 @@ export function PreviewExport({
                     }
                   }
                 }}
-                style={{ marginRight: 8 }}
+                style={{ marginRight: "var(--space-2)" }}
               />
               {renameNote && (
-                <p className={styles.fieldHint} style={{ margin: 0, marginTop: 4 }}>
+                <p className={styles.fieldHint} style={{ margin: 0, marginTop: "var(--space-1)" }}>
                   {renameNote}
                 </p>
               )}
             </div>
           )}
-          <div className={styles.ghActions} style={{ marginTop: 8 }}>
+          <div className={styles.ghActions} style={{ marginTop: "var(--space-2)" }}>
             <Button
               variant="contained"
               size="small"

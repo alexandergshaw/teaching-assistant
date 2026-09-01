@@ -89,7 +89,7 @@ export function RenameModulesModal({
           Module 1 becomes Week 1.
         </p>
 
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
           <div className={styles.field} style={{ flex: "1 1 200px" }}>
             <TextField
               id="rename-find"
@@ -123,7 +123,7 @@ export function RenameModulesModal({
           <div
             style={{
               border: "1px solid var(--field-border)",
-              borderRadius: 10,
+              borderRadius: "var(--radius-sm)",
               overflow: "hidden",
               maxHeight: "40vh",
               overflowY: "auto",
@@ -138,8 +138,8 @@ export function RenameModulesModal({
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    gap: 12,
-                    padding: "8px 12px",
+                    gap: "var(--space-3)",
+                    padding: "var(--space-2) var(--space-3)",
                     borderTop: i === 0 ? "none" : "1px solid var(--field-border)",
                     opacity: willChange ? 1 : 0.5,
                   }}
@@ -154,7 +154,7 @@ export function RenameModulesModal({
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
           <Button
             variant="contained"
             size="small"

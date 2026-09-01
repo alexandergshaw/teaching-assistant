@@ -69,7 +69,7 @@ export function CronHeartbeatStatus() {
     case "healthy":
     case "never":
       return (
-        <p className={styles.fieldHint} style={{ margin: "0 0 4px" }}>
+        <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)" }}>
           {status.message}
         </p>
       );
@@ -83,7 +83,7 @@ export function CronHeartbeatStatus() {
     // visible.
     case "late":
       return (
-        <p role="status" aria-live="polite" className={styles.fieldHint} style={{ margin: "0 0 4px", color: "var(--warning-ink)" }}>
+        <p role="status" aria-live="polite" className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", color: "var(--warning-ink)" }}>
           {status.message}
         </p>
       );
@@ -105,7 +105,7 @@ export function CronHeartbeatStatus() {
     case "failing":
     case "stalled":
       return (
-        <p role="alert" className={styles.error} style={{ margin: "0 0 4px" }}>
+        <p role="alert" className={styles.error} style={{ margin: "0 0 var(--space-1)" }}>
           {status.message}
         </p>
       );

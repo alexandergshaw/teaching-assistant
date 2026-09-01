@@ -180,9 +180,9 @@ interface WorkflowPanelProps {
  * TriggerEditForm's many internal controls. */
 function LockableSection({ locked, reason, children }: { locked: boolean; reason: string; children: ReactNode }) {
   return (
-    <div style={{ padding: "10px 0 4px" }}>
+    <div style={{ padding: "var(--space-2) 0 var(--space-1)" }}>
       {locked && (
-        <p className={styles.fieldHint} style={{ margin: "0 0 10px 0", fontStyle: "italic" }}>
+        <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontStyle: "italic" }}>
           {reason}
         </p>
       )}
@@ -334,11 +334,11 @@ export function WorkflowPanel({
       {/* Shared header - name/description/scope badge used to be rendered
           once by Build (description) and once by Run (name + description +
           scope badge); now rendered exactly once (AC2). */}
-      <div style={{ marginBottom: 12 }}>
-        <h2 style={{ fontSize: "1rem", margin: "0 0 4px 0" }}>{selectedDef.name}</h2>
+      <div style={{ marginBottom: "var(--space-3)" }}>
+        <h2 style={{ fontSize: "var(--font-size-lg)", margin: "0 0 var(--space-1) 0" }}>{selectedDef.name}</h2>
         {selectedDef.description && <WorkflowDescription description={selectedDef.description} />}
         {describeWorkflowScope(selectedDef.scope) && (
-          <div className={styles.ghBadge} style={{ display: "inline-block", fontSize: "0.85em", padding: "4px 8px" }}>
+          <div className={styles.ghBadge} style={{ display: "inline-block", fontSize: "var(--font-size-md)", padding: "var(--space-1) var(--space-2)" }}>
             {/* B3(c): a "*" scope used to read "all Canvas courses" with no
                 count - resolved here from the SAME option lists the run form
                 already loaded (fieldOptions, below), so the badge answers
@@ -370,7 +370,7 @@ export function WorkflowPanel({
       {stepsUiOpen && (
         <LockableSection locked={editingLocked} reason="Editing steps is locked while this workflow is running.">
           {selectedDef.preset && selectedDef.presetOverride?.diverged && (
-            <p className={styles.error} style={{ marginBottom: 8 }}>
+            <p className={styles.error} style={{ marginBottom: "var(--space-2)" }}>
               This workflow has diverged from its preset: steps were added,
               removed, or reordered, so it now has its own step list and will
               NOT automatically pick up new preset steps. Reset to shipped to
@@ -378,13 +378,13 @@ export function WorkflowPanel({
             </p>
           )}
           {selectedDef.preset && selectedDef.presetOverride && !selectedDef.presetOverride.diverged && (
-            <p className={styles.fieldHint} style={{ marginBottom: 8 }}>
+            <p className={styles.fieldHint} style={{ marginBottom: "var(--space-2)" }}>
               This preset has been customized - your changes merge with any
               future preset updates automatically.
             </p>
           )}
           {selectedDef.preset && !selectedDef.presetOverride && (
-            <p className={styles.fieldHint} style={{ marginBottom: 8 }}>
+            <p className={styles.fieldHint} style={{ marginBottom: "var(--space-2)" }}>
               This is a preset - editing scope or steps below saves your
               changes directly to it, for you only.
             </p>
@@ -401,7 +401,7 @@ export function WorkflowPanel({
 
           {!editing && (
             <div className={styles.fieldHint}>
-              <div style={{ margin: "6px 0" }}>
+              <div style={{ margin: "var(--space-2) 0" }}>
                 Turn a step off to skip it in your own runs - this only
                 affects you; the workflow itself (and other users) is
                 unchanged.
@@ -433,7 +433,7 @@ export function WorkflowPanel({
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
             <Button size="small" variant="outlined" onClick={() => setEditing(true)}>
               Edit
             </Button>
@@ -557,7 +557,7 @@ export function WorkflowPanel({
           down as `afterPrimary` so they land right after the primary column
           and before the deferred secondary tabs - reaching Run never costs
           a scroll past settings most runs never touch. */}
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: "var(--space-4)" }}>
         <RunFormFields
           fields={visibleRuntimeFields}
           values={values}
@@ -569,7 +569,7 @@ export function WorkflowPanel({
             <>
               {validationError && <p className={styles.error}>{validationError}</p>}
 
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+              <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
                 <Button
                   variant="contained"
                   onClick={onRunClick}
@@ -596,9 +596,9 @@ export function WorkflowPanel({
               {runState.length > 0 && (
                 <div className={panelStyles.runProgressLayout}>
                 <div className={panelStyles.runProgressMain}>
-                  <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
+                  <h2 style={{ fontSize: "var(--font-size-lg)", marginBottom: "var(--space-4)" }}>Run Progress</h2>
                   {(runState.some((grp) => grp.institution !== null) || isCourseFanoutRun) && (
-                    <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
+                    <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-3) 0" }}>
                       {/* C1: a course fan-out already reports only SETTLED
                           courses via countOkCourses (courseStatus is set
                           once a course actually finishes - see attended-
@@ -620,7 +620,7 @@ export function WorkflowPanel({
                       control an instructor running against the wrong single
                       course previously had no way to reach at all. */}
                   {running && (
-                    <div style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ marginBottom: "var(--space-3)", display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
                       {isCourseFanoutRun && (
                         <Button size="small" variant="outlined" onClick={onStopAfterCourse} disabled={stopRequested}>
                           {stopRequested ? "Stopping after this course..." : "Stop after this course"}
@@ -642,7 +642,7 @@ export function WorkflowPanel({
                     </div>
                   )}
                   {!running && abortRequested && (
-                    <p role="status" className={styles.error} style={{ margin: "0 0 12px 0" }}>
+                    <p role="status" className={styles.error} style={{ margin: "0 0 var(--space-3) 0" }}>
                       Stopped before finishing - steps already completed were
                       left as they were (not undone); every step after the
                       stop was skipped, not run. This run&apos;s record shows
@@ -652,12 +652,12 @@ export function WorkflowPanel({
                   {runState.map((group, g) => (
                     <Fragment key={group.courseId ?? group.institution ?? g}>
                       {group.institution && !group.courseId && (
-                        <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
+                        <h3 style={{ fontSize: "var(--font-size-md)", fontWeight: 600, margin: g === 0 ? "0 0 var(--space-1) 0" : "var(--space-5) 0 var(--space-1) 0", color: "var(--hint-text)" }}>
                           {group.institution}
                         </h3>
                       )}
                       {group.courseId && (
-                        <h3 style={{ fontSize: "0.85rem", fontWeight: 600, margin: g === 0 ? "0 0 4px 0" : "20px 0 4px 0", color: "var(--hint-text)" }}>
+                        <h3 style={{ fontSize: "var(--font-size-md)", fontWeight: 600, margin: g === 0 ? "0 0 var(--space-1) 0" : "var(--space-5) 0 var(--space-1) 0", color: "var(--hint-text)" }}>
                           Course {g + 1} of {runState.length}: {composedGroupLabel(group.courseName ?? "", group.institution)}
                         </h3>
                       )}
@@ -673,9 +673,9 @@ export function WorkflowPanel({
                             summary={state.summary ? <SummaryView summary={state.summary} /> : undefined}
                           >
                             {runPause && runPause.groupIndex === g && runPause.stepIndex === i && (
-                              <div style={{ marginTop: 12 }}>
+                              <div style={{ marginTop: "var(--space-3)" }}>
                                 <p className={styles.fieldHint}>{runPause.message}</p>
-                                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                                <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
                                   <Button
                                     size="small"
                                     variant="contained"
@@ -722,7 +722,7 @@ export function WorkflowPanel({
                   ))}
 
                   {!running && isCourseFanoutRun && (
-                    <div style={{ marginTop: 20 }}>
+                    <div style={{ marginTop: "var(--space-5)" }}>
                       {runState.map((group, g) => {
                         const status = group.courseStatus ?? "skipped";
                         const badgeClass =
@@ -735,7 +735,7 @@ export function WorkflowPanel({
                               display: "flex",
                               justifyContent: "space-between",
                               alignItems: "center",
-                              padding: "6px 0",
+                              padding: "var(--space-2) 0",
                               borderBottom: "1px solid var(--field-border)",
                             }}
                           >
@@ -744,7 +744,7 @@ export function WorkflowPanel({
                           </div>
                         );
                       })}
-                      <p className={styles.fieldHint} style={{ marginTop: 12, fontWeight: 600 }}>
+                      <p className={styles.fieldHint} style={{ marginTop: "var(--space-3)", fontWeight: 600 }}>
                         {buildCourseFanoutSummary(
                           runState.map((group) => ({
                             courseId: group.courseId ?? "",
@@ -777,7 +777,7 @@ export function WorkflowPanel({
         Run history
       </DisclosureToggle>
       {runHistoryOpen && (
-        <div style={{ padding: "10px 0 4px" }}>
+        <div style={{ padding: "var(--space-2) 0 var(--space-1)" }}>
           <AutomationRunsSection
             workflowId={selectedDef.id}
             workflowName={selectedDef.name}

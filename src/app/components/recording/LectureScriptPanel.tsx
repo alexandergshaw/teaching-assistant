@@ -25,8 +25,8 @@ export default function LectureScriptPanel({
     <details className={styles.adaptDisclosure}>
       <summary>Lecture script &amp; teleprompter</summary>
       <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: 12 }}>Draft a teleprompter-ready script with AI, edit it, then read it while you record.</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-3)" }}>Draft a teleprompter-ready script with AI, edit it, then read it while you record.</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
           <TextField
             label="Topic"
             value={scriptTopic}
@@ -70,7 +70,7 @@ export default function LectureScriptPanel({
           minRows={2}
           fullWidth
           size="small"
-          sx={{ marginBottom: 12 }}
+          sx={{ marginBottom: "var(--space-3)" }}
         />
         {scriptError && <p className={styles.error}>{scriptError}</p>}
         {script && (
@@ -82,9 +82,9 @@ export default function LectureScriptPanel({
               value={script}
               onChange={(e) => setScript(e.target.value)}
               size="small"
-              sx={{ marginBottom: 12 }}
+              sx={{ marginBottom: "var(--space-3)" }}
             />
-            <div className={styles.ghActions} style={{ alignItems: "center", marginBottom: 16 }}>
+            <div className={styles.ghActions} style={{ alignItems: "center", marginBottom: "var(--space-4)" }}>
               <span className={styles.ghMeta}>{script.trim().split(/\s+/).length} words · ~{Math.max(1, Math.round(script.trim().split(/\s+/).length / 140))} min at speaking pace</span>
               <Button
                 variant="text"

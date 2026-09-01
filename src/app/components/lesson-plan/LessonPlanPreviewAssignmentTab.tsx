@@ -145,7 +145,7 @@ export default function LessonPlanPreviewAssignmentTab({
                 <li key={index} className={styles.assignmentStepCard}>
                   <div
                     className={styles.fieldEditActions}
-                    style={{ justifyContent: "flex-end", marginBottom: 4 }}
+                    style={{ justifyContent: "flex-end", marginBottom: "var(--space-1)" }}
                   >
                     <IconButton
                       size="small"

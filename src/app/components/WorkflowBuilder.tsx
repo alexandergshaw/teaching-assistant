@@ -359,7 +359,7 @@ export default function WorkflowBuilder({
         <div
           style={{
             display: "flex",
-            gap: 8,
+            gap: "var(--space-2)",
             flexWrap: "wrap",
             alignItems: "flex-end",
           }}
@@ -392,7 +392,7 @@ export default function WorkflowBuilder({
                   <li {...(props as React.HTMLAttributes<HTMLLIElement>)} key={o.type}>
                     <span style={{ display: "flex", flexDirection: "column" }}>
                       <span>{o.name}</span>
-                      <span style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+                      <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>
                         {o.description}
                       </span>
                     </span>
@@ -465,10 +465,10 @@ export default function WorkflowBuilder({
         {includeError && (
           <div
             style={{
-              color: "var(--error-text, #d32f2f)",
-              marginTop: 8,
-              marginBottom: 8,
-              fontSize: "0.875rem",
+              color: "var(--danger)",
+              marginTop: "var(--space-2)",
+              marginBottom: "var(--space-2)",
+              fontSize: "var(--font-size-md)",
             }}
           >
             {includeError}
@@ -477,8 +477,8 @@ export default function WorkflowBuilder({
 
         <div
           style={{
-            marginTop: 8,
-            fontSize: "0.875rem",
+            marginTop: "var(--space-2)",
+            fontSize: "var(--font-size-md)",
             opacity: 0.75,
             maxWidth: "500px",
           }}
@@ -491,7 +491,7 @@ export default function WorkflowBuilder({
           variant="contained"
           size="small"
           onClick={onDone}
-          style={{ marginTop: 8 }}
+          style={{ marginTop: "var(--space-2)" }}
         >
           Done
         </Button>

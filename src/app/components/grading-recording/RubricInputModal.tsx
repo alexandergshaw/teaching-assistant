@@ -271,10 +271,10 @@ export function RubricInputModal({
           onDrop={handleDrop}
           style={{
             border: `1px dashed ${dragOver ? "var(--accent)" : "var(--field-border)"}`,
-            borderRadius: 10,
-            padding: 14,
+            borderRadius: "var(--radius-sm)",
+            padding: "var(--space-3)",
             textAlign: "center",
-            marginBottom: 16,
+            marginBottom: "var(--space-4)",
           }}
         >
           <label className={styles.downloadButton} style={{ cursor: busy ? "not-allowed" : "pointer" }}>
@@ -289,7 +289,7 @@ export function RubricInputModal({
               aria-describedby={`${textareaId}-file-hint`}
             />
           </label>
-          <span id={`${textareaId}-file-hint`} className={styles.fieldHint} style={{ marginLeft: 8 }}>
+          <span id={`${textareaId}-file-hint`} className={styles.fieldHint} style={{ marginLeft: "var(--space-2)" }}>
             or drop it here - .docx, .pdf, .txt or .md, up to 25 MB
           </span>
         </div>

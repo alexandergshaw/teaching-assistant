@@ -72,7 +72,7 @@
   top: calc(var(--topbar-height, 58px) + var(--in-session-banner-height, 0px) + 45px);
   z-index: 20;
   background: var(--card-background);
-  padding-bottom: 4px;
+  padding-bottom: var(--space-1);
 }
 
 .scroller {
@@ -86,24 +86,30 @@
      viewport than the banner's actual height warrants. */
   max-height: calc(100vh - var(--topbar-height, 58px) - var(--in-session-banner-height, 0px) - 160px);
   overflow: auto;
-  border: 1px solid var(--field-border);
-  border-radius: 14px;
+  /* AC6: the scroller frame is structural separation, not an input
+     affordance - --border-soft, not --field-border. */
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
 }
 
+/* AC10/aesthetics pass: one row height, one cell padding for the whole
+   table. font-size-sm (13px) is the token this scale reserves for dense
+   table cells - see globals.css's token table. Padding snaps 9px/13px to
+   the nearest --space-* step (8px/12px). */
 .table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm);
 }
 
 .table th,
 .table td {
-  padding: 9px 13px;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid var(--field-border);
-  border-right: 1px solid var(--field-border);
+  border-bottom: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border-soft);
 }
 
 .table th:last-child,
@@ -117,9 +123,12 @@
 
 .table th {
   font-weight: 700;
-  font-size: 0.78rem;
+  /* AM5 (supersedes AC10's font-size-xs): the tracked-uppercase micro-label
+     idiom is pinned exactly - font-size-2xs, weight 700, letter-spacing
+     0.06em, text-secondary - everywhere it appears, not chosen per surface. */
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
   color: var(--text-secondary);
   white-space: nowrap;
@@ -140,6 +149,26 @@
 
 /* Frozen name cell (body). Sits below the sticky header (z-index 2/3) but
    above ordinary body cells while the table scrolls horizontally. */
+/* Cursor affordance, folded into one rule (Y2): sort-triggering <th>s and
+   the click-to-edit <td>s of most editable columns share the same cursor. */
+.clickToEdit,
+.sortableHeader {
+  cursor: pointer;
+}
+
+.sortableHeader {
+  user-select: none;
+}
+
+/* The label span inside a sortable header - clears room for the cellMenu
+   trigger (F4) that sits to its right, 18px snapped to the nearest
+   --space-* step. */
+.headerLabel {
+  display: inline-flex;
+  align-items: center;
+  padding-right: var(--space-4);
+}
+
 .stickyName {
   position: sticky;
   left: 0;
@@ -270,14 +299,21 @@
    triggers is what restores pointer-events: auto once it does. */
 .cellMenu {
   position: absolute;
+  /* top/right are POSITION offsets, not padding/margin/gap - AM4 excludes
+     top/right/bottom/left from AC3's token floor, so these stay literal
+     and sub-4px on purpose (this trigger must sit flush in a cell's
+     corner, not visibly inset by a whole spacing step). */
   top: 2px;
   right: 2px;
   opacity: 0;
   pointer-events: none;
   color: var(--text-secondary);
   background: var(--card-background);
-  border-radius: 6px;
-  padding: 1px 2px 1px 6px;
+  border-radius: var(--radius-xs);
+  /* AM20: the floor for any non-zero padding is --space-1 - the original
+     1px/2px/1px/6px values (all sub-floor or, for 6px, a tie) all land on
+     --space-1 once floored/rounded down. */
+  padding: var(--space-1);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -364,16 +400,18 @@
    + one type selector each), so nothing here beats the earlier rules by
    selector strength alone - only by coming later in the file. */
 .rosterProvisionPanel {
-  margin-top: 6px;
+  /* Y3: the one 6px outlier - every other 6px value in the app rounds down
+     to --space-1; this one had drifted to --space-2. */
+  margin-top: var(--space-1);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .rosterSettingsStrip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-start;
 }
 
@@ -385,8 +423,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  font-size: 0.8rem;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
@@ -397,8 +435,8 @@
   max-width: 100%;
   max-height: 320px;
   overflow: auto;
-  border: 1px solid var(--field-border);
-  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
 }
 
 .rosterTable {
@@ -406,17 +444,17 @@
   min-width: 520px;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.8rem;
+  font-size: var(--font-size-sm);
   background: var(--card-background);
 }
 
 .rosterTable th,
 .rosterTable td {
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid var(--field-border);
-  border-right: 1px solid var(--field-border);
+  border-bottom: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border-soft);
   background: var(--card-background);
   white-space: normal;
 }
@@ -443,9 +481,10 @@
    sticky/z-index-1 misbehavior on body cells for free. */
 .rosterTable thead th {
   font-weight: 700;
-  font-size: 0.66rem;
+  /* AM5: the same pinned micro-label idiom as .table th above. */
+  font-size: var(--font-size-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--field-background) 90%, var(--accent) 10%);
   position: sticky;
@@ -490,23 +529,410 @@
 .rosterActionCell {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   align-items: flex-start;
 }
 
 .rosterActionButtons {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .rosterActionReason,
 .rosterOutcome {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
 
 .rosterOutcome {
   font-style: italic;
+}
+
+/* --------------------------------------------------------------------
+   Aesthetics pass (2026-09-01, Group D): shared utility classes used
+   across the cell editors in this folder, replacing per-file inline
+   `style={{...}}` objects that were choosing spacing/radius/font-size
+   values ad hoc. Every value here is a token - see
+   docs/aesthetics-pass-acceptance-criteria.md. Adding classes here is
+   expected (page-module-css-classes.test.ts only forbids REMOVING one).
+   -------------------------------------------------------------------- */
+
+/* One popover shell (AC "every cell editor popover popover uses ONE
+   popover shell"): CastletopCell/FilesCell/MiscFilesCell's Manage
+   popovers all rendered their own identical `{ padding: 16, width: 360,
+   maxWidth: "90vw" }` object - now one class. Width/max-width are layout
+   sizing, not spacing, so they stay literal (AC3 only governs
+   padding/margin/gap). */
+.popoverBody {
+  padding: var(--space-4);
+  width: 360px;
+  max-width: 90vw;
+}
+
+/* Generic flex stacks/rows - the single most repeated inline-style shape
+   across every cell file (column stacks and wrapping button rows at a
+   handful of gap sizes). */
+.stackXs,
+.stackSm,
+.stackMd {
+  display: flex;
+  flex-direction: column;
+}
+.stackXs { gap: var(--space-1); }
+.stackSm { gap: var(--space-2); }
+.stackMd { gap: var(--space-3); }
+
+.rowXs,
+.rowSm,
+.rowStart {
+  display: flex;
+  flex-wrap: wrap;
+  /* AM4: 6px is a tie between --space-1 and --space-2 - ties round DOWN. */
+  gap: var(--space-1);
+}
+.rowSm { gap: var(--space-2); }
+.rowXs,
+.rowSm { align-items: center; }
+.rowStart { align-items: flex-start; }
+
+/* The per-file "Manage" popover's uploaded-file list row - repeated
+   (with a bug: `var(--border-color)`, which globals.css never defines,
+   so every one of these silently rendered borderless) across
+   CastletopCell, MiscFilesCell, FilesCell (x2) and WeeklyChecklistCell's
+   own item/divider rows. --border-soft is the correct structural-divider
+   token (AC6). */
+.fileListRow {
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.fileRowHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-size-sm);
+}
+
+.fileRowName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileRowMeta {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  margin-left: var(--space-2);
+}
+
+.fileRowActions {
+  /* AM4: original 6px - a tie between --space-1/--space-2 - rounds DOWN. */
+  margin-top: var(--space-1);
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* A destructive-confirm sub-row (Delete/Cancel button pair shown under a
+   Remove click) - always margin-top: space-2 in every cell that has one. */
+.confirmRow {
+  margin-top: var(--space-2);
+}
+
+/* Compose with styles.linkButton (page.module.css) to keep a destructive
+   text-button red. .dangerText is the same colour for the two role="alert"
+   paragraphs (RecommendTextbooksModal.tsx, TextbookPhotoModal.tsx) that
+   render no link at all - .dangerLink's name lied for those two call sites. */
+.dangerLink,
+.dangerText {
+  color: var(--danger);
+}
+
+.errorNote {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--danger);
+}
+
+/* Same danger-coloured body text as .errorNote but with no margin -
+   SyllabusUploadControl.tsx's error line sits inside a gapped flex stack,
+   which already provides the spacing between it and its sibling. */
+.errorTextPlain {
+  color: var(--danger);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+}
+
+.noteText {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+/* Small metadata text (file sizes, timestamps) that used to be set as
+   0.85em/0.9em ad hoc - font-size-xs/sm are this scale's own tokens for
+   exactly that use ("badges, chips, table meta, helper text"). */
+.metaCompact {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.mt1 { margin-top: var(--space-1); }
+.mt2 { margin-top: var(--space-2); }
+.mt3 { margin-top: var(--space-3); }
+.mt4 { margin-top: var(--space-4); }
+.mb3 { margin-bottom: var(--space-3); }
+.alignStart { align-items: flex-start; }
+.hiddenInput { display: none; }
+
+.exportCountMeta {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+/* RosterCell.tsx / StudentReposCell's row-editor grid (header row, scroll
+   body, one editable row) - gap:6 snapped to the smaller step (--space-1)
+   since this is a tight control cluster, not a between-sections gap. */
+.editorHeadRow {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.editorRowsScroll {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.editorRow {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.flex1 {
+  flex: 1;
+}
+
+.w150 {
+  width: 150px;
+}
+
+/* WeeklyChecklistCell.tsx's inline checklist body. */
+.calendarBlockerListLoose {
+  /* AM4: original 6px - a tie - rounds DOWN to --space-1. */
+  margin-top: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.badgeWrap {
+  display: inline-block;
+  white-space: normal;
+  text-align: left;
+}
+
+/* --item-list-max-height is set inline from ITEM_LIST_MAX_HEIGHT
+   (WeeklyChecklistCell.tsx) - a fixed design constant, not per-row data,
+   but threaded through a custom property rather than baked into this
+   stylesheet so the two stay a single source of truth. */
+.itemList {
+  max-height: var(--item-list-max-height, 260px);
+  overflow-y: auto;
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.checklistItemRow {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.itemHeadRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.itemBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.itemLabel {
+  cursor: pointer;
+  word-break: break-word;
+}
+
+.overdueText {
+  color: var(--danger);
+  font-weight: 600;
+  font-size: var(--font-size-xs);
+}
+
+.deadlineControlsRow {
+  margin-top: var(--space-1);
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.itemButtonsRow {
+  margin-top: var(--space-1);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.addItemRow {
+  margin-top: var(--space-3);
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.mt1Only {
+  margin: var(--space-1) 0 0;
+}
+
+.resetSection {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+
+.issueLine {
+  margin: var(--space-1) 0;
+  color: var(--danger);
+}
+
+.mt2Only {
+  margin: var(--space-2) 0 0;
+}
+
+/* A small square thumbnail (photo preview / PDF placeholder), and its
+   "no image" variant - TextbookPhotoModal's one dynamic-width case
+   (drag-active border/background) stays inline; everything static here
+   does not. */
+.thumbImage {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--field-border);
+}
+
+.thumbPlaceholder {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--field-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Nearest token to the original 0.7rem literal (TextbookPhotoModal's PDF
+     placeholder). */
+  font-size: var(--font-size-2xs);
+  color: var(--text-secondary);
+}
+
+/* A drop zone whose border/background genuinely depend on drag state
+   (dynamic, kept inline in TextbookPhotoModal.tsx) - this class carries
+   only the static shell shared by both states. */
+.dropZone {
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+/* A primary, filled action button rendered as a plain <button> rather
+   than MUI's Button (SyllabusUploadControl predates this feature's MUI
+   Button convention) - previously a hand-rolled literal-px/hex-free but
+   token-free style object; now the one filled/accent treatment every
+   other primary action in this table already uses via MUI's
+   variant="contained". Kept as a CSS class (not switched to MUI Button)
+   to stay a pure presentation change - no prop/behaviour touched. */
+.primaryButton {
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  /* AM11: disabled is opacity 0.5 + not-allowed, never a second value. */
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* F4/AC41 "Copy all" / F3/AC27-28 copy-to-other-cells result panels
+   (CoursesTable.tsx) - the shared outer wrapper and the fallback textarea
+   shown when the Clipboard API is unavailable. */
+.copyStatusBlock {
+  /* AM4: original "4px 0 10px" - 10px is a tie, rounds DOWN to --space-2. */
+  margin: var(--space-1) 0 var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.copyFallbackArea {
+  width: 100%;
+  min-height: 100px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* The two always-mounted result lists (per-course copy errors, and
+   checklist calendar-sync notices) under the copy/undo summary. */
+.resultList {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.copyValueLine {
+  margin: 0 0 var(--space-3);
+}
+
+/* CourseRow.tsx's frozen Name cell and action cell. */
+.courseNameStrong {
+  font-weight: 600;
+}
+
+.notifBadgeInline {
+  margin-left: var(--space-2);
+}
+
+.calendarBlockerList {
+  margin-top: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.badgeBlock {
+  display: inline-block;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
 }

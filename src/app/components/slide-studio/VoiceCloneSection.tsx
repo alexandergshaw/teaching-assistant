@@ -28,7 +28,7 @@ export function VoiceCloneSection({
   } = voiceCloning;
 
   return (
-    <details className={styles.adaptDisclosure} style={{ marginTop: 16 }}>
+    <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-4)" }}>
       <summary>My voice clone</summary>
       <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
         {cloneVoiceId ? (
@@ -41,7 +41,7 @@ export function VoiceCloneSection({
             Or upload existing audio files:
           </p>
         )}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
           <TextField size="small" label="Voice name" value={cloneName} onChange={(e) => setCloneName(e.target.value)} sx={{ flex: "1 1 180px" }} disabled={cloneBusy || !voiceReady} />
           <Button variant="outlined" size="small" disabled={cloneBusy || !voiceReady || !cloneName.trim()} onClick={() => cloneFileRef.current?.click()}>
             {cloneBusy ? "Creating..." : "Upload samples & create"}

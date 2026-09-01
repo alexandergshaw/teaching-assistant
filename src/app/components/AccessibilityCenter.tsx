@@ -305,8 +305,13 @@ export default function AccessibilityCenter() {
     bottom: 0,
     width: "min(440px, 96vw)",
     background: "var(--field-background)",
-    borderLeft: "1px solid var(--field-border, #cbd5e1)",
-    boxShadow: "-8px 0 28px rgba(15,23,42,0.18)",
+    borderLeft: "1px solid var(--field-border)",
+    // No directional token exists for a side-sliding panel's shadow (the
+    // closed shadow set is symmetric, meant for things that float centered
+    // - see docs/aesthetics-pass-acceptance-criteria.md's elevation table);
+    // --shadow-lg is the nearest tier (this panel is a floating, modal-like
+    // surface) and is reported as a token gap rather than left as a literal.
+    boxShadow: "var(--shadow-lg)",
     zIndex: 10000,
     display: "flex",
     flexDirection: "column",
@@ -322,7 +327,9 @@ export default function AccessibilityCenter() {
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(15,23,42,0.32)",
+          // rgba(15,23,42,x) is exactly --text-primary (#0f172a) - expressed
+          // as a color-mix over the token instead of the raw triplet (AC5).
+          background: "color-mix(in srgb, var(--text-primary) 32%, transparent)",
           zIndex: 9999,
           opacity: shown ? 1 : 0,
           transition: `opacity ${TRANSITION_MS}ms ease`,
@@ -331,20 +338,21 @@ export default function AccessibilityCenter() {
       />
       <aside style={panel} role="dialog" aria-modal="true" aria-label="Accessibility Center" tabIndex={-1} ref={containerRef}>
         {/* Header */}
-        <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--field-border, #e2e8f0)" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ padding: "var(--space-4)", borderBottom: "1px solid var(--field-border)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-3)" }}>
             <div style={{ minWidth: 0 }}>
-              <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--text-primary)" }}>Accessibility</h2>
+              {/* AC7: a top-level panel's title is --font-size-xl. */}
+              <h2 style={{ margin: 0, fontSize: "var(--font-size-xl)", fontWeight: 700, color: "var(--text-primary)" }}>Accessibility</h2>
               {a11y.hasCourse && courseLabel && (
                 <div
                   title={courseLabel}
-                  style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}
+                  style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", marginTop: "var(--space-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}
                 >
                   {courseLabel}
                 </div>
               )}
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: "var(--space-2)" }}>
               <Button
                 variant="outlined"
                 size="small"
@@ -381,24 +389,24 @@ export default function AccessibilityCenter() {
               </Button>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: "0.84rem", color: "var(--text-secondary)" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-2)", fontSize: "var(--font-size-sm)", color: "var(--text-secondary)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}>
               <Dot color={SEVERITY.error.color} /> {a11y.errorCount} errors
             </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}>
               <Dot color={SEVERITY.warning.color} /> {a11y.warningCount} warnings
             </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}>
               <Dot color={SEVERITY.suggestion.color} /> {a11y.suggestionCount} suggestions
             </span>
           </div>
 
           {bulkItems.length > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--field-border, #eef2f7)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap", marginTop: "var(--space-3)", paddingTop: "var(--space-2)", borderTop: "1px solid var(--field-border)" }}>
               <FormControlLabel
                 control={<Checkbox checked={allSelected} onChange={toggleSelectAll} size="small" aria-label="Select all fixable items" />}
                 label={selectedCount > 0 ? `${selectedCount} selected` : `Select all (${bulkItems.length})`}
-                sx={{ fontSize: "0.8rem" }}
+                sx={{ fontSize: "var(--font-size-sm)" }}
               />
               <Button
                 variant="contained"
@@ -406,7 +414,7 @@ export default function AccessibilityCenter() {
                 onClick={fixSelected}
                 disabled={selectedCount === 0 || !!fixing}
                 title="Auto-fix the selected items (AI alt/link text, headings, titles, language) and save to Canvas without opening an editor"
-                sx={{ marginLeft: "auto", fontSize: "0.8rem" }}
+                sx={{ marginLeft: "auto", fontSize: "var(--font-size-sm)" }}
               >
                 {fixing ? `Fixing ${fixing.done}/${fixing.total}...` : "Fix selected without preview"}
               </Button>
@@ -415,17 +423,17 @@ export default function AccessibilityCenter() {
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "var(--space-3)" }}>
           {!a11y.hasCourse ? (
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+            <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>
               Open a course under LMS Integration to scan it for accessibility issues.
             </p>
           ) : a11y.status === "scanning" && flagged.length === 0 ? (
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Scanning the course…</p>
+            <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>Scanning the course…</p>
           ) : a11y.status === "error" ? (
-            <p style={{ color: "var(--danger)", fontSize: "0.9rem" }}>{a11y.error ?? "Scan failed."}</p>
+            <p style={{ color: "var(--danger)", fontSize: "var(--font-size-md)" }}>{a11y.error ?? "Scan failed."}</p>
           ) : flagged.length === 0 ? (
-            <p style={{ color: "var(--success)", fontSize: "0.9rem", fontWeight: 600 }}>
+            <p style={{ color: "var(--success-ink)", fontSize: "var(--font-size-md)", fontWeight: 600 }}>
               No accessibility issues found in this course.
             </p>
           ) : (
@@ -516,36 +524,38 @@ function ItemBlock({
   const remediable = isRemediable(item.type) || item.type === "file";
   const issues = [...item.issues].sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]);
   return (
-    <div style={{ marginBottom: 14, border: "1px solid var(--field-border, #e2e8f0)", borderRadius: 10, overflow: "hidden" }}>
-      <div style={{ padding: "9px 12px", background: "var(--surface-subtle)", borderBottom: "1px solid var(--field-border, #eef2f7)", display: "flex", gap: 9, alignItems: "flex-start" }}>
+    <div style={{ marginBottom: "var(--space-3)", border: "1px solid var(--field-border)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+      <div style={{ padding: "var(--space-2) var(--space-3)", background: "var(--surface-subtle)", borderBottom: "1px solid var(--field-border)", display: "flex", gap: "var(--space-2)", alignItems: "flex-start" }}>
         {onToggleSelect && (
           <Checkbox
             checked={!!selected}
             onChange={onToggleSelect}
             slotProps={{ input: { "aria-label": `Select ${item.title} for bulk fix` } }}
             size="small"
-            sx={{ marginTop: 0.375, flexShrink: 0 }}
+            sx={{ marginTop: "var(--space-1)", flexShrink: 0 }}
           />
         )}
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text-secondary)" }}>
+          {/* AM5: the tracked-uppercase micro-label idiom, pinned exactly -
+              --font-size-2xs / weight 700 / letter-spacing 0.06em / --text-secondary. */}
+          <div style={{ fontSize: "var(--font-size-2xs)", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" }}>
             {TYPE_LABEL[item.type]}
           </div>
-          <div style={{ fontSize: "0.92rem", fontWeight: 600, color: "var(--text-primary)", wordBreak: "break-word" }}>{item.title}</div>
+          <div style={{ fontSize: "var(--font-size-md)", fontWeight: 600, color: "var(--text-primary)", wordBreak: "break-word" }}>{item.title}</div>
         </div>
       </div>
       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {issues.map((issue, i) => (
           <li
             key={i}
-            style={{ padding: "9px 12px", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", display: "flex", gap: 9, alignItems: "flex-start" }}
+            style={{ padding: "var(--space-2) var(--space-3)", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", display: "flex", gap: "var(--space-2)", alignItems: "flex-start" }}
           >
-            <span style={{ marginTop: 4 }}>
+            <span style={{ marginTop: "var(--space-1)" }}>
               <Dot color={SEVERITY[issue.severity].color} />
             </span>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: "0.88rem", color: "var(--text-primary)" }}>{issue.message}</div>
-              <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginTop: 2 }}>
+              <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-primary)" }}>{issue.message}</div>
+              <div style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)", marginTop: "var(--space-1)" }}>
                 {SEVERITY[issue.severity].label}
                 {issue.wcag ? ` · WCAG ${issue.wcag}` : ""}
               </div>
@@ -556,7 +566,7 @@ function ItemBlock({
                 size="small"
                 onClick={() => onFix(issue)}
                 title="Open an editor with this fix pre-applied"
-                sx={{ flexShrink: 0, fontSize: "0.78rem", alignSelf: "center" }}
+                sx={{ flexShrink: 0, fontSize: "var(--font-size-xs)", alignSelf: "center" }}
               >
                 Fix
               </Button>

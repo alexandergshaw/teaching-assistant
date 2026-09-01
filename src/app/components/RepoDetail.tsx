@@ -74,9 +74,9 @@ export default function RepoDetail() {
 
   return (
     <div className={styles.field}>
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-end", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 320px" }}>
-          <label className={styles.panelTitle} style={{ display: "block", marginBottom: 6 }}>Repository</label>
+          <label className={styles.panelTitle} style={{ display: "block", marginBottom: "var(--space-1)" }}>Repository</label>
           <Typeahead
             options={repoOptions}
             value={repoRef}
@@ -96,7 +96,7 @@ export default function RepoDetail() {
         </div>
         {repoRef && (
           <div style={{ flex: "1 1 220px" }}>
-            <label className={styles.panelTitle} style={{ display: "block", marginBottom: 6 }}>Branch</label>
+            <label className={styles.panelTitle} style={{ display: "block", marginBottom: "var(--space-1)" }}>Branch</label>
             <Typeahead
               options={branchOptions}
               value={branch}
@@ -151,18 +151,18 @@ export default function RepoDetail() {
             value={tab}
             onChange={(_, v) => setTab(v as "files" | "branches" | "copy" | "pulls" | "actions" | "copilot" | "settings")}
             sx={{
-              marginTop: 2,
+              marginTop: "var(--space-4)",
               minHeight: 40,
               borderBottom: "1px solid var(--field-border)",
               "& .MuiTabs-indicator": { backgroundColor: "var(--accent)" },
               "& .MuiTab-root": {
                 fontFamily: "inherit",
-                fontSize: "0.88rem",
+                fontSize: "var(--font-size-md)",
                 fontWeight: 500,
                 textTransform: "none",
                 color: "var(--text-secondary)",
                 minHeight: 40,
-                padding: "8px 16px",
+                padding: "var(--space-2) var(--space-4)",
               },
               "& .Mui-selected": { color: "var(--accent-ink) !important", fontWeight: 600 },
             }}

@@ -72,8 +72,8 @@ function StepCard({
         <div
           style={{
             border: "1px solid var(--field-border)",
-            borderRadius: 12,
-            padding: 12,
+            borderRadius: "var(--radius-md)",
+            padding: "var(--space-3)",
             background: "var(--field-background)",
           }}
         >
@@ -95,8 +95,8 @@ function StepCard({
       <div
         style={{
           border: "1px solid var(--field-border)",
-          borderRadius: 12,
-          padding: 12,
+          borderRadius: "var(--radius-md)",
+          padding: "var(--space-3)",
           background: "var(--field-background)",
         }}
       >
@@ -105,7 +105,7 @@ function StepCard({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            marginBottom: isExpanded ? 12 : 0,
+            marginBottom: isExpanded ? "var(--space-3)" : 0,
           }}
         >
           <div style={{ flex: 1 }}>
@@ -116,12 +116,12 @@ function StepCard({
               (dynamic - runs that workflow&apos;s current steps)
             </span>
             {include.skipSteps.length > 0 && (
-              <div style={{ fontSize: "0.875rem", opacity: 0.75, marginTop: 4 }}>
+              <div style={{ fontSize: "var(--font-size-md)", opacity: 0.75, marginTop: "var(--space-1)" }}>
                 Mirrors {mirroredCount} of {sourceSteps.length} steps
               </div>
             )}
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: "var(--space-1)" }}>
             <Button
               size="small"
               variant="outlined"
@@ -156,11 +156,11 @@ function StepCard({
         </div>
 
         {isExpanded && sourceWorkflow && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: "0.875rem", fontWeight: 500, marginBottom: 8 }}>
+          <div style={{ marginTop: "var(--space-3)" }}>
+            <div style={{ fontSize: "var(--font-size-md)", fontWeight: 500, marginBottom: "var(--space-2)" }}>
               Select steps to mirror:
             </div>
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: "var(--space-3)" }}>
               {sourceSteps.map((srcStep, srcIdx) => (
                 <FormControlLabel
                   key={srcIdx}
@@ -174,7 +174,7 @@ function StepCard({
                     />
                   }
                   label={`${srcIdx + 1}. ${sourceStepLabel(srcStep, srcIdx, others, getStepDefinition)}`}
-                  style={{ display: "block", marginBottom: 4 }}
+                  style={{ display: "block", marginBottom: "var(--space-1)" }}
                 />
               ))}
             </div>
@@ -202,8 +202,8 @@ function StepCard({
       <div
         style={{
           border: "1px solid var(--field-border)",
-          borderRadius: 12,
-          padding: 12,
+          borderRadius: "var(--radius-md)",
+          padding: "var(--space-3)",
           background: "var(--field-background)",
         }}
       >
@@ -223,8 +223,8 @@ function StepCard({
     <div
       style={{
         border: "1px solid var(--field-border)",
-        borderRadius: 12,
-        padding: 12,
+        borderRadius: "var(--radius-md)",
+        padding: "var(--space-3)",
         background: "var(--field-background)",
       }}
     >
@@ -233,7 +233,7 @@ function StepCard({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: 12,
+          marginBottom: "var(--space-3)",
         }}
       >
         <div>
@@ -241,12 +241,12 @@ function StepCard({
             {stepIndex + 1}. {stepDef.name}
           </strong>
           {stepDef.description && (
-            <div style={{ fontSize: "0.8rem", opacity: 0.7, marginTop: 2, maxWidth: 640 }}>
+            <div style={{ fontSize: "var(--font-size-md)", opacity: 0.7, marginTop: "var(--space-1)", maxWidth: 640 }}>
               {stepDef.description}
             </div>
           )}
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: "var(--space-1)" }}>
           <Button
             size="small"
             variant="outlined"
@@ -322,8 +322,8 @@ function StepCard({
         const expected = runIf ? runIf.expected : true;
 
         return (
-          <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <label style={{ flex: 0, minWidth: "120px", fontSize: "0.85rem" }}>Run only if</label>
+          <div style={{ marginTop: "var(--space-2)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
+            <label style={{ flex: 0, minWidth: "120px", fontSize: "var(--font-size-md)" }}>Run only if</label>
             <TextField
               select
               size="small"

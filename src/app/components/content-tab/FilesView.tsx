@@ -328,7 +328,7 @@ export function FilesView({
           filesToolbarFallbackRef.current = el;
         }}
         tabIndex={-1}
-        style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}
+        style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}
       >
         <Button
           variant="outlined"
@@ -381,7 +381,7 @@ export function FilesView({
       </div>
 
       {uploads.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
           {uploads.map((row, idx) => (
             <span key={idx} className={styles.ccHint} style={{ color: row.status === "error" ? "var(--danger)" : undefined }}>
               {row.name}: {row.status === "uploading" ? "uploading…" : row.status === "done" ? "uploaded" : `failed (${row.error})`}
@@ -445,15 +445,15 @@ export function FilesView({
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 12,
+            gap: "var(--space-3)",
             flexWrap: "wrap",
-            padding: "10px 14px",
+            padding: "var(--space-2) var(--space-3)",
             border: "1px solid var(--warning-border)",
             background: "var(--warning-surface)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-sm)",
           }}
         >
-          <span style={{ fontSize: "0.85rem", color: "var(--warning-ink)", flex: "1 1 240px" }}>
+          <span style={{ fontSize: "var(--font-size-md)", color: "var(--warning-ink)", flex: "1 1 240px" }}>
             {strayCount} duplicate {strayCount === 1 ? "copy" : "copies"} found across{" "}
             {dupGroups.length} {dupGroups.length === 1 ? "file" : "files"} (e.g. &ldquo;{dupGroups[0].strays[0].displayName}&rdquo;).
             The newest copy of each is kept.
@@ -485,13 +485,13 @@ export function FilesView({
         >
           <FormControlLabel
             className={styles.fieldHint}
-            style={{ display: "inline-flex", gap: 6, alignItems: "center", margin: 0, padding: "8px 12px" }}
+            style={{ display: "inline-flex", gap: "var(--space-1)", alignItems: "center", margin: 0, padding: "var(--space-2) var(--space-3)" }}
             control={<Checkbox size="small" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />}
             label="Select all"
           />
           <div className={styles.ccItems} style={{ borderTop: "1px solid var(--card-border)" }}>
             {shown.length === 0 && (
-              <p className={styles.ccHint} style={{ padding: "4px 6px" }}>
+              <p className={styles.ccHint} style={{ padding: "var(--space-1) var(--space-2)" }}>
                 No files match your search.
               </p>
             )}

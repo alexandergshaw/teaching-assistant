@@ -198,12 +198,22 @@ function rendersOwnTabContainer(source: string): boolean {
   return /className=\{[^}]*\btabContainer\b/.test(stripJsComments(source));
 }
 
-/** A rule block that redraws the shared card frame - the 24px radius paired
+/** A rule block that redraws the shared card frame - the shell radius paired
  *  with an elevation shadow - which is what makes a nested container read as
- *  a second card. */
+ *  a second card.
+ *
+ *  The radius is matched in THREE forms, not one. The 2026-09-01 aesthetics
+ *  pass introduced `--radius-xl` (and moved its value from 24px to 20px), so
+ *  a copy of the frame can now be spelled `var(--radius-xl)`, `20px` or the
+ *  historical `24px`. Pinning only the old literal would have left this guard
+ *  matching nothing the moment page.module.css was tokenised - a scanner that
+ *  reports clean because its pattern can no longer fire is the exact failure
+ *  mode docs/DEV_LOOP.md catalogues as "the scanner that matched nothing".
+ *  The canaries below fire on all three spellings. */
 function definesCardFrame(css: string): boolean {
   const blocks = stripCssComments(css).split("}");
-  return blocks.some((block) => /border-radius:\s*24px/.test(block) && /box-shadow:\s*var\(--shadow-lg\)/.test(block));
+  const shellRadius = /border-radius:\s*(?:24px|20px|var\(--radius-xl\))/;
+  return blocks.some((block) => shellRadius.test(block) && /box-shadow:\s*var\(--shadow-lg\)/.test(block));
 }
 
 describe("U0c: the view does not draw a nested container frame", () => {
@@ -221,6 +231,13 @@ describe("U0c: the view does not draw a nested container frame", () => {
     expect(definesCardFrame(".viewRoot { border-radius: 24px; box-shadow: var(--shadow-lg); gap: 0; }")).toBe(true);
     expect(definesCardFrame(".gridWrap { border-radius: 10px; }")).toBe(false);
     expect(definesCardFrame("/* .viewRoot { border-radius: 24px; box-shadow: var(--shadow-lg); } */")).toBe(false);
+  });
+
+  it("canary: the frame checker still fires on the tokenised spelling of the same frame", () => {
+    expect(definesCardFrame(".viewRoot { border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); }")).toBe(true);
+    expect(definesCardFrame(".viewRoot { border-radius: 20px; box-shadow: var(--shadow-lg); }")).toBe(true);
+    // The radius alone is not a frame - a panel may legitimately share it.
+    expect(definesCardFrame(".viewRoot { border-radius: var(--radius-xl); }")).toBe(false);
   });
 
   it("index.tsx renders no tabContainer of its own", () => {

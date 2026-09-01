@@ -94,7 +94,7 @@ export default function ArtifactDesignTab() {
         subtitle="Build the reusable templates the workflow steps generate from - an assignment, a test, or a whole class session - described once and turned into real documents and LMS items per course and per week."
       />
 
-      <div style={{ marginTop: "1.5rem", maxWidth: 280 }}>
+      <div style={{ marginTop: "var(--space-6)", maxWidth: 280 }}>
         <TextField
           select
           label="Template kind"
@@ -118,7 +118,7 @@ export default function ArtifactDesignTab() {
         </TextField>
       </div>
 
-      <div style={{ display: "flex", gap: "2rem", marginTop: "1.5rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-8)", marginTop: "var(--space-6)" }}>
         <TemplateSelector
           kind={kind}
           custom={custom}
@@ -134,13 +134,13 @@ export default function ArtifactDesignTab() {
 
         <div style={{ flex: 1 }}>
           {!EDITABLE_KINDS.includes(kind) ? (
-            <div style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>
+            <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-6) 0" }}>
               {ARTIFACT_TEMPLATE_KIND_LABELS[kind]} templates are stored but have no editable fields
               yet - discussion and quiz specs exist only as legs of a Class Session template.
               Assignment, Test, and Class Session templates are ready to build.
             </div>
           ) : !selected ? (
-            <div style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>
+            <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-6) 0" }}>
               Select a template, or create a new one.
             </div>
           ) : (
@@ -148,11 +148,12 @@ export default function ArtifactDesignTab() {
               {isReadOnly && (
                 <div
                   style={{
-                    marginBottom: "1rem",
-                    padding: "0.75rem",
-                    borderRadius: "4px",
-                    border: "1px solid var(--field-border)",
-                    fontSize: "0.85rem",
+                    marginBottom: "var(--space-4)",
+                    padding: "var(--space-3)",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--border-soft)",
+                    backgroundColor: "var(--surface-muted)",
+                    fontSize: "var(--font-size-sm)",
                     color: "var(--text-secondary)",
                   }}
                 >
@@ -160,7 +161,7 @@ export default function ArtifactDesignTab() {
                 </div>
               )}
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "1rem" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", marginBottom: "var(--space-4)" }}>
                 <TextField
                   label="Template name"
                   size="small"

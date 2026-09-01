@@ -473,6 +473,11 @@ export default function CoursesTable({
 
   return (
     <>
+      {/* marginTop: 0 overrides page.module.css's .adaptActionBar (margin-top:
+          14px) - kept inline rather than as a same-specificity CSS class
+          because a plain className cannot reliably out-rank a class from a
+          different, separately-bundled stylesheet; 0 needs no token (AC3
+          treats it as a trivial 4px multiple). */}
       <div className={`${styles.adaptActionBar} ${tableStyles.actionBar}`} style={{ marginTop: 0 }}>
         <Button variant="contained" size="small" onClick={onNewCourse}>
           New course
@@ -556,10 +561,10 @@ export default function CoursesTable({
           a visible, dismissible status rather than only a screen-reader
           announcement, so a clipboard denial is never silent. */}
       {(copyAllStatus || copyAllFallback) && (
-        <div style={{ margin: "4px 0 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <div className={tableStyles.copyStatusBlock}>
           {copyAllStatus && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <p className={styles.fieldHint} style={{ margin: 0 }}>
+            <div className={tableStyles.rowSm}>
+              <p className={styles.fieldHint}>
                 Copied {CELL_COLUMN_LABELS[copyAllStatus.column]} for {copyAllStatus.count} course{copyAllStatus.count === 1 ? "" : "s"} to the clipboard.
               </p>
               {/* B7: two "Dismiss" buttons can be on screen at once (this one
@@ -571,8 +576,8 @@ export default function CoursesTable({
             </div>
           )}
           {copyAllFallback && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <p className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)" }}>
+            <div className={tableStyles.stackXs}>
+              <p className={`${styles.fieldHint} ${tableStyles.dangerLink}`}>
                 Could not copy {CELL_COLUMN_LABELS[copyAllFallback.column]} to the clipboard automatically. Select the text below and copy it manually.
               </p>
               <textarea
@@ -580,7 +585,7 @@ export default function CoursesTable({
                 aria-label={`${CELL_COLUMN_LABELS[copyAllFallback.column]} text to copy`}
                 value={copyAllFallback.text}
                 onFocus={(e) => e.currentTarget.select()}
-                style={{ width: "100%", minHeight: 100, fontFamily: "monospace", fontSize: "0.8rem" }}
+                className={tableStyles.copyFallbackArea}
               />
               <button type="button" className={styles.linkButton} aria-label="Dismiss clipboard-copy fallback" onClick={() => setCopyAllFallback(null)}>
                 Dismiss
@@ -599,9 +604,9 @@ export default function CoursesTable({
 
       {/* F3/AC27-AC28/U1: the last copy-to-other-cells (or undo) result. */}
       {copyResult && (
-        <div style={{ margin: "4px 0 10px", display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
+        <div className={tableStyles.copyStatusBlock}>
+          <div className={tableStyles.rowSm}>
+            <p className={styles.fieldHint}>
               {copyResultAnnouncement}
             </p>
             {undoState && undoState.column === copyResult.column && (
@@ -619,9 +624,9 @@ export default function CoursesTable({
             </button>
           </div>
           {copyResult.errors.length > 0 && (
-            <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+            <ul className={tableStyles.resultList}>
               {copyResult.errors.map((e) => (
-                <li key={e.courseName} className={styles.fieldHint} style={{ color: "var(--danger)" }}>
+                <li key={e.courseName} className={`${styles.fieldHint} ${tableStyles.dangerLink}`}>
                   {e.courseName}: {e.error}
                 </li>
               ))}
@@ -634,9 +639,9 @@ export default function CoursesTable({
               calendar could not be updated: ...") rather than as a failure of
               the copy/undo itself. */}
           {copyResult.calendarNotices.length > 0 && (
-            <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+            <ul className={tableStyles.resultList}>
               {copyResult.calendarNotices.map((n) => (
-                <li key={n.courseName} className={styles.fieldHint} style={{ color: "var(--danger)" }}>
+                <li key={n.courseName} className={`${styles.fieldHint} ${tableStyles.dangerLink}`}>
                   {n.courseName}: Checklist saved, but the calendar could not be updated: {n.error}
                 </li>
               ))}
@@ -650,8 +655,9 @@ export default function CoursesTable({
       </div>
 
       {loading && (
-        <div className={styles.finalizedLoading}>
+        <div className={styles.finalizedLoading} role="status" aria-live="polite" style={{ alignItems: "center", gap: "var(--space-2)" }}>
           <CircularProgress size={22} />
+          <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading courses...</span>
         </div>
       )}
 
@@ -673,8 +679,8 @@ export default function CoursesTable({
                     its own click/mousedown/keydown, so its button never
                     reaches this th's onClick and never sorts (verified
                     against CellMenu.tsx's own stopBubble wiring). */}
-                <th onClick={() => applySort("name")} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS.name }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", paddingRight: 18 }}>
+                <th className={tableStyles.sortableHeader} onClick={() => applySort("name")} style={{ minWidth: COLUMN_MIN_WIDTHS.name }}>
+                  <span className={tableStyles.headerLabel}>
                     Name{sortIndicator("name")}
                   </span>
                   <span className={tableStyles.cellMenu}>
@@ -682,8 +688,8 @@ export default function CoursesTable({
                   </span>
                 </th>
                 {orderedVisibleColumns.map((id) => (
-                  <th key={id} onClick={() => applySort(id)} style={{ cursor: "pointer", minWidth: COLUMN_MIN_WIDTHS[id] }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", paddingRight: 18 }}>
+                  <th key={id} className={tableStyles.sortableHeader} onClick={() => applySort(id)} style={{ minWidth: COLUMN_MIN_WIDTHS[id] }}>
+                    <span className={tableStyles.headerLabel}>
                       {CELL_COLUMN_LABELS[id]}{sortIndicator(id)}
                     </span>
                     <span className={tableStyles.cellMenu}>
@@ -754,10 +760,10 @@ export default function CoursesTable({
                 this wrapper's id on the Dialog, these two sentences (the
                 entire consequence of the action) are never announced. */}
             <div id={copyDialogDescriptionId}>
-              <p className={styles.fieldHint} style={{ margin: "0 0 0.75rem" }}>
+              <p className={`${styles.fieldHint} ${tableStyles.copyValueLine}`}>
                 Value: {copyPlan.summary}
               </p>
-              <p style={{ margin: 0 }}>
+              <p>
                 This will overwrite {CELL_COLUMN_LABELS[copyRequest.column]} on {copyTargetCount} other course
                 {copyTargetCount === 1 ? "" : "s"} currently in view with the value above.
               </p>

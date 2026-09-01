@@ -33,9 +33,9 @@ export function CopilotTab({
   } = copilot;
 
   return (
-    <div style={{ display: "flex", gap: 16, marginTop: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: "var(--space-4)", marginTop: "var(--space-3)", alignItems: "flex-start", flexWrap: "wrap" }}>
       <div className={styles.ghPanel} style={{ flex: "1 1 320px", minWidth: 280 }}>
-        <label className={styles.panelTitle} style={{ display: "block", marginBottom: 8 }}>
+        <label className={styles.panelTitle} style={{ display: "block", marginBottom: "var(--space-2)" }}>
           Assign a Copilot coding agent
         </label>
         <p className={styles.fieldHint} style={{ marginTop: 0 }}>
@@ -49,7 +49,7 @@ export function CopilotTab({
           value={copilotTaskTitle}
           onChange={(e) => setCopilotTaskTitle(e.target.value)}
           disabled={copilotBusy}
-          sx={{ marginBottom: 1 }}
+          sx={{ marginBottom: "var(--space-2)" }}
         />
         <TextField
           size="small"
@@ -60,7 +60,7 @@ export function CopilotTab({
           value={copilotTaskBody}
           onChange={(e) => setCopilotTaskBody(e.target.value)}
           disabled={copilotBusy}
-          sx={{ marginBottom: 1 }}
+          sx={{ marginBottom: "var(--space-2)" }}
         />
         <Button
           variant="contained"
@@ -73,7 +73,7 @@ export function CopilotTab({
         {copilotTaskMsg && (
           <p
             className={copilotTaskMsg.kind === "error" ? styles.error : styles.fieldHint}
-            style={{ marginTop: 8 }}
+            style={{ marginTop: "var(--space-2)" }}
           >
             {copilotTaskMsg.text}
             {copilotTaskMsg.url && (
@@ -93,7 +93,7 @@ export function CopilotTab({
           <label className={styles.panelTitle}>Copilot tasks</label>
           <div className={styles.ghPanelHeadRight}>
             {copilotLastLoaded && (
-              <span style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>updated {formatRelative(copilotLastLoaded)}</span>
+              <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }}>updated {formatRelative(copilotLastLoaded)}</span>
             )}
             <Button variant="text" size="small" onClick={reloadCopilotTasks} disabled={copilotTasksState === "loading"}>
               Refresh
@@ -101,8 +101,9 @@ export function CopilotTab({
           </div>
         </div>
         {copilotTasksState === "loading" && copilotTasks.length === 0 && (
-          <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
             <CircularProgress size={24} />
+            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading Copilot tasks...</span>
           </div>
         )}
         {copilotTasksState === "error" && <p className={styles.error}>Could not load Copilot tasks.</p>}
@@ -144,7 +145,7 @@ export function CopilotTab({
                   <a href={t.htmlUrl} target="_blank" rel="noreferrer" className={styles.ghRowNum}>
                     #{t.number}
                   </a>
-                  <span style={{ marginLeft: 8 }} className={styles.ghRowName}>{t.title}</span>
+                  <span style={{ marginLeft: "var(--space-2)" }} className={styles.ghRowName}>{t.title}</span>
                 </div>
                 <span className={`${styles.ghBadge} ${t.state === "OPEN" ? styles.ghBadgeSuccess : styles.ghBadgeNeutral}`}>
                   {t.state.toLowerCase()}
@@ -175,7 +176,7 @@ export function CopilotTab({
                   {checkBadge && <span className={`${styles.ghBadge} ${checkBadge.cls}`}>{checkBadge.label}</span>}
                   {reviewBadge && <span className={`${styles.ghBadge} ${reviewBadge.cls}`}>{reviewBadge.label}</span>}
                   <span className={styles.ghMeta}>
-                    <span style={{ color: "var(--success)" }}>+{pr.additions}</span>{" "}
+                    <span style={{ color: "var(--success-ink)" }}>+{pr.additions}</span>{" "}
                     <span style={{ color: "var(--danger)" }}>-{pr.deletions}</span> · {pr.changedFiles} file{pr.changedFiles === 1 ? "" : "s"}
                   </span>
                   <a href={pr.url} target="_blank" rel="noreferrer" className={styles.ghMeta}>

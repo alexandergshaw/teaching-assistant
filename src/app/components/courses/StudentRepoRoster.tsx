@@ -149,8 +149,7 @@ function ActionCell({
           </button>
           <button
             type="button"
-            className={styles.linkButton}
-            style={{ color: "var(--danger)" }}
+            className={`${styles.linkButton} ${tableStyles.dangerLink}`}
             aria-label={`Cancel invitation for ${studentLabel}`}
             aria-disabled={orgMissing || undefined}
             disabled={busy}
@@ -363,7 +362,7 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
           ))}
         </TextField>
       </div>
-      <p className={styles.fieldHint} style={{ margin: 0 }}>
+      <p className={styles.fieldHint}>
         Invitations expire after {INVITATION_EXPIRY_DAYS} days.
       </p>
 
@@ -371,7 +370,7 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
         <span>{summary.text}</span>
         <span>{formatCheckedAt(checkedAt, now)}</span>
         {notChecked > 0 && <span>{notChecked} more student{notChecked === 1 ? "" : "s"} not checked this refresh.</span>}
-        {refreshError && <span style={{ color: "var(--danger)" }}>{refreshError}</span>}
+        {refreshError && <span className={tableStyles.dangerLink}>{refreshError}</span>}
         <button type="button" className={styles.linkButton} disabled={checking} onClick={() => refresh()}>
           {checking ? "Refreshing..." : "Refresh"}
         </button>

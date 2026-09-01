@@ -223,7 +223,7 @@ export function RubricBuilderModal({
           </button>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "68vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", maxHeight: "68vh", overflowY: "auto" }}>
           <div className={styles.field}>
             <label htmlFor="rubric-title">Title</label>
             <TextField id="rubric-title" type="text" size="small" fullWidth value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Essay rubric" />
@@ -233,7 +233,7 @@ export function RubricBuilderModal({
 
           {!editing && (
             <>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                 <span className={styles.bulkLabel} style={{ flex: "0 0 auto" }}>Mode</span>
                 <Button variant={mode === "percent" ? "contained" : "outlined"} size="small" onClick={() => setMode("percent")}>
                   Percentage
@@ -256,8 +256,8 @@ export function RubricBuilderModal({
           )}
 
           {criteria.map((c, ci) => (
-            <div key={c.key} style={{ border: "1px solid var(--card-border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div key={c.key} style={{ border: "1px solid var(--card-border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+              <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                 <span className={styles.ccCount}>Criterion {ci + 1}</span>
                 <span style={{ flex: 1 }} />
                 <span className={styles.bulkField}>
@@ -290,8 +290,8 @@ export function RubricBuilderModal({
               />
               <span className={styles.ccCount}>Rating tiers</span>
               {c.ratings.map((r) => (
-                <div key={r.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div key={r.key} style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
                     <TextField
                       type="text"
                       size="small"
@@ -335,7 +335,7 @@ export function RubricBuilderModal({
             </div>
           ))}
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
             <Button variant="outlined" size="small" onClick={addCriterion}>
               Add criterion
             </Button>
@@ -344,7 +344,7 @@ export function RubricBuilderModal({
             </span>
           </div>
 
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", paddingTop: 8, borderTop: "1px solid var(--card-border)" }}>
+          <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap", paddingTop: "var(--space-2)", borderTop: "1px solid var(--card-border)" }}>
             <Button variant="contained" size="small" onClick={() => void handleCreate()} disabled={saving || loading || !title.trim()}>
               {saving
                 ? "Saving…"

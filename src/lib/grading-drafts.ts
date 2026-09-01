@@ -22,6 +22,7 @@ import type {
   RubricAreaResult,
   SubmittedFileInfo,
 } from "./grade";
+import { coerceGradeDetermination } from "./grade/types";
 import { coerceRepoGradingRunLog, type RepoGradingRunLog } from "./repo-grading-log";
 
 export type GradingDraftStatus = "pending" | "reviewed";
@@ -127,6 +128,22 @@ function coerceGradeResult(value: unknown): GradeResult | null {
     // stripGradeResultForDraft.
     gradedRepo: typeof o.gradedRepo === "string" ? o.gradedRepo : null,
     gradedRef: typeof o.gradedRef === "string" ? o.gradedRef : null,
+    // Same degrade-to-default idiom as the other optional fields above: a
+    // draft saved before this field existed, or a hand-edited/wrong-valued
+    // one, defaults to undefined ("graded normally") rather than dropping
+    // the whole result. coerceGradeDetermination (grade/types.ts) is the
+    // single source of truth for the GradeDetermination membership list -
+    // shared with github-grading-run-store.ts's stricter validator - so a
+    // future third determination is recognised here without a second,
+    // easy-to-forget copy of the list.
+    determination: coerceGradeDetermination(o.determination),
+    // Previously dropped entirely by this coercer (unlike
+    // github-grading-run-store.ts's parseGradeResult, which already handled
+    // it) - a draft saved through this path lost the fact that its
+    // submission was truncated on every reload. Same degrade-to-default
+    // idiom as the fields above: wrong type or absent both default to
+    // undefined.
+    submissionTruncated: typeof o.submissionTruncated === "boolean" ? o.submissionTruncated : undefined,
   };
 }
 

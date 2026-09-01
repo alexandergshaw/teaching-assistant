@@ -32,6 +32,16 @@ const gradeEntriesEmbedded = vi.fn();
 const renderRubricText = vi.fn();
 const attachCodeRuns = vi.fn();
 const rememberRubric = vi.fn();
+// G3 (docs/no-submission-and-requirement-checking-acceptance-criteria.md
+// section 3): the branch-scan check gradeRepoAction's no-submission branch
+// now runs. Defaulted below (beforeEach) to "no other branches" so every
+// existing test in this file - none of which cares about the branch scan -
+// keeps seeing the exact same `reason` prefix it always did. Dedicated
+// coverage for the scan itself, and for its wiring into gradeRepoAction's
+// `determination`/`reason`, lives in
+// github-repos.grading.unmerged-branch.test.ts.
+const listBranches = vi.fn();
+const getRepoTreeWithMeta = vi.fn();
 
 vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn(async () => ({ id: "owner" })) }));
 
@@ -56,6 +66,8 @@ vi.mock("@/lib/github", async (importOriginal) => {
     ingestRepo: (...args: unknown[]) => ingestRepo(...args),
     excludeInstructionsFromDigest: actual.excludeInstructionsFromDigest,
     isScaffoldingFile: actual.isScaffoldingFile,
+    listBranches: (...args: unknown[]) => listBranches(...args),
+    getRepoTreeWithMeta: (...args: unknown[]) => getRepoTreeWithMeta(...args),
   };
 });
 
@@ -103,6 +115,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   gradeEntries.mockResolvedValue({ results: [{ student: "s", totalScore: "0/10", rubricAreas: [] }], rubricAreaNames: [], fullCreditChecklist: [] });
   generateRubric.mockResolvedValue("Generated rubric text");
+  // No other branches by default, so the branch scan resolves to
+  // `{ kind: "not-found", branchesChecked: 0, branchesSkipped: 0 }` and
+  // every existing `reason` assertion in this file is unaffected.
+  listBranches.mockResolvedValue({ branches: ["main"], defaultBranch: "main" });
+  getRepoTreeWithMeta.mockResolvedValue({ entries: [], truncated: false });
 });
 
 const SOLUTION_README = "How to complete this assignment:\n\ndef trip_math():\n    return 42  # full worked solution";

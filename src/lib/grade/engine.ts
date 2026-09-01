@@ -39,7 +39,14 @@ async function gradeSubmission(
           .join(", ")}. Treat them as part of the submission and evaluate them against the rubric.`
       : "";
 
-  const codeNote = codeRun && !codeRun.error ? buildCodeExecutionNote(codeRun) : "";
+  // codeRun.neededStdin (code-runner.ts) means the run failed ONLY because
+  // this sandbox's hardcoded empty stdin starved a required input read - not
+  // evidence about the student's code, exactly like codeRun.error, so it is
+  // withheld from the prompt the same way: telling the model "ran without
+  // errors: no" here would let its own holistic judgment penalize the
+  // student for a platform limitation, the same mistake gradeEntriesEmbedded
+  // (embedded-grader/index.ts) avoids for its own deterministic criterion.
+  const codeNote = codeRun && !codeRun.error && !codeRun.neededStdin ? buildCodeExecutionNote(codeRun) : "";
   const fileListBlock = buildSubmittedFileNamesBlock(submittedFiles);
 
   const parts: LlmPart[] = [

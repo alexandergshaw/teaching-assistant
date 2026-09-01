@@ -10,41 +10,53 @@
 // Every server action here is called exactly as it ships - transcription,
 // drafting, posting and course listing are all owned elsewhere and none of
 // them are edited by this feature.
+//
+// The audio-preparation and transcription pipeline (obtain audio, decide the
+// real-time-fallback guard, transcribe in chunks) was split out into
+// takeAnnouncementTranscription.ts to stay under
+// recording-split.structure.test.ts's 1000-line ceiling on this directory -
+// see that file's own header. This hook still OWNS every ref and setState
+// setter that pipeline touches (created via useRef/useState below) and
+// still owns drafting, review, arming and posting; it only hands the
+// pipeline's own refs down through a TranscriptionPipelineDeps object and
+// gets called back via onTranscriptReady (this hook's own runDraft) once a
+// transcript is ready. AnnouncementStage and decideRealTimeGuard are
+// re-exported below so no existing importer's path changes.
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  transcribeLiveAudioAction,
   draftAnnouncementAction,
   saveMessageDraftAction,
   createAnnouncementAction,
   listCourseHubAction,
 } from "../../actions";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
-import { LIVE_SAMPLE_RATE, downsampleToMono, encodeWav, base64FromArrayBuffer } from "@/lib/live-class/wav";
-import { checkWireBudget } from "@/lib/upload-budget";
-import { extractAudioOnly } from "@/lib/strip-audio";
-import { awaitVideoMetadata, ensureFiniteDuration } from "@/lib/caption-burn";
-import { planTranscriptChunks, sliceMonoSamples, joinTranscriptChunks, type TranscriptChunkPlan } from "@/lib/take-transcript";
-import { buildTakeAnnouncementInstruction } from "@/lib/take-announcement";
+import type { TranscriptChunkPlan } from "@/lib/take-transcript";
+import {
+  buildTakeAnnouncementInstruction,
+  DEFAULT_ANNOUNCEMENT_COMPOSITION,
+  type AnnouncementCompositionSettings,
+} from "@/lib/take-announcement";
+import { coerceAnnouncementComposition } from "./announcement-composition";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { isConfirmArmed, mayPostCommit } from "../content-tab/modules/postConfirmArming";
 import { takePostArmSignature } from "./takeAnnouncementArming";
+import {
+  runPipelineFromSegments,
+  runPipelineFromRealTime,
+  proceedToTranscription,
+  beginRealTimeGuardCheck,
+  decideRealTimeGuard,
+  estimateRealTimeMinutes,
+  type AnnouncementStage,
+  type PreparedAudioKind,
+  type TranscriptionPipelineDeps,
+} from "./takeAnnouncementTranscription";
 import type { Take } from "./types";
 
-// The stage a review-and-post pass is currently in. Kept as a discriminated
-// union (rather than a handful of booleans) so a transcription failure, a
-// draft failure and a post failure each get their own distinguishable
-// message instead of collapsing into one generic "something went wrong".
-export type AnnouncementStage =
-  | { phase: "idle" }
-  | { phase: "preparing"; realTime: boolean; pct: number }
-  | { phase: "transcribing"; chunk: number; of: number }
-  | { phase: "drafting" }
-  | { phase: "review" }
-  | { phase: "posting" }
-  | { phase: "noSpeech" }
-  | { phase: "failed"; stage: "audio" | "transcribe" | "draft" | "post"; message: string };
+export type { AnnouncementStage };
+export { decideRealTimeGuard };
 
 export interface AnnCourseOption {
   id: string;
@@ -95,13 +107,6 @@ export interface UseTakeAnnouncementOptions {
   onTranscriptCached?: (takeId: string, transcript: string) => void;
 }
 
-type PreparedAudioKind = "segments" | "single" | null;
-
-type TranscriptionOutcome =
-  | { kind: "cancelled"; completed: number }
-  | { kind: "failed"; chunkIndex: number; message: string }
-  | { kind: "done" };
-
 export interface ProgressInfo {
   value: number | null;
   max: number;
@@ -151,6 +156,25 @@ export interface UseTakeAnnouncementReturn {
   savingDraft: boolean;
   draftSaved: boolean;
   draftError: string | null;
+
+  /** docs/reply-composition-controls-acceptance-criteria.md C0-1 (this
+   * group): what every drafted announcement should contain and how formal it
+   * should read. Persisted under this surface's own two new "ann-ingredients"
+   * / "ann-formality" storage keys (see the literal key names a few lines
+   * below, in the state initializer and setComposition - never restated in a
+   * comment here, so this comment can never poison the key-inventory scan)
+   * - see announcement-composition.ts's coerceAnnouncementComposition for the
+   * read side. There is no addressByName field here (see take-announcement
+   * .ts's header) and no per-row arming to join: drafting on this surface is
+   * single-shot (one subject/body pair, not a queued table of rows), so a
+   * composition change has no in-flight draft to disarm - it only takes
+   * effect the next time runDraft() actually runs (the panel's auto-start on
+   * open, or an explicit regenerate/retry click). The existing POST arm
+   * signature already includes the live subject/body, so any regenerate
+   * naturally disarms a pending "Confirm post" without composition needing
+   * to join that signature too. */
+  composition: AnnouncementCompositionSettings;
+  setComposition: (next: AnnouncementCompositionSettings) => void;
 }
 
 // GAP 3 (cross-surface busy gating, AC15b): TakeAnnouncementPanel.tsx computes
@@ -196,90 +220,6 @@ export function useAnnouncementBusy(): boolean {
   return useSyncExternalStore(subscribeAnnouncementBusy, getAnnouncementBusySnapshot, () => false);
 }
 
-function estimateRealTimeMinutes(durationSec: number): number {
-  if (!Number.isFinite(durationSec) || durationSec <= 0) return 1;
-  return Math.max(1, Math.round(durationSec / 60));
-}
-
-// The sidecar path is bounded: it rotates into roughly one-minute segments, so
-// only one is ever decoded at a time. The real-time fallback has no such bound
-// - it hands the whole extracted blob to decodeAudioData in a single call, and
-// decodeAudioData decodes the entire buffer at once. At 48 kHz stereo that is
-// durationSec * 48000 * 2 * 4 bytes of intermediate PCM before the resample:
-// about 23 MB per minute, so 20 minutes is roughly 460 MB in one allocation.
-// Past that the tab is liable to die outright, which is a far worse outcome
-// than declining, so this refuses with an actionable message instead.
-//
-// This is a ceiling on the FALLBACK only. A take recorded in this session
-// carries its own audio segments and skips this path entirely at any length.
-const REAL_TIME_MAX_SECONDS = 20 * 60;
-
-function realTimeTooLong(durationSec: number): boolean {
-  return Number.isFinite(durationSec) && durationSec > REAL_TIME_MAX_SECONDS;
-}
-
-// FIX 2: the decision half of the guard, pulled out as a pure function so it
-// is reachable from node-env vitest (this project's suite has no jsdom - see
-// useRepoGradesBulkGrade.test.ts's header comment for the established
-// precedent this follows: extract the pure decision from the hook rather
-// than trying to render it). `resolveRealAudioDurationSec` below is the
-// impure half (touches the DOM) and is exercised only by reading; this
-// function is exercised by a real test.
-//
-// null means "the duration could not be resolved" (Problem B: an
-// unresolvable duration must refuse, not gamble, on exactly the path that
-// can take the tab down). A non-null return is the refusal message; null
-// means "go ahead and show the confirm".
-export function decideRealTimeGuard(durationSec: number | null): string | null {
-  if (durationSec === null) {
-    return "Could not determine this recording's length, so it cannot safely be played back in real time to extract audio here. Record a take in this session to draft from it directly - it carries its own captured audio and skips this step entirely.";
-  }
-  if (realTimeTooLong(durationSec)) {
-    const minutes = estimateRealTimeMinutes(durationSec);
-    return `This recording is about ${minutes} minutes long, which is too long to prepare this way - it has no captured audio track, so the whole recording would have to be decoded at once. Record a take in this session to draft from it directly - it carries its own captured audio and skips this step entirely.`;
-  }
-  return null;
-}
-
-// FIX 2 / Problem B: `take.durationSec` is exactly the field finding B5 was
-// raised about - buildTakeFromLibraryFile falls back to `file.durationSec ??
-// 0` when its own metadata probe throws, and a MediaRecorder webm reports
-// `Infinity` until seeked. Both sail past `realTimeTooLong` (Number.isFinite
-// rejects Infinity, and 0 is never > REAL_TIME_MAX_SECONDS) straight into the
-// ~920 MB single decodeAudioData call the cap exists to prevent. This loads
-// the take's own URL into a throwaway <video> and resolves the REAL duration
-// the same way buildTakeFromLibraryFile and stripAudio already do - metadata
-// plus a seek, not playback - so the guard trusts measured bytes instead of
-// a field known to be unreliable on exactly this path. Returns null (rather
-// than throwing) when the duration genuinely cannot be determined, so the
-// caller can refuse rather than gamble.
-async function resolveRealAudioDurationSec(url: string): Promise<number | null> {
-  const probe = document.createElement("video");
-  probe.preload = "metadata";
-  probe.muted = true;
-  probe.src = url;
-  try {
-    await awaitVideoMetadata(probe);
-    return await ensureFiniteDuration(probe);
-  } catch {
-    return null;
-  } finally {
-    // Clean up the throwaway element only - `url` is the take's own object
-    // URL, owned by the caller, and is never revoked here.
-    probe.removeAttribute("src");
-    probe.load();
-  }
-}
-
-async function decodeBlobToMono(ctx: AudioContext, blob: Blob): Promise<Float32Array> {
-  const arrayBuffer = await blob.arrayBuffer();
-  if (arrayBuffer.byteLength === 0) return new Float32Array(0);
-  const decoded = await ctx.decodeAudioData(arrayBuffer);
-  const channels: Float32Array[] = [];
-  for (let ch = 0; ch < decoded.numberOfChannels; ch++) channels.push(decoded.getChannelData(ch));
-  return downsampleToMono(channels, decoded.sampleRate, LIVE_SAMPLE_RATE);
-}
-
 export function useTakeAnnouncement({
   take,
   setTakes,
@@ -302,6 +242,25 @@ export function useTakeAnnouncement({
     if (typeof window === "undefined") return "";
     return window.localStorage.getItem("ta-rec-ann-course") ?? "";
   });
+
+  // docs/reply-composition-controls-acceptance-criteria.md C5, this group's
+  // own C-2: same useState-initializer + wrapped-setter idiom as courseId
+  // just above - read once at mount via coerceAnnouncementComposition (a
+  // plain exported function, per C5a - vitest here renders no hook), written
+  // back through both keys on every change.
+  const [composition, setCompositionState] = useState<AnnouncementCompositionSettings>(() => {
+    if (typeof window === "undefined") return DEFAULT_ANNOUNCEMENT_COMPOSITION;
+    return coerceAnnouncementComposition(
+      window.localStorage.getItem("ta-rec-ann-ingredients"),
+      window.localStorage.getItem("ta-rec-ann-formality")
+    );
+  });
+  function setComposition(next: AnnouncementCompositionSettings) {
+    setCompositionState(next);
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("ta-rec-ann-ingredients", JSON.stringify(next.ingredients));
+    window.localStorage.setItem("ta-rec-ann-formality", next.formality);
+  }
 
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -393,8 +352,20 @@ export function useTakeAnnouncement({
   useEffect(() => {
     return () => {
       cancelledRef.current = true;
+      // Deliberately read at CLEANUP time, not snapshotted at mount: these
+      // are AbortController/AudioContext handles the transcription pipeline
+      // (takeAnnouncementTranscription.ts) writes via TranscriptionPipelineDeps
+      // while this hook is mounted, not DOM refs - a mount-time snapshot
+      // would abort/close whatever existed at mount (usually nothing) rather
+      // than whatever the pipeline most recently created, which is the
+      // whole point of this cleanup. exhaustive-deps' "may have changed by
+      // cleanup time" heuristic is written for DOM-node refs (see its own
+      // "if this ref points to a node rendered by React" wording) and
+      // cannot see that the write sites now live in the sibling module.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       realTimeAbortRef.current?.abort();
       if (decodeCtxRef.current) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         void decodeCtxRef.current.close().catch(() => {});
       }
     };
@@ -416,236 +387,54 @@ export function useTakeAnnouncement({
     setLiveRegionText(text);
   }
 
-  async function ensureDecodeContext(): Promise<AudioContext> {
-    if (decodeCtxRef.current) return decodeCtxRef.current;
-    const w = window as unknown as Record<string, unknown>;
-    const Ctor = (window.AudioContext ?? (w.webkitAudioContext as typeof AudioContext)) as typeof AudioContext | undefined;
-    if (!Ctor) throw new Error("This browser cannot decode audio - no AudioContext is available.");
-    const ctx = new Ctor({ sampleRate: LIVE_SAMPLE_RATE });
-    decodeCtxRef.current = ctx;
-    return ctx;
-  }
-
-  async function getChunkMono(i: number): Promise<Float32Array> {
-    const ctx = await ensureDecodeContext();
-    if (preparedKindRef.current === "segments") {
-      const segments = segmentsRef.current;
-      if (!segments || !segments[i]) return new Float32Array(0);
-      return decodeBlobToMono(ctx, segments[i]);
-    }
-    const mono = monoRef.current;
-    const plan = planRef.current;
-    if (!mono || !plan || !plan[i]) return new Float32Array(0);
-    return sliceMonoSamples(mono, LIVE_SAMPLE_RATE, plan[i]);
-  }
-
-  function announceQuartileIfCrossed(chunk: number, total: number) {
-    if (total <= 0) return;
-    const pct = Math.floor((chunk / total) * 100);
-    const quartile = Math.floor(pct / 25);
-    if (quartile > lastAnnouncedQuartileRef.current) {
-      lastAnnouncedQuartileRef.current = quartile;
-      announce(`Transcribing - chunk ${chunk} of ${total} (${pct} percent complete).`);
-    }
-  }
-
-  async function runTranscriptionLoop(startIndex: number, total: number): Promise<TranscriptionOutcome> {
-    const parts = chunkTranscriptsRef.current;
-    for (let i = startIndex; i < total; i++) {
-      if (cancelledRef.current) {
-        return { kind: "cancelled", completed: i };
-      }
-      setStage({ phase: "transcribing", chunk: i + 1, of: total });
-      announceQuartileIfCrossed(i + 1, total);
-
-      let mono: Float32Array;
-      try {
-        mono = await getChunkMono(i);
-      } catch (err) {
-        return {
-          kind: "failed",
-          chunkIndex: i,
-          message: err instanceof Error ? err.message : "Could not read this chunk's audio.",
-        };
-      }
-
-      if (mono.length === 0) {
-        parts[i] = "";
-        continue;
-      }
-
-      const wav = encodeWav(mono, LIVE_SAMPLE_RATE);
-      const base64 = base64FromArrayBuffer(wav);
-      const budget = checkWireBudget(base64.length, `Chunk ${i + 1} of ${total}`);
-      if (!budget.ok) {
-        return { kind: "failed", chunkIndex: i, message: budget.error ?? "This chunk is too large to send." };
-      }
-
-      const result = await transcribeLiveAudioAction(base64, { provider: getStoredProvider() });
-      if ("error" in result) {
-        return { kind: "failed", chunkIndex: i, message: result.error };
-      }
-      parts[i] = result.text;
-    }
-    return { kind: "done" };
-  }
-
-  async function proceedToTranscription(startIndex: number) {
-    cancelledRef.current = false;
-    const total = totalChunksRef.current;
-    if (total === 0) {
-      setStage({ phase: "noSpeech" });
-      announce("No speech was found in this recording.");
-      return;
-    }
-
-    announce(`Transcribing this take - chunk ${startIndex + 1} of ${total}.`);
-    setStage({ phase: "transcribing", chunk: startIndex + 1, of: total });
-    const outcome = await runTranscriptionLoop(startIndex, total);
-
-    if (outcome.kind === "cancelled") {
-      chunkTranscriptsRef.current = new Array(total).fill("");
-      setStage({ phase: "idle" });
-      const message = `Transcription cancelled after ${outcome.completed} of ${total} chunks. Nothing was kept.`;
-      setLastMessage(message);
-      announce(message);
-      return;
-    }
-
-    if (outcome.kind === "failed") {
-      failedChunkIndexRef.current = outcome.chunkIndex;
-      const message = `Transcription failed on chunk ${outcome.chunkIndex + 1} of ${total} - ${outcome.message}.`;
-      setStage({ phase: "failed", stage: "transcribe", message });
-      announce(message);
-      return;
-    }
-
-    const joined = joinTranscriptChunks(chunkTranscriptsRef.current);
-    if (!joined) {
-      setStage({ phase: "noSpeech" });
-      announce("No speech was found in this recording.");
-      return;
-    }
-
-    // AC23d: the transcript is written ONLY here, on a complete successful
-    // pass - never on a cancelled or failed one. Both writes below share
-    // that guarantee: setTakes still updates Take.transcript for a take that
-    // lives in the `takes` array, and onTranscriptCached feeds RecordingTab's
-    // own id-keyed cache (F3) so a library-sourced take - never added to
-    // `takes` - gets the same "do not pay for transcription twice" benefit.
-    transcriptRef.current = joined;
-    setTakes((prev) => prev.map((t) => (t.id === take.id ? { ...t, transcript: joined } : t)));
-    onTranscriptCached?.(take.id, joined);
-    await runDraft(joined);
-  }
-
-  async function runPipelineFromSegments(segments: Blob[]) {
-    announce("Preparing this take's audio.");
-    setStage({ phase: "preparing", realTime: false, pct: 100 });
-    preparedKindRef.current = "segments";
-    segmentsRef.current = segments;
-    totalChunksRef.current = segments.length;
-    chunkTranscriptsRef.current = new Array(segments.length).fill("");
-    failedChunkIndexRef.current = 0;
-    lastAnnouncedQuartileRef.current = 0;
-    await proceedToTranscription(0);
-  }
-
-  async function runPipelineFromRealTime() {
-    // FIX 2: the length refusal used to live here, reading take.durationSec -
-    // the exact unreliable field B5 was raised about. It is now decided in
-    // start(), before the confirm is even shown, against a duration measured
-    // straight off the take's own bytes (resolveRealAudioDurationSec). By the
-    // time this function runs the guard has already passed, so it is not
-    // re-checked here against the untrustworthy field.
-    cancelledRef.current = false;
-    const controller = new AbortController();
-    realTimeAbortRef.current = controller;
-    announce("Preparing this take's audio - this plays back in real time, so it can take a while.");
-    setStage({ phase: "preparing", realTime: true, pct: 0 });
-    try {
-      const response = await fetch(take.url);
-      const blob = await response.blob();
-      const audioBlob = await extractAudioOnly(
-        blob,
-        (pct) => {
-          if (cancelledRef.current) return;
-          setStage({ phase: "preparing", realTime: true, pct });
-        },
-        controller.signal
-      );
-      // The extraction stage is over (successfully) - the signal covers
-      // only that stage, so drop the controller now rather than leaving a
-      // spent one around for the next attempt to trip over.
-      realTimeAbortRef.current = null;
-
-      const ctx = await ensureDecodeContext();
-      const mono = await decodeBlobToMono(ctx, audioBlob);
-      // Decoding has no abort signal of its own - a Cancel press landing in
-      // the narrow window between extraction finishing and decode finishing
-      // still needs to be honoured here, via the same ref the chunk loop
-      // checks.
-      if (cancelledRef.current) {
-        setStage({ phase: "idle" });
-        const message = "Preparing the audio was cancelled. Nothing was kept.";
-        setLastMessage(message);
-        announce(message);
-        return;
-      }
-
-      preparedKindRef.current = "single";
-      monoRef.current = mono;
-      // B5 fix: plan from the DECODED audio's own length, not take.durationSec.
-      // On the AC26 library path, buildTakeFromLibraryFile falls back to
-      // file.durationSec ?? 0 whenever the metadata probe throws, and
-      // planTranscriptChunks(0) is [] - which proceedToTranscription turns
-      // into a false "No speech was found" for a perfectly good recording.
-      // mono.length / LIVE_SAMPLE_RATE is the only length actually true of
-      // the buffer being sliced below; it also fixes the same bug for a
-      // paused walkthrough (whose durationSec under-reports by the pause
-      // length) and for any take whose recorded duration is simply wrong. A
-      // genuinely empty decode still yields duration 0 here, so it still
-      // correctly lands on noSpeech - only a duration failure is no longer
-      // misreported as no speech.
-      const decodedDurationSec = mono.length / LIVE_SAMPLE_RATE;
-      const plan = planTranscriptChunks(decodedDurationSec);
-      planRef.current = plan;
-      totalChunksRef.current = plan.length;
-      chunkTranscriptsRef.current = new Array(plan.length).fill("");
-      failedChunkIndexRef.current = 0;
-      lastAnnouncedQuartileRef.current = 0;
-      await proceedToTranscription(0);
-    } catch (err) {
-      realTimeAbortRef.current = null;
-      // A pressed Cancel button aborts extractAudioOnly's signal, which
-      // rejects with this exact AbortError (src/lib/strip-audio.ts) rather
-      // than returning a partial blob - it must land as a cancellation
-      // (AC23c), never as an audio failure (AC23), or a user who cancelled
-      // is shown an error for having done so.
-      if (err instanceof DOMException && err.name === "AbortError") {
-        setStage({ phase: "idle" });
-        const message = "Preparing the audio was cancelled. Nothing was kept.";
-        setLastMessage(message);
-        announce(message);
-        return;
-      }
-      const message = err instanceof Error ? err.message : "Could not prepare this take's audio.";
-      setStage({ phase: "failed", stage: "audio", message });
-      announce(message);
-    }
+  // Bundles every ref and setState setter the transcription pipeline
+  // (takeAnnouncementTranscription.ts) touches into the deps object its
+  // exported functions take explicitly - see that file's header for why it
+  // takes dependencies as parameters rather than closing over this hook's
+  // scope. Built fresh at each call site below so it always reflects the
+  // current render's `take`/`setTakes`/`onTranscriptCached` props, exactly
+  // as the inlined closures did before this split.
+  function pipelineDeps(): TranscriptionPipelineDeps {
+    return {
+      take,
+      setTakes,
+      onTranscriptCached,
+      onTranscriptReady: runDraft,
+      transcriptRef,
+      cancelledRef,
+      realTimeAbortRef,
+      decodeCtxRef,
+      preparedKindRef,
+      segmentsRef,
+      monoRef,
+      planRef,
+      chunkTranscriptsRef,
+      totalChunksRef,
+      failedChunkIndexRef,
+      lastAnnouncedQuartileRef,
+      resolvedRealTimeDurationRef,
+      setStage,
+      announce,
+      setLastMessage,
+      setNeedsRealTimeConfirm,
+    };
   }
 
   async function runDraft(transcript: string) {
     announce("Writing the announcement.");
     setStage({ phase: "drafting" });
-    const instruction = buildTakeAnnouncementInstruction(transcript, {
-      takeName: take.name,
-      durationSec: take.durationSec,
-      topic: context.topic,
-      objectives: context.objectives,
-      cardTitle: context.cardTitle,
-      cardSubtitle: context.cardSubtitle,
-    });
+    const instruction = buildTakeAnnouncementInstruction(
+      transcript,
+      {
+        takeName: take.name,
+        durationSec: take.durationSec,
+        topic: context.topic,
+        objectives: context.objectives,
+        cardTitle: context.cardTitle,
+        cardSubtitle: context.cardSubtitle,
+      },
+      composition
+    );
     const result = await draftAnnouncementAction(instruction, getStoredProvider());
     if ("error" in result) {
       setStage({ phase: "failed", stage: "draft", message: result.error });
@@ -669,36 +458,10 @@ export function useTakeAnnouncement({
       return;
     }
     if (take.audioSegments && take.audioSegments.length > 0) {
-      void runPipelineFromSegments(take.audioSegments);
+      void runPipelineFromSegments(take.audioSegments, pipelineDeps());
       return;
     }
-    void beginRealTimeGuardCheck();
-  }
-
-  // FIX 2 / Problem A: the 20-minute guard used to fire only after the user
-  // pressed "Play it back" on the AC22a confirm - so the confirm's own
-  // "...about N minutes" estimate was shown, the user committed to it, and
-  // only then was the request refused. The guard now runs BEFORE the confirm
-  // is shown, so a take that fails it never reaches the confirm at all - the
-  // refusal replaces it instead of following it.
-  //
-  // FIX 2 / Problem B: the duration used for the check is resolved from the
-  // take's own bytes (resolveRealAudioDurationSec), never read off
-  // take.durationSec - see that function's comment for why that field cannot
-  // be trusted on exactly this path.
-  async function beginRealTimeGuardCheck() {
-    announce("Checking this recording's length.");
-    const durationSec = await resolveRealAudioDurationSec(take.url);
-    resolvedRealTimeDurationRef.current = durationSec;
-
-    const refusal = decideRealTimeGuard(durationSec);
-    if (refusal) {
-      setStage({ phase: "failed", stage: "audio", message: refusal });
-      announce(refusal);
-      return;
-    }
-
-    setNeedsRealTimeConfirm(true);
+    void beginRealTimeGuardCheck(pipelineDeps());
   }
 
   // Auto-start the moment the panel opens for a take that has not already
@@ -725,7 +488,7 @@ export function useTakeAnnouncement({
 
   function confirmRealTimeExtraction() {
     setNeedsRealTimeConfirm(false);
-    void runPipelineFromRealTime();
+    void runPipelineFromRealTime(pipelineDeps());
   }
 
   function cancelRealTimeConfirm() {
@@ -742,14 +505,14 @@ export function useTakeAnnouncement({
   }
 
   function retryFromFailedChunk() {
-    void proceedToTranscription(failedChunkIndexRef.current);
+    void proceedToTranscription(failedChunkIndexRef.current, pipelineDeps());
   }
 
   function startOver() {
     const total = totalChunksRef.current;
     chunkTranscriptsRef.current = new Array(total).fill("");
     lastAnnouncedQuartileRef.current = 0;
-    void proceedToTranscription(0);
+    void proceedToTranscription(0, pipelineDeps());
   }
 
   function retryDraft() {
@@ -911,5 +674,8 @@ export function useTakeAnnouncement({
     savingDraft,
     draftSaved,
     draftError,
+
+    composition,
+    setComposition,
   };
 }

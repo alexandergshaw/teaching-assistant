@@ -20,6 +20,23 @@ import { copyAllButtonLabel, computeStoppedSessionSummary } from "./discussion-t
 import { CopyIcon, CheckIcon } from "./discussion-icons";
 import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } from "./useReplyResources";
 import { useDiscussionReplies } from "./useDiscussionReplies";
+// docs/DEV_LOOP.md's "every feature needs a downloadable log" rule
+// (REGRESSION entries 369/372/373/374 record this surface's unpaid debt).
+// This panel only formats/downloads - collection and assembly are entirely
+// useDiscussionReplies.ts's `runLog` and discussion-replies-log.ts, per that
+// module's own header. Mirrors
+// src/app/components/drafted-grades/RepoGradingLogPanel.tsx's own split
+// (that panel is a different, unrelated log - see this repo's
+// src/lib/repo-grading-log.ts header) down to the download idiom:
+// triggerFileDownload, never a hand-rolled object-URL dance.
+import {
+  formatDiscussionRepliesLogCsv,
+  formatDiscussionRepliesLogJson,
+  discussionRepliesLogFileName,
+  discussionRepliesLogSummaryLine,
+  summarizeDiscussionRepliesRunLog,
+} from "./discussion-replies-log";
+import { triggerFileDownload } from "../course-planning/utils";
 // Extracted (pure move, no behaviour change) into its own file once this
 // panel was pressing on the 1000-line ceiling enforced by
 // recording-split.structure.test.ts - see that file's own header comment
@@ -169,7 +186,24 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     findMissing,
     retryResources,
     removeResource,
+    runLog,
   } = useDiscussionReplies(active);
+
+  // docs/DEV_LOOP.md's downloadable-log rule: the two format handlers,
+  // mirroring RepoGradingLogPanel.tsx's own handleDownload exactly - the one
+  // clock read in this panel (everything downstream, the filename stamp and
+  // the JSON's exportedAt, takes it as a parameter) and triggerFileDownload,
+  // never a hand-rolled object-URL dance.
+  const handleDownloadLog = useCallback(
+    (format: "csv" | "json") => {
+      const now = new Date().toISOString();
+      const text = format === "csv" ? formatDiscussionRepliesLogCsv(runLog) : formatDiscussionRepliesLogJson(runLog, { exportedAt: now });
+      const filename = discussionRepliesLogFileName(runLog.courseName, format, now);
+      const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
+      triggerFileDownload(new Blob([text], { type: mimeType }), filename);
+    },
+    [runLog]
+  );
 
   // F8: R4e says the embedded-provider capability limit must be shown as a
   // standing hint, not routed through the per-batch notice channel (which
@@ -504,6 +538,22 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           Screen-record a discussion board while you scroll - the app reads the posts off the screen and drafts a
           reply to each one.
         </p>
+      </div>
+
+      {/* docs/DEV_LOOP.md: "a downloadable log ... displayed in a prominent
+          location". Placed immediately under the header, before every other
+          control - never gated on `totalCount > 0` or on a capture having
+          run, since a failed or empty run (a capture that never found
+          anything, a start() that threw before anything was captured) is
+          exactly when this needs to be reachable without hunting. */}
+      <div className={styles.fieldHint} style={{ margin: "0 0 4px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span>{discussionRepliesLogSummaryLine(summarizeDiscussionRepliesRunLog(runLog))}</span>
+        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
+          Download run log (CSV)
+        </Button>
+        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
+          Download run log (JSON)
+        </Button>
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>

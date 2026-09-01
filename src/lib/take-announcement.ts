@@ -22,6 +22,102 @@ export const TRANSCRIPT_PROMPT_CAP = 8000;
 
 const TRUNCATION_MARKER = " [transcript truncated]";
 
+// docs/reply-composition-controls-acceptance-criteria.md C0-1: this group
+// (implementer C2) brings the same reply-composition vocabulary to
+// announcements, reusing discussion-reply-prompt.ts's ReplyIngredient /
+// ReplyFormality types and REPLY_INGREDIENT_LABELS rather than forking a
+// second copy - that file is already the one leaf both the discussion
+// controls and its prompt builder import, for exactly this reason.
+//
+// The ingredient list needed real judgement, not a blind copy of all five:
+//   - "compliment" and "deeper-question" are aimed at ONE person's post -
+//     an announcement addresses the whole class at once, so there is no
+//     single post to compliment and no single argument to push a question
+//     deeper on. Omitted.
+//   - "correction" gently corrects a factual error IN A POST - an
+//     announcement is not a reply to anyone's writing, so there is nothing
+//     for it to correct. Omitted.
+//   - "insight" and "resources" transfer. "resources" is reinterpreted,
+//     though: the discussion side gates a SEPARATE resource-search pass
+//     (entry 368's state machine) and there is no such pass, and no per-row
+//     surface to attach a fetched link to, on this surface - asking the
+//     model to invent one would be exactly the hallucination C2b forbids.
+//     Here "resources" instead asks the model to surface a resource ALREADY
+//     named in the transcript, never to invent one.
+//
+// There is deliberately no "address by name" control on this surface at
+// all (contrast the discussion side's addressByName toggle, ON by default).
+// An announcement has no single recipient - it goes to a whole class under
+// the instructor's name - so a per-person greeting toggle would be either a
+// no-op or would have to invent a collective address ("Hi everyone") nobody
+// asked for. Omitted rather than shipped as a control that silently does
+// nothing.
+import { REPLY_INGREDIENT_LABELS, type ReplyFormality, type ReplyIngredient } from "@/lib/discussion-reply-prompt";
+
+export type AnnouncementIngredient = Extract<ReplyIngredient, "insight" | "resources">;
+
+export const ANNOUNCEMENT_INGREDIENTS: readonly AnnouncementIngredient[] = ["insight", "resources"];
+
+// Reused verbatim from REPLY_INGREDIENT_LABELS, not forked into a second map.
+// Both labels now read correctly on both surfaces: "insight" was renamed at
+// the source (discussion-reply-prompt.ts) from "an insight the post did not
+// cover" to "an insight not already covered", because "the post" named
+// something that does not exist here. Renaming the shared label was the fix;
+// forking a second map so each surface could word it differently would have
+// been the mistake - entry 372 shipped one set restated in four modules.
+export const ANNOUNCEMENT_INGREDIENT_LABELS: Record<AnnouncementIngredient, string> = {
+  insight: REPLY_INGREDIENT_LABELS.insight,
+  resources: REPLY_INGREDIENT_LABELS.resources,
+};
+
+export interface AnnouncementCompositionSettings {
+  ingredients: readonly AnnouncementIngredient[];
+  formality: ReplyFormality;
+}
+
+// C4b-i's reasoning, transferred: NOT inert by default. Both available
+// ingredients are pre-selected, so the first announcement drafted after this
+// ships is visibly different with no action taken - deliberate. Formality
+// still defaults to "balanced", a true no-op (see formalityClause below).
+export const DEFAULT_ANNOUNCEMENT_COMPOSITION: AnnouncementCompositionSettings = {
+  ingredients: ANNOUNCEMENT_INGREDIENTS,
+  formality: "balanced",
+};
+
+// docs/reply-composition-controls-acceptance-criteria.md C4b/C4: modulates
+// the standing instruction below rather than restating or contradicting it -
+// diction only. Reuses the discussion side's exact wording pattern (its own
+// formalityClause is private to discussion-reply-prompt.ts, so this is a
+// parallel function, not an import) so the two surfaces read as one
+// vocabulary. "balanced" is a true no-op - the empty string is dropped by
+// the caller below, so a default-formality call is byte-identical to one
+// that never mentioned formality at all.
+function formalityClause(formality: ReplyFormality): string {
+  switch (formality) {
+    case "casual":
+      return "Lean casual in how you write this: contractions are fine, favor shorter sentences and everyday word choices - without abandoning the warmth and clarity already asked for above.";
+    case "formal":
+      return "Lean formal in how you write this: avoid contractions, favor fuller sentences and more precise, exact word choices - without abandoning the warmth and clarity already asked for above.";
+    case "balanced":
+    default:
+      return "";
+  }
+}
+
+// docs/reply-composition-controls-acceptance-criteria.md C2: one prompt
+// clause per selected ingredient - see this file's own header for why only
+// two of the five reply ingredients exist here.
+function announcementIngredientClause(ingredient: AnnouncementIngredient): string {
+  switch (ingredient) {
+    case "insight":
+      return "- Where it fits naturally, add one relevant insight or connection beyond what the transcript explicitly says - never a date, policy, deadline or fact that is not actually in the transcript below.";
+    case "resources":
+      return "- If the transcript names any specific resource, reading, tool or link, remind students of it in the announcement. Do not invent or write any resource, reading or link that is not already named in the transcript below.";
+    default:
+      return "";
+  }
+}
+
 /**
  * The standing instruction, included verbatim in every built prompt so a
  * wording change is a one-line diff here rather than an edit inside a
@@ -85,15 +181,49 @@ function formatDuration(durationSec: number): string {
  * future prompt-debugging session - relies on; the exact prose is not, since
  * this repo has twice had a source-text assertion force a contorted
  * implementation to satisfy an over-specified test.
+ *
+ * docs/reply-composition-controls-acceptance-criteria.md C0-2/C3/C4, this
+ * group's own C-2: `composition` is optional, defaulting to the fully inert
+ * state (no ingredients, balanced formality) - a call that omits it is
+ * byte-identical to this function's pre-composition-controls behaviour,
+ * proven in take-announcement.test.ts. The paragraph requirement below is
+ * the one UNCONDITIONAL addition (C0-2: a requirement, not a toggle) and is
+ * emitted regardless of `composition`.
  */
-export function buildTakeAnnouncementInstruction(transcript: string, context: TakeAnnouncementContext): string {
+export function buildTakeAnnouncementInstruction(
+  transcript: string,
+  context: TakeAnnouncementContext,
+  composition: AnnouncementCompositionSettings = { ingredients: [], formality: "balanced" }
+): string {
   const truncated = truncateTranscriptForPrompt(transcript);
 
   const lines: string[] = [
     TAKE_ANNOUNCEMENT_INSTRUCTION,
     "",
-    `This is a transcript of a screen recording titled "${context.takeName}" (${formatDuration(context.durationSec)} long), made by an instructor for their students. Draft the announcement from this transcript - it is source material, not the announcement itself.`,
+    // C3, generalized from the discussion side's C3-i line (same ~60-word
+    // threshold and blank-line requirement, reworded for "announcement"
+    // rather than "reply"): unconditional, never post-processed - see this
+    // file's own C0-2 note above. The owner's separate "plain text
+    // copyable" requirement is unaffected: a blank line is plain text, not
+    // markdown.
+    'If the announcement runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line ("\\n\\n"). Never write it as one unbroken block.',
   ];
+
+  const formality = formalityClause(composition.formality);
+  if (formality) lines.push("", formality);
+
+  if (composition.ingredients.length > 0) {
+    lines.push(
+      "",
+      "IN ADDITION, WHERE IT FITS",
+      ...composition.ingredients.map((ingredient) => announcementIngredientClause(ingredient))
+    );
+  }
+
+  lines.push(
+    "",
+    `This is a transcript of a screen recording titled "${context.takeName}" (${formatDuration(context.durationSec)} long), made by an instructor for their students. Draft the announcement from this transcript - it is source material, not the announcement itself.`
+  );
 
   if (context.topic && context.topic.trim()) {
     lines.push(`Course topic: ${context.topic.trim()}`);

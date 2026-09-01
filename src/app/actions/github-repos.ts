@@ -39,6 +39,8 @@ import {
   ingestRepo,
   excludeInstructionsFromDigest,
   isScaffoldingFile,
+  listBranches,
+  getRepoTreeWithMeta,
   type GithubRepo,
   type CopyRepoOptions,
   type CopyRepoResult,
@@ -59,13 +61,14 @@ import {
   type UpdateRepoPatch,
 } from "@/lib/github";
 import { classifyFrontend, classifyBackend, type BackendInfo } from "@/lib/frontend-detect";
-import { generateRubric, gradeEntries, type GradingRun, type StudentSubmissionEntry, type SubmittedFileInfo } from "@/lib/grade";
+import { generateRubric, gradeEntries, type GradingRun, type StudentSubmissionEntry, type SubmittedFileInfo, type GradeDetermination } from "@/lib/grade";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText } from "@/lib/embedded-grader";
 import { attachCodeRuns } from "@/lib/code-runner";
 import { rememberRubric } from "@/lib/research/rubric-bank";
 import { type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
 import { pickReadmeInstructions } from "@/lib/repo-readme-instructions";
+import { scanBranchesForUnmergedSubmission, MAX_BRANCHES_SCANNED } from "@/lib/repo-grade-branch-scan";
 
 type RepoFile = { path: string; content: string; truncated: boolean };
 type RepoDigest = { fullName: string; text: string; fileCount: number; files: RepoFile[] };
@@ -678,6 +681,16 @@ export async function gradeRepoAction(
       digestTruncated?: boolean;
       readmePath?: string;
       readmeMissing?: boolean;
+      // G3 (docs/no-submission-and-requirement-checking-acceptance-criteria.md
+      // section 3): set to "no-submission-unmerged-branch" only when
+      // scanBranchesForUnmergedSubmission found real, non-scaffolding content
+      // for this same folder on another branch of this repo - `reason` above
+      // names which one. Absent for the ordinary no-submission case (nothing
+      // found on any other branch, or the branch scan itself could not
+      // determine an answer - see `reason` for that honest caveat either
+      // way). The score/outcome never changes either way (G3a) - this is
+      // additive information only.
+      determination?: GradeDetermination;
     }
   | { error: string }
 > {
@@ -739,8 +752,57 @@ export async function gradeRepoAction(
     if (gradableFiles.length === 0) {
       const folderLabel = pathPrefix ? `"${pathPrefix}"` : "the repository";
       const removed = readmePath ? "the assignment instructions file and scaffolding (.gitkeep)" : "scaffolding (.gitkeep)";
-      const reason = `Nothing was submitted in ${folderLabel} - after removing ${removed}, no student-authored files remain.`;
-      return { noSubmission: true, fullName: digest.fullName, reason, digestTruncated, readmePath, readmeMissing };
+      let reason = `Nothing was submitted in ${folderLabel} - after removing ${removed}, no student-authored files remain.`;
+      let determination: GradeDetermination | undefined;
+
+      // G3 (docs/no-submission-and-requirement-checking-acceptance-criteria.md
+      // section 3): the most common innocent cause of a missing submission
+      // is that the work landed on a branch that was never merged. Runs ONLY
+      // here, on the no-submission path already established above (G3a) -
+      // never for a repo that submitted something, which is what keeps this
+      // affordable across a roster. Never throws (see that module's own doc
+      // comment) and never changes the score/outcome - only enriches the
+      // comment the student and instructor read.
+      const scan = await scanBranchesForUnmergedSubmission(
+        parsed.owner,
+        parsed.repo,
+        pathPrefix,
+        branch,
+        {
+          listBranches,
+          fetchTree: async (owner, repo, b) => {
+            const { entries, truncated } = await getRepoTreeWithMeta(owner, repo, b);
+            return { entries, truncated };
+          },
+        }
+      );
+
+      if (scan.kind === "found") {
+        // G3/G1a: the fact is a field (determination), never encoded into
+        // the score string - totalScore is not touched anywhere on this
+        // path, and this branch does not produce one at all. The comment
+        // below is written to be actionable and non-accusatory (G3, and this
+        // doc's own "must not accuse" note): it names the branch and states
+        // plainly that the work was not on the graded branch, without
+        // implying misconduct - an unmerged branch is a process mistake, the
+        // most common innocent cause of a missing submission.
+        determination = "no-submission-unmerged-branch";
+        reason = `${reason} The same folder does appear on another branch of this repository, "${scan.branch}", which was never merged into the graded branch - it looks like the work exists, just not where it was graded. Merging or re-pointing the submission to "${scan.branch}" would let it be graded.`;
+      } else if (scan.kind === "undetermined") {
+        // G3d: never "no unmerged work found" when the check itself could
+        // not be completed - the honest statement is that other branches
+        // could not be checked, not that they were checked and came up
+        // empty.
+        reason = `${reason} Other branches of this repository could not be checked for the same folder (${scan.reason}), so it is possible the work exists there unseen.`;
+      }
+      if (scan.branchesSkipped > 0) {
+        // G3c: a silent cap reads as "checked everywhere" when it did not -
+        // always say how many branches were left unchecked past the cap,
+        // regardless of whether the check that did run found anything.
+        reason = `${reason} (${scan.branchesSkipped} other branch${scan.branchesSkipped === 1 ? "" : "es"} of this repository were not checked - past the ${MAX_BRANCHES_SCANNED}-branch limit for this check.)`;
+      }
+
+      return { noSubmission: true, fullName: digest.fullName, reason, digestTruncated, readmePath, readmeMissing, determination };
     }
 
     const instructions = effectiveInstructions.trim() || `Evaluate the repository "${digest.fullName}".`;

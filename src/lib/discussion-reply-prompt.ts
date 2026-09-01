@@ -107,7 +107,12 @@ export const REPLY_INGREDIENTS: readonly ReplyIngredient[] = [
 export const REPLY_INGREDIENT_LABELS: Record<ReplyIngredient, string> = {
   compliment: "a compliment on what the post did well",
   "deeper-question": "a question that goes deeper",
-  insight: "an insight the post did not cover",
+  // Deliberately does NOT say "the post": this label is shared with the
+  // announcement surface (take-announcement.ts), where there is no post and
+  // "the post" read as a stray reference to something that does not exist.
+  // Neutral wording serves both surfaces, which is why the list is shared
+  // rather than forked - entry 372 shipped one set restated in four modules.
+  insight: "an insight not already covered",
   resources: "two or three relevant resources",
   correction: "a gentle correction, only if something is wrong",
 };

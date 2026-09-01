@@ -3,7 +3,7 @@
  * by its deadline. Pure function, testable without network calls.
  */
 
-import type { GradingRunEntry } from "./grade";
+import { composeOverallComment, formatFeedback, RESUBMIT_NOTICE, type GradingRunEntry } from "./grade";
 
 // Canvas submission_types that record an online submission state we can trust to
 // mean "turned in". on_paper / none / external_tool are NOT here: for those the
@@ -41,23 +41,72 @@ export interface BuildZeroGradingEntryInput {
   nonSubmitters: Array<{ userId: number; name: string }>;
 }
 
+// docs/no-submission-and-requirement-checking-acceptance-criteria.md G2: the
+// comment states plainly that no submission was found, what was looked for,
+// and where - written for the student, in the instructor's voice, and must
+// not imply wrongdoing (a missing submission has innocent causes). Split
+// across the strengths/improvements boxes (rather than one long
+// overallComment) per G2a - composeOverallComment below is what recombines
+// them, so the three parts can never drift out of sync with the composed
+// text a student actually reads.
+//
+// Deliberately generic about the cause: this producer covers every online
+// submission type (text entry, URL, upload, quiz, discussion, media
+// recording, annotation), not just GitHub-repo assignments, so it does not
+// name a specific innocent cause (e.g. an unmerged branch) that may not
+// apply to this submission type.
+const NO_SUBMISSION_STRENGTHS =
+  "No submission was found for this assignment as of the due date, so there is nothing yet to grade - this is not a judgment on your work, only a record of what Canvas shows for your submission to this assignment.";
+const NO_SUBMISSION_IMPROVEMENTS =
+  "If you completed the work but it did not make it in (a failed upload, a wrong link, or a similar issue), please let me know and I will take a look.";
+
 export function buildZeroGradingEntry(input: BuildZeroGradingEntryInput): GradingRunEntry {
+  // G1a: the no-submission fact is its own field (determination below),
+  // never encoded into totalScore - six sites in this repo take the first
+  // number found anywhere in a score string, so text like "No submission -
+  // checked 3 branches" would post as 3.
+  //
+  // G1b: pointsPossible ?? 0 used to produce "0/0" whenever a Canvas
+  // assignment's points were unknown, and every fraction parser in this repo
+  // (parseEarnedPossibleScore requires possible > 0) rejects that string. A
+  // bare "0" - still a valid score to post, still picked up by every
+  // first-number extraction site - is used instead whenever pointsPossible
+  // is not a positive number.
+  const totalScore =
+    input.pointsPossible != null && input.pointsPossible > 0 ? `0/${input.pointsPossible}` : "0";
+
+  // G2a: composeOverallComment (not a hand-authored string) so overallComment
+  // can never drift from the three boxes it is built from.
+  //
+  // G1d: resubmitNotice is set directly here, not derived from
+  // pointsWereDeducted(totalScore, ...) - that helper cannot parse a bare
+  // "0" (no "/"), and this producer must reach the resubmit notice
+  // deliberately rather than by accident of parsing. A 0 for a missing
+  // submission has, by construction, room to improve on resubmission.
+  const overallComment = composeOverallComment(
+    NO_SUBMISSION_STRENGTHS,
+    NO_SUBMISSION_IMPROVEMENTS,
+    RESUBMIT_NOTICE
+  );
+
   const results = input.nonSubmitters.map((s) => ({
     student: s.name,
-    // No submission means nothing to describe as a strength, no improvement
-    // guidance to give, and no resubmission is being offered here (this is a
-    // zero for a missed deadline, not a graded-but-imperfect submission) - all
-    // three stay "", matching overallComment's pre-existing "" exactly.
-    overallComment: "",
-    strengths: "",
-    improvements: "",
-    resubmitNotice: "",
+    overallComment,
+    strengths: NO_SUBMISSION_STRENGTHS,
+    improvements: NO_SUBMISSION_IMPROVEMENTS,
+    resubmitNotice: RESUBMIT_NOTICE,
     rubricAreas: [],
-    totalScore: `0/${input.pointsPossible ?? 0}`,
-    feedback: "",
+    totalScore,
+    // Reuses the same composition every LLM-backed producer uses
+    // (grade/engine.ts) rather than authoring a parallel "feedback" string.
+    feedback: formatFeedback(overallComment, [], totalScore),
     mergedFileCount: 0,
     submittedFiles: [],
     userId: s.userId,
+    // G2b: no LLM call is made here (this whole function is pure, sync, and
+    // network-free) - there is nothing to grade, and the text above is fully
+    // deterministic.
+    determination: "no-submission" as const,
   }));
 
   return {

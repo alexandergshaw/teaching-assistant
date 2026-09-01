@@ -449,9 +449,11 @@ export default function RepoGradeCellControl({
                   ? displayedCodeRun.timedOut
                     ? "timed out before the sandbox reported back."
                     : `could not execute - ${displayedCodeRun.error}`
-                  : `${displayedCodeRun.entryPoint ?? "the submission"} ${
-                      displayedCodeRun.ran ? "ran cleanly" : "did not run cleanly"
-                    }`}
+                  : displayedCodeRun.neededStdin
+                    ? `${displayedCodeRun.entryPoint ?? "the submission"} found no input available (not scored)`
+                    : `${displayedCodeRun.entryPoint ?? "the submission"} ${
+                        displayedCodeRun.ran ? "ran cleanly" : "did not run cleanly"
+                      }`}
               </span>
               {!displayedCodeRun.error && (
                 <button type="button" className={pageStyles.linkButton} onClick={() => setCodeRunOpen((v) => !v)}>
@@ -460,7 +462,10 @@ export default function RepoGradeCellControl({
               )}
               {codeRunOpen && !displayedCodeRun.error && (
                 <div className={styles.codeRunOutput}>
-                  <p className={pageStyles.previewMeta}>Ran without errors: {displayedCodeRun.ran ? "yes" : "no"}</p>
+                  <p className={pageStyles.previewMeta}>
+                    Ran without errors:{" "}
+                    {displayedCodeRun.neededStdin ? "no input available (not scored)" : displayedCodeRun.ran ? "yes" : "no"}
+                  </p>
                   {displayedCodeRun.compileOutput && displayedCodeRun.compileOutput.trim() && (
                     <>
                       <p className={pageStyles.previewMeta}>Compiler output</p>

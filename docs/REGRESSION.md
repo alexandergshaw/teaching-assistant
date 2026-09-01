@@ -36115,3 +36115,219 @@ rather than hidden, and wired in a follow-up wave.
 
 Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
 pre-existing warnings, `vitest` **741 files / 15342 tests** all passing.
+
+## 375. A zero that finally says why, the branch the work was actually on, and the input the sandbox never had
+
+Nine pieces in one batch, three of them about the same sentence: what a student is told
+when the app decides they submitted nothing.
+
+**A no-submission zero used to be a number with no words attached.**
+`buildZeroGradingEntry` (`grade-zeros.ts`) emitted `overallComment`, `strengths`,
+`improvements` and `resubmitNotice` as four empty strings, with a comment explaining that
+this was deliberate. It was defensible in isolation and indefensible in an appeal: a
+student saw a 0 and nothing else, and the instructor had nothing to quote. All four boxes
+now carry real text, composed through `composeOverallComment` rather than authored
+separately so they cannot drift, stating what was looked for and where, offering the
+innocent reading first ("a failed upload, a wrong link"), and reaching `RESUBMIT_NOTICE`
+deliberately rather than by accident of `pointsWereDeducted` failing to parse the total.
+The posted number does not move: `parseEarnedPoints` read `"0/100"` as 0 before and reads
+it as 0 now.
+
+**`"0/0"` was a real score string that no parser in this repo accepts.** Whenever Canvas
+did not report an assignment's points, `pointsPossible ?? 0` produced it, and every
+fraction reader here rejects a zero denominator. It now degrades to a bare `"0"`, which
+`resolvePostScore` routes through its no-slash `Number()` branch and posts unchanged.
+
+**The fact is a field, not a sentence.** `GradeDetermination` is a closed union on
+`GradeResult`, never encoded into `totalScore` - because six sites in this repo take the
+first number found anywhere in a score string, so a marker like "No submission - checked 3
+branches" would post as **3**. The union's membership list is written exactly once, as
+`Record<GradeDetermination, true>`, so adding a member without registering it is a
+compile error in both directions.
+
+**The most common innocent cause of a missing submission is now checked.**
+`scanBranchesForUnmergedSubmission` (`repo-grade-branch-scan.ts`) runs only on the
+no-submission path - never for a repo that submitted something, which is what keeps it
+affordable across a roster - and looks for the same scoped folder on the repo's other
+branches. When it finds one, the reason names the branch and says the work looks like it
+exists, just not where it was graded. The score does not change. Four situations that
+would otherwise read as "checked, found nothing" are kept distinct as `undetermined`: a
+404, a 409 empty-repository response, a rate-limit refusal, and a tree listing GitHub
+truncated. A positive finding on a truncated listing is still trusted - the file that was
+seen really exists - but an absence on one is not. Branches past the cap are always
+counted and reported, never silently dropped.
+
+**Two hardcoded literal comparisons would have quietly eaten the new member.**
+`github-grading-run-store.ts` and `grading-drafts.ts` each validated `determination`
+against its own inline list. Both now call one `coerceGradeDetermination`. The two keep
+deliberately different idioms and both are documented at the call site: the store rejects
+a *present but unknown* value outright (a corrupt blob, not an old one) while letting an
+absent one through, and drafts degrade anything unrecognised to `undefined`. A run stored
+before any of this existed still restores.
+
+**A third allowlist was found dropping a field, for the second time.**
+`stripGradeResultForDraft` had been silently dropping `submissionTruncated` -
+`github-grading-run-store.ts` compensated by re-attaching it by index, and
+`grading-drafts.ts` had no compensation at all, so a draft saved through that path lost
+its truncation warning on every reload. Both are fixed at the source. The new
+`grade-result-allowlist-coverage.test.ts` pushes a sentinel `GradeResult` through all
+three allowlists and adds a compile-time exhaustiveness assertion; the assertion was
+verified by replicating the construct with a deliberately unlisted field and confirming
+`tsc` fails on it, rather than trusting that it would.
+
+**"Needed input, got EOF" is now a third outcome, and it is neither a pass nor a fail.**
+This sandbox always runs student code with stdin hardcoded to `""`. A Python program that
+correctly does what the assignment asked - read two numbers - raised `EOFError`, exited
+non-zero, and was scored **0/10** on the `Code runs` criterion. `neededStdin` now marks
+that case, and both graders treat it exactly the way they already treated a network
+outage: the criterion is **excluded from that entry's denominator, never scored zero**, so
+a rubric-perfect submission goes from 30/40 to 30/30. On the LLM path the entire
+`AUTOMATED CODE EXECUTION` note is withheld rather than telling the model "ran without
+errors: no". Java's `Scanner` case is detected by requiring **both** the exact
+`java.util.NoSuchElementException` class name **and** a `java.util.Scanner` read frame on
+the trace - never either alone, which is what rules out an empty collection's iterator.
+`InputMismatchException` is correctly never matched: this sandbox's stdin is always empty,
+never malformed, so when that fires it is a real defect and must keep failing the run.
+
+**C++ fails the same way silently, and the honest fix was a caveat, not a reclassification.**
+`cin >> x` at EOF sets a failure flag, leaves the variable untouched, and exits 0 - so the
+model was being shown garbage stdout as if it were real program behaviour.
+`stdinReadSuspected` adds a sentence to the prompt telling the model to judge the
+input-handling from the source instead. It never changes whether the run counts as clean,
+because the process genuinely did exit 0 and claiming otherwise would be lying in the
+other direction. Four display sites learned the new vocabulary and use it verbatim rather
+than inventing four phrasings.
+
+**The capture surface gained a downloadable run log**, and - unlike the four features that
+shipped dead earlier in this project's history - its control is gated on nothing at all,
+so it renders on a run that failed before it produced a single row, which is the only time
+it matters.
+
+**`useTakeAnnouncement.ts` lost 234 lines to `takeAnnouncementTranscription.ts`**, moved
+statement-for-statement with only closure variables rewritten to injected dependencies.
+The import graph runs one way; `REAL_TIME_MAX_SECONDS` moved wholly into the leaf with its
+only consumer beside it, and `estimateRealTimeMinutes` was promoted to an export and
+imported *forward* by the parent, rather than back-imported - the cycle this repo has
+built silently before.
+
+Final gates: `tsc` 0 errors, `eslint` 0 errors / 6 pre-existing warnings, `vitest`
+**747 files / 15486 tests** all passing. The `ta-rec-*` key canary is 54, re-derived
+independently with an ordinal sort; the two new `ta-rec-ann-*` keys sit at their correct
+sorted slots and are both read and written.
+
+### Limits
+
+- **Whether the model honours any of the new requirement-checking rules is entirely
+  unmeasured.** Every assertion in this batch is that an *instruction is present in the
+  prompt* and that a field is non-empty - never that the model's citation is correct, or
+  even real. A fabricated citation passes every gate here. The same applies to the
+  `stdinReadSuspected` caveat: nothing measures whether the model actually discounts the
+  output, and the direction of travel for C/C++ submissions is *downward*, since output
+  that previously read as evidence now reads as unreliable.
+- **The EOF detection has known uncovered cases, and two known false positives.**
+  Uncovered by design: Python's two-statement form (`line = sys.stdin.readline()` then
+  `int(line)` later), where the failing line no longer mentions stdin; and any bare
+  `ValueError`/`IndexError` with no stdin call on the failing line. False positives that
+  will inflate a grade rather than deflate it: a Java `Scanner` wrapping a **file** rather
+  than `System.in` produces an identical stack trace, and Python's `EOFError` is also
+  raised by `pickle`, `gzip`, `bz2`, `lzma` and `marshal` on an empty or truncated stream -
+  the bare `/EOFError/` match does not distinguish those from `input()`.
+  `sourceLooksLikeItReadsStdin` is a regex over source text and matches inside comments and
+  string literals.
+- **The branch scan is best-effort in three specific ways.** It excludes any file whose
+  *basename* matches `/readme/i`, so an assignment whose deliverable actually is a README
+  can never be found on an unmerged branch. It fetches at most 10 other branches, taken in
+  `listBranches` order rather than most-recent order, so on a repo with many stale branches
+  the relevant one can be the branch skipped - the count skipped is always reported, which
+  is the mitigation, not a fix. It reads tree paths only, never file content, so it cannot
+  do the exact-content instructions match the graded branch gets. It is also blind to work
+  pushed to a fork rather than a branch, and `listBranches` discards head SHAs so two branch
+  names pointing at one commit cannot be deduped.
+- **A 0 is a real grade with real consequences.** If the no-submission detection or the
+  branch scan is wrong, a student now receives a 0 accompanied by a *confident, quotable
+  explanation*, which is worse than a 0 with no words. The three "could not determine"
+  states exist precisely because that failure mode is worse than no grade at all.
+- **No component is rendered by any test in this repo.** vitest here is node-env and
+  collects only `src/**/*.test.ts`, so every finding about the new announcement controls,
+  the log download button, and the four code-run display sites comes from reading the JSX,
+  not from exercising it. A green suite proves nothing about markup, focus order, or
+  keyboard behaviour on any of them.
+- **`useDiscussionReplies.ts` is at 944 lines against the 1000-line ceiling** - it was 820
+  at entry 373 and this batch added 130. `DiscussionRepliesPanel.tsx` moved 831 to 882.
+  Both are the next extraction targets and neither has more than one more feature of
+  headroom.
+- **The runtime half of the new allowlist guard cannot see a future *optional* field.**
+  `tsc` forces a new field into `ALL_GRADE_RESULT_FIELDS`, but nothing forces it into
+  `sentinelResult()` when it is optional - and both fields this file exists because of are
+  optional. An omitted sentinel value compares `undefined` to `undefined` and passes.
+- **A discarded batch's posts are logged as duplicates.** The run log derives
+  `postsDuplicate` as `postsExtracted - postsAdded`, and the epoch-discard call site passes
+  no `postsAdded`, so a batch dropped by a table reset reports every post it found as a
+  duplicate. The test asserts the inflated total as correct.
+
+
+### Written before the post-review fixes - what actually shipped
+
+The review returned no blocker and eight SHOULDs. Five were closed before the
+push; the entry body above describes the pre-fix state.
+
+**The EOF detection was defeated twice, and both defeats INFLATED grades.** The
+review attacked it rather than reading it, and won:
+
+- A Java `Scanner` wrapping a **File** that runs out of input produces a trace
+  byte-identical to the stdin case. A student whose file-parsing loop genuinely
+  over-reads would have been silently excluded from scoring instead of marked
+  down.
+- Python's bare `EOFError` check also matches `pickle`, `gzip` and `bz2` on an
+  empty or truncated stream. The source comment asserting that CPython raises
+  `EOFError` for no other built-in reason was simply **false**.
+
+Both are closed by requiring **source-level proof that the program reads
+standard input**, in addition to the stderr signature: the exception proves
+input ran out, the source proves the input in question was stdin - the only
+thing this sandbox starves. Java accepts only a `Scanner` over `System.in`
+(directly or through `InputStreamReader`/`BufferedReader`); a `Scanner` over a
+`File` or a string is rejected. That is the same standard the pre-existing
+Python `sys.stdin` same-line rule already met, which is exactly why that rule
+**survived the attack unchanged**.
+
+Deliberately still uncovered, because a false positive here hides a real defect
+and inflates a grade - worse than the bug being fixed: a Java `Scanner` built
+from a reader variable declared on an earlier statement; a Python `EOFError`
+where `input(`/`sys.stdin` appears somewhere in the file but not on the failing
+path; `cin >>` inside a string literal or a block comment. An uncovered case
+keeps today's behaviour, which is wrong but visible.
+
+**Three tests could not fail, one of them inside the guard written to prevent
+exactly that.** The allowlist coverage guard forces a new `GradeResult` field
+into its field list at compile time, but NOT into its sentinel object - so an
+optional field left out was `undefined` on both sides of every comparison and
+"survived" all three allowlists trivially. That is the `submissionTruncated`
+defect this file exists to catch, alive inside it. Now every listed field must
+be non-`undefined` on the sentinel before the round-trips run, proven by adding
+a throwaway field and watching the suite go red while the three original blocks
+stayed green.
+
+The capture log counted a **discarded** batch's posts as duplicates - and its
+test froze the inflated number as correct, so the bug was protected by its own
+test. Reading the epoch-bump path showed it was worse than reported: `postsAdded`
+is always `0` on that branch, so EVERY discarded post was counted as a duplicate.
+Discarded posts now have their own tally and their own clause in the on-screen
+summary line (appended only when non-zero, so both frozen sentences are
+unchanged) - because a discarded batch is posts read off the instructor's screen
+and then silently thrown away, and nothing else in the UI said it happened.
+
+An announcement inertness test compared two values that both defaulted to
+`balanced`, so it could not fail. **The implementing agent reported replacing
+it; it had actually added a stronger sibling alongside and left the tautology
+in place** - recorded because an agent's self-report needs the same verification
+as its code.
+
+**One review correction worth keeping:** entry 374's guard lives in
+`src/app/actions/github.ts`, which has a zero-byte diff in this batch - it could
+not have been weakened. And X3 is not a pure extraction as reported:
+`useTakeAnnouncement.ts` measures **681** lines, not 631, because the
+composition feature rides in the same diff.
+
+Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
+pre-existing warnings, `vitest` **747 files / 15493 tests** all passing.

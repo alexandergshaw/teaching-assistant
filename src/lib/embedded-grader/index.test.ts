@@ -182,4 +182,75 @@ describe("gradeEntriesEmbedded", () => {
     expect(run.results[0].rubricAreas.find((a) => a.area === "Code runs")).toBeUndefined();
     expect(run.results[0].totalScore).toBe("30/30");
   });
+
+  // The defect this covers: assignments on this course require reading two
+  // numbers from stdin, but the sandbox always runs code with stdin
+  // hardcoded to "" (code-runner.ts). Python's input() then raises
+  // EOFError, the process exits non-zero, and - before this fix - this
+  // exact `ran: false` shape scored zero, penalizing a student for doing
+  // exactly what the assignment asked. neededStdin (set by code-runner.ts
+  // when isStdinEofFailure matches) must be treated like a runner error:
+  // excluded from the denominator, not zeroed.
+  it("excludes Code runs from the denominator (not zero) when the run failed only because no stdin was available", () => {
+    const base = entry("Hana", "import pandas\ndef clean(df): return df", ["py"]);
+    const withRun = {
+      ...base,
+      codeRun: {
+        language: "python",
+        files: ["Hana.py"],
+        ran: false,
+        exitCode: 1,
+        stdout: "",
+        stderr: "EOFError: EOF when reading a line",
+        neededStdin: true,
+      },
+    };
+    const run = gradeEntriesEmbedded([withRun], rubric);
+    // Excluded entirely - same shape as the pre-existing runner-error skip,
+    // NOT a "0/10" entry (the opposite, over-correcting error the brief
+    // warns against is scoring it as full marks - this asserts neither).
+    expect(run.rubricAreaNames).not.toContain("Code runs");
+    expect(run.results[0].rubricAreas.find((a) => a.area === "Code runs")).toBeUndefined();
+    // The denominator drops the 10 code-run points entirely rather than
+    // counting them as 0/10 - 30 (rubric only), not 30/40 with 0 earned.
+    expect(run.results[0].totalScore).toBe("30/30");
+  });
+
+  it("still scores Code runs as zero for a genuine failure unrelated to stdin, even alongside a stdin-starved sibling", () => {
+    const stdinStarved = {
+      ...entry("Ivy", "import pandas\ndef clean(df): return df", ["py"]),
+      codeRun: {
+        language: "python",
+        files: ["Ivy.py"],
+        ran: false,
+        exitCode: 1,
+        stdout: "",
+        stderr: "EOFError: EOF when reading a line",
+        neededStdin: true,
+      },
+    };
+    const genuineFailure = {
+      ...entry("Jon", "import pandas\ndef clean(df): return df", ["py"]),
+      codeRun: { language: "python", files: ["Jon.py"], ran: false, exitCode: 1, stdout: "", stderr: "NameError: name 'x' is not defined" },
+    };
+    const run = gradeEntriesEmbedded([stdinStarved, genuineFailure], rubric);
+    // At least one entry (Jon's) counts, so the column exists...
+    expect(run.rubricAreaNames).toContain("Code runs");
+    // ...but Hana/Ivy's own row still has no Code runs area (excluded)...
+    expect(run.results[0].rubricAreas.find((a) => a.area === "Code runs")).toBeUndefined();
+    expect(run.results[0].totalScore).toBe("30/30");
+    // ...while Jon's genuine failure is still scored zero, unchanged.
+    const jonArea = run.results[1].rubricAreas.find((a) => a.area === "Code runs");
+    expect(jonArea?.score).toBe("0/10");
+    expect(run.results[1].totalScore).toBe("30/40");
+  });
+
+  it("leaves a program that needed no input unaffected (ran: true stays 10/10)", () => {
+    const base = entry("Kim", "import pandas\ndef clean(df): return df", ["py"], 9);
+    const withRun = { ...base, codeRun: { language: "python", files: ["Kim.py"], ran: true, exitCode: 0, stdout: "ok", stderr: "" } };
+    const run = gradeEntriesEmbedded([withRun], rubric);
+    const area = run.results[0].rubricAreas.find((a) => a.area === "Code runs");
+    expect(area?.score).toBe("10/10");
+    expect(run.results[0].totalScore).toBe("40/40");
+  });
 });

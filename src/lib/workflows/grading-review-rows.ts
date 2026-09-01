@@ -54,6 +54,19 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
     // grade to a student (AC2.4) even after this run's process exits.
     gradedRepo: result.gradedRepo,
     gradedRef: result.gradedRef,
+    // Kept for the same reason gradedRepo/gradedRef are: not bulky, and it
+    // is exactly the fact (docs/no-submission-and-requirement-checking-
+    // acceptance-criteria.md G1a) a draft/posted grade must be able to
+    // defend later without parsing overallComment's prose.
+    determination: result.determination,
+    // Previously dropped by this allowlist (github-grading-run-store.ts had
+    // to work around it by re-attaching the value by index after calling
+    // this function - see that file's serializeGithubGradingRun). Kept
+    // directly here now: not bulky, and every caller of this strip -
+    // including grading-drafts.ts's draft persistence, which had no
+    // compensating re-attachment of its own - should see the same fact a
+    // restored run does.
+    submissionTruncated: result.submissionTruncated,
   };
 }
 

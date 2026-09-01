@@ -161,6 +161,122 @@ describe("code-runner", () => {
       expect(result!.ran).toBe(false);
       expect(result!.exitCode).toBe(1);
       expect(result!.stderr).toContain("ValueError: boom");
+      // A genuine, unrelated failure must NOT be flagged as stdin-starved.
+      expect(result!.neededStdin).toBeFalsy();
+    });
+
+    // The defect: this sandbox always runs code with stdin hardcoded to ""
+    // (see the "stdin: ''" call sites this test's mocked /execute body
+    // stands in for). Assignments on this course require reading two
+    // numbers from the user, so Python's input() raises EOFError here -
+    // exactly the same as a real course submission that did nothing wrong.
+    // neededStdin must be set so callers (embedded-grader/index.ts,
+    // grade/engine.ts) treat this as neutral, not a genuine failure.
+    it("flags a Python EOFError-at-empty-stdin failure as neededStdin", async () => {
+      const pythonContent = "a = int(input())\nb = int(input())\nprint(a + b)";
+      const pythonBase64 = Buffer.from(pythonContent).toString("base64");
+
+      global.fetch = vi.fn(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/runtimes")) {
+          return new Response(JSON.stringify([{ language: "python", version: "3.10.0" }]), { status: 200 });
+        }
+        if (urlStr.includes("/execute")) {
+          // Confirms the defect directly: stdin sent to the runner is "".
+          const body = JSON.parse(String(init?.body));
+          expect(body.stdin).toBe("");
+          return new Response(
+            JSON.stringify({
+              language: "python",
+              version: "3.10.0",
+              run: {
+                stdout: "",
+                stderr: 'Traceback (most recent call last):\n  File "main.py", line 1, in <module>\n    a = int(input())\nEOFError: EOF when reading a line\n',
+                code: 1,
+                signal: null,
+                output: "",
+              },
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`Unexpected URL: ${urlStr}`);
+      });
+
+      const files: CodeFileInput[] = [{ name: "main.py", extension: "py", rawBase64: pythonBase64 }];
+      const result = await runSubmittedCode(files);
+      expect(result).not.toBeNull();
+      expect(result!.ran).toBe(false);
+      expect(result!.neededStdin).toBe(true);
+      expect(result!.error).toBeUndefined();
+    });
+
+    // The C++ counterpart of the same defect: `cin >> x` at empty stdin sets
+    // failbit and leaves the variable untouched, but the process still
+    // exits 0 - so `ran` stays true (this module cannot honestly say
+    // otherwise; the process really did exit cleanly). stdinReadSuspected is
+    // the caveat callers use instead of reclassifying the run - see
+    // grade/utils.ts's buildCodeExecutionNote.
+    it("flags a C++ run that reads stdin and exits 0 as stdinReadSuspected, without changing ran", async () => {
+      const cppContent = "#include <iostream>\nint main(){int a,b;std::cin>>a>>b;std::cout<<a+b;}";
+      const cppBase64 = Buffer.from(cppContent).toString("base64");
+
+      global.fetch = vi.fn(async (url) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/runtimes")) {
+          return new Response(JSON.stringify([{ language: "c++", version: "10.2.0" }]), { status: 200 });
+        }
+        if (urlStr.includes("/execute")) {
+          return new Response(
+            JSON.stringify({
+              language: "c++",
+              version: "10.2.0",
+              compile: { stdout: "", stderr: "", code: 0, output: "" },
+              run: { stdout: "0", stderr: "", code: 0, signal: null, output: "0" },
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`Unexpected URL: ${urlStr}`);
+      });
+
+      const files: CodeFileInput[] = [{ name: "main.cpp", extension: "cpp", rawBase64: cppBase64 }];
+      const result = await runSubmittedCode(files);
+      expect(result).not.toBeNull();
+      expect(result!.ran).toBe(true);
+      expect(result!.exitCode).toBe(0);
+      expect(result!.stdinReadSuspected).toBe(true);
+      expect(result!.neededStdin).toBeFalsy();
+    });
+
+    it("does not flag a program that needs no input at all", async () => {
+      const pythonContent = 'print("hello")';
+      const pythonBase64 = Buffer.from(pythonContent).toString("base64");
+
+      global.fetch = vi.fn(async (url) => {
+        const urlStr = String(url);
+        if (urlStr.includes("/runtimes")) {
+          return new Response(JSON.stringify([{ language: "python", version: "3.10.0" }]), { status: 200 });
+        }
+        if (urlStr.includes("/execute")) {
+          return new Response(
+            JSON.stringify({
+              language: "python",
+              version: "3.10.0",
+              run: { stdout: "hello\n", stderr: "", code: 0, signal: null, output: "hello\n" },
+            }),
+            { status: 200 }
+          );
+        }
+        throw new Error(`Unexpected URL: ${urlStr}`);
+      });
+
+      const files: CodeFileInput[] = [{ name: "main.py", extension: "py", rawBase64: pythonBase64 }];
+      const result = await runSubmittedCode(files);
+      expect(result).not.toBeNull();
+      expect(result!.ran).toBe(true);
+      expect(result!.neededStdin).toBeFalsy();
+      expect(result!.stdinReadSuspected).toBeFalsy();
     });
 
     it("captures compile failure for C++", async () => {

@@ -116,6 +116,46 @@ describe("recording-split structure", () => {
       "\n" +
       recordingTabContent;
 
+    // Shared by both the disc and ann read/write wiring-check blocks below
+    // (moved here, out of the disc block, so the ann block - added by this
+    // group, docs/reply-composition-controls-acceptance-criteria.md C0-1 -
+    // does not have to duplicate it). What "wired" honestly means here, and
+    // no more: the literal key string appears as the argument of a call
+    // shaped like a persistence READ (`readLocalStorage("KEY")`,
+    // `readPersisted("KEY")` or `localStorage.getItem("KEY")`), AND,
+    // separately, as the argument of a call shaped like a persistence WRITE
+    // (`writeLocalStorage("KEY", ...)` or `localStorage.setItem("KEY", ...)`)
+    // - directly, or via a `const NAME = "KEY"` binding used at the call
+    // site instead of the literal (the three useReplyRows.ts STORAGE_KEY_*
+    // keys need this; the ta-rec-ann-* keys do not, but the same helper
+    // covers both without caring which shape a given key uses). A
+    // source-text scan cannot prove the read result reaches component
+    // state, that the write effect actually fires at runtime, or that
+    // either runs at all - only that both call shapes exist in the source,
+    // addressed to this exact key. That is enough to catch the proven
+    // failure mode: a write call deleted outright while the read (and the
+    // key string itself) survives untouched.
+    function isWired(key: string, callKind: "read" | "write"): boolean {
+      const directPattern =
+        callKind === "read"
+          ? new RegExp(`(readLocalStorage|readPersisted|localStorage\\.getItem)\\(\\s*["']${key}["']\\s*\\)`)
+          : new RegExp(`(writeLocalStorage|localStorage\\.setItem)\\(\\s*["']${key}["']\\s*,`);
+      if (directPattern.test(combinedRecordingSource)) return true;
+
+      const constNames = Array.from(
+        combinedRecordingSource.matchAll(new RegExp(`const\\s+(\\w+)\\s*=\\s*["']${key}["']`, "g"))
+      ).map((m) => m[1]);
+      if (constNames.length === 0) return false;
+
+      return constNames.some((name) => {
+        const pattern =
+          callKind === "read"
+            ? new RegExp(`(readLocalStorage|readPersisted|localStorage\\.getItem)\\(\\s*${name}\\s*\\)`)
+            : new RegExp(`(writeLocalStorage|localStorage\\.setItem)\\(\\s*${name}\\s*,`);
+        return pattern.test(combinedRecordingSource);
+      });
+    }
+
     it("should have exactly the expected set of ta-rec-* keys", () => {
       const keysSet = new Set<string>();
       const matches = combinedRecordingSource.match(/ta-rec-[a-z-]*/g);
@@ -126,6 +166,8 @@ describe("recording-split structure", () => {
       const derivedKeys = Array.from(keysSet).sort();
       const expectedKeys = [
         "ta-rec-ann-course",
+        "ta-rec-ann-formality",
+        "ta-rec-ann-ingredients",
         "ta-rec-autostop",
         "ta-rec-avatar-camera",
         "ta-rec-avatar-course",
@@ -291,27 +333,6 @@ describe("recording-split structure", () => {
         expect(discKeys).toHaveLength(9);
       });
 
-      function isWired(key: string, callKind: "read" | "write"): boolean {
-        const directPattern =
-          callKind === "read"
-            ? new RegExp(`(readLocalStorage|readPersisted|localStorage\\.getItem)\\(\\s*["']${key}["']\\s*\\)`)
-            : new RegExp(`(writeLocalStorage|localStorage\\.setItem)\\(\\s*["']${key}["']\\s*,`);
-        if (directPattern.test(combinedRecordingSource)) return true;
-
-        const constNames = Array.from(
-          combinedRecordingSource.matchAll(new RegExp(`const\\s+(\\w+)\\s*=\\s*["']${key}["']`, "g"))
-        ).map((m) => m[1]);
-        if (constNames.length === 0) return false;
-
-        return constNames.some((name) => {
-          const pattern =
-            callKind === "read"
-              ? new RegExp(`(readLocalStorage|readPersisted|localStorage\\.getItem)\\(\\s*${name}\\s*\\)`)
-              : new RegExp(`(writeLocalStorage|localStorage\\.setItem)\\(\\s*${name}\\s*,`);
-          return pattern.test(combinedRecordingSource);
-        });
-      }
-
       it.each(discKeys)(
         '"%s" has both a read and a write call wired to that key (directly, or via a const STORAGE_KEY_* binding)',
         (key) => {
@@ -319,6 +340,34 @@ describe("recording-split structure", () => {
           expect(isWired(key, "write"), `expected a write call wired to "${key}"`).toBe(true);
         }
       );
+    });
+
+    describe("every ta-rec-ann-* key is wired to both a read and a write", () => {
+      // docs/reply-composition-controls-acceptance-criteria.md C0-1 (this
+      // group, implementer C2): the announcement half of the same C5c
+      // wiring gap the disc block above closes - the canary above proves a
+      // key STRING exists somewhere in this directory, not that it is both
+      // written and read back. This surface reads/writes all three
+      // ta-rec-ann-* keys directly through bare `window.localStorage
+      // .getItem`/`localStorage.setItem` calls with the literal key as the
+      // argument (useTakeAnnouncement.ts for the two new keys; that file and
+      // RecordingTab.tsx for the pre-existing course key), so the DIRECT
+      // branch of the shared isWired() helper above covers all three with no
+      // STORAGE_KEY_* indirection to account for.
+      const annKeys = Array.from(new Set(combinedRecordingSource.match(/ta-rec-ann-[a-z-]*/g) ?? [])).sort();
+
+      it("finds at least one ta-rec-ann-* key to check - a check over nothing proves nothing", () => {
+        expect(annKeys.length).toBeGreaterThan(0);
+      });
+
+      it("finds exactly three ta-rec-ann-* keys (course, plus this group's formality and ingredients)", () => {
+        expect(annKeys).toHaveLength(3);
+      });
+
+      it.each(annKeys)('"%s" has both a read and a write call wired to that key', (key) => {
+        expect(isWired(key, "read"), `expected a read call wired to "${key}"`).toBe(true);
+        expect(isWired(key, "write"), `expected a write call wired to "${key}"`).toBe(true);
+      });
     });
   });
 });

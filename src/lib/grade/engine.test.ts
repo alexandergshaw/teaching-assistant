@@ -238,3 +238,92 @@ describe("gradeEntries - submitted files reach the model as an explicit list (re
     expect(sentText.text.split("SUBMITTED FILES").length - 1).toBe(1);
   });
 });
+
+// The stdin-EOF defect (code-runner.ts's CodeRunResult.neededStdin), LLM
+// grading side: this sandbox always runs code with stdin hardcoded to "", so
+// an assignment requiring input from the user fails Python's input() with
+// EOFError for reasons that have nothing to do with the student's code.
+// Before this fix, gradeSubmission (engine.ts) told the model "Ran without
+// errors: no" plus the EOFError traceback for every such run, letting the
+// model's own holistic judgment penalize the student for a platform
+// limitation - the same mistake the deterministic embedded engine avoids for
+// its own "Code runs" criterion (embedded-grader/index.test.ts). This pins
+// that the AUTOMATED CODE EXECUTION note is withheld from the prompt
+// entirely when neededStdin is set, exactly like the pre-existing `error`
+// case, while a genuine failure or a normal run still gets the note.
+describe("gradeEntries - stdin-starved runs are withheld from the model's prompt (neededStdin)", () => {
+  it("sends no AUTOMATED CODE EXECUTION note when the run failed only because stdin was empty", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+
+    await gradeEntries(
+      [
+        entry({
+          codeRun: {
+            language: "python",
+            files: ["main.py"],
+            ran: false,
+            exitCode: 1,
+            stdout: "",
+            stderr: "EOFError: EOF when reading a line",
+            neededStdin: true,
+          },
+        }),
+      ],
+      "Grade the assignment.",
+      "Grade for correctness and clarity.",
+      "gemini"
+    );
+
+    const sentText = mockCallLlm.mock.calls[0][0].contents[0].parts[0];
+    if (!("text" in sentText)) throw new Error("expected a text part");
+    expect(sentText.text).not.toContain("AUTOMATED CODE EXECUTION");
+    expect(sentText.text).not.toContain("EOFError");
+  });
+
+  it("still sends the AUTOMATED CODE EXECUTION note for a genuine failure unrelated to stdin", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+
+    await gradeEntries(
+      [
+        entry({
+          codeRun: {
+            language: "python",
+            files: ["main.py"],
+            ran: false,
+            exitCode: 1,
+            stdout: "",
+            stderr: "NameError: name 'x' is not defined",
+          },
+        }),
+      ],
+      "Grade the assignment.",
+      "Grade for correctness and clarity.",
+      "gemini"
+    );
+
+    const sentText = mockCallLlm.mock.calls[0][0].contents[0].parts[0];
+    if (!("text" in sentText)) throw new Error("expected a text part");
+    expect(sentText.text).toContain("AUTOMATED CODE EXECUTION");
+    expect(sentText.text).toContain("NameError");
+  });
+
+  it("still sends the note for an ordinary clean run (unaffected by this fix)", async () => {
+    mockCallLlm.mockResolvedValueOnce({ ok: true, text: OK_RESPONSE_TEXT });
+
+    await gradeEntries(
+      [
+        entry({
+          codeRun: { language: "python", files: ["main.py"], ran: true, exitCode: 0, stdout: "42", stderr: "" },
+        }),
+      ],
+      "Grade the assignment.",
+      "Grade for correctness and clarity.",
+      "gemini"
+    );
+
+    const sentText = mockCallLlm.mock.calls[0][0].contents[0].parts[0];
+    if (!("text" in sentText)) throw new Error("expected a text part");
+    expect(sentText.text).toContain("AUTOMATED CODE EXECUTION");
+    expect(sentText.text).toContain("Ran without errors: yes");
+  });
+});

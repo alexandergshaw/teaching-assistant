@@ -4,6 +4,10 @@ import {
   buildTakeAnnouncementInstruction,
   TAKE_ANNOUNCEMENT_INSTRUCTION,
   TRANSCRIPT_PROMPT_CAP,
+  ANNOUNCEMENT_INGREDIENTS,
+  ANNOUNCEMENT_INGREDIENT_LABELS,
+  DEFAULT_ANNOUNCEMENT_COMPOSITION,
+  type AnnouncementCompositionSettings,
 } from "./take-announcement";
 
 describe("truncateTranscriptForPrompt", () => {
@@ -93,5 +97,110 @@ describe("buildTakeAnnouncementInstruction", () => {
     const longTranscript = "word ".repeat(5000);
     const out = buildTakeAnnouncementInstruction(longTranscript, baseContext);
     expect(out).toContain("[transcript truncated]");
+  });
+});
+
+// docs/reply-composition-controls-acceptance-criteria.md C0-1 (this group,
+// implementer C2): the announcement half of the reply-composition controls.
+// Frozen-literal oracles throughout, not values re-derived from the
+// implementation - the point is to pin the exact string a person (and the
+// model) reads.
+describe("buildTakeAnnouncementInstruction - composition (this group's own C-2)", () => {
+  const baseContext = { takeName: "Take 3", durationSec: 615 };
+  const inert: AnnouncementCompositionSettings = { ingredients: [], formality: "balanced" };
+
+  const PARAGRAPH_REQUIREMENT =
+    'If the announcement runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line ("\\n\\n"). Never write it as one unbroken block.';
+
+  it("includes the paragraph requirement unconditionally, even with an inert composition (C0-2/C3)", () => {
+    const out = buildTakeAnnouncementInstruction("t", baseContext, inert);
+    expect(out).toContain(PARAGRAPH_REQUIREMENT);
+  });
+
+  it("omitting composition entirely is byte-identical to passing the inert default explicitly", () => {
+    const withDefault = buildTakeAnnouncementInstruction("some transcript", baseContext);
+    const withExplicitInert = buildTakeAnnouncementInstruction("some transcript", baseContext, inert);
+    expect(withDefault).toBe(withExplicitInert);
+  });
+
+  it("zero ingredients selected omits the ingredients block entirely (C2c, transferred)", () => {
+    const out = buildTakeAnnouncementInstruction("t", baseContext, inert);
+    expect(out).not.toContain("IN ADDITION, WHERE IT FITS");
+  });
+
+  it("'balanced' formality contributes NO extra text at all - full frozen-literal output", () => {
+    // A prior version of this test compared two calls that both defaulted to
+    // "balanced" formality - a tautology, since both sides are identical no
+    // matter what the code does, even a regression that adds a stray clause
+    // to the balanced branch itself. This pins the exact, complete string
+    // instead, so any unexpected addition fails loudly here.
+    const out = buildTakeAnnouncementInstruction("hello world", { takeName: "Take X", durationSec: 90 });
+    const expected = [
+      TAKE_ANNOUNCEMENT_INSTRUCTION,
+      "",
+      PARAGRAPH_REQUIREMENT,
+      "",
+      'This is a transcript of a screen recording titled "Take X" (1 minute 30 seconds long), made by an instructor for their students. Draft the announcement from this transcript - it is source material, not the announcement itself.',
+      "",
+      "TRANSCRIPT:",
+      "hello world",
+    ].join("\n");
+    expect(out).toBe(expected);
+  });
+
+  it("'casual' formality adds its own clause, verbatim", () => {
+    const out = buildTakeAnnouncementInstruction("t", baseContext, { ingredients: [], formality: "casual" });
+    expect(out).toContain(
+      "Lean casual in how you write this: contractions are fine, favor shorter sentences and everyday word choices - without abandoning the warmth and clarity already asked for above."
+    );
+    expect(out).not.toContain("Lean formal in how you write this");
+  });
+
+  it("'formal' formality adds its own clause, verbatim", () => {
+    const out = buildTakeAnnouncementInstruction("t", baseContext, { ingredients: [], formality: "formal" });
+    expect(out).toContain(
+      "Lean formal in how you write this: avoid contractions, favor fuller sentences and more precise, exact word choices - without abandoning the warmth and clarity already asked for above."
+    );
+    expect(out).not.toContain("Lean casual in how you write this");
+  });
+
+  it("selecting 'insight' adds its clause and nothing about resources", () => {
+    const out = buildTakeAnnouncementInstruction("t", baseContext, { ingredients: ["insight"], formality: "balanced" });
+    expect(out).toContain(
+      "Where it fits naturally, add one relevant insight or connection beyond what the transcript explicitly says"
+    );
+    expect(out).not.toContain("If the transcript names any specific resource");
+  });
+
+  it("selecting 'resources' adds its clause and nothing about insight, and never invites an invented link", () => {
+    const out = buildTakeAnnouncementInstruction("t", baseContext, { ingredients: ["resources"], formality: "balanced" });
+    expect(out).toContain("If the transcript names any specific resource, reading, tool or link, remind students of it");
+    expect(out).toContain("Do not invent or write any resource, reading or link that is not already named");
+    expect(out).not.toContain("Where it fits naturally, add one relevant insight");
+  });
+
+  it("omitting BOTH ingredients selected still emits every clause for every selected ingredient (order matches selection order)", () => {
+    const out = buildTakeAnnouncementInstruction("t", baseContext, {
+      ingredients: ["insight", "resources"],
+      formality: "balanced",
+    });
+    const insightIdx = out.indexOf("Where it fits naturally, add one relevant insight");
+    const resourcesIdx = out.indexOf("If the transcript names any specific resource");
+    expect(insightIdx).toBeGreaterThan(-1);
+    expect(resourcesIdx).toBeGreaterThan(insightIdx);
+  });
+
+  it("'compliment', 'deeper-question' and 'correction' are not reachable ingredient values here (type-level omission, exercised at the constants)", () => {
+    expect(ANNOUNCEMENT_INGREDIENTS).toEqual(["insight", "resources"]);
+    expect(Object.keys(ANNOUNCEMENT_INGREDIENT_LABELS).sort()).toEqual(["insight", "resources"]);
+  });
+
+  it("DEFAULT_ANNOUNCEMENT_COMPOSITION is not inert (C4b-i, transferred): both ingredients pre-selected, formality balanced", () => {
+    expect(DEFAULT_ANNOUNCEMENT_COMPOSITION).toEqual({ ingredients: ["insight", "resources"], formality: "balanced" });
+  });
+
+  it("a real composition produces a materially different instruction than the inert default", () => {
+    const out = buildTakeAnnouncementInstruction("t", baseContext, DEFAULT_ANNOUNCEMENT_COMPOSITION);
+    expect(out).not.toBe(buildTakeAnnouncementInstruction("t", baseContext, inert));
   });
 });

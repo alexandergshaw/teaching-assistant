@@ -34,6 +34,80 @@ export interface RubricAreaResult {
   comment: string;
 }
 
+/**
+ * How a GradeResult came to be, when it did NOT come from an ordinary
+ * grading pass (an LLM call or the embedded engine). Absent (undefined) on
+ * GradeResult.determination means "graded normally" - every existing
+ * producer leaves the field unset, so nothing else needed to change just
+ * because the field was added.
+ *
+ * A single discriminator, not a family of loose booleans
+ * (docs/no-submission-and-requirement-checking-acceptance-criteria.md G1):
+ * "no-submission" (grade-zeros.ts's buildZeroGradingEntry - a student had
+ * nothing on record by the assignment's deadline) and
+ * "no-submission-unmerged-branch" (that same doc's G3: gradeRepoAction,
+ * github-repos.ts, found the graded ref empty but real, non-scaffolding
+ * content on another branch of the same repo - see
+ * scanBranchesForUnmergedSubmission in repo-grade-branch-scan.ts). The
+ * second is still, unambiguously, a no-submission outcome - the score and
+ * the base determination do not change, only the reason text gains a named
+ * branch (G3: "still counts as not submitting, but this should be flagged
+ * in comments"). It is its own member rather than a boolean bolted onto
+ * "no-submission" so a reader can switch on GradeDetermination exhaustively
+ * and so the branch-found fact travels with the same single field
+ * `buildZeroGradingEntry`'s determination already does, instead of a second,
+ * easy-to-forget flag. The union stays closed to known determinations; a
+ * later determination adds one more member here rather than a new
+ * independent field on GradeResult.
+ */
+export type GradeDetermination = "no-submission" | "no-submission-unmerged-branch";
+
+// Single source of truth for validating a persisted/untrusted value against
+// the union above (github-grading-run-store.ts and grading-drafts.ts both
+// need this - see coerceGradeDetermination below). Declared as
+// Record<GradeDetermination, true> rather than a plain array literal so
+// TypeScript enforces both directions at compile time: adding a member to
+// GradeDetermination without adding a key here is a missing-property compile
+// error, and adding a key here that is not a real union member is an
+// excess-property compile error. This repo has shipped a membership list
+// duplicated across modules more than once (see this file's own history) -
+// this is the one place the list is written, and every caller imports it
+// rather than re-typing it.
+const GRADE_DETERMINATION_MEMBERS: Record<GradeDetermination, true> = {
+  "no-submission": true,
+  "no-submission-unmerged-branch": true,
+};
+
+/** Every known GradeDetermination value, for callers that need to enumerate
+ * the union rather than just validate against it (tests in particular -
+ * looping over this array, rather than a hand-typed literal list, means a
+ * future third member is automatically exercised without an edit here). */
+export const GRADE_DETERMINATIONS: readonly GradeDetermination[] = Object.keys(
+  GRADE_DETERMINATION_MEMBERS
+) as GradeDetermination[];
+
+/**
+ * Validates an arbitrary (untrusted/persisted) value against the closed
+ * GradeDetermination union, returning the narrowed value when it is exactly
+ * one of the known members and undefined for anything else - including an
+ * absent field, a wrong type, or a string that used to be valid but was
+ * removed from the union.
+ *
+ * This function alone cannot distinguish "the field was never set" from "the
+ * field was set to something not in the union" - both produce undefined
+ * here. A caller that needs that distinction (github-grading-run-store.ts's
+ * strict validator, which must invalidate a corrupt PRESENT value but let an
+ * absent one through) checks presence itself (`raw.determination !==
+ * undefined`) before calling this. A caller that does not need the
+ * distinction (grading-drafts.ts, which degrades every unrecognised optional
+ * field to undefined the same way) can call this directly.
+ */
+export function coerceGradeDetermination(value: unknown): GradeDetermination | undefined {
+  return (GRADE_DETERMINATIONS as readonly unknown[]).includes(value)
+    ? (value as GradeDetermination)
+    : undefined;
+}
+
 export interface SubmittedFileInfo {
   name: string;
   extension: string;
@@ -90,6 +164,15 @@ export interface GradeResult {
   // sentence inside the prompt text that no instructor ever saw; this field
   // lets a UI say "this submission was truncated" instead.
   submissionTruncated?: boolean;
+  // The fact that this is a 0 for a missing submission, as its OWN field -
+  // never encoded into totalScore or overallComment (G1a: six sites in this
+  // repo take the first number found anywhere in a score string, so a score
+  // like "No submission - checked 3 branches" would post as 3). See
+  // GradeDetermination above. Set only by buildZeroGradingEntry today; the
+  // score/comment fields still carry a real, student-facing explanation
+  // (composeOverallComment) - this field exists so nothing downstream has to
+  // parse that prose to learn the same fact.
+  determination?: GradeDetermination;
 }
 
 export interface GradingRun {

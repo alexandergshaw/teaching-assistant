@@ -31,7 +31,7 @@ describe("ingredientsRenderValue", () => {
     expect(
       ingredientsRenderValue(["compliment", "deeper-question", "insight", "resources", "correction"])
     ).toBe(
-      "a compliment on what the post did well, a question that goes deeper, an insight the post did not cover, two or three relevant resources, a gentle correction, only if something is wrong"
+      "a compliment on what the post did well, a question that goes deeper, an insight not already covered, two or three relevant resources, a gentle correction, only if something is wrong"
     );
   });
 });

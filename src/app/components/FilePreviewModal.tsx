@@ -172,7 +172,9 @@ export default function FilePreviewModal({
               <p className={styles.previewNotice}>The code runner could not execute this file: {runResult.error}</p>
             ) : runResult ? (
               <>
-                <p className={styles.previewMeta}>Ran without errors: {runResult.ran ? "yes" : "no"}</p>
+                <p className={styles.previewMeta}>
+                  Ran without errors: {runResult.neededStdin ? "no input available (not scored)" : runResult.ran ? "yes" : "no"}
+                </p>
                 {runResult.compileOutput && runResult.compileOutput.trim() && (
                   <>
                     <p className={styles.previewMeta}>Compiler output</p>

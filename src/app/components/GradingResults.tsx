@@ -526,19 +526,33 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     )}
                     {(() => {
                       const cr = codeRunFor(result);
+                      // neededStdin (code-runner.ts): this run failed only because
+                      // this sandbox's hardcoded empty stdin starved a required
+                      // input read, not because of a defect in the student's code
+                      // - scored neutrally (excluded, not zeroed - see
+                      // embedded-grader/index.ts). Labeling it the same red
+                      // "Code: errors" as a genuine failure would mislead the
+                      // instructor into thinking it dragged the score down.
                       const label = !cr
                         ? null
                         : cr.error
                           ? "Code: runner error"
-                          : cr.ran
-                            ? "Code: ran cleanly"
-                            : "Code: errors";
+                          : cr.neededStdin
+                            ? "Code: no input available (not scored)"
+                            : cr.ran
+                              ? "Code: ran cleanly"
+                              : "Code: errors";
                       return (
                         <div style={{ marginTop: 6 }}>
                           {label && (
                             <div
                               className={styles.fieldHint}
-                              style={{ color: cr && !cr.error && !cr.ran ? "var(--error, #b91c1c)" : undefined }}
+                              style={{
+                                color:
+                                  cr && !cr.error && !cr.neededStdin && !cr.ran
+                                    ? "var(--error, #b91c1c)"
+                                    : undefined,
+                              }}
                             >
                               {label}
                             </div>
@@ -740,7 +754,17 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               <p className={styles.previewNotice}>The code runner could not execute this submission: {cr.error}</p>
             ) : (
               <>
-                <p className={styles.previewMeta}>Ran without errors: {cr.ran ? "yes" : "no"}</p>
+                {/* Same neutral case as the row badge above (see its comment):
+                    a run that failed ONLY because this sandbox feeds empty
+                    stdin is excluded from scoring, not zeroed, so this modal
+                    must not report it as a plain "no" - that reads as the
+                    student's code being broken when it is not. Wording is
+                    reused verbatim from the badge rather than re-invented, so
+                    one vocabulary describes this state everywhere. */}
+                <p className={styles.previewMeta}>
+                  Ran without errors:{" "}
+                  {cr.neededStdin ? "no input available (not scored)" : cr.ran ? "yes" : "no"}
+                </p>
                 {cr.compileOutput && cr.compileOutput.trim() && (
                   <>
                     <p className={styles.previewMeta}>Compiler output</p>

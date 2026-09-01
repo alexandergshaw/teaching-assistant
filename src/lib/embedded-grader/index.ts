@@ -17,6 +17,7 @@ import {
   type RubricAreaResult,
   type StudentSubmissionEntry,
 } from "@/lib/grade";
+import type { CodeRunResult } from "@/lib/code-runner";
 import type { EmbeddedRubric } from "./types";
 import { pick } from "@/lib/embedded/scaffold";
 import { runCheck } from "./checks";
@@ -120,7 +121,19 @@ export function gradeEntriesEmbedded(
   rubric: EmbeddedRubric,
   pointsPossible: number | null = null
 ): GradingRun {
-  const anyCodeRun = entries.some((e) => e.codeRun && !e.codeRun.error);
+  // A run that errored (network/timeout) or that failed solely because this
+  // sandbox's hardcoded empty stdin starved a required input read
+  // (neededStdin - see code-runner.ts's CodeRunResult doc comment) is
+  // excluded from the "Code runs" criterion the exact same way: neither
+  // outcome is evidence about the student's code, so neither may move this
+  // criterion's denominator for that entry. A stdin-starved run is NOT
+  // scored zero here - it simply never adds CODE_RUNS_POINTS to `possible`
+  // below, which is what "excluded, not zeroed" means in this repo's
+  // existing points model (mirrors the pre-existing `error` skip - the
+  // network-outage case that established this pattern).
+  const codeRunCounts = (run: CodeRunResult | null | undefined): run is CodeRunResult =>
+    !!run && !run.error && !run.neededStdin;
+  const anyCodeRun = entries.some((e) => codeRunCounts(e.codeRun));
   const rubricAreaNames = [
     ...rubric.checks.map((check) => check.criterion),
     ...(anyCodeRun ? ["Code runs"] : []),
@@ -148,9 +161,14 @@ export function gradeEntriesEmbedded(
 
     // Auto-run code criterion: add a scored area before scaling so it re-bases to
     // Canvas points like any other. Skip when the runner errored (an outage must
-    // not penalize the student). Do NOT touch passedCount/missing so the overall
-    // comment keeps counting only the rubric's own checks.
-    if (entry.codeRun && !entry.codeRun.error) {
+    // not penalize the student) OR when it failed solely because this sandbox
+    // gave the program no stdin to read (neededStdin) - a student who was
+    // asked to read input and did exactly that must not be scored zero for a
+    // platform limitation. Either way the criterion is excluded from this
+    // entry's denominator (neither earned nor possible move), not scored 0 -
+    // see codeRunCounts above. Do NOT touch passedCount/missing so the
+    // overall comment keeps counting only the rubric's own checks.
+    if (codeRunCounts(entry.codeRun)) {
       const runsClean = entry.codeRun.ran;
       rawAreas.push({
         area: "Code runs",

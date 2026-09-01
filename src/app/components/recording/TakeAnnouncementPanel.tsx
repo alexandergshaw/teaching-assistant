@@ -27,6 +27,7 @@ import {
   type AnnouncementRecordingContext,
   type PostedAnnouncementInfo,
 } from "./useTakeAnnouncement";
+import AnnouncementCompositionControls from "./AnnouncementCompositionControls";
 import type { Take } from "./types";
 
 const POST_CONFIRM_CONSEQUENCE_ID = "take-announcement-post-confirm-consequence";
@@ -131,6 +132,8 @@ export default function TakeAnnouncementPanel({
     savingDraft,
     draftSaved,
     draftError,
+    composition,
+    setComposition,
   } = hook;
 
   // AC28 item 5: focus moves to the surface heading on open. Restoring focus
@@ -298,6 +301,28 @@ export default function TakeAnnouncementPanel({
               {coursesError}
             </p>
           )}
+
+          {/* docs/reply-composition-controls-acceptance-criteria.md C0-1
+              (this group): the announcement composition controls, reused
+              from the discussion side's vocabulary. Placed after the course
+              picker and before subject/body, alongside the one control that
+              actually re-runs drafting with the new settings - changing a
+              control here never re-drafts by itself (see useTakeAnnouncement
+              .ts's own note on this surface having no per-row arming to
+              join), so a visible, explicit "Regenerate" action is what makes
+              the controls reachable rather than dead. */}
+          <div>
+            <p className={styles.ghMeta} style={{ marginBottom: 8 }}>
+              Announcement style
+            </p>
+            <AnnouncementCompositionControls composition={composition} onChange={setComposition} disabled={busy || posting} />
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: 8, flexWrap: "wrap" }}>
+              <Button size="small" variant="outlined" onClick={retryDraft} disabled={busy || posting}>
+                Regenerate announcement
+              </Button>
+              <span className={styles.fieldHint}>Replaces the subject and body currently shown below.</span>
+            </div>
+          </div>
 
           <TextField
             size="small"

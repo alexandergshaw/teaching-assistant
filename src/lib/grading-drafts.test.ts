@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { mapDraft, coerceGradingDraftPayload, createGradingDraft } from "./grading-drafts";
+import { GRADE_DETERMINATIONS } from "./grade/types";
 import type { Database } from "./supabase/types";
 
 type DraftRow = Database["public"]["Tables"]["grading_drafts"]["Row"];
@@ -193,6 +194,61 @@ describe("coerceGradingDraftPayload", () => {
     const payload = coerceGradingDraftPayload({ runs: [validRunEntry] });
     expect(payload.runs[0].run.results[0].gradedRepo).toBeNull();
     expect(payload.runs[0].run.results[0].gradedRef).toBeNull();
+  });
+
+  // docs/no-submission-and-requirement-checking-acceptance-criteria.md G1c:
+  // the same allowlist that already dropped submissionTruncated once must
+  // not do the same to determination.
+  it("round-trips determination when present in the raw jsonb", () => {
+    const withDetermination = {
+      ...validRunEntry,
+      run: {
+        ...validRunEntry.run,
+        results: [{ ...validRunEntry.run.results[0], determination: "no-submission" }],
+      },
+    };
+    const payload = coerceGradingDraftPayload({ runs: [withDetermination] });
+    expect(payload.runs[0].run.results[0].determination).toBe("no-submission");
+  });
+
+  it("defaults determination to undefined when absent (a draft predating this feature)", () => {
+    const payload = coerceGradingDraftPayload({ runs: [validRunEntry] });
+    expect(payload.runs[0].run.results[0].determination).toBeUndefined();
+  });
+
+  it("defaults determination to undefined for a wrong/unknown value rather than throwing or keeping it", () => {
+    const withBadDetermination = {
+      ...validRunEntry,
+      run: {
+        ...validRunEntry.run,
+        results: [{ ...validRunEntry.run.results[0], determination: "something-else" }],
+      },
+    };
+    const payload = coerceGradingDraftPayload({ runs: [withBadDetermination] });
+    expect(payload.runs[0].run.results[0].determination).toBeUndefined();
+  });
+
+  // docs/no-submission-and-requirement-checking-acceptance-criteria.md G3:
+  // GradeDetermination was widened to add "no-submission-unmerged-branch"
+  // alongside "no-submission". Driven off GRADE_DETERMINATIONS (grade/types.ts)
+  // itself, not a hand-typed literal list here, so a future third member is
+  // automatically exercised by this same test without an edit to this file -
+  // if GRADE_DETERMINATIONS grows without coerceGradeDetermination recognizing
+  // the new member, this test fails instead of silently coercing it to
+  // undefined.
+  it("round-trips every known GradeDetermination member", () => {
+    expect(GRADE_DETERMINATIONS.length).toBeGreaterThanOrEqual(2);
+    for (const determination of GRADE_DETERMINATIONS) {
+      const withDetermination = {
+        ...validRunEntry,
+        run: {
+          ...validRunEntry.run,
+          results: [{ ...validRunEntry.run.results[0], determination }],
+        },
+      };
+      const payload = coerceGradingDraftPayload({ runs: [withDetermination] });
+      expect(payload.runs[0].run.results[0].determination).toBe(determination);
+    }
   });
 
   // docs/grading-results-feedback-boxes-acceptance-criteria.md A5 item 18:

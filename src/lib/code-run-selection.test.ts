@@ -4,8 +4,10 @@ import {
   capOutput,
   chooseEntryPoint,
   describeCodeRunSkip,
+  isStdinEofFailure,
   languageForExtension,
   selectCodeRunFiles,
+  sourceLooksLikeItReadsStdin,
   type CodeRunCandidate,
 } from "./code-run-selection";
 
@@ -398,5 +400,248 @@ describe("capOutput (Item 4)", () => {
   it("treats output exactly at the cap as untouched", () => {
     const text = "a".repeat(100);
     expect(capOutput(text, 100)).toBe(text);
+  });
+});
+
+describe("isStdinEofFailure", () => {
+  it("recognizes Python's exact EOFError signature (input() at EOF) when the source actually calls input()", () => {
+    const stderr = [
+      'Traceback (most recent call last):',
+      '  File "main.py", line 1, in <module>',
+      "    a = int(input())",
+      "        ^^^^^^^",
+      "EOFError: EOF when reading a line",
+      "",
+    ].join("\n");
+    const files = [{ name: "main.py", content: "a = int(input())\nprint(a * 2)\n" }];
+    expect(isStdinEofFailure(stderr, files)).toBe(true);
+  });
+
+  it("does NOT flag pickle.load's identical bare EOFError on a truncated/empty file - nothing to do with stdin", () => {
+    // Real trace shape: pickle.load's Unpickler chain ends in a bare
+    // "EOFError" with no message, byte-for-byte the same token input()'s
+    // EOFError carries. The source never calls input() or touches sys.stdin
+    // - it only unpickles a file - so this must NOT be excluded from scoring.
+    const stderr = [
+      "Traceback (most recent call last):",
+      '  File "main.py", line 3, in <module>',
+      '    data = pickle.load(open("save.dat", "rb"))',
+      '  File "C:\\Python312\\Lib\\pickle.py", line 1213, in load',
+      "    return Unpickler(file, fix_imports=fix_imports, encoding=encoding, errors=errors).load()",
+      '  File "C:\\Python312\\Lib\\pickle.py", line 1099, in load',
+      "    dispatch[key[0]](self)",
+      '  File "C:\\Python312\\Lib\\pickle.py", line 1385, in load_eof',
+      "    raise EOFError",
+      "EOFError",
+    ].join("\n");
+    const files = [
+      {
+        name: "main.py",
+        content: 'import pickle\ndata = pickle.load(open("save.dat", "rb"))\nprint(data)\n',
+      },
+    ];
+    expect(isStdinEofFailure(stderr, files)).toBe(false);
+  });
+
+  it("does not flag a genuine, unrelated failure (syntax error)", () => {
+    const stderr = '  File "main.py", line 1\n    def f(:\n          ^\nSyntaxError: invalid syntax';
+    expect(isStdinEofFailure(stderr, [])).toBe(false);
+  });
+
+  it("does not flag a genuine, unrelated failure (unhandled exception)", () => {
+    const stderr = [
+      "Traceback (most recent call last):",
+      '  File "main.py", line 2, in <module>',
+      "    x = 1 / 0",
+      "ZeroDivisionError: division by zero",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(false);
+  });
+
+  it("returns false for empty stderr", () => {
+    expect(isStdinEofFailure("", [])).toBe(false);
+  });
+
+  it("recognizes Java's Scanner.nextInt() EOF signature when the source constructs Scanner(System.in)", () => {
+    // A real javac/java stack trace: Main.java calls new Scanner(System.in).nextInt()
+    // with nothing on stdin.
+    const stderr = [
+      'Exception in thread "main" java.util.NoSuchElementException',
+      "\tat java.base/java.util.Scanner.throwFor(Scanner.java:937)",
+      "\tat java.base/java.util.Scanner.next(Scanner.java:1594)",
+      "\tat java.base/java.util.Scanner.nextInt(Scanner.java:2258)",
+      "\tat java.base/java.util.Scanner.nextInt(Scanner.java:2212)",
+      "\tat Main.main(Main.java:6)",
+    ].join("\n");
+    const files = [
+      {
+        name: "Main.java",
+        content:
+          "import java.util.Scanner;\n\npublic class Main {\n  public static void main(String[] args) {\n    Scanner sc = new Scanner(System.in);\n    int x = sc.nextInt();\n    System.out.println(x);\n  }\n}\n",
+      },
+    ];
+    expect(isStdinEofFailure(stderr, files)).toBe(true);
+  });
+
+  it("does NOT flag a Scanner(new File(...)) that runs out of lines, even though the stack trace is byte-identical to the Scanner(System.in) case above", () => {
+    const stderr = [
+      'Exception in thread "main" java.util.NoSuchElementException',
+      "\tat java.base/java.util.Scanner.throwFor(Scanner.java:937)",
+      "\tat java.base/java.util.Scanner.next(Scanner.java:1594)",
+      "\tat java.base/java.util.Scanner.nextInt(Scanner.java:2258)",
+      "\tat java.base/java.util.Scanner.nextInt(Scanner.java:2212)",
+      "\tat Main.main(Main.java:8)",
+    ].join("\n");
+    const files = [
+      {
+        name: "Main.java",
+        content:
+          "import java.io.File;\nimport java.util.Scanner;\n\npublic class Main {\n  public static void main(String[] args) throws Exception {\n    Scanner sc = new Scanner(new File(\"data.txt\"));\n    while (true) {\n      int x = sc.nextInt();\n      System.out.println(x);\n    }\n  }\n}\n",
+      },
+    ];
+    expect(isStdinEofFailure(stderr, files)).toBe(false);
+  });
+
+  it("recognizes Scanner wrapped over BufferedReader(InputStreamReader(System.in)) as reading from stdin", () => {
+    const stderr = [
+      'Exception in thread "main" java.util.NoSuchElementException: No line found',
+      "\tat java.base/java.util.Scanner.nextLine(Scanner.java:1651)",
+      "\tat Main.main(Main.java:7)",
+    ].join("\n");
+    const files = [
+      {
+        name: "Main.java",
+        content:
+          "import java.io.BufferedReader;\nimport java.io.InputStreamReader;\nimport java.util.Scanner;\n\npublic class Main {\n  public static void main(String[] args) {\n    Scanner sc = new Scanner(new BufferedReader(new InputStreamReader(System.in)));\n    String line = sc.nextLine();\n    System.out.println(line);\n  }\n}\n",
+      },
+    ];
+    expect(isStdinEofFailure(stderr, files)).toBe(true);
+  });
+
+  it("does NOT flag a Java NoSuchElementException with no Scanner frame (e.g. an empty collection's iterator - a genuine student bug)", () => {
+    const stderr = [
+      'Exception in thread "main" java.util.NoSuchElementException',
+      "\tat java.base/java.util.ArrayList$Itr.next(ArrayList.java:1002)",
+      "\tat Main.main(Main.java:11)",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(false);
+  });
+
+  it("does NOT flag Java's InputMismatchException (malformed, not absent, input - a genuine student bug) even though it also goes through Scanner.throwFor", () => {
+    const stderr = [
+      'Exception in thread "main" java.util.InputMismatchException',
+      "\tat java.base/java.util.Scanner.throwFor(Scanner.java:939)",
+      "\tat java.base/java.util.Scanner.nextInt(Scanner.java:2373)",
+      "\tat Main.main(Main.java:7)",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(false);
+  });
+
+  it("does NOT flag a Java NullPointerException (a genuine student bug, unrelated to stdin)", () => {
+    const stderr = [
+      'Exception in thread "main" java.lang.NullPointerException: Cannot invoke "String.length()" because "s" is null',
+      "\tat Main.main(Main.java:4)",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(false);
+  });
+
+  it("does NOT flag a Java compiler error (never reached Scanner at all)", () => {
+    const stderr = "Main.java:3: error: ';' expected\n    int x = 5\n             ^\n1 error";
+    expect(isStdinEofFailure(stderr, [])).toBe(false);
+  });
+
+  it("recognizes Python's sys.stdin.readline() parsed directly by int() on the same line - no source evidence required, the stderr text already proves it", () => {
+    const stderr = [
+      "Traceback (most recent call last):",
+      '  File "main.py", line 3, in <module>',
+      "    n = int(sys.stdin.readline())",
+      "            ^^^^^^^^^^^^^^^^^^^^^",
+      "ValueError: invalid literal for int() with base 10: ''",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(true);
+  });
+
+  it("recognizes Python's sys.stdin.read() parsed directly by float() on the same line", () => {
+    const stderr = [
+      "Traceback (most recent call last):",
+      '  File "calculator.py", line 5, in <module>',
+      "    x = float(sys.stdin.read())",
+      "ValueError: could not convert string to float: ''",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(true);
+  });
+
+  it("recognizes Python's sys.stdin.readline().split()[0] indexed directly on the same line (IndexError)", () => {
+    const stderr = [
+      "Traceback (most recent call last):",
+      '  File "calculator.py", line 4, in <module>',
+      "    op = sys.stdin.readline().split()[0]",
+      "IndexError: list index out of range",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(true);
+  });
+
+  it("recognizes Python's a, b = sys.stdin.readline().split() unpacking an empty split on the same line", () => {
+    const stderr = [
+      "Traceback (most recent call last):",
+      '  File "calculator.py", line 4, in <module>',
+      "    a, b = sys.stdin.readline().split()",
+      "ValueError: not enough values to unpack (expected 2, got 0)",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(true);
+  });
+
+  it("does NOT flag Python's two-statement form - the failing line no longer mentions sys.stdin (documented limitation)", () => {
+    const stderr = [
+      "Traceback (most recent call last):",
+      '  File "calculator.py", line 5, in <module>',
+      "    n = int(line)",
+      "ValueError: invalid literal for int() with base 10: ''",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(false);
+  });
+
+  it("does NOT flag a bare ValueError with no stdin call on the failing line - ambiguous, could be anything", () => {
+    const stderr = [
+      "Traceback (most recent call last):",
+      '  File "main.py", line 2, in <module>',
+      "    n = int(user_input)",
+      "ValueError: invalid literal for int() with base 10: ''",
+    ].join("\n");
+    expect(isStdinEofFailure(stderr, [])).toBe(false);
+  });
+});
+
+describe("sourceLooksLikeItReadsStdin", () => {
+  it("flags C++ source that reads via cin >>", () => {
+    const files = [{ name: "main.cpp", content: "int main() { int a, b; std::cin >> a >> b; }" }];
+    expect(sourceLooksLikeItReadsStdin("c++", files)).toBe(true);
+  });
+
+  it("flags C source that reads via scanf", () => {
+    const files = [{ name: "main.c", content: '#include <stdio.h>\nint main(){int a;scanf("%d",&a);}' }];
+    expect(sourceLooksLikeItReadsStdin("c", files)).toBe(true);
+  });
+
+  it("does not flag C++ source with no stdin read", () => {
+    const files = [{ name: "main.cpp", content: 'int main() { std::cout << "hi"; }' }];
+    expect(sourceLooksLikeItReadsStdin("c++", files)).toBe(false);
+  });
+
+  it("never flags languages outside c/c++, even if the source reads stdin (Python fails loudly instead)", () => {
+    const files = [{ name: "main.py", content: "x = input()" }];
+    expect(sourceLooksLikeItReadsStdin("python", files)).toBe(false);
+  });
+
+  it("does not flag a cin >> that is entirely commented out with //", () => {
+    const files = [
+      { name: "main.cpp", content: 'int main() { int a; // std::cin >> a;\n std::cout << "hi"; }' },
+    ];
+    expect(sourceLooksLikeItReadsStdin("c++", files)).toBe(false);
+  });
+
+  it("still flags a genuine cin >> that appears before a trailing // comment on the same line", () => {
+    const files = [{ name: "main.cpp", content: "int main() { int a; std::cin >> a; // read input\n }" }];
+    expect(sourceLooksLikeItReadsStdin("c++", files)).toBe(true);
   });
 });

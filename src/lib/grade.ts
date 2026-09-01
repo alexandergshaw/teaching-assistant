@@ -1,5 +1,5 @@
 // Re-export all public APIs from submodules
-export { RESUBMIT_NOTICE, MAX_NESTED_ZIP_DEPTH, composeOverallComment, type RubricAreaResult, type SubmittedFileInfo, type GradeResult, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry } from "./grade/types";
+export { RESUBMIT_NOTICE, MAX_NESTED_ZIP_DEPTH, composeOverallComment, GRADE_DETERMINATIONS, coerceGradeDetermination, type RubricAreaResult, type SubmittedFileInfo, type GradeResult, type GradeDetermination, type GradingRun, type GradingRunEntry, type StudentSubmissionEntry } from "./grade/types";
 
 export { getMimeType, IMAGE_EXTENSIONS, GEMINI_IMAGE_MIME_TYPES } from "./grade/constants";
 

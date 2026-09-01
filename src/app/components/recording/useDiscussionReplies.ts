@@ -42,7 +42,7 @@
 // './useReplyRows' is expected until sets A/C1/C2 land; report it, don't
 // create it.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EXTRACT_BATCH_WIRE_BUDGET,
   draftDispatchForce,
@@ -85,6 +85,22 @@ import {
   type UseDiscussionRepliesReturn,
   type DraftQueueItem,
 } from "./discussion-draft-loop";
+// docs/DEV_LOOP.md's "every feature needs a downloadable log" rule
+// (REGRESSION entries 369/372/373/374 record this surface's unpaid debt).
+// COLLECTION lives here (the three event-stream refs and the timestamps
+// below); ASSEMBLY (turning that plus `rawRows` into a full
+// DiscussionRepliesRunLog, and formatting it) is entirely in
+// discussion-replies-log.ts - see that file's header for the full split and
+// for why parent resolution is a call to the SAME `resolveDraftParent` the
+// drafting loop itself uses, never a second copy.
+import {
+  buildDiscussionRepliesRunLog,
+  makeDiscussionRepliesLogBatch,
+  type DiscussionRepliesLogBatch,
+  type DiscussionRepliesLogNotice,
+  type DiscussionRepliesLogRetry,
+  type DiscussionRepliesRunLog,
+} from "./discussion-replies-log";
 
 export type { UseDiscussionRepliesReturn } from "./discussion-draft-loop";
 
@@ -208,6 +224,24 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   const noticeCounterRef = useRef(0);
   const lastNoticeTextRef = useRef<string | null>(null);
 
+  // --- docs/DEV_LOOP.md's downloadable-log rule (REGRESSION entries
+  // 369/372/373/374): the three event streams the log records, plus the two
+  // run-timestamp fields and the running frame count. Plain React state, not
+  // refs - this repo's `react-hooks/refs` lint rule forbids reading a ref's
+  // `.current` during render (including inside a `useMemo` factory, which
+  // runs during render), and the `runLog` memo below needs every one of
+  // these values to build its input. Each is appended to with a functional
+  // updater at the moment its event happens, the same pattern
+  // `setDraftQueueSize`/`setExtracting` already use from inside these same
+  // async loops. See discussion-replies-log.ts's header for why this
+  // collection lives here and formatting/assembly does not. ---
+  const [logStartedAt, setLogStartedAt] = useState("");
+  const [logEndedAt, setLogEndedAt] = useState("");
+  const [logFramesCaptured, setLogFramesCaptured] = useState(0);
+  const [logBatches, setLogBatches] = useState<DiscussionRepliesLogBatch[]>([]);
+  const [logAllNotices, setLogAllNotices] = useState<DiscussionRepliesLogNotice[]>([]);
+  const [logRetries, setLogRetries] = useState<DiscussionRepliesLogRetry[]>([]);
+
   const pushNotice = useCallback((text: string) => {
     // Dedupe against the immediately-preceding notice only (AC38: "identical
     // consecutive texts deduped"), so a repeating 429 does not build a wall
@@ -216,6 +250,11 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     lastNoticeTextRef.current = text;
     noticeCounterRef.current += 1;
     const id = `disc-notice-${noticeCounterRef.current}`;
+    // Logged here, after the dedupe check above - "every notice shown to
+    // the instructor" means what was actually shown, and a duplicate
+    // suppressed by the check above was not.
+    const at = new Date().toISOString();
+    setLogAllNotices((prev) => [...prev, { at, text }]);
     setNotices((prev) => {
       const next = [...prev, { id, text }];
       return next.length > 4 ? next.slice(next.length - 4) : next;
@@ -433,6 +472,16 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       const epochSnapshot = rowsApiRef.current.tableEpochRef.current;
       const provider = getStoredProvider();
       const courseName = courseNameRef.current;
+      // Log collection: this batch's send time and frame count, recorded
+      // once dispatch is decided. `logBatch` closes over `batchAt`/
+      // `frames.length` so each of the four outcome branches below only
+      // names what is non-default for it - see
+      // discussion-replies-log.ts's `makeDiscussionRepliesLogBatch` for the
+      // defaults and `DiscussionRepliesLogBatch` for what each field means.
+      const batchAt = new Date().toISOString();
+      setLogFramesCaptured((prev) => prev + frames.length);
+      const logBatch = (args: Omit<Parameters<typeof makeDiscussionRepliesLogBatch>[0], "at" | "framesInBatch">) =>
+        setLogBatches((prev) => [...prev, makeDiscussionRepliesLogBatch({ at: batchAt, framesInBatch: frames.length, ...args })]);
 
       if (loopsActiveRef.current) setExtracting(true);
       let result: Awaited<ReturnType<typeof extractDiscussionPostsAction>>;
@@ -445,14 +494,26 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       setExtracting(false);
 
       if ("error" in result) {
+        logBatch({ error: result.error });
         pushNotice(`Some of the screen could not be read: ${result.error} Capture is still running.`);
         continue;
       }
 
-      if (rowsApiRef.current.tableEpochRef.current !== epochSnapshot) continue;
-      if (result.posts.length === 0) continue;
+      if (rowsApiRef.current.tableEpochRef.current !== epochSnapshot) {
+        // The table's epoch changed (Delete table / Redraft every reply)
+        // while this batch's response was in flight - the posts it found
+        // are dropped by design (AC45), but that is exactly the kind of
+        // silent event this log exists to make legible.
+        logBatch({ postsExtracted: result.posts.length, discarded: true });
+        continue;
+      }
+      if (result.posts.length === 0) {
+        logBatch({});
+        continue;
+      }
 
       const { addedIds, capped } = rowsApiRef.current.mergeIncoming(result.posts);
+      logBatch({ postsExtracted: result.posts.length, postsAdded: addedIds.length, capped });
       if (capped) {
         pushNotice("The reply table is full. Delete it, or remove some rows, to keep capturing.");
       }
@@ -671,6 +732,14 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // keep a stable identity across renders (useCallback with [] deps), which
   // also satisfies set D's React.memo row requirement for editReply. ---
   const start = useCallback(async () => {
+    // Log collection: `startedAt` is the first Start this page load, never
+    // overwritten by a later one (the functional updater keeps whatever is
+    // already set) - a returning instructor asking "when did this begin"
+    // means the whole session, not just its latest leg. `endedAt` clears
+    // back to "" so a run currently capturing does not still claim an end
+    // time from an earlier Stop.
+    setLogStartedAt((prev) => prev || new Date().toISOString());
+    setLogEndedAt("");
     try {
       await captureRef.current.start({ saveVideo: saveVideoRef.current });
     } catch (err) {
@@ -682,6 +751,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   }, [pushNotice]);
 
   const stop = useCallback(() => {
+    setLogEndedAt(new Date().toISOString());
     captureRef.current.stop();
   }, []);
 
@@ -716,6 +786,10 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       // neither markDrafting nor markFailed ever writes to it) could never
       // be dispatched again by any action. See draftDispatchForce for the
       // full policy across all four dispatch sites.
+      // Log collection: a row's final drafted/failed state never carries
+      // "this was retried" on its own - recorded here as its own event so
+      // the log can answer that question.
+      setLogRetries((prev) => [...prev, { at: new Date().toISOString(), rowId: id }]);
       enqueueDrafts([id], draftDispatchForce("retry"));
     },
     [enqueueDrafts]
@@ -757,6 +831,54 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // deleted, alongside session start and unmount.
     captureRef.current.clearRecording();
   }, []);
+
+  // --- docs/DEV_LOOP.md's downloadable-log rule: assembly. `courseName` is
+  // read the same way `courseNameRef` derives it (courses.find by id) rather
+  // than through that ref, so this memo's own dependency array can name the
+  // real reactive inputs (`courses`, `courseId`) instead of a ref whose
+  // writes React cannot see. `rawRows`, never the filtered `rows` - F0-2/F11's
+  // rule applies here exactly as it does to every other whole-table read in
+  // this file: a search-box keystroke must never make the downloaded log
+  // silently omit a row the instructor cannot currently see. Assembly itself
+  // (turning this input plus `rawRows` into the full record, including the
+  // per-row `resolveDraftParent` recompute) is entirely
+  // discussion-replies-log.ts's `buildDiscussionRepliesRunLog` - this memo
+  // only gathers the inputs and calls it. ---
+  const runLog: DiscussionRepliesRunLog = useMemo(() => {
+    const courseName = courses?.find((c) => c.id === courseId)?.name ?? "";
+    return buildDiscussionRepliesRunLog(
+      {
+        startedAt: logStartedAt,
+        endedAt: logEndedAt,
+        audience,
+        courseName,
+        ingredients: composition.ingredients,
+        addressByName: composition.addressByName,
+        formality: composition.formality,
+        framesCaptured: logFramesCaptured,
+        droppedFrames: capture.droppedFrames,
+        stalled: capture.stalled,
+        batches: logBatches,
+        notices: logAllNotices,
+        retries: logRetries,
+      },
+      rowsApi.rawRows
+    );
+  }, [
+    logStartedAt,
+    logEndedAt,
+    audience,
+    courseId,
+    courses,
+    composition,
+    logFramesCaptured,
+    capture.droppedFrames,
+    capture.stalled,
+    logBatches,
+    logAllNotices,
+    logRetries,
+    rowsApi.rawRows,
+  ]);
 
   return {
     audience,
@@ -816,5 +938,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     findMissing: resourcesApi.findMissing,
     retryResources: resourcesApi.retryResources,
     removeResource,
+
+    runLog,
   };
 }

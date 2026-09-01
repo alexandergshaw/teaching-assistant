@@ -18,6 +18,7 @@
 // for the component to call.
 
 import type { GradeResult, GradingRun, RubricAreaResult } from "@/lib/grade";
+import { coerceGradeDetermination } from "@/lib/grade/types";
 import { stripGradingRunForDraft } from "@/lib/workflows/grading-review-rows";
 
 const RUN_KEY = "ta-github-grading-run";
@@ -209,6 +210,24 @@ function parseGradeResult(raw: unknown): GradeResult | null {
   const improvements = typeof raw.improvements === "string" ? raw.improvements : "";
   const resubmitNotice = typeof raw.resubmitNotice === "string" ? raw.resubmitNotice : "";
 
+  // docs/no-submission-and-requirement-checking-acceptance-criteria.md G1c:
+  // UNLIKE submissionTruncated above (which degrades any wrong type to
+  // undefined), this field follows the noSubmissionRepos/undeterminedRepos
+  // idiom instead: an ABSENT field restores as undefined ("graded normally"
+  // - true for every run saved before this field existed, since no producer
+  // could have set it), but a PRESENT value that is not one of the known
+  // GradeDetermination members (coerceGradeDetermination, grade/types.ts,
+  // the single source of truth for that membership list) is a corrupt
+  // result, not an old one, and invalidates this result (and therefore the
+  // whole run - see parseGradingRun below) rather than silently discarding
+  // the fact. Presence is checked here, separately from the coercion call
+  // below, because coerceGradeDetermination cannot itself distinguish
+  // "absent" from "invalid" - both return undefined from it.
+  if (raw.determination !== undefined && coerceGradeDetermination(raw.determination) === undefined) {
+    return null;
+  }
+  const determination = coerceGradeDetermination(raw.determination);
+
   return {
     student: raw.student,
     overallComment: raw.overallComment,
@@ -226,6 +245,7 @@ function parseGradeResult(raw: unknown): GradeResult | null {
     gradedRepo,
     gradedRef,
     submissionTruncated,
+    determination,
   };
 }
 

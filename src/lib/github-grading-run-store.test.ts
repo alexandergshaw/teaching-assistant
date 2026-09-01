@@ -7,6 +7,7 @@
 // src/app/components/repo-grades/repoGradesUiState.test.ts's own pattern.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { GradeResult, GradingRun } from "@/lib/grade";
+import { GRADE_DETERMINATIONS } from "@/lib/grade/types";
 import {
   describeGithubGradingNoSubmission,
   describeGithubGradingTruncation,
@@ -104,6 +105,7 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
         gradedRepo: "student/hw1",
         gradedRef: "abc123def456",
         submissionTruncated: undefined,
+        determination: undefined,
       },
     ]);
     expect(restored!.run.rubricAreaNames).toEqual(["Clarity"]);
@@ -154,6 +156,58 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
     expect(restored!.run.results[0].submissionTruncated).toBe(true);
     expect(restored!.run.results[1].submissionTruncated).toBe(false);
     expect(restored!.run.results[2].submissionTruncated).toBeUndefined();
+  });
+
+  // docs/no-submission-and-requirement-checking-acceptance-criteria.md G1c:
+  // determination must round-trip through serialize+parse like every other
+  // grade-relevant field, both set and absent.
+  it("round-trips determination (\"no-submission\" and absent) through serialize+parse", () => {
+    const run = fixtureRun({
+      results: [
+        fixtureResult({ student: "No Sub", determination: "no-submission" }),
+        fixtureResult({ student: "Graded Normally", determination: undefined }),
+      ],
+    });
+    const json = serializeGithubGradingRun({
+      run,
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+    });
+    const restored = parseStoredGithubGradingRun(json);
+    expect(restored).not.toBeNull();
+    expect(restored!.run.results[0].determination).toBe("no-submission");
+    expect(restored!.run.results[1].determination).toBeUndefined();
+  });
+
+  // docs/no-submission-and-requirement-checking-acceptance-criteria.md G3:
+  // GradeDetermination was widened to add "no-submission-unmerged-branch"
+  // alongside "no-submission". Driven off GRADE_DETERMINATIONS (grade/types.ts)
+  // itself, not a hand-typed literal list here, so a future third member is
+  // automatically exercised by this same test without an edit to this file -
+  // if GRADE_DETERMINATIONS grows without the store's coercer recognizing the
+  // new member, this test fails instead of silently letting the new value be
+  // coerced away.
+  it("round-trips every known GradeDetermination member through serialize+parse", () => {
+    expect(GRADE_DETERMINATIONS.length).toBeGreaterThanOrEqual(2);
+    for (const determination of GRADE_DETERMINATIONS) {
+      const run = fixtureRun({
+        results: [fixtureResult({ student: `Student ${determination}`, determination })],
+      });
+      const json = serializeGithubGradingRun({
+        run,
+        gradedAt: "2026-08-24T12:00:00.000Z",
+        lastGradedFolder: "",
+        truncatedRepos: [],
+        noSubmissionRepos: [],
+        undeterminedRepos: [],
+      });
+      const restored = parseStoredGithubGradingRun(json);
+      expect(restored).not.toBeNull();
+      expect(restored!.run.results[0].determination).toBe(determination);
+    }
   });
 });
 
@@ -306,6 +360,54 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
         JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], noSubmissionRepos: [], run: "nope" })
       )
     ).toBeNull();
+  });
+
+  // docs/no-submission-and-requirement-checking-acceptance-criteria.md G1c:
+  // UNLIKE submissionTruncated (which silently degrades any wrong type to
+  // undefined), determination must reject a corrupt PRESENT value outright -
+  // an ABSENT field still restores as undefined ("graded normally"), since
+  // every run saved before this field existed was in fact graded normally.
+  it("restores determination as undefined when absent (an older stored blob), but rejects the WHOLE run when a result's determination is a wrong/unknown value", () => {
+    const goodRun = fixtureRun({ results: [fixtureResult({ student: "Old Row" })] });
+    const stored = JSON.stringify({
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "week-1",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+      run: goodRun,
+    });
+    const restoredOld = parseStoredGithubGradingRun(stored);
+    expect(restoredOld).not.toBeNull();
+    expect(restoredOld!.run.results[0].determination).toBeUndefined();
+    // The rest of the result restores normally too - this is not "no run".
+    expect(restoredOld!.run.results[0].student).toBe("Old Row");
+
+    const badRun = fixtureRun({
+      results: [{ ...fixtureResult(), determination: "something-else" } as unknown as GradeResult],
+    });
+    const withBadDetermination = JSON.stringify({
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+      run: badRun,
+    });
+    expect(parseStoredGithubGradingRun(withBadDetermination)).toBeNull();
+
+    const badRunNumber = fixtureRun({
+      results: [{ ...fixtureResult(), determination: 1 } as unknown as GradeResult],
+    });
+    const withNumericDetermination = JSON.stringify({
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+      run: badRunNumber,
+    });
+    expect(parseStoredGithubGradingRun(withNumericDetermination)).toBeNull();
   });
 
   it("rejects the WHOLE run when one result is missing a required field, rather than returning a partial run", () => {

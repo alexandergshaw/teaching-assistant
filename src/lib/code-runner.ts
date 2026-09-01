@@ -17,6 +17,8 @@ import {
   languageForExtension,
   describeCodeRunSkip,
   capOutput,
+  isStdinEofFailure,
+  sourceLooksLikeItReadsStdin,
   CODE_RUN_TIMEOUT_MS,
   CODE_RUN_OUTPUT_CAP_CHARS,
   type CodeRunCandidate,
@@ -53,6 +55,33 @@ export interface CodeRunResult {
   /** Set when execution could not be attempted (e.g. network error, or the
    * timeout below). Non-fatal. */
   error?: string;
+  /** True when `ran` is false SOLELY because this run's hardcoded empty
+   * stdin (see the module doc comment above) starved a required input read
+   * - detected via isStdinEofFailure (code-run-selection.ts), which now
+   * requires BOTH a stderr signature AND source-level proof the program
+   * reads from stdin (not just a file/other stream that happens to raise
+   * the same exception): Python's EOFError (input()) gated on `input(`/
+   * `sys.stdin` in the source, Java's Scanner-sourced
+   * NoSuchElementException gated on the source constructing a Scanner over
+   * System.in, and Python's sys.stdin.read()/readline()/readlines() parsed
+   * or indexed directly on the same source line (already self-proving from
+   * stderr alone). Distinct from `error`: this run DID
+   * execute (real stdout/stderr exist), it just failed for a reason that
+   * has nothing to do with the student's code, so callers must treat it as
+   * a third, NEUTRAL outcome - excluded from scoring, not zeroed - rather
+   * than folding it into either `ran: true` or a genuine `ran: false`
+   * failure. See gradeEntriesEmbedded (embedded-grader/index.ts) and
+   * gradeSubmission (grade/engine.ts), which both gate on this exactly like
+   * `error` already. */
+  neededStdin?: boolean;
+  /** True when `ran` is true, the language is one this repo has verified
+   * fails SILENTLY at EOF (c/c++ - see sourceLooksLikeItReadsStdin's own doc
+   * comment), and the submitted source appears to read from stdin. The
+   * process really did exit 0, so this never changes whether the run counts
+   * as clean - it only tells a grading-prompt builder that `stdout`/`stderr`
+   * may reflect an unset/garbage variable rather than real program
+   * behavior, since this sandbox never gave the program any input to read. */
+  stdinReadSuspected?: boolean;
   /** True when `error` is set BECAUSE this run hit CODE_RUN_TIMEOUT_MS,
    * rather than failing on its own - a normal, expected outcome for a slow
    * or unreachable runner under the fixed budget Vercel Hobby's 60s ceiling
@@ -319,15 +348,19 @@ async function runViaWandbox(
     result.status !== undefined && result.status !== "" ? parseInt(result.status, 10) : NaN;
   const exitCode = Number.isFinite(parsedStatus) ? parsedStatus : null;
   const compileOutput = result.compiler_error || result.compiler_output || undefined;
+  const stderr = result.program_error ?? "";
+  const ran = exitCode === 0 && !result.signal;
 
   return {
     language,
     files: files.map((f) => f.name),
-    ran: exitCode === 0 && !result.signal,
+    ran,
     exitCode,
     stdout: result.program_output ?? "",
-    stderr: result.program_error ?? "",
+    stderr,
     compileOutput,
+    neededStdin: !ran && isStdinEofFailure(stderr, files),
+    stdinReadSuspected: ran && sourceLooksLikeItReadsStdin(language, files),
   };
 }
 
@@ -481,6 +514,8 @@ async function executeRunFiles(
     stdout,
     stderr,
     compileOutput,
+    neededStdin: !ran && isStdinEofFailure(stderr, runFiles),
+    stdinReadSuspected: ran && sourceLooksLikeItReadsStdin(dominantLanguage, runFiles),
   };
 }
 

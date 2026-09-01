@@ -39,9 +39,10 @@ export {
   forkRepo,
 } from "./github.repos";
 
-export type { RepoTreeEntry } from "./github.files";
+export type { RepoTreeEntry, RepoTreeResult } from "./github.files";
 export {
   getRepoTree,
+  getRepoTreeWithMeta,
   getFileText,
   putFile,
   deletePaths,

@@ -104,6 +104,22 @@ describe("stripGradeResultForDraft", () => {
     expect(stripped.gradedRepo).toBe("student/hw1");
     expect(stripped.gradedRef).toBe("abc123def456");
   });
+
+  // docs/no-submission-and-requirement-checking-acceptance-criteria.md G1c:
+  // this is the exact allowlist that already dropped submissionTruncated
+  // once - proves determination survives the draft round-trip rather than
+  // being silently dropped the same way.
+  it("keeps determination", () => {
+    const result = makeResult({ determination: "no-submission" });
+    const stripped = stripGradeResultForDraft(result);
+    expect(stripped.determination).toBe("no-submission");
+  });
+
+  it("leaves determination undefined when the source result never set it", () => {
+    const result = makeResult({ determination: undefined });
+    const stripped = stripGradeResultForDraft(result);
+    expect(stripped.determination).toBeUndefined();
+  });
 });
 
 describe("stripGradingRunForDraft / stripGradingRunEntriesForDraft", () => {

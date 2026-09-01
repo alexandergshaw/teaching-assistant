@@ -209,6 +209,23 @@ export function buildCodeExecutionNote(codeRun: CodeRunResult): string {
   if (codeRun.stderr && codeRun.stderr.trim()) {
     lines.push(`- Errors (stderr):\n${cap(codeRun.stderr)}`);
   }
+  // codeRun.stdinReadSuspected (code-runner.ts): this run exited cleanly, but
+  // its source appears to read from stdin and this sandbox always runs code
+  // with stdin empty - in a language (c/c++) that reads past end-of-stream
+  // SILENTLY (the variable is simply left unset, no error, no distinguishing
+  // exit code), so a "clean run" here is not evidence the input-handling
+  // code is correct. Only a caveat, never a suppression: unlike
+  // codeRun.neededStdin (excluded from the prompt entirely by the caller,
+  // grade/engine.ts, since that case is a genuine execution failure), this
+  // run really did produce real output for whatever parts of the program
+  // never touched the unread input - hiding that would be its own kind of
+  // dishonesty. The model is told explicitly not to weigh the input-derived
+  // parts of the output as real.
+  if (codeRun.stdinReadSuspected) {
+    lines.push(
+      "- Note: this program appears to read from standard input, but this grading sandbox cannot provide any (input was empty). In this language, reading past the end of an empty input does not raise an error - it silently leaves the target variable unset, and the program can still exit cleanly. Do not treat the output above as evidence that the input-handling logic is correct or incorrect; judge that part of the submission from the source code instead."
+    );
+  }
   // An execution-influenced grade must be explainable to the student it
   // affects - the previous wording here ("Do not mention that the code was
   // run automatically") made that impossible by construction: a student

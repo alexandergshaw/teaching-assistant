@@ -52,6 +52,11 @@ import { greetingNameFromAuthor } from "@/lib/person-name";
 import type { LlmProvider } from "@/lib/llm";
 import type { UseReplyRowsReturn } from "./useReplyRows";
 import type { UseReplyResourcesReturn } from "./useReplyResources";
+// docs/DEV_LOOP.md's "every feature needs a downloadable log" rule
+// (REGRESSION entries 369/372/373/374 record this surface's unpaid debt):
+// the sealed return widens by exactly one field, `runLog`, below - see that
+// field's own doc comment for what builds it and where.
+import type { DiscussionRepliesRunLog } from "./discussion-replies-log";
 
 // --- S6: both sub-hooks' real return types are used directly - no hand-
 // written duplicate interface and no `as` assertion at the call site below.
@@ -133,6 +138,18 @@ export interface UseDiscussionRepliesReturn {
   findMissing: () => void;
   retryResources: (id: string) => void;
   removeResource: (id: string, url: string) => void;
+
+  /** docs/DEV_LOOP.md's downloadable-log rule. ASSEMBLED by
+   *  discussion-replies-log.ts's `buildDiscussionRepliesRunLog` from two
+   *  things useDiscussionReplies.ts holds: the event streams it collects as
+   *  it runs (batches sent to extraction, notices shown, retries clicked -
+   *  each appended the moment it happens, never reconstructed after the
+   *  fact) and the current `rawRows` table (read fresh, not itself an event
+   *  stream - a row's stored fields already ARE its debugging truth at any
+   *  given moment). D (the panel) formats this into CSV/JSON and downloads
+   *  it; this hook never formats anything - see discussion-replies-log.ts's
+   *  own header for the full collection-vs-assembly split. */
+  runLog: DiscussionRepliesRunLog;
 }
 
 // A drafting-queue entry. `force` bypasses `isDispatchableDraftItem`'s

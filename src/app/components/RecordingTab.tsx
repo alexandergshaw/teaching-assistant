@@ -31,6 +31,7 @@ import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
 import { listRecordingFiles, downloadRecordingFile, type RecordingFile } from "@/lib/recording-files";
 import { awaitVideoMetadata, ensureFiniteDuration } from "@/lib/caption-burn";
+import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
 import type { Take } from "./recording/types";
 
 export type { Take } from "./recording/types";
@@ -47,6 +48,31 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("ta-rec-view", recView);
   }, [recView]);
+
+  // Launch seam (Knowledge base "Start recording" on a page selection, and
+  // the fab's Recording-tab entries): RecordingTab is kept mounted for the
+  // whole app session (see the always-mounted wrapper in page.tsx), so a
+  // mount-only effect reading a one-shot payload would only ever observe the
+  // FIRST launch of a session - see src/lib/recording-launch.ts's own header
+  // comment for the full account. Registering this listener once (empty
+  // deps) is still correct: it is the CALLBACK, not the effect body, that
+  // must re-run per launch, and a live `window.addEventListener` does
+  // exactly that - every openRecordingTool() dispatch, first or fifth,
+  // reaches this handler and switches recView. Re-parses `e.detail`
+  // defensively (matching AiChatFab's own re-parse of the sibling
+  // "open-ai-chat" event) rather than trusting the dispatcher, since a raw
+  // CustomEvent dispatch bypassing openRecordingTool() is not ruled out (see
+  // ContextMenu.tsx's own bypass of openChat() for the "open-ai-chat"
+  // event's precedent of exactly that).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
+      if (!detail) return;
+      setRecView(detail.view);
+    };
+    window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
+    return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
+  }, []);
 
   const [error, setError] = useState<string | null>(null);
   const [hasStream, setHasStream] = useState(false);

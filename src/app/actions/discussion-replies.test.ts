@@ -711,6 +711,91 @@ describe("draftDiscussionRepliesAction", () => {
       }
     });
   });
+
+  // "Activate this recording from the Knowledge base" - `knowledgeContext` is
+  // a NEW TRAILING argument, after `provider` (never inserted earlier -
+  // every existing call above in this describe block uses the old 5-argument
+  // shape and must keep working unchanged). Coerced at this Server Action
+  // wire the same way `composition` is (coerceKnowledgeContextAtBoundary
+  // mirrors coerceCompositionAtBoundary's own rationale) before reaching
+  // buildReplyDraftingPrompt - inspected the same way, via the spied
+  // buildReplyDraftingPrompt's own call arguments.
+  describe("knowledgeContext threading and server-boundary coercion (docs owner ask: activate recording from the Knowledge base)", () => {
+    function mockOk() {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
+      } as never);
+    }
+
+    it("threads a real knowledgeContext through to buildReplyDraftingPrompt's 6th (trailing) argument, unchanged", async () => {
+      mockOk();
+      const text = "Reference context below, from knowledge base pages the instructor explicitly selected...\n\nSelected page: Grading Rubric\nLate work loses 10% per day.";
+      await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini", text);
+      expect(buildReplyDraftingPrompt).toHaveBeenCalledTimes(1);
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      // posts(0), audience(1), courseName(2), styleBlock(3), composition(4),
+      // knowledgeContext(5) - the 6th positional argument is what this test
+      // pins, exactly the way the composition tests above pin call[4].
+      expect(call[5]).toBe(text);
+      // And it actually reached the real prompt sent to the model - the
+      // anti-injection framing survived through this action's own coercion
+      // step, not just into the mocked builder's recorded arguments.
+      const callArgs = vi.mocked(callLlm).mock.calls[0][0];
+      const promptPart = callArgs.contents[0].parts[0] as { text: string };
+      expect(promptPart.text).toContain("Late work loses 10% per day.");
+    });
+
+    it("omitting knowledgeContext passes undefined to buildReplyDraftingPrompt (the 5-argument, pre-feature call shape)", async () => {
+      mockOk();
+      await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect(call[5]).toBeUndefined();
+    });
+
+    it("a whitespace-only knowledgeContext coerces to undefined rather than reaching the prompt builder as a blank section", async () => {
+      mockOk();
+      await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini", "   \n  ");
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect(call[5]).toBeUndefined();
+    });
+
+    it("a non-string knowledgeContext (arrived malformed over the wire) coerces to undefined rather than throwing", async () => {
+      mockOk();
+      const bogus = 42 as unknown as string;
+      const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini", bogus);
+      expect("error" in result).toBe(false);
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect(call[5]).toBeUndefined();
+    });
+
+    it("caps an over-long knowledgeContext at the server boundary, truncating (never dropping) and marking it VISIBLY inside the prompt text", async () => {
+      mockOk();
+      // Well above buildKnowledgeContextBlock's own 10,000-character default
+      // (the real producer's ceiling), and above this action's own
+      // defense-in-depth cap.
+      const overLong = "x".repeat(25000);
+      await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini", overLong);
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      const received = call[5] as string;
+      expect(received).toBeDefined();
+      expect(received.length).toBeLessThan(overLong.length);
+      // Truncated, not silently dropped to nothing.
+      expect(received.length).toBeGreaterThan(0);
+      // The truncation is visible INSIDE the text itself - never a silent cut.
+      expect(received).toContain("truncated");
+    });
+
+    it("does NOT touch a knowledgeContext already comfortably under the cap", async () => {
+      mockOk();
+      const short = "Selected page: Policy\nA short policy.";
+      await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini", short);
+      const call = vi.mocked(buildReplyDraftingPrompt).mock.calls[0];
+      expect(call[5]).toBe(short);
+    });
+  });
 });
 
 describe("gatherReplyResourcesAction", () => {

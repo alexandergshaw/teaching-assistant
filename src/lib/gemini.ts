@@ -1,4 +1,26 @@
 const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
+
+/**
+ * Default model for image generation (text-in, image-out) calls, kept
+ * separate from DEFAULT_GEMINI_MODEL because the text-drafting default above
+ * is not an image-capable model.
+ *
+ * Image generation does NOT use the `:generateContent` endpoint that
+ * getGeminiModel()'s callers use - that shape (an image part returned inline
+ * via generationConfig.responseModalities: ["TEXT","IMAGE"]) is Google's
+ * LEGACY image-generation schema and was removed 2026-06-08. Verified
+ * against Google's live documentation, the current schema is a dedicated
+ * `POST /v1beta/interactions` endpoint (model id in the request body, an
+ * `Api-Revision: 2026-05-20` header required) - see generateGeminiImage in
+ * llm.ts for the full request/response shape.
+ *
+ * "gemini-3.1-flash-image" (Nano Banana 2) is the current default. Other
+ * supported ids as of this check: "gemini-3-pro-image" (Nano Banana Pro) and
+ * "gemini-2.5-flash-image" (Nano Banana, the previous default here).
+ * GEMINI_IMAGE_MODEL overrides it, mirroring GEMINI_MODEL's own override
+ * knob below, so a future model-id change is a config change, not a deploy.
+ */
+const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image";
 const DEFAULT_MAX_OUTPUT_TOKENS = 700;
 const DEFAULT_MAX_SUBMISSIONS = 5;
 
@@ -68,6 +90,12 @@ export function getGeminiApiKey() {
 
 export function getGeminiModel() {
   return process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL;
+}
+
+/** Model used for image-generation calls. See DEFAULT_GEMINI_IMAGE_MODEL's
+ * own comment above for why this is a separate knob from getGeminiModel(). */
+export function getGeminiImageModel() {
+  return process.env.GEMINI_IMAGE_MODEL ?? DEFAULT_GEMINI_IMAGE_MODEL;
 }
 
 export function getGeminiMaxOutputTokens() {

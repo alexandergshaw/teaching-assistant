@@ -30,17 +30,33 @@ import {
   createAnnouncementAction,
   listCourseHubAction,
 } from "../../actions";
+// Imported directly by module path, not through the "../../actions" barrel
+// above - this action lives in this wave's own file set
+// (src/app/actions/announcement-image.ts) while the barrel (src/app/actions.ts)
+// does not, and a direct "@/app/actions/<file>" import is an already-
+// established pattern in this repo (e.g. src/app/api/visualizer/create/route.ts
+// imports createVisualizerConceptAction the same way) - so this stays out of
+// a file two sibling agents' waves might also be touching.
+import { generateAnnouncementImageAction } from "@/app/actions/announcement-image";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
 import type { TranscriptChunkPlan } from "@/lib/take-transcript";
 import {
   buildTakeAnnouncementInstruction,
+  buildAnnouncementImagePrompt,
   DEFAULT_ANNOUNCEMENT_COMPOSITION,
   type AnnouncementCompositionSettings,
 } from "@/lib/take-announcement";
 import { coerceAnnouncementComposition } from "./announcement-composition";
+import { announcementImageFileName } from "./announcement-image-filename";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { isConfirmArmed, mayPostCommit } from "../content-tab/modules/postConfirmArming";
+// The image's only real destination this wave ships (see this file's own
+// note above imageState in UseTakeAnnouncementReturn): triggerFileDownload is
+// the repo's one anchor/click/revoke idiom, not a hand-rolled sixth copy of
+// it - see RepoGradesLogPanel.tsx's own comment on why (REGRESSION entry 267
+// check 4 already refused one).
+import { triggerFileDownload } from "../course-planning/utils";
 import { takePostArmSignature } from "./takeAnnouncementArming";
 import {
   runPipelineFromSegments,
@@ -175,6 +191,48 @@ export interface UseTakeAnnouncementReturn {
    * to join that signature too. */
   composition: AnnouncementCompositionSettings;
   setComposition: (next: AnnouncementCompositionSettings) => void;
+
+  /** The announcement's companion image (owner's ask: "a simple, everyday
+   * image that is relevant"). "idle" before any attempt or after an explicit
+   * discard; "generating" while a call is in flight; "ready" with
+   * imageBase64/imageMimeType populated; "failed" with imageError set to a
+   * specific message (see announcement-image.ts's own failure branches).
+   * Never persisted (not localStorage, not the message draft payload) - see
+   * this hook's own note above generateImage for why, and
+   * TakeAnnouncementPanel.tsx for how it is rendered. Purely additive: every
+   * state here is independent of `stage`/`subject`/`body`, so an image
+   * failure can never block or degrade the already-drafted, already-postable
+   * announcement text.
+   *
+   * IMPORTANT: this image is NEVER sent when the announcement is posted.
+   * commitPost() below calls createAnnouncementAction with only
+   * (canvasUrl, subject, body, institution) - no image argument exists, and
+   * none should be added here: the owner separately requires the
+   * announcement stay plain-text copyable (see
+   * useTakeAnnouncement.image-copy-safety.test.ts), which an inline or
+   * attached image would break. Attaching it to the Canvas announcement
+   * itself would need Canvas's file-upload API (upload, then reference the
+   * result in an HTML body) - out of scope for this wave; see downloadImage
+   * below for the destination this wave actually ships. Any UI copy near
+   * this state must say so plainly (TakeAnnouncementPanel.tsx's Image
+   * section) - an instructor who believes the image posts automatically and
+   * finds out from a student is exactly the failure this note exists to
+   * prevent. */
+  imageState: "idle" | "generating" | "ready" | "failed";
+  imageBase64: string | null;
+  imageMimeType: string | null;
+  imageError: string | null;
+  regenerateImage: () => void;
+  discardImage: () => void;
+  /** The image's real destination (see the IMPORTANT note above imageState):
+   * saves the current image to the instructor's downloads as
+   * `<subject-slug>-image.<ext>` (announcement-image-filename.ts) so they can
+   * attach it themselves wherever they are posting. A no-op when there is no
+   * ready image (imageBase64/imageMimeType null) - TakeAnnouncementPanel.tsx
+   * only ever renders the control that calls this inside the "ready" branch,
+   * so that should never happen in practice; the guard is defense in depth,
+   * not the primary gate. */
+  downloadImage: () => void;
 }
 
 // GAP 3 (cross-surface busy gating, AC15b): TakeAnnouncementPanel.tsx computes
@@ -265,6 +323,27 @@ export function useTakeAnnouncement({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
+
+  // Image companion (owner's ask, see this file's own header and
+  // GenerateAnnouncementImageResult in announcement-image.ts). Deliberately
+  // component state, not localStorage - the "no base64 image in
+  // localStorage" constraint this feature was built under (see
+  // upload-budget.ts's own header on wire-size discipline; the reply-table
+  // persistence's quota-failure path already proves far smaller payloads can
+  // blow a localStorage quota). The image lives only as long as this hook is
+  // mounted for this take; closing the panel and reopening it re-generates
+  // rather than restoring - a deliberate simplification, not an oversight
+  // (see this hook's own header comment above imageState for the full
+  // reasoning).
+  const [imageState, setImageState] = useState<"idle" | "generating" | "ready" | "failed">("idle");
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMimeType, setImageMimeType] = useState<string | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  // Guards the auto-generation effect below to at most one attempt per
+  // drafted subject/body pair - set true the moment an attempt (auto or
+  // manual) starts, and reset to false only when runDraft lands a genuinely
+  // new draft (see runDraft's own reset of this ref).
+  const autoImageAttemptedRef = useRef(false);
 
   const [armedFor, setArmedFor] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
@@ -446,9 +525,113 @@ export function useTakeAnnouncement({
     setArmedFor(null);
     setFieldError(null);
     setPostError(null);
+    // A genuinely new draft lands here - reset the image companion so the
+    // auto-generation effect below fires again for the new subject/body,
+    // even if a prior draft's image was generated, regenerated, or
+    // explicitly discarded. See this file's header comment on imageState for
+    // why this is the deliberate behavior (a fresh draft gets a fresh image
+    // attempt) rather than carrying a discard decision across drafts.
+    autoImageAttemptedRef.current = false;
+    setImageState("idle");
+    setImageBase64(null);
+    setImageMimeType(null);
+    setImageError(null);
     setStage({ phase: "review" });
     announce("Draft ready to review.");
   }
+
+  /**
+   * Calls generateAnnouncementImageAction with a prompt built from the
+   * CURRENT subject/body (buildAnnouncementImagePrompt,
+   * src/lib/take-announcement.ts) - always the announcement actually on
+   * screen, whether that came from the auto-drafted text, a regenerate, or
+   * the instructor's own edits to the Subject/Message fields. Never throws
+   * (announcement-image.ts's own discipline); every failure lands in
+   * imageError with a specific message, and the drafted announcement text
+   * itself is completely untouched either way.
+   */
+  async function generateImage() {
+    setImageState("generating");
+    setImageError(null);
+    const prompt = buildAnnouncementImagePrompt(subject, body);
+    const result = await generateAnnouncementImageAction(prompt);
+    if ("error" in result) {
+      setImageState("failed");
+      setImageError(result.error);
+      setImageBase64(null);
+      setImageMimeType(null);
+      return;
+    }
+    setImageState("ready");
+    setImageBase64(result.base64);
+    setImageMimeType(result.mimeType);
+  }
+
+  /** Explicit "Regenerate image" control (TakeAnnouncementPanel.tsx) -
+   * replaces whatever image is currently shown (ready, failed, or none) with
+   * a fresh attempt against the CURRENT subject/body. Marks the auto-attempt
+   * ref used so the review-stage effect below never fires a second,
+   * redundant attempt on top of this explicit one. */
+  function regenerateImage() {
+    autoImageAttemptedRef.current = true;
+    void generateImage();
+  }
+
+  /** Explicit "Remove image" control - clears the image companion without
+   * touching subject/body or re-attempting generation. The instructor can
+   * still post (or save to drafts) with no image at all; this is the control
+   * that makes that a real choice rather than only a byproduct of a failure. */
+  function discardImage() {
+    autoImageAttemptedRef.current = true;
+    setImageState("idle");
+    setImageBase64(null);
+    setImageMimeType(null);
+    setImageError(null);
+  }
+
+  /** "Download image" control (TakeAnnouncementPanel.tsx) - the image's only
+   * real destination this wave ships (see the IMPORTANT note on imageState
+   * above): posting to Canvas never carries it, so the instructor downloads
+   * it here and attaches it themselves wherever they are posting. Decodes
+   * the base64 the same way this repo's other client-side downloads already
+   * do (Uint8Array.from(atob(...), c => c.charCodeAt(0)) - see e.g.
+   * FinalizedSyllabusLibrary.tsx's downloadDocx) into a Blob, names it via
+   * announcementImageFileName (a pure leaf, unit-tested with frozen
+   * literals), and hands both to triggerFileDownload - never a hand-rolled
+   * createObjectURL/anchor/click/revoke dance. */
+  function downloadImage() {
+    if (!imageBase64 || !imageMimeType) return;
+    const bytes = Uint8Array.from(atob(imageBase64), (c) => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: imageMimeType });
+    triggerFileDownload(blob, announcementImageFileName(subject, imageMimeType));
+  }
+
+  // Auto-generate the image companion the first time a drafted announcement
+  // reaches "review" (mirroring this hook's own auto-start-on-open behavior
+  // for the TEXT draft, a few lines below - "the click that opened this
+  // surface IS the start click, nothing further to press", minimize-clicks).
+  // Fires at most once per drafted subject/body pair (autoImageAttemptedRef),
+  // never re-fires on every keystroke while the instructor edits the fields,
+  // and is skipped entirely for an empty draft. Deferred past a microtask
+  // (await Promise.resolve()) before the first setState, matching this
+  // file's own auto-start effect's idiom for the same reason: setState must
+  // never be reached synchronously from an effect body.
+  useEffect(() => {
+    if (stage.phase !== "review") return;
+    if (autoImageAttemptedRef.current) return;
+    if (!subject.trim() || !body.trim()) return;
+    autoImageAttemptedRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      void generateImage();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage.phase]);
 
   function start() {
     setLastMessage(null);
@@ -677,5 +860,13 @@ export function useTakeAnnouncement({
 
     composition,
     setComposition,
+
+    imageState,
+    imageBase64,
+    imageMimeType,
+    imageError,
+    regenerateImage,
+    discardImage,
+    downloadImage,
   };
 }

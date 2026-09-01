@@ -397,6 +397,35 @@ export function formatFeedback(text: string): string {
   return text.replace(/\s*[–—]\s*/g, ", ");
 }
 
+/**
+ * The clipboard text for "Copy all feedback": the three feedback boxes joined
+ * by a BLANK LINE, in FEEDBACK_FIELDS order.
+ *
+ * Deliberately NOT `edit.overall`, which is what this button used to copy.
+ * `composeOverallComment` (src/lib/grade/types.ts) joins the same three parts
+ * with a single SPACE, because that composed string is what gets posted to an
+ * LMS as one comment field. Pasting it gives the instructor three distinct
+ * blocks - what went well, what to improve, and the resubmission offer - run
+ * together as a single paragraph.
+ *
+ * Only the CLIPBOARD shape changes here. `overall` itself is untouched, so
+ * what is stored, posted and read by the ~32 downstream files that consume
+ * `overallComment` is byte-identical to before - and the local/lib
+ * `composeOverallComment` parity test stays valid, since neither
+ * implementation moved.
+ *
+ * Falls back to `overall` (then to a stated placeholder) when all three boxes
+ * are empty, preserving the button's previous behaviour for a row that has no
+ * per-box text - an embedded-grader result with only a composed comment still
+ * copies something useful rather than an empty clipboard.
+ */
+export function copyAllFeedbackText(edit: FeedbackBoxesEdit): string {
+  const blocks = FEEDBACK_FIELDS.map((field) => edit[field].trim()).filter((text) => text.length > 0);
+  if (blocks.length > 0) return blocks.map(formatFeedback).join("\n\n");
+  const overall = edit.overall.trim();
+  return formatFeedback(overall.length > 0 ? overall : "No feedback provided.");
+}
+
 // ── F4 (docs/grading-results-file-viewer-acceptance-criteria.md) ──────────
 // A restored GithubGradingPanel run and a persisted grading draft both drop
 // `submittedFiles` deliberately (github-grading-run-store.ts's

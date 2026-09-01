@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   truncateTranscriptForPrompt,
   buildTakeAnnouncementInstruction,
+  buildAnnouncementImagePrompt,
   TAKE_ANNOUNCEMENT_INSTRUCTION,
   TRANSCRIPT_PROMPT_CAP,
+  IMAGE_PROMPT_TOPIC_CAP,
   ANNOUNCEMENT_INGREDIENTS,
   ANNOUNCEMENT_INGREDIENT_LABELS,
   DEFAULT_ANNOUNCEMENT_COMPOSITION,
@@ -202,5 +204,56 @@ describe("buildTakeAnnouncementInstruction - composition (this group's own C-2)"
   it("a real composition produces a materially different instruction than the inert default", () => {
     const out = buildTakeAnnouncementInstruction("t", baseContext, DEFAULT_ANNOUNCEMENT_COMPOSITION);
     expect(out).not.toBe(buildTakeAnnouncementInstruction("t", baseContext, inert));
+  });
+});
+
+describe("buildAnnouncementImagePrompt", () => {
+  it("includes the subject and body text verbatim", () => {
+    const out = buildAnnouncementImagePrompt("Week 4: Recursion", "This week we cover recursive functions.");
+    expect(out).toContain("Week 4: Recursion");
+    expect(out).toContain("This week we cover recursive functions.");
+  });
+
+  it("unconditionally forbids rendered text, real people, and real institutions - not toggles, always present", () => {
+    const out = buildAnnouncementImagePrompt("Any subject", "Any body");
+    expect(out).toMatch(/do not render any text/i);
+    expect(out).toMatch(/do not depict any real, identifiable person/i);
+    expect(out).toMatch(/do not depict or imply any real, specific school, company, or institution/i);
+  });
+
+  it("asks for a simple, everyday, uncluttered illustration (the owner's own framing)", () => {
+    const out = buildAnnouncementImagePrompt("Any subject", "Any body");
+    expect(out).toMatch(/simple, everyday, uncluttered illustration/i);
+  });
+
+  it("falls back to a placeholder when subject and body are both empty", () => {
+    const out = buildAnnouncementImagePrompt("", "");
+    expect(out).toContain("(no announcement text yet)");
+  });
+
+  it("trims and joins subject/body with a blank line between them", () => {
+    const out = buildAnnouncementImagePrompt("  Subject line  ", "  Body text  ");
+    expect(out).toContain("Subject line\n\nBody text");
+    expect(out).not.toContain("  Subject line  ");
+  });
+
+  it("truncates a topic longer than IMAGE_PROMPT_TOPIC_CAP and appends a truncation marker", () => {
+    const longBody = "word ".repeat(2000); // well over IMAGE_PROMPT_TOPIC_CAP (4000) characters
+    const out = buildAnnouncementImagePrompt("Subject", longBody);
+    expect(out).toContain("[truncated]");
+    // The whole prompt should not balloon without bound just because the
+    // body did - the topic portion is capped even though the surrounding
+    // instructions add a fixed amount on top.
+    expect(out.length).toBeLessThan(longBody.length);
+  });
+
+  it("does not truncate a topic at or under the cap", () => {
+    const body = "x".repeat(IMAGE_PROMPT_TOPIC_CAP - 20);
+    const out = buildAnnouncementImagePrompt("", body);
+    expect(out).not.toContain("[truncated]");
+  });
+
+  it("IMAGE_PROMPT_TOPIC_CAP is 4000", () => {
+    expect(IMAGE_PROMPT_TOPIC_CAP).toBe(4000);
   });
 });

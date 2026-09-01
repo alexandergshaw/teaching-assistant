@@ -26,6 +26,7 @@ import styles from "../../page.module.css";
 import {
   FEEDBACK_FIELDS,
   FEEDBACK_FIELD_META,
+  copyAllFeedbackText,
   formatFeedback,
   type FeedbackBoxesEdit,
   type FeedbackField,
@@ -93,6 +94,10 @@ export function RowFeedbackBoxes({
   const allKey = `${student}-all-feedback`;
   const allCopied = copiedKey === allKey;
   const copyAllLabel = namePrefix ? `Copy all ${namePrefix} feedback for ${student}` : `Copy all feedback for ${student}`;
+  // The clipboard text joins the three boxes with a BLANK LINE rather than
+  // copying the space-joined `overall` - see copyAllFeedbackText. Only the
+  // clipboard shape changes here; what is stored and posted to an LMS is
+  // untouched.
 
   return (
     <div>
@@ -100,7 +105,7 @@ export function RowFeedbackBoxes({
         <Button
           variant="text"
           size="small"
-          onClick={() => onCopy(allKey, formatFeedback(edit.overall || "No feedback provided."))}
+          onClick={() => onCopy(allKey, copyAllFeedbackText(edit))}
           aria-label={allCopied ? "Copied" : copyAllLabel}
           sx={{ textTransform: "none", minWidth: 0, p: "2px 6px" }}
         >

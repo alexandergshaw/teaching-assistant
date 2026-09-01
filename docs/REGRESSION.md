@@ -36331,3 +36331,178 @@ composition feature rides in the same diff.
 
 Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
 pre-existing warnings, `vitest` **747 files / 15493 tests** all passing.
+
+## 376. Five pieces from one bulk bar: the Knowledge base learns to launch a recording, and the announcement learns to draw
+
+Five pieces in one batch. Four of them are one feature seen from four angles: an
+instructor selects their standards pages in the Knowledge base and the replies drafted
+off a screen recording are written against those pages.
+
+**The Recording tab had no door from outside, and the obvious door would have worked
+exactly once.** Nothing in this app could reach `recView` - `RecordingTab`'s only prop is
+`active`, `setRecView` is private, `recView` is not in the URL, and the Manual rail
+explicitly refuses to expose it. The established idiom for "open surface X carrying this
+selection" is `course-handoff.ts`'s one-shot localStorage payload consumed in a
+mount-only effect - and it would have shipped this dead. `RecordingTab` is kept mounted
+for the whole session so an in-progress recording survives a tab switch, so a
+`useEffect(..., [])` reading a one-shot payload fires **once per page load**, not once
+per launch: the second "Start recording" of a session would have been a silent no-op with
+every gate green. `recording-launch.ts` is modelled on the event idiom instead. The
+listener registration is still mount-only - it is the *callback*, not the effect body,
+that must re-run - so a first, fifth or twentieth launch all deliver. `page.tsx` owns the
+tab switch (it is still the only component that can call `setActiveTab`) and
+`RecordingTab` owns the inner-view switch, both listening to the same event, neither
+knowing about the other.
+
+**The page text rides with the launch; the framing header rides with the text.**
+`KnowledgeTab.tsx` already holds every selected page's full `body` client-side, so
+"Start recording" builds the block through `buildKnowledgeContextBlock` - the *same*
+renderer the "Ask AI" path uses server-side - rather than inventing a second context
+format or, worse, a second anti-prompt-injection framing header. That header is the only
+thing standing between an instructor's standards page and a prompt that reads it as a
+directive, and it survives untouched all the way to the model: the boundary coercion only
+trims, and the 20,000-character defense-in-depth cap slices from the end and marks the cut
+inside the prompt text. The test builds a **real** block and asserts the framing sentence
+verbatim in the assembled prompt and in the real `callLlm` payload, not against a
+hand-typed stand-in.
+
+**`knowledgeContext` is a per-RUN value, not a per-batch one, and the distinction is
+load-bearing.** `takeRecordingKnowledgeContext()` drains on read. Called from the drafting
+loop it would have fed the first batch and starved every batch after it. It is called
+exactly once, by `start()`, and held in a ref for the life of the table - proven by a real
+six-row, two-batch `runDraftLoop` that asserts both dispatches carry the identical text.
+The 6th parameter was added **trailing** on both `buildReplyDraftingPrompt` and the real
+`draftDiscussionRepliesAction` - and on the injected `DraftDiscussionRepliesAction` type in
+the same commit, because entry 372 shipped a feature dead by widening the injected type and
+never the action. Omitting it leaves the prompt **byte-identical** to a frozen literal
+captured before this feature existed - not merely equal to a second call in the same file.
+
+**Two voices, and a rule that they never both speak.** The context never survives a
+reload by design (persisting page text is how `useReplyRows`'s localStorage quota failure
+happens); only a short label does. So the panel's live hint derives from state alone and
+is silent after a reload, and the one-time reload notice fires only when there is no live
+context, a persisted label, and a restored table. The conditions are exact complements: a
+restored table can never imply drafting context it no longer holds.
+
+**The announcement learned to draw, through the app's own key.** `generateGeminiImage`
+posts to `/v1beta/interactions` with an `Api-Revision: 2026-05-20` header - not the
+`:generateContent` endpoint the text path uses, whose image-out variant was removed
+2026-06-08. The text transport was extracted to `postGenerateContent` and is otherwise
+unmoved: same URL, same `?key=` auth, no new header, same retry policy, same parse. The
+image path gets its own transport with its own auth style, sharing only the backoff. A
+200 with no image is kept out of the failure branch, because the HTTP call did succeed -
+and when the model returned prose instead of a picture, that prose **is** the real reason
+and is surfaced to the instructor verbatim rather than replaced by a generic message. The
+prompt forbids rendered text, real identifiable people, and real institutions
+unconditionally - not as toggles.
+
+**"Copy all feedback" stopped copying the LMS comment.** The button copied `overall`,
+which `composeOverallComment` builds by joining the three boxes with a single **space**,
+because that composed string is one Canvas comment field. Pasted, the instructor got
+three distinct blocks - what went well, what to improve, the resubmission offer - as one
+run-on paragraph. Only the clipboard shape changed. `composeOverallComment` and
+`composeOverallCommentLocal` are both unmoved, so the ~32 files that read `overallComment`
+and the parity test that pins the two implementations to each other are all untouched, and
+the new test plants a deliberately different `overall` in its fixture to prove it is no
+longer the source.
+
+Final gates: `tsc` 0 errors, `eslint` 0 errors / 6 pre-existing warnings, `vitest`
+**752 files / 15591 tests** all passing. The `ta-rec-*` key canary is 55, re-derived
+independently with an ordinal sort; the one new key, `ta-rec-disc-kb-context-label`, sits
+at its correct sorted slot and is both read and written.
+
+### Limits
+
+- **The image refusal path is inferred, and unverified against a live API.** Google
+  documents only the success response for the `interactions` schema. That a refusal
+  arrives as a `text` block inside a step's `content` array is a defensible reading of the
+  legacy shape's behaviour, nothing more. It degrades in the safe direction - no text
+  found means the bare "did not return an image" message, never a fabricated reason - but
+  if refusals actually arrive as a 4xx, the instructor sees a raw truncated JSON body
+  instead of the crafted sentence. Nothing in this batch has ever spoken to the real
+  endpoint.
+- **The generated image has no destination.** It renders as a preview and is never posted
+  to Canvas, never saved to a draft, never written to the Files tab, and never persisted.
+  Closing the panel discards it. There is no download control, so the only way to keep it
+  is a browser right-click.
+- **No component is rendered by any test in this repo.** `vitest` is node-env and collects
+  only `src/**/*.test.ts`. The Knowledge base's "Start recording" button, the two new fab
+  entries, the panel's Knowledge-context hint line, and the entire image section of the
+  announcement panel are verified **by reading**. A green suite says nothing about whether
+  any of them render, are labelled, or are reachable by keyboard.
+- **The `openRecordingTool` dispatch is not covered by anything that runs.** The three
+  tests that would cover it open with `if (typeof window === "undefined") { expect(true)
+  .toBe(true); return; }`, and in this runner `window` is undefined - so they pass
+  vacuously. The event name, the payload on the wire, and the "every dispatch reaches a
+  registered listener" claim are all unexecuted. The two-sequential-launches test that
+  does run exercises only the module's one-shot slot, which behaves identically under the
+  mount-only design it claims to rule out.
+- **The `start()` source guard is a structural regex, not an executing test of the hop.**
+  It pins the literal text of the call site because a pure function cannot tell a
+  sabotaged call from "no launch happened". It catches the specific sabotage it was
+  written against. It does not verify the call sits inside `start()` - relocating the
+  identical line into a mount-only effect passes every assertion while reintroducing the
+  exact defect this feature exists to avoid - and it stops one hop short of the
+  `setKnowledgeContext` write. It will break on a rename before it breaks on a defect.
+- **`useDiscussionReplies.ts` is at 990 of 1000 and this batch put it there.** Nine lines
+  of headroom - less than one `useState` plus one effect plus one return line. The next
+  feature that touches discussion replies must begin with a real structural split, sized
+  against that feature's own additions rather than against the 1000 limit.
+- **`resolveStartKnowledgeContext`'s null-`taken` branch is unreachable in production.**
+  The caller guards on `if (taken)`, so the function is `(_, taken) => taken` at its only
+  call site; the take-once-per-run guarantee is enforced by that guard, not by the pure
+  function. Two of its five unit tests describe an argument pair the app never produces.
+
+### Written before the blocker fixes - what actually shipped
+
+The review returned two blockers; both are closed in this same commit.
+
+**The generated announcement image had nowhere to go.** Generation, preview,
+Regenerate and Remove all worked - and `createAnnouncementAction` takes no image
+argument, so posting produced plain text. The idle copy even implied posting
+behaved differently when an image existed. An instructor would have generated an
+image, posted, and learned otherwise from a student. **The fifth
+dead-on-arrival capability this session**: every export was wired; the last hop
+did not exist. Closed with a Download control (reusing the existing
+`triggerFileDownload` helper - found via a header comment warning that the
+anchor/click/revoke dance must not get "a sixth copy") and copy that states the
+truth in every state: the image never posts with the announcement; download it
+and attach it yourself. **Attaching to Canvas is a real follow-up, not a gap** -
+it needs Canvas's file-upload API and an HTML body, and is a deliberate
+question for the owner rather than an assumption.
+
+**Three launch-seam tests could not fail.** Every dispatch test opened with
+`if (typeof window === "undefined") { expect(true).toBe(true); return; }`, and
+this suite is node-env, so `window` IS undefined - all three took the early
+return. `openRecordingTool`'s `window.dispatchEvent` had **zero executed
+coverage**, including the test titled "a listener registered once observes EVERY
+dispatch", which was this feature's headline evidence against the
+never-unmounts trap. `expect(true).toBe(true)` is worse than no test: it
+advertises coverage that does not exist.
+
+Closed by installing a minimal `EventTarget`-backed `window` in a `beforeEach`
+scoped to the one describe block that needs it (no jsdom, no environment
+change - other tests here depend on node-env) and deleting every guard.
+**Proven, not assumed:** commenting out the dispatch turns exactly the three
+dispatch tests red; a second sabotage that redispatches the FIRST launch's
+payload on every call is caught too, so the tests discriminate on payload, not
+merely on a call count.
+
+The "two sequential launches" test was also rewritten, because it proved the
+wrong thing: it exercised only the module's one-shot slot, which behaves
+**identically** under the mount-only design it claimed to rule out. It now
+registers ONE listener before any launch and asserts the exact payload of the
+second and third - which is precisely what a mount-only consumer fails.
+
+Two SHOULDs rode along. A FAB launch silently wiped a pending Knowledge
+selection, so an instructor who selected standards pages and then reached
+Discussions via the FAB lost the context they had just chosen; a new
+`navigateToRecordingTool` dispatches without touching the pending slot, leaving
+`openRecordingTool`'s clear-on-bare-view semantics correct for its one real
+caller. And a doc comment in `discussion-reply-prompt.ts` said `knowledgeContext`
+is appended AFTER `styleBlock` while the code and its test both put it before -
+corrected, since this repo has burned an entire entry on a comment describing a
+twin.
+
+Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
+pre-existing warnings, `vitest` **753 files / 15601 tests** all passing.

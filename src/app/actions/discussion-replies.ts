@@ -88,6 +88,46 @@ function coerceCompositionAtBoundary(value: unknown): ReplyCompositionSettings {
   return { ingredients, addressByName, formality };
 }
 
+// "Activate this recording from the Knowledge base" (src/lib/recording-launch.ts's
+// RecordingKnowledgeContext, taken once per capture run by
+// useDiscussionReplies.ts's `start()` and threaded through every batch by
+// discussion-draft-loop.ts's `runDraftLoop`): a defense-in-depth cap at the
+// Server Action wire, mirroring coerceCompositionAtBoundary's own rationale
+// just above - nothing enforces a caller's own cap once a value has crossed
+// this boundary.
+//
+// The realistic worst case today is far below this cap. The ONLY production
+// producer of a non-empty knowledgeContext (KnowledgeTab.tsx's
+// startRecordingWithSelection) builds it via buildKnowledgeContextBlock
+// (src/lib/chat/knowledge-context.ts), whose own DEFAULT_KNOWLEDGE_CONTEXT_MAX_CHARS
+// already caps the rendered block at 10,000 characters - at most ~40KB even
+// at 4-byte-per-character worst-case Unicode inflation, roughly 1% of
+// UPLOAD_WIRE_BUDGET_BYTES (3.5MB, src/lib/upload-budget.ts). This feature
+// carries no images and no file uploads, so it never needs its own
+// checkWireBudget call the way extractDiscussionPostsAction's frames do. The
+// cap below (MAX_KNOWLEDGE_CONTEXT_CHARS) is set well above that real
+// ceiling on purpose, so it never fires against the one real path today and
+// only ever protects against a hypothetical future caller of the exported
+// openRecordingTool()/sanitizeKnowledgeContext() (recording-launch.ts, a
+// sibling's file) that supplies unbounded text - sanitizeKnowledgeContext
+// checks only that `text` is a non-blank string, never its length. Because
+// this path is unreachable from anything an instructor can trigger today,
+// truncating here (unlike a cap on the instructor's own real input) needs no
+// instructor-facing notice - there is no real input to have silently
+// shortened. Truncates rather than dropping, and marks the truncation
+// visibly INSIDE the prompt text itself (never silently), mirroring
+// MAX_POST_CHARS's own "..." marker on an over-long extracted post.
+const MAX_KNOWLEDGE_CONTEXT_CHARS = 20000;
+
+function coerceKnowledgeContextAtBoundary(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > MAX_KNOWLEDGE_CONTEXT_CHARS
+    ? `${trimmed.slice(0, MAX_KNOWLEDGE_CONTEXT_CHARS)}\n\n[Knowledge Base context truncated - it was too long to include in full.]`
+    : trimmed;
+}
+
 /**
  * Read the discussion posts visible across a batch of screen-capture frames.
  * frames.length must be 1..EXTRACT_BATCH_SIZE (the client packs batches by
@@ -207,7 +247,18 @@ export async function draftDiscussionRepliesAction(
   audience: DiscussionAudience,
   courseName: string,
   composition: ReplyCompositionSettings,
-  provider: LlmProvider
+  provider: LlmProvider,
+  // "Activate this recording from the Knowledge base" (src/lib/recording-launch.ts):
+  // the already-framed knowledgeContext text taken once per run and threaded
+  // through every batch by discussion-draft-loop.ts's runDraftLoop. Added as
+  // a NEW TRAILING parameter, after `provider`, deliberately - inserting it
+  // anywhere earlier in this parameter list would have silently shifted
+  // every existing 5-argument call site in this file's own test suite (over
+  // two dozen of them) onto the wrong parameter, which is exactly the kind
+  // of drift this repo's own wire-boundary tests exist to catch. Optional,
+  // coerced below the same way `composition` is - never trusted as-is, since
+  // it arrives from the client over the Server Action wire.
+  knowledgeContext?: string
 ): Promise<{ replies: Array<{ id: string; reply: string }> } | { error: string }> {
   try {
     const user = await requireOwner();
@@ -221,8 +272,9 @@ export async function draftDiscussionRepliesAction(
     const styleBlock = await getWritingStyleBlock(user.id);
 
     const safeComposition = coerceCompositionAtBoundary(composition);
+    const safeKnowledgeContext = coerceKnowledgeContextAtBoundary(knowledgeContext);
 
-    const prompt = buildReplyDraftingPrompt(posts, audience, courseName, styleBlock, safeComposition);
+    const prompt = buildReplyDraftingPrompt(posts, audience, courseName, styleBlock, safeComposition, safeKnowledgeContext);
     const parts: LlmPart[] = [{ text: prompt }];
 
     // AC4b-ii: temperature 0.7 is advisory on the default Gemini 3 model

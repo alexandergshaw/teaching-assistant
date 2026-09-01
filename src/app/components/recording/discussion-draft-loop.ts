@@ -49,6 +49,14 @@ import {
 // is built from a disjoint object literal ({ author, text }) that has no
 // `greetingName` field to begin with.
 import { greetingNameFromAuthor } from "@/lib/person-name";
+// "Activate this recording from the Knowledge base": the one-shot, per-RUN
+// context taken (once, at Start) from recording-launch.ts and held here for
+// the life of the table - see RunDraftLoopDeps's own `knowledgeContextRef`
+// doc comment below for the full account. Type-only import: this file
+// already reaches across module boundaries freely (unlike
+// discussion-reply-prompt.ts's own dependency-free leaf contract), so this
+// adds no new coupling concern.
+import type { RecordingKnowledgeContext } from "@/lib/recording-launch";
 import type { LlmProvider } from "@/lib/llm";
 import type { UseReplyRowsReturn } from "./useReplyRows";
 import type { UseReplyResourcesReturn } from "./useReplyResources";
@@ -88,6 +96,25 @@ export interface UseDiscussionRepliesReturn {
    *  and silently dropped on the other. */
   composition: ReplyCompositionSettings;
   setComposition: (next: ReplyCompositionSettings) => void;
+
+  /**
+   * "Activate this recording from the Knowledge base": the label of the
+   * knowledge context CURRENTLY held for this table's run (e.g. "3 Knowledge
+   * Base pages"), or `null` when no context is active - either because the
+   * capture was started normally (no launch, or a launch with no usable
+   * pages) or because the page was reloaded since the context was taken
+   * (see useDiscussionReplies.ts's own header note on why context is
+   * deliberately NOT persisted across a reload). This is the one visible
+   * signal that a run's drafts are using different context than an ordinary
+   * run. `DiscussionRepliesPanel.tsx` renders it as a hint line above the
+   * drafting controls whenever it is non-null. It is deliberately null after
+   * a reload even when a table is restored - only a short label persists, not
+   * the context text - so the panel shows nothing there and the reload notice
+   * in useDiscussionReplies.ts is the sole voice for that case. The two must
+   * not both speak, or they contradict each other about whether the context
+   * is still live.
+   */
+  knowledgeContextLabel: string | null;
 
   capturing: boolean;
   elapsedSec: number;
@@ -270,6 +297,19 @@ export function coerceReplyComposition(
 // tests and the real action stay assignment-compatible - the
 // `draftAction: draftDiscussionRepliesAction` assignment in
 // useDiscussionReplies.ts is itself the proof the two have not drifted.
+// "Activate this recording from the Knowledge base": `knowledgeContext` is a
+// NEW TRAILING parameter, after `provider` - deliberately, not inserted
+// earlier in this list. Entry 372 shipped a feature dead by widening only
+// this injected type and never the real server action; the fix here is the
+// opposite mistake to avoid - widening BOTH this type and the real
+// draftDiscussionRepliesAction (src/app/actions/discussion-replies.ts)
+// identically, in the SAME trailing position, so the
+// `draftAction: draftDiscussionRepliesAction` assignment in
+// useDiscussionReplies.ts stays the proof the two have not drifted (see this
+// file's own header for why that assignment is load-bearing). Trailing,
+// specifically, because inserting anywhere earlier would have silently
+// shifted every existing 5-argument call site in discussion-replies.test.ts
+// (over two dozen of them) onto the wrong parameter.
 export type DraftDiscussionRepliesAction = (
   posts: Array<{
     id: string;
@@ -281,7 +321,8 @@ export type DraftDiscussionRepliesAction = (
   audience: DiscussionAudience,
   courseName: string,
   composition: ReplyCompositionSettings,
-  provider: LlmProvider
+  provider: LlmProvider,
+  knowledgeContext?: string
 ) => Promise<{ replies: Array<{ id: string; reply: string }> } | { error: string }>;
 
 // T6a's budget figure (docs/discussion-thread-structure-acceptance-criteria.md
@@ -330,6 +371,29 @@ export interface RunDraftLoopDeps {
    *  `audienceRef` exactly - the drafting queue reads the CURRENT composition
    *  at dispatch time, never a stale closure value. */
   compositionRef: MutableRefObject<ReplyCompositionSettings>;
+  /**
+   * "Activate this recording from the Knowledge base" - the owner ask this
+   * closes: replies drafted with the instructor's selected standards pages
+   * as context. UNLIKE `compositionRef`/`audienceRef` above, this is
+   * deliberately NOT re-read as a live "current" control value - it is a
+   * PER-RUN value (see this repo's own decision on the point): taken exactly
+   * ONCE, by useDiscussionReplies.ts's `start()`, from
+   * takeRecordingKnowledgeContext() (src/lib/recording-launch.ts), and held
+   * unchanged in this ref for the life of the table. Still a ref, not a
+   * plain closed-over value, for the same stale-closure reason every other
+   * ref here exists (this loop is await-suspended across renders) - but its
+   * value is written ONCE per table, not on every render.
+   * takeRecordingKnowledgeContext() is itself a ONE-SHOT that clears on
+   * read, which is exactly why this loop must never call it again per batch:
+   * a second take anywhere would return null and silently starve every
+   * batch after the first of context the first batch got. `null` (no
+   * launch, or a launch with no usable pages) leaves every dispatch
+   * byte-identical to before this feature - see the `.text` read at the
+   * call site below, which passes `undefined` (never `null` or `""`)
+   * through in that case, exactly what draftAction/buildReplyDraftingPrompt
+   * treat as "omitted".
+   */
+  knowledgeContextRef: MutableRefObject<RecordingKnowledgeContext | null>;
   pushNotice: (text: string) => void;
   draftAction: DraftDiscussionRepliesAction;
 }
@@ -347,6 +411,7 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
     audienceRef,
     courseNameRef,
     compositionRef,
+    knowledgeContextRef,
     pushNotice,
     draftAction,
   } = deps;
@@ -405,6 +470,11 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
     const audienceNow = audienceRef.current;
     const courseName = courseNameRef.current;
     const compositionNow = compositionRef.current;
+    // Per-run, not per-batch (this ref's own doc comment above) - read
+    // fresh from the ref anyway, since every other dispatch-time value here
+    // is, and `undefined` (never `null`/`""`) is what reaches draftAction
+    // when there is nothing to carry.
+    const knowledgeContextNow = knowledgeContextRef.current?.text || undefined;
 
     let result: Awaited<ReturnType<DraftDiscussionRepliesAction>>;
     try {
@@ -455,7 +525,8 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
         audienceNow,
         courseName,
         compositionNow,
-        provider
+        provider,
+        knowledgeContextNow
       );
     } catch (err) {
       result = { error: err instanceof Error ? err.message : "Could not draft replies." };

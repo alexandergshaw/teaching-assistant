@@ -377,6 +377,26 @@ function ingredientClause(ingredient: ReplyIngredient, audience: DiscussionAudie
  * block from ever being greeted: `greetingName` only ever exists on a post
  * element, never on `parent`, and the code below never reads
  * `p.parent.greetingName`.
+ *
+ * `knowledgeContext` (the "activate this recording from the Knowledge base"
+ * feature, src/lib/recording-launch.ts): an optional, ALREADY-RENDERED block
+ * - the caller (src/app/actions/discussion-replies.ts) hands this function
+ * exactly what buildKnowledgeContextBlock (src/lib/chat/knowledge-context.ts)
+ * produced, verbatim, including its own anti-prompt-injection framing header.
+ * This function never reformats it, never truncates it further, and never
+ * re-derives its own framing - the instructor's selected standards pages are
+ * DATA, and that header is the one guard against a page whose text reads
+ * like a directive. Appended immediately BEFORE `styleBlock`, never after -
+ * `styleBlock` stays the LAST element exactly as its own "LAST deliberately"
+ * placement (this doc's own paragraph above) requires, so styleBlock's own
+ * "put format instructions right before the model's turn" reasoning stays
+ * true even when knowledgeContext is also present: reference material about
+ * SUBSTANCE precedes format instructions about FORM. Omitted (not just
+ * falsy) leaves the returned prompt byte-identical to a call that never
+ * mentioned it at all, via the same `.filter(Boolean)` every other optional
+ * block in this function already relies on - this is what keeps every
+ * EXISTING call site in this file's own test suite (all of them omit this
+ * 6th argument) provably unchanged by this addition.
  */
 export function buildReplyDraftingPrompt(
   posts: ReadonlyArray<{
@@ -389,7 +409,8 @@ export function buildReplyDraftingPrompt(
   audience: DiscussionAudience,
   courseName: string,
   styleBlock: string,
-  composition: ReplyCompositionSettings
+  composition: ReplyCompositionSettings,
+  knowledgeContext?: string
 ): string {
   const course = courseName.trim();
   const addressing = composition.addressByName;
@@ -475,6 +496,11 @@ export function buildReplyDraftingPrompt(
     // reply over roughly 60 words.
     'Write the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line ("\\n\\n"). No backticks.',
     "No prose before or after the array. No code fences.",
+    // knowledgeContext BEFORE styleBlock, never after - see this function's
+    // own doc comment for why styleBlock must stay LAST even when both are
+    // present. "" (never present) is dropped by .filter(Boolean) below,
+    // which is what keeps a call that omits this argument byte-identical.
+    knowledgeContext ?? "",
     styleBlock,
   ].filter(Boolean).join("\n\n");
 }

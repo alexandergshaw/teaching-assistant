@@ -59,6 +59,16 @@ import {
 } from "@/app/actions/discussion-replies";
 import { listCourseHubAction } from "@/app/actions/course-hub-core";
 import { getStoredProvider } from "@/lib/llm-provider";
+// "Activate this recording from the Knowledge base" - the launch seam's
+// one-shot pickup. See knowledgeContextRef's own doc comment below (near
+// `start`) for why it is taken exactly once, here, rather than inside
+// discussion-draft-loop.ts's runDraftLoop.
+import { takeRecordingKnowledgeContext, type RecordingKnowledgeContext } from "@/lib/recording-launch";
+// GAP 2 fix: the DECISION half of the same feature - what context THIS run
+// ends up using, given the one-shot take's result - pulled into a pure,
+// unit-tested leaf. See that file's own header for why (the untested hop a
+// sibling wave sabotaged with zero test failures).
+import { resolveStartKnowledgeContext, knowledgeContextLabelFor } from "./discussion-knowledge-context";
 import {
   EXTRACT_BATCH_SIZE,
   normalizeAudience,
@@ -295,6 +305,63 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     const match = courses?.find((c) => c.id === courseId);
     courseNameRef.current = match ? match.name : "";
   }, [courses, courseId]);
+
+  // --- "Activate this recording from the Knowledge base" (the owner ask
+  // this closes: replies drafted with the instructor's selected standards
+  // pages as context). Held as REACT STATE (never mutated as a bare ref from
+  // a callback - `react-hooks/immutability` forbids that once a ref is also
+  // read inside an effect, which the reload-visibility effect below does),
+  // mirrored into a ref for runDraftLoop exactly the way compositionRef
+  // mirrors `composition` right above. PER-RUN, not per-batch: taken exactly
+  // ONCE (inside `start` below) from takeRecordingKnowledgeContext()
+  // (src/lib/recording-launch.ts), a one-shot slot that clears itself on
+  // read - calling it anywhere that can run more than once per table's life
+  // (runDraftLoop's own per-batch dispatch, in particular) would deliver
+  // context to the FIRST batch only and starve every batch after it. See
+  // discussion-draft-loop.ts's own `knowledgeContextRef` doc comment for the
+  // full account.
+  //
+  // Persistence: deliberately NOT persisted across a reload, the same rule
+  // recording-launch.ts's own module state already follows (see that
+  // module's header) - persisting the actual page TEXT here would risk the
+  // same localStorage-quota failure useReplyRows.ts's `persistError` already
+  // guards the reply TABLE against. What IS persisted, deliberately small,
+  // is a LABEL ONLY ("ta-rec-disc-kb-context-label" below) - just enough to
+  // TELL a returning instructor their table's earlier drafts used context
+  // this fresh page load does not hold, never enough to reconstruct it.
+  const [knowledgeContext, setKnowledgeContext] = useState<RecordingKnowledgeContext | null>(null);
+  const knowledgeContextRef = useRef<RecordingKnowledgeContext | null>(knowledgeContext);
+  useEffect(() => {
+    knowledgeContextRef.current = knowledgeContext;
+  }, [knowledgeContext]);
+  // The one visible signal that this run's drafting is using different
+  // context than an ordinary run - DiscussionRepliesPanel.tsx now renders
+  // this near the controls that govern drafting (GAP 1 fix). Derived, never
+  // a second piece of state, via knowledgeContextLabelFor
+  // (discussion-knowledge-context.ts).
+  const knowledgeContextLabel = knowledgeContextLabelFor(knowledgeContext);
+  const kbContextReloadNoticeShownRef = useRef(false);
+
+  // Reload-visibility case: `knowledgeContext` never survives a reload by
+  // design, but this table's OWN rows (restored from "ta-rec-disc-table" by
+  // useReplyRows.ts) can - without this, a returning instructor whose
+  // earlier drafts used Knowledge Base context has no way to know a later
+  // redraft silently will not. Fires at most once, and only when there is
+  // something to warn about: a persisted label from an earlier `start()`, a
+  // restored table this fresh load can see, and no live context already
+  // held (a same-session Stop/Start already has `knowledgeContext` set, so
+  // this correctly does not fire mid-session).
+  useEffect(() => {
+    if (kbContextReloadNoticeShownRef.current) return;
+    if (knowledgeContext) return;
+    const priorLabel = readLocalStorage("ta-rec-disc-kb-context-label");
+    if (priorLabel && rowsApi.rawRows.length > 0) {
+      kbContextReloadNoticeShownRef.current = true;
+      pushNotice(
+        `Earlier replies in this table were drafted using Knowledge Base context (${priorLabel}). That context does not survive a reload - redrafting now will not include it unless you relaunch "Start recording" from the Knowledge Base with the same pages selected.`
+      );
+    }
+  }, [knowledgeContext, rowsApi.rawRows.length, pushNotice]);
 
   // --- Mounted / loop-running latch. Doubles as AC43's isRunningRef (both
   // loops check it at the top of every iteration and stop draining once it
@@ -554,6 +621,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
         audienceRef,
         courseNameRef,
         compositionRef,
+        knowledgeContextRef,
         pushNotice,
         draftAction: draftDiscussionRepliesAction,
       }),
@@ -696,6 +764,20 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // time from an earlier Stop.
     setLogStartedAt((prev) => prev || new Date().toISOString());
     setLogEndedAt("");
+    // "Activate this recording from the Knowledge base" - take the pending
+    // context exactly ONCE here (a one-shot: drains on read). The merge/label
+    // DECISION is resolveStartKnowledgeContext / knowledgeContextLabelFor
+    // (discussion-knowledge-context.ts) - see that file's header for the full
+    // account of what a null vs. non-null `taken` means. Only the LABEL is
+    // persisted (never the page text) - see knowledgeContextRef's own doc
+    // comment above. `if (taken)` guards the write itself: a null take must
+    // never re-fire it, since nothing changed.
+    const taken = takeRecordingKnowledgeContext();
+    if (taken) {
+      const resolved = resolveStartKnowledgeContext(knowledgeContextRef.current, taken);
+      setKnowledgeContext(resolved);
+      writeLocalStorage("ta-rec-disc-kb-context-label", knowledgeContextLabelFor(resolved) ?? "Knowledge Base pages");
+    }
     try {
       await captureRef.current.start({ saveVideo: saveVideoRef.current });
     } catch (err) {
@@ -786,6 +868,12 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // AC31: the saved-recording object URL is revoked when the table is
     // deleted, alongside session start and unmount.
     captureRef.current.clearRecording();
+    // "Activate this recording from the Knowledge base": deleting the table
+    // ends that table's "life" (knowledgeContextRef's own doc comment above)
+    // - a brand new table started after this must not silently inherit a
+    // stale context from the one just deleted.
+    setKnowledgeContext(null);
+    writeLocalStorage("ta-rec-disc-kb-context-label", "");
   }, []);
 
   // --- docs/DEV_LOOP.md's downloadable-log rule: assembly. `courseName` is
@@ -852,6 +940,8 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
 
     composition,
     setComposition,
+
+    knowledgeContextLabel,
 
     capturing: capture.capturing,
     elapsedSec: capture.elapsedSec,

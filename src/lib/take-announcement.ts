@@ -242,3 +242,56 @@ export function buildTakeAnnouncementInstruction(
 
   return lines.join("\n");
 }
+
+/**
+ * Cap on how much of the drafted subject+body reaches the image prompt, in
+ * characters. Same rationale in miniature as TRANSCRIPT_PROMPT_CAP above: an
+ * instructor can freely edit the body in the review TextField before ever
+ * regenerating the image, and an unbounded edit is how an image prompt call
+ * starts failing for reasons nobody can see. 4000 is far more generous than
+ * any real announcement needs (a drafted announcement's own maxOutputTokens
+ * budget, ~1024 tokens, tops out around 4000 characters on its own) - this
+ * exists as a backstop against a pasted-in essay, not as a routine limiter.
+ */
+export const IMAGE_PROMPT_TOPIC_CAP = 4000;
+
+const IMAGE_TRUNCATION_MARKER = " [truncated]";
+
+function truncateForImagePrompt(text: string, cap: number = IMAGE_PROMPT_TOPIC_CAP): string {
+  if (text.length <= cap) return text;
+  const keep = Math.max(0, cap - IMAGE_TRUNCATION_MARKER.length);
+  return text.slice(0, keep) + IMAGE_TRUNCATION_MARKER;
+}
+
+/**
+ * Builds the prompt sent to generateGeminiImage (src/lib/llm.ts) for the
+ * announcement's companion image. Pure and dependency-free, like
+ * buildTakeAnnouncementInstruction above, so it is unit-testable without a
+ * network call and importable from the client hook.
+ *
+ * The owner's own framing ("a simple, everyday image that is relevant") is
+ * encoded directly into the instructions below, plus three constraints this
+ * feature's acceptance criteria require unconditionally (not toggles):
+ *   - no text/letters/numbers baked into the image - image models render
+ *     text badly, and a misspelled word in a generated image would be worse
+ *     than no image;
+ *   - no real, identifiable person depicted;
+ *   - no real school, company, institution, or logo implied.
+ * The announcement's own drafted subject and body are the source material
+ * (truncated per IMAGE_PROMPT_TOPIC_CAP above) so the image is actually
+ * relevant to THIS announcement, not a generic stock illustration.
+ */
+export function buildAnnouncementImagePrompt(subject: string, body: string): string {
+  const topic = truncateForImagePrompt(`${subject.trim()}\n\n${body.trim()}`.trim());
+
+  return [
+    "Create ONE simple, everyday, uncluttered illustration relevant to this class announcement - a clean, friendly illustration suitable alongside a college course announcement, not a photo, not a screenshot, not a meme, not a diagram or infographic.",
+    "Keep it simple: one clear subject, a plain uncluttered background, nothing busy.",
+    "Do not render any text, letters, numbers, or writing anywhere in the image, in any language.",
+    "Do not depict any real, identifiable person.",
+    "Do not depict or imply any real, specific school, company, or institution - no logos, no signage or branding naming a real place.",
+    "",
+    "ANNOUNCEMENT THIS IMAGE ILLUSTRATES:",
+    topic || "(no announcement text yet)",
+  ].join("\n");
+}

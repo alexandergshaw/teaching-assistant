@@ -32,6 +32,7 @@ import {
   buildCsvContent,
   compareText,
   composeOverallCommentLocal,
+  copyAllFeedbackText,
   defaultRowEdit,
   escapeCsvCell,
   FILES_NOT_RETAINED_LABEL,
@@ -184,6 +185,55 @@ describe("formatFeedback", () => {
 
   it("leaves text with no dashes unchanged", () => {
     expect(formatFeedback("no dashes here")).toBe("no dashes here");
+  });
+});
+
+// "Copy all feedback" used to copy `overall`, which composeOverallComment
+// builds by joining the three boxes with a single SPACE - correct for an LMS
+// comment field, wrong for the clipboard, where the instructor pastes three
+// distinct blocks and got one run-on paragraph. These pin the blank line, and
+// pin that `overall` itself is NOT what is copied any more.
+describe("copyAllFeedbackText", () => {
+  const edit = (over: Partial<Record<"overall" | "strengths" | "improvements" | "resubmitNotice", string>> = {}) => ({
+    overall: "",
+    strengths: "",
+    improvements: "",
+    resubmitNotice: "",
+    ...over,
+  });
+
+  it("joins the three boxes with a BLANK LINE, in FEEDBACK_FIELDS order", () => {
+    expect(
+      copyAllFeedbackText(
+        edit({
+          strengths: "Clear variable names.",
+          improvements: "Add a zero check before dividing.",
+          resubmitNotice: "You are welcome to resubmit.",
+          // Present and deliberately DIFFERENT, to prove it is not the source.
+          overall: "SPACE JOINED OVERALL",
+        })
+      )
+    ).toBe("Clear variable names.\n\nAdd a zero check before dividing.\n\nYou are welcome to resubmit.");
+  });
+
+  it("drops an empty box rather than leaving a doubled blank line", () => {
+    expect(
+      copyAllFeedbackText(edit({ strengths: "Nice work.", improvements: "   ", resubmitNotice: "Resubmit freely." }))
+    ).toBe("Nice work.\n\nResubmit freely.");
+  });
+
+  it("still normalises dashes inside each block", () => {
+    expect(copyAllFeedbackText(edit({ strengths: "Good – solid", improvements: "Try — this" }))).toBe(
+      "Good, solid\n\nTry, this"
+    );
+  });
+
+  it("falls back to overall when every box is empty (an embedded-grader result)", () => {
+    expect(copyAllFeedbackText(edit({ overall: "Composed comment only." }))).toBe("Composed comment only.");
+  });
+
+  it("falls back to a stated placeholder when there is nothing at all, never an empty clipboard", () => {
+    expect(copyAllFeedbackText(edit())).toBe("No feedback provided.");
   });
 });
 

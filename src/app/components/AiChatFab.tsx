@@ -26,6 +26,7 @@ import type {
 } from "@/lib/chat/types";
 import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/chat/attachments";
 import { OPEN_AI_CHAT_EVENT, parseOpenChatDetail } from "@/lib/chat/open-chat";
+import { navigateToRecordingTool } from "@/lib/recording-launch";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { readActiveInstitution } from "@/lib/institutions";
 import { getChatToneStatusAction } from "../actions";
@@ -551,6 +552,50 @@ export default function AiChatFab() {
             setChecklistOverviewOpen((open) => !open);
           }}
         />
+
+        {/* Reachable-from-the-fab entries for the Recording tab's grading
+            tools (Discussions, Announcements - the owner's confirmed scope;
+            "the coming grading-via-recording" has no surface to link to yet
+            and is deliberately not added here). Unlike the three actions
+            above, these NAVIGATE (Manual > Recording > a specific inner
+            view) rather than opening a floating window - the fab lives
+            outside page.tsx (layout.tsx) and has no access to
+            setActiveTab/setManualView, so this goes through
+            navigateToRecordingTool() (src/lib/recording-launch.ts), the one
+            mechanism that crosses that boundary, exactly the way the
+            Knowledge tab's own "Ask AI" reaches this same component through
+            open-ai-chat. navigateToRecordingTool (not openRecordingTool) is
+            deliberate here: neither fab entry ever carries a
+            knowledgeContext of its own, and a bare-view openRecordingTool()
+            call clears any pending one - which would silently throw away a
+            Knowledge-tab selection the instructor made moments earlier, just
+            because they happened to reach this same pane through the fab
+            instead of the Knowledge tab's own "Start recording" button. Both
+            actions close the dial like every action above; neither opens a
+            window here, so there is no dialOpen toggle-back needed. */}
+        <SpeedDialAction
+          icon={<RecordingDiscussionsIcon />}
+          title="Discussion Replies (Recording)"
+          onClick={() => {
+            setDialOpen(false);
+            navigateToRecordingTool("discussions");
+          }}
+        />
+        <SpeedDialAction
+          icon={<RecordingAnnouncementIcon />}
+          // The announcement pane itself only opens once a take exists (see
+          // RecordingTab.tsx - announcementTake gates it, not recView, since
+          // a take is an in-memory object URL that cannot be restored on its
+          // own) - this entry lands on Record, where "Draft announcement" is
+          // reached from a fresh recording, an existing take, or the saved
+          // library picker, matching every existing entry point into that
+          // flow.
+          title="Record for Announcement"
+          onClick={() => {
+            setDialOpen(false);
+            navigateToRecordingTool("record");
+          }}
+        />
       </SpeedDial>
 
       {/* The FAB's own persistent recording indicator (H4 / regression
@@ -652,6 +697,48 @@ function ChatIcon() {
       <path
         d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
         fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+// Two speech bubbles (overlapping), distinguishing "Discussion Replies" from
+// the single-bubble ChatIcon above without pulling in @mui/icons-material
+// (forbidden - inline SVGs only).
+function RecordingDiscussionsIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M9 3h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-1v3l-3.5-3H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+        fill="currentColor"
+      />
+      <path
+        d="M6 8H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h.5v2.5L8.5 19H12a2 2 0 0 0 2-2v-1"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+// A megaphone - stands for "announce" without borrowing ChatIcon's speech
+// bubble, which this fab already uses for something else.
+function RecordingAnnouncementIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M3 10v4a1 1 0 0 0 1 1h2l1 5h2l-1-5h1l9 4V6l-9 4H4a1 1 0 0 0-1 1z"
+        fill="currentColor"
+      />
+      <path
+        d="M19 9a4 4 0 0 1 0 6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        fill="none"
       />
     </svg>
   );

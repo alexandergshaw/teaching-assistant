@@ -1,6 +1,7 @@
 import {
   getGeminiApiKey,
   getGeminiModel,
+  getGeminiImageModel,
   getGeminiAllowLowTemperature,
   getGeminiThinkingLevel,
   getGeminiMinOutputTokens,
@@ -165,6 +166,28 @@ export type LlmResult =
   | { ok: false; status: number; body: string };
 
 /**
+ * Result of an image-generation call (generateGeminiImage). Three shapes,
+ * matching LlmResult's own discipline of never throwing to the caller:
+ *  - a real image (`base64` + `mimeType`);
+ *  - a transport/HTTP failure (`ok: false` - same {status, body} shape as
+ *    LlmResult's failure branch, so describeLlmFailure works on both without
+ *    a second formatter);
+ *  - a 200 response that contains no image part at all (`ok: true` with
+ *    `base64: null`) - an image model can refuse a request (safety, a prompt
+ *    it will not illustrate), return text explaining why instead of a
+ *    picture, or simply omit the image part on a MAX_TOKENS/SAFETY
+ *    finishReason. This is not a transport failure (the HTTP call itself
+ *    succeeded), so it is kept out of the `ok: false` branch, mirroring why
+ *    callGemini's own "empty text" case stays inside `ok: true` above -
+ *    see describeEmptyLlmImage for turning it into a caller-facing message
+ *    that surfaces the model's own refusal text when it gave one.
+ */
+export type LlmImageResult =
+  | { ok: true; base64: string; mimeType: string }
+  | { ok: true; base64: null; text: string; finishReason?: string }
+  | { ok: false; status: number; body: string };
+
+/**
  * Format a failed LlmResult into a single user-facing error string, matching
  * the `Xxx failed: HTTP <status> — <body>` convention already used throughout
  * the codebase. status === 0 means a network/transport error (see the catch
@@ -193,6 +216,29 @@ export function describeEmptyLlmText(
 ): string {
   const reasonSuffix = result.finishReason ? ` (finishReason: ${result.finishReason})` : "";
   return `${label}: the model returned an empty response${reasonSuffix}.`;
+}
+
+/**
+ * Format a "the model responded but returned no image" LlmImageResult into a
+ * single user-facing error string, mirroring describeEmptyLlmText above. When
+ * the model returned text instead of an image (the common refusal shape - it
+ * explains in prose why it will not illustrate the prompt), that text IS the
+ * most specific, real explanation available and is surfaced verbatim
+ * (truncated to the same 200-character budget describeLlmFailure uses,
+ * rather than inventing a fresh limit). Only when the model returned neither
+ * an image nor any text does this fall back to finishReason, or to a bare
+ * "no image" statement when even that is absent.
+ */
+export function describeEmptyLlmImage(
+  result: Extract<LlmImageResult, { ok: true; base64: null }>,
+  label: string
+): string {
+  const text = result.text.slice(0, 200).trim();
+  if (text) {
+    return `${label}: the model did not return an image - it said: "${text}"`;
+  }
+  const reasonSuffix = result.finishReason ? ` (finishReason: ${result.finishReason})` : "";
+  return `${label}: the model did not return an image${reasonSuffix}.`;
 }
 
 /**
@@ -276,10 +322,68 @@ function backoffDelay(attempt: number, retryAfter: string | null): number {
   return exp + Math.floor(Math.random() * 400);
 }
 
-async function callGemini(req: LlmRequest): Promise<LlmResult> {
+/**
+ * Shared low-level transport for a Gemini `:generateContent` call: builds the
+ * URL, retries rate-limit/5xx/network failures with backoff (see the block
+ * comment above), and returns either the parsed JSON body or a
+ * {status, body} failure. callGemini (text) and generateGeminiImage
+ * (image-out) both build their own request body and parse their own
+ * response shape out of `data` — this function knows nothing about text vs.
+ * image, only about getting a request to Gemini and back reliably. Splitting
+ * it out (rather than duplicating the retry loop in generateGeminiImage) is
+ * what keeps the image path's auth, retry/backoff, and error shape identical
+ * to the text path's, per this feature's own requirement.
+ */
+async function postGenerateContent(
+  model: string,
+  body: string
+): Promise<{ ok: true; data: unknown } | { ok: false; status: number; body: string }> {
   const apiKey = getGeminiApiKey();
-  const model = getGeminiModel();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  let lastResult: { ok: false; status: number; body: string } = {
+    ok: false,
+    status: 0,
+    body: "Request was never attempted.",
+  };
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const isLastAttempt = attempt === MAX_ATTEMPTS - 1;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    } catch (err) {
+      // Network/transport error — always transient, retry with backoff.
+      lastResult = { ok: false, status: 0, body: err instanceof Error ? err.message : "Network error" };
+      if (isLastAttempt) return lastResult;
+      await sleep(backoffDelay(attempt, null));
+      continue;
+    }
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      lastResult = { ok: false, status: response.status, body: errBody };
+      if (!isLastAttempt && RETRYABLE_STATUS.has(response.status)) {
+        await sleep(backoffDelay(attempt, response.headers.get("retry-after")));
+        continue;
+      }
+      return lastResult;
+    }
+
+    const data: unknown = await response.json();
+    return { ok: true, data };
+  }
+
+  return lastResult;
+}
+
+async function callGemini(req: LlmRequest): Promise<LlmResult> {
+  const model = getGeminiModel();
 
   // Gemini 3 generation config normalization. Two vendor facts drive this:
   // (1) Google's Gemini 3 guide recommends leaving temperature at its 1.0
@@ -310,16 +414,83 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
       : {}),
   });
 
-  let lastResult: LlmResult = { ok: false, status: 0, body: "Request was never attempted." };
+  const result = await postGenerateContent(model, body);
+  if (!result.ok) {
+    return result;
+  }
+
+  const data = result.data as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      groundingMetadata?: {
+        groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
+      };
+      finishReason?: string;
+    }>;
+    promptFeedback?: { blockReason?: string };
+  };
+
+  const text =
+    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+
+  const sources = parseGroundingSources(data);
+  const finishReason = parseFinishReason(data);
+
+  return {
+    ok: true,
+    text,
+    ...(sources ? { sources } : {}),
+    ...(finishReason ? { finishReason } : {}),
+  };
+}
+
+/**
+ * Endpoint + header for Gemini's current image-generation schema. This is
+ * NOT the `:generateContent` endpoint postGenerateContent/callGemini use for
+ * text — that shape's image-out variant (an inline image part requested via
+ * generationConfig.responseModalities) was Google's LEGACY image-generation
+ * schema and was removed 2026-06-08. Verified against Google's live
+ * documentation, image generation now goes through a dedicated `interactions`
+ * endpoint that requires an explicit `Api-Revision` header; without it the
+ * legacy schema handling is gone entirely, so this header is a single point
+ * of failure worth keeping visible as a named constant rather than an inline
+ * string.
+ */
+const GEMINI_INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
+const GEMINI_API_REVISION = "2026-05-20";
+
+/**
+ * Transport for a Gemini `interactions` call (image generation). Deliberately
+ * NOT shared with postGenerateContent above — that function is the text
+ * path's transport (`:generateContent`, `?key=` query auth, no Api-Revision
+ * header) and must stay untouched; this is a separate endpoint with its own
+ * auth style (`x-goog-api-key` header, not a query param) and its own
+ * required header. The retry/backoff policy (RETRYABLE_STATUS, MAX_ATTEMPTS,
+ * backoffDelay, sleep) is still shared, so both transports retry rate-limit/
+ * 5xx/network failures identically.
+ */
+async function postInteraction(
+  apiKey: string,
+  body: string
+): Promise<{ ok: true; data: unknown } | { ok: false; status: number; body: string }> {
+  let lastResult: { ok: false; status: number; body: string } = {
+    ok: false,
+    status: 0,
+    body: "Request was never attempted.",
+  };
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const isLastAttempt = attempt === MAX_ATTEMPTS - 1;
 
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await fetch(GEMINI_INTERACTIONS_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+          "Api-Revision": GEMINI_API_REVISION,
+        },
         body,
       });
     } catch (err) {
@@ -340,30 +511,157 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
       return lastResult;
     }
 
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-        groundingMetadata?: {
-          groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
-        };
-        finishReason?: string;
-      }>;
-      promptFeedback?: { blockReason?: string };
-    };
-
-    const text =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-
-    const sources = parseGroundingSources(data);
-    const finishReason = parseFinishReason(data);
-
-    return {
-      ok: true,
-      text,
-      ...(sources ? { sources } : {}),
-      ...(finishReason ? { finishReason } : {}),
-    };
+    const data: unknown = await response.json();
+    return { ok: true, data };
   }
 
   return lastResult;
+}
+
+/** One content block inside an `interactions` response step. */
+interface InteractionsContentBlock {
+  type?: string;
+  data?: string;
+  mime_type?: string;
+  text?: string;
+}
+
+/** One step inside an `interactions` response's `steps` array. */
+interface InteractionsStep {
+  type?: string;
+  content?: InteractionsContentBlock[];
+  stop_reason?: string;
+  finish_reason?: string;
+}
+
+/** Shape of a Gemini `interactions` response body (image generation). */
+interface InteractionsResponseBody {
+  steps?: InteractionsStep[];
+  output_image?: { data?: string; mime_type?: string };
+  stop_reason?: string;
+  finish_reason?: string;
+}
+
+/**
+ * Find the generated image in an `interactions` response: the `output_image`
+ * convenience property first (documented as the fast path), falling back to
+ * scanning every step's `content` array for the first `type: "image"` block —
+ * matching the response shape's own two-places-the-same-data documentation.
+ */
+function findInteractionsImage(
+  data: InteractionsResponseBody
+): { data: string; mimeType: string } | undefined {
+  if (typeof data.output_image?.data === "string" && data.output_image.data) {
+    return { data: data.output_image.data, mimeType: data.output_image.mime_type || "image/png" };
+  }
+
+  for (const step of data.steps ?? []) {
+    for (const block of step.content ?? []) {
+      if (block.type === "image" && typeof block.data === "string" && block.data) {
+        return { data: block.data, mimeType: block.mime_type || "image/png" };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Collect every non-image content block's text across all steps. When the
+ * model refuses or safety-blocks a prompt instead of returning an image, the
+ * `interactions` schema's documented example only shows the success shape
+ * (an image block) — there is no documented dedicated "refusal" field. The
+ * defensible reading, matching how the legacy `:generateContent` shape put a
+ * refusal's explanation in a text part alongside/instead of the image part,
+ * is that a refusing `model_output` step's `content` array carries a `text`
+ * block explaining why instead of an `image` block. This is what
+ * describeEmptyLlmImage surfaces to the instructor as the real refusal
+ * reason, so it is preferred over a generic message whenever present.
+ */
+function collectInteractionsText(data: InteractionsResponseBody): string {
+  const texts: string[] = [];
+  for (const step of data.steps ?? []) {
+    for (const block of step.content ?? []) {
+      if (block.type !== "image" && typeof block.text === "string" && block.text) {
+        texts.push(block.text);
+      }
+    }
+  }
+  return texts.join("");
+}
+
+/**
+ * Best-effort finish/stop reason from an `interactions` response, checked at
+ * both the top level and per-step since the documented example does not show
+ * where (or whether) this schema surfaces one — unlike collectInteractionsText
+ * above, whose text (when present) is the primary, always-real signal
+ * describeEmptyLlmImage surfaces, this is only the fallback used when no text
+ * is present at all, so an absent value here still degrades to the existing
+ * bare "did not return an image" message rather than a wrong one.
+ */
+function findInteractionsFinishReason(data: InteractionsResponseBody): string | undefined {
+  if (typeof data.stop_reason === "string" && data.stop_reason) return data.stop_reason;
+  if (typeof data.finish_reason === "string" && data.finish_reason) return data.finish_reason;
+
+  for (const step of data.steps ?? []) {
+    if (typeof step.stop_reason === "string" && step.stop_reason) return step.stop_reason;
+    if (typeof step.finish_reason === "string" && step.finish_reason) return step.finish_reason;
+  }
+
+  return undefined;
+}
+
+/**
+ * Generate an image from a text prompt via Gemini's current image-generation
+ * schema (`POST /v1beta/interactions`, verified against Google's live
+ * documentation — see GEMINI_INTERACTIONS_URL's comment above for why this
+ * is NOT the `:generateContent` shape callGemini uses for text). Same
+ * never-throw discipline as callGemini: a bad/missing API key surfaces as a
+ * rejected promise exactly like callGemini's does today (callers already
+ * wrap this in try/catch, matching existing precedent), everything else
+ * resolves to an LlmImageResult the caller inspects, never a thrown error
+ * from a bad response.
+ *
+ * Request body: `{ model, input: [{ type: "text", text: prompt }],
+ * response_format: { type: "image", mime_type: "image/png" } }`.
+ * `response_format` is optional per the docs; `type: "image"` is what makes
+ * this an image-generation call rather than a text one.
+ *
+ * Response shape: read `output_image` first (the documented convenience
+ * property), falling back to scanning `steps[].content[]` for the first
+ * `type: "image"` block — see findInteractionsImage. Field names in this
+ * schema are snake_case (`mime_type`), not the `:generateContent` shape's
+ * camelCase.
+ */
+export async function generateGeminiImage(prompt: string): Promise<LlmImageResult> {
+  const model = getGeminiImageModel();
+  const apiKey = getGeminiApiKey();
+
+  const body = JSON.stringify({
+    model,
+    input: [{ type: "text", text: prompt }],
+    response_format: { type: "image", mime_type: "image/png" },
+  });
+
+  const result = await postInteraction(apiKey, body);
+  if (!result.ok) {
+    return result;
+  }
+
+  const data = result.data as InteractionsResponseBody;
+  const image = findInteractionsImage(data);
+
+  if (image) {
+    return { ok: true, base64: image.data, mimeType: image.mimeType };
+  }
+
+  const text = collectInteractionsText(data);
+  const finishReason = findInteractionsFinishReason(data);
+
+  return {
+    ok: true,
+    base64: null,
+    text,
+    ...(finishReason ? { finishReason } : {}),
+  };
 }

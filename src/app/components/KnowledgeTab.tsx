@@ -66,6 +66,8 @@ import { useKbInstitutionPicker } from "./knowledge/useKbInstitutionPicker";
 import { useKbSelection } from "./knowledge/useKbSelection";
 import { allVisibleSelected, visiblePageIds } from "./knowledge/knowledge-helpers";
 import { openChat } from "@/lib/chat/open-chat";
+import { buildKnowledgeContextBlock } from "@/lib/chat/knowledge-context";
+import { openRecordingTool } from "@/lib/recording-launch";
 import styles from "../page.module.css";
 import kbStyles from "./KnowledgeTab.module.css";
 
@@ -269,6 +271,42 @@ export default function KnowledgeTab({
     openChat({
       knowledgePageIds,
       label: `${knowledgePageIds.length} Knowledge Base page${knowledgePageIds.length === 1 ? "" : "s"}`,
+    });
+  };
+
+  // Start recording (from the Knowledge base's bulk bar, next to Ask AI):
+  // hands the selected pages' TITLE+BODY - not just their ids - to the
+  // Discussion-replies capture surface as drafting context, then navigates
+  // there. Text over ids (unlike askAiAboutSelection above) because the
+  // consuming pipeline has no equivalent of /api/ai-chat/route.ts's
+  // server-side id-resolution glue to call - buildKnowledgeContextBlock is
+  // the ONLY reusable renderer, and it takes already-fetched page text, not
+  // ids; `pages` already holds every selected page's full body client-side
+  // (useKbPageTree), so nothing more needs to be fetched to build it here.
+  // Reuses buildKnowledgeContextBlock (src/lib/chat/knowledge-context.ts) -
+  // the SAME renderer askAiAboutSelection's server-side path uses - rather
+  // than inventing a second context format or a second anti-prompt-injection
+  // framing header; attachments are omitted (only the /api/ai-chat route can
+  // extract attachment text server-side, which is out of reach here, and the
+  // owner's own ask names "the relevant instructor standards" - page bodies -
+  // not attachments).
+  const startRecordingWithSelection = () => {
+    const selectedPages = (pages ?? []).filter((p) => kbSelection.selected.has(p.id));
+    if (selectedPages.length === 0) return;
+    const block = buildKnowledgeContextBlock({
+      pages: selectedPages.map((p) => ({ title: p.title, body: p.body })),
+      attachments: [],
+    });
+    openRecordingTool({
+      view: "discussions",
+      ...(block.text
+        ? {
+            knowledgeContext: {
+              text: block.text,
+              label: `${selectedPages.length} Knowledge Base page${selectedPages.length === 1 ? "" : "s"}`,
+            },
+          }
+        : {}),
     });
   };
 
@@ -520,6 +558,9 @@ export default function KnowledgeTab({
                 <span className={styles.bulkLabel}>Actions</span>
                 <Button variant="contained" size="small" onClick={askAiAboutSelection}>
                   Ask AI
+                </Button>
+                <Button variant="outlined" size="small" onClick={startRecordingWithSelection}>
+                  Start recording
                 </Button>
               </div>
             </div>

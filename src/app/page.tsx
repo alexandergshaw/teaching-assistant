@@ -34,6 +34,7 @@ import { useDraftedGradesInbox } from "./components/DraftedGradesInbox";
 import styles from "./page.module.css";
 import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
+import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
 import { type ActiveTab } from "./url-state";
 
 const initialState: GradeActionState = { run: null, error: null };
@@ -103,6 +104,28 @@ export default function Home() {
       markFilesSeen();
     }
   }, [activeTab, markFilesSeen]);
+
+  // Launch seam: this is the ONLY place that can call setActiveTab/
+  // setManualView (see useAppNavigation.ts - setActiveTab is never a prop
+  // and never in a context, and every programmatic tab switch already
+  // happens inside this component, e.g. openWorkflow below). The Recording
+  // tab's own inner-view switch (recView) is handled independently by
+  // RecordingTab's own listener on the SAME event - see
+  // src/lib/recording-launch.ts's header comment for why one event serves
+  // both listeners rather than threading a callback prop through
+  // KnowledgeTab or exposing setActiveTab to the fab (which lives outside
+  // this component entirely, in layout.tsx, and cannot receive a prop from
+  // here at all).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
+      if (!detail) return;
+      setManualView("recording");
+      setActiveTab("manual");
+    };
+    window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
+    return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
+  }, [setManualView, setActiveTab]);
 
   useEffect(() => {
     if (activeTab === "workflows" && workflowsView === "drafts") {

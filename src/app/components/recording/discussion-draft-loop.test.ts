@@ -34,6 +34,7 @@ import { mergeCapturedPosts, type ReplyRow } from "./discussion-capture";
 import type { UseReplyRowsReturn } from "./useReplyRows";
 import type { UseReplyResourcesReturn } from "./useReplyResources";
 import { DEFAULT_REPLY_COMPOSITION, type ReplyCompositionSettings } from "@/lib/discussion-reply-prompt";
+import type { RecordingKnowledgeContext } from "@/lib/recording-launch";
 
 // ---------------------------------------------------------------------------
 // Test harness: a minimal fake of every RunDraftLoopDeps field, driving
@@ -66,6 +67,11 @@ interface DispatchResult {
    *  call order - empty when it was never called at all, which is exactly
    *  what the "resources" ingredient NOT selected must produce. */
   enqueueResourcesCalls: string[][];
+  /** "Activate this recording from the Knowledge base": the exact
+   *  `knowledgeContext` argument (the 6th, trailing positional arg)
+   *  `draftAction` was called with, or `undefined` if it was never called or
+   *  nothing was carried. */
+  knowledgeContext: string | undefined;
 }
 
 async function dispatchOneBatch(args: {
@@ -79,9 +85,14 @@ async function dispatchOneBatch(args: {
    *  value to prove `compositionRef.current` (not a stale default) is what
    *  actually reaches `draftAction`. */
   composition?: ReplyCompositionSettings;
+  /** "Activate this recording from the Knowledge base": defaults to `null`
+   *  (no context held) when omitted - the same "held for the life of the
+   *  table" ref the real hook writes once, at Start. */
+  knowledgeContext?: RecordingKnowledgeContext | null;
 }): Promise<DispatchResult> {
   let capturedPosts: Parameters<DraftDiscussionRepliesAction>[0] | null = null;
   let capturedComposition: ReplyCompositionSettings | null = null;
+  let capturedKnowledgeContext: string | undefined = undefined;
   const enqueueResourcesCalls: string[][] = [];
 
   const loopsActiveRef = { current: true };
@@ -109,10 +120,12 @@ async function dispatchOneBatch(args: {
   const audienceRef = { current: "students" as const };
   const courseNameRef = { current: "Intro to Testing" };
   const compositionRef = { current: args.composition ?? DEFAULT_REPLY_COMPOSITION };
+  const knowledgeContextRef = { current: args.knowledgeContext ?? null };
 
-  const draftAction: DraftDiscussionRepliesAction = async (posts, _audience, _courseName, composition) => {
+  const draftAction: DraftDiscussionRepliesAction = async (posts, _audience, _courseName, composition, _provider, knowledgeContext) => {
     capturedPosts = posts;
     capturedComposition = composition;
+    capturedKnowledgeContext = knowledgeContext;
     return { replies: posts.map((p) => ({ id: p.id, reply: "Drafted reply text." })) };
   };
 
@@ -130,13 +143,14 @@ async function dispatchOneBatch(args: {
     audienceRef,
     courseNameRef,
     compositionRef,
+    knowledgeContextRef,
     pushNotice: () => {},
     draftAction,
   };
 
   await runDraftLoop(0, deps);
 
-  return { posts: capturedPosts, composition: capturedComposition, enqueueResourcesCalls };
+  return { posts: capturedPosts, composition: capturedComposition, enqueueResourcesCalls, knowledgeContext: capturedKnowledgeContext };
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +478,116 @@ describe("runDraftLoop / SHOULD 1 - the 'resources' ingredient gates the resourc
 // (discussion-capture.ts) - the same function `mergeIncoming`'s
 // implementation forwards its argument to, unrebuilt.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// "Activate this recording from the Knowledge base" - the owner ask closed
+// by this wave: instructor-selected Knowledge Base pages reach the drafting
+// prompt as context. Before this fix, takeRecordingKnowledgeContext()
+// (src/lib/recording-launch.ts) had zero production callers - the exact
+// entry-372/373 shape ("looks tested, is not wired") this file's own header
+// comment calls out. Sabotage-checked: removing the `knowledgeContextRef`
+// read (or the `knowledgeContextNow` argument at the draftAction call site)
+// from discussion-draft-loop.ts reproduces every failure below - confirmed
+// red, restored, confirmed green.
+// ---------------------------------------------------------------------------
+
+describe("runDraftLoop / 'Activate this recording from the Knowledge base' wiring", () => {
+  it("threads knowledgeContextRef.current.text through to draftAction on a real dispatch", async () => {
+    const child = makeRow({ id: "c1", author: "Jordan Lee", post: "A post." });
+    const { knowledgeContext } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+      knowledgeContext: { text: "Selected page: Policy\nLate work loses 10% per day.", label: "1 Knowledge Base page" },
+    });
+    expect(knowledgeContext).toBe("Selected page: Policy\nLate work loses 10% per day.");
+  });
+
+  it("passes undefined (never null, never the empty string) to draftAction when no context was ever taken", async () => {
+    const child = makeRow({ id: "c1", author: "Jordan Lee", post: "A post." });
+    const { knowledgeContext } = await dispatchOneBatch({
+      rawRows: [child],
+      queue: [{ id: "c1", force: false }],
+      // knowledgeContext omitted - the default (no launch, or a launch with
+      // no usable pages), matching most drafting runs.
+    });
+    expect(knowledgeContext).toBeUndefined();
+  });
+
+  it("ONE-SHOT held for the life of the table, not re-taken per batch: TWO batches in the SAME loop run both carry the SAME context", async () => {
+    // Six rows -> two batches of DRAFT_BATCH_SIZE (5) then 1. If this loop
+    // ever called takeRecordingKnowledgeContext() again per batch (instead
+    // of reading the SAME already-taken ref useDiscussionReplies.ts's
+    // `start()` populated once), the second batch would see it as drained -
+    // this is exactly the failure mode the "decisions already made" section
+    // rules out, reproduced here as a real two-batch run rather than
+    // asserted only against the one-shot module's own test file.
+    const rows = Array.from({ length: 6 }, (_, i) => makeRow({ id: `c${i}`, author: `Author ${i}`, post: `Post ${i}.` }));
+    const queue: DraftQueueItem[] = rows.map((r) => ({ id: r.id, force: false }));
+
+    const capturedPerBatch: Array<string | undefined> = [];
+    const loopsActiveRef = { current: true };
+    const loopEpochRef = { current: 0 };
+    const draftQueueRef = { current: [...queue] };
+    const rowsApiFake = {
+      rawRows: rows,
+      rows,
+      markDrafting: () => {},
+      snapshotEditSeq: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
+      isUnchangedSince: () => true,
+      applyReply: () => {},
+      markFailed: () => {},
+    } as unknown as UseReplyRowsReturn;
+    const rowsApiRef = { current: rowsApiFake };
+    const resourcesApiRef = { current: { enqueueResources: () => {} } as unknown as UseReplyResourcesReturn };
+    const audienceRef = { current: "students" as const };
+    const courseNameRef = { current: "Intro to Testing" };
+    const compositionRef = { current: DEFAULT_REPLY_COMPOSITION };
+    // Populated ONCE, exactly the way useDiscussionReplies.ts's `start()`
+    // populates it exactly once per table - this test never re-assigns it
+    // between batches, proving the loop itself never needs a second take to
+    // see the same context on batch 2.
+    const knowledgeContextRef = { current: { text: "Selected page: Policy\nSome policy text.", label: "1 page" } };
+
+    let batchCount = 0;
+    const draftAction: DraftDiscussionRepliesAction = async (posts, _audience, _courseName, _composition, _provider, knowledgeContext) => {
+      batchCount += 1;
+      capturedPerBatch.push(knowledgeContext);
+      return { replies: posts.map((p) => ({ id: p.id, reply: "Drafted reply text." })) };
+    };
+
+    const deps: RunDraftLoopDeps = {
+      loopsActiveRef,
+      loopEpochRef,
+      draftQueueRef,
+      setDraftQueueSize: () => {},
+      setDrafting: () => {},
+      // Lets the loop run through BOTH batches before stopping: stays alive
+      // through the first two wakes (batch 1, then batch 2), then ends the
+      // loop on the third - after which the queue is empty anyway.
+      waitForWake: async () => {
+        if (batchCount >= 2) loopsActiveRef.current = false;
+      },
+      rowsApiRef,
+      resourcesApiRef,
+      audienceRef,
+      courseNameRef,
+      compositionRef,
+      knowledgeContextRef,
+      pushNotice: () => {},
+      draftAction,
+    };
+
+    await runDraftLoop(0, deps);
+
+    expect(batchCount).toBe(2);
+    expect(capturedPerBatch).toHaveLength(2);
+    // Both batches carry the EXACT SAME text - not re-taken, not drained to
+    // undefined on the second call the way a real one-shot take would if
+    // this loop mistakenly called takeRecordingKnowledgeContext() itself.
+    expect(capturedPerBatch[0]).toBe("Selected page: Policy\nSome policy text.");
+    expect(capturedPerBatch[1]).toBe("Selected page: Policy\nSome policy text.");
+  });
+});
 
 describe("FIX 2 - mergeIncoming's declared contract matches what mergeCapturedPosts accepts", () => {
   it("a literal typed as mergeIncoming's own declared parameter may carry threadPosition and replyingToAuthor, and both land on the merged row", () => {

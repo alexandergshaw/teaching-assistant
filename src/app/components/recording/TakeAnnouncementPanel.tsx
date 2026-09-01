@@ -134,6 +134,13 @@ export default function TakeAnnouncementPanel({
     draftError,
     composition,
     setComposition,
+    imageState,
+    imageBase64,
+    imageMimeType,
+    imageError,
+    regenerateImage,
+    discardImage,
+    downloadImage,
   } = hook;
 
   // AC28 item 5: focus moves to the surface heading on open. Restoring focus
@@ -342,6 +349,82 @@ export default function TakeAnnouncementPanel({
             minRows={4}
             fullWidth
           />
+
+          {/* Companion image (owner's ask: "a simple, everyday image that is
+              relevant"). Entirely additive - imageState is independent of
+              stage/subject/body, so nothing here ever blocks or disables
+              posting, saving to drafts, or editing the text above. The image
+              itself is never folded into `subject`/`body` (see
+              useTakeAnnouncement.ts's own note and the source-text guard in
+              useTakeAnnouncement.image-copy-safety.test.ts), so copying or
+              saving the announcement text is unaffected by anything in this
+              block.
+
+              This image never posts with the announcement - see the
+              IMPORTANT note above imageState in useTakeAnnouncement.ts for
+              why (the plain-text-copyable constraint, and why a Canvas
+              attach is out of scope for this wave). The line right below is
+              the one place that fact is stated for the instructor, so it
+              stays visible for every state (generating/ready/failed/idle),
+              not just idle - an instructor who never sees this line and
+              assumes a "ready" image posts automatically is exactly the
+              failure this exists to prevent. */}
+          <div>
+            <p className={styles.ghMeta} style={{ marginBottom: 8 }}>
+              Image
+            </p>
+            <p className={styles.fieldHint} style={{ marginBottom: 8 }}>
+              This image never posts with the announcement - the announcement
+              itself stays plain text. Download it and attach it yourself
+              wherever you are posting.
+            </p>
+            {imageState === "generating" && (
+              <p role="status" aria-live="polite" className={styles.fieldHint}>
+                Generating an image for this announcement...
+              </p>
+            )}
+            {imageState === "ready" && imageBase64 && imageMimeType && (
+              <div>
+                {/* eslint-disable-next-line @next/next/no-img-element -- inline data-URL preview, not a remote image */}
+                <img
+                  src={`data:${imageMimeType};base64,${imageBase64}`}
+                  alt=""
+                  style={{ display: "block", maxWidth: "320px", width: "100%", borderRadius: 4, marginBottom: 8 }}
+                />
+                <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                  <Button size="small" variant="outlined" onClick={downloadImage}>
+                    Download image
+                  </Button>
+                  <Button size="small" variant="outlined" onClick={regenerateImage} disabled={busy || posting}>
+                    Regenerate image
+                  </Button>
+                  <Button size="small" variant="text" onClick={discardImage} disabled={busy || posting}>
+                    Remove image
+                  </Button>
+                </div>
+              </div>
+            )}
+            {imageState === "failed" && (
+              <div>
+                <p role="alert" className={styles.fieldHint}>
+                  {imageError}
+                </p>
+                <Button size="small" variant="outlined" onClick={regenerateImage} disabled={busy || posting}>
+                  Try again
+                </Button>
+              </div>
+            )}
+            {imageState === "idle" && (
+              <div>
+                <span className={styles.fieldHint}>No image yet.</span>
+                <div style={{ marginTop: 8 }}>
+                  <Button size="small" variant="outlined" onClick={regenerateImage} disabled={busy || posting}>
+                    Generate image
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {fieldError && (
             <p role="alert" className={styles.fieldHint}>

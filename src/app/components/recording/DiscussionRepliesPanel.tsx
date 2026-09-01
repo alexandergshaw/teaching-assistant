@@ -124,6 +124,10 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     // its setter straight back as that component's onChange.
     composition,
     setComposition,
+    // GAP 1 fix: the one visible signal that this run's drafts are using
+    // the instructor's selected Knowledge Base pages as context - see the
+    // standing hint rendered just above DiscussionReplyControls below.
+    knowledgeContextLabel,
     recordingUrl,
     recordingBytes,
     capturing,
@@ -647,6 +651,19 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           disclosure here at all: it would hide the address-by-name toggle,
           which is ON by default, i.e. the one control that silently changes
           output. */}
+      {/* GAP 1 fix: the instructor could not tell a Knowledge-base-launched
+          run apart from an ordinary one - this is the one visible signal,
+          placed with the other controls that govern drafting (immediately
+          above them, same as the composition cluster's own placement
+          rationale just above). Only rendered while `knowledgeContextLabel`
+          is non-null - useDiscussionReplies.ts derives that from LIVE state
+          only, never the persisted label, so this line is silent in the
+          restored-after-reload case (see the reload notice pushed by that
+          hook, which is this feature's only voice for that case - this line
+          deliberately does not duplicate or contradict it). */}
+      {knowledgeContextLabel && (
+        <p className={styles.fieldHint}>{`Drafting with Knowledge Base context: ${knowledgeContextLabel}.`}</p>
+      )}
       <DiscussionReplyControls composition={composition} onChange={setComposition} />
 
       <div className={styles.ghActions}>

@@ -21,6 +21,7 @@ import {
   blankRowEdit,
   buildCsvContent,
   defaultRowEdit,
+  fanOutGradingPostResult,
   filesColumnEmptyLabel,
   loadGradingResultsEdits,
   persistGradingResultsEdits,
@@ -57,7 +58,25 @@ import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeSc
 // that reads them moved to ./grading-results/ResultsTableHeaderRow.tsx - both
 // part of this file's line-budget extraction.
 
-type PostState = { status: "idle" | "posting" | "posted" | "error"; message?: string };
+// B1 (ux-audit-grading.md): "skipped" is a genuine third outcome, distinct
+// from "posted" and "error" - postCanvasGradesAction's own `skipped` array
+// (src/lib/canvas/grades.ts) names a student who had no grade or comment to
+// send, so Canvas was never called for them. Treating that as "posted" (the
+// pre-fix behaviour: absent from `failures` read as success) is the defect
+// this type change exists to make impossible - there is no "idle default
+// counts as success" branch left to fall into.
+type PostState = { status: "idle" | "posting" | "posted" | "error" | "skipped"; message?: string };
+
+/** B3 (ux-audit-grading.md): what one postAll/handlePostGrades call actually
+ * did - returned so a caller (LiveFeedPanel's "Post & next") can decide
+ * whether to advance, rather than always advancing and losing the outcome
+ * the instant the row changes. `null` means nothing was attempted (no
+ * gradable rows, or the confirm was declined). */
+export interface GradingPostOutcome {
+  posted: number;
+  failed: number;
+  skipped: number;
+}
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -101,8 +120,11 @@ export type GradingResultsProps = {
 
 /** Imperative handle so a parent (the Live Feed pane) can drive "Post & Next". */
 export interface GradingResultsHandle {
-  /** Post every gradable student. Pass false to skip the confirm prompt. */
-  postAll: (confirm?: boolean) => Promise<void>;
+  /** Post every gradable student. Pass false to skip the confirm prompt.
+   * B3: returns the outcome (or null if nothing was attempted) so the
+   * caller can decide whether it is safe to navigate away - see
+   * GradingPostOutcome's own doc comment. */
+  postAll: (confirm?: boolean) => Promise<GradingPostOutcome | null>;
 }
 
 /**
@@ -230,21 +252,19 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // assignment or a Live Feed row), which is exactly when posting back applies.
   const canvasGradable = gradableResults.length > 0;
 
-  const handlePostGrades = useCallback(async (confirm = true) => {
-    if (gradableResults.length === 0) return;
+  const handlePostGrades = useCallback(async (confirm = true): Promise<GradingPostOutcome | null> => {
+    if (gradableResults.length === 0) return null;
     if (
       confirm &&
       !window.confirm(
         `Post ${gradableResults.length} grade(s) to Canvas? This writes to the live gradebook.`
       )
     ) {
-      return;
+      return null;
     }
 
-    const userIdToStudent = new Map<number, string>();
     const payload = gradableResults.map((r) => {
       const edit = edits[r.student] ?? defaultRowEdit(r);
-      userIdToStudent.set(r.userId as number, r.student);
       return {
         userId: r.userId as number,
         grade: parseEarnedPoints(edit.total),
@@ -274,27 +294,30 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         for (const r of gradableResults) next[r.student] = { status: "error", message: result.error };
         return next;
       });
-      return;
+      return { posted: 0, failed: gradableResults.length, skipped: 0 };
     }
 
-    const failedByStudent = new Map<string, string>();
-    for (const failure of result.failures) {
-      const student = userIdToStudent.get(failure.userId);
-      if (student) failedByStudent.set(student, failure.error);
-    }
+    // B1: the shared, independently-tested decision (gradingResultsHelpers.ts's
+    // fanOutGradingPostResult) - a userId in `result.skipped` is "skipped",
+    // never folded into "posted" just because it is absent from `failures`.
+    const fanout = fanOutGradingPostResult(gradableResults, result);
     setPostStatus(() => {
       const next: Record<string, PostState> = {};
       for (const r of gradableResults) {
-        next[r.student] = failedByStudent.has(r.student)
-          ? { status: "error", message: failedByStudent.get(r.student) }
-          : { status: "posted" };
+        next[r.student] = fanout[r.student] ?? { status: "posted" };
       }
       return next;
     });
+    // B1: state the denominator, never a bare count that cannot be told
+    // apart from a partial failure - "Posted 28." used to be indistinguishable
+    // from a 30-student class where 2 were silently dropped.
     setPostSummary(
-      `Posted ${result.posted}${result.failures.length ? `, ${result.failures.length} failed` : ""}.`
+      `Posted ${result.posted} of ${gradableResults.length} attempted.` +
+        (result.failures.length ? ` ${result.failures.length} failed.` : "") +
+        (result.skipped.length ? ` ${result.skipped.length} skipped (no grade or comment to send).` : "")
     );
     onPosted?.();
+    return { posted: result.posted, failed: result.failures.length, skipped: result.skipped.length };
   }, [gradableResults, edits, canvasUrl, onPosted]);
 
   // Expose post-all so the Live Feed pane's "Post & Next" can drive it.
@@ -325,10 +348,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       setPostStatus((prev) => ({ ...prev, [row.student]: { status: "error", message: res.error } }));
       return;
     }
-    const failure = res.failures.find((f) => f.userId === row.userId);
+    // B1: the SAME fan-out the bulk post uses above (fanOutGradingPostResult),
+    // scoped to this one row - a skip is neither "posted" nor "error", and
+    // must never fall through to "posted" just because it is absent from
+    // `failures`.
+    const fanout = fanOutGradingPostResult([row], res);
     setPostStatus((prev) => ({
       ...prev,
-      [row.student]: failure ? { status: "error", message: failure.error } : { status: "posted" },
+      [row.student]: fanout[row.student] ?? { status: "posted" },
     }));
     onPosted?.();
   };
@@ -515,13 +542,22 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     {status && status.status !== "idle" && (
                       <div
                         className={styles.fieldHint}
-                        style={{ color: status.status === "error" ? "var(--error, #b91c1c)" : undefined }}
+                        style={{
+                          color:
+                            status.status === "error"
+                              ? "var(--error, #b91c1c)"
+                              : status.status === "skipped"
+                                ? "var(--warning-ink)"
+                                : undefined,
+                        }}
                       >
                         {status.status === "posted"
                           ? "Posted to Canvas"
                           : status.status === "posting"
                             ? "Posting…"
-                            : `Failed: ${status.message ?? ""}`}
+                            : status.status === "skipped"
+                              ? "Not posted - no grade or comment to send"
+                              : `Failed: ${status.message ?? ""}`}
                       </div>
                     )}
                     {(() => {

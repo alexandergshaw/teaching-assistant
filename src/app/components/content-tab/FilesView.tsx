@@ -23,6 +23,11 @@ import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from "./contentSourceGating";
+// B1: signature-based two-click delete arming (see that module's own header
+// for the invariant) - this view's bulk delete used to arm on a bare
+// boolean that survived a selection change untouched.
+import { isConfirmArmed, selectionSignature } from "./modules/confirmArming";
+import { bulkDeleteConfirmLabel } from "../files/bulkDeleteLabel";
 
 export function FilesView({
   courseUrl,
@@ -58,7 +63,9 @@ export function FilesView({
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkModule, setBulkModule] = useState<number | "">("");
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // Armed FOR a selection signature, not a bare boolean - see the derived
+  // `confirmBulkDelete` below (B1: confirmArming.ts).
+  const [deleteArmedFor, setDeleteArmedFor] = useState<string | null>(null);
   const [editFile, setEditFile] = useState<CourseFile | null>(null);
   const [structureFile, setStructureFile] = useState<CourseFile | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
@@ -89,6 +96,12 @@ export function FilesView({
   // non-focusable container is a silent no-op (useModalDismiss.ts).
   const filesToolbarFallbackRef = useRef<HTMLElement | null>(null);
   const filesListFallbackRef = useRef<HTMLElement | null>(null);
+  // B3: "Upload files" used to be a <label> wrapping a display:none <input>
+  // - neither node is focusable, so uploading was keyboard-unreachable (the
+  // drag-and-drop zone below was the only other path). Real button + hidden
+  // input driven by a ref, the same idiom ModulesHeaderBar.tsx uses for
+  // "Import cartridge".
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const previewTriggerRef = useRef<HTMLElement | null>(null);
   const officeEditorTriggerRef = useRef<HTMLElement | null>(null);
   const structureTriggerRef = useRef<HTMLElement | null>(null);
@@ -140,13 +153,17 @@ export function FilesView({
     setSelected(new Set());
   };
 
+  // Signature of the CURRENT selection, recomputed every render.
+  const bulkDeleteSig = selectionSignature(selected);
+  const confirmBulkDelete = isConfirmArmed(deleteArmedFor, bulkDeleteSig);
+
   const bulkDelete = async () => {
     if (selected.size === 0) return;
     if (!confirmBulkDelete) {
-      setConfirmBulkDelete(true);
+      setDeleteArmedFor(bulkDeleteSig);
       return;
     }
-    setConfirmBulkDelete(false);
+    setDeleteArmedFor(null);
     const ids = [...selected];
     setSelected(new Set());
     setFiles((fs) => fs.filter((x) => !ids.includes(x.id)));
@@ -313,18 +330,23 @@ export function FilesView({
         tabIndex={-1}
         style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}
       >
-        <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => uploadInputRef.current?.click()}
+        >
           Upload files
-          <input
-            type="file"
-            multiple
-            style={{ display: "none" }}
-            onChange={(e) => {
-              void handleFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-        </label>
+        </Button>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => {
+            void handleFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
         <Button variant="outlined" size="small" onClick={() => void reload()} disabled={busy}>
           Refresh
         </Button>
@@ -346,6 +368,7 @@ export function FilesView({
           placeholder="Search files by name…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search files by name"
           sx={{ flex: "1 1 200px", maxWidth: 300 }}
         />
         <span className={styles.fieldHint} style={{ margin: 0 }}>
@@ -401,13 +424,21 @@ export function FilesView({
               </Button>
             </span>
             <Button variant="outlined" size="small" color="error" disabled={busy} onClick={() => void bulkDelete()}>
-              {confirmBulkDelete ? "Confirm delete" : "Delete"}
+              {bulkDeleteConfirmLabel(confirmBulkDelete, selected.size)}
             </Button>
           </div>
         </div>
       )}
 
-      {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+      {note && (
+        <p
+          role={note.kind === "error" ? "alert" : "status"}
+          aria-live="polite"
+          className={note.kind === "error" ? styles.error : styles.fieldHint}
+        >
+          {note.text}
+        </p>
+      )}
 
       {strayCount > 0 && (
         <div

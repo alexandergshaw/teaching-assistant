@@ -34,8 +34,15 @@
 //
 // Left behind in GradingResults.tsx (deliberately NOT moved here):
 // - PostState (originally :115) models the shape of the component's
-//   `postStatus` React state, not the output of any function in this file -
-//   none of the helpers below read or produce a PostState.
+//   `postStatus` React state. fanOutGradingPostResult below (added for B1,
+//   ux-audit-grading.md) is the ONE exception to "none of the helpers below
+//   read or produce a PostState": it returns a structurally-compatible
+//   `{status, message?}` shape so the dangerous "did this student's grade
+//   actually reach Canvas" decision - which vitest can never exercise
+//   directly inside a "use client" component - is a pure, independently
+//   testable function instead of inline logic duplicated across
+//   handlePostGrades and handlePostOne. Mirrors repoGradesPosting.ts's own
+//   fanOutRepoGradePostResult for the sibling Repo Grades surface.
 // - The icon components (:20-53) return JSX and are a different kind of
 //   "pure" (pure render, not pure data) that the acceptance criteria's named
 //   region (:57-199) does not cover.
@@ -605,4 +612,62 @@ export function persistGradingResultsEdits(canvasUrl: string, edits: Record<stri
   } catch {
     // best-effort persistence only, matching persistRepoGradesUiState above.
   }
+}
+
+/** B1 (ux-audit-grading.md): one student's status entry as
+ * fanOutGradingPostResult below produces it - structurally compatible with
+ * GradingResults.tsx's own PostState (`{status, message?}`), but declared
+ * here (not imported from there) so this file stays free of any dependency
+ * on the "use client" component - the same direction every other helper in
+ * this file already keeps. */
+export interface GradingPostFanoutEntry {
+  status: "posted" | "error" | "skipped";
+  message?: string;
+}
+
+/**
+ * B1: the SAME three-way decision src/app/components/repo-grades/
+ * repoGradesPosting.ts's fanOutRepoGradePostResult makes for the Repo Grades
+ * surface, mirrored here for GradingResults.tsx's own bulk (handlePostGrades)
+ * and single-row (handlePostOne) posts, which used to each inline their own
+ * copy of this logic - and the bulk copy's inline version was the exact
+ * defect this fix closes: it built `failedByStudent` alone and treated every
+ * OTHER attempted student as "posted", so a student postCanvasGradesAction
+ * itself skipped (no grade or comment to send - src/lib/canvas/grades.ts)
+ * fell through to "posted" purely by being absent from `failures`.
+ *
+ * Checked in order per attempted student: a hit in `failures` is "error"
+ * with that failure's own message; otherwise a hit in `skipped` is "skipped"
+ * with that skip's own reason; otherwise the student is "posted" - the only
+ * case a student can be genuinely marked posted. A student whose `userId` is
+ * not a number is skipped over entirely (defensive - GradingResults.tsx only
+ * ever calls this with rows it already filtered to `typeof userId ===
+ * "number"`, but this function makes no assumption about its caller having
+ * done that filtering).
+ */
+export function fanOutGradingPostResult(
+  attempted: readonly Pick<GradeRow, "student" | "userId">[],
+  result: {
+    failures: Array<{ userId: number; error: string }>;
+    skipped: Array<{ userId: number; reason: string }>;
+  }
+): Record<string, GradingPostFanoutEntry> {
+  const failureByUserId = new Map(result.failures.map((f) => [f.userId, f.error]));
+  const skippedByUserId = new Map(result.skipped.map((s) => [s.userId, s.reason]));
+  const next: Record<string, GradingPostFanoutEntry> = {};
+  for (const row of attempted) {
+    if (typeof row.userId !== "number") continue;
+    const failureMessage = failureByUserId.get(row.userId);
+    if (failureMessage !== undefined) {
+      next[row.student] = { status: "error", message: failureMessage };
+      continue;
+    }
+    const skipReason = skippedByUserId.get(row.userId);
+    if (skipReason !== undefined) {
+      next[row.student] = { status: "skipped", message: skipReason };
+      continue;
+    }
+    next[row.student] = { status: "posted" };
+  }
+  return next;
 }

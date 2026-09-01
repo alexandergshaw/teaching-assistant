@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Checkbox } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { CourseCopyModal } from "./content-tab/CourseCopyModal";
 import CartridgeDropPanel from "./CartridgeDropPanel";
@@ -20,15 +19,21 @@ import {
   type RecordingFile,
 } from "@/lib/recording-files";
 import { stripAudio } from "@/lib/strip-audio";
-import { groupRecordingFiles } from "@/lib/recording-file-groups";
 import { getPreviewStrategy } from "@/lib/file-preview";
-import { formatRelative } from "@/app/utils/time";
 import { listCourseContentAction, sampleInUseAction } from "../actions";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import TabShell from "./TabShell";
 import styles from "../page.module.css";
-import { FileRow } from "./files/FileRow";
+import { FileList } from "./files/FileList";
+import type { FileRowSharedProps } from "./files/FileRow";
 import { FilterToolbar } from "./files/FilterToolbar";
+// Signature-based two-click delete arming (B1): the bare boolean this tab
+// used to arm bulk delete with survived a selection change untouched, so a
+// confirm armed on 2 files could be spent on 40. This is the same mechanism
+// every modules-side delete already uses - see that module's own header for
+// the invariant ("the confirmation matches the thing that would be
+// deleted").
+import { isConfirmArmed, selectionSignature } from "./content-tab/modules/confirmArming";
 import { UploadDropZone } from "./files/UploadDropZone";
 import { BulkSelectionBar } from "./files/BulkSelectionBar";
 import { useFilePreview } from "./files/useFilePreview";
@@ -88,7 +93,11 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
 
   // Delete confirmation state
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // Armed FOR a selection signature (confirmArming.ts), not a bare boolean -
+  // see the derived `confirmBulkDelete` below, computed from the CURRENT
+  // selection every render, so arming on {A,B} and then changing the
+  // selection to {A,B,C,...} (e.g. via "Select all") disarms automatically.
+  const [deleteArmedFor, setDeleteArmedFor] = useState<string | null>(null);
 
   // Rename drafts state
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
@@ -455,13 +464,18 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
     setBulkModuleId("");
   };
 
+  // Signature of the CURRENT selection, recomputed every render - see
+  // deleteArmedFor's own comment above.
+  const bulkDeleteSig = selectionSignature(selected);
+  const confirmBulkDelete = isConfirmArmed(deleteArmedFor, bulkDeleteSig);
+
   const handleBulkDelete = async () => {
     if (selected.size === 0) return;
     if (!confirmBulkDelete) {
-      setConfirmBulkDelete(true);
+      setDeleteArmedFor(bulkDeleteSig);
       return;
     }
-    setConfirmBulkDelete(false);
+    setDeleteArmedFor(null);
     const ids = [...selected];
     setSelected(new Set());
 
@@ -629,6 +643,62 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
   const toggleSelectAll = () =>
     setSelected(allShownSelected ? new Set() : new Set(shown.map((f) => f.id)));
 
+  // Shared by every <FileRow> render site inside <FileList> (grouped /
+  // ungrouped / flat) - previously three identical inline closures, one per
+  // site.
+  const handleSelectToggle = (fileId: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId);
+      else next.add(fileId);
+      return next;
+    });
+
+  const handleNameChange = (fileId: string, name: string) =>
+    setNameDrafts((prev) => ({ ...prev, [fileId]: name }));
+
+  const handleAddToModuleCancel = () => {
+    setAddTarget(null);
+    setAddNote(null);
+  };
+
+  // Every prop <FileRow> needs except `file` itself - one object, spread at
+  // FileList.tsx's three render sites (files/FileList.tsx, files/FileRow.tsx's
+  // FileRowSharedProps), replacing what used to be the same ~28 props
+  // spelled out in full three times over.
+  const fileRowProps: FileRowSharedProps = {
+    selected,
+    onSelectToggle: handleSelectToggle,
+    onDelete: handleDelete,
+    confirmDelete,
+    onDownload: handleDownload,
+    onStripAudio: handleStripAudio,
+    stripping,
+    nameDrafts,
+    onNameChange: handleNameChange,
+    onSaveRename: saveRename,
+    expandedPlay,
+    playUrls,
+    onPlayToggle: setExpandedPlay,
+    onPreview: handleFilePreview,
+    onPreviewTrigger: handlePreviewTrigger,
+    previewLoading: filePreview.loading,
+    addTarget,
+    onAddTargetToggle: setAddTarget,
+    courseUrl,
+    courseName,
+    moduleId,
+    modules,
+    modulesStatus,
+    onModuleSelect: setModuleId,
+    onAddToModule: handleAddToModule,
+    adding,
+    addNote,
+    onAddToModuleCancel: handleAddToModuleCancel,
+    activeInstitution,
+    onSelectCourse: handleSelectCourse,
+  };
+
   return (
     <TabShell>
       <TabHeader
@@ -666,8 +736,16 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         </div>
       </div>
 
+      {/* S1 (docs/ux-audit-files-content.md): sole reporting channel for
+          every rename/delete/strip-audio/add-to-module/bulk-delete outcome
+          on this tab - role/aria-live make it audible to a screen reader,
+          which it previously was not. */}
       {note && (
-        <div className={note.kind === "error" ? styles.error : styles.fieldHint}>
+        <div
+          role={note.kind === "error" ? "alert" : "status"}
+          aria-live="polite"
+          className={note.kind === "error" ? styles.error : styles.fieldHint}
+        >
           {note.text}
         </div>
       )}
@@ -737,224 +815,18 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
                 />
               )}
 
-          {files.length === 0 ? (
-            <div className={styles.emptyState}>
-              No files yet. Record one on the Recording tab or upload files here.
-            </div>
-          ) : (
-            <div
-              ref={(el) => {
-                filesTableFallbackRef.current = el;
-              }}
-              tabIndex={-1}
-              className={styles.libTable}
-            >
-              <div className={styles.libHead}>
-                <div style={{ display: "flex", alignItems: "center" }}>
-                  <Checkbox size="small" checked={allShownSelected} onChange={toggleSelectAll} disabled={shown.length === 0} />
-                </div>
-                <div>Kind</div>
-                <div>Type</div>
-                <div>Name</div>
-                <div>Length</div>
-                <div>Size</div>
-                <div>Added</div>
-                <div>Actions</div>
-              </div>
-
-              {shown.length === 0 ? (
-                <div style={{ padding: "12px", textAlign: "center", color: "var(--text-secondary)" }}>
-                  No files match your search.
-                </div>
-              ) : groupBy === "grouped" ? (
-                <>
-                  {(() => {
-                    const grouped = groupRecordingFiles(shown);
-                    return (
-                      <>
-                        {grouped.groups.map((group) => (
-                          <div key={group.key}>
-                            <div style={{
-                              padding: "12px",
-                              backgroundColor: "var(--bg-secondary)",
-                              borderBottom: "1px solid var(--border-color)",
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              gap: 12,
-                            }}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontWeight: 500 }}>
-                                  {group.workflowName || "Workflow run"}
-                                </div>
-                                <div className={styles.fieldHint} style={{ margin: "4px 0 0 0", fontSize: "0.9em" }}>
-                                  {group.files.length} file{group.files.length === 1 ? "" : "s"} {formatRelative(group.newest)}
-                                </div>
-                              </div>
-                              {group.workflowId && onOpenWorkflow && (
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={() => onOpenWorkflow(group.workflowId!)}
-                                >
-                                  Open workflow
-                                </Button>
-                              )}
-                            </div>
-                            {group.files.map((file) => (
-                              <FileRow
-                                key={file.id}
-                                file={file}
-                                selected={selected}
-                                onSelectToggle={(fileId) => setSelected((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(fileId)) next.delete(fileId);
-                                  else next.add(fileId);
-                                  return next;
-                                })}
-                                onDelete={handleDelete}
-                                confirmDelete={confirmDelete}
-                                onDownload={handleDownload}
-                                onStripAudio={handleStripAudio}
-                                stripping={stripping}
-                                nameDrafts={nameDrafts}
-                                onNameChange={(fileId, name) => setNameDrafts((prev) => ({ ...prev, [fileId]: name }))}
-                                onSaveRename={saveRename}
-                                expandedPlay={expandedPlay}
-                                playUrls={playUrls}
-                                onPlayToggle={setExpandedPlay}
-                                onPreview={handleFilePreview}
-                                onPreviewTrigger={handlePreviewTrigger}
-                                previewLoading={filePreview.loading}
-                                addTarget={addTarget}
-                                onAddTargetToggle={setAddTarget}
-                                courseUrl={courseUrl}
-                                courseName={courseName}
-                                moduleId={moduleId}
-                                modules={modules}
-                                modulesStatus={modulesStatus}
-                                onModuleSelect={setModuleId}
-                                onAddToModule={handleAddToModule}
-                                adding={adding}
-                                addNote={addNote}
-                                onAddToModuleCancel={() => {
-                                  setAddTarget(null);
-                                  setAddNote(null);
-                                }}
-                                activeInstitution={activeInstitution}
-                                onSelectCourse={handleSelectCourse}
-                              />
-                            ))}
-                          </div>
-                        ))}
-                        {grouped.ungrouped.length > 0 && (
-                          <div>
-                            <div style={{
-                              padding: "12px",
-                              backgroundColor: "var(--bg-secondary)",
-                              borderBottom: "1px solid var(--border-color)",
-                              fontWeight: 500,
-                            }}>
-                              Other files
-                            </div>
-                            {grouped.ungrouped.map((file) => (
-                              <FileRow
-                                key={file.id}
-                                file={file}
-                                selected={selected}
-                                onSelectToggle={(fileId) => setSelected((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(fileId)) next.delete(fileId);
-                                  else next.add(fileId);
-                                  return next;
-                                })}
-                                onDelete={handleDelete}
-                                confirmDelete={confirmDelete}
-                                onDownload={handleDownload}
-                                onStripAudio={handleStripAudio}
-                                stripping={stripping}
-                                nameDrafts={nameDrafts}
-                                onNameChange={(fileId, name) => setNameDrafts((prev) => ({ ...prev, [fileId]: name }))}
-                                onSaveRename={saveRename}
-                                expandedPlay={expandedPlay}
-                                playUrls={playUrls}
-                                onPlayToggle={setExpandedPlay}
-                                onPreview={handleFilePreview}
-                                onPreviewTrigger={handlePreviewTrigger}
-                                previewLoading={filePreview.loading}
-                                addTarget={addTarget}
-                                onAddTargetToggle={setAddTarget}
-                                courseUrl={courseUrl}
-                                courseName={courseName}
-                                moduleId={moduleId}
-                                modules={modules}
-                                modulesStatus={modulesStatus}
-                                onModuleSelect={setModuleId}
-                                onAddToModule={handleAddToModule}
-                                adding={adding}
-                                addNote={addNote}
-                                onAddToModuleCancel={() => {
-                                  setAddTarget(null);
-                                  setAddNote(null);
-                                }}
-                                activeInstitution={activeInstitution}
-                                onSelectCourse={handleSelectCourse}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </>
-              ) : (
-                shown.map((file) => (
-                  <FileRow
-                    key={file.id}
-                    file={file}
-                    selected={selected}
-                    onSelectToggle={(fileId) => setSelected((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(fileId)) next.delete(fileId);
-                      else next.add(fileId);
-                      return next;
-                    })}
-                    onDelete={handleDelete}
-                    confirmDelete={confirmDelete}
-                    onDownload={handleDownload}
-                    onStripAudio={handleStripAudio}
-                    stripping={stripping}
-                    nameDrafts={nameDrafts}
-                    onNameChange={(fileId, name) => setNameDrafts((prev) => ({ ...prev, [fileId]: name }))}
-                    onSaveRename={saveRename}
-                    expandedPlay={expandedPlay}
-                    playUrls={playUrls}
-                    onPlayToggle={setExpandedPlay}
-                    onPreview={handleFilePreview}
-                    onPreviewTrigger={handlePreviewTrigger}
-                    previewLoading={filePreview.loading}
-                    addTarget={addTarget}
-                    onAddTargetToggle={setAddTarget}
-                    courseUrl={courseUrl}
-                    courseName={courseName}
-                    moduleId={moduleId}
-                    modules={modules}
-                    modulesStatus={modulesStatus}
-                    onModuleSelect={setModuleId}
-                    onAddToModule={handleAddToModule}
-                    adding={adding}
-                    addNote={addNote}
-                    onAddToModuleCancel={() => {
-                      setAddTarget(null);
-                      setAddNote(null);
-                    }}
-                    activeInstitution={activeInstitution}
-                    onSelectCourse={handleSelectCourse}
-                  />
-                ))
-              )}
-            </div>
-          )}
+          <FileList
+            files={files}
+            shown={shown}
+            groupBy={groupBy}
+            allShownSelected={allShownSelected}
+            onToggleSelectAll={toggleSelectAll}
+            onOpenWorkflow={onOpenWorkflow}
+            listRef={(el) => {
+              filesTableFallbackRef.current = el;
+            }}
+            fileRowProps={fileRowProps}
+          />
             </>
           )}
 

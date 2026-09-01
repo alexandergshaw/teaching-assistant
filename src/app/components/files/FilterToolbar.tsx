@@ -2,7 +2,7 @@
 
 import { Button, TextField, MenuItem } from "@mui/material";
 import type { RefObject } from "react";
-import styles from "../../page.module.css";
+import { useRef } from "react";
 import { FILES_FILTER_KIND_OPTIONS, type FilesFilterKind } from "./filter-sort";
 
 interface FilterToolbarProps {
@@ -68,6 +68,13 @@ export function FilterToolbar({
   isRefreshing,
   containerRef,
 }: FilterToolbarProps) {
+  // B3: the previous <label>-wraps-a-display:none-<input> markup put
+  // "Upload files" nowhere in the tab order (a <label> is not focusable, and
+  // `display: none` removes the input too) - the drag-and-drop zone was the
+  // only other upload affordance, so uploading was mouse-only. Real button +
+  // hidden input driven by a ref, the same idiom ModulesHeaderBar.tsx uses
+  // for "Import cartridge".
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   return (
     <div
       ref={(el) => {
@@ -76,18 +83,23 @@ export function FilterToolbar({
       tabIndex={-1}
       style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}
     >
-      <label className={styles.downloadButton} style={{ cursor: "pointer" }}>
+      <Button
+        variant="outlined"
+        size="small"
+        onClick={() => uploadInputRef.current?.click()}
+      >
         Upload files
-        <input
-          type="file"
-          multiple
-          style={{ display: "none" }}
-          onChange={(e) => {
-            onUploadChange(e.target.files);
-            e.target.value = "";
-          }}
-        />
-      </label>
+      </Button>
+      <input
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => {
+          onUploadChange(e.target.files);
+          e.target.value = "";
+        }}
+      />
       <Button
         variant="outlined"
         size="small"
@@ -115,6 +127,7 @@ export function FilterToolbar({
           placeholder="Search files by name..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
+          aria-label="Search files by name"
           sx={{ flex: "1 1 200px", maxWidth: 300 }}
         />
         <TextField
@@ -122,6 +135,7 @@ export function FilterToolbar({
           size="small"
           value={sortBy}
           onChange={(e) => onSortChange(e.target.value as "newest" | "oldest" | "name" | "largest")}
+          aria-label="Sort files by"
           sx={{ minWidth: 140 }}
         >
           <MenuItem value="newest">Newest</MenuItem>
@@ -134,6 +148,7 @@ export function FilterToolbar({
           size="small"
           value={filterKind}
           onChange={(e) => onFilterKindChange(e.target.value as FilesFilterKind)}
+          aria-label="Filter by file kind"
           sx={{ minWidth: 140 }}
         >
           {FILES_FILTER_KIND_OPTIONS.map((opt) => (
@@ -147,6 +162,7 @@ export function FilterToolbar({
           size="small"
           value={filterWorkflow}
           onChange={(e) => onFilterWorkflowChange(e.target.value as "all" | "workflow")}
+          aria-label="Filter by source"
           sx={{ minWidth: 140 }}
         >
           <MenuItem value="all">All files</MenuItem>
@@ -157,6 +173,7 @@ export function FilterToolbar({
           size="small"
           value={groupBy}
           onChange={(e) => onGroupByChange(e.target.value as "flat" | "grouped")}
+          aria-label="Group files"
           sx={{ minWidth: 140 }}
         >
           <MenuItem value="flat">Flat view</MenuItem>

@@ -13,6 +13,7 @@ import { LIVE_CONTENT_SOURCE, gateOperation, type ContentSourceContext } from ".
 import { BulkBarGroup } from "./BulkBarGroup";
 import { groupById, type BulkBarFacts, type BulkBarGroupRuntime } from "./bulkBarGroups";
 import type { BulkBarGroupsApi } from "./useBulkBarGroups";
+import { bulkRemoveFromModuleBannerText, bulkRemoveFromModuleButtonLabel } from "./bulkRemoveFromModuleCopy";
 
 // Module-level, not recreated per render: the default for `clearRubricRunLog`
 // when a caller (today, only ModulesView.tsx) does not yet pass one - see
@@ -95,7 +96,11 @@ export interface BulkItemsSectionProps {
    * the SAME ref (decision 4). */
   onPageEditorTrigger: (trigger: HTMLElement) => void;
   bulkPublish: (published: boolean) => void;
-  descSharedState: "idle" | "loading" | "same" | "mixed";
+  descSharedState: "idle" | "loading" | "same" | "mixed" | "partial";
+  /** S2: populated only while descSharedState === "partial" - how many of
+   * the selected gradables' current descriptions could not be read, out of
+   * how many were considered. */
+  descPartialCounts: { uncheckedCount: number; totalCount: number } | null;
   bulkItemsDescription: string;
   setBulkItemsDescription: (v: string) => void;
   bulkSetDescription: () => void;
@@ -173,6 +178,10 @@ export interface BulkItemsSectionProps {
   modules: CanvasModule[];
   bulkMoveToModule: () => void;
   bulkRemoveFromModule: () => void;
+  /** B2: whether the NEXT bulkRemoveFromModule() call actually removes -
+   * armed for the current selection, independent of confirmDeleteContent
+   * below so arming one never arms the other. */
+  confirmRemoveFromModule: boolean;
   bulkDeleteContent: () => void;
   confirmDeleteContent: boolean;
 }
@@ -203,6 +212,7 @@ export function BulkItemsSection({
   onPageEditorTrigger,
   bulkPublish,
   descSharedState,
+  descPartialCounts,
   bulkItemsDescription,
   setBulkItemsDescription,
   bulkSetDescription,
@@ -247,6 +257,7 @@ export function BulkItemsSection({
   modules,
   bulkMoveToModule,
   bulkRemoveFromModule,
+  confirmRemoveFromModule,
   bulkDeleteContent,
   confirmDeleteContent,
 }: BulkItemsSectionProps) {
@@ -381,6 +392,18 @@ export function BulkItemsSection({
           )}
           {descSharedState === "mixed" && (
             <span className={styles.bulkFieldLabel}>Selected items have different descriptions; typing replaces them all.</span>
+          )}
+          {/* S2: some of the selected gradables' current descriptions could
+              not be fetched (rate limit, a deleted item, a network blip).
+              The surviving subset might happen to agree, but claiming
+              "shared" here would assert the app read every item's current
+              text - it did not, and "Set description" below still
+              overwrites every selected item, including the unread ones. */}
+          {descSharedState === "partial" && descPartialCounts && (
+            <span className={styles.bulkFieldLabel} style={{ color: "var(--danger)" }}>
+              Could not read {descPartialCounts.uncheckedCount} of {descPartialCounts.totalCount} selected
+              items — their current descriptions are unknown and will still be replaced if you set one below.
+            </span>
           )}
           <TextField
             multiline
@@ -623,7 +646,7 @@ export function BulkItemsSection({
       <BulkBarGroup
         group={groupById("move")}
         facts={facts}
-        runtime={staticRuntime(opBusy, confirmDeleteContent)}
+        runtime={staticRuntime(opBusy, confirmDeleteContent || confirmRemoveFromModule)}
         state={groupsState}
         announceBusy={false}
       >
@@ -666,8 +689,21 @@ export function BulkItemsSection({
               Move
             </Button>
           </span>
-          <Button variant="outlined" size="small" disabled={opBusy} onClick={bulkRemoveFromModule} title="Remove selected items from their module">
-            Remove
+          {/* B2: this used to fire bulkRemoveFromModule on the first click
+              with no arming at all, immediately to the left of the fully-
+              armed "Delete from Canvas" below, inside the same danger-tier
+              card - the higher-consequence-looking neighbour was the
+              unguarded one. Same two-click arm + label swap + colocated
+              banner treatment as Delete now, tracked independently
+              (confirmRemoveFromModule) so arming one never arms the other. */}
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={opBusy}
+            onClick={bulkRemoveFromModule}
+            title="Remove selected items from their module"
+          >
+            {bulkRemoveFromModuleButtonLabel(confirmRemoveFromModule)}
           </Button>
           <Button variant="outlined" size="small" color="error" disabled={opBusy} onClick={bulkDeleteContent}>
             {confirmDeleteContent ? "Confirm delete" : "Delete from Canvas"}
@@ -684,6 +720,11 @@ export function BulkItemsSection({
             <span role="status" aria-live="polite" className={styles.bulkHint}>
               Click &quot;Confirm delete&quot; again to permanently delete the selected item
               {facts.itemCount === 1 ? "" : "s"} from Canvas. This cannot be undone.
+            </span>
+          )}
+          {confirmRemoveFromModule && (
+            <span role="status" aria-live="polite" className={styles.bulkHint}>
+              {bulkRemoveFromModuleBannerText(facts.itemCount)}
             </span>
           )}
         </div>

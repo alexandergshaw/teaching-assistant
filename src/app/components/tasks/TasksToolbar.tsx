@@ -78,6 +78,17 @@ export interface TasksToolbarProps {
   onDownloadCsv: () => void;
   onManageTasks: () => void;
   summaryText: string;
+  /** BLOCKER 2 (Tasks-tab UX audit): the SAME announcement string the tab's
+   * srOnly live region carries, rendered visibly beside `summaryText` - a
+   * bulk outcome ("Set X to Y for 3 of 26 courses.") used to reach a
+   * sighted instructor nowhere but that 1px-clipped region. */
+  statusText: string;
+  /** SHOULD 8: a manual refresh entry point next to Download CSV, matching
+   * CoursesTable.tsx's own Refresh button - previously the only way to force
+   * a fresh load was the Retry button, which only appeared after a
+   * NON-silent failure. */
+  refreshing: boolean;
+  onRefresh: () => void;
   periodCaption?: string;
 
   // AC-E: the active-filter chip row (item 225-226), rendered here (plan
@@ -115,6 +126,9 @@ export default function TasksToolbar({
   onDownloadCsv,
   onManageTasks,
   summaryText,
+  statusText,
+  refreshing,
+  onRefresh,
   periodCaption,
   columnFilters,
   onClearColumnFilter,
@@ -330,6 +344,12 @@ export default function TasksToolbar({
           </div>
         </Popover>
 
+        {/* SHOULD 8: matches CoursesTable.tsx's own Refresh button exactly -
+            disabled label while a silent background reload is in flight. */}
+        <Button variant="text" size="small" onClick={onRefresh} disabled={refreshing}>
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </Button>
+
         <Button variant="text" size="small" onClick={onDownloadCsv}>
           Download CSV
         </Button>
@@ -385,6 +405,9 @@ export default function TasksToolbar({
 
       <div className={styles.summaryBar}>
         <span className={styles.summaryFigure}>{summaryText}</span>
+        {/* BLOCKER 2: visible counterpart of the tab's srOnly announcement
+            region - see this prop's own doc comment above. */}
+        {statusText && <span className={styles.bulkStatusLine}>{statusText}</span>}
       </div>
       {periodCaption && <p className={styles.periodCaption}>{periodCaption}</p>}
     </>

@@ -35,28 +35,67 @@ export interface SyllabusUploadStorageClient<T> {
 export type SyllabusUploadResult<V> = { ok: true; value: V } | { ok: false; error: string };
 
 /**
- * Whether `storagePath` looks like a path THIS feature could have written -
- * `${userId}/syllabus-uploads/...` (see syllabusUploadStoragePath below).
- * `storagePath` arrives here as browser-supplied metadata (the object was
- * already uploaded client-side before the action ever runs), and
- * withUploadedSyllabusFile both DOWNLOADS and DELETES whatever path it is
- * handed against the service-role client the server action uses - so an
- * unvalidated path would let a malformed or hostile call point this
- * download-and-delete lifecycle at any other object in the "course-files"
- * bucket under the same user prefix, e.g. a course's materials zip
- * (`${userId}/${courseId}/...`, src/lib/course-files.ts) or a Tasks-cell
- * attachment (`${userId}/${courseId}/task-attachments/...`,
+ * The path segments this shared extract-then-delete lifecycle accepts, and
+ * the ONLY place that list is written. `syllabusUploadStoragePath` (below)
+ * builds a path from one of these segments, and `isKnownUploadPath` checks a
+ * path against the same array - one source of truth for both directions, so
+ * they cannot drift apart the way two independently-maintained lists could.
+ *
+ * TypeScript closes the door on a THIRD segment before it ever reaches
+ * `isKnownUploadPath` at runtime: `syllabusUploadStoragePath`'s `segment`
+ * parameter is typed `UploadPathSegment`, the literal union derived from
+ * this exact array (see the `as const` below), so passing anything not in
+ * this list is a compile error at the call site, not a validator rejection
+ * discovered later. A caller cannot invent `"attachment-uploads"` and have
+ * it silently compile only to be refused at runtime - it never compiles.
+ *
+ * Two features share this lifecycle today, each under its own honestly
+ * named segment - a syllabus upload (`SyllabusUploadControl.tsx`, and the
+ * course-schedule-from-source workflow step's "syllabus document" source)
+ * and a rubric upload (`RubricInputModal.tsx`, which reuses
+ * `extractSyllabusTextAction` WHOLE for its download/extract/delete logic
+ * but must not therefore have its object live under a path segment named
+ * for the syllabus feature). Add a third by adding its segment here - and
+ * nowhere else.
+ */
+const UPLOAD_PATH_SEGMENTS = ["syllabus-uploads", "rubric-uploads"] as const;
+
+/** The closed set of path segments `withUploadedSyllabusFile` will ever
+ * download and delete. See `UPLOAD_PATH_SEGMENTS` above for why this is a
+ * union derived from one array rather than a plain `string`. */
+export type UploadPathSegment = (typeof UPLOAD_PATH_SEGMENTS)[number];
+
+/**
+ * Whether `storagePath` looks like a path THIS lifecycle could have written -
+ * `${userId}/${segment}/...` for one of `UPLOAD_PATH_SEGMENTS` (see
+ * syllabusUploadStoragePath below). `storagePath` arrives here as
+ * browser-supplied metadata (the object was already uploaded client-side
+ * before the action ever runs), and withUploadedSyllabusFile both DOWNLOADS
+ * and DELETES whatever path it is handed against the service-role client the
+ * server action uses - so an unvalidated path would let a malformed or
+ * hostile call point this download-and-delete lifecycle at any other object
+ * in the "course-files" bucket under the same user prefix, e.g. a course's
+ * materials zip (`${userId}/${courseId}/...`, src/lib/course-files.ts) or a
+ * Tasks-cell attachment (`${userId}/${courseId}/task-attachments/...`,
  * src/lib/course-task-attachments.ts). Checked here, inside the one function
- * both uploadSyllabusAction and extractSyllabusTextAction call, rather than
- * in each caller separately, so a future caller of this lifecycle inherits
- * the guard automatically instead of having to remember to add it - the same
- * reasoning that puts the delete-on-blank rule inside upsertTaskInstruction
+ * every caller of this lifecycle (uploadSyllabusAction,
+ * extractSyllabusTextAction) calls, rather than in each caller separately,
+ * so a future caller of this lifecycle inherits the guard automatically
+ * instead of having to remember to add it - the same reasoning that puts the
+ * delete-on-blank rule inside upsertTaskInstruction
  * (src/lib/supabase/task-institution-instructions.ts) rather than in its
  * callers.
+ *
+ * Named `isKnownUploadPath` (not `isSyllabusUploadPath`) because it now
+ * accepts more than one feature's segment - a name that only mentioned
+ * syllabus would misdescribe what it actually checks the moment a second
+ * segment existed.
  */
-export function isSyllabusUploadPath(userId: string, storagePath: string): boolean {
-  const prefix = `${userId}/syllabus-uploads/`;
-  return storagePath.startsWith(prefix) && storagePath.length > prefix.length;
+export function isKnownUploadPath(userId: string, storagePath: string): boolean {
+  return UPLOAD_PATH_SEGMENTS.some((segment) => {
+    const prefix = `${userId}/${segment}/`;
+    return storagePath.startsWith(prefix) && storagePath.length > prefix.length;
+  });
 }
 
 /**
@@ -74,7 +113,7 @@ export function isSyllabusUploadPath(userId: string, storagePath: string): boole
  * succeeded.
  *
  * `storagePath` is validated against `userId` BEFORE any Storage call at
- * all (see isSyllabusUploadPath above) - a mismatched path is refused
+ * all (see isKnownUploadPath above) - a mismatched path is refused
  * outright, with no download and no remove, rather than trusted just
  * because a caller supplied it.
  */
@@ -84,7 +123,7 @@ export async function withUploadedSyllabusFile<T, V>(
   storagePath: string,
   consume: (bytes: T) => Promise<V>
 ): Promise<SyllabusUploadResult<V>> {
-  if (!isSyllabusUploadPath(userId, storagePath)) {
+  if (!isKnownUploadPath(userId, storagePath)) {
     return { ok: false, error: "That upload could not be found. Please try uploading the file again." };
   }
 
@@ -121,26 +160,39 @@ export async function withUploadedSyllabusFile<T, V>(
 export const SYLLABUS_UPLOAD_BUCKET = "course-files";
 
 /**
- * The storage object path for one temporary syllabus upload:
- * `${userId}/syllabus-uploads/${uploadId}${extension}`.
+ * The storage object path for one temporary upload through this lifecycle:
+ * `${userId}/${segment}/${uploadId}${extension}`. `segment` defaults to
+ * `"syllabus-uploads"` so every existing 3-argument call site - the two
+ * genuinely-syllabus callers, `SyllabusUploadControl.tsx` and the
+ * course-schedule-from-source workflow step's "syllabus document" source -
+ * keeps emitting the byte-identical path it always has, unchanged. A caller
+ * that instead wants this lifecycle for a DIFFERENT kind of upload (today:
+ * `RubricInputModal.tsx`'s rubric upload) passes its own segment explicitly
+ * - `"rubric-uploads"` - so its object lives somewhere honestly named rather
+ * than under a segment named for the syllabus feature, while still sharing
+ * every line of the download/extract/delete logic below.
  *
  * The user id comes first because the "course-files" bucket's RLS policies
  * (supabase/migrations/20260722000000_course_materials.sql) all check only
  * `(storage.foldername(name))[1] = auth.uid()::text` - a path that does not
  * start with the user id is refused by RLS, not by this code.
  *
- * "syllabus-uploads" is this feature's own path segment, so these temporary
- * objects are never confused with a course's materials zip (stored directly
- * under `${userId}/${courseId}/`, src/lib/course-files.ts's uploadCourseFile)
- * or a Tasks-cell attachment (`${userId}/${courseId}/task-attachments/`,
+ * `segment` distinguishes these temporary objects from a course's materials
+ * zip (stored directly under `${userId}/${courseId}/`,
+ * src/lib/course-files.ts's uploadCourseFile) or a Tasks-cell attachment
+ * (`${userId}/${courseId}/task-attachments/`,
  * src/lib/course-task-attachments.ts's taskAttachmentStoragePath). No
- * `courseId` segment, unlike those two: a syllabus upload is not always
- * reached with a course already selected (the course-schedule-from-source
- * workflow step's "syllabus document" source has no course-tile requirement
- * of its own), and the object never outlives the request that parses it
- * anyway - see withUploadedSyllabusFile above.
+ * `courseId` segment, unlike those two: neither a syllabus upload nor a
+ * rubric upload is always reached with a course already selected, and the
+ * object never outlives the request that parses it anyway - see
+ * withUploadedSyllabusFile above.
  */
-export function syllabusUploadStoragePath(userId: string, uploadId: string, extension: string): string {
+export function syllabusUploadStoragePath(
+  userId: string,
+  uploadId: string,
+  extension: string,
+  segment: UploadPathSegment = "syllabus-uploads"
+): string {
   const ext = extension.startsWith(".") ? extension : `.${extension}`;
-  return `${userId}/syllabus-uploads/${uploadId}${ext}`;
+  return `${userId}/${segment}/${uploadId}${ext}`;
 }

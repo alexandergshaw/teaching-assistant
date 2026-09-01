@@ -78,6 +78,26 @@ import { syncGradingRowsFromExtracted } from "./grading-capture-sync";
 import { checkGradingReadiness } from "./grading-dispatch";
 import { describeExtractionOutcome, isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
 import { classifyGradingResult } from "./grading-rows";
+// docs/DEV_LOOP.md's "every feature needs a downloadable log" rule - this
+// surface is the newest and most in need of it (it reads names off a screen,
+// merges readings, skips unnamed submissions, drops frames, and grades; every
+// one of those is a silent-failure candidate). Collection (the refs/effects
+// below) lives here, mirroring useDiscussionReplies.ts's own split;
+// assembly/formatting is entirely grading-recording-log.ts, per that module's
+// own header.
+import {
+  makeGradingRecordingLogBatch,
+  buildGradingRecordingRunLog,
+  summarizeGradingRecordingRunLog,
+  gradingRecordingLogSummaryLine,
+  formatGradingRecordingLogCsv,
+  formatGradingRecordingLogJson,
+  gradingRecordingLogFileName,
+  type GradingRecordingLogBatch,
+  type GradingRecordingLogEncodeNotice,
+  type GradingRecordingLogGradingRun,
+} from "./grading-recording-log";
+import { triggerFileDownload } from "../course-planning/utils";
 
 // STORAGE KEY CANARY (grading-rows.test.ts's own "grading-recording persisted
 // key canary" - self-contained, since recording-split.structure.test.ts's
@@ -106,6 +126,36 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   // run must never look like a complete one".
   const { capturing, elapsedSec, pendingFrames, droppedFrames, frameEncodeNotice, stalled, previewRef, start, stop, takeFrameBatch } =
     useDiscussionCapture();
+
+  // docs/DEV_LOOP.md's downloadable-log rule: collection. State, not refs -
+  // eslint-plugin-react-hooks forbids reading a ref's `.current` during
+  // render (Cannot access refs during render), and the summary line/download
+  // handler below both need a render-time read - mirrors
+  // useDiscussionReplies.ts's own identical choice (logStartedAt/logBatches/
+  // etc. are all useState there too, not refs - see that file's own
+  // logStartedAt/setLogBatches for the shipped precedent this follows).
+  // `logStartedAt`/`logEndedAt` are set directly in handleStartStop below
+  // (an event handler, not an effect) for the same reason
+  // useDiscussionReplies.ts's own start()/stop() set theirs directly rather
+  // than watching a `capturing` transition.
+  const [logStartedAt, setLogStartedAt] = useState("");
+  const [logEndedAt, setLogEndedAt] = useState("");
+  const [logBatches, setLogBatches] = useState<GradingRecordingLogBatch[]>([]);
+  const [logEncodeNotices, setLogEncodeNotices] = useState<GradingRecordingLogEncodeNotice[]>([]);
+  const [logGradingRuns, setLogGradingRuns] = useState<GradingRecordingLogGradingRun[]>([]);
+  // useDiscussionCapture.ts's frameEncodeNotice is live, MOST-RECENT-only
+  // state (reset to null on every start()) - collected here as its own
+  // append-only event stream so a session that hit it more than once still
+  // shows every occurrence in the downloaded log, not just the last. The
+  // comparison ref is read/written only inside this effect, never during
+  // render, so it does not trip the same rule the state above exists for.
+  const prevEncodeNoticeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (frameEncodeNotice && frameEncodeNotice !== prevEncodeNoticeRef.current) {
+      setLogEncodeNotices((prev) => [...prev, { at: new Date().toISOString(), text: frameEncodeNotice }]);
+    }
+    prevEncodeNoticeRef.current = frameEncodeNotice;
+  }, [frameEncodeNotice]);
 
   const { courses, coursesLoading, coursesError } = useGradingCourses(active);
 
@@ -226,11 +276,27 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         provider
       );
       if ("error" in result) {
+        setLogBatches((prev) => [
+          ...prev,
+          makeGradingRecordingLogBatch({ at: new Date().toISOString(), framesInBatch: frames.length, error: result.error }),
+        ]);
         pushNotices(describeExtractionOutcome(result, 0));
         return;
       }
       const merge = mergeExtractedSubmissions(extractedRef.current, result.submissions);
       extractedRef.current = merge.submissions;
+      setLogBatches((prev) => [
+        ...prev,
+        makeGradingRecordingLogBatch({
+          at: new Date().toISOString(),
+          framesInBatch: frames.length,
+          submissionsExtracted: result.submissions.length,
+          added: merge.addedCount,
+          merged: merge.mergedCount,
+          skippedUnnamed: result.skippedUnnamed,
+          confirmedEmpty: result.confirmedEmpty,
+        }),
+      ]);
       pushNotices(describeExtractionOutcome(result, merge.addedCount));
       setTotalReadingsCount((prev) => prev + merge.addedCount + merge.mergedCount);
 
@@ -277,9 +343,15 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
 
   const handleStartStop = useCallback(() => {
     if (capturing) {
+      setLogEndedAt(new Date().toISOString());
       stop();
       return;
     }
+    // `startedAt` is the first Start this panel mount, never overwritten by
+    // a later one - mirrors useDiscussionReplies.ts's own start()
+    // (functional updater keeps whatever is already set).
+    setLogStartedAt((prev) => prev || new Date().toISOString());
+    setLogEndedAt("");
     void start({ saveVideo: false });
   }, [capturing, start, stop]);
 
@@ -290,6 +362,21 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     const readiness = checkGradingReadiness(rubricText, gradingRows.totalCount);
     if (!readiness.ok) {
       setGradeError(readiness.reason);
+      // docs/DEV_LOOP.md's downloadable-log rule: a refused attempt is a real
+      // event ("why didn't grading run") - logged here rather than silently
+      // leaving no trace of the click at all.
+      setLogGradingRuns((prev) => [
+        ...prev,
+        {
+          at: new Date().toISOString(),
+          rowCount: gradingRows.totalCount,
+          blocked: true,
+          reason: readiness.reason ?? "",
+          error: "",
+          graded: 0,
+          failed: 0,
+        },
+      ]);
       return;
     }
     setGradeError(null);
@@ -308,6 +395,18 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       );
       if ("error" in result) {
         setGradeError(result.error);
+        setLogGradingRuns((prev) => [
+          ...prev,
+          {
+            at: new Date().toISOString(),
+            rowCount: submissions.length,
+            blocked: false,
+            reason: "",
+            error: result.error,
+            graded: 0,
+            failed: 0,
+          },
+        ]);
         return;
       }
       // BLOCKER 3: classifyGradingResult (grading-rows.ts) is the one place
@@ -318,15 +417,67 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       // every result as "ready" unconditionally (the previous code here) is
       // exactly what made GradingRow's "failed" state and `error` field
       // dead code.
+      let graded = 0;
+      let failed = 0;
       for (const r of result.results) {
-        gradingRows.applyGradingResult(r.id, classifyGradingResult(r));
+        const classified = classifyGradingResult(r);
+        if (classified.state === "failed") failed += 1;
+        else graded += 1;
+        gradingRows.applyGradingResult(r.id, classified);
       }
+      setLogGradingRuns((prev) => [
+        ...prev,
+        { at: new Date().toISOString(), rowCount: submissions.length, blocked: false, reason: "", error: "", graded, failed },
+      ]);
     } catch (err) {
-      setGradeError(err instanceof Error ? err.message : "Could not grade these submissions.");
+      const message = err instanceof Error ? err.message : "Could not grade these submissions.";
+      setGradeError(message);
+      setLogGradingRuns((prev) => [
+        ...prev,
+        {
+          at: new Date().toISOString(),
+          rowCount: gradingRows.totalCount,
+          blocked: false,
+          reason: "",
+          error: message,
+          graded: 0,
+          failed: 0,
+        },
+      ]);
     } finally {
       setGradingBusy(false);
     }
   }, [rubricText, gradingRows, knowledgeContext, provider]);
+
+  // docs/DEV_LOOP.md's downloadable-log rule: assembled fresh on every
+  // render (cheap - a handful of array spreads over state that only grows on
+  // a real event) so the on-screen summary line and a download click always
+  // agree, and so a download can never be built from a stale prior render's
+  // course/rubric/knowledge-context settings.
+  const currentGradingLog = buildGradingRecordingRunLog(
+    {
+      startedAt: logStartedAt,
+      endedAt: logEndedAt,
+      courseName: selectedCourse?.name ?? "",
+      rubricPresent: rubricText.trim() !== "",
+      knowledgeContextPresent: knowledgeContext !== null,
+      droppedFrames,
+      batches: logBatches,
+      encodeNotices: logEncodeNotices,
+      gradingRuns: logGradingRuns,
+    },
+    gradingRows.rawRows
+  );
+  const handleDownloadLog = (format: "csv" | "json") => {
+    const now = new Date().toISOString();
+    const text =
+      format === "csv"
+        ? formatGradingRecordingLogCsv(currentGradingLog)
+        : formatGradingRecordingLogJson(currentGradingLog, { exportedAt: now });
+    const filename = gradingRecordingLogFileName(currentGradingLog.courseName, format, now);
+    const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
+    triggerFileDownload(new Blob([text], { type: mimeType }), filename);
+  };
 
   return (
     <div className={styles.adaptPanel}>
@@ -337,6 +488,25 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           them against a rubric you provide. Nothing here is bound to a student record or posted to an LMS; it is a
           working surface to review, edit, and copy from.
         </p>
+      </div>
+
+      {/* docs/DEV_LOOP.md: "a downloadable log ... displayed in a prominent
+          location". Placed immediately under the header, before every other
+          control - never gated on `gradingRows.totalCount > 0` or on a
+          capture/grade having run, since a failed or empty run (a capture
+          that never found a readable name, a "Grade submissions" click
+          refused for a missing rubric) is exactly when this needs to be
+          reachable without hunting - mirrors
+          recording/DiscussionRepliesPanel.tsx's own identical placement and
+          reasoning. */}
+      <div className={styles.fieldHint} style={{ margin: "0 0 4px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span>{gradingRecordingLogSummaryLine(summarizeGradingRecordingRunLog(currentGradingLog))}</span>
+        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
+          Download run log (CSV)
+        </Button>
+        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
+          Download run log (JSON)
+        </Button>
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-start" }}>

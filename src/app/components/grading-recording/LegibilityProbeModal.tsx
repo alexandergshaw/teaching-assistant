@@ -74,6 +74,21 @@ import {
   type ProbeCaptureParameters,
   type ProbeResultNotice,
 } from "./legibility-probe";
+// docs/DEV_LOOP.md's "every feature needs a downloadable log" rule: this
+// probe already computes and shows everything worth logging (the transcript,
+// the capture-parameters line) - see legibility-probe-log.ts's own header
+// for why this file only needs to ACCUMULATE what is already computed, never
+// re-derive any of it.
+import {
+  buildLegibilityProbeRunLog,
+  summarizeLegibilityProbeRunLog,
+  legibilityProbeLogSummaryLine,
+  formatLegibilityProbeLogCsv,
+  formatLegibilityProbeLogJson,
+  legibilityProbeLogFileName,
+  type LegibilityProbeLogRun,
+} from "./legibility-probe-log";
+import { triggerFileDownload } from "../course-planning/utils";
 
 export interface LegibilityProbeModalProps {
   onClose: () => void;
@@ -110,6 +125,14 @@ export function LegibilityProbeModal({
   const [params, setParams] = useState<ProbeCaptureParameters | null>(null);
   const [sentFrames, setSentFrames] = useState<CapturedFrame[]>([]);
   const runCountRef = useRef(0);
+  // docs/DEV_LOOP.md's downloadable-log rule: accumulates for the whole
+  // modal-open lifetime (every "Run legibility probe" click, not just the
+  // most recently displayed one) - see legibility-probe-log.ts's own header.
+  // State, not a ref: eslint-plugin-react-hooks forbids reading a ref's
+  // `.current` during render, and the summary line/download handler below
+  // both need a render-time read - mirrors GradingRecordingPanel.tsx's own
+  // identical choice.
+  const [probeRuns, setProbeRuns] = useState<LegibilityProbeLogRun[]>([]);
 
   const handleStartStop = useCallback(() => {
     if (capturing) {
@@ -156,13 +179,41 @@ export function LegibilityProbeModal({
       setSentFrames(frames);
       setParams({ frames, wireBytes });
       setTranscript("transcript" in result ? result.transcript : null);
-      setNotice(deriveProbeResultNotice(result));
+      const resultNotice = deriveProbeResultNotice(result);
+      setNotice(resultNotice);
+      setProbeRuns((prev) => [
+        ...prev,
+        {
+          at: new Date().toISOString(),
+          frameCount: frames.length,
+          wireBytes,
+          captureParametersLine: describeCaptureParameters({ frames, wireBytes }, formatMB),
+          outcome: resultNotice.kind,
+          noticeText: resultNotice.text,
+          transcript: "transcript" in result ? result.transcript : "",
+        },
+      ]);
     } finally {
       if (runId === runCountRef.current) setBusy(false);
     }
   }, [pendingFrames, busy, takeFrameBatch, provider]);
 
   const canRun = canRunProbe(pendingFrames, busy);
+
+  // docs/DEV_LOOP.md's downloadable-log rule: rebuilt on every render (cheap
+  // - the ref only grows on a real "Run legibility probe" completion) so the
+  // on-screen summary and a download click always agree.
+  const currentProbeLog = buildLegibilityProbeRunLog(probeRuns);
+  const handleDownloadLog = (format: "csv" | "json") => {
+    const now = new Date().toISOString();
+    const text =
+      format === "csv"
+        ? formatLegibilityProbeLogCsv(currentProbeLog)
+        : formatLegibilityProbeLogJson(currentProbeLog, { exportedAt: now });
+    const filename = legibilityProbeLogFileName(format, now);
+    const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
+    triggerFileDownload(new Blob([text], { type: mimeType }), filename);
+  };
 
   return (
     <ModalShell
@@ -186,6 +237,22 @@ export function LegibilityProbeModal({
       </div>
 
       <div className={styles.previewContent}>
+        {/* docs/DEV_LOOP.md: "a downloadable log ... displayed in a
+            prominent location". Placed first inside the content area, before
+            every capture control - never gated on a run having happened
+            (canRun/busy/transcript), since a probe that never returned a
+            usable answer is exactly when this needs to be reachable without
+            hunting - mirrors GradingRecordingPanel.tsx/
+            DiscussionRepliesPanel.tsx's own identical placement. */}
+        <div className={styles.fieldHint} style={{ margin: "0 0 4px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span>{legibilityProbeLogSummaryLine(summarizeLegibilityProbeRunLog(currentProbeLog))}</span>
+          <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
+            Download run log (CSV)
+          </Button>
+          <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
+            Download run log (JSON)
+          </Button>
+        </div>
         <div className={styles.ghActions}>
           <Button variant="contained" size="small" onClick={handleStartStop}>
             {capturing ? "Stop capture" : "Start capture"}

@@ -69,8 +69,12 @@ export type RepoGradeCellStatus =
   | "ungraded" // the folder exists; no score has been posted
   | "scan-error"; // this repo's tree fetch failed, so folder presence is unknown - never conflated with "missing-folder" (AC3 item 17c)
 
-/** Mirrors GradingResults.tsx's own PostState union. */
-export type RepoGradePostStatus = "idle" | "posting" | "posted" | "error";
+/** Mirrors GradingResults.tsx's own PostState union. B1 (ux-audit-grading.md):
+ * "skipped" is a genuine third outcome after a post attempt - the student had
+ * no grade or comment to send, so Canvas was never called for them
+ * (postCanvasGradesAction's own `skipped` array, src/lib/canvas/grades.ts).
+ * Never folded into "posted" just because it is absent from `failures`. */
+export type RepoGradePostStatus = "idle" | "posting" | "posted" | "error" | "skipped";
 
 /**
  * This pure module (buildRepoGradeRows/buildRepoGradeGridModel) always

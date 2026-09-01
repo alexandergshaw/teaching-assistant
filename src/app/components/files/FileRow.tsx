@@ -59,6 +59,13 @@ interface FileRowProps {
   onSelectCourse: (url: string) => void;
 }
 
+// Every FileList.tsx render site (grouped / ungrouped / flat) passes the
+// exact same set of props to every <FileRow> except `file` itself - see
+// FileList.tsx's own header comment. Named and exported here (mirroring
+// ModuleCard.tsx's ModuleItemRowSharedProps / AddItemRowSharedProps idiom)
+// so the two files share ONE type instead of FileList re-deriving it.
+export type FileRowSharedProps = Omit<FileRowProps, "file">;
+
 export function FileRow({
   file,
   selected,
@@ -257,6 +264,7 @@ export function FileRow({
                     size="small"
                     sx={{ minWidth: 220 }}
                     disabled={modulesStatus !== "ready"}
+                    aria-label={`Module to add ${file.name} to`}
                   >
                     {modulesStatus === "ready" && modules.length === 0 ? (
                       <MenuItem value="">No modules found</MenuItem>

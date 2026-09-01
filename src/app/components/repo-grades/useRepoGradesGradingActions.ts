@@ -437,17 +437,13 @@ export function useRepoGradesGradingActions(
   // ticking four students and clicking Post silently graded-and-posted every
   // postable row in the column instead.
   //
-  // NOTE (flagged plainly, not papered over): RepoGradesGrid.tsx's column
-  // header button (ColumnHeaderControls) computes ITS OWN postable count
-  // from the UNSCOPED `rows` it was given - it has no `selected` prop wired
-  // to it, so that header count/enabled-state can now legitimately disagree
-  // with what actually gets posted whenever a selection is active (it will
-  // show the whole column's count even though only the selection posts). The
-  // confirm dialog below and the "nothing postable in the current scope"
-  // summary message always describe the REAL, selection-scoped plan, so the
-  // actual write is never mis-stated - only the header's separate, always-
-  // visible count can be stale relative to it. Closing that requires
-  // threading `selected` into RepoGradesGrid.tsx's ColumnHeaderControls.
+  // NOTE: RepoGradesGrid.tsx's column header button (ColumnHeaderControls)
+  // scopes its own postable count through the SAME pipeline this handler
+  // uses - it receives `selected` and calls scopeRepoGradeRowsToSelection
+  // (repoGradesPosting.ts) before repoGradePostCandidateRows/
+  // buildRepoGradePostPlan, exactly as this handler does above - so the
+  // header's displayed count and this handler's actual post can never
+  // disagree about which rows a selection scopes to.
   const handlePostColumn = async (column: RepoGradeColumn, pointsPossible: number | null) => {
     if (!course) return;
     const scopedRows = scopeRepoGradeRowsToSelection(rows, selected);
@@ -535,17 +531,27 @@ export function useRepoGradesGradingActions(
     // L1 items 3-5: one entry per ATTEMPTED row carrying the exact score that
     // went out (read off the plan, never re-read from the edit state, which
     // the instructor may have kept typing into while the call was in flight),
-    // plus one per row the plan dropped before the call.
+    // plus one per row the plan dropped before the call. B1: a row
+    // postCanvasGradesAction itself skipped (no grade or comment to send)
+    // logs under the SAME "post-skipped" kind as a plan-level drop, since
+    // both describe "this row was never written to Canvas."
     const gradeByRepo = new Map(plan.postable.map((item) => [item.repo, item.grade.grade]));
     recordLog([
       ...fanout.map((outcome) =>
-        buildLogEntry(outcome.postStatus === "error" ? "post-failed" : "post-succeeded", {
-          repo: outcome.repo,
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          score: gradeByRepo.get(outcome.repo) ?? "",
-          detail: outcome.postMessage ?? "",
-        })
+        buildLogEntry(
+          outcome.postStatus === "error"
+            ? "post-failed"
+            : outcome.postStatus === "skipped"
+              ? "post-skipped"
+              : "post-succeeded",
+          {
+            repo: outcome.repo,
+            folder: column.folder,
+            assignmentId: column.assignmentId ?? "",
+            score: gradeByRepo.get(outcome.repo) ?? "",
+            detail: outcome.postMessage ?? "",
+          }
+        )
       ),
       ...plan.skipped.map((skip) =>
         buildLogEntry("post-skipped", {
@@ -557,9 +563,17 @@ export function useRepoGradesGradingActions(
       ),
     ]);
 
+    // B1: state the denominator and both non-success outcomes separately -
+    // "posted 54, 3 failed" used to be indistinguishable from a batch where a
+    // FOURTH row was silently dropped for having no grade or comment to send.
     const failedCount = fanout.filter((f) => f.postStatus === "error").length;
+    const skippedCount = fanout.filter((f) => f.postStatus === "skipped").length;
+    const postedCount = fanout.length - failedCount - skippedCount;
     setPostSummary(
-      `${column.folder}: posted ${fanout.length - failedCount}${failedCount ? `, ${failedCount} failed` : ""}.`
+      `${column.folder}: posted ${postedCount} of ${fanout.length} attempted` +
+        (failedCount ? `, ${failedCount} failed` : "") +
+        (skippedCount ? `, ${skippedCount} skipped (no grade or comment)` : "") +
+        "."
     );
   };
 
@@ -636,18 +650,36 @@ export function useRepoGradesGradingActions(
     const singleGrade = plan.postable[0]?.grade.grade ?? "";
     recordLog(
       fanout.map((outcome) =>
-        buildLogEntry(outcome.postStatus === "error" ? "post-failed" : "post-succeeded", {
-          repo: outcome.repo,
-          folder: column.folder,
-          assignmentId: column.assignmentId ?? "",
-          score: singleGrade,
-          detail: outcome.postMessage ?? "Single-row retry",
-        })
+        buildLogEntry(
+          outcome.postStatus === "error"
+            ? "post-failed"
+            : outcome.postStatus === "skipped"
+              ? "post-skipped"
+              : "post-succeeded",
+          {
+            repo: outcome.repo,
+            folder: column.folder,
+            assignmentId: column.assignmentId ?? "",
+            score: singleGrade,
+            detail: outcome.postMessage ?? "Single-row retry",
+          }
+        )
       )
     );
 
-    const failed = fanout.some((f) => f.postStatus === "error");
-    setPostSummary(`${row.repo} / ${column.folder}: ${failed ? "failed to post." : "posted."}`);
+    // B1: a skip is neither "posted" nor "failed to post" - Canvas was never
+    // called for this row, and saying "posted" would be exactly the false
+    // "Posted to Canvas" claim this fix exists to prevent.
+    const outcome = fanout[0]?.postStatus;
+    setPostSummary(
+      `${row.repo} / ${column.folder}: ${
+        outcome === "error"
+          ? "failed to post."
+          : outcome === "skipped"
+            ? "not posted - no grade or comment to send."
+            : "posted."
+      }`
+    );
   };
 
   // ---- "Grade all": grades a whole column at once against each folder's

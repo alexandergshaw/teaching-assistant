@@ -29,6 +29,18 @@ import {
 } from "./useTakeAnnouncement";
 import AnnouncementCompositionControls from "./AnnouncementCompositionControls";
 import type { Take } from "./types";
+// docs/DEV_LOOP.md's "every feature needs a downloadable log" rule -
+// collection lives in useTakeAnnouncement.ts (getAnnouncementLog); this
+// panel only formats/downloads, mirroring GradingRecordingPanel.tsx and
+// recording/DiscussionRepliesPanel.tsx's own identical split.
+import {
+  summarizeAnnouncementRunLog,
+  announcementLogSummaryLine,
+  formatAnnouncementLogCsv,
+  formatAnnouncementLogJson,
+  announcementLogFileName,
+} from "./announcement-log";
+import { triggerFileDownload } from "../course-planning/utils";
 
 const POST_CONFIRM_CONSEQUENCE_ID = "take-announcement-post-confirm-consequence";
 
@@ -141,6 +153,7 @@ export default function TakeAnnouncementPanel({
     regenerateImage,
     discardImage,
     downloadImage,
+    getAnnouncementLog,
   } = hook;
 
   // AC28 item 5: focus moves to the surface heading on open. Restoring focus
@@ -156,12 +169,47 @@ export default function TakeAnnouncementPanel({
     onCourseIdChange?.(id);
   }
 
+  // docs/DEV_LOOP.md's downloadable-log rule: rebuilt on every render (cheap
+  // - getAnnouncementLog only spreads a handful of arrays that grow on a
+  // real event) so the on-screen summary and a download click always agree.
+  // Reachable from BOTH return branches below (the already-posted early
+  // return and the main pipeline view) - a run that already succeeded is
+  // still worth downloading, and so is one that never reached a post at all.
+  const currentAnnouncementLog = getAnnouncementLog();
+  const handleDownloadLog = (format: "csv" | "json") => {
+    const now = new Date().toISOString();
+    const text =
+      format === "csv"
+        ? formatAnnouncementLogCsv(currentAnnouncementLog)
+        : formatAnnouncementLogJson(currentAnnouncementLog, { exportedAt: now });
+    const filename = announcementLogFileName(currentAnnouncementLog.takeName, format, now);
+    const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
+    triggerFileDownload(new Blob([text], { type: mimeType }), filename);
+  };
+  const downloadLogRow = (
+    <div className={styles.fieldHint} style={{ margin: "0 0 4px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <span>{announcementLogSummaryLine(summarizeAnnouncementRunLog(currentAnnouncementLog))}</span>
+      <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
+        Download run log (CSV)
+      </Button>
+      <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
+        Download run log (JSON)
+      </Button>
+    </div>
+  );
+
   if (posted) {
     return (
       <div className={styles.adaptPanel}>
         <h2 ref={headingRef} tabIndex={-1} className={styles.adaptPanelTitle}>
           Announcement from {take.name}
         </h2>
+        {/* docs/DEV_LOOP.md: "a downloadable log ... displayed in a
+            prominent location" - reachable here too, not just the in-progress
+            view below, since a run that already posted is still worth being
+            able to download (what path did the transcription take, did the
+            image upload fail while the text posted). */}
+        {downloadLogRow}
         <p role="status" aria-live="polite">
           Posted to {posted.course}. Students can see it now.
         </p>
@@ -190,6 +238,16 @@ export default function TakeAnnouncementPanel({
           Back to takes
         </Button>
       </div>
+
+      {/* docs/DEV_LOOP.md: "a downloadable log ... displayed in a prominent
+          location". Placed immediately under the header/close controls,
+          before every stage-specific view - never gated on `stage.phase` or
+          on a post having happened, since a failed run (a draft failure, a
+          transcription chunk that never recovered) is exactly when this
+          needs to be reachable without hunting - mirrors
+          GradingRecordingPanel.tsx/DiscussionRepliesPanel.tsx's own identical
+          placement and reasoning. */}
+      {downloadLogRow}
 
       {/* Throttled stage-transition / 25%-of-chunks announcements (AC23b) -
           visible, matching this repo's own precedent of a live region that is

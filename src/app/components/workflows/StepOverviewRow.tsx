@@ -74,6 +74,15 @@ export function StepOverviewRow({
         {bindings && (
           <span style={{ marginLeft: 8 }}>({bindings})</span>
         )}
+        {/* B3: every StepDefinition already carries a description - this used
+            to render only the step's bare name and its raw bindings, leaving
+            "what will this step actually DO" (e.g. "posts an announcement to
+            Canvas" vs. "drafts a file") unstated before Run is clicked. */}
+        {stepDef?.description && (
+          <div className={styles.fieldHint} style={{ marginTop: 2 }}>
+            {stepDef.description}
+          </div>
+        )}
         {disabled && (
           <span
             className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}

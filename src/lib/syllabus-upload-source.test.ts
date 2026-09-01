@@ -17,7 +17,7 @@
 // than reasoned about in review. This is the same shape uploadTaskAttachment
 // uses for the same class of problem.
 import { describe, it, expect } from "vitest";
-import { withUploadedSyllabusFile, isSyllabusUploadPath } from "./syllabus-upload-source";
+import { withUploadedSyllabusFile, isKnownUploadPath, syllabusUploadStoragePath } from "./syllabus-upload-source";
 
 /** A fake of the only two storage calls this lifecycle makes, recording the
  * order it was called in so the assertions below are about real sequencing
@@ -137,7 +137,65 @@ describe("withUploadedSyllabusFile: the object is removed even when things go wr
 });
 
 // ---------------------------------------------------------------------------
-// isSyllabusUploadPath / withUploadedSyllabusFile's path guard.
+// The same lifecycle, unmodified, for the rubric-uploads segment
+// (RubricInputModal.tsx). This is not a second implementation - it is the
+// exact same withUploadedSyllabusFile call above, just fed a
+// "rubric-uploads" path - so these tests exist to prove the always-delete
+// guarantee holds for that segment too, on every branch, rather than assume
+// it because the syllabus-uploads tests above passed.
+// ---------------------------------------------------------------------------
+const RUBRIC_PATH = "user-1/rubric-uploads/xyz.pdf";
+
+describe("withUploadedSyllabusFile: the always-delete guarantee also holds for a rubric upload", () => {
+  it("happy path: downloads, hands bytes to consume, removes the object", async () => {
+    const storage = fakeStorage({ bytes: new Uint8Array([7]) });
+    const result = await withUploadedSyllabusFile(storage.client, USER_ID, RUBRIC_PATH, async () => "rubric text");
+    expect(result).toEqual({ ok: true, value: "rubric text" });
+    expect(storage.calls).toEqual([`download:${RUBRIC_PATH}`, "remove"]);
+    expect(storage.removed).toEqual([[RUBRIC_PATH]]);
+  });
+
+  it("download failure: still removes, never calls consume", async () => {
+    const storage = fakeStorage({ downloadError: "network" });
+    let consumed = 0;
+    const result = await withUploadedSyllabusFile(storage.client, USER_ID, RUBRIC_PATH, async () => {
+      consumed += 1;
+      return "x";
+    });
+    expect(consumed).toBe(0);
+    expect(result.ok).toBe(false);
+    expect(storage.removed).toEqual([[RUBRIC_PATH]]);
+  });
+
+  it("consume throws (e.g. an unreadable rubric file): still removes", async () => {
+    const storage = fakeStorage();
+    const result = await withUploadedSyllabusFile(storage.client, USER_ID, RUBRIC_PATH, async () => {
+      throw new Error("not a readable pdf");
+    });
+    expect(result).toEqual({ ok: false, error: "not a readable pdf" });
+    expect(storage.removed).toEqual([[RUBRIC_PATH]]);
+  });
+
+  it("a mismatched path under a segment that is NOT in the allow-list is refused before any Storage call - no download, no remove, no consume", async () => {
+    const storage = fakeStorage();
+    let consumed = 0;
+    const result = await withUploadedSyllabusFile(
+      storage.client,
+      USER_ID,
+      "user-1/attachment-uploads/xyz.pdf",
+      async () => {
+        consumed += 1;
+        return "x";
+      }
+    );
+    expect(result.ok).toBe(false);
+    expect(consumed).toBe(0);
+    expect(storage.calls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isKnownUploadPath / withUploadedSyllabusFile's path guard.
 //
 // storagePath arrives here as browser-supplied metadata, and this lifecycle
 // both downloads AND deletes whatever path it is handed, against a
@@ -148,29 +206,80 @@ describe("withUploadedSyllabusFile: the object is removed even when things go wr
 // runs BEFORE either Storage call, not merely that it eventually reports an
 // error.
 // ---------------------------------------------------------------------------
-describe("isSyllabusUploadPath", () => {
+describe("isKnownUploadPath", () => {
   it("accepts a path under this user's own syllabus-uploads prefix", () => {
-    expect(isSyllabusUploadPath("user-1", "user-1/syllabus-uploads/abc.docx")).toBe(true);
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/abc.docx")).toBe(true);
   });
 
   it("rejects a path with no uploadId/extension after the prefix", () => {
-    expect(isSyllabusUploadPath("user-1", "user-1/syllabus-uploads/")).toBe(false);
+    expect(isKnownUploadPath("user-1", "user-1/syllabus-uploads/")).toBe(false);
   });
 
   it("rejects a course materials path - the same bucket, a different segment", () => {
-    expect(isSyllabusUploadPath("user-1", "user-1/course-9/materials.zip")).toBe(false);
+    expect(isKnownUploadPath("user-1", "user-1/course-9/materials.zip")).toBe(false);
   });
 
   it("rejects a Tasks-cell attachment path - the same bucket, a different segment", () => {
-    expect(isSyllabusUploadPath("user-1", "user-1/course-9/task-attachments/attach-1.pdf")).toBe(false);
+    expect(isKnownUploadPath("user-1", "user-1/course-9/task-attachments/attach-1.pdf")).toBe(false);
   });
 
   it("rejects another user's syllabus-uploads path", () => {
-    expect(isSyllabusUploadPath("user-1", "user-2/syllabus-uploads/abc.docx")).toBe(false);
+    expect(isKnownUploadPath("user-1", "user-2/syllabus-uploads/abc.docx")).toBe(false);
   });
 
   it("rejects a path that merely CONTAINS the prefix without starting with it", () => {
-    expect(isSyllabusUploadPath("user-1", "attacker/user-1/syllabus-uploads/abc.docx")).toBe(false);
+    expect(isKnownUploadPath("user-1", "attacker/user-1/syllabus-uploads/abc.docx")).toBe(false);
+  });
+
+  // RubricInputModal.tsx reuses this whole lifecycle for a rubric upload,
+  // under its own honestly-named segment rather than "syllabus-uploads" -
+  // this is the "second, equally-valid path segment" the generalisation
+  // adds. These pin that it is genuinely equally valid, not a special case.
+  it("accepts a path under this user's own rubric-uploads prefix - the second valid segment", () => {
+    expect(isKnownUploadPath("user-1", "user-1/rubric-uploads/abc.pdf")).toBe(true);
+  });
+
+  it("rejects a rubric-uploads path with no uploadId/extension after the prefix", () => {
+    expect(isKnownUploadPath("user-1", "user-1/rubric-uploads/")).toBe(false);
+  });
+
+  it("rejects another user's rubric-uploads path", () => {
+    expect(isKnownUploadPath("user-1", "user-2/rubric-uploads/abc.pdf")).toBe(false);
+  });
+
+  // A THIRD segment nobody added to UPLOAD_PATH_SEGMENTS must still be
+  // refused at runtime - proving the allow-list is actually closed, not
+  // merely typed closed for callers that go through
+  // syllabusUploadStoragePath's typed `segment` parameter. A raw string
+  // reaching isKnownUploadPath (e.g. from browser-supplied metadata, which
+  // is untyped by the time it is JSON) still has to be checked for real.
+  it("rejects an invented third segment - the allow-list is closed at runtime too, not just at the type level", () => {
+    expect(isKnownUploadPath("user-1", "user-1/attachment-uploads/abc.pdf")).toBe(false);
+    expect(isKnownUploadPath("user-1", "user-1/rubric-uploads-extra/abc.pdf")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syllabusUploadStoragePath's `segment` parameter: a frozen-literal oracle
+// for the exact path each caller gets, so a future edit that silently
+// changes the default (breaking the two syllabus callers, which never pass
+// a fourth argument) or the rubric caller's explicit segment is caught here
+// rather than discovered in Storage.
+// ---------------------------------------------------------------------------
+describe("syllabusUploadStoragePath: segment defaulting", () => {
+  it("defaults to syllabus-uploads when no segment is passed - existing callers are unaffected", () => {
+    expect(syllabusUploadStoragePath("user-1", "upload-1", ".docx")).toBe("user-1/syllabus-uploads/upload-1.docx");
+  });
+
+  it("builds a rubric-uploads path when that segment is passed explicitly", () => {
+    expect(syllabusUploadStoragePath("user-1", "upload-1", ".pdf", "rubric-uploads")).toBe(
+      "user-1/rubric-uploads/upload-1.pdf"
+    );
+  });
+
+  it("a path built for the rubric segment is itself accepted by isKnownUploadPath - the builder and the guard agree", () => {
+    const path = syllabusUploadStoragePath("user-1", "upload-1", ".pdf", "rubric-uploads");
+    expect(isKnownUploadPath("user-1", path)).toBe(true);
   });
 });
 

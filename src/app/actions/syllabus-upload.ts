@@ -198,13 +198,22 @@ export async function uploadSyllabusAction(
 }
 
 /**
- * Extract plain text from an uploaded syllabus file (.docx, .pdf, .txt, .md)
- * with NO persistence side effect - unlike uploadSyllabusAction above, this
- * never creates a syllabus-library record or touches a course. It exists for
- * callers that just need the syllabus's TEXT (e.g. the course-schedule-from-
- * source workflow step, which derives a schedule from it the same way the
- * "course description" source does), where creating a durable syllabus
- * record would be an unwanted side effect of a schedule-preview step.
+ * Extract plain text from an uploaded file (.docx, .pdf, .txt, .md) with NO
+ * persistence side effect - unlike uploadSyllabusAction above, this never
+ * creates a syllabus-library record or touches a course. It has two callers
+ * today, reusing it whole rather than forking it: the course-schedule-from-
+ * source workflow step (steps.course-schedule-from-source.ts), which derives
+ * a schedule from an uploaded syllabus's text the same way the "course
+ * description" source does, and RubricInputModal.tsx
+ * (src/app/components/grading-recording/RubricInputModal.tsx), which
+ * extracts a rubric's text for review before the instructor uses it. Both
+ * want the exact same thing from this function - download an object, extract
+ * its text, always delete the object - and creating a durable syllabus
+ * record would be an unwanted side effect for either. The two callers use
+ * different storagePath segments (`syllabusUploadStoragePath`'s
+ * `"syllabus-uploads"` vs `"rubric-uploads"`, both accepted by
+ * withUploadedSyllabusFile's isKnownUploadPath guard), which is the only
+ * thing that differs between them here.
  *
  * Like uploadSyllabusAction, `file` is metadata describing an object the
  * browser already wrote to the "course-files" bucket - never a base64

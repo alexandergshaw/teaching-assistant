@@ -55,14 +55,17 @@
 //    reused WHOLE and unmodified: it downloads the object, extracts text,
 //    and ALWAYS deletes the object afterwards (success or failure) - a
 //    rubric gets the identical "extract, then forget" lifecycle a syllabus
-//    gets. This is why the storage path below is built with
-//    `syllabusUploadStoragePath`, not a new "rubric-uploads" segment of its
-//    own: `withUploadedSyllabusFile` (src/lib/syllabus-upload-source.ts)
-//    validates the path against `isSyllabusUploadPath`, which only accepts
-//    `${userId}/syllabus-uploads/...` - reusing the ACTION whole means
-//    reusing that exact path shape too. The object is a temporary rubric
-//    upload living under a path segment named for a different feature; that
-//    naming is the visible cost of reuse, not a bug.
+//    gets, and none of that download/extract/delete code is duplicated here.
+//    The storage path below is still built with `syllabusUploadStoragePath`
+//    (src/lib/syllabus-upload-source.ts) - reusing the ACTION whole means
+//    reusing that one path builder too - but passed its own
+//    `"rubric-uploads"` segment rather than the default `"syllabus-uploads"`,
+//    so the object this control writes lives somewhere honestly named for
+//    a rubric rather than under a path segment named for a different
+//    feature. `withUploadedSyllabusFile`'s path guard, `isKnownUploadPath`,
+//    accepts both segments (and only those two - see
+//    UPLOAD_PATH_SEGMENTS in syllabus-upload-source.ts), so this control
+//    cannot accidentally invent a third.
 //
 // NOT BUILT THIS WAVE: the scanned-PDF vision-model fallback R2b describes
 // (sending the PDF inline to the vision model when extraction comes back
@@ -164,10 +167,12 @@ export function RubricInputModal({
       setBusy(true);
       try {
         const uploadId = crypto.randomUUID();
-        // Reuses the syllabus upload's own path shape - see this file's
-        // header comment on why: extractSyllabusTextAction's internal
-        // isSyllabusUploadPath check only accepts this exact prefix.
-        const storagePath = syllabusUploadStoragePath(user.id, uploadId, validation.extension);
+        // Reuses the syllabus upload's own path builder - see this file's
+        // header comment - but with the "rubric-uploads" segment, which
+        // extractSyllabusTextAction's internal path guard (isKnownUploadPath)
+        // also accepts, so this object lives under its own honestly-named
+        // path rather than a "syllabus-uploads" one.
+        const storagePath = syllabusUploadStoragePath(user.id, uploadId, validation.extension, "rubric-uploads");
 
         const { error: uploadError } = await supabase.storage
           .from(SYLLABUS_UPLOAD_BUCKET)

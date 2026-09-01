@@ -1,13 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, TextField } from "@mui/material";
 import TabHeader from "./TabHeader";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { listPendingMessageDrafts, deleteMessageDraft, type MessageDraft } from "@/lib/message-drafts";
-import { updateMessageDraftPayloadAction, postMessageDraftAction, sendMessageDraftByEmailAction } from "../actions";
+import type { Course } from "@/lib/supabase/courses";
+import {
+  updateMessageDraftPayloadAction,
+  postMessageDraftAction,
+  sendMessageDraftByEmailAction,
+  listCourseHubAction,
+} from "../actions";
 import TabShell from "./TabShell";
 import { useDraftedGradesInbox } from "./DraftedGradesInbox";
+import { isConfirmArmed } from "./content-tab/modules/confirmArming";
+import {
+  buildCourseRecipientIndex,
+  describeMessageDraftRecipients,
+  resolveMessageDraftSubject,
+  messageDraftArmSignature,
+  type MessageDraftAction,
+} from "./message-drafts-helpers";
 import styles from "../page.module.css";
 
 export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: (id: string) => void }) {
@@ -19,14 +33,26 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [confirmPost, setConfirmPost] = useState<string | null>(null);
-  const [confirmEmail, setConfirmEmail] = useState<string | null>(null);
+  // B2: a single signature-based arm, replacing three bare draft ids
+  // (confirmPost/confirmEmail/confirmDelete) that nothing ever cleared. See
+  // message-drafts-helpers.ts's messageDraftArmSignature - the armed value
+  // records WHAT it was armed for (draft id + action + current body/title),
+  // so a reload, an edit, or arming a different draft's button all
+  // invalidate a stale arm by construction rather than needing an explicit
+  // reset at every call site that could touch a draft.
+  const [armedFor, setArmedFor] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // B1: courses loaded so an announcement's recipients can be named (course
+  // + student-email count) before any send, in both the meta line and the
+  // confirm banner - not just the email path, since a Canvas announcement
+  // reaches the same whole class. A failed/slow load just leaves
+  // courseIndex empty; describeMessageDraftRecipients degrades to a legible
+  // "unrecognized course" fallback rather than crashing or blocking sends.
+  const [courses, setCourses] = useState<Course[]>([]);
 
   // Load drafts on mount and when user changes
   useEffect(() => {
@@ -58,8 +84,31 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     };
   }, [user, supabase]);
 
+  // B1: courses loaded once, independent of the drafts load above - only
+  // needed to resolve an announcement's hubCourseId into a name + count.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await listCourseHubAction();
+      if (!cancelled && !("error" in res)) {
+        setCourses(res.courses);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const courseIndex = useMemo(() => buildCourseRecipientIndex(courses), [courses]);
+
   const reload = async () => {
     if (!user) return;
+    // B2: an armed confirmation is a claim about the CURRENT draft content;
+    // a reload can bring back different content (or a different set of
+    // drafts entirely), so any pending arm is explicitly dropped here too -
+    // on top of the fact that a changed payload would already invalidate
+    // the signature on its own.
+    setArmedFor(null);
     setStatus("loading");
     try {
       const loaded = await listPendingMessageDrafts(supabase, user.id);
@@ -71,33 +120,38 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     }
   };
 
+  // B4: no optimistic removal - the row stays on screen, and Delete is
+  // disabled (disabled={busy === draft.id}, wired below) for exactly the
+  // window a send for this same draft could be in flight, so Delete can
+  // never race a Send/Send-by-email to the same draft. Only removed from
+  // local state once the server confirms the delete.
   const handleDelete = async (draft: MessageDraft) => {
-    if (confirmDelete !== draft.id) {
-      setConfirmDelete(draft.id);
-      return;
-    }
-
-    setConfirmDelete(null);
-    setDrafts((prev) => (prev ? prev.filter((d) => d.id !== draft.id) : null));
-    refreshBadge();
-
+    setArmedFor(null);
+    setBusy(draft.id);
     try {
       await deleteMessageDraft(supabase, user!.id, draft.id);
+      setDrafts((prev) => (prev ? prev.filter((d) => d.id !== draft.id) : null));
+      refreshBadge();
       setNote({ kind: "success", text: "Drafted message deleted." });
     } catch (err) {
       setNote({
         kind: "error",
         text: err instanceof Error ? err.message : "Delete failed",
       });
-      void reload();
+    } finally {
+      setBusy(null);
     }
   };
 
   const startEdit = (draft: MessageDraft) => {
     setEditingId(draft.id);
     setEditBody(draft.payload.body);
-    setEditTitle(draft.payload.kind === "announcement" ? draft.payload.title ?? "" : "");
-    setConfirmPost(null);
+    // B3: seed the Subject field the same way for EVERY kind, not just
+    // announcements - the exact fallback the server applies for the email
+    // path (messaging-outlook.ts:154), so the instructor sees precisely
+    // what would otherwise go out unedited.
+    setEditTitle(resolveMessageDraftSubject(draft.payload, draft.summary));
+    setArmedFor(null);
   };
 
   const cancelEdit = () => {
@@ -107,10 +161,17 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   };
 
   const saveEdit = async (draft: MessageDraft) => {
+    // B3: the Subject is now editable, and saved, for every kind - not just
+    // announcements. coerceMessageDraftPayload (src/lib/message-drafts.ts)
+    // already accepts an optional title on any kind; every send path that
+    // reads it (Canvas announcement/message title, and the email subject
+    // fallback payload.title || draft.summary) already treats an unset or
+    // blank title as "no override", so this never changes reply/message
+    // behavior for an instructor who leaves the field untouched.
     const newPayload = {
       ...draft.payload,
       body: editBody,
-      ...(draft.payload.kind === "announcement" ? { title: editTitle } : {}),
+      title: editTitle,
     };
     setBusy(draft.id);
     try {
@@ -128,12 +189,16 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     }
   };
 
+  // B2: handlePost/handleSendByEmail/handleDelete (above) no longer arm
+  // their own confirmation - they only ever run once armed and then
+  // explicitly confirmed via the banner below (see armedActionFor /
+  // runArmedAction), so a click on Send/Send by email/Delete itself only
+  // ever arms, never sends. See message-drafts-helpers.ts for why this is
+  // safe against a double click or a stray Enter/Space landing on the
+  // still-focused first-click button: re-arming an already-armed action is
+  // a harmless no-op, not a second confirmation.
   const handlePost = async (draft: MessageDraft) => {
-    if (confirmPost !== draft.id) {
-      setConfirmPost(draft.id);
-      return;
-    }
-    setConfirmPost(null);
+    setArmedFor(null);
     setBusy(draft.id);
     try {
       const res = await postMessageDraftAction(draft.id);
@@ -151,11 +216,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   };
 
   const handleSendByEmail = async (draft: MessageDraft) => {
-    if (confirmEmail !== draft.id) {
-      setConfirmEmail(draft.id);
-      return;
-    }
-    setConfirmEmail(null);
+    setArmedFor(null);
     setBusy(draft.id);
     try {
       const res = await sendMessageDraftByEmailAction(draft.id);
@@ -168,6 +229,48 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     } finally {
       setBusy(null);
     }
+  };
+
+  // Which action (if any) is currently armed for this specific draft - at
+  // most one is ever true across the whole tab, since armedFor is a single
+  // shared value (arming a different draft's button, or a different action
+  // on the same draft, overwrites it outright - B2's "clear whenever a
+  // different draft's action is armed", satisfied by construction rather
+  // than an explicit reset).
+  const armedActionFor = (draft: MessageDraft): MessageDraftAction | null => {
+    if (isConfirmArmed(armedFor, messageDraftArmSignature(draft, "post"))) return "post";
+    if (isConfirmArmed(armedFor, messageDraftArmSignature(draft, "email"))) return "email";
+    if (isConfirmArmed(armedFor, messageDraftArmSignature(draft, "delete"))) return "delete";
+    return null;
+  };
+
+  // B1 + B2: the confirm banner's sentence - always names who a send
+  // reaches (reusing the exact same describeMessageDraftRecipients the meta
+  // line below uses, so the two can never say something different) and
+  // always states irreversibility.
+  const armedBannerText = (draft: MessageDraft, action: MessageDraftAction): string => {
+    if (action === "delete") {
+      return "Delete this drafted message? This does not affect anything already sent, and cannot be undone.";
+    }
+    const recipients = describeMessageDraftRecipients(draft.payload, courseIndex);
+    const verb =
+      action === "email"
+        ? "Send by email"
+        : draft.payload.kind === "announcement"
+        ? "Post this announcement to Canvas"
+        : draft.payload.kind === "reply"
+        ? "Send this reply"
+        : "Send this message";
+    return `${verb} to ${recipients.text}. Sending cannot be undone.`;
+  };
+
+  const armedConfirmLabel = (action: MessageDraftAction): string =>
+    action === "post" ? "Confirm send" : action === "email" ? "Confirm send by email" : "Confirm delete";
+
+  const runArmedAction = (draft: MessageDraft, action: MessageDraftAction) => {
+    if (action === "post") void handlePost(draft);
+    else if (action === "email") void handleSendByEmail(draft);
+    else void handleDelete(draft);
   };
 
   const toggleExpand = (key: string) => {
@@ -228,7 +331,11 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
             <div className={styles.emptyState}>No drafted messages yet. Run a workflow that ends in Save a message draft and they will appear here.</div>
           ) : (
             <div className={styles.draftList}>
-              {drafts.map((draft) => (
+              {drafts.map((draft) => {
+                const armedAction = armedActionFor(draft);
+                const recipients = describeMessageDraftRecipients(draft.payload, courseIndex);
+                const subject = resolveMessageDraftSubject(draft.payload, draft.summary);
+                return (
                 <div key={draft.id} className={styles.draftSection}>
                   <div className={styles.draftSectionHead}>
                     <div>
@@ -241,6 +348,13 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           : draft.payload.kind === "message"
                           ? `message to ${draft.payload.recipientName || "student"}${draft.payload.recipientEmail ? ` (${draft.payload.recipientEmail})` : ""}`
                           : `announcement${draft.payload.title ? `: ${draft.payload.title}` : ""}`}
+                      </div>
+                      {/* B1: names who this reaches even before any send
+                          button is touched - not only inside the confirm
+                          banner - and B3: shows the subject a student
+                          actually sees, without needing to click Edit. */}
+                      <div className={styles.draftSectionMeta}>
+                        Reaches {recipients.text} · Subject: {subject}
                       </div>
                       {draft.workflowId && draft.workflowName && onOpenWorkflow && (
                         <button
@@ -278,35 +392,48 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           <Button
                             variant="outlined"
                             size="small"
+                            disabled={busy === draft.id}
                             onClick={() => startEdit(draft)}
                           >
                             Edit
                           </Button>
+                          {/* B2: this button's label never changes and it
+                              never sends by itself - clicking it only arms
+                              the confirm banner below (out from under this
+                              button, and not occupying this button's own
+                              pixels), so a double-click or a stray
+                              Enter/Space landing here after the first click
+                              just re-arms harmlessly instead of sending. */}
                           <Button
                             variant="contained"
                             size="small"
                             disabled={busy === draft.id}
-                            onClick={() => void handlePost(draft)}
+                            onClick={() => setArmedFor(messageDraftArmSignature(draft, "post"))}
                           >
-                            {busy === draft.id ? "Sending..." : confirmPost === draft.id ? "Confirm send" : "Send"}
+                            {busy === draft.id ? "Sending..." : "Send"}
                           </Button>
                           {(draft.payload.recipientEmail || (draft.payload.kind === "announcement" && draft.payload.hubCourseId)) && (
                             <Button
                               variant="outlined"
                               size="small"
                               disabled={busy === draft.id}
-                              onClick={() => void handleSendByEmail(draft)}
+                              onClick={() => setArmedFor(messageDraftArmSignature(draft, "email"))}
                             >
-                              {busy === draft.id ? "Sending..." : confirmEmail === draft.id ? "Confirm send by email" : "Send by email"}
+                              {busy === draft.id ? "Sending..." : "Send by email"}
                             </Button>
                           )}
+                          {/* B4: guarded the same way Send/Send by email
+                              already are - a send in flight for this draft
+                              (busy === draft.id) disables Delete, so Delete
+                              can never race a send for the same draft. */}
                           <Button
                             variant="outlined"
                             size="small"
                             color="error"
-                            onClick={() => void handleDelete(draft)}
+                            disabled={busy === draft.id}
+                            onClick={() => setArmedFor(messageDraftArmSignature(draft, "delete"))}
                           >
-                            {confirmDelete === draft.id ? "Confirm delete" : "Delete"}
+                            {busy === draft.id ? "Deleting..." : "Delete"}
                           </Button>
                         </>
                       )}
@@ -316,17 +443,22 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                   <div style={{ padding: "10px 16px" }}>
                     {editingId === draft.id ? (
                       <>
-                        {draft.payload.kind === "announcement" && (
-                          <TextField
-                            size="small"
-                            value={editTitle}
-                            onChange={(e) => setEditTitle(e.target.value)}
-                            sx={{ width: "100%", marginBottom: 1 }}
-                          />
-                        )}
+                        {/* B3: shown for every kind now, not only
+                            announcements - seeded in startEdit from
+                            resolveMessageDraftSubject, so an instructor
+                            editing a reply's body can also see and change
+                            the exact line a student's inbox will show. */}
+                        <TextField
+                          size="small"
+                          label="Subject (what the student sees)"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          sx={{ width: "100%", marginBottom: 1 }}
+                        />
                         <TextField
                           multiline
                           minRows={4}
+                          label="Message"
                           value={editBody}
                           onChange={(e) => setEditBody(e.target.value)}
                           sx={{ width: "100%" }}
@@ -354,9 +486,36 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                         </Button>
                       </>
                     )}
+
+                    {/* B2: the confirm banner - rendered BELOW the draft's
+                        body/context, never in the action row above, so the
+                        confirming click is never at the position the
+                        arming click was. Reuses KnowledgeTab.tsx's
+                        kbWarnBanner/kbWarnActions shell (its own delete
+                        confirmation) rather than inventing a second one. */}
+                    {armedAction && (
+                      <div className={styles.kbWarnBanner} role="alertdialog" aria-label={armedConfirmLabel(armedAction)} style={{ marginTop: 12 }}>
+                        <span>{armedBannerText(draft, armedAction)}</span>
+                        <div className={styles.kbWarnActions}>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color={armedAction === "delete" ? "error" : "primary"}
+                            disabled={busy === draft.id}
+                            onClick={() => runArmedAction(draft, armedAction)}
+                          >
+                            {busy === draft.id ? "Working..." : armedConfirmLabel(armedAction)}
+                          </Button>
+                          <Button size="small" disabled={busy === draft.id} onClick={() => setArmedFor(null)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </>

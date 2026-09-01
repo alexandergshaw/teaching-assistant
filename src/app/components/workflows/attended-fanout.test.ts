@@ -4,6 +4,8 @@ import {
   buildCourseFanoutSummary,
   buildCourseFanoutDetail,
   countOkCourses,
+  countOkInstitutionGroups,
+  describeInstitutionFanoutProgress,
   buildComposedFanoutEntities,
   pinComposedGroupScope,
   uniqueZipEntryName,
@@ -11,6 +13,16 @@ import {
   withTopLevelRunLog,
   type RunStateGroup,
 } from "./attended-fanout";
+
+function institutionGroup(
+  institution: string,
+  stepStatuses: RunStateGroup["steps"][number]["status"][]
+): RunStateGroup {
+  return {
+    institution,
+    steps: stepStatuses.map((status) => ({ status, progress: null, summary: null, error: null })),
+  };
+}
 
 function group(courseId: string, courseName: string, stepStatuses: RunStateGroup["steps"][number]["status"][]): RunStateGroup {
   return {
@@ -350,5 +362,72 @@ describe("withTopLevelRunLog", () => {
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("Run Log.txt");
     expect(await result[0].blob.text()).toBe("solo log");
+  });
+});
+
+// C1: the ok-count bug this fixes is that the OLD inline expression
+// (`steps.every(s => s.status !== "error")`) reads a group of all-"pending"
+// steps as ok - the exact state EVERY group is in the instant Run is
+// clicked, before anything has run. countOkInstitutionGroups must reject
+// that.
+describe("countOkInstitutionGroups", () => {
+  it("does NOT count a group whose every step is still pending - this is the C1 bug itself", () => {
+    const groups = [institutionGroup("MIT", ["pending", "pending"])];
+    // The bug this guards: steps.every(s => s.status !== "error") is TRUE
+    // here (nothing has errored - nothing has even started), so the old
+    // expression would have read this as "1/1 ok" the moment Run was
+    // clicked. It must read 0.
+    expect(groups[0].steps.every((s) => s.status !== "error")).toBe(true);
+    expect(countOkInstitutionGroups(groups)).toBe(0);
+  });
+
+  it("does not count a group with a step still running", () => {
+    const groups = [institutionGroup("MIT", ["done", "running"])];
+    expect(countOkInstitutionGroups(groups)).toBe(0);
+  });
+
+  it("counts a group only once every step has settled with no error", () => {
+    const groups = [institutionGroup("MIT", ["done", "skipped", "disabled"])];
+    expect(countOkInstitutionGroups(groups)).toBe(1);
+  });
+
+  it("does not count a group with a settled error step", () => {
+    const groups = [institutionGroup("MIT", ["done", "error"])];
+    expect(countOkInstitutionGroups(groups)).toBe(0);
+  });
+
+  it("counts each qualifying group independently across a multi-institution run", () => {
+    const groups = [
+      institutionGroup("MIT", ["done"]),
+      institutionGroup("Yale", ["error"]),
+      institutionGroup("NYU", ["pending"]),
+      institutionGroup("Brown", ["done"]),
+    ];
+    expect(countOkInstitutionGroups(groups)).toBe(2);
+  });
+});
+
+describe("describeInstitutionFanoutProgress", () => {
+  it("reports 'still running' while any group has an unsettled step", () => {
+    const groups = [
+      institutionGroup("MIT", ["done"]),
+      institutionGroup("Yale", ["pending"]),
+      institutionGroup("NYU", ["running"]),
+    ];
+    expect(describeInstitutionFanoutProgress(groups)).toBe(
+      "1 of 3 institutions finished ok, 2 still running"
+    );
+  });
+
+  it("switches to the terminal 'N/M ok' phrasing once every group has settled", () => {
+    const groups = [institutionGroup("MIT", ["done"]), institutionGroup("Yale", ["error"])];
+    expect(describeInstitutionFanoutProgress(groups)).toBe("1/2 institutions ok");
+  });
+
+  it("never reports an unstarted run as complete", () => {
+    const groups = [institutionGroup("MIT", ["pending", "pending"])];
+    expect(describeInstitutionFanoutProgress(groups)).toBe(
+      "0 of 1 institutions finished ok, 1 still running"
+    );
   });
 });

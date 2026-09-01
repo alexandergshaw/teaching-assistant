@@ -420,6 +420,18 @@
   font-weight: 600;
 }
 
+/* B1 (ux-audit-grading.md): a third outcome, distinct from both success and
+   failure - the student had no grade or comment to send, so Canvas was
+   never called for them. --warning-ink (not the plain --warning token) for
+   the same accessible-contrast reason globals.css documents on the binding
+   badges above - --warning alone measures under WCAG AA on a plain
+   background in light mode. */
+.postStatusSkipped {
+  color: var(--warning-ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 /* ── Reflow at half-screen width (B1, B3, B4, B5, B6, B2 partial) ─────────
    Strategy chosen: collapse each row to a stacked card, following
    page.module.css:1956-1965's `.automationRunsRow` precedent - NOT

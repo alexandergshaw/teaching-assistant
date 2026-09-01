@@ -22,6 +22,7 @@ import type { VisibleTableRow } from "../run-input-table-stats";
 import type { PromptState } from "./run-input-prompt-state";
 import type { RunInputColumn } from "./run-input-types";
 import { RunInputRowDetail } from "./RunInputRowDetail";
+import { describeRunInputRow } from "./run-input-row-label";
 import styles from "../../../page.module.css";
 
 export interface RunInputTableProps {
@@ -67,6 +68,7 @@ export function RunInputTable({
           <tr>
             {selectable && (
               <th
+                scope="col"
                 style={{
                   textAlign: "center",
                   borderBottom: "1px solid var(--field-border)",
@@ -94,49 +96,79 @@ export function RunInputTable({
                       checked: prev.checked.map((c, i) => (visible.has(i) ? !allChecked : c)),
                     }));
                   }}
+                  slotProps={{ input: { "aria-label": "Select all visible rows" } }}
                 />
               </th>
             )}
-            {columns.map((col) => (
-              <th
-                key={col.key}
-                style={{
-                  textAlign: "left",
-                  borderBottom: "1px solid var(--field-border)",
-                  padding: "8px 10px",
-                  fontWeight: "bold",
-                  width: col.width,
-                  position: "sticky",
-                  top: 0,
-                  background: "var(--card-background)",
-                  zIndex: 1,
-                  cursor: col.link ? undefined : "pointer",
-                  userSelect: "none",
-                }}
-                title={col.link ? undefined : "Sort by this column"}
-                onClick={() => {
-                  if (col.link) return;
-                  setState((prev) => ({
-                    ...prev,
-                    sort:
-                      prev.sort?.key !== col.key
-                        ? { key: col.key, dir: "asc" }
-                        : prev.sort.dir === "asc"
-                          ? { key: col.key, dir: "desc" }
-                          : null,
-                  }));
-                }}
-              >
-                {col.label}
-                {sort?.key === col.key && (
-                  <span style={{ marginLeft: 4, fontSize: "0.7em", color: "var(--hint-text)" }}>
-                    {sort.dir === "asc" ? "(asc)" : "(desc)"}
-                  </span>
-                )}
-              </th>
-            ))}
+            {columns.map((col) => {
+              const isSorted = sort?.key === col.key;
+              const ariaSort: "ascending" | "descending" | "none" = col.link
+                ? "none"
+                : isSorted
+                  ? sort!.dir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none";
+              const onSort = () => {
+                if (col.link) return;
+                setState((prev) => ({
+                  ...prev,
+                  sort:
+                    prev.sort?.key !== col.key
+                      ? { key: col.key, dir: "asc" }
+                      : prev.sort.dir === "asc"
+                        ? { key: col.key, dir: "desc" }
+                        : null,
+                }));
+              };
+              return (
+                <th
+                  key={col.key}
+                  scope="col"
+                  aria-sort={ariaSort}
+                  style={{
+                    textAlign: "left",
+                    borderBottom: "1px solid var(--field-border)",
+                    padding: "8px 10px",
+                    fontWeight: "bold",
+                    width: col.width,
+                    position: "sticky",
+                    top: 0,
+                    background: "var(--card-background)",
+                    zIndex: 1,
+                  }}
+                >
+                  {col.link ? (
+                    col.label
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={onSort}
+                      title="Sort by this column"
+                      style={{
+                        all: "unset",
+                        cursor: "pointer",
+                        font: "inherit",
+                        color: "inherit",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      {col.label}
+                      {isSorted && (
+                        <span style={{ fontSize: "0.7em", color: "var(--hint-text)" }}>
+                          {sort!.dir === "asc" ? "(asc)" : "(desc)"}
+                        </span>
+                      )}
+                    </button>
+                  )}
+                </th>
+              );
+            })}
             {hasDetail && (
               <th
+                scope="col"
                 style={{
                   textAlign: "center",
                   borderBottom: "1px solid var(--field-border)",
@@ -271,6 +303,7 @@ export function RunInputTable({
                             checked: prev.checked.map((c, idx) => (idx === rowIndex ? !c : c)),
                           }));
                         }}
+                        slotProps={{ input: { "aria-label": `Include ${describeRunInputRow(columns, row, rowIndex)}` } }}
                       />
                     </td>
                   )}

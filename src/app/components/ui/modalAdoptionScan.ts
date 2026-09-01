@@ -404,6 +404,16 @@ export const PERMANENT_EXCLUSIONS: readonly ListedSite[] = [
     path: "src/app/components/KnowledgeTab.tsx",
     reason: 'role="alertdialog" inline warning banner (.kbWarnBanner), not an overlay dialog - no backdrop or portal, nothing to adopt',
   },
+  // MessageDraftsTab's send/delete confirm banner (send-safety fixes B1/B2/
+  // B4) - deliberately reuses KnowledgeTab.tsx's exact .kbWarnBanner/
+  // .kbWarnActions shell and its role="alertdialog", for the same reason:
+  // an inline row rendered below the draft it confirms, never an overlay -
+  // no backdrop, no portal, nothing to trap focus in or restore focus from.
+  // Same shape, same non-adopting answer.
+  {
+    path: "src/app/components/MessageDraftsTab.tsx",
+    reason: 'role="alertdialog" inline send/delete confirm banner (reuses KnowledgeTab.tsx\'s .kbWarnBanner shell), not an overlay dialog - no backdrop or portal, nothing to adopt',
+  },
 ];
 
 /** A THIRD list, distinct from PERMANENT_EXCLUSIONS: refused on inspection,

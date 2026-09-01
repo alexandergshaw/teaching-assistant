@@ -144,7 +144,11 @@ export interface TasksGridProps {
   onCellChange: (courseId: string, taskId: string, nextCell: TaskCellValue) => void;
   onColumnBulkSet: (task: TaskDefinition, status: TaskStatus) => void;
   onRowBulkSet: (courseId: string, courseName: string, status: TaskStatus) => void;
-  onFillDown: (task: TaskDefinition, sourceCell: TaskCellValue, targetCourseIds: string[]) => void;
+  /** BLOCKER 1 (Tasks-tab UX audit): `anchorCourseName` is the course the
+   * fill started FROM (the focused cell's own row) - threaded through so the
+   * confirm dialog can name it ("...into the 25 courses below Intro to
+   * Java?") rather than a generic count with no anchor. */
+  onFillDown: (task: TaskDefinition, sourceCell: TaskCellValue, targetCourseIds: string[], anchorCourseName: string) => void;
 
   // AC-A/AC-D: sort/column-filter state, already RESOLVED by the caller
   // (resolveTaskSort/visible-columns-scoped) so the header's aria-sort and
@@ -489,7 +493,7 @@ const TasksGrid = forwardRef<TasksGridHandle, TasksGridProps>(function TasksGrid
       const sourceCell = taskCellAt(sourceRow.cells, gridCol.task.id);
       const targets = rows.slice(row + 1).map((r) => r.course.id);
       if (targets.length === 0) return;
-      onFillDown(gridCol.task, sourceCell, targets);
+      onFillDown(gridCol.task, sourceCell, targets, sourceRow.course.name);
     },
     [columns, rows, onFillDown]
   );

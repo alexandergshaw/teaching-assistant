@@ -66,7 +66,17 @@ export async function postCanvasGradesAction(
     rubricAreas?: Array<{ area: string; score: string; comment: string }>;
   }>
 ): Promise<
-  { posted: number; failures: Array<{ userId: number; error: string }> } | { error: string }
+  | {
+      posted: number;
+      failures: Array<{ userId: number; error: string }>;
+      /** B1 (docs/REGRESSION.md-class defect, ux-audit-grading.md): the
+       * third outcome - a userId here had no grade or comment to send, so
+       * Canvas was never called for it. Every caller must treat a userId
+       * here the same way as one in `failures`: NOT posted. See
+       * src/lib/canvas/grades.ts's own doc comment on this field. */
+      skipped: Array<{ userId: number; reason: string }>;
+    }
+  | { error: string }
 > {
   try {
     await requireOwner();
@@ -468,10 +478,21 @@ export async function deriveAssignmentChecklistAction(
 }
 
 /** Post EVERY gradable result in a draft to Canvas, then mark it reviewed.
- * Mirrors the post-grades step's payload construction. */
+ * Mirrors the post-grades step's payload construction.
+ *
+ * B1 (docs/REGRESSION.md-class defect, ux-audit-grading.md): this used to
+ * gate "delete the draft / mark reviewed" on `failed === 0` alone, treating
+ * a student postCanvasGradesAction silently SKIPPED (blank grade and blank
+ * comment - no network call made) the same as one that genuinely posted -
+ * the draft would vanish from the pending list with that student never
+ * graded in Canvas. Now gated on `failed === 0 && skipped === 0`, and both
+ * `skipped` and `attempted` (the denominator - how many results this call
+ * actually tried, before postCanvasGrades's own per-student skip) are
+ * returned so the caller can state "posted N of M attempted" rather than a
+ * bare count that cannot be told apart from a partial failure. */
 export async function postGradingDraftAction(
   id: string
-): Promise<{ posted: number; failed: number } | { error: string }> {
+): Promise<{ posted: number; failed: number; skipped: number; attempted: number } | { error: string }> {
   try {
     const user = await requireOwner();
     const supabase = createServiceClient();
@@ -480,6 +501,8 @@ export async function postGradingDraftAction(
 
     let posted = 0;
     let failed = 0;
+    let skipped = 0;
+    let attempted = 0;
     const fractionRegex = /(-?\d+(?:\.\d+)?)\s*\/\s*-?\d+/;
 
     for (const entry of draft.payload.runs) {
@@ -497,19 +520,21 @@ export async function postGradingDraftAction(
           };
         });
       if (grades.length === 0) continue;
+      attempted += grades.length;
       const res = await postCanvasGradesAction(entry.canvasUrl, grades);
       if ("error" in res) {
         failed += grades.length;
       } else {
         posted += res.posted;
         failed += res.failures.length;
+        skipped += res.skipped.length;
       }
     }
 
-    if (failed === 0) {
+    if (failed === 0 && skipped === 0) {
       await markGradingDraftReviewed(supabase, user.id, id);
     }
-    return { posted, failed };
+    return { posted, failed, skipped, attempted };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the grades." };
   }

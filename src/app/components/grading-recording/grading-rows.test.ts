@@ -435,13 +435,18 @@ describe("gradingClearTableSignature (\"Clear table\" confirm-arm signature - AC
 // (useReplyRows.ts's STORAGE_KEY_TABLE comment documents this exact
 // footgun). Every mention of a key in this file's comments is the FULL
 // literal key ("ta-rec-grade-filter" / "ta-rec-grade-sort" /
-// "ta-rec-grade-course"), never a bare prefix.
+// "ta-rec-grade-course" / "ta-rec-grade-table"), never a bare prefix.
 //
 // "ta-rec-grade-course" (the panel's course picker, for R3a roster
 // matching) was added by GradingRecordingPanel.tsx, which lives in this same
 // directory and is therefore already covered by `files`/`combined` below
 // with no change to the scan itself - only the two expectation lists needed
 // updating.
+//
+// "ta-rec-grade-table" (THE GAP fix - the row array itself, not just
+// filter/sort) was added by useGradingRows.ts, which also already lives in
+// this same directory - same story, only the two expectation lists below
+// needed updating, again with no change to the scan itself.
 // ---------------------------------------------------------------------------
 
 describe("grading-recording persisted key canary (self-contained - recording-split.structure.test.ts cannot see this directory)", () => {
@@ -454,9 +459,9 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("has exactly the expected set of persisted keys (filter, sort, course)", () => {
+  it("has exactly the expected set of persisted keys (filter, sort, course, table)", () => {
     const keys = Array.from(new Set(combined.match(/ta-rec-grade-[a-z-]*/g) ?? [])).sort();
-    expect(keys).toEqual(["ta-rec-grade-course", "ta-rec-grade-filter", "ta-rec-grade-sort"]);
+    expect(keys).toEqual(["ta-rec-grade-course", "ta-rec-grade-filter", "ta-rec-grade-sort", "ta-rec-grade-table"]);
   });
 
   // Mirrors recording-split.structure.test.ts's own isWired helper: a key
@@ -487,7 +492,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     });
   }
 
-  it.each(["ta-rec-grade-filter", "ta-rec-grade-sort", "ta-rec-grade-course"])(
+  it.each(["ta-rec-grade-filter", "ta-rec-grade-sort", "ta-rec-grade-course", "ta-rec-grade-table"])(
     '"%s" has both a localStorage read and a localStorage write call wired to that key (directly, or via a const STORAGE_KEY_* binding)',
     (key) => {
       expect(isWired(key, "read"), `expected a localStorage read call wired to "${key}"`).toBe(true);

@@ -123,6 +123,24 @@
   color: var(--text-primary);
 }
 
+/* BLOCKER 2 (Tasks-tab UX audit): the visible counterpart of the tab's
+   srOnly announcement region - a bulk-action outcome, a sort/filter change,
+   etc. used to reach a sighted instructor nowhere else, so a partial bulk
+   failure looked identical to a full success. */
+.bulkStatusLine {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+/* SHOULD 6 (Tasks-tab UX audit): Manage Tasks dialog's Retire-arming status
+   line - visible (not only role="status"-announced), matching the visible
+   treatment BLOCKER 2 already applies to .bulkStatusLine above. */
+.inlineStatus {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
 .periodCaption {
   margin: 0 0 10px;
   font-size: 0.8rem;

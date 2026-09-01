@@ -23,6 +23,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
           <thead>
             <tr>
               <th
+                scope="col"
                 style={{
                   padding: "6px 10px",
                   borderBottom: "1px solid var(--field-border)",
@@ -33,6 +34,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
                 Week
               </th>
               <th
+                scope="col"
                 style={{
                   padding: "6px 10px",
                   borderBottom: "1px solid var(--field-border)",
@@ -43,6 +45,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
                 Topic
               </th>
               <th
+                scope="col"
                 style={{
                   padding: "6px 10px",
                   borderBottom: "1px solid var(--field-border)",
@@ -53,6 +56,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
                 Summary
               </th>
               <th
+                scope="col"
                 style={{
                   padding: "6px 10px",
                   borderBottom: "1px solid var(--field-border)",
@@ -63,6 +67,7 @@ export function SummaryView({ summary }: { summary: StepRunSummary }) {
                 Assignment
               </th>
               <th
+                scope="col"
                 style={{
                   padding: "6px 10px",
                   borderBottom: "1px solid var(--field-border)",

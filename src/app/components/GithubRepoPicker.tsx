@@ -22,6 +22,7 @@ export default function GithubRepoPicker({
   placeholder = "owner/repository",
   branch,
   onBranchChange,
+  describedById,
 }: {
   value: string;
   onChange: (repoRef: string) => void;
@@ -29,6 +30,13 @@ export default function GithubRepoPicker({
   placeholder?: string;
   branch?: string;
   onBranchChange?: (branch: string) => void;
+  // Optional id of an error message elsewhere on the page that describes
+  // this picker (e.g. a caller-owned "could not load that repo" banner).
+  // Wired to the underlying input's aria-describedby so screen reader users
+  // get the same association sighted users get from proximity. Omitted by
+  // every existing caller today, so this is purely additive - no behavior
+  // change unless a caller opts in.
+  describedById?: string;
 }) {
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "unconfigured" | "error">("loading");
@@ -119,6 +127,13 @@ export default function GithubRepoPicker({
           <TextField
             {...params}
             placeholder={state === "loading" ? "Loading repositories..." : placeholder}
+            slotProps={{
+              ...params.slotProps,
+              htmlInput: {
+                ...params.slotProps.htmlInput,
+                ...(describedById ? { "aria-describedby": describedById } : {}),
+              },
+            }}
           />
         )}
       />

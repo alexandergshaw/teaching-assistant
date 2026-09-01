@@ -59,6 +59,21 @@ import { isConfirmArmed, mayPostCommit } from "../content-tab/modules/postConfir
 // check 4 already refused one).
 import { triggerFileDownload } from "../course-planning/utils";
 import { takePostArmSignature } from "./takeAnnouncementArming";
+// docs/DEV_LOOP.md's "every feature needs a downloadable log" rule -
+// collection (the refs + push calls below) lives here since only this hook
+// sees every stage transition; assembly/formatting is entirely
+// announcement-log.ts, per that module's own header (this file was already
+// 905 of its 1000-line ceiling, so every formatting/aggregation decision had
+// to move out rather than grow inline here).
+import {
+  buildAnnouncementRunLog,
+  type AnnouncementRunLog,
+  type AnnouncementTranscriptionPath,
+  type AnnouncementLogChunkRetry,
+  type AnnouncementLogDraftAttempt,
+  type AnnouncementLogImageAttempt,
+  type AnnouncementLogPostAttempt,
+} from "./announcement-log";
 import {
   runPipelineFromSegments,
   runPipelineFromRealTime,
@@ -241,6 +256,16 @@ export interface UseTakeAnnouncementReturn {
    * so that should never happen in practice; the guard is defense in depth,
    * not the primary gate. */
   downloadImage: () => void;
+
+  /** docs/DEV_LOOP.md's downloadable-log rule: assembles this hook's whole
+   * collected run record (transcription path/chunk retries, draft attempts,
+   * image attempts, post attempts) plus the take's own identity. A function,
+   * not reactive state - TakeAnnouncementPanel.tsx calls it fresh on every
+   * render it needs a current log for (cheap: a handful of array spreads
+   * over refs that only grow on a real event), which is always after the
+   * relevant state change has already landed since every push below happens
+   * alongside a setState call in the same function. */
+  getAnnouncementLog: () => AnnouncementRunLog;
 }
 
 // GAP 3 (cross-surface busy gating, AC15b): TakeAnnouncementPanel.tsx computes
@@ -389,6 +414,17 @@ export function useTakeAnnouncement({
   const totalChunksRef = useRef(0);
   const failedChunkIndexRef = useRef(0);
   const lastAnnouncedQuartileRef = useRef(0);
+  // docs/DEV_LOOP.md's downloadable-log rule: see this file's own import
+  // comment and announcement-log.ts's header. State, not refs -
+  // eslint-plugin-react-hooks forbids reading a ref's `.current` during
+  // render, and getAnnouncementLog() below is called during
+  // TakeAnnouncementPanel.tsx's render - mirrors GradingRecordingPanel.tsx/
+  // LegibilityProbeModal.tsx's own identical choice.
+  const [logTranscriptionPath, setLogTranscriptionPath] = useState<AnnouncementTranscriptionPath>("");
+  const [logChunkRetries, setLogChunkRetries] = useState<AnnouncementLogChunkRetry[]>([]);
+  const [logDraftAttempts, setLogDraftAttempts] = useState<AnnouncementLogDraftAttempt[]>([]);
+  const [logImageAttempts, setLogImageAttempts] = useState<AnnouncementLogImageAttempt[]>([]);
+  const [logPostAttempts, setLogPostAttempts] = useState<AnnouncementLogPostAttempt[]>([]);
 
   // Load the owner's courses once, filtering out export-only tiles
   // (canvasUrl: null) up front - they cannot be posted to, so offering them
@@ -524,10 +560,12 @@ export function useTakeAnnouncement({
     );
     const result = await draftAnnouncementAction(instruction, getStoredProvider());
     if ("error" in result) {
+      setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: false, error: result.error }]);
       setStage({ phase: "failed", stage: "draft", message: result.error });
       announce(`Could not draft the announcement - ${result.error}`);
       return;
     }
+    setLogDraftAttempts((prev) => [...prev, { at: new Date().toISOString(), ok: true, error: "" }]);
     setSubject(result.title);
     setBody(result.message);
     setArmedFor(null);
@@ -564,12 +602,14 @@ export function useTakeAnnouncement({
     const prompt = buildAnnouncementImagePrompt(subject, body);
     const result = await generateAnnouncementImageAction(prompt);
     if ("error" in result) {
+      setLogImageAttempts((prev) => [...prev, { at: new Date().toISOString(), outcome: "failed", error: result.error }]);
       setImageState("failed");
       setImageError(result.error);
       setImageBase64(null);
       setImageMimeType(null);
       return;
     }
+    setLogImageAttempts((prev) => [...prev, { at: new Date().toISOString(), outcome: "generated", error: "" }]);
     setImageState("ready");
     setImageBase64(result.base64);
     setImageMimeType(result.mimeType);
@@ -591,6 +631,7 @@ export function useTakeAnnouncement({
    * that makes that a real choice rather than only a byproduct of a failure. */
   function discardImage() {
     autoImageAttemptedRef.current = true;
+    setLogImageAttempts((prev) => [...prev, { at: new Date().toISOString(), outcome: "discarded", error: "" }]);
     setImageState("idle");
     setImageBase64(null);
     setImageMimeType(null);
@@ -645,13 +686,16 @@ export function useTakeAnnouncement({
     setLastMessage(null);
     setFieldError(null);
     if (transcriptRef.current) {
+      setLogTranscriptionPath("cached");
       void runDraft(transcriptRef.current);
       return;
     }
     if (take.audioSegments && take.audioSegments.length > 0) {
+      setLogTranscriptionPath("segments");
       void runPipelineFromSegments(take.audioSegments, pipelineDeps());
       return;
     }
+    setLogTranscriptionPath("real-time");
     void beginRealTimeGuardCheck(pipelineDeps());
   }
 
@@ -696,6 +740,10 @@ export function useTakeAnnouncement({
   }
 
   function retryFromFailedChunk() {
+    setLogChunkRetries((prev) => [
+      ...prev,
+      { at: new Date().toISOString(), chunkNumber: failedChunkIndexRef.current + 1, restart: false },
+    ]);
     void proceedToTranscription(failedChunkIndexRef.current, pipelineDeps());
   }
 
@@ -703,6 +751,7 @@ export function useTakeAnnouncement({
     const total = totalChunksRef.current;
     chunkTranscriptsRef.current = new Array(total).fill("");
     lastAnnouncedQuartileRef.current = 0;
+    setLogChunkRetries((prev) => [...prev, { at: new Date().toISOString(), chunkNumber: 1, restart: true }]);
     void proceedToTranscription(0, pipelineDeps());
   }
 
@@ -784,11 +833,19 @@ export function useTakeAnnouncement({
     setPosting(false);
     if ("error" in result) {
       const message = `Canvas refused the announcement - ${result.error}. Nothing was posted.`;
+      setLogPostAttempts((prev) => [
+        ...prev,
+        { at: new Date().toISOString(), ok: false, error: message, imageUploadFailed: false, course: selectedCourse.name },
+      ]);
       setStage({ phase: "failed", stage: "post", message });
       setPostError(message);
       announce(message);
       return;
     }
+    setLogPostAttempts((prev) => [
+      ...prev,
+      { at: new Date().toISOString(), ok: true, error: "", imageUploadFailed: !!result.imageError, course: selectedCourse.name },
+    ]);
     setArmedFor(null);
     setStage({ phase: "review" });
     if (result.imageError) {
@@ -829,6 +886,20 @@ export function useTakeAnnouncement({
       }
       setDraftSaved(true);
     })();
+  }
+
+  function getAnnouncementLog(): AnnouncementRunLog {
+    return buildAnnouncementRunLog({
+      takeName: take.name,
+      takeDurationSec: take.durationSec,
+      collected: {
+        transcriptionPath: logTranscriptionPath,
+        chunkRetries: logChunkRetries,
+        draftAttempts: logDraftAttempts,
+        imageAttempts: logImageAttempts,
+        postAttempts: logPostAttempts,
+      },
+    });
   }
 
   const realTimeMinutes = estimateRealTimeMinutes(resolvedRealTimeDurationRef.current ?? take.durationSec);
@@ -901,5 +972,7 @@ export function useTakeAnnouncement({
     regenerateImage,
     discardImage,
     downloadImage,
+
+    getAnnouncementLog,
   };
 }

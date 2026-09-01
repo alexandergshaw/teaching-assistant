@@ -37144,3 +37144,164 @@ review found the whole feature green through all four blockers because:
 
 Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
 pre-existing warnings, `vitest` **778 files / 16026 tests** all passing.
+
+## 380. A UX round over every surface the recording work had not touched - and what a green suite had been hiding on all of them
+
+Five read-only audits (Tasks; Files + Content/Modules; Workflows + Lecture
+Planning; Grading + Drafted Grades; Knowledge + Courses + Message Drafts +
+Version Control), then seven fix waves. Plus four debt items closed alongside.
+
+**The finding that frames the entry: 22 blockers, and not one was reachable by a
+test.** vitest here is node-env and collects only `src/**/*.test.ts`, so no
+component on any of these surfaces has ever been rendered by the suite. Every
+one of these surfaces was green for the whole session while carrying them.
+
+Almost every blocker was one of two shapes.
+
+### Shape one: work destroyed in one click
+
+- **Tasks, Ctrl+D fill-down** rewrote every course below the cursor. The confirm
+  fired only when a target cell already held a different non-default value - so
+  at the START OF A TERM, when every cell is still open, 25 courses were
+  overwritten silently. The only report was a screen-reader-only announcement,
+  there is no undo, and Ctrl+D is also the browser bookmark shortcut, which the
+  handler `preventDefault`s.
+- **Bulk delete on BOTH Files surfaces** armed on a bare boolean. Arm on 2 files,
+  change the selection to 40, and the button still read "Confirm delete".
+  `content-tab/modules/confirmArming.ts` exists in this repo specifically to
+  prevent that, and every modules-side delete already used it - these two bulk
+  deletes were the only ones that did not.
+- **Bulk "Remove from module" had no confirmation at all**, sitting immediately
+  beside a fully-armed delete inside the same danger card, while the PER-ROW
+  version of the same call was already two-click armed.
+- **Lecture Planning's Generate cleared every plan BEFORE the request.** A second
+  click discarded an evening of edits; if the request then failed, the instructor
+  landed on an error state with an empty list and nothing to recover.
+- **A started workflow could not be stopped** unless it happened to be a course
+  fan-out - so a single-course run writing to the WRONG course had no exit.
+- **Message Drafts' send confirm never disarmed.** Nothing cleared it - not a
+  reload, not a timer, not a signature - and the label swapped in place while the
+  button kept focus. A double-click or a stray Enter sent to the whole class.
+
+### Shape two: the app asserting something false
+
+- **A grade reported as posted that never reached Canvas.** `postCanvasGrades`
+  `continue`d past a student whose payload was blank - not counted as posted, not
+  pushed to `failures` - and all three fan-outs treated absence from `failures` as
+  success. Drafted Grades then DELETED the draft because nothing had failed, and
+  no summary stated the denominator, so 28-of-30 was indistinguishable from
+  28-of-28. Fixed by returning `skipped` as a third outcome and threading it
+  through every fan-out; "delete the draft" now requires `failed === 0 && skipped === 0`.
+- **"5/5 institutions ok"** counted a group ok when no step had ERRORED - so
+  pending steps passed and the tally read complete from the instant Run was
+  clicked, only ever counting down. The course branch had always been correct;
+  the institution branch was not.
+- **"Loaded the shared description - edits apply to all"** was computed from only
+  the fetches that SUCCEEDED, and then a primary unconfirmed button overwrote
+  every item with it. A partial read now reports as partial regardless of whether
+  the survivors agree, and never pre-fills the field.
+- **Deleting a workflow left its schedules and triggers enabled**, firing
+  server-side against a workflow that no longer existed - `workflow_id` is plain
+  text with no foreign key or cascade.
+- **A failed load told the instructor their account was empty** ("No courses yet.
+  Add one on the Courses tab.") because the empty state keyed on zero rows rather
+  than on a settled, successful load.
+- **The subject a student received was the AI-written summary** - the one-liner
+  the model wrote as a card heading for the instructor. A subject field existed
+  only for announcements.
+
+### What the audits got right that is worth keeping
+
+Every audit was told to say what is ALREADY right, and each named a local
+exemplar the fixes were then made to copy rather than inventing a second idiom:
+the modules bulk bar (signature arming + danger tiering + a three-signal
+confirm), `ModuleItemRow.tsx` for `aria-disabled` over `disabled`,
+`ScheduledReleasesPanel`'s consequence-previewing confirm, `RunProgressSidebar`'s
+deliberately quiet live region, `CoursesTable`'s copy flow, and
+`repoGradePostScore.ts`'s `describePostScore` - the one place on the grading
+surface that states the exact number a click will send and refuses rather than
+guesses. Reuse, not redesign, was the instruction and it held.
+
+### Debt closed in the same batch
+
+- The **grading table now survives a reload**. On a storage quota failure it drops
+  the submission text first and keeps every feedback field and the edited flag -
+  the feedback is the part that cannot be regenerated by re-recording.
+- **Downloadable logs** for grading-by-recording, the announcement surface and the
+  legibility probe, sharing one shape with the two shipped precedents. The rule
+  ("all features should have a downloadable log") had been unpaid on these three.
+- **The `start()` source guard was reshaped.** It had blocked a legitimate
+  extraction while still permitting the defect it was written to catch. It now
+  asserts the call sits inside `start()`'s body AND forbids it inside any
+  `useEffect` - proven by sabotaging BOTH ways: nulling the call (3 red) and
+  relocating it verbatim into a mount-only effect (5 red, where the old regex
+  stayed green).
+- **The recording ceiling had silently been 999.** That gate counted with
+  `split("\n").length`, one more than the `@(Get-Content).Count` the project
+  mandates. One shared `countLines` helper now serves both gates, placed in a
+  non-test module so importing it cannot re-run another file's describe blocks.
+- **The rubric upload path was generalised**, not forked: one `UPLOAD_PATH_SEGMENTS`
+  array feeds both a compile-time union and the runtime check, so an invented
+  third segment is a type error at the builder and a rejection at the validator.
+
+### Test-quality findings, which are the durable part
+
+Three agents caught a test that could not fail **in their own work, before
+reporting**:
+- The logs wave's first oracle fixtures had two outcome buckets at the SAME
+  count, so swapping those two branches would have passed silently. Every bucket
+  now has a distinct number.
+- The persistence wave's first write-side normalization test passed with the
+  normalization removed, because the value round-tripped through the READER's own
+  defensive repair. Rewritten to assert against the raw serialized output.
+- The Lecture Planning wave verified "leaving the tab loses the run" by tracing
+  the architecture (a plain awaited server action, no job id, no polling, no
+  persistence) and grepping for a duration override, then **declined to state a
+  timeout number** because nothing in the repo pins one.
+
+Two false comments were also corrected, both the entry-374 class: one asserting a
+prop "has no `selected` wired to it" when it demonstrably does, and one claiming
+a log module collects via refs when the shipped pattern is state (discovered when
+the ref approach tripped `react-hooks/refs`).
+
+### An instruction of mine that was wrong, and was pushed back on
+
+The Tasks brief said to use the signature-based arming helper for the fill-down
+confirm. That helper models a two-click arm; the finding needed a one-shot Yes/No
+dialog. The implementer said so, used the helper where it DID fit (the Retire
+action, which had no confirmation at all), and flagged the interpretation rather
+than following the instruction into the wrong shape.
+
+### Gates
+
+`tsc --noEmit` 0 errors. `eslint` 0 errors, 6 warnings - the same six pre-existing
+ones, none in any touched file. `vitest` **800 files / 16314 tests**, all passing.
+`next build` compiled successfully. No-emoji scan green via the committed test.
+Repo-wide ceiling re-derived independently: nothing over 1000 except the four
+test files already allow-listed at their pre-batch counts; `canvas-inbox.ts` sits
+at exactly 1000. `FilesTab.tsx` 999 -> 871 and `TasksTab.tsx` 978 -> 946, both by
+extraction rather than trimming.
+
+### Limits
+
+- **No component on any of these surfaces is rendered by any test.** Every a11y
+  fix, every confirm dialog, every live region and every empty state in this entry
+  is verified BY READING. A green suite still proves nothing about this markup.
+- A stopped workflow run is recorded with status `error`, because
+  `WorkflowRunStatus` has no `stopped` member; the detail string leads with
+  "Stopped by user after N of M steps". Adding a status value would touch the
+  migration set.
+- Abort cannot interrupt a step already in flight, and cannot act while a run is
+  paused awaiting input - it declines to start the next step.
+- The legibility probe's downloadable log contains the **verbatim transcript**,
+  which for its intended use is a real student's submitted work. The grading log
+  carries student names as read, but deliberately not submission text or full
+  feedback. Neither is redacted.
+- The grading table re-serializes on every keystroke while editing feedback - no
+  debounce, because that hook never had one.
+- `foldersError` in Lecture Planning gets `role="alert"` but no `aria-describedby`:
+  the error and the control it describes are mutually exclusive in the existing
+  render, so there is no live control to point at.
+- The audits' SHOULD and NICE findings were not all fixed - each wave was scoped
+  to its blockers plus the highest-harm accessibility items. The audit documents
+  in the session scratchpad hold the remainder.

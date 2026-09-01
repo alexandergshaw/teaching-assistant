@@ -596,6 +596,23 @@
   color: var(--text-primary);
 }
 
+/* The criterion cell is now a <th scope="row"> (accessibility fix - it is
+   the row's identity, not a plain data cell), which the generic
+   `.generatedRubricTable th` rule above would otherwise style like a column
+   header (uppercase, tinted background). This restores the original
+   first-column look the `td:first-child` rule above gave it, which no
+   longer matches now that the cell is a th. Higher specificity than the
+   plain `th` rule above, so it wins regardless of source order. */
+.generatedRubricTable th[scope="row"] {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-primary);
+  text-transform: none;
+  letter-spacing: normal;
+  background: transparent;
+  text-align: left;
+}
+
 .generatedRubricTable td:nth-child(2) {
   white-space: nowrap;
   color: var(--text-secondary);

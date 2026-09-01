@@ -126,6 +126,19 @@ export function WorkflowListSidebar({
         data-testid="workflow-search"
       />
 
+      {/* A8: the workflow list, folder tools, and "New workflow" all used to
+          go `disabled` (dropping out of tab order with no stated reason)
+          while a run was in progress. A single visible reason here - the
+          same discipline LockableSection (WorkflowPanel.tsx) already
+          applies to the editing affordances it locks - covers every control
+          below, which instead go `aria-disabled` + a no-op click handler so
+          they stay reachable by keyboard and screen reader. */}
+      {runningWorkflow && (
+        <p className={styles.fieldHint} role="status" style={{ margin: "0 0 4px", fontStyle: "italic" }}>
+          Switching workflows is locked while one is running.
+        </p>
+      )}
+
       {groups.length === 0 && !workflowSearch && (
         <div style={{ fontSize: "0.85em", color: "var(--text-secondary)", padding: "4px 8px" }}>
           No workflows available.
@@ -223,8 +236,12 @@ export function WorkflowListSidebar({
               >
                 <button
                   type="button"
-                  disabled={runningWorkflow}
-                  onClick={() => onSelectWorkflow(w.id)}
+                  aria-disabled={runningWorkflow}
+                  title={runningWorkflow ? "Switching workflows is locked while one is running" : undefined}
+                  onClick={() => {
+                    if (runningWorkflow) return;
+                    onSelectWorkflow(w.id);
+                  }}
                   style={{
                     flex: 1,
                     textAlign: "left",
@@ -296,17 +313,21 @@ export function WorkflowListSidebar({
                 {(w.id === selectedWorkflowId || w.id === hoveredWorkflowId) && (
                   <button
                     type="button"
-                    onClick={() => onRunClick(w.id)}
+                    onClick={() => {
+                      if (runningWorkflow) return;
+                      onRunClick(w.id);
+                    }}
                     className={styles.ghBadge}
-                    disabled={runningWorkflow}
+                    aria-disabled={runningWorkflow}
                     style={{
                       padding: "4px 8px",
                       fontSize: "0.75em",
                       whiteSpace: "nowrap",
                       flex: "none",
+                      opacity: runningWorkflow ? 0.6 : 1,
                     }}
-                    title={`Run ${w.name}`}
-                    aria-label={`Run ${w.name}`}
+                    title={runningWorkflow ? "Another workflow is running" : `Run ${w.name}`}
+                    aria-label={runningWorkflow ? `Run ${w.name} - another workflow is running` : `Run ${w.name}`}
                   >
                     Run
                   </button>
@@ -319,9 +340,13 @@ export function WorkflowListSidebar({
       <Button
         size="small"
         variant="outlined"
-        disabled={runningWorkflow}
-        onClick={onNewWorkflow}
-        style={{ marginTop: 8 }}
+        aria-disabled={runningWorkflow}
+        title={runningWorkflow ? "Locked while a workflow is running" : undefined}
+        onClick={() => {
+          if (runningWorkflow) return;
+          onNewWorkflow();
+        }}
+        style={{ marginTop: 8, opacity: runningWorkflow ? 0.6 : 1 }}
       >
         New workflow
       </Button>

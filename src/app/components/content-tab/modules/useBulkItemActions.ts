@@ -37,6 +37,7 @@ import {
 } from "./bulkRubricGenerateSummary";
 import { planModuleShiftMoves, planMoveToModulePositions } from "./bulkItemModulePlacementPlan";
 import { computeSelectedGradables, groupIdsByKind } from "./bulkItemSelectionQueries";
+import { classifyDescriptionShare, type DescSharedState } from "./descSharedState";
 import {
   appendRubricRunLogEntries,
   buildRubricRunLogEntries,
@@ -85,7 +86,10 @@ export interface UseBulkItemActionsReturn {
   setBulkItemsQuestions: React.Dispatch<React.SetStateAction<EditableQuestion[]>>;
   bulkItemsQuestionsOpen: boolean;
   setBulkItemsQuestionsOpen: (v: boolean) => void;
-  descSharedState: "idle" | "loading" | "same" | "mixed";
+  descSharedState: DescSharedState;
+  /** Populated only while descSharedState === "partial" - see that state's
+   * own comment above. */
+  descPartialCounts: { uncheckedCount: number; totalCount: number } | null;
   bulkPoints: string;
   setBulkPoints: (v: string) => void;
   bulkRubricId: number | "";
@@ -114,6 +118,10 @@ export interface UseBulkItemActionsReturn {
   bulkSetDescription: () => void;
   bulkAddQuestionsToQuizzes: () => void;
   bulkRemoveFromModule: () => void;
+  /** B2: whether the NEXT bulkRemoveFromModule() call will actually remove -
+   * armed for the current selection's signature, same shape as
+   * confirmDeleteContent above but tracked independently. */
+  confirmRemoveFromModule: boolean;
   bulkDeleteContent: () => void;
 }
 
@@ -162,8 +170,16 @@ export function useBulkItemActions(
   const [bulkItemsDescription, setBulkItemsDescription] = useState("");
   const [bulkItemsQuestions, setBulkItemsQuestions] = useState<EditableQuestion[]>([]);
   const [bulkItemsQuestionsOpen, setBulkItemsQuestionsOpen] = useState(false);
-  // Whether the selected gradables share a description (loaded into the field).
-  const [descSharedState, setDescSharedState] = useState<"idle" | "loading" | "same" | "mixed">("idle");
+  // Whether the selected gradables share a description (loaded into the
+  // field) - "partial" (S2) is set whenever one or more of the selected
+  // gradables' description fetches failed, so the claim never outruns what
+  // was actually read. See descSharedState.ts's classifyDescriptionShare.
+  const [descSharedState, setDescSharedState] = useState<DescSharedState>("idle");
+  // How many selected gradables' current description could not be read,
+  // out of how many were considered - only meaningful (both nonzero) when
+  // descSharedState === "partial". Rendered by BulkItemsSection.tsx so the
+  // instructor sees the honest count, not just "some failed".
+  const [descPartialCounts, setDescPartialCounts] = useState<{ uncheckedCount: number; totalCount: number } | null>(null);
   const [bulkPoints, setBulkPoints] = useState("");
   // NO `ta-` LOCALSTORAGE KEY HERE - same reasoning as bulkTargetModule
   // above, and the identical shape as bulkAddRubricId in
@@ -224,6 +240,14 @@ export function useBulkItemActions(
   const [deleteArmedFor, setDeleteArmedFor] = useState<string | null>(null);
   const itemSelectionSig = selectionSignature(selected);
   const confirmDeleteContent = isConfirmArmed(deleteArmedFor, itemSelectionSig);
+  // B2: "Remove from module" used to fire on the first click with no arming
+  // at all, immediately to the left of the fully-armed Delete above - one
+  // click destroyed every selected item's module placement, position,
+  // indent and title override. Independent signature state (not shared with
+  // deleteArmedFor) so arming one never arms the other, matching the
+  // per-row version of this same call (ModuleItemRow.tsx's confirmId).
+  const [removeArmedFor, setRemoveArmedFor] = useState<string | null>(null);
+  const confirmRemoveFromModule = isConfirmArmed(removeArmedFor, itemSelectionSig);
 
   // The selected gradable items plus the data needed to pre-fill the bulk
   // fields (computeSelectedGradables, ./bulkItemSelectionQueries.ts).
@@ -249,6 +273,7 @@ export function useBulkItemActions(
     const gradables = selGradablesRef.current;
     if (gradables.length === 0) {
       setDescSharedState("idle");
+      setDescPartialCounts(null);
       return;
     }
     // Deadline (all gradables) and points (assignments + quizzes) from item data.
@@ -271,17 +296,20 @@ export function useBulkItemActions(
         .map((p) => ({ type: p.type, detail: (p.res as { detail: { description: string; rubricId?: number } }).detail }));
       if (detailPairs.length === 0) {
         setDescSharedState("idle");
+        setDescPartialCounts(null);
         return;
       }
-      // Description (all gradables).
+      // Description (all gradables). classifyDescriptionShare (S2,
+      // ./descSharedState.ts) is what stops a partial fetch from being
+      // reported as "shared" - `descs` here holds ONLY the successful
+      // fetches, and `gradables.length` (not `descs.length`) is the true
+      // total, so a fetch failure shows up as descs.length < gradables.length
+      // rather than silently vanishing.
       const descs = detailPairs.map((p) => p.detail.description);
-      if (descs.every((d) => d === descs[0])) {
-        setBulkItemsDescription(descs[0]);
-        setDescSharedState("same");
-      } else {
-        setBulkItemsDescription("");
-        setDescSharedState("mixed");
-      }
+      const share = classifyDescriptionShare(descs, gradables.length);
+      setBulkItemsDescription(share.description);
+      setDescSharedState(share.state);
+      setDescPartialCounts(share.state === "partial" ? { uncheckedCount: share.uncheckedCount, totalCount: share.totalCount } : null);
       // Rubric (assignments only): pre-fill when they all share one that exists
       // in the course's rubric list; otherwise clear.
       const assignmentRubrics = detailPairs.filter((p) => p.type === "Assignment").map((p) => p.detail.rubricId);
@@ -866,6 +894,11 @@ export function useBulkItemActions(
   const bulkRemoveFromModule = () => {
     const items = selectedItems();
     if (items.length === 0) return;
+    if (!confirmRemoveFromModule) {
+      setRemoveArmedFor(itemSelectionSig);
+      return;
+    }
+    setRemoveArmedFor(null);
     void (async () => {
       await runPerItem(items, (it, moduleId) => deleteModuleItemAction(courseUrl, moduleId, it.id, acronym), "Removed from module");
       clearSelection();
@@ -928,7 +961,7 @@ export function useBulkItemActions(
     opBusy, bulkDue, setBulkDue, bulkShift, setBulkShift, bulkStaggerOffset, setBulkStaggerOffset,
     bulkStaggerUnit, setBulkStaggerUnit, bulkModuleShift, setBulkModuleShift, bulkTargetModule, setBulkTargetModule,
     bulkItemsDescription, setBulkItemsDescription, bulkItemsQuestions, setBulkItemsQuestions,
-    bulkItemsQuestionsOpen, setBulkItemsQuestionsOpen, descSharedState,
+    bulkItemsQuestionsOpen, setBulkItemsQuestionsOpen, descSharedState, descPartialCounts,
     bulkPoints, setBulkPoints, bulkRubricId, setBulkRubricId,
     bulkRubricGenerateReport, bulkGenerateAndAssociateRubric,
     rubricRunLog, clearRubricRunLog,
@@ -936,6 +969,6 @@ export function useBulkItemActions(
     confirmDeleteContent,
     bulkPublish, bulkSetDue, bulkShiftDue, bulkStaggerDue, bulkShiftModules, bulkMoveToModule,
     bulkSetPoints, bulkRubric, openRubricBuilder, selectedAssignmentCount, bulkUpdateSubmissionType,
-    bulkSetDescription, bulkAddQuestionsToQuizzes, bulkRemoveFromModule, bulkDeleteContent,
+    bulkSetDescription, bulkAddQuestionsToQuizzes, bulkRemoveFromModule, confirmRemoveFromModule, bulkDeleteContent,
   };
 }

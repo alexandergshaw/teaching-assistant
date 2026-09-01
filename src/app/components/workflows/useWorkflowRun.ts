@@ -22,6 +22,7 @@ import { resolvePassThroughOutputs, isGroupGenuineFailure } from "./useWorkflowR
 import { finalizeRunDownload, type CourseFailureGroup } from "./finalize-run-download";
 import { buildAttendedStepHelpers } from "./attended-step-helpers";
 import { validateRunForm } from "./validate-run-form";
+import { describeStoppedRunDetail, stoppedRunStatus } from "./run-stop";
 import { useRunInputPrompt, type RunInputValue } from "./useRunInputPrompt";
 import { completeCourseZipRunLogsAction } from "@/app/actions";
 import { finishWorkflowRun, type WorkflowRunStepStatus } from "@/lib/workflow-runs";
@@ -68,6 +69,16 @@ export interface UseWorkflowRunReturn {
   /** Requests that a course fan-out stop BETWEEN courses (never mid-course).
    * A no-op outside an active course fan-out. */
   stopAfterCurrentCourse: () => void;
+  /** B4: true once "Abort run" has been clicked for the CURRENT (or most
+   * recently finished) run - unlike stopRequested above, this is available
+   * for every run, not only a course fan-out, and stays true after the run
+   * ends so the UI can show "this run was stopped" until the next Run
+   * click resets it. */
+  abortRequested: boolean;
+  /** Requests that the run stop BETWEEN steps (never mid-step - the engine
+   * cannot preempt an in-flight `await step.run(...)`, only decline to
+   * start the next one). Always effective, unlike stopAfterCurrentCourse. */
+  abortRun: () => void;
   runPause: { groupIndex: number; stepIndex: number; message: string } | null;
   pauseResolverRef: React.MutableRefObject<{ resolve: (go: boolean) => void } | null>;
   runInput: RunInputValue | null;
@@ -109,6 +120,16 @@ export function useWorkflowRun(
     stopAfterCourseRef.current = true;
     setStopRequested(true);
   };
+  // B4: a reachable stop for every run (not just a course fan-out) - a ref
+  // (not just state) because handleRun's own async closure below reads it
+  // synchronously between steps, and a React state value captured at the
+  // start of that closure would never reflect a LATER click.
+  const abortRequestedRef = useRef(false);
+  const [abortRequested, setAbortRequested] = useState(false);
+  const abortRun = () => {
+    abortRequestedRef.current = true;
+    setAbortRequested(true);
+  };
   const [runPause, setRunPause] = useState<{ groupIndex: number; stepIndex: number; message: string } | null>(null);
   const pauseResolverRef = useRef<{ resolve: (go: boolean) => void } | null>(null);
 
@@ -142,6 +163,8 @@ export function useWorkflowRun(
     inputResolverRef.current = null;
     stopAfterCourseRef.current = false;
     setStopRequested(false);
+    abortRequestedRef.current = false;
+    setAbortRequested(false);
 
     // Fan-out entity resolution (composed institution x course, institution-
     // only, course-only, or the single implicit entity) - extracted to
@@ -197,6 +220,12 @@ export function useWorkflowRun(
 
     let anyGenuineFailure = false;
     let aborted = false;
+    // B4: distinct from `aborted` above (which also covers a cancelled
+    // pause / a required-input skip) - true ONLY when "Abort run" is why
+    // this run stopped early, so the once-per-run write-back below can
+    // force an honest "Stopped by user..." record regardless of whether
+    // the steps that DID run happened to error.
+    let stoppedByUser = false;
     // Loop-local accumulators for the once-per-run write-back below: reading
     // `runState` there would read a STALE closure (this async function's
     // `runState` binding never updates across the re-renders that setRunState
@@ -355,6 +384,25 @@ export function useWorkflowRun(
       const passThroughFailures = new Set<number>();
 
       for (let i = 0; i < expanded.steps.length; i++) {
+      // B4: checked between EVERY step (not just between courses, as
+      // stopAfterCourseRef alone used to allow) - "Abort run" is available
+      // for every run, including a plain single-course/no-fan-out one that
+      // previously had no reachable stop at all. Never mid-step: this can
+      // only decline to START step i, never interrupt one already running.
+      // Every step from i onward that is still "pending" is marked
+      // "skipped" (never silently left pending forever, never marked
+      // "error" - it never ran, so it did not fail).
+      if (abortRequestedRef.current) {
+        stoppedByUser = true;
+        aborted = true;
+        setRunState((prev) => {
+          const next = [...prev];
+          const steps = next[g].steps.map((s) => (s.status === "pending" ? { ...s, status: "skipped" as const } : s));
+          next[g] = { ...next[g], steps };
+          return next;
+        });
+        break;
+      }
       const step = expanded.steps[i];
       const def = getStepDefinition(step.type);
       // One consistent clock for this step's timing, captured before the
@@ -659,15 +707,29 @@ export function useWorkflowRun(
       }
     }
 
-    // Hard-cancel mid-course (e.g. cancelled pause or failed required input): mark
-    // remaining courses skipped in both the UI state and the outcome accumulator.
+    // Hard-cancel (e.g. cancelled pause, failed required input, or B4's
+    // "Abort run"): mark every remaining group skipped, in both the UI
+    // state and (for a course fan-out) the outcome accumulator. B4 widened
+    // this from `aborted && isCourseRun` to plain `aborted` for the
+    // setRunState call - an institution-only fan-out's remaining groups
+    // used to stay "pending" forever after an abort; applyStopAfterCourse
+    // operates generically on any RunStateGroup list, course or not.
     if (aborted && isCourseRun) {
       for (let r = currentGroupIndex + 1; r < fanoutEntities.length; r++) {
         const rest = fanoutEntities[r];
         courseOutcomes.push({ courseId: rest.courseId ?? "", courseName: rest.courseName ?? "", status: "skipped" });
       }
+    }
+    if (aborted) {
       setRunState((prev) => applyStopAfterCourse(prev, currentGroupIndex + 1).groups);
     }
+
+    // B4: a stopped run must never look like a completed one - forced here
+    // regardless of whether the steps that DID run happened to error, so
+    // the download/handoff/write-back logic below (all keyed off THIS
+    // combined flag from here on, not the raw anyGenuineFailure) treats a
+    // user-stopped run the same as a genuinely failed one.
+    const genuineFailure = anyGenuineFailure || stoppedByUser;
 
     // D6: persist this run's text deliverables to the Files tab, exactly
     // like an unattended run's post-run stage does (runWorkflowUnattended,
@@ -714,7 +776,7 @@ export function useWorkflowRun(
     await finalizeRunDownload({
       pendingRunDownloads,
       workflowRunId,
-      ok: !anyGenuineFailure,
+      ok: !genuineFailure,
       user,
       supabase,
       combinedFileName: buildWorkflowFileName({
@@ -731,12 +793,11 @@ export function useWorkflowRun(
       failureGroups,
     });
 
-    if (anyGenuineFailure) {
+    if (genuineFailure) {
       onSetPendingHandoff(null);
     }
 
     if (user && supabase && selectedDef) {
-      const genuineFailure = anyGenuineFailure;
       // Built from the loop's own accumulators, NOT the `runState` variable -
       // this closure's `runState` binding is frozen at the render that started
       // the run and never updates across the many setRunState calls above.
@@ -750,11 +811,18 @@ export function useWorkflowRun(
         const courseSummary = buildCourseFanoutDetail(courseOutcomes);
         detail = detail ? `${courseSummary} - ${detail}` : courseSummary;
       }
+      // B4: a stopped run's record LEADS with "Stopped by user...", ahead
+      // of any genuine error text it also produced - see run-stop.ts's own
+      // doc comment for why this can never be mistaken for a clean "ok".
+      if (stoppedByUser) {
+        const stopNote = describeStoppedRunDetail(stepCount, expanded.steps.length * fanoutEntities.length);
+        detail = detail ? `${stopNote} - ${detail}` : stopNote;
+      }
       // finishWorkflowRun never throws (see workflow-runs.ts) - no .catch
       // needed, but not awaited either: this write-back must never delay
       // handleRun's own completion (setRunning(false) below).
       void finishWorkflowRun(supabase, user.id, workflowRunId, {
-        status: genuineFailure ? "error" : "ok",
+        status: stoppedByUser ? stoppedRunStatus() : genuineFailure ? "error" : "ok",
         detail,
         stepCount,
         errorCount,
@@ -793,6 +861,8 @@ export function useWorkflowRun(
     running,
     stopRequested,
     stopAfterCurrentCourse,
+    abortRequested,
+    abortRun,
     validationError,
     setValidationError,
     runPause,

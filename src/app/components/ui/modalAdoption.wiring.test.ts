@@ -256,7 +256,14 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // grading-recording/LegibilityProbeModal.tsx is one more new dialog
     // site, on the same terms as RubricInputModal.tsx before it - it adopts
     // ModalShell from birth.
-    expect(DIALOG_SITES.length).toBe(49);
+    //
+    // 50, not 49, as of the Message Drafts / Knowledge send-safety fixes
+    // chunk: MessageDraftsTab.tsx is one more new dialog site, on the same
+    // terms KnowledgeTab.tsx already sits on PERMANENT_EXCLUSIONS for - its
+    // new send/delete confirm banner reuses KnowledgeTab.tsx's exact
+    // role="alertdialog" .kbWarnBanner shell, so it adds to the non-adopting
+    // side (PERMANENT_EXCLUSIONS), not to ADOPTING_PATHS.
+    expect(DIALOG_SITES.length).toBe(50);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {

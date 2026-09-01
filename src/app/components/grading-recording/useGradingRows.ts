@@ -21,19 +21,40 @@
 // GradingTable/GradingTableRow's Remove and Clear table controls call
 // through.
 //
-// PERSISTENCE SCOPE (a judgment call, noted for review): only the two UI
-// controls (`filterText`, `sort`) are persisted to localStorage here, NOT
-// the `rows` array itself - unlike useReplyRows.ts's own STORAGE_KEY_TABLE,
-// which persists the whole captured reply table across reloads. Two
-// reasons: (1) nothing produces GradingRow objects yet in this wave (no
-// capture/extraction caller exists - see above), so there is no real
-// "reload mid-session" scenario to protect against today, and (2)
-// GradingRow explicitly carries no field that could ever be written to
-// `grading_drafts` (grading-row.ts's own header, R0-2) - persisting the raw
-// rows to localStorage would not violate that boundary (localStorage is not
-// the database table R0-2 forbids), but committing to a serialization
-// format for a row shape a sibling wave has not finished driving felt
-// premature. This can be revisited once a capture/extraction caller exists.
+// PERSISTENCE SCOPE: the whole table now persists too, not just the two UI
+// controls (`filterText`, `sort`) - closing THE GAP a capture/extraction
+// caller (GradingRecordingPanel.tsx) now actually exercises: an instructor
+// records thirty submissions, reloads, and the table used to come back
+// empty, silently dropping every grade and any feedback already edited by
+// hand. This mirrors useReplyRows.ts's own STORAGE_KEY_TABLE exactly - same
+// "read once in the initializer, write on every commit" shape - except
+// there is no debounce here: this file has none of useReplyRows.ts's
+// generation-guard/debounce machinery (see the file's own header above), so
+// every mutator's `commitRows` call persists synchronously via
+// `persistRows`, same as `setSort`/`setFilterText` already do below.
+//
+// Serialization itself (the version constant, the read/write coercion, and
+// the quota-fallback write that drops `submissionText` first) lives in
+// grading-row-serialization.ts, a pure DOM-free leaf beside grading-row.ts -
+// never duplicated here, mirroring discussion-serialization.ts /
+// useReplyRows.ts's own division of labour (that file's own header is this
+// one's precedent). GradingRow still carries no field that could ever be
+// written to `grading_drafts` (grading-row.ts's own header, R0-2) -
+// persisting the raw rows to localStorage does not touch that boundary
+// (localStorage is not the database table R0-2 forbids), and
+// grading-row-serialization.ts's own header documents why its write path
+// cannot leak a stray field into the wire format even by accident.
+//
+// Quota (item 4): a table of thirty submissions' worth of full-length
+// submission text WILL exceed a real class's localStorage quota.
+// `persistRows` below tries the full write first; on failure it retries
+// with `serializeGradingRowsWithoutSubmissionText` (submissionText dropped,
+// every feedback field and `userEdited` kept - see that function's own doc
+// comment for why submissionText, not feedback, is what gets sacrificed
+// first); if even THAT throws, the failure is reported via `persistError`,
+// never swallowed. Caught by catching, never by `err.name` - mirrors
+// useReplyRows.ts's own AC23a discipline (Firefox/Safari private mode each
+// throw something different here).
 //
 // Keys are whole string literals throughout this file (never a template
 // literal) - this directory's own canary
@@ -58,9 +79,26 @@ import {
   type GradingResultInput,
 } from "./grading-rows";
 import type { GradingRow, GradingRowNameMatch } from "./grading-row";
+import {
+  serializeGradingRows,
+  serializeGradingRowsWithoutSubmissionText,
+  deserializeGradingRows,
+} from "./grading-row-serialization";
 
 const STORAGE_KEY_FILTER = "ta-rec-grade-filter";
 const STORAGE_KEY_SORT = "ta-rec-grade-sort";
+const STORAGE_KEY_TABLE = "ta-rec-grade-table";
+
+// Item 4: the exact user-facing messages for the two ways a persistence
+// write can come up short. Two distinct messages, not one, because the two
+// cases are different in kind: the reduced write still SUCCEEDED (feedback
+// is safe), while the full failure means NOTHING was saved this time
+// (in-memory rows still work until reload, mirroring useReplyRows.ts's own
+// AC23a STORAGE_FULL_MESSAGE guarantee).
+const STORAGE_REDUCED_MESSAGE =
+  "There was not enough room to also save submission text, so only student names, roster matches, scores and feedback were saved. Your feedback is safe across a reload; re-run the capture to get submission text back.";
+const STORAGE_FULL_MESSAGE =
+  "There is no room left to save the grading table at all. Your grading still works until you reload - remove rows you are done with, or copy out feedback you need, then try again.";
 
 export interface UseGradingRowsReturn {
   /** Sorted AND filtered for display. A fresh array whenever `rawRows`,
@@ -102,10 +140,22 @@ export interface UseGradingRowsReturn {
 
   removeRow: (id: string) => void;
   clearTable: () => void;
+
+  /** Item 4. Null once the last persistence write succeeded (in full or in
+   *  the reduced, submission-text-dropped form); the exact user-facing
+   *  message otherwise. In-memory rows keep working regardless - this never
+   *  blocks a mutator, mirroring useReplyRows.ts's own `persistError`. */
+  persistError: string | null;
 }
 
 export function useGradingRows(): UseGradingRowsReturn {
-  const [rawRows, setRawRows] = useState<GradingRow[]>([]);
+  // Read-once-in-the-initializer, guarded by `typeof window` - mirrors
+  // useReplyRows.ts's own `rawRows` initializer (STORAGE_KEY_TABLE).
+  const [rawRows, setRawRows] = useState<GradingRow[]>(() => {
+    if (typeof window === "undefined") return [];
+    return deserializeGradingRows(window.localStorage.getItem(STORAGE_KEY_TABLE));
+  });
+  const [persistError, setPersistError] = useState<string | null>(null);
 
   // Read-once-in-the-initializer, guarded by `typeof window` - mirrors
   // useReplyRows.ts's own sort/filter initializers. The table is not owned
@@ -126,10 +176,40 @@ export function useGradingRows(): UseGradingRowsReturn {
   // reads/writes rowsRef.current, never a `rawRows` closure.
   const rowsRef = useRef<GradingRow[]>(rawRows);
 
-  const commitRows = useCallback((next: GradingRow[]) => {
-    rowsRef.current = next;
-    setRawRows(next);
+  // Item 4: tries the full write first; on failure (real-world cause is
+  // almost always quota - Firefox's NS_ERROR_DOM_QUOTA_REACHED, Safari
+  // private mode throwing on any setItem, or the origin's quota actually
+  // filled by some other ta- key), retries with submissionText dropped
+  // (serializeGradingRowsWithoutSubmissionText keeps every feedback field
+  // and userEdited - see that function's own doc comment for why
+  // submissionText is what gets sacrificed first, never feedback). If even
+  // the reduced write throws, nothing was saved this time and that is
+  // reported, never swallowed. Caught by catching, never by `err.name` -
+  // mirrors useReplyRows.ts's own AC23a discipline.
+  const persistRows = useCallback((rows: GradingRow[]) => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY_TABLE, serializeGradingRows(rows));
+      setPersistError(null);
+      return;
+    } catch {
+      // fall through to the reduced write below
+    }
+    try {
+      window.localStorage.setItem(STORAGE_KEY_TABLE, serializeGradingRowsWithoutSubmissionText(rows));
+      setPersistError(STORAGE_REDUCED_MESSAGE);
+    } catch {
+      setPersistError(STORAGE_FULL_MESSAGE);
+    }
   }, []);
+
+  const commitRows = useCallback(
+    (next: GradingRow[]) => {
+      rowsRef.current = next;
+      setRawRows(next);
+      persistRows(next);
+    },
+    [persistRows]
+  );
 
   const setSort = useCallback((next: GradingSort) => {
     setSortState(next);
@@ -224,5 +304,6 @@ export function useGradingRows(): UseGradingRowsReturn {
     applyRosterMatch,
     removeRow,
     clearTable,
+    persistError,
   };
 }

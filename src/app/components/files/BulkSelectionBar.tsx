@@ -4,6 +4,7 @@ import { Button, TextField, MenuItem } from "@mui/material";
 import type { CanvasModule } from "@/lib/canvas-modules";
 import CoursePicker from "../CoursePicker";
 import styles from "../../page.module.css";
+import { bulkDeleteConfirmLabel } from "./bulkDeleteLabel";
 
 interface BulkSelectionBarProps {
   selectedCount: number;
@@ -82,7 +83,7 @@ export function BulkSelectionBar({
             color="error"
             onClick={onDelete}
           >
-            {confirmBulkDelete ? "Confirm delete" : "Delete"}
+            {bulkDeleteConfirmLabel(confirmBulkDelete, selectedCount)}
           </Button>
         </div>
       )}
@@ -110,6 +111,7 @@ export function BulkSelectionBar({
                     size="small"
                     sx={{ minWidth: 220, marginTop: 1 }}
                     disabled={modulesStatus !== "ready"}
+                    aria-label="Module to add the files to"
                   >
                     {modulesStatus === "ready" && modules.length === 0 ? (
                       <MenuItem value="">No modules found</MenuItem>

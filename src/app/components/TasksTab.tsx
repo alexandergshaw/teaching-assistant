@@ -21,10 +21,7 @@ import TabShell from "./TabShell";
 import type { TasksView } from "../url-state";
 import { TASK_GROUPS, TERM_TASKS, RECURRING_TASKS } from "@/lib/course-tasks-catalog";
 import {
-  setTaskCellStatus,
-  taskCellAt,
   type TaskCell as TaskCellValue,
-  type TaskDefinition,
   type TaskGroupId,
   type TaskStatus,
 } from "@/lib/course-tasks";
@@ -45,7 +42,6 @@ import {
   serializeTaskColumnSet,
   sortTaskRows,
   TASK_COLUMNS_ADDED_IN,
-  TASK_STATUS_WORDS,
   terminated,
   type TaskCatalogOverride,
   type TaskColumnFilters,
@@ -64,6 +60,9 @@ import {
   type ReorderableColumn,
 } from "./tasks/columnOrder";
 import { useCourseTasksData } from "./tasks/useCourseTasksData";
+import { useTaskCellErrors } from "./tasks/useTaskCellErrors";
+import { useTaskBulkActions } from "./tasks/useTaskBulkActions";
+import { shouldShowEmptyState, shouldShowMainContent, errorBannerText } from "./tasks/taskLoadState";
 import TasksToolbar from "./tasks/TasksToolbar";
 import TasksGrid, { type Density, type TasksGridHandle } from "./tasks/TasksGrid";
 import ManageTasksDialog from "./tasks/ManageTasksDialog";
@@ -79,18 +78,6 @@ import {
 } from "./tasks/tasksUiState";
 import pageStyles from "../page.module.css";
 import styles from "./tasks/TasksGrid.module.css";
-
-/** The one thing every bulk/fill action needs to ask before overwriting
- * data it did not just create (AC6 item 33): does the target cell already
- * hold a non-open value that differs from what is about to be written. */
-function overwritesMeaningfully(cell: TaskCellValue, nextStatus: TaskStatus): boolean {
-  return cell.status !== "open" && cell.status !== nextStatus;
-}
-
-type BulkAction =
-  | { kind: "column"; task: TaskDefinition; status: TaskStatus }
-  | { kind: "row"; courseId: string; courseName: string; status: TaskStatus }
-  | { kind: "fill"; task: TaskDefinition; sourceCell: TaskCellValue; targetCourseIds: string[] };
 
 // Impure Date.now() read isolated in this tiny top-level helper (mirrors
 // currentTimeMs in WeeklyChecklistCell.tsx) so eslint's react-hooks/purity
@@ -295,6 +282,13 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   const periodCaption =
     view === "recurring" ? "Daily tasks clear at midnight; weekly tasks clear Sunday." : undefined;
 
+  // BLOCKER 3/4 + SHOULD 8: the one place "is there an error, and which
+  // wording" gets decided (taskLoadState.ts, pure/tested) - both the error
+  // banner and the empty-state gate below read from `data.state`/`data.error`
+  // directly, but only through these two helpers, never a re-derived
+  // `data.error &&`/`data.courses.length === 0` pair of their own.
+  const errorText = errorBannerText(data.state, data.error);
+
   // Shared live region (AC6 item 33, AC12 item 63; S7/S8) - bulk-action
   // results AND per-cell save errors both funnel through this one
   // announcement string, declared here (ahead of both "Cell edits" and
@@ -417,29 +411,29 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   };
 
   // -----------------------------------------------------------------------
-  // Cell edits (AC5) - per-cell inline error, cleared on the next attempt or
-  // after a few seconds.
-  const [cellErrors, setCellErrors] = useState<Record<string, string>>({});
-  const clearCellError = (key: string) => {
-    setCellErrors((prev) => {
-      if (!(key in prev)) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  };
+  // Cell edits (AC5) - per-cell inline error. State lives in
+  // useTaskCellErrors.ts (line-budget split - shared with the bulk-action
+  // hook below, which reports/clears the SAME map for a bulk write's
+  // per-course outcomes, BLOCKER 2).
+  //
+  // SHOULD 7: the error is cleared ONLY on the next attempt for that same
+  // (courseId, taskId) key (clearCellError below, at the START of
+  // handleCellChange) or on a bulk write that SUCCEEDED for it
+  // (useTaskBulkActions.ts) - never on a timer. The optimistic value has
+  // already reverted by the time a failure reaches here
+  // (useCourseTasksData.ts), so a clock-based clear used to erase the ONLY
+  // visible evidence of the failure while the cell quietly showed the old
+  // status again.
+  const { cellErrors, reportCellError: markCellError, clearCellError } = useTaskCellErrors();
   // S7/S8: cell save errors are announced through the ONE always-mounted
   // live region below (not a per-cell `role="status"` span that mounts at
   // the same instant as its own text, unreliable, and there can be over a
-  // thousand of these cells) - `reportCellError` is the single place a cell
-  // error becomes user-visible, so it is also the single place it gets
-  // announced.
-  const reportCellError = (key: string, message: string, courseName: string, taskLabel: string) => {
-    setCellErrors((prev) => ({ ...prev, [key]: message }));
+  // thousand of these cells) - `reportCellSaveError` is the single place a
+  // single-cell edit's error becomes user-visible, so it is also the single
+  // place it gets announced.
+  const reportCellSaveError = (key: string, message: string, courseName: string, taskLabel: string) => {
+    markCellError(key, message);
     setAnnouncement(`Could not save ${taskLabel} for ${courseName}: ${message}`);
-    if (typeof window !== "undefined") {
-      window.setTimeout(() => clearCellError(key), 6000);
-    }
   };
 
   // Not wrapped in useCallback: every caller below already wraps it in its
@@ -453,7 +447,7 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
     if (!result.ok) {
       const courseName = allRows.find((r) => r.course.id === courseId)?.course.name ?? "this course";
       const taskLabel = resolvedCatalog.find((t) => t.id === taskId)?.label ?? "this task";
-      reportCellError(key, result.error ?? "Could not save.", courseName, taskLabel);
+      reportCellSaveError(key, result.error ?? "Could not save.", courseName, taskLabel);
     }
   };
 
@@ -487,82 +481,30 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
 
   // -----------------------------------------------------------------------
   // Bulk actions (AC6) - column/row/fill-down all funnel through one confirm
-  // + apply + announce pipeline.
-  const [pendingBulk, setPendingBulk] = useState<{ action: BulkAction; count: number } | null>(null);
-
-  const applyBulk = useCallback(
-    async (action: BulkAction) => {
-      if (action.kind === "column") {
-        const results = await Promise.all(
-          sortedRows.map((row) =>
-            setCourseCells(row.course.id, { [action.task.id]: setTaskCellStatus(taskCellAt(row.cells, action.task.id), action.status, nowMs) })
-          )
-        );
-        const succeeded = results.filter((r) => r.ok).length;
-        // S10: TASK_STATUS_WORDS, not the raw enum - `action.status` on its
-        // own produced announcements like "Set Textbook Owned? to na for 3
-        // courses."
-        setAnnouncement(
-          `Set ${action.task.label} to ${TASK_STATUS_WORDS[action.status]} for ${succeeded} of ${sortedRows.length} course${sortedRows.length === 1 ? "" : "s"}.`
-        );
-        return;
-      }
-      if (action.kind === "row") {
-        const row = allRows.find((r) => r.course.id === action.courseId);
-        if (!row) return;
-        const patch: Record<string, TaskCellValue> = {};
-        for (const t of visibleTasks) patch[t.id] = setTaskCellStatus(taskCellAt(row.cells, t.id), action.status, nowMs);
-        const result = await setCourseCells(action.courseId, patch);
-        setAnnouncement(
-          result.ok
-            ? `Set ${visibleTasks.length} task${visibleTasks.length === 1 ? "" : "s"} to ${TASK_STATUS_WORDS[action.status]} for ${action.courseName}.`
-            : `Could not update ${action.courseName}: ${result.error}`
-        );
-        return;
-      }
-      // fill-down
-      const results = await Promise.all(action.targetCourseIds.map((id) => setCourseCells(id, { [action.task.id]: action.sourceCell })));
-      const succeeded = results.filter((r) => r.ok).length;
-      setAnnouncement(`Filled ${action.task.label} down to ${succeeded} of ${action.targetCourseIds.length} course${action.targetCourseIds.length === 1 ? "" : "s"}.`);
-    },
-    [sortedRows, allRows, visibleTasks, nowMs, setCourseCells]
-  );
-
-  const requestBulk = (action: BulkAction, affectedCells: TaskCellValue[]) => {
-    const count = affectedCells.filter((cell) => overwritesMeaningfully(cell, "status" in action ? action.status : action.sourceCell.status)).length;
-    if (count > 0) setPendingBulk({ action, count });
-    else void applyBulk(action);
-  };
-
-  const handleColumnBulkSet = (task: TaskDefinition, status: TaskStatus) => {
-    requestBulk(
-      { kind: "column", task, status },
-      sortedRows.map((row) => taskCellAt(row.cells, task.id))
-    );
-  };
-
-  const handleRowBulkSet = (courseId: string, courseName: string, status: TaskStatus) => {
-    const row = allRows.find((r) => r.course.id === courseId);
-    requestBulk(
-      { kind: "row", courseId, courseName, status },
-      row ? visibleTasks.map((t) => taskCellAt(row.cells, t.id)) : []
-    );
-  };
-
-  const handleFillDown = (task: TaskDefinition, sourceCell: TaskCellValue, targetCourseIds: string[]) => {
-    const cells = targetCourseIds.map((id) => {
-      const row = allRows.find((r) => r.course.id === id);
-      return row ? taskCellAt(row.cells, task.id) : taskCellAt({}, task.id);
-    });
-    requestBulk({ kind: "fill", task, sourceCell, targetCourseIds }, cells);
-  };
-
-  // S10: TASK_STATUS_WORDS, not the raw enum, in every branch that names a status.
-  const confirmBulkMessage = (action: BulkAction, count: number): string => {
-    if (action.kind === "column") return `This will overwrite ${count} existing value${count === 1 ? "" : "s"} in "${action.task.label}" with ${TASK_STATUS_WORDS[action.status]}. Continue?`;
-    if (action.kind === "row") return `This will overwrite ${count} existing value${count === 1 ? "" : "s"} for ${action.courseName} with ${TASK_STATUS_WORDS[action.status]}. Continue?`;
-    return `This will overwrite ${count} existing value${count === 1 ? "" : "s"} in "${action.task.label}" below. Continue?`;
-  };
+  // + apply + announce pipeline. State/writes/counting-and-messaging all
+  // live in useTaskBulkActions.ts / bulkConfirmDecision.ts (line-budget
+  // split, BLOCKER 1/2 fixes) - this file only wires the hook's inputs
+  // (current filtered/sorted rows, the shared cell-error map, the shared
+  // announcement) through to it and renders the confirm dialog it drives.
+  const {
+    pendingBulk,
+    cancelBulk,
+    confirmBulk,
+    handleColumnBulkSet,
+    handleRowBulkSet,
+    handleFillDown,
+  } = useTaskBulkActions({
+    sortedRows,
+    allRows,
+    visibleTasks,
+    nowMs,
+    setCourseCells,
+    reportCellError: markCellError,
+    clearCellError,
+    setAnnouncement,
+  });
+  // SHOULD 5: see the Dialog's own comment below.
+  const bulkConfirmDescId = useId();
 
   // -----------------------------------------------------------------------
   // CSV export (AC10, period stated for AC14 item 80)
@@ -827,9 +769,16 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
           {reorderAnnouncement}
         </div>
 
-        {data.error && (
-          <div className={styles.errorBanner}>
-            <span>{data.error}</span>
+        {/* BLOCKER 3/4: errorBannerText tells a hard failure ("state" ===
+            "error", possibly zero cached courses) apart from a SILENT
+            background-refresh failure (state stays "idle", stale data still
+            shown - SHOULD 8) - the two need different wording, and BOTH now
+            get `role="alert"`, which this banner never carried before (an
+            instructor whose load failed was told nothing at all by a screen
+            reader; the tab simply looked like it had no courses). */}
+        {errorText && (
+          <div className={styles.errorBanner} role="alert">
+            <span>{errorText}</span>
             <Button size="small" onClick={() => void reload()}>
               Retry
             </Button>
@@ -838,17 +787,22 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
 
         {data.state === "loading" && (
           <div style={{ display: "flex", justifyContent: "center", padding: 32 }}>
-            <CircularProgress size={22} />
+            <CircularProgress size={22} aria-label="Loading tasks" />
+            <span className={styles.srOnly}>Loading tasks…</span>
           </div>
         )}
 
-        {data.state !== "loading" && data.courses.length === 0 && (
+        {/* BLOCKER 3: gated on state === "idle" (shouldShowEmptyState), not
+            merely "not loading" - a failed load used to fall through to this
+            exact sentence, telling an instructor whose network blipped that
+            their account has no courses at all. */}
+        {shouldShowEmptyState(data.state, data.courses.length) && (
           <p className={styles.emptyState}>
             No courses yet. Add one on the Courses tab, and it will show up here automatically.
           </p>
         )}
 
-        {data.state !== "loading" && data.courses.length > 0 && (
+        {shouldShowMainContent(data.state, data.courses.length) && (
           <>
             <TasksToolbar
               search={current.search}
@@ -876,6 +830,20 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
               onDownloadCsv={handleDownloadCsv}
               onManageTasks={() => setManageOpen(true)}
               summaryText={summaryText}
+              // BLOCKER 2: the SAME announcement string the srOnly live
+              // region above already carries, now ALSO shown visibly next to
+              // the summary figure - a bulk outcome ("Set X to Y for 3 of 26
+              // courses.") used to reach a sighted instructor nowhere but
+              // that 1px-clipped region, so a partial failure and a full
+              // success looked identical on screen.
+              statusText={announcement}
+              // SHOULD 8: a manual escape hatch from the silent-refresh path
+              // (mount-time reload when the cache is warm, and the
+              // attachments dialog's onChanged) - previously the ONLY way to
+              // force a fresh load was the Retry button, which only ever
+              // appeared after a NON-silent failure.
+              refreshing={data.refreshing}
+              onRefresh={() => void reload()}
               periodCaption={periodCaption}
               columnFilters={columnFilters}
               onClearColumnFilter={handleClearColumnFilter}
@@ -952,22 +920,22 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
         onChanged={() => void reload({ silent: true })}
       />
 
+      {/* SHOULD 5: MUI's Dialog auto-wires aria-labelledby from DialogTitle
+          but does NOT auto-wire aria-describedby (Dialog.js only forwards it
+          when passed explicitly) - this repo already fixed the identical gap
+          at CoursesTable.tsx:450-455/747 (copied verbatim here), so without
+          `bulkConfirmDescId` a screen-reader user heard "Confirm bulk
+          update" plus two buttons and NOTHING of the actual consequence
+          (BLOCKER 1's whole point). */}
       {pendingBulk && (
-        <Dialog open onClose={() => setPendingBulk(null)}>
+        <Dialog open onClose={cancelBulk} aria-describedby={bulkConfirmDescId}>
           <DialogTitle>Confirm bulk update</DialogTitle>
           <DialogContent>
-            <p>{confirmBulkMessage(pendingBulk.action, pendingBulk.count)}</p>
+            <p id={bulkConfirmDescId}>{pendingBulk.message}</p>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setPendingBulk(null)}>Cancel</Button>
-            <Button
-              variant="contained"
-              onClick={() => {
-                const action = pendingBulk.action;
-                setPendingBulk(null);
-                void applyBulk(action);
-              }}
-            >
+            <Button onClick={cancelBulk}>Cancel</Button>
+            <Button variant="contained" onClick={confirmBulk}>
               Continue
             </Button>
           </DialogActions>

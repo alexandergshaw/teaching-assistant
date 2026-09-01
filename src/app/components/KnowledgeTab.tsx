@@ -64,7 +64,7 @@ import { useKbAttachments } from "./knowledge/useKbAttachments";
 import { useKbTreeActions } from "./knowledge/useKbTreeActions";
 import { useKbInstitutionPicker } from "./knowledge/useKbInstitutionPicker";
 import { useKbSelection } from "./knowledge/useKbSelection";
-import { allVisibleSelected, visiblePageIds } from "./knowledge/knowledge-helpers";
+import { allVisibleSelected, visiblePageIds, describeSelectedPages } from "./knowledge/knowledge-helpers";
 import { openChat } from "@/lib/chat/open-chat";
 import { buildKnowledgeContextBlock } from "@/lib/chat/knowledge-context";
 import { openRecordingTool } from "@/lib/recording-launch";
@@ -176,6 +176,14 @@ export default function KnowledgeTab({
   // expansion changes, not on every render.
   const visibleIds = useMemo(() => visiblePageIds(tree, expanded), [tree, expanded]);
   const allVisSelected = allVisibleSelected(kbSelection.selected, visibleIds);
+  // B5: names the selection by TITLE, including pages sitting inside a
+  // collapsed branch - built off the full flat `pages` list, never
+  // `visibleIds` above, so a page with no checkbox currently on screen is
+  // still legible here instead of silently riding along unseen.
+  const selectionDescription = useMemo(
+    () => describeSelectedPages(pages ?? [], kbSelection.selected),
+    [pages, kbSelection.selected]
+  );
 
   // Switch this tab's own institution (AC5): guarded exactly like selectPage
   // below, since it discards the current page's unsaved edits just as surely.
@@ -588,6 +596,15 @@ export default function KnowledgeTab({
                   Clear
                 </Button>
               </div>
+              {/* B5: names the selection by title (including pages inside a
+                  collapsed branch, which have no checkbox visible right now)
+                  so the count above is legible without expanding the tree. */}
+              <div className={styles.bulkRow}>
+                <span className={styles.bulkLabel}>Selected</span>
+                <span className={styles.fieldHint} style={{ margin: 0 }}>
+                  {selectionDescription.text}
+                </span>
+              </div>
               <div className={styles.bulkRow}>
                 <span className={styles.bulkLabel}>Actions</span>
                 <Button variant="contained" size="small" onClick={askAiAboutSelection}>
@@ -600,6 +617,12 @@ export default function KnowledgeTab({
                   Grade via recording
                 </Button>
               </div>
+              {/* B5: nothing else on this surface says selecting a page sends
+                  its full text to the model - state it once, here, next to
+                  the actions that actually do it. */}
+              <p className={styles.fieldHint} style={{ margin: 0 }}>
+                These pages are sent to the model as context for the action you pick.
+              </p>
             </div>
           )}
 

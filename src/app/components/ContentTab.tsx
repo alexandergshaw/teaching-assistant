@@ -318,6 +318,21 @@ export default function ContentTab({
     return { status: willAutoLoad ? "loading" : "idle", message: "" };
   });
   const [note, setNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  // S1 (docs/ux-audit-files-content.md): this one node is the sole
+  // reporting channel for every bulk-bar outcome in ModulesView and every
+  // hook under it (setNote is threaded all the way down) - and it renders a
+  // full screen above the sticky module list an instructor is usually
+  // scrolled into when a bulk action finishes, with no aria-live to
+  // announce it either. noteRef + the effect below scroll the note into
+  // view whenever it transitions from null, so the result lands somewhere
+  // visible near the click that produced it; role="status"/"alert" +
+  // aria-live below make it audible to a screen reader too.
+  const noteRef = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    if (note) {
+      noteRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [note]);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [editorOpen, setEditorOpen] = useState(false);
@@ -819,7 +834,16 @@ export default function ContentTab({
             />
           )}
 
-          {note && <p className={note.kind === "error" ? styles.error : styles.fieldHint}>{note.text}</p>}
+          {note && (
+            <p
+              ref={noteRef}
+              role={note.kind === "error" ? "alert" : "status"}
+              aria-live="polite"
+              className={note.kind === "error" ? styles.error : styles.fieldHint}
+            >
+              {note.text}
+            </p>
+          )}
 
           {courseTab && loadState.status === "loading" && (
             <div className={styles.loadingState} role="status" aria-live="polite">

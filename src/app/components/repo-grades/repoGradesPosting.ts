@@ -360,40 +360,55 @@ export function buildRepoGradePostPlan(
 }
 
 /** One row's outcome after a post attempt - what a grid cell's post-status
- * fields (RepoGradeCell.postStatus / a companion message) get set to. */
+ * fields (RepoGradeCell.postStatus / a companion message) get set to. B1
+ * (ux-audit-grading.md): "skipped" joins "posted"/"error" as a genuine third
+ * outcome - a row here had no grade or comment to send, so Canvas was never
+ * called for it. */
 export interface RepoGradePostFanoutResult {
   repo: string;
-  postStatus: Extract<RepoGradePostStatus, "posted" | "error">;
+  postStatus: Extract<RepoGradePostStatus, "posted" | "error" | "skipped">;
   postMessage: string | null;
 }
 
 /** The two return shapes postCanvasGradesAction actually produces
- * (src/app/actions/grading.ts:100-102) - declared locally rather than
- * imported so this pure module never imports a "use server" action file
- * (AC6 item 33's boundary is about client code reaching src/lib/github* only
- * through an action, but the same discipline - depend on shapes, not on the
- * action module itself - keeps this file trivially unit-testable with a
- * plain object literal, no server context required). */
+ * (src/app/actions/grading.ts) - declared locally rather than imported so
+ * this pure module never imports a "use server" action file (AC6 item 33's
+ * boundary is about client code reaching src/lib/github* only through an
+ * action, but the same discipline - depend on shapes, not on the action
+ * module itself - keeps this file trivially unit-testable with a plain
+ * object literal, no server context required).
+ *
+ * `skipped` is OPTIONAL here (never on the real action, which always
+ * returns it - see grading.ts) purely so this module's own frozen test file,
+ * whose fixtures predate B1, keeps compiling and keeps behaving identically:
+ * an absent `skipped` array is treated as empty, matching what "no student
+ * was skipped" looks like on the real payload. */
 export type RepoGradePostActionResult =
-  | { posted: number; failures: Array<{ userId: number; error: string }> }
+  | {
+      posted: number;
+      failures: Array<{ userId: number; error: string }>;
+      skipped?: Array<{ userId: number; reason: string }>;
+    }
   | { error: string };
 
 /**
  * Fans postCanvasGradesAction's result back out to the specific rows this
  * call attempted (`attempted` - always exactly `plan.postable` from the same
  * buildRepoGradePostPlan call, never the whole grid). Copies
- * GradingResults.tsx:336-349's two-step shape:
+ * GradingResults.tsx's own three-step shape:
  *   1. A whole-request `{error}` (the action itself threw, or requireOwner
  *      rejected, etc.) marks EVERY attempted row "error" with that one
  *      message - none are left "posted" on an unknown outcome.
- *   2. Otherwise, `failures` is turned into a userId -> message Map ONCE,
- *      then every attempted row is looked up by ITS OWN userId: a hit is
- *      "error" with that failure's own message; a miss is "posted". Because
- *      the lookup is keyed by userId and each attempted row supplies its own
- *      userId, one student's failure can never bleed onto a different
- *      student's row - the miss case simply never sees a userId it does not
- *      own.
- * Never mutates `attempted`.
+ *   2. Otherwise, `failures` is turned into a userId -> message Map, checked
+ *      FIRST: a hit is "error" with that failure's own message.
+ *   3. `skipped` is checked next (B1): a userId here had no grade or comment
+ *      to send, so it is "skipped", never "posted" - the pre-fix defect was
+ *      exactly this row falling through to the miss case below and reading
+ *      as a success.
+ *   4. Only a userId in NEITHER map is "posted".
+ * Because both lookups are keyed by userId and each attempted row supplies
+ * its own userId, one student's failure/skip can never bleed onto a
+ * different student's row. Never mutates `attempted`.
  */
 export function fanOutRepoGradePostResult(
   attempted: readonly Pick<RepoGradePostPlanItem, "repo" | "userId">[],
@@ -403,11 +418,17 @@ export function fanOutRepoGradePostResult(
     return attempted.map((row) => ({ repo: row.repo, postStatus: "error", postMessage: result.error }));
   }
   const failureByUserId = new Map(result.failures.map((f) => [f.userId, f.error]));
+  const skippedByUserId = new Map((result.skipped ?? []).map((s) => [s.userId, s.reason]));
   return attempted.map((row) => {
     const failureMessage = failureByUserId.get(row.userId);
-    return failureMessage !== undefined
-      ? { repo: row.repo, postStatus: "error", postMessage: failureMessage }
-      : { repo: row.repo, postStatus: "posted", postMessage: null };
+    if (failureMessage !== undefined) {
+      return { repo: row.repo, postStatus: "error", postMessage: failureMessage };
+    }
+    const skipReason = skippedByUserId.get(row.userId);
+    if (skipReason !== undefined) {
+      return { repo: row.repo, postStatus: "skipped", postMessage: skipReason };
+    }
+    return { repo: row.repo, postStatus: "posted", postMessage: null };
   });
 }
 

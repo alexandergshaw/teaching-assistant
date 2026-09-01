@@ -2,6 +2,19 @@ import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fmt } from "./types";
+// Shared with src/file-size-ceiling.structure.test.ts (the repo-wide sibling
+// of this directory-scoped gate) so the two line-counting rules cannot drift
+// apart the way they had: this file used to count with plain
+// content.split("\n").length, which is one MORE than PowerShell's
+// `@(Get-Content <file>).Count` (the measurement AGENTS.md/docs/DEV_LOOP.md
+// actually mandate) for any file ending in a trailing newline - effectively
+// enforcing a 999-line ceiling here, off by one from the repo-wide gate's
+// 1000. See ../../../lib/count-lines.ts's own header for the full account.
+// A plain .ts leaf, not another *.test.ts, is what makes sharing it safe:
+// importing a helper from a sibling *.test.ts file re-runs that file's own
+// describe/it blocks a second time under this file's run (a recorded trap
+// in this repo) - count-lines.ts has no describe blocks to re-run.
+import { countLines } from "../../../lib/count-lines";
 
 describe("recording-split structure", () => {
   describe("fmt()", () => {
@@ -36,7 +49,7 @@ describe("recording-split structure", () => {
         path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx"),
         "utf-8"
       );
-      const lineCount = content.split("\n").length;
+      const lineCount = countLines(content);
       expect(lineCount).toBeLessThanOrEqual(1000);
     });
 
@@ -45,7 +58,7 @@ describe("recording-split structure", () => {
         path.resolve(process.cwd(), "src/app/components/TabShell.tsx"),
         "utf-8"
       );
-      const lineCount = content.split("\n").length;
+      const lineCount = countLines(content);
       expect(lineCount).toBeLessThanOrEqual(1000);
     });
 
@@ -60,7 +73,7 @@ describe("recording-split structure", () => {
       for (const file of tsFiles) {
         const filePath = path.join(recordingDir, file);
         const content = fs.readFileSync(filePath, "utf-8");
-        const lineCount = content.split("\n").length;
+        const lineCount = countLines(content);
         expect(
           lineCount,
           `${file} should be under 1000 lines but has ${lineCount}`

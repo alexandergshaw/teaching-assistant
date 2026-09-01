@@ -860,6 +860,8 @@ export default function WorkflowsTab() {
               runState={workflowRun.runState}
               stopRequested={workflowRun.stopRequested}
               onStopAfterCourse={workflowRun.stopAfterCurrentCourse}
+              abortRequested={workflowRun.abortRequested}
+              onAbortRun={workflowRun.abortRun}
               pauseResolverRef={workflowRun.pauseResolverRef}
               inputResolverRef={workflowRun.inputResolverRef}
               onRunClick={workflowRun.handleRun}

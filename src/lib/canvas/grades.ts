@@ -27,7 +27,20 @@ export async function postCanvasGrades(
     comment?: string;
     rubricAreas?: Array<{ area: string; score: string; comment: string }>;
   }>
-): Promise<{ posted: number; failures: Array<{ userId: number; error: string }> }> {
+): Promise<{
+  posted: number;
+  failures: Array<{ userId: number; error: string }>;
+  /** REGRESSION-class fix: a student whose payload produced no params (blank
+   * grade AND blank comment, or a rubric-only payload whose criteria all
+   * failed to name-match) used to `continue` silently here - not counted in
+   * `posted`, not pushed to `failures`. Every caller then treated "absent
+   * from failures" as proof of success, so a row could read "Posted to
+   * Canvas" for a student whose grade never reached Canvas. This array is
+   * the third outcome: a caller MUST check it (alongside `failures`) before
+   * marking any userId "posted" - a userId is a genuine success only when it
+   * appears in neither `failures` nor `skipped`. */
+  skipped: Array<{ userId: number; reason: string }>;
+}> {
   const parsed = parseCanvasUrl(url);
   if (!parsed) {
     throw new Error(
@@ -77,6 +90,7 @@ export async function postCanvasGrades(
 
   let posted = 0;
   const failures: Array<{ userId: number; error: string }> = [];
+  const skipped: Array<{ userId: number; reason: string }> = [];
 
   for (const { userId, grade, comment, rubricAreas } of grades) {
     const params = new URLSearchParams();
@@ -96,7 +110,11 @@ export async function postCanvasGrades(
     }
 
     if ([...params.keys()].length === 0) {
-      continue; // nothing to post for this student
+      // Nothing to post for this student - not a failure (Canvas was never
+      // called), but NOT a success either. Recorded so every caller can tell
+      // this apart from a genuine post.
+      skipped.push({ userId, reason: "No grade or comment to send for this student." });
+      continue;
     }
 
     try {
@@ -130,5 +148,5 @@ export async function postCanvasGrades(
     }
   }
 
-  return { posted, failures };
+  return { posted, failures, skipped };
 }

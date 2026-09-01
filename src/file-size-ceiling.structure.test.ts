@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
+import { countLines } from "./lib/count-lines";
 
 // docs/DEV_LOOP.md: "The 1000-line ceiling on every touched file... audited,
 // not assumed... A file over 1000 lines does not get a follow-up ticket; the
@@ -70,25 +71,12 @@ const ALLOWED_OVERAGE: Record<string, { maxLines: number; reason: string }> = {
   },
 };
 
-// Matches PowerShell's `@(Get-Content <file>).Count` - the method this
-// project's own measurement convention (docs/DEV_LOOP.md, the assignment
-// brief for this gate) mandates, and NOT plain `content.split("\n").length`.
-// The two disagree by exactly one for any file ending in a trailing newline
-// (almost every file in this repo): split("\n") counts the empty string
-// after the final newline as an extra "line", Get-Content does not. Proven
-// while building this gate: with split("\n").length, src/app/actions/canvas-inbox.ts
-// - measured at exactly 1000 by Get-Content and described as "at the wall,
-// with zero headroom" - came out to 1001 and failed the gate it is not
-// actually over. Counting the Get-Content way keeps this gate's numbers
-// consistent with the numbers a human (or another agent) gets by running the
-// mandated measurement command directly.
-function countLines(content: string): number {
-  const lines = content.split(/\r\n|\r|\n/);
-  if (lines.length > 0 && lines[lines.length - 1] === "") {
-    lines.pop();
-  }
-  return lines.length;
-}
+// countLines (Get-Content-matching semantics) now lives in ./lib/count-lines
+// - shared with recording-split.structure.test.ts (this directory's sibling
+// gate) rather than reimplemented here a second time. See that module's own
+// header for the full account of why the naive content.split("\n").length
+// disagrees with the project's mandated measurement by exactly one, and why
+// a plain .ts leaf (not another *.test.ts) is what makes sharing it safe.
 
 function listSourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

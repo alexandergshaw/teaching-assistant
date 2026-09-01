@@ -35,7 +35,23 @@
 // button's real postability can never disagree (AC5 item 28).
 import { useState } from "react";
 import TextField from "@mui/material/TextField";
+// B4 (ux-audit-grading.md): the per-cell Post button used to be a plain
+// pageStyles.linkButton, styled identically to the harmless "Grade" and
+// "Browse files" buttons beside it, even though it is the only one of the
+// three that writes to a live Canvas gradebook. Raised to the same MUI
+// weight RepoGradesGrid.tsx's own column-level Post button already uses for
+// this exact action.
+import Button from "@mui/material/Button";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
+// B4: the shipped two-click "arm, then confirm" idiom, reused VERBATIM (not
+// reimplemented) - see draftPostArming.ts's header comment for the same
+// reuse on the Drafted Grades surface. The signature built below (see
+// firstPostSignature) is a plain `repo:folder:score` template string rather
+// than that file's JSON.stringify tuple - the three fields (a GitHub repo
+// full name, a folder name, a raw score string) are simple, non-JSON-like
+// text that cannot itself contain a colon, so a plain delimiter join is
+// already collision-safe here without needing JSON.stringify's escaping.
+import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 // docs for this feature (request 2 - "a button ... that can kick off the
 // interpreter/compiler for any specified file(s) in a student's folder"):
 // reuses runSubmissionCodeAction, the SAME server action the results page's
@@ -223,6 +239,16 @@ export default function RepoGradeCellControl({
   // results-table row does there.
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [expandedField, setExpandedField] = useState<FeedbackField | null>(null);
+  // B4 (ux-audit-grading.md): the FIRST post from this cell needs a confirm -
+  // a retry (postStatus "error") or a deliberate re-post (postStatus
+  // "posted") stays one click, matching handlePostOneCell's own "a single,
+  // already-scoped row is a deliberate enough act on its own" reasoning for
+  // those cases. `confirmFirstPost` holds the signature the arm was set for
+  // (null = not armed); handleScoreChange already resets postStatus to
+  // "idle" on every score edit (docs/rubric-criteria-breakdown-acceptance-
+  // criteria.md B5), so a changed score both re-enters "first post" AND
+  // changes `firstPostSignature` below, disarming any stale arm twice over.
+  const [confirmFirstPost, setConfirmFirstPost] = useState<string | null>(null);
   const handleCopyFeedback = async (key: string, value: string) => {
     await navigator.clipboard.writeText(value);
     setCopiedKey(key);
@@ -257,7 +283,13 @@ export default function RepoGradeCellControl({
   const postScoreDescription = postability.postable ? describePostScore(edit.score, pointsPossible) : null;
 
   const postStatusClass =
-    edit.postStatus === "error" ? styles.postStatusError : edit.postStatus === "posted" ? styles.postStatusPosted : styles.postStatusPosting;
+    edit.postStatus === "error"
+      ? styles.postStatusError
+      : edit.postStatus === "posted"
+        ? styles.postStatusPosted
+        : edit.postStatus === "skipped"
+          ? styles.postStatusSkipped
+          : styles.postStatusPosting;
 
   // A4: label/disabled state for the per-row post/retry button - "Post" once
   // postable and never attempted, "Retry" after an error, "Re-post" after a
@@ -268,6 +300,15 @@ export default function RepoGradeCellControl({
   const postButtonLabel =
     edit.postStatus === "posting" ? "Posting..." : edit.postStatus === "posted" ? "Re-post" : edit.postStatus === "error" ? "Retry" : "Post";
   const postButtonDisabled = edit.postStatus === "posting" || (edit.postStatus === "idle" && !postability.postable);
+  // B4: "first post" is exactly the idle/never-attempted case - a retry
+  // (postStatus "error") or a re-post (postStatus "posted") is already an
+  // established action and stays one click. The signature is scoped to THIS
+  // cell's own row/column (fixed props, never change for this component
+  // instance) plus the CURRENT score, so a stray click on a never-posted
+  // cell cannot reach Canvas, and typing a new score always re-arms.
+  const isFirstPost = edit.postStatus === "idle";
+  const firstPostSignature = `${row.repo}:${column.folder}:${edit.score}`;
+  const firstPostArmed = isConfirmArmed(confirmFirstPost, firstPostSignature);
 
   // docs for this feature (request 2): a fresh manual Run always wins over
   // the grading-time run for DISPLAY - the exact "a fresh manual run wins,
@@ -506,16 +547,25 @@ export default function RepoGradeCellControl({
           {edit.grading ? "Grading..." : "Grade"}
         </button>
         {onPostOne && (
-          <button
+          <Button
             type="button"
-            className={pageStyles.linkButton}
+            variant="contained"
+            size="small"
             disabled={postButtonDisabled}
             onClick={() => {
+              // B4: the first post from a never-attempted cell requires an
+              // arming click before it can reach Canvas - a retry/re-post
+              // (isFirstPost false) stays the existing one-click action.
+              if (isFirstPost && !firstPostArmed) {
+                setConfirmFirstPost(firstPostSignature);
+                return;
+              }
+              setConfirmFirstPost(null);
               onPostOne();
             }}
           >
-            {postButtonLabel}
-          </button>
+            {isFirstPost && firstPostArmed ? "Confirm post" : postButtonLabel}
+          </Button>
         )}
         {/* docs/grading-results-file-viewer-acceptance-criteria.md: only
             rendered once this cell HAS files to show - a graded cell whose
@@ -537,6 +587,12 @@ export default function RepoGradeCellControl({
         )}
         {postScoreDescription && <span className={styles.postReason}>{postScoreDescription}</span>}
         {!postability.postable && <span className={styles.postReason}>{postability.reason}</span>}
+        {/* B4: matches the column-level Post button's own confirm wording
+            ("This writes to the live gradebook") for the same reason it is
+            armed there - the click below is about to write to Canvas. */}
+        {isFirstPost && firstPostArmed && (
+          <span className={styles.postReason}>This writes to the live Canvas gradebook.</span>
+        )}
       </div>
       {filesOpen && (
         <SubmittedFilesPanel
@@ -557,7 +613,9 @@ export default function RepoGradeCellControl({
             ? "Posting..."
             : edit.postStatus === "posted"
               ? "Posted to Canvas"
-              : `Failed: ${edit.postMessage ?? ""}`}
+              : edit.postStatus === "skipped"
+                ? "Not posted - no grade or comment to send"
+                : `Failed: ${edit.postMessage ?? ""}`}
         </span>
       )}
     </div>

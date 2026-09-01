@@ -318,8 +318,22 @@ export default function LiveFeedPanel({
 
   const inSequence = sequence !== null;
 
+  // B3 (ux-audit-grading.md): this used to call postAll(false) - skipping
+  // the confirm entirely for a whole-run write, the only caller of postAll
+  // that ever did - and then advance() UNCONDITIONALLY, which changes `run`
+  // and trips GradingResults.tsx's own reset effect, wiping postStatus/
+  // postSummary before the instructor could read them. If 4 of 25 failed,
+  // nobody ever saw it. Two independent fixes: (a) confirm like every other
+  // bulk post (postAll's default is already `confirm = true` - there is no
+  // other caller of postAll that needs `false`, so the parameter is simply
+  // no longer passed here); (b) only advance when the outcome was clean -
+  // nothing failed and nothing was silently skipped - so a failure keeps
+  // GradingResults mounted on THIS row with its status still on screen
+  // instead of being scrolled past invisibly.
   const handlePostAndNext = async () => {
-    await resultsHandle.current?.postAll(false);
+    const outcome = await resultsHandle.current?.postAll();
+    if (!outcome) return; // nothing attempted, or the confirm was declined
+    if (outcome.failed > 0 || outcome.skipped > 0) return; // stay put - the result is still on screen
     advance(inSequence);
   };
 

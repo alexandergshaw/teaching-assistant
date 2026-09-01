@@ -39,6 +39,15 @@ import local from "./DraftedGradesTab.module.css";
 // risk a value import of @/lib/grade would; src/lib/repo-grade-postability.ts
 // already imports a sibling repo-grades helper the same way.
 import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeScoreDisplay";
+// B2 (ux-audit-grading.md): the two-click "Post" arm used to key on a bare
+// `draft.id`, so it stayed armed through a search/filter/sort change - a
+// collapse-then-post path could send a whole draft, spanning several
+// assignments and courses, from a screen with zero rows visible. Now armed
+// against a SIGNATURE of the draft, its grade count, and the toolbar state -
+// any change to any of those disarms by construction. See that module's own
+// header comment for why the signature is an ordered JSON.stringify tuple,
+// not confirmArming.ts's sorting selectionSignature.
+import { draftPostArmSignature, isConfirmArmed } from "./drafted-grades/draftPostArming";
 
 type CommentEditState = {
   draftId: string;
@@ -62,6 +71,10 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, { totalScore: string; overallComment: string }>>({});
+  // B2: holds the SIGNATURE (draftPostArmSignature) the "Post" arm was set
+  // for, not a bare draft id - isConfirmArmed compares it against the
+  // CURRENT signature, so any change to the grade count, search, course
+  // filter, or sort disarms by construction. See draftPostArming.ts.
   const [confirmPost, setConfirmPost] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState<Set<string>>(new Set());
@@ -239,9 +252,26 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     }
   };
 
-  const handlePost = async (draft: GradingDraft) => {
-    if (confirmPost !== draft.id) {
-      setConfirmPost(draft.id);
+  // B2: `gradeCount` is the SAME value the section header already computes
+  // for display (see the sections.map render below) - passed in here rather
+  // than re-derived, so the arming signature can never disagree with the
+  // count shown above the button the instructor is looking at. (The course
+  // names themselves are read into the confirm LABEL at the JSX call site,
+  // not needed inside this handler.)
+  const handlePost = async (draft: GradingDraft, gradeCount: number) => {
+    const armSignature = draftPostArmSignature({
+      draftId: draft.id,
+      gradeCount,
+      sort,
+      search,
+      courseFilter: effectiveCourseFilter,
+    });
+    if (!isConfirmArmed(confirmPost, armSignature)) {
+      setConfirmPost(armSignature);
+      // (c) The second click must never be blind: force this section open so
+      // the rows a confirmed click would post are on screen for the arming
+      // click, exactly as startEdit already does above.
+      setDraftCollapsed(draft.id, false);
       return;
     }
     setConfirmPost(null);
@@ -249,15 +279,24 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
     try {
       const res = await postGradingDraftAction(draft.id);
       if ("error" in res) throw new Error(res.error);
-      if (res.failed === 0) {
+      // B1: a draft is only genuinely fully posted when NOTHING was failed
+      // AND nothing was silently skipped (a blank grade/comment that never
+      // reached Canvas at all) - `res.failed === 0` alone used to delete the
+      // draft even when some students were dropped without a network call.
+      const clean = res.failed === 0 && res.skipped === 0;
+      if (clean) {
         setDrafts((prev) => (prev ? prev.filter((d) => d.id !== draft.id) : null));
       } else {
         void reload();
       }
       refreshDraftsBadge();
+      const parts = [
+        res.failed > 0 ? `${res.failed} failed` : "",
+        res.skipped > 0 ? `${res.skipped} skipped (no grade or comment to send)` : "",
+      ].filter(Boolean);
       setNote({
-        kind: res.failed > 0 ? "error" : "success",
-        text: `Posted ${res.posted} grade${res.posted === 1 ? "" : "s"}${res.failed > 0 ? `, ${res.failed} failed - draft kept for retry` : ""}.`,
+        kind: clean ? "success" : "error",
+        text: `Posted ${res.posted} of ${res.attempted} attempted grade${res.attempted === 1 ? "" : "s"}${parts.length ? `, ${parts.join(", ")}` : ""}${clean ? "" : " - draft kept for retry"}.`,
       });
     } catch (err) {
       setNote({ kind: "error", text: err instanceof Error ? err.message : "Could not post grades." });
@@ -354,7 +393,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       <TabHeader
         eyebrow="Grades"
         title="Drafted grades"
-        subtitle="AI-drafted grades from the Grade submissions to a draft workflow live here until you review and post them. Nothing here has been sent to your LMS yet."
+        subtitle="AI-drafted grades from the Grade submissions to a draft workflow live here until you review and post them. Posting writes directly to your LMS and cannot be undone."
       />
 
       {note && (
@@ -511,17 +550,42 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                           </Button>
                         </>
                       ) : (
-                        <>
-                          <Button variant="outlined" size="small" onClick={() => startEdit(draft)}>
-                            Edit
-                          </Button>
-                          <Button variant="contained" size="small" disabled={busy === draft.id} onClick={() => void handlePost(draft)}>
-                            {busy === draft.id ? "Posting..." : confirmPost === draft.id ? "Confirm post" : "Post"}
-                          </Button>
-                          <Button variant="outlined" size="small" color="error" onClick={() => void handleDelete(draft)}>
-                            {confirmDelete === draft.id ? "Confirm delete" : "Delete"}
-                          </Button>
-                        </>
+                        (() => {
+                          // B2: the SAME signature handlePost itself computes -
+                          // never a second, hand-rolled copy - so the label
+                          // shown here and the arm handlePost checks can never
+                          // disagree about what "armed" means.
+                          const armSignature = draftPostArmSignature({
+                            draftId: draft.id,
+                            gradeCount,
+                            sort,
+                            search,
+                            courseFilter: effectiveCourseFilter,
+                          });
+                          const postArmed = isConfirmArmed(confirmPost, armSignature);
+                          return (
+                            <>
+                              <Button variant="outlined" size="small" onClick={() => startEdit(draft)}>
+                                Edit
+                              </Button>
+                              <Button
+                                variant="contained"
+                                size="small"
+                                disabled={busy === draft.id}
+                                onClick={() => void handlePost(draft, gradeCount)}
+                              >
+                                {busy === draft.id
+                                  ? "Posting..."
+                                  : postArmed
+                                    ? `Confirm post ${gradeCount} grade${gradeCount === 1 ? "" : "s"} to ${courses.length > 0 ? courses.join(", ") : "Canvas"} - no undo`
+                                    : "Post"}
+                              </Button>
+                              <Button variant="outlined" size="small" color="error" onClick={() => void handleDelete(draft)}>
+                                {confirmDelete === draft.id ? "Confirm delete" : "Delete"}
+                              </Button>
+                            </>
+                          );
+                        })()
                       )}
                     </div>
                   </div>

@@ -599,6 +599,49 @@ describe("fanOutRepoGradePostResult - AC5 item 30: per-row status after a bulk p
     expect(byRepo.get("org/b")).toEqual({ repo: "org/b", postStatus: "error", postMessage: "err-b" });
     expect(byRepo.get("org/c")).toEqual({ repo: "org/c", postStatus: "posted", postMessage: null });
   });
+
+  // ---------------------------------------------------------------------
+  // B1 (ux-audit-grading.md): a userId in `skipped` (postCanvasGradesAction's
+  // own third outcome - no grade or comment to send, Canvas never called)
+  // must land as "skipped", never fall through to "posted" just because it
+  // is absent from `failures`.
+  it("a skipped userId is reported as 'skipped', not 'posted' - the exact B1 defect", () => {
+    const result = { posted: 2, failures: [], skipped: [{ userId: 2, reason: "No grade or comment to send." }] };
+    const fanout = fanOutRepoGradePostResult(attempted, result);
+    expect(fanout).toEqual([
+      { repo: "org/a", postStatus: "posted", postMessage: null },
+      { repo: "org/b", postStatus: "skipped", postMessage: "No grade or comment to send." },
+      { repo: "org/c", postStatus: "posted", postMessage: null },
+    ]);
+    // A skipped row must never be counted as posted.
+    expect(fanout.filter((f) => f.postStatus === "posted")).toHaveLength(2);
+  });
+
+  it("a failure takes priority over a skip for the same userId (defensive - the two are mutually exclusive on the real payload)", () => {
+    const result = {
+      posted: 1,
+      failures: [{ userId: 2, error: "HTTP 500." }],
+      skipped: [{ userId: 2, reason: "No grade or comment to send." }],
+    };
+    const fanout = fanOutRepoGradePostResult(attempted, result);
+    expect(fanout.find((f) => f.repo === "org/b")).toEqual({
+      repo: "org/b",
+      postStatus: "error",
+      postMessage: "HTTP 500.",
+    });
+  });
+
+  it("an absent `skipped` field (a fixture predating B1) behaves exactly as an empty array - nobody is skipped", () => {
+    const fanout = fanOutRepoGradePostResult(attempted, { posted: 3, failures: [] });
+    expect(fanout.every((f) => f.postStatus === "posted")).toBe(true);
+  });
+
+  // SABOTAGE-CHECK ANCHOR: temporarily deleting the `skipReason !== undefined`
+  // branch (falling straight through from the failure check to "posted",
+  // reproducing the exact pre-fix behaviour where "absent from failures"
+  // alone meant success) was verified to make "a skipped userId is reported
+  // as 'skipped', not 'posted'" FAIL - org/b came back "posted" instead of
+  // "skipped". Reverted after confirming the failure.
 });
 
 describe("repoGradeAssignmentUrl", () => {

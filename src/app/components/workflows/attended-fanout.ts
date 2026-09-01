@@ -95,6 +95,45 @@ export function countOkCourses(groups: RunStateGroup[]): number {
 }
 
 /**
+ * C1: counts how many groups in a NON-course (institution-only, or the
+ * single implicit) fan-out run are "ok" - every one of the group's steps has
+ * SETTLED (done, error, disabled, or skipped; never pending or running) AND
+ * none of them settled as "error". Mirrors countOkCourses' own "count what
+ * has actually finished, never what merely hasn't failed yet" discipline:
+ * the caller used to inline `steps.every(s => s.status !== "error")`, which
+ * a group whose every step was still "pending" (the instant Run is clicked,
+ * before anything has run) also passes - so the old expression read "N/N
+ * institutions ok" from the very first render and could only ever count
+ * down. A pending step is NOT ok.
+ */
+export function countOkInstitutionGroups(groups: RunStateGroup[]): number {
+  return groups.filter(
+    (grp) =>
+      grp.steps.every((s) => s.status !== "pending" && s.status !== "running") &&
+      grp.steps.every((s) => s.status !== "error")
+  ).length;
+}
+
+/**
+ * C1: the institution-fanout progress line shown in the Run UI while a run
+ * is (or was) in flight - "N of M institutions finished ok, K still
+ * running" while any group has an unsettled step, or the terminal "N/M
+ * institutions ok" once every group has settled. Never reports a group as
+ * "ok" before it has actually finished (see countOkInstitutionGroups).
+ */
+export function describeInstitutionFanoutProgress(groups: RunStateGroup[]): string {
+  const ok = countOkInstitutionGroups(groups);
+  const total = groups.length;
+  const stillRunning = groups.filter((grp) =>
+    grp.steps.some((s) => s.status === "pending" || s.status === "running")
+  ).length;
+  if (stillRunning > 0) {
+    return `${ok} of ${total} institutions finished ok, ${stillRunning} still running`;
+  }
+  return `${ok}/${total} institutions ok`;
+}
+
+/**
  * AC4 (defect-2 write-up): when a course's step group hands the runner more
  * than one distinct downloadable file (e.g. a Blackboard export AND a course
  * materials zip - two genuinely different artifacts, neither losslessly

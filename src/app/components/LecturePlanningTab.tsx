@@ -11,7 +11,6 @@ import {
   type AssignmentPlan,
 } from "../actions";
 import GithubRepoPicker from "./GithubRepoPicker";
-import { parseGeneratedRubric } from "../utils/rubric";
 import { saveFile, loadFile, deleteFile } from "../../lib/file-persistence";
 import { getStoredProvider, useLlmProvider } from "@/lib/llm-provider";
 import { resolveDocumentAuthor } from "@/lib/author";
@@ -21,6 +20,19 @@ import { checkCourseEngineUpload } from "@/lib/course-engine-upload";
 import { checkFileWireBudget, formatMB, maxFileBytesForWireBudget, type UploadBudgetCheck } from "@/lib/upload-budget";
 import styles from "../page.module.css";
 import LecturePlanPreviewModal from "./LecturePlanPreviewModal";
+import LecturePlanCardList from "./LecturePlanCardList";
+import LecturePlanningRubricSection from "./LecturePlanningRubricSection";
+import {
+  plansSignature,
+  isGenerateConfirmArmed,
+  planEditSignature,
+  planHasEdits,
+  isRegenerateConfirmArmed,
+  generateButtonLabel,
+  generateConfirmMessage,
+  courseEngineDoneMessage,
+  type RegenerateArmed,
+} from "./lecture-planning-decisions";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -79,6 +91,20 @@ export default function LecturePlanningTab() {
   const [foldersError, setFoldersError] = useState<string | null>(null);
   // Index of the card currently being regenerated in place (null when none).
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
+  // BLOCKER 1: signature Generate is armed to overwrite. Generate only runs
+  // for real when this matches the CURRENT plan set's signature - see
+  // isGenerateConfirmArmed in lecture-planning-decisions.ts for why a
+  // signature (not a boolean/timer) is the right shape here.
+  const [generateArmedFor, setGenerateArmedFor] = useState<string | null>(null);
+  // BLOCKER 2: which single card's Regenerate is armed, and for what edited
+  // state - see isRegenerateConfirmArmed.
+  const [regenerateArmed, setRegenerateArmed] = useState<RegenerateArmed>(null);
+  // BLOCKER 3: the Course Engine path's last finished package, so a "done"
+  // state with no per-assignment plans can still say what was produced and
+  // offer a re-download instead of rendering nothing.
+  const [courseEngineMaterials, setCourseEngineMaterials] = useState<
+    { base64: string; fileName: string; mimeType: string } | null
+  >(null);
   const [rubricStatus, setRubricStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [rubricError, setRubricError] = useState<string | null>(null);
   const [generatedRubric, setGeneratedRubric] = useState<string | null>(null);
@@ -223,6 +249,18 @@ export default function LecturePlanningTab() {
     );
   };
 
+  // BLOCKER 1: generating again used to clear `plans` before the request even
+  // started (setPlans([]) up front), so a second click - or a failed retry -
+  // destroyed every existing plan and every edit made in the preview modal
+  // (edits write straight into `plans`, see updatePlan below) with no way
+  // back. Fixed two ways: (1) `plans` is never cleared ahead of the request -
+  // it is only ever REPLACED, and only on success, so a failed request lands
+  // back on whatever was on screen before, not a blank slate; (2) when there
+  // is something on screen to lose, the button arms instead of firing
+  // immediately, using this app's existing signature-based arming idiom
+  // (isGenerateConfirmArmed / content-tab/modules/confirmArming.ts) so a
+  // second click on the SAME plan set confirms, but any change to what is at
+  // risk (a new zip, a different scope) re-requires confirmation.
   const handleGenerate = async () => {
     const file = zipFile;
     if (!file) {
@@ -236,18 +274,25 @@ export default function LecturePlanningTab() {
       return;
     }
 
-    // Single-module path: generate just the chosen assignment and show it as one
-    // card. Runs the Gemini preview flow regardless of provider (the Course
-    // Engine "other" path only produces a whole-course package).
-    if (scope === "single") {
-      if (!selectedSlug) {
-        setError("Choose an assignment to generate a module for.");
-        return;
-      }
-      setStatus("loading");
-      setError(null);
-      setPlans([]);
-      try {
+    if (scope === "single" && !selectedSlug) {
+      setError("Choose an assignment to generate a module for.");
+      return;
+    }
+
+    if (plans.length > 0 && !isGenerateConfirmArmed(generateArmedFor, plans)) {
+      setGenerateArmedFor(plansSignature(plans));
+      return;
+    }
+    setGenerateArmedFor(null);
+
+    setStatus("loading");
+    setError(null);
+
+    try {
+      // Single-module path: generate just the chosen assignment and show it as
+      // one card. Runs the Gemini preview flow regardless of provider (the
+      // Course Engine "other" path only produces a whole-course package).
+      if (scope === "single") {
         const result = await callSingleAction(selectedSlug, minutes);
         if ("error" in result) {
           setError(result.error);
@@ -256,19 +301,11 @@ export default function LecturePlanningTab() {
         }
         setPlans([result]);
         setOriginalPlans(JSON.parse(JSON.stringify([result])) as AssignmentPlan[]);
+        setCourseEngineMaterials(null);
         setStatus("done");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Generation failed. Please try again.");
-        setStatus("error");
+        return;
       }
-      return;
-    }
 
-    setStatus("loading");
-    setError(null);
-    setPlans([]);
-
-    try {
       const isCourseEngine = getStoredProvider() === "other";
       // Pre-flight before readFileAsBase64, in the same unit the platform's
       // request-body cap applies in (WIRE bytes, not raw file bytes - see
@@ -298,6 +335,11 @@ export default function LecturePlanningTab() {
           return;
         }
         downloadBase64File(materials.base64, materials.fileName, materials.mimeType);
+        // BLOCKER 3: this path never produces per-assignment `plans` - record
+        // what it DID produce so a finished run has something to show.
+        setCourseEngineMaterials({ base64: materials.base64, fileName: materials.fileName, mimeType: materials.mimeType });
+        setPlans([]);
+        setOriginalPlans([]);
         if (materials.rubricCsv) {
           setGeneratedRubric(materials.rubricCsv);
           setRubricStatus("done");
@@ -330,6 +372,7 @@ export default function LecturePlanningTab() {
 
       setPlans(result);
       setOriginalPlans(JSON.parse(JSON.stringify(result)) as AssignmentPlan[]);
+      setCourseEngineMaterials(null);
       setStatus("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed. Please try again.");
@@ -364,6 +407,29 @@ export default function LecturePlanningTab() {
     } finally {
       setRegeneratingIndex(null);
     }
+  };
+
+  // BLOCKER 2: Regenerate used to overwrite the plan AND its reset-snapshot
+  // (originalPlans[index]) unconfirmed, so Reset could no longer recover the
+  // instructor's edits. A card with no edits has nothing to protect, so it
+  // still regenerates on the first click - only an EDITED card requires a
+  // confirming second click (isRegenerateConfirmArmed, armed by
+  // planEditSignature so a further edit after arming re-requires
+  // confirmation).
+  const handleRegenerateClick = (index: number) => {
+    const plan = plans[index];
+    const original = originalPlans[index];
+    if (!plan) return;
+    if (!original || !planHasEdits(plan, original)) {
+      void regenerateModule(index);
+      return;
+    }
+    if (isRegenerateConfirmArmed(regenerateArmed, index, plan)) {
+      setRegenerateArmed(null);
+      void regenerateModule(index);
+      return;
+    }
+    setRegenerateArmed({ index, signature: planEditSignature(plan) });
   };
 
   const handleDownloadAll = async () => {
@@ -480,13 +546,20 @@ export default function LecturePlanningTab() {
     downloadBlob(csv, "rubric.csv", "text/csv;charset=utf-8");
   };
 
+  // Whether Generate, if clicked right now, would run for real vs. arm the
+  // confirmation - see the BLOCKER 1 comment above handleGenerate.
+  const generateArmed = isGenerateConfirmArmed(generateArmedFor, plans);
+
   return (
     <section className={styles.card}>
       <div className={styles.header}>
         <h1>Lecture Planning</h1>
         <p>
-          Upload a zip of your template course repository and generate a tailored PowerPoint
-          lecture for each assignment — ready to teach the concepts students need to succeed.
+          Upload a zip of your template course repository to generate lecture materials — slide
+          decks, module intros, and assignment instructions ready to teach from. Choose{" "}
+          <strong>All assignments</strong> below to get one module per assignment, or{" "}
+          <strong>Single assignment</strong> for just one. (The Course Engine provider instead
+          produces one finished course package rather than per-assignment previews.)
         </p>
       </div>
 
@@ -538,7 +611,14 @@ export default function LecturePlanningTab() {
           </p>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-              <GithubRepoPicker value={githubRepo} onChange={setGithubRepo} disabled={githubLoading} branch={githubBranch} onBranchChange={setGithubBranch} />
+              <GithubRepoPicker
+                value={githubRepo}
+                onChange={setGithubRepo}
+                disabled={githubLoading}
+                branch={githubBranch}
+                onBranchChange={setGithubBranch}
+                describedById={githubError ? "githubRepoError" : undefined}
+              />
             </div>
             <Button
               variant="contained"
@@ -549,7 +629,11 @@ export default function LecturePlanningTab() {
               {githubLoading ? "Loading…" : "Load from GitHub"}
             </Button>
           </div>
-          {githubError && <p className={styles.error}>{githubError}</p>}
+          {githubError && (
+            <p id="githubRepoError" className={styles.error} role="alert">
+              {githubError}
+            </p>
+          )}
         </div>
       </div>
 
@@ -614,14 +698,15 @@ export default function LecturePlanningTab() {
       </div>
 
       <div className={styles.field}>
-        <label>Scope</label>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <label id="scopeGroupLabel">Scope</label>
+        <div role="group" aria-labelledby="scopeGroupLabel" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {(["all", "single"] as const).map((opt) => (
             <Button
               key={opt}
               type="button"
               variant={scope === opt ? "contained" : "outlined"}
               size="small"
+              aria-pressed={scope === opt}
               onClick={() => setScope(opt)}
             >
               {opt === "all" ? "All assignments" : "Single assignment"}
@@ -635,7 +720,9 @@ export default function LecturePlanningTab() {
             ) : foldersLoading ? (
               <p>Reading assignments…</p>
             ) : foldersError ? (
-              <p className={styles.error}>{foldersError}</p>
+              <p className={styles.error} role="alert">
+                {foldersError}
+              </p>
             ) : folders.length > 0 ? (
               <TextField
                 select
@@ -658,7 +745,11 @@ export default function LecturePlanningTab() {
         )}
       </div>
 
-      {error && <p className={styles.error}>{error}</p>}
+      {error && (
+        <p className={styles.error} role="alert">
+          {error}
+        </p>
+      )}
 
       <Button
         variant="contained"
@@ -666,14 +757,53 @@ export default function LecturePlanningTab() {
         onClick={handleGenerate}
         disabled={status === "loading" || (scope === "single" && !selectedSlug)}
       >
-        {status === "loading"
-          ? "Generating…"
-          : scope === "single"
-            ? "Generate Module"
-            : "Generate Lecture Plans"}
+        {generateButtonLabel({ status, scope, confirmArmed: generateArmed })}
       </Button>
 
-      {status === "done" && plans.length > 0 && (
+      {generateArmed && (
+        <p role="alert" className={styles.error} style={{ marginTop: 6 }}>
+          {generateConfirmMessage(plans.length)}
+        </p>
+      )}
+
+      {status === "loading" && (
+        <p aria-live="polite" style={{ marginTop: 6, fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+          {scope === "single" ? "Generating this module…" : "Generating your lecture plans…"} This can take
+          several minutes for a large course repository. Keep this tab open — closing it or navigating away
+          cancels the request and you will lose the result.
+        </p>
+      )}
+
+      {status === "done" && plans.length === 0 && courseEngineMaterials && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "12px 16px",
+            borderRadius: 10,
+            background: "var(--field-background)",
+            border: "1px solid var(--field-border)",
+          }}
+        >
+          <p style={{ margin: "0 0 10px", color: "var(--text-primary)" }}>
+            {courseEngineDoneMessage(courseEngineMaterials.fileName)}
+          </p>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() =>
+              downloadBase64File(
+                courseEngineMaterials.base64,
+                courseEngineMaterials.fileName,
+                courseEngineMaterials.mimeType
+              )
+            }
+          >
+            Download again
+          </Button>
+        </div>
+      )}
+
+      {plans.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 20, marginTop: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <p style={{ margin: 0, fontWeight: 600, color: "var(--text-primary)" }}>
@@ -714,97 +844,14 @@ export default function LecturePlanningTab() {
             );
           })()}
 
-          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-            {plans.map((plan, i) => {
-              const badges: string[] = [];
-              if (!plan.slidesFailed) {
-                badges.push(`${plan.slides.length + 1} slide${plan.slides.length !== 0 ? "s" : ""}`);
-              }
-              if (plan.moduleIntroduction) badges.push("Module Intro");
-              if (plan.assignmentInstructions) badges.push("Instructions");
-              return (
-                <li
-                  key={plan.assignmentName}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedIndex(i)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedIndex(i); }}
-                  style={{
-                    background: "var(--field-background)",
-                    border: "1px solid var(--field-border)",
-                    borderRadius: 10,
-                    padding: "14px 18px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                    cursor: "pointer",
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-                    {plan.presentationTitle}
-                  </span>
-                  <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontWeight: 500 }}>
-                    {plan.assignmentName}
-                  </span>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
-                    {plan.slidesFailed && (
-                      <span
-                        style={{
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                          padding: "2px 8px",
-                          borderRadius: 20,
-                          background: "color-mix(in srgb, #f59e0b 14%, transparent 86%)",
-                          color: "var(--warning)",
-                          border: "1px solid color-mix(in srgb, #f59e0b 35%, transparent 65%)",
-                        }}
-                      >
-                        Slides failed
-                      </span>
-                    )}
-                    {badges.map((badge) => (
-                      <span
-                        key={badge}
-                        style={{
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                          padding: "2px 8px",
-                          borderRadius: 20,
-                          background: "color-mix(in srgb, var(--accent) 12%, transparent 88%)",
-                          color: "var(--accent-ink)",
-                          border: "1px solid color-mix(in srgb, var(--accent) 25%, transparent 75%)",
-                        }}
-                      >
-                        {badge}
-                      </span>
-                    ))}
-                  </div>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      regenerateModule(i);
-                    }}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    disabled={regeneratingIndex !== null}
-                    title="Regenerate this module from the uploaded zip"
-                    sx={{
-                      alignSelf: "flex-start",
-                      marginTop: 1,
-                      opacity: regeneratingIndex !== null && regeneratingIndex !== i ? 0.5 : 1,
-                    }}
-                  >
-                    {regeneratingIndex === i ? "Regenerating…" : "Regenerate"}
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
+          <LecturePlanCardList
+            plans={plans}
+            originalPlans={originalPlans}
+            regeneratingIndex={regeneratingIndex}
+            regenerateArmed={regenerateArmed}
+            onSelect={setSelectedIndex}
+            onRegenerateClick={handleRegenerateClick}
+          />
         </div>
       )}
 
@@ -821,91 +868,16 @@ export default function LecturePlanningTab() {
         />
       )}
 
-      <div style={{ borderTop: "1px solid var(--field-border)", marginTop: 32, paddingTop: 28 }}>
-        <div style={{ marginBottom: 16 }}>
-          <h2 style={{ margin: "0 0 6px", fontSize: "1.1rem", fontWeight: 700, color: "var(--text-primary)" }}>
-            Course-Wide Rubric
-          </h2>
-          <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-secondary)" }}>
-            {provider === "other"
-              ? "The grading rubric is produced together with the lecture package above — generate it there and it will appear here. It can be copied and pasted into the Grading tab."
-              : "Generate a universal grading rubric derived from all assignment instructions in the uploaded zip. This rubric can be copied and pasted into the Grading tab."}
-          </p>
-        </div>
-
-        {rubricError && <p className={styles.error}>{rubricError}</p>}
-
-        {provider !== "other" && (
-          <Button
-            variant="contained"
-            size="small"
-            onClick={handleGenerateRubric}
-            disabled={rubricStatus === "loading"}
-            sx={{ marginBottom: 2 }}
-          >
-            {rubricStatus === "loading" ? "Generating Rubric…" : "Generate Course Rubric"}
-          </Button>
-        )}
-
-        {rubricStatus === "done" && generatedRubric && (() => {
-          const rows = parseGeneratedRubric(generatedRubric);
-          return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-primary)" }}>
-                  Generated rubric — applies to all assignments
-                </span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={handleCopyRubric}
-                  >
-                    {rubricCopied ? "Copied!" : "Copy Rubric"}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={handleDownloadRubricCsv}
-                  >
-                    Download CSV
-                  </Button>
-                </div>
-              </div>
-              {rows ? (
-                <table className={styles.generatedRubricTable}>
-                  <thead>
-                    <tr>
-                      <th>Criterion</th>
-                      <th>Weight</th>
-                      <th>Performance Levels</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => (
-                      <tr key={row.area}>
-                        <td>{row.area}</td>
-                        <td>{row.weight.endsWith("%") ? row.weight : `${row.weight}%`}</td>
-                        <td>
-                          {row.subcategories.length > 0 ? (
-                            <ul className={styles.rubricSubcategoryList}>
-                              {row.subcategories.map((sub) => (
-                                <li key={sub.label}><strong>{sub.label}:</strong> {sub.description}</li>
-                              ))}
-                            </ul>
-                          ) : row.description}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <pre className={styles.generatedRubricBody}>{generatedRubric}</pre>
-              )}
-            </div>
-          );
-        })()}
-      </div>
+      <LecturePlanningRubricSection
+        provider={provider}
+        rubricStatus={rubricStatus}
+        rubricError={rubricError}
+        generatedRubric={generatedRubric}
+        rubricCopied={rubricCopied}
+        onGenerate={handleGenerateRubric}
+        onCopy={handleCopyRubric}
+        onDownloadCsv={handleDownloadRubricCsv}
+      />
     </section>
   );
 }

@@ -956,3 +956,8 @@ describe("GradingResults.tsx wires its Browse-all-files button to SubmittedFiles
     expect(source).toMatch(RENDER_PATTERN);
   });
 });
+
+// B1's fanOutGradingPostResult tests (and the GradingResults.tsx wiring
+// check for it) live in their own file, gradingResultsPostOutcome.test.ts -
+// this file was already close to the repo's 1000-line-per-file ceiling
+// (docs/DEV_LOOP.md) and adding them here would have pushed it over.

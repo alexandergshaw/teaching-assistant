@@ -36,6 +36,16 @@ import {
   type TaskCatalogOverride,
 } from "@/lib/course-tasks-view";
 import { groupPositionAssignments, stepWithinGroup, type ReorderableColumn } from "./columnOrder";
+// SHOULD 6 (Tasks-tab UX audit): Retire used to fire in ONE click, right
+// beside Rename in a row of identically-sized small buttons, with no
+// confirmation and no announcement - the column and every note/attachment/
+// institution instruction reachable through it simply vanished from the
+// grid. This is exactly the case this repo's shipped signature-based
+// arming idiom exists for (isConfirmArmed: armed state is a property of
+// WHAT it was armed for, not a timer) - already implemented correctly one
+// file over for a smaller action (TaskAttachmentsDialog.tsx's Remove ->
+// Confirm two-click flow, copied here almost verbatim).
+import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 import styles from "./TasksGrid.module.css";
 
 function generateCustomTaskId(): string {
@@ -88,6 +98,14 @@ export default function ManageTasksDialog({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
 
+  // SHOULD 6: `confirmRetireId` is the armed-for taskId (or null) -
+  // `isConfirmArmed` compares it against a ROW's own taskId, so arming one
+  // row implicitly disarms whichever other row was armed before (there is
+  // only ever one value here), exactly like TaskAttachmentsDialog's
+  // `confirmRemoveId`.
+  const [confirmRetireId, setConfirmRetireId] = useState<string | null>(null);
+  const [retireStatus, setRetireStatus] = useState("");
+
   // Resets the transient form state whenever the dialog (re)opens - the
   // "adjusting state during rendering" pattern React's own docs recommend
   // for this exact case (https://react.dev/learn/you-might-not-need-an-effect
@@ -107,6 +125,8 @@ export default function ManageTasksDialog({
       setNewCadence("daily");
       setRenamingId(null);
       setError(null);
+      setConfirmRetireId(null);
+      setRetireStatus("");
     }
   }
 
@@ -175,9 +195,29 @@ export default function ManageTasksDialog({
     if (ok) setRenamingId(null);
   };
 
-  const retireTask = (taskId: string) => {
+  // SHOULD 6: the first click only arms (names the task it is armed for,
+  // and announces it - Accessibility review fix 3's precedent from
+  // TaskAttachmentsDialog.tsx, since the button's accessible name alone is
+  // not useful to someone not already reading it); the SECOND click, while
+  // still armed for the SAME task, actually retires it.
+  const retireTask = async (taskId: string, label: string) => {
+    if (!isConfirmArmed(confirmRetireId, taskId)) {
+      setConfirmRetireId(taskId);
+      setRetireStatus(`Press Confirm to retire "${label}".`);
+      return;
+    }
+    setConfirmRetireId(null);
     const base = baseTaskCatalogOverride(taskId, builtIns, overrides);
-    void runSave({ ...base, retired: true });
+    const ok = await runSave({ ...base, retired: true });
+    if (ok) setRetireStatus(`Retired "${label}". Restore it under Retired below.`);
+  };
+
+  // Disarms on blur (silently - moving focus elsewhere is itself the
+  // signal, nothing to announce) and on Escape (announced) - mirrors
+  // TaskAttachmentsDialog.tsx's disarmRemove exactly.
+  const disarmRetire = (taskId: string, label: string, announce: boolean) => {
+    setConfirmRetireId((prev) => (prev === taskId ? null : prev));
+    if (announce) setRetireStatus(`Retiring "${label}" cancelled.`);
   };
 
   const restoreTask = (taskId: string) => {
@@ -221,6 +261,15 @@ export default function ManageTasksDialog({
         {error && (
           <p className={styles.inlineError} role="alert">
             {error}
+          </p>
+        )}
+
+        {/* SHOULD 6: visible AND announced (role="status", the SAME node -
+            matching TaskAttachmentsDialog.tsx's single-region idiom) -
+            arming, cancelling, and the actual retire all report here. */}
+        {retireStatus && (
+          <p className={styles.inlineStatus} role="status">
+            {retireStatus}
           </p>
         )}
 
@@ -329,9 +378,35 @@ export default function ManageTasksDialog({
                         <Button size="small" disabled={busy} onClick={() => startRename(task.id, task.label)}>
                           Rename
                         </Button>
-                        <Button size="small" disabled={busy} onClick={() => retireTask(task.id)}>
-                          Retire
-                        </Button>
+                        {/* SHOULD 6: two literal branches (not one Button
+                            with a ternary aria-label/color), matching
+                            TaskAttachmentsDialog.tsx's own Remove/Confirm
+                            pair - React reconciles them as updates to the
+                            SAME underlying button (same type, same position),
+                            so arming/disarming never remounts it or drops
+                            focus. */}
+                        {isConfirmArmed(confirmRetireId, task.id) ? (
+                          <Button
+                            size="small"
+                            color="error"
+                            disabled={busy}
+                            aria-label={`Confirm retiring ${task.label}`}
+                            onClick={() => void retireTask(task.id, task.label)}
+                            onBlur={() => disarmRetire(task.id, task.label, false)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                e.stopPropagation();
+                                disarmRetire(task.id, task.label, true);
+                              }
+                            }}
+                          >
+                            Confirm
+                          </Button>
+                        ) : (
+                          <Button size="small" disabled={busy} onClick={() => void retireTask(task.id, task.label)}>
+                            Retire
+                          </Button>
+                        )}
                       </>
                     )}
                   </div>

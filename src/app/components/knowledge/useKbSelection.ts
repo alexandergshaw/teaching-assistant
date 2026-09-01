@@ -19,6 +19,22 @@
 // useModuleSelection.ts (:279-287) both use: state is adjusted synchronously
 // during render, never from a setState reached inside an effect (see
 // AGENTS.md's set-state-in-effect idiom - eslint rejects that here).
+//
+// B5 persistence decision: this selection is not just UI state (like
+// `expanded` above) - it silently becomes the context handed to the model
+// for grading and reply-drafting (KnowledgeTab.tsx's askAiAboutSelection /
+// startRecordingWithSelection / startGradingWithSelection). A selection an
+// instructor made last month, forgot about, and would never have re-made
+// today must not go on shaping feedback a student reads - so a fresh page
+// load (this hook's initial mount) always starts EMPTY, never reads
+// readBulkSelectedIds. What DOES stay backed by localStorage is switching
+// between institutions within one still-open session (the `active !==
+// prevActive` branch below) - that is ordinary in-session navigation, not a
+// selection surviving a reload, and losing it on every institution tab
+// click would make the bulk-action feature unusable for anyone working two
+// schools in one sitting. The write-through (toggle/selectAllVisible/clear
+// below) is left in place so that within-session round trip keeps working;
+// only the "resurrect it after a reload" read is removed.
 
 import { useCallback, useState } from "react";
 import type { InstitutionPage } from "@/lib/knowledge-base";
@@ -98,7 +114,11 @@ export interface UseKbSelectionReturn {
 }
 
 export function useKbSelection(active: string, pages: InstitutionPage[] | null): UseKbSelectionReturn {
-  const [selected, setSelected] = useState<Set<string>>(() => (active ? readBulkSelectedIds(active) : new Set()));
+  // B5: NEVER seed from localStorage on initial mount - see the module
+  // comment above. A fresh mount (page load, or navigating back to this
+  // tab) always starts with nothing selected; only the in-session
+  // institution-switch branch below reads readBulkSelectedIds.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
   // Reset on institution change, prune on page-list reload - both during
   // render (compare-and-adjust), never an effect (S4). An institution change
@@ -113,7 +133,13 @@ export function useKbSelection(active: string, pages: InstitutionPage[] | null):
   if (active !== prevActive) {
     setPrevActive(active);
     setPrunedForPages(pages);
-    setSelected(active ? readBulkSelectedIds(active) : new Set());
+    // B5: restore a persisted selection only for a genuine in-session
+    // SWITCH between two already-resolved institutions (prevActive was
+    // itself non-empty) - not the initial resolution of `active` from ""
+    // (not yet loaded/chosen) to the first real institution, which must
+    // start empty per the module comment above, the same as any other
+    // fresh mount.
+    setSelected(active && prevActive ? readBulkSelectedIds(active) : new Set());
   } else if (pages !== prunedForPages) {
     setPrunedForPages(pages);
     const pruned = pruneSelection(selected, pages);

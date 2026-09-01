@@ -12,6 +12,7 @@ import {
   parseTagsInput,
   visiblePageIds,
   allVisibleSelected,
+  describeSelectedPages,
   parseBulkSelectedIds,
 } from "./knowledge-helpers";
 import { buildPageTree, type InstitutionPage } from "@/lib/knowledge-base";
@@ -342,6 +343,52 @@ describe("allVisibleSelected", () => {
 
   it("ignores a selected id that falls outside visibleIds (e.g. a collapsed branch)", () => {
     expect(allVisibleSelected(new Set(["a", "b", "z"]), ["a", "b"])).toBe(true);
+  });
+});
+
+describe("describeSelectedPages", () => {
+  const pages = [
+    page({ id: "root", title: "Root", position: 0 }),
+    page({ id: "child-a", title: "Child A", parentId: "root", position: 0 }),
+    page({ id: "child-b", title: "Child B", parentId: "root", position: 1 }),
+    page({ id: "grandchild", title: "Grandchild", parentId: "child-a", position: 0 }),
+    page({ id: "other-root", title: "Other Root", position: 1 }),
+  ];
+
+  it("returns an empty description for an empty selection", () => {
+    expect(describeSelectedPages(pages, new Set())).toEqual({ shownTitles: [], overflowCount: 0, text: "" });
+  });
+
+  it("lists every selected title when the count is at or under maxShown", () => {
+    const result = describeSelectedPages(pages, new Set(["root", "other-root"]));
+    expect(result).toEqual({ shownTitles: ["Root", "Other Root"], overflowCount: 0, text: "Root, Other Root" });
+  });
+
+  it("names a page selected INSIDE A COLLAPSED BRANCH - this is the whole point of B5: describeSelectedPages filters the flat `pages` list, never visiblePageIds, so a page with no on-screen checkbox is still named here", () => {
+    // "grandchild" is nested three levels deep; nothing here says anything
+    // about tree expansion state - describeSelectedPages does not take
+    // `expanded` as a parameter at all, unlike visiblePageIds.
+    const result = describeSelectedPages(pages, new Set(["grandchild"]));
+    expect(result.shownTitles).toEqual(["Grandchild"]);
+    expect(result.text).toBe("Grandchild");
+  });
+
+  it("folds anything past maxShown into a stated +N more, never a silent truncation", () => {
+    const result = describeSelectedPages(pages, new Set(["root", "child-a", "child-b", "grandchild"]), 2);
+    expect(result.shownTitles).toEqual(["Root", "Child A"]);
+    expect(result.overflowCount).toBe(2);
+    expect(result.text).toBe("Root, Child A +2 more");
+  });
+
+  it("falls back to 'Untitled page' for a blank title, matching PageTreeView's own fallback", () => {
+    const blank = [page({ id: "blank", title: "   ", position: 0 })];
+    expect(describeSelectedPages(blank, new Set(["blank"])).text).toBe("Untitled page");
+  });
+
+  it("ignores a selected id that no longer exists in `pages` (deleted page still lingering in the selection)", () => {
+    const result = describeSelectedPages(pages, new Set(["root", "deleted-id"]));
+    expect(result.shownTitles).toEqual(["Root"]);
+    expect(result.overflowCount).toBe(0);
   });
 });
 

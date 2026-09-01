@@ -622,6 +622,7 @@ export function ModulesView({
                     onPageEditorTrigger={onPageEditorTrigger}
                     bulkPublish={bulkItemActions.bulkPublish}
                     descSharedState={bulkItemActions.descSharedState}
+                    descPartialCounts={bulkItemActions.descPartialCounts}
                     bulkItemsDescription={bulkItemActions.bulkItemsDescription}
                     setBulkItemsDescription={bulkItemActions.setBulkItemsDescription}
                     bulkSetDescription={bulkItemActions.bulkSetDescription}
@@ -666,6 +667,7 @@ export function ModulesView({
                     modules={modules}
                     bulkMoveToModule={bulkItemActions.bulkMoveToModule}
                     bulkRemoveFromModule={bulkItemActions.bulkRemoveFromModule}
+                    confirmRemoveFromModule={bulkItemActions.confirmRemoveFromModule}
                     bulkDeleteContent={bulkItemActions.bulkDeleteContent}
                     confirmDeleteContent={bulkItemActions.confirmDeleteContent}
                     facts={bulkBarFacts}

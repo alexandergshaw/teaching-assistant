@@ -99,6 +99,50 @@ export function allVisibleSelected(selected: Set<string>, visibleIds: string[]):
   return visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
 }
 
+/**
+ * Describe the bulk selection by page TITLE (B5) - deliberately filters the
+ * full, flat `pages` list (every page the institution has, regardless of
+ * tree expand/collapse state), NOT `visiblePageIds`'s walk-only-expanded-
+ * nodes result above. A page selected inside a collapsed branch has no
+ * checkbox on screen and is otherwise invisible; this is the one place that
+ * must still be able to name it, since it is still shipped to the model as
+ * grading/drafting context (KnowledgeTab.tsx's askAiAboutSelection /
+ * startRecordingWithSelection / startGradingWithSelection).
+ *
+ * `text` is never empty for a non-empty selection and never silently drops
+ * a page - anything past `maxShown` is folded into a stated "+N more"
+ * count rather than just being cut off.
+ */
+export interface SelectedPagesDescription {
+  /** Up to `maxShown` selected page titles, in `pages` order. */
+  shownTitles: string[];
+  /** How many selected pages exist beyond `shownTitles` - 0 when every
+   *  selected page fit. */
+  overflowCount: number;
+  /** Human-readable one-line summary, e.g. "Grading rubric, Late policy
+   *  +3 more", or "" for an empty selection. */
+  text: string;
+}
+
+export function describeSelectedPages(
+  pages: InstitutionPage[],
+  selected: Set<string>,
+  maxShown = 3
+): SelectedPagesDescription {
+  const titles = pages
+    .filter((p) => selected.has(p.id))
+    .map((p) => p.title.trim() || "Untitled page");
+  const shownTitles = titles.slice(0, maxShown);
+  const overflowCount = titles.length - shownTitles.length;
+  const text =
+    shownTitles.length === 0
+      ? ""
+      : overflowCount > 0
+      ? `${shownTitles.join(", ")} +${overflowCount} more`
+      : shownTitles.join(", ");
+  return { shownTitles, overflowCount, text };
+}
+
 // ---------------------------------------------------------------------------
 // Move up / down arithmetic (AC7's "keep it simple" reordering).
 // ---------------------------------------------------------------------------

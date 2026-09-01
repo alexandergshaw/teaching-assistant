@@ -290,9 +290,20 @@ export function useCourseTasksData(): UseCourseTasksDataReturn {
 
     if ("error" in coursesResult) {
       setRefreshing(false);
+      // SHOULD 8 (Tasks-tab UX audit): a SILENT reload (the mount effect
+      // below when hubCache is already warm, or the attachments dialog's
+      // onChanged) used to fail completely silently on this branch - it
+      // returned without ever calling setState or setError, so an
+      // instructor reading cached data over a dead network got no
+      // indication at all that anything was wrong. `error` is now recorded
+      // either way; only a NON-silent reload also flips `state` to "error"
+      // (which would otherwise replace the whole tab's content with the
+      // error banner - wrong for a background refresh that still has good
+      // stale data to show). taskLoadState.ts's errorBannerText is what
+      // turns this into the right banner wording for each case.
+      setError(coursesResult.error);
       if (!opts?.silent) {
         setState("error");
-        setError(coursesResult.error);
       }
       return;
     }

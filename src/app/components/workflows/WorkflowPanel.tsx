@@ -54,11 +54,15 @@ import { ScheduleSection } from "./ScheduleSection";
 import { TriggerSection } from "./TriggerSection";
 import { AutomationRunsSection } from "./AutomationRunsSection";
 import { SummaryView, csvCell, tableGradeIssue, GradeBadge, DetailSectionsView } from "./run-results";
-import { buildCourseFanoutSummary, countOkCourses, type RunStateGroup } from "./attended-fanout";
+import { buildCourseFanoutSummary, countOkCourses, describeInstitutionFanoutProgress, type RunStateGroup } from "./attended-fanout";
 import { composedGroupLabel } from "@/lib/workflows/fanout";
 import type { ActiveStepLocation } from "./run-progress-sidebar";
 import { upsertWorkflowDef, deleteWorkflowDef } from "@/lib/workflow-defs";
 import { describeWorkflowScope, upsertWorkflowDefById } from "@/lib/workflows/types";
+import { describeWorkflowScopeWithCounts } from "./resolved-scope-badge";
+import { describeStepsToggle } from "./toggle-steps-summary";
+import { buildWorkflowDeletePlan, armedWorkflowDeleteLabel } from "./workflow-delete-plan";
+import { buildAbortRunConfirmMessage } from "./run-stop";
 import { describeAutomationSummary } from "./workflow-panel-migration";
 import { getStepDefinition as getStepDefinitionImpl } from "@/lib/workflows/registry";
 import { getPresetDef } from "@/lib/workflows/presets";
@@ -134,6 +138,12 @@ interface WorkflowPanelProps {
   runState: RunStateGroup[];
   stopRequested: boolean;
   onStopAfterCourse: () => void;
+  // B4: a reachable stop for EVERY run, not just a course fan-out (the only
+  // case stopRequested/onStopAfterCourse above ever covered) - see
+  // run-stop.ts and useWorkflowRun.ts's abortRequestedRef for the "never
+  // mid-step, always between steps" semantics.
+  abortRequested: boolean;
+  onAbortRun: () => void;
   pauseResolverRef: React.MutableRefObject<{ resolve: (go: boolean) => void } | null>;
   inputResolverRef: React.MutableRefObject<{ resolve: (value: string | Record<string, string>[] | File[] | null) => void } | null>;
   onRunClick: () => void;
@@ -223,6 +233,8 @@ export function WorkflowPanel({
   runState,
   stopRequested,
   onStopAfterCourse,
+  abortRequested,
+  onAbortRun,
   pauseResolverRef,
   inputResolverRef,
   onRunClick,
@@ -253,9 +265,6 @@ export function WorkflowPanel({
   // disclosure, with the reason stated inline rather than a dead control.
   const editingLocked = running || !!runPause || !!runInput;
 
-  const enabledStepCount = expanded.steps.filter((_, i) => !disabledSteps.has(expanded.topIndices[i])).length;
-  const totalStepCount = expanded.steps.length;
-
   // Display name for each step, parallel to every runState group's own
   // `steps` array (every group shares the same step list, just run against
   // a different scope - see attended-fanout.ts). Computed once here, the
@@ -266,6 +275,12 @@ export function WorkflowPanel({
 
   const workflowSchedules = (automation.schedules ?? []).filter((s) => s.workflowId === selectedDef.id);
   const workflowTriggers = (automation.triggers ?? []).filter((t) => t.workflowId === selectedDef.id);
+
+  // B5: workflow_schedules.workflow_id / workflow_triggers.workflow_id carry
+  // no FK/cascade (see workflow-delete-plan.ts's header) - this is what a
+  // delete of selectedDef must ALSO remove so nothing survives, still
+  // enabled, once its workflow is gone.
+  const deletePlan = buildWorkflowDeletePlan(selectedDef.id, automation.schedules ?? [], automation.triggers ?? []);
 
   // A field whose StepInputSpec declared visibleWhen (types.ts - e.g.
   // course-schedule-from-source's per-source repo/cartridge/syllabus/
@@ -324,7 +339,15 @@ export function WorkflowPanel({
         {selectedDef.description && <WorkflowDescription description={selectedDef.description} />}
         {describeWorkflowScope(selectedDef.scope) && (
           <div className={styles.ghBadge} style={{ display: "inline-block", fontSize: "0.85em", padding: "4px 8px" }}>
-            Scoped: {describeWorkflowScope(selectedDef.scope)}
+            {/* B3(c): a "*" scope used to read "all Canvas courses" with no
+                count - resolved here from the SAME option lists the run form
+                already loaded (fieldOptions, below), so the badge answers
+                "how many" before Run is ever clicked. */}
+            Scoped: {describeWorkflowScopeWithCounts(selectedDef.scope, {
+              institutionCount: fieldOptions.institutions.length,
+              hubCourseCount: fieldOptions.hubCourses?.length ?? null,
+              lmsCourseCount: fieldOptions.lmsCourseOptions?.length ?? null,
+            })}
           </div>
         )}
       </div>
@@ -334,7 +357,15 @@ export function WorkflowPanel({
       {/* Steps / configure - collapsed by default (AC2); force-open while
           editing so WorkflowBuilder is never hidden. */}
       <DisclosureToggle open={stepsUiOpen} onClick={onToggleSteps}>
-        Steps ({totalStepCount === 0 ? "none" : `${enabledStepCount}/${totalStepCount} enabled`})
+        {/* B3(b): naming the steps that will actually run - not just a bare
+            enabled/total count - so the CLOSED state alone answers "what
+            will this workflow do" without opening it. */}
+        {describeStepsToggle(
+          expanded.steps.map((step, i) => ({
+            name: stepDisplayNames[i] ?? step.type,
+            enabled: !disabledSteps.has(expanded.topIndices[i]),
+          }))
+        )}
       </DisclosureToggle>
       {stepsUiOpen && (
         <LockableSection locked={editingLocked} reason="Editing steps is locked while this workflow is running.">
@@ -415,6 +446,18 @@ export function WorkflowPanel({
                   if (!deleteArmed) {
                     setDeleteArmed(true);
                   } else {
+                    // B5: remove every schedule/trigger that targets this
+                    // workflow FIRST, via the same handlers the Schedule &
+                    // trigger disclosure's own "Remove" buttons use
+                    // (automation.handleDeleteSchedule/handleDeleteTrigger),
+                    // so none of them survive - still enabled, still firing
+                    // server-side - once the workflow def row below is gone.
+                    for (const id of deletePlan.scheduleIds) {
+                      void automation.handleDeleteSchedule(id);
+                    }
+                    for (const id of deletePlan.triggerIds) {
+                      void automation.handleDeleteTrigger(id);
+                    }
                     if (user && supabase) {
                       void deleteWorkflowDef(supabase, selectedDef.id).catch(console.error);
                     }
@@ -430,7 +473,7 @@ export function WorkflowPanel({
                   }
                 }}
               >
-                {deleteArmed ? "Confirm delete" : "Delete"}
+                {deleteArmed ? armedWorkflowDeleteLabel(selectedDef.name, deletePlan) : "Delete"}
               </Button>
             )}
 
@@ -556,15 +599,55 @@ export function WorkflowPanel({
                   <h2 style={{ fontSize: "1rem", marginBottom: 16 }}>Run Progress</h2>
                   {(runState.some((grp) => grp.institution !== null) || isCourseFanoutRun) && (
                     <p className={styles.fieldHint} style={{ margin: "0 0 12px 0" }}>
-                      {isCourseFanoutRun ? countOkCourses(runState) : runState.filter((grp) => grp.steps.every((s) => s.status !== "error")).length}/{runState.length} {isCourseFanoutRun ? "courses" : "institutions"} ok
+                      {/* C1: a course fan-out already reports only SETTLED
+                          courses via countOkCourses (courseStatus is set
+                          once a course actually finishes - see attended-
+                          fanout.ts). describeInstitutionFanoutProgress gives
+                          the institution-fanout branch the same discipline -
+                          a group whose steps are all still "pending" is NOT
+                          ok, so this can never read e.g. "5/5 ok" the
+                          instant Run is clicked. */}
+                      {isCourseFanoutRun
+                        ? `${countOkCourses(runState)}/${runState.length} courses ok`
+                        : describeInstitutionFanoutProgress(runState)}
                     </p>
                   )}
-                  {running && isCourseFanoutRun && (
-                    <div style={{ marginBottom: 12 }}>
-                      <Button size="small" variant="outlined" onClick={onStopAfterCourse} disabled={stopRequested}>
-                        {stopRequested ? "Stopping after this course..." : "Stop after this course"}
+                  {/* B4: EVERY run gets a reachable stop, not only a course
+                      fan-out. "Stop after this course" (below) stays
+                      course-fanout-only and waits for the current course to
+                      finish; "Abort run" is available for every run and
+                      checks the stop flag between STEPS as well - the
+                      control an instructor running against the wrong single
+                      course previously had no way to reach at all. */}
+                  {running && (
+                    <div style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {isCourseFanoutRun && (
+                        <Button size="small" variant="outlined" onClick={onStopAfterCourse} disabled={stopRequested}>
+                          {stopRequested ? "Stopping after this course..." : "Stop after this course"}
+                        </Button>
+                      )}
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        disabled={abortRequested}
+                        onClick={() => {
+                          if (window.confirm(buildAbortRunConfirmMessage())) {
+                            onAbortRun();
+                          }
+                        }}
+                      >
+                        {abortRequested ? "Stopping..." : "Abort run"}
                       </Button>
                     </div>
+                  )}
+                  {!running && abortRequested && (
+                    <p role="status" className={styles.error} style={{ margin: "0 0 12px 0" }}>
+                      Stopped before finishing - steps already completed were
+                      left as they were (not undone); every step after the
+                      stop was skipped, not run. This run&apos;s record shows
+                      it was stopped.
+                    </p>
                   )}
                   {runState.map((group, g) => (
                     <Fragment key={group.courseId ?? group.institution ?? g}>

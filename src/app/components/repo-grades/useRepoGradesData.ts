@@ -594,6 +594,7 @@ export function useRepoGradesData(courseId: string, orgPrefix: string): UseRepoG
     const update = buildRosterUpdate({
       submissions: ok,
       existingStudentRepos: course!.studentRepos ?? [],
+      existingRoster: course!.roster ?? "",
     });
 
     const writeResult = await updateCourseHubAction(course!.id, {

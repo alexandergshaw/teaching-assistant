@@ -2,7 +2,20 @@
  * Merge GitHub usernames into course roster and student repo data structures.
  * Preserves existing repo bindings, deduplicates usernames, and disambiguates
  * duplicate student names.
+ *
+ * Every roster-deriving function below (buildRosterUpdate, mergeCanvasRoster,
+ * mergeImportedRoster) used to derive `roster` TEXT purely from its merged
+ * studentRepos, keeping only entries that carried a username. That silently
+ * REPLACED course.roster: a hand-typed line for a student who never submitted
+ * and has no GitHub handle recorded anywhere was not merely left out of a new
+ * line - it was erased, because the caller writes `roster: update.roster`
+ * straight onto the course. Every one of these functions now takes the
+ * course's EXISTING roster text and merges derived candidates INTO it via
+ * mergeRosterText below: every line already there survives; a candidate may
+ * only fill a blank username or add a brand-new line, never drop one.
  */
+
+import { rosterToRows, rowsToRoster } from "@/lib/courses-tab-helpers";
 
 export interface RosterStudentRepo {
   student: string;
@@ -25,11 +38,125 @@ export interface RosterUpdate {
   conflicts: string[];
 }
 
+/**
+ * Mirrors rosterUsernameOverlay.ts's canonicalNameKey (deliberately
+ * duplicated, not imported: that module lives under app/components/repo-
+ * grades and this one under lib/workflows, and the two are wired together
+ * only through the plain {student, username} shape below, not through a
+ * shared import). Trim, collapse whitespace, lowercase, and invert a
+ * "Last, First" spelling - the Courses tab Roster tile's own placeholder
+ * format - to "first last" so it collides with the same student's
+ * "First Last" spelling as it appears in a Canvas submission or import row.
+ * A name with no comma passes through unchanged, which is exactly the key a
+ * comma-form name produces once inverted, so both spellings collide on
+ * purpose.
+ */
+function canonicalRosterNameKey(name: string): string {
+  const normalized = name.trim().replace(/\s+/g, " ").toLowerCase();
+  const commaIndex = normalized.indexOf(",");
+  if (commaIndex === -1) return normalized;
+  const last = normalized.slice(0, commaIndex).trim();
+  const first = normalized.slice(commaIndex + 1).trim();
+  if (!last || !first) return normalized;
+  return `${first} ${last}`;
+}
+
+/**
+ * Merges freshly-derived {student, username} candidates into an existing
+ * roster TEXT, never dropping a line already there.
+ *
+ * - A candidate whose (canonically-keyed) name matches exactly one existing
+ *   line with a BLANK username fills that blank.
+ * - A candidate whose name matches exactly one existing line with the SAME
+ *   (case-insensitive) username changes nothing.
+ * - A candidate whose name matches exactly one existing line with a
+ *   DIFFERENT, non-blank username is a genuine disagreement. The candidate
+ *   wins - it was just derived from a live Canvas submission or import, the
+ *   same "structured data outranks hand-typed text" rule
+ *   rosterUsernameOverlay.ts documents and applies in the opposite direction
+ *   (there, an existing studentRepos username - itself submission-derived -
+ *   outranks a hand-typed roster line; here, the fresh submission/import
+ *   outranks the pre-existing hand-typed line). The overridden line is never
+ *   silently replaced without a trace: it is named in `conflicts`.
+ * - A candidate whose name matches MORE THAN ONE existing line is left
+ *   alone entirely (same ambiguous-match posture as
+ *   rosterUsernameOverlay.ts) - a wrong guess here is exactly how a grade
+ *   reaches the wrong student - and is reported in `conflicts`.
+ * - A candidate matching no existing line is appended as a new line.
+ * - Every existing line that no candidate ever names (a student with no
+ *   GitHub handle recorded anywhere, or one who simply did not submit or
+ *   import this run) passes through completely unchanged.
+ */
+function mergeRosterText(
+  existingRosterText: string,
+  candidates: ReadonlyArray<{ student: string; username: string }>
+): { roster: string; conflicts: string[] } {
+  const rows = rosterToRows(existingRosterText).map((r) => ({ ...r }));
+  const conflicts: string[] = [];
+
+  // Index existing lines by canonical name key BEFORE any mutation or
+  // addition, so a name that matches more than one EXISTING line is detected
+  // against the original set, and so a line added later in this same pass
+  // can never accidentally satisfy a still-unprocessed candidate's lookup.
+  const byKey = new Map<string, number[]>();
+  rows.forEach((row, index) => {
+    const key = canonicalRosterNameKey(row.student);
+    if (!key) return;
+    const existing = byKey.get(key);
+    if (existing) existing.push(index);
+    else byKey.set(key, [index]);
+  });
+
+  for (const { student, username } of candidates) {
+    const trimmedStudent = student.trim();
+    const trimmedUsername = username.trim();
+    if (!trimmedStudent || !trimmedUsername) continue;
+
+    const key = canonicalRosterNameKey(trimmedStudent);
+    const indices = byKey.get(key) ?? [];
+
+    if (indices.length > 1) {
+      conflicts.push(
+        `${trimmedStudent}: ambiguous match in the existing roster (${indices.length} lines share this name) - left unchanged`
+      );
+      continue;
+    }
+
+    if (indices.length === 1) {
+      const row = rows[indices[0]];
+      const existingUsername = row.username.trim();
+      if (!existingUsername) {
+        row.username = trimmedUsername;
+      } else if (existingUsername.toLowerCase() !== trimmedUsername.toLowerCase()) {
+        conflicts.push(
+          `${trimmedStudent}: roster had "${existingUsername}", submission says "${trimmedUsername}" - updated to "${trimmedUsername}"`
+        );
+        row.username = trimmedUsername;
+      }
+      continue;
+    }
+
+    // No existing line for this student - add one, and register it so a
+    // later candidate that names the same student updates this new row
+    // instead of appending a second one.
+    rows.push({ student: trimmedStudent, username: trimmedUsername });
+    byKey.set(key, [rows.length - 1]);
+  }
+
+  return { roster: rowsToRoster(rows), conflicts };
+}
+
 export function buildRosterUpdate(input: {
   submissions: RosterSubmission[];
   existingStudentRepos: RosterStudentRepo[];
+  /** The course tile's CURRENT course.roster text, before this run. Every
+   * line in it survives this call (see mergeRosterText above) - pass ""
+   * only when the tile genuinely has no roster text yet, never as a
+   * shortcut, since that silently reproduces the erasure this function used
+   * to cause. */
+  existingRoster: string;
 }): RosterUpdate {
-  const { submissions, existingStudentRepos } = input;
+  const { submissions, existingStudentRepos, existingRoster } = input;
   const conflicts: string[] = [];
 
   // Step 1: DEDUP by username (case-insensitive)
@@ -109,14 +236,14 @@ export function buildRosterUpdate(input: {
   const nullIdEntries = existingStudentRepos.filter((e) => !e.canvasUserId);
   const mergedStudentRepos = [...Array.from(reposByUserId.values()), ...nullIdEntries];
 
-  // Step 4: DERIVE roster from merged studentRepos
-  const rosterLines: string[] = [];
-  for (const entry of mergedStudentRepos) {
-    if (entry.username) {
-      rosterLines.push(`${entry.student} | ${entry.username}`);
-    }
-  }
-  const roster = rosterLines.join("\n");
+  // Step 4: MERGE the derived {student, username} candidates into the
+  // EXISTING roster text - never derive it from scratch (see this file's
+  // header and mergeRosterText's own doc comment for why).
+  const candidates = mergedStudentRepos
+    .filter((entry) => !!entry.username)
+    .map((entry) => ({ student: entry.student, username: entry.username as string }));
+  const { roster, conflicts: rosterConflicts } = mergeRosterText(existingRoster, candidates);
+  conflicts.push(...rosterConflicts);
 
   // Step 5: Return the result
   return {
@@ -129,8 +256,12 @@ export function buildRosterUpdate(input: {
 
 export function mergeCanvasRoster(
   existing: RosterStudentRepo[],
-  students: Array<{ id: string; name: string }>
-): { studentRepos: RosterStudentRepo[]; roster: string; added: number } {
+  students: Array<{ id: string; name: string }>,
+  /** The course tile's CURRENT course.roster text, before this run - see
+   * buildRosterUpdate's `existingRoster` doc comment; the same rule applies
+   * here. */
+  existingRoster: string
+): { studentRepos: RosterStudentRepo[]; roster: string; added: number; conflicts: string[] } {
   // Create a map of existing entries by canvasUserId
   const existingByUserId = new Map<string, RosterStudentRepo>();
   const nullIdEntries: RosterStudentRepo[] = [];
@@ -172,22 +303,25 @@ export function mergeCanvasRoster(
     ...nullIdEntries,
   ];
 
-  // Derive roster text exactly like buildRosterUpdate: only entries with username
-  const rosterLines: string[] = [];
-  for (const entry of studentRepos) {
-    if (entry.username) {
-      rosterLines.push(`${entry.student} | ${entry.username}`);
-    }
-  }
-  const roster = rosterLines.join("\n");
+  // Merge derived candidates (entries with a username) into the existing
+  // roster TEXT - never derive it from scratch. See mergeRosterText's doc
+  // comment and this file's header.
+  const candidates = studentRepos
+    .filter((entry) => !!entry.username)
+    .map((entry) => ({ student: entry.student, username: entry.username as string }));
+  const { roster, conflicts } = mergeRosterText(existingRoster, candidates);
 
-  return { studentRepos, roster, added };
+  return { studentRepos, roster, added, conflicts };
 }
 
 export function mergeImportedRoster(
   existing: RosterStudentRepo[],
-  students: Array<{ name: string; email?: string; externalId?: string }>
-): { studentRepos: RosterStudentRepo[]; roster: string; added: number; matched: number } {
+  students: Array<{ name: string; email?: string; externalId?: string }>,
+  /** The course tile's CURRENT course.roster text, before this run - see
+   * buildRosterUpdate's `existingRoster` doc comment; the same rule applies
+   * here. */
+  existingRoster: string
+): { studentRepos: RosterStudentRepo[]; roster: string; added: number; matched: number; conflicts: string[] } {
   // Make a shallow copy of existing entries for tracking and updates
   const existingCopy = existing.map((e) => ({ ...e }));
 
@@ -287,14 +421,13 @@ export function mergeImportedRoster(
     }
   }
 
-  // Derive roster text from entries with username only (unchanged from existing pattern)
-  const rosterLines: string[] = [];
-  for (const entry of result) {
-    if (entry.username) {
-      rosterLines.push(`${entry.student} | ${entry.username}`);
-    }
-  }
-  const roster = rosterLines.join("\n");
+  // Merge derived candidates (entries with a username) into the existing
+  // roster TEXT - never derive it from scratch. See mergeRosterText's doc
+  // comment and this file's header.
+  const candidates = result
+    .filter((entry) => !!entry.username)
+    .map((entry) => ({ student: entry.student, username: entry.username as string }));
+  const { roster, conflicts } = mergeRosterText(existingRoster, candidates);
 
-  return { studentRepos: result, roster, added, matched };
+  return { studentRepos: result, roster, added, matched, conflicts };
 }

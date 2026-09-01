@@ -147,6 +147,7 @@ export const courseSetupRosterSteps: StepDefinition[] = [
       const updateResult = buildRosterUpdate({
         submissions: okRows,
         existingStudentRepos: tile.studentRepos ?? [],
+        existingRoster: tile.roster ?? "",
       });
 
       onProgress("Saving roster...");
@@ -327,12 +328,16 @@ export const courseSetupRosterSteps: StepDefinition[] = [
                   rosterResult.students.map((s) => ({
                     id: s.id,
                     name: s.name,
-                  }))
+                  })),
+                  tile.roster ?? ""
                 );
                 if (merged.added > 0) {
                   addedStudents = merged.added;
                   overrides.studentRepos = merged.studentRepos;
                   overrides.roster = merged.roster;
+                }
+                if (merged.conflicts.length > 0) {
+                  reportLines.push(`${tile.name}: roster needs review - ${merged.conflicts.join("; ")}`);
                 }
               }
             } catch (err) {
@@ -464,7 +469,7 @@ export const courseSetupRosterSteps: StepDefinition[] = [
       }
 
       onProgress("Merging roster...");
-      const merged = mergeImportedRoster(tile.studentRepos ?? [], students);
+      const merged = mergeImportedRoster(tile.studentRepos ?? [], students, tile.roster ?? "");
 
       const updateResult = await updateCourseHubAction(hubCourseId, {
         ...courseToInputPayload(tile),
@@ -480,6 +485,9 @@ export const courseSetupRosterSteps: StepDefinition[] = [
       reportLines.push(`Added: ${merged.added}`);
       reportLines.push(`Matched: ${merged.matched}`);
       reportLines.push(`Total: ${merged.studentRepos.length}`);
+      if (merged.conflicts.length > 0) {
+        reportLines.push(`Needs review: ${merged.conflicts.join("; ")}`);
+      }
 
       const report = reportLines.join("\n");
 

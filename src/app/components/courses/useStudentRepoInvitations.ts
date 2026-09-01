@@ -31,8 +31,14 @@ import {
   setupStudentRepoAction,
 } from "@/app/actions";
 import type { RepoPermission } from "@/lib/github";
-import { rosterToRows } from "@/lib/courses-tab-helpers";
-import { parseStoredStatusRows, formatProvisionOutcome, type StudentRepoInvitationRow } from "@/lib/student-repo-status";
+import { rosterToRows, rowsToRoster } from "@/lib/courses-tab-helpers";
+import { studentRepoName } from "@/lib/student-repo-names";
+import {
+  parseStoredStatusRows,
+  formatProvisionOutcome,
+  resolveInvitationRow,
+  type StudentRepoInvitationRow,
+} from "@/lib/student-repo-status";
 
 const BASE_INTERVAL_MS = 60_000;
 const MAX_INTERVAL_MS = 180_000;
@@ -65,6 +71,29 @@ function normalizeHandle(u: string): string {
 export function rowKey(student: string, username: string, index: number): string {
   const handle = normalizeHandle(username);
   return handle ? `u:${handle}` : `s:${student.trim().toLowerCase()}:${index}`;
+}
+
+/** Replaces exactly one row - the one whose recomputed `rowKey` (using ITS
+ * OWN position in `rows`, same as `resolvedByKey` in StudentRepoRoster.tsx
+ * builds it) equals `key` - with `newRow`, leaving every other row and the
+ * array's shape/order completely untouched. Returns `null` when no row's key
+ * matches, which callers must read as "there is nowhere safe to put this
+ * single result" rather than appending it: rowKey's handle-less branch
+ * (`s:${student}:${index}`) depends on this row's position lining up with
+ * its position in the roster, a guarantee that only ever holds for rows that
+ * just came back from a full, same-order refresh (see the long comment above
+ * resolvedByKey in StudentRepoRoster.tsx) - never something a partial merge
+ * can manufacture by inserting at a guessed position. Never mutates `rows`. */
+export function mergeSingleRowResult(
+  rows: StudentRepoInvitationRow[],
+  key: string,
+  newRow: StudentRepoInvitationRow
+): StudentRepoInvitationRow[] | null {
+  const index = rows.findIndex((r, i) => rowKey(r.student, r.username, i) === key);
+  if (index === -1) return null;
+  const next = rows.slice();
+  next[index] = newRow;
+  return next;
 }
 
 function rowSignature(rows: StudentRepoInvitationRow[]): string {
@@ -289,6 +318,94 @@ export function useStudentRepoInvitations({ active, courseId, org, prefix, roste
     [active, org, prefix, rosterText]
   );
 
+  // AC2.7/AC3.8's per-row refresh, at that row's own request cost instead of
+  // the whole table's. Only ever called directly (bypassing enqueue) from
+  // inside a mutation's own queued operation - same reasoning as
+  // runRefreshCore's direct calls below: that operation IS the current slot
+  // in the chain, so queuing again here would deadlock.
+  //
+  // Docs/org-student-repo-provisioning-acceptance-criteria.md AC3.5's call
+  // budget is unavoidable for `listOrgRepos` (repo existence still has to
+  // come from the org-wide listing - see that action's own comment on why
+  // it cannot filter server-side), but this stops paying the "one
+  // invitations call plus one collaborators call PER ROSTER ROW" cost for
+  // every OTHER student on every single click: `studentRepoInvitationStatusAction`
+  // is called with a roster of exactly this one row, so that per-row cost is
+  // now paid once, for this student, not once per student in the class.
+  const runSingleRowRefreshCore = useCallback(
+    async (key: string, student: string, username: string) => {
+      if (!active || !org.trim()) return;
+
+      // A result can only be MERGED IN PLACE, never inserted: see
+      // mergeSingleRowResult's own doc comment for why a guessed insertion
+      // position could key busy/outcome state onto the wrong student. If
+      // this row has no existing entry to replace - in practice, only
+      // before the panel's very first refresh has resolved it, since every
+      // later click lands after `rows` already holds one entry per roster
+      // row - fall back to the exact full refresh this hook always used to
+      // do, so nothing here trades correctness for speed.
+      if (!rowsRef.current.some((r, i) => rowKey(r.student, r.username, i) === key)) {
+        await runRefreshCore(true);
+        return;
+      }
+
+      // Same generation/cancellation discipline as runRefreshCore above:
+      // snapshot the generation this request is running under, and check it
+      // (alongside cancelledRef) before any setState in the result path.
+      const generation = generationRef.current;
+      setChecking(true);
+      try {
+        const hasUsername = username.trim().replace(/^@/, "") !== "";
+        let newRow: StudentRepoInvitationRow;
+        if (!hasUsername) {
+          // resolveInvitationRow's own precedence order (see
+          // src/lib/student-repo-status.ts) puts "no-username" ahead of
+          // every other check, unconditionally - the outcome is fixed
+          // without needing to ask GitHub anything at all.
+          newRow = resolveInvitationRow({
+            student,
+            username,
+            org: org.trim(),
+            repo: studentRepoName(prefix, student, username),
+            repoExists: false,
+            invitations: [],
+            collaborators: [],
+            error: null,
+            now: Date.now(),
+          });
+        } else {
+          const result = await studentRepoInvitationStatusAction(
+            org.trim(),
+            prefix,
+            rowsToRoster([{ student, username }])
+          );
+          if (cancelledRef.current || generation !== generationRef.current) return;
+          if ("error" in result) {
+            setRefreshError(result.error);
+            return;
+          }
+          const resolved = result.rows[0];
+          if (!resolved) return;
+          newRow = resolved;
+        }
+        if (cancelledRef.current || generation !== generationRef.current) return;
+        setRefreshError(null);
+        // checkedAt/notChecked are deliberately left untouched: those two
+        // describe the last WHOLE-TABLE check (AC3.5/AC3.9), and this
+        // refresh only ever resolved one row - bumping checkedAt here would
+        // make "Checked N minutes ago" claim the other rows were just
+        // re-checked when they were not.
+        setRows((prev) => mergeSingleRowResult(prev, key, newRow) ?? prev);
+      } catch (err) {
+        if (cancelledRef.current || generation !== generationRef.current) return;
+        setRefreshError(err instanceof Error ? err.message : "Could not check invitation status.");
+      } finally {
+        if (!cancelledRef.current) setChecking(false);
+      }
+    },
+    [active, org, prefix, runRefreshCore]
+  );
+
   const runRefresh = useCallback(
     (manual: boolean): Promise<void> => {
       if (manual) {
@@ -461,12 +578,14 @@ export function useStudentRepoInvitations({ active, courseId, org, prefix, roste
           const hasUsername = username.trim().replace(/^@/, "") !== "";
           setOutcomes((prev) => ({ ...prev, [key]: formatProvisionOutcome(result, hasUsername) }));
           intervalMsRef.current = BASE_INTERVAL_MS;
-          // AC2.7: this row's status refreshes immediately. Call the core
-          // body directly rather than through runRefresh()/enqueue() - this
-          // callback IS the current slot in the chain, so queuing again here
-          // would append a new tail behind itself and deadlock waiting on
-          // its own completion.
-          await runRefreshCore(true);
+          // AC2.7: this row's status refreshes immediately - at this row's
+          // own request cost, not the whole table's (see
+          // runSingleRowRefreshCore). Call the core body directly rather
+          // than through runRefresh()/enqueue() - this callback IS the
+          // current slot in the chain, so queuing again here would append a
+          // new tail behind itself and deadlock waiting on its own
+          // completion.
+          await runSingleRowRefreshCore(key, student, username);
         } catch (err) {
           if (cancelledRef.current) return;
           setOutcomes((prev) => ({
@@ -481,7 +600,7 @@ export function useStudentRepoInvitations({ active, courseId, org, prefix, roste
         }
       });
     },
-    [org, prefix, enqueue, runRefreshCore]
+    [org, prefix, enqueue, runSingleRowRefreshCore]
   );
 
   const inviteOrResendRow = useCallback(
@@ -514,8 +633,9 @@ export function useStudentRepoInvitations({ active, courseId, org, prefix, roste
           });
           intervalMsRef.current = BASE_INTERVAL_MS;
           // See provisionRow: direct call, not runRefresh()/enqueue(), to
-          // avoid queuing behind this same operation.
-          await runRefreshCore(true);
+          // avoid queuing behind this same operation. Single-row cost, not
+          // the whole table's - see runSingleRowRefreshCore.
+          await runSingleRowRefreshCore(key, student, username);
         } catch (err) {
           if (cancelledRef.current) return;
           setOutcomes((prev) => ({
@@ -527,7 +647,7 @@ export function useStudentRepoInvitations({ active, courseId, org, prefix, roste
         }
       });
     },
-    [org, enqueue, runRefreshCore]
+    [org, enqueue, runSingleRowRefreshCore]
   );
 
   const revokeRow = useCallback(
@@ -555,8 +675,9 @@ export function useStudentRepoInvitations({ active, courseId, org, prefix, roste
           }
           intervalMsRef.current = BASE_INTERVAL_MS;
           // See provisionRow: direct call, not runRefresh()/enqueue(), to
-          // avoid queuing behind this same operation.
-          await runRefreshCore(true);
+          // avoid queuing behind this same operation. Single-row cost, not
+          // the whole table's - see runSingleRowRefreshCore.
+          await runSingleRowRefreshCore(key, student, username);
         } catch (err) {
           if (cancelledRef.current) return;
           setOutcomes((prev) => ({
@@ -568,7 +689,7 @@ export function useStudentRepoInvitations({ active, courseId, org, prefix, roste
         }
       });
     },
-    [org, enqueue, runRefreshCore]
+    [org, enqueue, runSingleRowRefreshCore]
   );
 
   return {

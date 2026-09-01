@@ -471,13 +471,16 @@ export const gradingSinglesSteps: StepDefinition[] = [
                 email: s.email,
                 externalId: s.externalId,
               }));
-              const merged = mergeImportedRoster(tile.studentRepos ?? [], students);
+              const merged = mergeImportedRoster(tile.studentRepos ?? [], students, tile.roster ?? "");
 
               const overrides: Record<string, unknown> = {};
               if (merged.added > 0 || merged.matched > 0) {
                 overrides.studentRepos = merged.studentRepos;
                 overrides.roster = merged.roster;
                 reportLines.push(`+${merged.added} added, ${merged.matched} matched`);
+                if (merged.conflicts.length > 0) {
+                  reportLines.push(`Needs review: ${merged.conflicts.join("; ")}`);
+                }
 
                 const updateResult = await updateCourseHubAction(hubCourseId, {
                   ...courseToInputPayload(tile),

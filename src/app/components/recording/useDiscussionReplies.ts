@@ -97,10 +97,15 @@ import {
   buildDiscussionRepliesRunLog,
   makeDiscussionRepliesLogBatch,
   type DiscussionRepliesLogBatch,
-  type DiscussionRepliesLogNotice,
   type DiscussionRepliesLogRetry,
   type DiscussionRepliesRunLog,
 } from "./discussion-replies-log";
+// The notices system (AC38): a capped, deduped list plus the log mirror
+// docs/DEV_LOOP.md's downloadable-log rule needs, and the forwarding of C1's
+// recorder/frame-encode notices and C2's persist-error into the same
+// channel. Split out purely to stay under recording-split.structure.test.ts's
+// 1000-line ceiling on this directory - see that file's own header.
+import { useDiscussionNotices } from "./useDiscussionNotices";
 
 export type { UseDiscussionRepliesReturn } from "./discussion-draft-loop";
 
@@ -219,10 +224,19 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // --- notices (AC38): a capped list, not a slot, so an extraction failure,
   // a drafting failure, a recorder failure and a storage failure never erase
   // each other. Also carries the two conditions (AC10's drop sentence, AC23b's
-  // table-full ceiling) that have no other channel in the sealed return. ---
-  const [notices, setNotices] = useState<Array<{ id: string; text: string }>>([]);
-  const noticeCounterRef = useRef(0);
-  const lastNoticeTextRef = useRef<string | null>(null);
+  // table-full ceiling) that have no other channel in the sealed return.
+  // Split into useDiscussionNotices.ts (its own hook) purely to stay under
+  // recording-split.structure.test.ts's 1000-line ceiling on this directory
+  // (non-recursive) - see that file's own header for the full account. It
+  // also forwards C1's recorder failure (`recordingError`) and over-budget-
+  // frame notice (`frameEncodeNotice`), and C2's AC23a storage failure
+  // (`persistError`), into the same channel - this hook still owns and
+  // returns every field below exactly as before. ---
+  const { notices, dismissNotice, pushNotice, logAllNotices } = useDiscussionNotices({
+    recordingError: capture.recordingError,
+    frameEncodeNotice: capture.frameEncodeNotice,
+    persistError: rowsApi.persistError,
+  });
 
   // --- docs/DEV_LOOP.md's downloadable-log rule (REGRESSION entries
   // 369/372/373/374): the three event streams the log records, plus the two
@@ -234,44 +248,14 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // updater at the moment its event happens, the same pattern
   // `setDraftQueueSize`/`setExtracting` already use from inside these same
   // async loops. See discussion-replies-log.ts's header for why this
-  // collection lives here and formatting/assembly does not. ---
+  // collection lives here and formatting/assembly does not. `logAllNotices`
+  // itself now comes from useDiscussionNotices.ts above, not a local
+  // useState - see that hook's own header. ---
   const [logStartedAt, setLogStartedAt] = useState("");
   const [logEndedAt, setLogEndedAt] = useState("");
   const [logFramesCaptured, setLogFramesCaptured] = useState(0);
   const [logBatches, setLogBatches] = useState<DiscussionRepliesLogBatch[]>([]);
-  const [logAllNotices, setLogAllNotices] = useState<DiscussionRepliesLogNotice[]>([]);
   const [logRetries, setLogRetries] = useState<DiscussionRepliesLogRetry[]>([]);
-
-  const pushNotice = useCallback((text: string) => {
-    // Dedupe against the immediately-preceding notice only (AC38: "identical
-    // consecutive texts deduped"), so a repeating 429 does not build a wall
-    // but two DIFFERENT failures that happen to recur are not merged.
-    if (lastNoticeTextRef.current === text) return;
-    lastNoticeTextRef.current = text;
-    noticeCounterRef.current += 1;
-    const id = `disc-notice-${noticeCounterRef.current}`;
-    // Logged here, after the dedupe check above - "every notice shown to
-    // the instructor" means what was actually shown, and a duplicate
-    // suppressed by the check above was not.
-    const at = new Date().toISOString();
-    setLogAllNotices((prev) => [...prev, { at, text }]);
-    setNotices((prev) => {
-      const next = [...prev, { id, text }];
-      return next.length > 4 ? next.slice(next.length - 4) : next;
-    });
-  }, []);
-
-  const dismissNotice = useCallback((id: string) => {
-    // N4: the consecutive-dedupe ref must be cleared on a dismissal, or the
-    // user's own dismiss action becomes the thing permanently suppressing a
-    // notice - hit the same 429 again after dismissing the first one and
-    // nothing would reappear. Clearing unconditionally (rather than only
-    // when the dismissed notice's text happens to match) is the simpler,
-    // safer-in-the-wrong-direction choice: the worst case is one duplicate
-    // notice instead of a permanently silenced one.
-    lastNoticeTextRef.current = null;
-    setNotices((prev) => prev.filter((n) => n.id !== id));
-  }, []);
 
   // --- Refs mirroring everything the two async loops read to decide what to
   // dispatch (AC41). Both loops are await-suspended across renders, so their
@@ -699,34 +683,6 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       wakeTickerRef.current = null;
     }
   }, [hasWork, flushWakeResolvers]);
-
-  // --- Forward C1's out-of-band recorder failure (assumption 1 above) into
-  // notices, once per distinct message (F4: the recorder error is rendered
-  // as a notice; the drop count itself is passed through on the return
-  // below instead, since AC7b places that specific sentence beneath the
-  // persistent post-stop summary, not in the generic notices list). ---
-  const lastRecordingErrorRef = useRef<string | null>(null);
-  useEffect(() => {
-    const err = capture.recordingError;
-    if (err && err !== lastRecordingErrorRef.current) pushNotice(err);
-    lastRecordingErrorRef.current = err;
-  }, [capture.recordingError, pushNotice]);
-
-  // --- S5/AC10b: forward C1's over-budget-frame notice the same way. ---
-  const lastFrameEncodeNoticeRef = useRef<string | null>(null);
-  useEffect(() => {
-    const note = capture.frameEncodeNotice;
-    if (note && note !== lastFrameEncodeNoticeRef.current) pushNotice(note);
-    lastFrameEncodeNoticeRef.current = note;
-  }, [capture.frameEncodeNotice, pushNotice]);
-
-  // --- Forward C2's AC23a localStorage write failure into notices. ---
-  const lastPersistErrorRef = useRef<string | null>(null);
-  useEffect(() => {
-    const err = rowsApi.persistError;
-    if (err && err !== lastPersistErrorRef.current) pushNotice(err);
-    lastPersistErrorRef.current = err;
-  }, [rowsApi.persistError, pushNotice]);
 
   // --- Session actions. All read fresh state through the refs above and
   // keep a stable identity across renders (useCallback with [] deps), which

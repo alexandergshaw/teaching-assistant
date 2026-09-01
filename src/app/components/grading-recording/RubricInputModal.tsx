@@ -1,33 +1,28 @@
 "use client";
 
-// STAGING NOTICE - READ BEFORE WIRING OR DELETING THIS FILE.
+// REACHABILITY NOTICE - READ BEFORE CHANGING HOW THIS MODAL IS WIRED.
 //
-// This modal is NOT reachable from any surface in this app. Nothing outside
-// this directory imports RubricInputModal - grep the repo and confirm before
-// trusting any comment, including this one, that suggests otherwise.
+// This modal IS reachable, as of the assembly wave that wired grading-via-
+// recording together: src/app/components/grading-recording/
+// GradingRecordingPanel.tsx (grading-via-recording's own inner view, reached
+// from Manual > Recording > "Grading (from a recording)") renders it behind
+// an "Add rubric"/"Edit rubric" button, and it also opens automatically the
+// moment an instructor lands there from the Knowledge base's "Grade via
+// recording" bulk-bar button (src/app/components/KnowledgeTab.tsx, via
+// `openRecordingTool({ view: "grading", openRubric: true, ... })` -
+// see src/lib/recording-launch.ts's own RecordingLaunch.openRubric doc
+// comment). Grep the repo and confirm before trusting any comment, including
+// this one, if that ever changes again - this repo has been bitten by a
+// stale reachability claim before (LegibilityProbeModal.tsx's own notice
+// documents the same discipline).
 //
-// That is deliberate staging, not an oversight or a forgotten wire-up.
-// docs/grading-via-recording-acceptance-criteria.md section 5 (R5a) calls for
-// shipping the section 1 legibility measurement (R1/R1b) and this rubric
-// modal (section 2, R2) as their own push, ahead of the capture/table work,
-// because the measurement decides whether the rest of grading-via-recording
-// is worth building at all. This piece is staged ready for that decision -
-// it is not "done and shipped" in the sense of being reachable by an
-// instructor today.
+// The two conditions this file used to wait on (R1/R1b's legibility
+// measurement passing, and a grading-via-recording view existing to host it)
+// are both satisfied: the owner ran the legibility probe against a real
+// submission and reported it legible (see grading-row.ts's own header), and
+// GradingRecordingPanel.tsx is that view.
 //
-// WHAT MAKES THIS REACHABLE - both still outstanding as of this commit:
-//   1. The AC section 1 legibility measurement (R1/R1b) passes: a real
-//      submission page, captured at the widths an instructor actually uses,
-//      comes back readable. If it does not, the AC says stop, not "wire the
-//      modal anyway".
-//   2. A grading-via-recording view exists to host it. There is no such view
-//      yet, so even a passing R1 does not by itself give this modal a caller.
-//
-// Until both are true, do not add an importer here - Knowledge bulk bar or
-// anywhere else - just to make this file "used": a button that opens a modal
-// whose output goes nowhere is worse than no button.
-//
-// What this modal DOES do, once wired: it ONLY collects and lets the
+// What this modal DOES do: it ONLY collects and lets the
 // instructor review rubric text; it does not capture a recording, does not
 // grade anything, and does not render a table - those are separate, later
 // pieces. Per requirement 5, the text is handed to the caller via onSubmit

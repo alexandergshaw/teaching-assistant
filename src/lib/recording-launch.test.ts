@@ -17,6 +17,29 @@ describe("recording-launch", () => {
       expect(parseRecordingLaunch({ view: "announcement" })).toEqual({ view: "announcement" });
     });
 
+    it("accepts the grading view - grading-via-recording's own dedicated view", () => {
+      expect(parseRecordingLaunch({ view: "grading" })).toEqual({ view: "grading" });
+    });
+
+    it("accepts openRubric: true alongside the grading view", () => {
+      expect(parseRecordingLaunch({ view: "grading", openRubric: true })).toEqual({
+        view: "grading",
+        openRubric: true,
+      });
+    });
+
+    it("drops openRubric when it is not literally true (false, missing, or a non-boolean), without invalidating the view", () => {
+      expect(parseRecordingLaunch({ view: "grading", openRubric: false })).toEqual({ view: "grading" });
+      expect(parseRecordingLaunch({ view: "grading" })).toEqual({ view: "grading" });
+      expect(parseRecordingLaunch({ view: "grading", openRubric: "yes" })).toEqual({ view: "grading" });
+    });
+
+    it("accepts openRubric alongside a knowledgeContext in the same launch (the Knowledge base's 'Grade via recording' button sets both)", () => {
+      expect(
+        parseRecordingLaunch({ view: "grading", openRubric: true, knowledgeContext: { text: "policy text" } })
+      ).toEqual({ view: "grading", openRubric: true, knowledgeContext: { text: "policy text" } });
+    });
+
     it("accepts a view with a usable knowledgeContext", () => {
       expect(
         parseRecordingLaunch({ view: "discussions", knowledgeContext: { text: "hello", label: "1 page" } })
@@ -226,6 +249,40 @@ describe("recording-launch", () => {
         expect.objectContaining({
           type: RECORDING_LAUNCH_EVENT,
           detail: { view: "announcement" },
+        })
+      );
+      eventSpy.mockRestore();
+    });
+
+    // The fab's own "grading" entry (item 3 of this task) uses
+    // navigateToRecordingTool, never openRecordingTool with openRubric - see
+    // this module's own header on RecordingLaunch.openRubric for why a plain
+    // fab visit must not surprise the instructor with the rubric modal.
+    it("navigateToRecordingTool dispatches RECORDING_LAUNCH_EVENT for the grading view, with no openRubric", () => {
+      const eventSpy = vi.spyOn(window, "dispatchEvent");
+      navigateToRecordingTool("grading");
+      expect(eventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: RECORDING_LAUNCH_EVENT,
+          detail: { view: "grading" },
+        })
+      );
+      eventSpy.mockRestore();
+    });
+
+    // The Knowledge base's "Grade via recording" button (item 2 of this
+    // task) is expected to call openRecordingTool({ view: "grading",
+    // openRubric: true, ... }) - this proves that exact shape is a
+    // dispatchable, non-degraded launch, carrying BOTH the view switch
+    // RecordingTab reacts to and the openRubric flag GradingRecordingPanel
+    // reacts to, from ONE dispatch.
+    it("openRecordingTool dispatches RECORDING_LAUNCH_EVENT with openRubric true for a grading launch", () => {
+      const eventSpy = vi.spyOn(window, "dispatchEvent");
+      openRecordingTool({ view: "grading", openRubric: true });
+      expect(eventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: RECORDING_LAUNCH_EVENT,
+          detail: { view: "grading", openRubric: true },
         })
       );
       eventSpy.mockRestore();

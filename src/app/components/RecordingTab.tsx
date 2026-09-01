@@ -26,6 +26,7 @@ import SpeedPanel from "./recording/SpeedPanel";
 import TakesPanel from "./recording/TakesPanel";
 import AvatarStudioPanel from "./recording/AvatarStudioPanel";
 import DiscussionRepliesPanel from "./recording/DiscussionRepliesPanel";
+import GradingRecordingPanel from "./grading-recording/GradingRecordingPanel";
 import WalkthroughPanel from "./recording/WalkthroughPanel";
 import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
@@ -46,12 +47,25 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // underlying surface, not a replacement for the old one - see the shared
   // gating below (the block that used to render only for recView==="record")
   // for how both routes stay live at once.
+  //
+  // "grading" (docs/grading-via-recording-acceptance-criteria.md): a NEW,
+  // independent inner view - grading-via-recording's own capture/extraction/
+  // table surface (GradingRecordingPanel.tsx), reached from the Knowledge
+  // base's "Grade via recording" bulk-bar button and the fab's own
+  // navigateToRecordingTool("grading") entry, exactly the same two entry
+  // points "discussions" already has.
   const [recView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement"
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading"
   >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
-    return v === "discussions" || v === "speed" || v === "captions" || v === "slides" || v === "avatar" || v === "announcement"
+    return v === "discussions" ||
+      v === "speed" ||
+      v === "captions" ||
+      v === "slides" ||
+      v === "avatar" ||
+      v === "announcement" ||
+      v === "grading"
       ? v
       : "record";
   });
@@ -546,7 +560,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       subtitle="Record video from any attached camera or your screen, preview it live, and download the takes."
     >
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["grading", "Grading (from a recording)"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
             onClick={() => setRecView(key)}>
@@ -773,6 +787,15 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             course fetch and starts both its loops on every page load even
             while sitting on a different top-level tab. */}
         <DiscussionRepliesPanel active={active && recView === "discussions"} />
+      </div>
+
+      {/* Same always-mounted stack, same reason: an in-progress capture and
+          its extraction queue must survive the user switching to another
+          inner view - grading-via-recording's own capture loop (see
+          GradingRecordingPanel.tsx) needs exactly the guarantee
+          "discussions" needs above. */}
+      <div style={{ display: recView === "grading" ? undefined : "none" }}>
+        <GradingRecordingPanel active={active && recView === "grading"} />
       </div>
 
       <div style={{ display: recView === "captions" ? undefined : "none" }}>

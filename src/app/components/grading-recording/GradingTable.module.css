@@ -1,0 +1,103 @@
+/* Grading from a screen recording - the table's own row styles.
+   docs/grading-via-recording-acceptance-criteria.md section 4.
+
+   Deliberately a FRESH stylesheet, not an import of
+   recording/DiscussionRepliesPanel.module.css - R4b is explicit that the
+   discussion feature's panel/row components are not reusable here (this is
+   "a second instance sharing an engine, not a parameterisation of the
+   discussion surface"), and that boundary is cleanest kept at the
+   stylesheet too rather than reaching into a sibling feature's CSS module
+   for class names whose next edit is someone else's to make. The shared
+   TABLE SKIN (.scroller/.table) is still reused directly from
+   ../workflows/AutomationsTable.module.css in GradingTable.tsx - that
+   module's own header already frames it as "the idiom the app's tables
+   read as one system under", which is a genuinely cross-feature contract,
+   unlike this file's row-specific layout. */
+
+/* One logical row renders as TWO <tr>s: a compact header bar (Name / Name
+   match / State / Score) plus a full-width continuation row holding the
+   submission text and the editable feedback fields - same two-row idiom as
+   recording/DiscussionRepliesPanel.module.css's .summaryRow/.bodyRow pair,
+   restated here as its own rule rather than imported (see this file's own
+   header). */
+.rowBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 10px 4px;
+}
+
+@media (max-width: 720px) {
+  .rowBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.submissionBlock,
+.feedbackBlock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 8px;
+}
+
+.blockHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.submissionCell {
+  height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
+.submissionCell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Same border-suppression pair as DiscussionRepliesPanel.module.css's
+   .summaryRow/.bodyRow, restated for this table's own two class names -
+   both rules are needed (th and td, separately) so the header bar and its
+   continuation row read as one visual block instead of splitting into two
+   bordered boxes. */
+tr.summaryRow th,
+tr.summaryRow td {
+  border-bottom: none;
+  padding-bottom: 4px;
+}
+
+tr.bodyRow td {
+  padding-top: 4px;
+}
+
+.rosterCandidates {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.tableCaption {
+  caption-side: top;
+  text-align: left;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  padding-bottom: 8px;
+}
+
+.filterEmptyCell {
+  padding: 14px 8px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.scoreField {
+  width: 100px;
+}

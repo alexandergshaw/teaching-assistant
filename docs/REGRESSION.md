@@ -36913,3 +36913,234 @@ it says nothing about the guarantee unless the inputs were chosen adversarially.
 
 Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
 pre-existing warnings, `vitest` **767 files / 15819 tests** all passing.
+
+## 379. Grade a class off a screen recording - and the four ways a student ends up with someone else's words, or none
+
+The owner ran the R1 legibility probe against a real submission page and
+reported it readable, which is what unblocked this being built at all. What
+got built is a complete surface: a Knowledge-base bulk-bar button, a rubric
+modal, a screen capture, a vision extraction, a dedupe, a roster check, a
+per-submission grading call, and a filterable table. Every hop is wired -
+traced from the button to the row, which is worth saying in a session where
+six features shipped dead.
+
+**The boundary the owner asked for is structural, and it holds.** `GradingRow`
+has no `userId` and no field that could carry one; every occurrence of
+`userId`, `GradeResult`, `grading_drafts`, `GradingRunEntry` and
+`postCanvasGrades` across the feature's thirteen source files is inside a
+comment. `gradeCapturedSubmissionsAction` returns four strings and a row id,
+never a `GradeResult`, and never imports `gradeEntries`/`gradeStudentEntries`.
+Nothing persists to Supabase; the only storage is three localStorage keys for
+UI controls. Posting one of these scores is a compile error, not a discipline.
+One seam is worth naming: the action's `submissions` parameter takes a bare
+`{ id: string }`, so a future caller could pass a Canvas user id as `id`
+without tsc objecting. It goes nowhere today.
+
+**R1a's three outcomes are genuinely distinct end to end.** The extraction
+prompt refuses a bare `[]` and demands a marker element naming what the frames
+actually showed; the action turns "no submissions and no marker" into a hard
+error rather than a quiet empty table, and a blank model response into a hard
+error too. `describeExtractionOutcome` gives the skipped-unnamed count the
+SAME danger styling and `role="alert"` a hard error gets, so "we saw work we
+refused to attribute" can never read as "nothing was here". Verified from the
+action through to the rendered class name.
+
+**The grading call is composed the one way this repo composes.**
+`composeOverallComment` on both the success and the failure path, never a
+second hand-authored composition. `buildSystemPrompt` is the shared one, so
+entry 375's rules arrive verbatim. The "never 0/0" guard is real and closes a
+gap the shared code does not: `deriveTotalScore` returns an explicit
+model-supplied total unchecked and `scaleResultToPoints` passes it through on
+the null-pointsPossible branch, so a model that volunteers `"0/0"` would ship
+it - `safeTotalScore` re-parses and degrades to `""`. One LLM call per
+submission, each in its own try/catch, so one bad submission cannot fail nine
+others. The knowledge-context anti-injection header travels byte-for-byte,
+verified against the string in `knowledge-context.ts`.
+
+**And a student can still receive another student's essay, or nothing at
+all.** Four ways, all with every gate green:
+
+1. `isSameSubmission` fuses two students. Its name gate returns true whenever
+   the last tokens agree and EITHER side is a single token, so a cropped
+   header read as "Smith" matches every Smith on the roster; its text gate is
+   token-Levenshtein over the first 40 tokens at a 0.25 threshold, and two
+   submissions that open with the same restated prompt score **0**, not 0.24.
+   Both gates pass, the longer text wins, and the FIRST reading's name is kept
+   forever. With no course selected - the default - the fused row's badge
+   reads the neutral "No roster to check" and nothing flags it. The second
+   student has no row at all.
+2. One submission read across two batches becomes two rows. The identity test
+   is over OPENING tokens, so page 2 of a scrolled essay is a different
+   submission; the prompt's "join the parts" rule only operates within one
+   6-frame batch. A five-page essay spanning three batches gets three rows,
+   each graded against the full rubric on a third of the work, each deducting
+   (the shared prompt mandates at least one deduction), each carrying the
+   resubmit notice.
+3. Every grading FAILURE renders as a green "Ready" row whose student-facing
+   overall comment IS the error string. The panel hardcodes `state: "ready"`
+   for every returned result and never sets `error`, so `GradingRow`'s
+   `"failed"` state and its per-row error block are dead code, while
+   `composeFailedGradingRow` correctly composes the verbatim failure into
+   `overallComment` - the box an instructor copies. Past the submission cap,
+   row 21 reads "This submission could not be graded: Too many submissions in
+   one grading run."
+4. Frames dropped to backpressure are invisible. `useDiscussionCapture`
+   exposes `droppedFrames` and `frameEncodeNotice` precisely so a caller can
+   say so; the panel destructures neither. A submission that was only ever on
+   a dropped frame produces no row, no notice and no error - while the OTHER
+   way a student disappears is reported in red.
+
+And no row can be deleted: `removeRow`/`clearTable` exist on the hook and no
+control calls them.
+
+**The suite is green on inputs chosen to make it green.** `SIMILARITY_THRESHOLD`
+is compared only against itself, by fixtures whose real distances are `0` and
+`1.0` - it could be changed to `0.99` and nothing would fail. There is no
+fixture where two submissions share a boilerplate opening, none where one
+submission is read as two disjoint parts, and none with a non-ASCII name
+anywhere in the merge suite (`normalizeForMatch` maps `[^a-z0-9 ]` to a space,
+so `"José Álvarez"` tokenises to `["jos", "lvarez"]`). Three tests in the
+extraction action's suite enter `if ("submissions" in result)` with no prior
+assertion that the branch is taken, so they execute **zero assertions** on an
+error result - including "never invents a name - an unnamed entry never
+appears in `submissions` under any key", the one test that would catch R3
+breaking. And every success fixture in both action tests carries
+`status: 200, body: ""`, which `LlmResult`'s success branch does not have -
+hidden by `as never` in one file and by a helper's widening in the other, so
+neither `tsc` nor the suite would notice if the real shape changed. This is
+the third batch in a row where a green suite rested on a fixture shape or a
+character set the production path never produces.
+
+Final gates: `tsc` 0 errors, `eslint` 0 errors / 6 pre-existing warnings,
+`vitest` **778 files / 15992 tests** all passing (763/15773 at entry 378: +15
+files, +219 tests). The repo-wide ceiling gate's allow-list was re-derived
+against a fresh `@(Get-Content).Count` sweep: exactly four files in `src/`
+exceed 1000 lines and the list names exactly those four at exactly those
+counts, with nothing re-pinned by this batch. Both key canaries re-derived
+independently with an ordinal sort - the `recording/` set is unchanged, and
+the new self-contained `grading-recording/` canary's three keys
+(`ta-rec-grade-course`, `ta-rec-grade-filter`, `ta-rec-grade-sort`) each have
+both a read and a write.
+
+### Limits
+
+- **The dedupe has no timestamp fallback, and its similarity threshold is
+  untested against a real class.** A discussion board prints a time next to
+  every post; a document, PDF or code view does not, so name plus
+  opening-token similarity is the whole identity rule. The threshold is
+  `0.25` over the first 40 tokens, chosen without measurement, with no
+  boundary test from either side and no fixture in which two students share
+  an opening boilerplate. Every merge fixture was constructed to make the
+  merge work.
+- **The roster is a free-text course field, not a live API call.**
+  `parseRosterNames` splits `course.roster` on newlines and takes the half
+  before the last `|`. `listCourseRosterAction` and `studentRepos` are not
+  consulted, and the two roster fields this repo already has are not synced
+  with each other. A roster that is blank, stale, or written "Last, First"
+  in one place and "First Last" in another changes only what the row SAYS -
+  correctly, per R3b - but it means the roster check is a courtesy, not a
+  verification. Matching is exact after canonicalization, so a middle initial
+  present on one side and absent on the other reports "unmatched".
+- **A name read off a screen is not a student identity, which is why the
+  no-write boundary exists.** Everything above is why the owner's own ruling
+  ("it's not possible to bind the score to a student or upload to an lms") is
+  the correct one and is a permanent ceiling on this feature, not a gap to
+  close later. The scores and comments here are a working surface for an
+  instructor to read, edit and copy - nothing more.
+- **The legibility measurement was one instructor's one run, not a
+  characterisation.** R1 asked whether a submission page can be read at all.
+  It was answered once, on one page, at one width. Nothing has been measured
+  about 12-13px code, two-column PDFs, handwriting, or what the 0.55 JPEG
+  quality does to thin dark-on-light strokes at the widths a second monitor
+  produces. Every accuracy claim about this feature still rests on that
+  single observation.
+- **The feature's two name normalizers disagree, and nothing tests the
+  disagreement.** `studentNamesMatch` (merge) tolerates a middle initial and
+  strips apostrophes; `canonicalizeNameForMatch` (roster) requires exact
+  equality after canonicalization and does not strip apostrophes. So the same
+  pair of strings can be "the same submission" to the dedupe and "unmatched"
+  to the roster check. Neither suite has a fixture with a middle initial
+  against `matchNameAgainstRoster`, an apostrophe, an accent, a hyphenated
+  surname, or "Last, First" on both sides at once.
+- **No component is rendered by any test in this repo.** vitest is node-env
+  and collects only `src/**/*.test.ts`. The 453-line panel, the table, the
+  row, the rubric modal and every badge, `role="alert"`, `aria-sort` and
+  keyboard stop described above were verified **by reading**. A green suite
+  says nothing about whether any of them render or are reachable by keyboard.
+- **Four reachability notices in this feature are now stale in the other
+  direction.** `useGradingRows.ts`, `GradingTable.tsx` and both server actions
+  still carry paragraphs asserting they have no production caller. They do.
+  The staging notice that WAS corrected (`RubricInputModal.tsx`) shows the
+  discipline; these four were missed.
+
+### Written before the blocker fixes - what actually shipped
+
+Four blockers, every one green on every gate. Three of them showed the
+instructor a confident result that was wrong.
+
+**B1 - two students fused into one row, and one of them vanished.** The name gate
+passed whenever last tokens agreed AND either side was a single token, so a
+cropped header read as "Smith" matched every Smith in the class. The text gate
+compared the first 40 tokens - exactly where a restated prompt or shared template
+lives - so two different students opening the same way scored 0, identical. The
+longer text won, the first reading's name was kept, and the second student got no
+row. With no course selected (the default) the badge read a neutral "No roster to
+check", so nothing looked wrong.
+
+Fixed with a three-tier name confidence: a cropped surname is now CORROBORATING
+EVIDENCE, not identity, and carries a merge only when the text is near-verbatim
+(0.05, not 0.25). The text comparison now starts at the DIVERGENCE POINT rather
+than the shared opening, so boilerplate can no longer mask real disagreement.
+
+**The fixing agent reported an attack it could NOT close**, and it is right that
+it cannot: two different students, one with a cropped name, both submitting only
+the untouched template with zero original content, are byte-identical. No
+comparison over name+text can separate them. That is an information-theoretic
+limit of the available signals, not a gap in the implementation - so the
+mitigation is visibility, not cleverness: the panel now reports
+`"18 readings merged into 11 submissions so far."` An instructor who recorded
+twelve students and sees eleven notices. That catches the whole class of
+over-merges, not one attack.
+
+**B2 - one submission split across two batches became two rows**, each graded on
+a fragment against the whole rubric - and the shared prompt mandates finding at
+least one deduction, so the student was penalised twice and offered two
+resubmissions. Fixed by detecting the six-token verbatim splice two frames leave
+at a batch boundary, and joining rather than splitting.
+
+**B3 - a grading FAILURE rendered as a green "Ready" row whose student-facing
+comment WAS the error text.** `GradingRow`'s `"failed"` state and error field were
+dead code. Fixed on the consuming side first, then properly: the action now
+returns a real `failed` discriminator and the classification no longer
+prefix-matches a 39-character sentence. **The exact-key-set pin was updated
+deliberately rather than worked around** - it exists to prove no identity field
+leaks in, and it still does; freezing the shape forever was never its job.
+
+**B4 - dropped frames were invisible**, which is R1a reached around the outside
+of the very machinery built to prevent it. The capture hook reports
+`droppedFrames` and `frameEncodeNotice`; the panel destructured neither, so a
+frame lost to backpressure took its student off the table silently. Both now
+surface with the same urgency as the skipped-unnamed notice, reusing the
+discussion surface's shipped wording rather than inventing a second one.
+
+Also: no row could be removed at all. Per-row delete and clear-table added,
+following the reply table's confirm discipline (signature-based arming, not a
+timer).
+
+**The test suite was not evidence, and this is the part worth keeping.** The
+review found the whole feature green through all four blockers because:
+- `SIMILARITY_THRESHOLD` - the constant deciding whether two submissions are the
+  same person - was **only ever compared against itself**. Every fixture sat at
+  distance 0 or 1.0, so it could have been 0.99 and nothing would fail. It now
+  has fixtures at 0.20, exactly 0.25, and 0.35, and a sabotage run proved they
+  bind to the real constant.
+- **Three tests executed ZERO assertions**, entering `if ("submissions" in result)`
+  with no prior narrowing - including "never invents a name", the one test that
+  would have caught the R3 skip rule breaking. Sabotaging that rule now fails it;
+  before, it passed silently.
+- Every success fixture carried a `status`/`body` shape `LlmResult`'s success
+  branch does not have, hidden by an `as never` cast. Reintroducing it now fails
+  `tsc`, which proves the cast was doing the hiding.
+
+Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
+pre-existing warnings, `vitest` **778 files / 16026 tests** all passing.

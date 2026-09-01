@@ -588,10 +588,8 @@ export default function AiChatFab() {
         />
 
         {/* Reachable-from-the-fab entries for the Recording tab's grading
-            tools (Discussions, Announcements - the owner's confirmed scope;
-            "the coming grading-via-recording" has no surface to link to yet
-            and is deliberately not added here). Unlike the three actions
-            above, these NAVIGATE (Manual > Recording > a specific inner
+            tools (Discussions, Announcements, and now grading-via-recording
+            itself). Unlike the three actions above, these NAVIGATE (Manual > Recording > a specific inner
             view) rather than opening a floating window - the fab lives
             outside page.tsx (layout.tsx) and has no access to
             setActiveTab/setManualView, so this goes through
@@ -599,14 +597,15 @@ export default function AiChatFab() {
             mechanism that crosses that boundary, exactly the way the
             Knowledge tab's own "Ask AI" reaches this same component through
             open-ai-chat. navigateToRecordingTool (not openRecordingTool) is
-            deliberate here: neither fab entry ever carries a
+            deliberate here: none of these fab entries ever carries a
             knowledgeContext of its own, and a bare-view openRecordingTool()
             call clears any pending one - which would silently throw away a
             Knowledge-tab selection the instructor made moments earlier, just
             because they happened to reach this same pane through the fab
-            instead of the Knowledge tab's own "Start recording" button. Both
-            actions close the dial like every action above; neither opens a
-            window here, so there is no dialOpen toggle-back needed. */}
+            instead of the Knowledge tab's own "Start recording"/"Grade via
+            recording" button. All three actions close the dial like every
+            action above; none opens a window here, so there is no dialOpen
+            toggle-back needed. */}
         <SpeedDialAction
           icon={<RecordingDiscussionsIcon />}
           title="Discussion Replies (Recording)"
@@ -633,6 +632,24 @@ export default function AiChatFab() {
           onClick={() => {
             setDialOpen(false);
             navigateToRecordingTool("announcement");
+          }}
+        />
+        {/* Grading-via-recording's own fab entry (docs/grading-via-recording-
+            acceptance-criteria.md item 3): navigates, exactly like the two
+            entries above, rather than opening a modal - this is item 3's own
+            "navigate idiom, not the modal idiom" requirement. Deliberately
+            navigateToRecordingTool, never openRecordingTool with
+            openRubric: true - a plain fab visit is not "I just selected
+            Knowledge pages to grade with" (see recording-launch.ts's own doc
+            comment on RecordingLaunch.openRubric), so this must not surprise
+            the instructor with the rubric modal the Knowledge base's own
+            "Grade via recording" button intentionally opens. */}
+        <SpeedDialAction
+          icon={<RecordingGradingIcon />}
+          title="Grading (from a recording)"
+          onClick={() => {
+            setDialOpen(false);
+            navigateToRecordingTool("grading");
           }}
         />
       </SpeedDial>
@@ -785,6 +802,26 @@ function LegibilityProbeIcon() {
         fill="none"
       />
       <circle cx="12" cy="12" r="3" fill="currentColor" />
+    </svg>
+  );
+}
+
+// A checkmark on a lined page - stands for "grading" without borrowing
+// ChecklistIcon (a different feature above) or any speech-bubble shape
+// already used by the two icons before it in this dial.
+function RecordingGradingIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <rect x="4" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.6" fill="none" />
+      <path d="M7.5 8h7M7.5 11.5h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path
+        d="M14.5 14.5l1.7 1.7L20 12.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
     </svg>
   );
 }

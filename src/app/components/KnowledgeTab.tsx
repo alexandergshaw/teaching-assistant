@@ -310,6 +310,40 @@ export default function KnowledgeTab({
     });
   };
 
+  // Grade via recording (docs/grading-via-recording-acceptance-criteria.md,
+  // the owner's own words: "select the relevant grading/feedback knowledge
+  // pages as context / a grading-via-screen-recording option appears / paste
+  // a rubric into a modal ... "). A SECOND bulk-bar button beside "Start
+  // recording", on the exact same selection condition - reuses
+  // buildKnowledgeContextBlock and the openRecordingTool handoff exactly the
+  // way startRecordingWithSelection above does (same page-text-not-ids
+  // reasoning, same "omit the field entirely when there is no usable text"
+  // rule for knowledgeContext), differing only in the destination view and
+  // in also asking the landing panel to open the rubric modal
+  // (`openRubric: true` - see recording-launch.ts's own doc comment on that
+  // field for why this is carried on the event `detail` rather than a
+  // one-shot slot like knowledgeContext).
+  const startGradingWithSelection = () => {
+    const selectedPages = (pages ?? []).filter((p) => kbSelection.selected.has(p.id));
+    if (selectedPages.length === 0) return;
+    const block = buildKnowledgeContextBlock({
+      pages: selectedPages.map((p) => ({ title: p.title, body: p.body })),
+      attachments: [],
+    });
+    openRecordingTool({
+      view: "grading",
+      openRubric: true,
+      ...(block.text
+        ? {
+            knowledgeContext: {
+              text: block.text,
+              label: `${selectedPages.length} Knowledge Base page${selectedPages.length === 1 ? "" : "s"}`,
+            },
+          }
+        : {}),
+    });
+  };
+
   const searchHits = useMemo(
     () => (pages && search.trim() ? searchPages(pages, search) : []),
     [pages, search]
@@ -561,6 +595,9 @@ export default function KnowledgeTab({
                 </Button>
                 <Button variant="outlined" size="small" onClick={startRecordingWithSelection}>
                   Start recording
+                </Button>
+                <Button variant="outlined" size="small" onClick={startGradingWithSelection}>
+                  Grade via recording
                 </Button>
               </div>
             </div>

@@ -99,20 +99,25 @@ describe("recording-split structure", () => {
     // The strip is one inline array-of-tuples literal rendered via .map -
     // this pins the entry COUNT (a fresh entry silently dropped, or an old
     // one silently duplicated, both change this number without changing any
-    // other visible source text) at seven: the pre-existing six
-    // (record/discussions/speed/captions/slides/avatar) plus the dedicated
-    // Announcement front door added for recording FOR an announcement.
-    it("should render exactly seven inner-view tabs", () => {
+    // other visible source text) at eight: the pre-existing six
+    // (record/discussions/speed/captions/slides/avatar), the dedicated
+    // Announcement front door added for recording FOR an announcement, and
+    // the dedicated Grading front door for grading-via-recording.
+    it("should render exactly eight inner-view tabs", () => {
       const stripLine = recordingTabContent
         .split("\n")
         .find((line: string) => line.includes('["record", "Record"]'));
       expect(stripLine, "expected to find the inner-view strip's array literal in RecordingTab.tsx").toBeTruthy();
       const entries = stripLine!.match(/\["[a-z]+",\s*"[^"]+"\]/g) ?? [];
-      expect(entries).toHaveLength(7);
+      expect(entries).toHaveLength(8);
     });
 
     it("should include a dedicated announcement entry in the strip, not only the pre-existing per-take route", () => {
       expect(recordingTabContent).toMatch(/\["announcement",\s*"[^"]+"\]/);
+    });
+
+    it("should include a dedicated grading entry in the strip - grading-via-recording's own front door", () => {
+      expect(recordingTabContent).toMatch(/\["grading",\s*"[^"]+"\]/);
     });
   });
 
@@ -130,11 +135,11 @@ describe("recording-split structure", () => {
     // chain itself (bounded by its own `return`/ternary) rather than the
     // whole file, so this cannot be satisfied by the value appearing
     // anywhere else in the source (e.g. only in the strip above).
-    it("should accept every non-default recView value in the restored-view equality chain, including announcement", () => {
+    it("should accept every non-default recView value in the restored-view equality chain, including announcement and grading", () => {
       const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
       expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
       const guard = guardMatch![0];
-      for (const value of ["discussions", "speed", "captions", "slides", "avatar", "announcement"]) {
+      for (const value of ["discussions", "speed", "captions", "slides", "avatar", "announcement", "grading"]) {
         expect(guard, `expected the restore guard to accept "${value}"`).toContain(`v === "${value}"`);
       }
     });

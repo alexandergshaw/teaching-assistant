@@ -1,8 +1,9 @@
 // In-memory + window-event bridge for launching a specific Recording-tab
 // inner view (record / announcement / discussions / speed / captions /
-// slides / avatar) from OUTSIDE RecordingTab - the Knowledge base's bulk bar
-// ("Start recording" on a page selection) and the always-mounted AiChatFab
-// (the Recording tab's inner tools, reachable from the fab).
+// slides / avatar / grading) from OUTSIDE RecordingTab - the Knowledge
+// base's bulk bar ("Start recording" and "Grade via recording" on a page
+// selection) and the always-mounted AiChatFab (the Recording tab's inner
+// tools, reachable from the fab).
 //
 // Modeled on workflow-schedule-handoff.ts's module-singleton + window-event
 // shape, deliberately NOT on course-handoff.ts's mount-only-effect shape.
@@ -44,7 +45,8 @@ export type RecordingLaunchView =
   | "speed"
   | "captions"
   | "slides"
-  | "avatar";
+  | "avatar"
+  | "grading";
 
 const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "record",
@@ -54,6 +56,7 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "captions",
   "slides",
   "avatar",
+  "grading",
 ];
 
 /** Already-framed, already-capped prompt text - built via
@@ -71,6 +74,24 @@ export interface RecordingKnowledgeContext {
 export interface RecordingLaunch {
   view: RecordingLaunchView;
   knowledgeContext?: RecordingKnowledgeContext;
+  /** Grading-via-recording (docs/grading-via-recording-acceptance-criteria.md
+   * item 2): true when this exact launch should also open the rubric modal
+   * the moment it lands on the "grading" view - the Knowledge base's "Grade
+   * via recording" button sets this alongside `view: "grading"`.
+   * navigateToRecordingTool (the FAB's plain navigate idiom, item 3) never
+   * sets it: landing on the view from the fab is not "I just selected
+   * knowledge pages to grade with", so the fab entry should not surprise the
+   * instructor with a modal they did not ask for.
+   *
+   * Deliberately NOT a one-shot module slot the way `knowledgeContext` is
+   * (see this module's own header for why that one needs one): every
+   * listener that cares about this wants the SAME thing from the SAME
+   * dispatch (GradingRecordingPanel.tsx reacting to its own view's launch
+   * event, exactly like RecordingTab's `recView` switch already does) - there
+   * is no "handed to exactly one consumer, then forgotten" concern here, so
+   * it rides the event `detail` like `view` does, not a slot a caller must
+   * remember to drain. */
+  openRubric?: boolean;
 }
 
 /** The event name, so nobody re-types the string literal. Deliberately NOT
@@ -119,6 +140,7 @@ export function parseRecordingLaunch(detail: unknown): RecordingLaunch | null {
   return {
     view: raw.view,
     ...(knowledgeContext ? { knowledgeContext } : {}),
+    ...(raw.openRubric === true ? { openRubric: true } : {}),
   };
 }
 

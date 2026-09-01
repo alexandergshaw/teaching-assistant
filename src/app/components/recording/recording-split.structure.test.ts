@@ -90,6 +90,56 @@ describe("recording-split structure", () => {
     });
   });
 
+  describe("inner-view strip (exact-count canary)", () => {
+    const recordingTabContent = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx"),
+      "utf-8"
+    );
+
+    // The strip is one inline array-of-tuples literal rendered via .map -
+    // this pins the entry COUNT (a fresh entry silently dropped, or an old
+    // one silently duplicated, both change this number without changing any
+    // other visible source text) at seven: the pre-existing six
+    // (record/discussions/speed/captions/slides/avatar) plus the dedicated
+    // Announcement front door added for recording FOR an announcement.
+    it("should render exactly seven inner-view tabs", () => {
+      const stripLine = recordingTabContent
+        .split("\n")
+        .find((line: string) => line.includes('["record", "Record"]'));
+      expect(stripLine, "expected to find the inner-view strip's array literal in RecordingTab.tsx").toBeTruthy();
+      const entries = stripLine!.match(/\["[a-z]+",\s*"[^"]+"\]/g) ?? [];
+      expect(entries).toHaveLength(7);
+    });
+
+    it("should include a dedicated announcement entry in the strip, not only the pre-existing per-take route", () => {
+      expect(recordingTabContent).toMatch(/\["announcement",\s*"[^"]+"\]/);
+    });
+  });
+
+  describe("view-restore guard (reload safety canary)", () => {
+    const recordingTabContent = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx"),
+      "utf-8"
+    );
+
+    // The restored-view read (the localStorage-backed useState initializer
+    // near the top of the file) is a chained equality that falls back to
+    // "record" for anything it does not recognize - a new recView value that
+    // is not added to this chain restores to "record" silently on reload
+    // instead of the view the instructor was actually on. Scoped to the
+    // chain itself (bounded by its own `return`/ternary) rather than the
+    // whole file, so this cannot be satisfied by the value appearing
+    // anywhere else in the source (e.g. only in the strip above).
+    it("should accept every non-default recView value in the restored-view equality chain, including announcement", () => {
+      const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
+      expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
+      const guard = guardMatch![0];
+      for (const value of ["discussions", "speed", "captions", "slides", "avatar", "announcement"]) {
+        expect(guard, `expected the restore guard to accept "${value}"`).toContain(`v === "${value}"`);
+      }
+    });
+  });
+
   describe("localStorage key canary (cross-component API)", () => {
     const recordingDir = path.resolve(
       process.cwd(),

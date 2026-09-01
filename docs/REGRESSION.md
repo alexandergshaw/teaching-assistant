@@ -36506,3 +36506,194 @@ twin.
 
 Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
 pre-existing warnings, `vitest` **753 files / 15601 tests** all passing.
+
+## 377. The announcement finally carries its picture to Canvas, a 990-line hook comes apart cleanly, and a modal with no door
+
+Four waves. One of them posts an image into a real course announcement that real students
+read, so it got the scrutiny first.
+
+**The image posts, and a failed upload can never take the announcement down with it.**
+`uploadAnnouncementImage` is not a new guess about Canvas's file API - step 1 and step 2 are
+byte-equivalent to `canvas-modules/files.ts`'s `uploadFileToModule`, down to the parameter
+order, `on_duplicate=rename`, the unmodified `upload_params` pass-through and the reliance on
+`fetch`'s default redirect-follow to absorb Canvas's optional step 3. The failure discipline
+is the load-bearing part: `createAnnouncementAction` wraps only the upload in its own
+`try/catch`, so a rejection leaves `uploadedImage` undefined, and `createAnnouncement` is
+then called down the *identical* text-only path an image-less post takes. The instructor
+gets `imageError` on a **successful** result, never `error`. The test asserts the trailing
+`undefined` reaches `createAnnouncement`, which is the assertion that would actually catch a
+half-posted announcement.
+
+**The 6th argument is optional, additive, and the one call site that could have leaked
+does not.** Five production callers reach `createAnnouncementAction`; four pass four or five
+positional arguments and were verified individually rather than in aggregate. The one worth
+checking is `lms-generation-writers.ts`'s writer adapter, because a point-free
+`createAnnouncement: createAnnouncementAction` would have forwarded whatever the writer
+interface passed straight into the new `image` slot. It is written as an explicit four-parameter
+arrow. Nothing reorders.
+
+**Alt text comes from the subject, and the markup cannot be broken by one.**
+`buildAnnouncementImageAltText` derives from the announcement's own drafted subject - never
+the filename, which is a generated slug and not a description - and falls back to a
+generic-but-honest sentence when the subject is edited to blank, so the attribute is never
+empty. `escapeHtmlAttr` replaces `&` first, then `"`, `<`, `>`, and the test drives a genuinely
+hostile subject (`A "quoted" & <tagged> description`) and a URL carrying `"><script>`,
+asserting the rendered HTML contains no `<script>`. `buildAnnouncementBodyHtml` was kept as
+its own function precisely so the no-image path is provably `textToHtml(message.trim())`.
+
+**A 990-line hook came apart without moving anything.** `useDiscussionReplies.ts` went to 644
+across six leaves. The sealed return literal diffs byte-for-byte clean against HEAD, comments
+included; every HEAD code line is accounted for in the union of the seven files; the only
+deltas are prop renames of the identical value. The import graph has **zero** edges from any
+leaf back into the parent - the cycle that yields silent `undefined` and that `tsc` does not
+catch. All five refs added to dependency arrays trace to a literal `useRef`, so none is a
+`useMemo` product or a prop that would re-fire an effect, and no mount-only effect gained
+one. Effect ordering is preserved 1:1, including relative to the interleaved sub-hook calls.
+
+**The announcement became its own front door without closing the old one.** A seventh strip
+entry, and - the part that silently breaks on a reload if missed - the `ta-rec-view` restore
+guard accepts `"announcement"`. `TakeAnnouncementPanel` stays gated on `announcementTake`,
+never on `recView`, inside the one shared subtree, so the per-take route from a take's own
+row is unchanged and nothing is double-mounted. Two new structure assertions were added and
+both genuinely fail against `git show HEAD:` - the restore-guard check is scoped to the
+ternary itself, so the value merely appearing in the strip cannot satisfy it.
+
+Final gates: `tsc` 0 errors, `eslint` 0 errors / 6 pre-existing warnings, `vitest`
+**756 files / 15660 tests** all passing (753/15601 at entry 376: +3 files, +59 tests). The
+`ta-rec-*` key canary is 55, re-derived independently with an ordinal sort and unchanged -
+none of the six new leaves introduces a key.
+
+### Limits
+
+- **Whether the posted image renders for a STUDENT is unverified, and it fails invisibly to
+  the instructor.** The `<img src>` is the `url` Canvas returns for the newly-uploaded course
+  file. Both existing upload call sites in this repo read only `id` off that response, never
+  `url`, so this field has no shipped precedent here - and this repo's own consumer of a
+  Canvas file `url`, `canvas-modules/file-preview.ts:38`, fetches it **with an Authorization
+  bearer token**, which is not something a student's browser sends. `command-apply-outcome.ts`
+  already documents that Canvas's `api_user_content` rewrites file links and verifiers on
+  read, which is the mechanism that makes a *course-scoped* reference resolve per viewer.
+  If the URL 403s for an enrolled student, the instructor sees the image fine (they are the
+  uploader) and the student sees a broken-image icon with the alt text. Nothing detects it;
+  the instructor's own success message says the post worked. One live test post, viewed as an
+  enrolled test student, settles it. `uploadAnnouncementImage` already returns `fileId` and
+  **no caller reads it** - building a course-scoped `/courses/<id>/files/<fileId>/preview`
+  src instead of the raw `url` removes the guess entirely.
+- **No component is rendered by any test in this repo.** `vitest` is node-env and collects
+  only `src/**/*.test.ts`. The seventh strip entry, the entire rubric modal (315 lines - every
+  wiring decision in that feature), and the announcement panel's rewritten image copy are all
+  verified **by reading**. A green suite says nothing about whether any of them render, are
+  labelled, or are reachable by keyboard. The rubric modal's upload control in fact is not:
+  a `display:none` input inside a bare `<label>` leaves no focusable element on that path.
+- **Rubrics upload under a `syllabus-uploads` path segment.** `isSyllabusUploadPath` checks
+  that prefix unconditionally before any Storage call, so reusing `extractSyllabusTextAction`
+  whole forces it. The segment is genuinely internal - no RLS policy in `supabase/` references
+  it (all four `course-files` policies check only the uid folder), and no retention or cleanup
+  job filters by prefix because no `.list(` call exists in `src/` at all. The path is fine.
+  The **copy** is not: the reused error strings say "syllabus file", so an instructor who
+  uploaded a rubric is told *"Could not download the uploaded syllabus file."* - and the new
+  test freezes that string in.
+- **The `start()` source guard now constrains refactoring while still permitting the defect it
+  was written to catch.** It is a whole-file positive regex on the literal text of the call
+  site; it does not verify the line sits inside `start()`. Relocating that identical line into
+  a mount-only effect passes all four assertions while restoring the drain-at-mount defect the
+  per-run contract exists to prevent. Meanwhile it is now costing real work: the split wave
+  reports it could not extract the session actions because of it. Slicing `start()`'s body out
+  and asserting against the slice would make it positional rather than spelling-pinned.
+- **The rubric modal has no entry point.** `RubricInputModal` has no importer outside its own
+  directory; the chain stops before the first control. This was a deliberate staging choice,
+  but the justification recorded for it - that the modal is "independently useful" - is not
+  true as shipped: an instructor cannot open it from anywhere in the running app.
+- **`src/app/actions/canvas-inbox.ts` is 1028 lines, 28 over the ceiling, and this batch put
+  it there** (986 at HEAD, +48/-6). It is the only non-test file in the repo over the line, and
+  nothing catches it: the ceiling canary scans only `recording/`, `RecordingTab.tsx` and
+  `TabShell.tsx`, so `src/app/actions/` has no automated ceiling gate.
+- **The `rawRows` source-scan guard no longer scans the file holding the gate it protects.**
+  The S5 loop-start gate moved to `useDiscussionLoopStarter.ts`; the guard's three hardcoded
+  paths were not repointed, the way they were when `runDraftLoop` moved. It still binds - the
+  swap regression at the prop computation is still caught - but a change inside the starter
+  would not be.
+- **Three of the batch's "sabotage check" tests do not sabotage anything.** The worst,
+  in `canvas-inbox.announcement-image.test.ts`, asserts properties of two object literals it
+  constructs itself and touches no production code; it would pass with the feature deleted.
+  The alt-text one would still pass if the `<img>` were dropped entirely. The repo's own
+  working pattern is next door in `useTakeAnnouncement.image-copy-safety.test.ts`, which runs
+  the **same regex** against a deliberately sabotaged source string.
+- **The rubric flow leaks its Storage object on three paths** (path-prefix rejection, a
+  `requireOwner()` throw after the browser has already uploaded, and the modal's own client-side
+  `catch`), and nothing enumerates the bucket. Inherited from `SyllabusUploadControl.tsx`.
+  Separately, a PDF whose extraction *throws* returns an 85-character placeholder sentence,
+  which clears the 25-character suspicion threshold and is reported to the instructor as a
+  successful extraction.
+
+
+### Written before the blocker fixes - what actually shipped
+
+The review returned three blockers, all with every gate green. That is the point
+worth keeping: nothing that runs could have caught any of them.
+
+**B1 - the posted image would not have rendered for students, and failed
+invisibly.** The wave embedded the raw `url` Canvas returns for an uploaded
+file. The review disproved that from this repo's own code: `file-preview.ts:38`
+fetches a Canvas file `url` **with an Authorization bearer token**, which a
+student's browser never sends; and `command-apply-outcome.ts:313` already
+documents that Canvas rewrites file links per viewer through `api_user_content`,
+the mechanism a COURSE-SCOPED reference relies on. Both existing upload sites in
+this repo read only the file `id`, never `url` - so the new file's claim that "no
+new assumption is introduced here" was false for the one field that mattered.
+
+Degradation was the worst available shape: the instructor, being the uploader,
+sees the image fine and is told the post succeeded; the student sees a broken
+icon; nobody finds out until a student says so. **The fix was already in the code
+and discarded** - `uploadAnnouncementImage` returned a `fileId` no caller read.
+
+Now embedded as `/courses/<id>/files/<fileId>/download`, verified against four
+things: the bearer-token evidence above, the `api_user_content` note, this repo's
+own pre-existing `extractCanvasFileIds` regex which already parses exactly that
+shape out of Canvas-authored HTML, and Canvas's live file API docs, which
+document `/download` as a course-scoped web route distinct from the `/api/v1`
+routes that need a token. The raw `url` remains only as an unreachable fallback.
+
+**B2 - `canvas-inbox.ts` was 1028 lines**, 28 over the ceiling and the only
+non-test file in the repo over it. Nothing fired, because the ceiling canary
+scans `src/app/components/recording/` only. **42 of the 48 added lines were a
+single doc comment.** Now 1000 exactly - at the wall, with the upload logic
+lifted into a leaf. **The canary's blindness outside `recording/` is a real gap
+and is NOT closed here** - extending it would light up other files and deserves
+its own wave.
+
+**B3 - the rubric modal has no importer**, which is correct staging (its own AC
+says the legibility measurement decides whether the capture half is built at
+all) but was recorded with a false justification: the file claimed the piece was
+"independently useful" while nothing could reach it. **Sixth dead-on-arrival
+capability this session, and the sixth time a confident comment stood in for a
+wired call site.** The header now opens by saying the modal is unreachable, tells
+the reader to grep rather than trust any comment including itself, and names the
+two conditions that unlock it. It was deliberately NOT wired: a button opening a
+modal whose output goes nowhere is worse than no button.
+
+**Two further findings, both about guards that had quietly stopped guarding.**
+The `rawRows` source-scan guard carries three hardcoded paths, and the hook split
+moved one of its protected gates into `useDiscussionLoopStarter.ts` - so that
+gate was unguarded while the test still passed. Repointed and re-proven by
+sabotage. The fixer's first regex false-positived on the file's own explanatory
+prose ("never the filtered `rows.length`") and it caught that itself before
+reporting. It also **declined** to broaden the guard to scan the whole directory,
+with a concrete counterexample: `useReplyResources.ts:341` reads the filtered
+`.rows` deliberately, for a visible-selection action rather than a whole-table
+dispatch, and a blanket scan cannot tell those apart. That reasoning is now in
+the test file so the broadening is not re-proposed.
+
+And the poison-comment mistake appeared a second time in this same batch, in the
+new `grading-recording/` directory - harmless only because the key canary's
+`readdirSync` is non-recursive, i.e. safe by accident. Removed.
+
+**A note on the `start()` source guard**, added two waves ago to catch an
+untestable hop: it now pins the literal text of `start()` and **blocked a
+legitimate extraction** in the hook split, while still permitting the defect it
+was written to catch - relocating that same line into a mount-only effect would
+pass it. It is a spelling-pinned POSITIVE regex where the `rawRows` guard it was
+modelled on is a class-forbidding NEGATIVE one. Reshaping it is owed.
+
+Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
+pre-existing warnings, `vitest` **756 files / 15671 tests** all passing.

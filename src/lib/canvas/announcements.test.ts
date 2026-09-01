@@ -13,10 +13,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   listAnnouncements,
+  createAnnouncement,
   createScheduledAnnouncementResilient,
   updateAnnouncementSchedule,
   getAnnouncementById,
+  buildAnnouncementBodyHtml,
 } from "./announcements";
+import { courseFileDownloadUrl } from "../canvas-url";
+import { buildAnnouncementImageAltText } from "../take-announcement";
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -172,6 +176,119 @@ describe("Canvas announcements transport", () => {
       expect(String(url)).toBe("https://canvas.mccneb.edu/api/v1/courses/123/discussion_topics/42");
       expect(init?.method).toBe("PUT");
       expect(String(init?.body)).toBe(`delayed_post_at=${encodeURIComponent("2026-01-12T08:00:00.000Z")}`);
+    });
+  });
+
+  describe("buildAnnouncementBodyHtml (the companion-image wave)", () => {
+    it("with no image, is byte-identical to plain textToHtml - the pre-image behavior every existing caller still gets", () => {
+      expect(buildAnnouncementBodyHtml("Hello\n\nSecond paragraph")).toBe(
+        "<p>Hello</p><p>Second paragraph</p>"
+      );
+    });
+
+    it("with an image, appends an <img> with the given src and alt after the text, never before or inside it", () => {
+      const html = buildAnnouncementBodyHtml("Hello there", {
+        url: "https://canvas.mccneb.edu/files/9/download",
+        altText: "Illustration accompanying the announcement: Hello there",
+      });
+      expect(html).toBe(
+        '<p>Hello there</p><p><img src="https://canvas.mccneb.edu/files/9/download" alt="Illustration accompanying the announcement: Hello there"></p>'
+      );
+    });
+
+    it("escapes both the url and alt text attributes (no raw quote/angle-bracket break-out)", () => {
+      const html = buildAnnouncementBodyHtml("Hi", {
+        url: 'https://example.com/x?a=1&b=2"><script>',
+        altText: 'A "quoted" & <tagged> description',
+      });
+      expect(html).toContain('src="https://example.com/x?a=1&amp;b=2&quot;&gt;&lt;script&gt;"');
+      expect(html).toContain('alt="A &quot;quoted&quot; &amp; &lt;tagged&gt; description"');
+      expect(html).not.toContain("<script>");
+    });
+
+    it("end-to-end with a hostile subject: the real course-scoped src (courseFileDownloadUrl) plus a real derived alt text (buildAnnouncementImageAltText) containing a quote and an angle bracket still escape safely (frozen literal)", () => {
+      const courseUrl = "https://canvas.mccneb.edu/courses/123";
+      const src = courseFileDownloadUrl(courseUrl, 999)!;
+      const altText = buildAnnouncementImageAltText('Week 3: "Midterm" <Review>');
+
+      const html = buildAnnouncementBodyHtml("Hello there", { url: src, altText });
+
+      expect(html).toBe(
+        '<p>Hello there</p><p><img src="https://canvas.mccneb.edu/courses/123/files/999/download" alt="Illustration accompanying the announcement: Week 3: &quot;Midterm&quot; &lt;Review&gt;"></p>'
+      );
+      // Sabotage check: the raw hostile characters must never survive
+      // unescaped - a naive implementation that forgot to escape the alt
+      // text would let the angle bracket break out of the attribute.
+      expect(html).not.toContain('<Review>');
+      expect(html).not.toContain('"Midterm"');
+    });
+
+    it("sabotage check: this test would fail if the alt attribute were ever dropped or left empty", () => {
+      const sabotagedHtml = '<p>Hello there</p><p><img src="https://canvas.mccneb.edu/files/9/download" alt=""></p>';
+      const realHtml = buildAnnouncementBodyHtml("Hello there", {
+        url: "https://canvas.mccneb.edu/files/9/download",
+        altText: "Illustration accompanying the announcement: Hello there",
+      });
+      expect(realHtml).not.toBe(sabotagedHtml);
+      expect(realHtml).not.toMatch(/alt=""/);
+    });
+  });
+
+  describe("createAnnouncement - optional image argument", () => {
+    it("with no image argument, posts message=textToHtml(message) exactly as before (byte-identical to the pre-image request body)", async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValue(fakeResponse({ ok: true, body: { id: 1, title: "T" } }));
+
+      await createAnnouncement(COURSE_URL, "T", "Hello there", "MCC");
+
+      const [, init] = fetchMock.mock.calls[0];
+      // Parsed via URLSearchParams rather than a raw string/encodeURIComponent
+      // comparison - form-urlencoded space handling ("+") differs from
+      // encodeURIComponent's ("%20"), so a raw-string comparison would be
+      // testing the wrong encoding, not the actual posted value.
+      const sent = new URLSearchParams(String(init?.body));
+      expect(sent.get("message")).toBe("<p>Hello there</p>");
+    });
+
+    it("with an image argument, the posted message HTML includes the <img> with its alt text", async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValue(fakeResponse({ ok: true, body: { id: 1, title: "T" } }));
+
+      await createAnnouncement(COURSE_URL, "T", "Hello there", "MCC", null, {
+        url: "https://canvas.mccneb.edu/files/9/download",
+        altText: "An illustration",
+      });
+
+      const [, init] = fetchMock.mock.calls[0];
+      const sent = new URLSearchParams(String(init?.body));
+      expect(sent.get("message")).toBe(
+        '<p>Hello there</p><p><img src="https://canvas.mccneb.edu/files/9/download" alt="An illustration"></p>'
+      );
+    });
+
+    it("the returned CanvasAnnouncement's plain-text `message` field never contains the image markup (Canvas's own HTML-to-text strips the <img> tag)", async () => {
+      const fetchMock = vi.mocked(fetch);
+      // Simulate Canvas echoing back the posted HTML (including the <img>) as
+      // `topic.message`, exactly as the real API does.
+      fetchMock.mockResolvedValue(
+        fakeResponse({
+          ok: true,
+          body: {
+            id: 1,
+            title: "T",
+            message: '<p>Hello there</p><p><img src="https://canvas.mccneb.edu/files/9/download" alt="An illustration"></p>',
+          },
+        })
+      );
+
+      const result = await createAnnouncement(COURSE_URL, "T", "Hello there", "MCC", null, {
+        url: "https://canvas.mccneb.edu/files/9/download",
+        altText: "An illustration",
+      });
+
+      expect(result.message).toBe("Hello there");
+      expect(result.message.toLowerCase()).not.toContain("img");
+      expect(result.message).not.toContain("<");
     });
   });
 

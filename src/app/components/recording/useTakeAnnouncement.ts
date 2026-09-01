@@ -43,6 +43,7 @@ import type { TranscriptChunkPlan } from "@/lib/take-transcript";
 import {
   buildTakeAnnouncementInstruction,
   buildAnnouncementImagePrompt,
+  buildAnnouncementImageAltText,
   DEFAULT_ANNOUNCEMENT_COMPOSITION,
   type AnnouncementCompositionSettings,
 } from "@/lib/take-announcement";
@@ -204,20 +205,27 @@ export interface UseTakeAnnouncementReturn {
    * failure can never block or degrade the already-drafted, already-postable
    * announcement text.
    *
-   * IMPORTANT: this image is NEVER sent when the announcement is posted.
-   * commitPost() below calls createAnnouncementAction with only
-   * (canvasUrl, subject, body, institution) - no image argument exists, and
-   * none should be added here: the owner separately requires the
-   * announcement stay plain-text copyable (see
-   * useTakeAnnouncement.image-copy-safety.test.ts), which an inline or
-   * attached image would break. Attaching it to the Canvas announcement
-   * itself would need Canvas's file-upload API (upload, then reference the
-   * result in an HTML body) - out of scope for this wave; see downloadImage
-   * below for the destination this wave actually ships. Any UI copy near
-   * this state must say so plainly (TakeAnnouncementPanel.tsx's Image
-   * section) - an instructor who believes the image posts automatically and
-   * finds out from a student is exactly the failure this note exists to
-   * prevent. */
+   * The image DOES post now, as of this wave: when a "ready" image exists at
+   * commit time, commitPost() below passes it as createAnnouncementAction's
+   * optional 6th (image) argument, which uploads it to the course's Canvas
+   * Files and folds an <img> (with content-derived alt text -
+   * buildAnnouncementImageAltText, src/lib/take-announcement.ts) onto the
+   * HTML Canvas actually receives - see src/lib/canvas/announcements.ts's
+   * buildAnnouncementBodyHtml and src/lib/canvas/announcement-image-upload.ts
+   * for the upload handshake. This does NOT touch `subject`/`body`
+   * (setSubject/setBody are never called with anything image-related, and
+   * neither is the saveDraft() MessageDraftPayload below) - the owner's
+   * separate "plain text copyable" requirement is about what the Subject/
+   * Message fields hold and what saveDraft() persists, not about what
+   * Canvas's own HTML body carries, and
+   * useTakeAnnouncement.image-copy-safety.test.ts guards exactly that
+   * distinction. An upload failure is never allowed to fail the whole post -
+   * createAnnouncementAction catches it and posts the announcement as text
+   * only, returning `imageError` on the (still successful) result;
+   * commitPost() surfaces that via lastMessage/announce so the instructor is
+   * told the image failed and why, rather than assuming a "ready" image
+   * always made it in. downloadImage below remains the fallback either way -
+   * useful regardless, and the only route left when the upload fails. */
   imageState: "idle" | "generating" | "ready" | "failed";
   imageBase64: string | null;
   imageMimeType: string | null;
@@ -752,7 +760,27 @@ export function useTakeAnnouncement({
     setPostError(null);
     setStage({ phase: "posting" });
     announce("Posting to Canvas.");
-    const result = await createAnnouncementAction(selectedCourse.canvasUrl, subject, body, institution || undefined);
+    // Only a "ready" image (imageBase64 + imageMimeType both populated) is
+    // ever sent - generating/failed/idle/discarded all post text-only, with
+    // no attempt and no failure to report (mirrors the "ready" gate
+    // TakeAnnouncementPanel.tsx already uses to render the image itself).
+    const image =
+      imageState === "ready" && imageBase64 && imageMimeType
+        ? {
+            base64: imageBase64,
+            mimeType: imageMimeType,
+            altText: buildAnnouncementImageAltText(subject),
+            fileName: announcementImageFileName(subject, imageMimeType),
+          }
+        : undefined;
+    const result = await createAnnouncementAction(
+      selectedCourse.canvasUrl,
+      subject,
+      body,
+      institution || undefined,
+      undefined,
+      image
+    );
     setPosting(false);
     if ("error" in result) {
       const message = `Canvas refused the announcement - ${result.error}. Nothing was posted.`;
@@ -763,7 +791,12 @@ export function useTakeAnnouncement({
     }
     setArmedFor(null);
     setStage({ phase: "review" });
-    announce(`Posted to ${selectedCourse.name}. Students can see it now.`);
+    if (result.imageError) {
+      setLastMessage(result.imageError);
+      announce(`Posted to ${selectedCourse.name}. ${result.imageError}`);
+    } else {
+      announce(`Posted to ${selectedCourse.name}. Students can see it now.`);
+    }
     onPosted({ course: selectedCourse.name, subject });
   }
 

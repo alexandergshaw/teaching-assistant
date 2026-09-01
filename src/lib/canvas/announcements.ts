@@ -222,16 +222,66 @@ export async function listAnnouncements(
 }
 
 /**
+ * An already-uploaded companion image to fold into an announcement's HTML
+ * body (see buildAnnouncementBodyHtml below). `url` is the uploaded file's
+ * own Canvas URL (AnnouncementImageUploadResult.url from
+ * announcement-image-upload.ts); `altText` is real, content-derived
+ * alt text - never empty, never filename-derived - supplied by the caller
+ * (buildAnnouncementImageAltText, src/lib/take-announcement.ts).
+ */
+export interface AnnouncementBodyImage {
+  url: string;
+  altText: string;
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Build the HTML Canvas receives for an announcement's message: the plain
+ * text converted the same way it always has been (textToHtml), with an
+ * optional <img> appended when a companion image was successfully uploaded.
+ * Kept as its own function - rather than inlined into createAnnouncement -
+ * so the "no image" path is trivially provably identical to the pre-image
+ * behavior (`buildAnnouncementBodyHtml(message)` === `textToHtml(message.trim())`),
+ * and so this is unit-testable against a frozen literal without any network
+ * call. The alt attribute is REQUIRED whenever an image is passed - Canvas
+ * students using a screen reader get nothing from a decorative image with
+ * no description, so there is no code path here that can emit an <img> with
+ * no alt text.
+ */
+export function buildAnnouncementBodyHtml(message: string, image?: AnnouncementBodyImage): string {
+  const textHtml = textToHtml(message.trim());
+  if (!image) return textHtml;
+  return `${textHtml}<p><img src="${escapeHtmlAttr(image.url)}" alt="${escapeHtmlAttr(image.altText)}"></p>`;
+}
+
+/**
  * Post a new announcement to the course. When `delayedPostAt` is set to a future
  * time, Canvas schedules it: students cannot see it until then. Returns the
  * created announcement.
+ *
+ * `image`, when provided, is an already-uploaded companion image (see
+ * AnnouncementBodyImage above) folded into the posted HTML via
+ * buildAnnouncementBodyHtml. This function does not perform the upload
+ * itself - createAnnouncementAction (src/app/actions/canvas-inbox.ts) owns
+ * that, and treats an upload failure as non-fatal, calling this function
+ * with `image` omitted (text-only post) rather than ever failing the whole
+ * post over an image. Omitting `image` (every existing caller) is
+ * byte-identical to this function's behavior before it existed.
  */
 export async function createAnnouncement(
   courseUrl: string,
   title: string,
   message: string,
   code?: string,
-  delayedPostAt?: string | null
+  delayedPostAt?: string | null,
+  image?: AnnouncementBodyImage
 ): Promise<CanvasAnnouncement> {
   if (!title.trim()) throw new Error("An announcement needs a title.");
   if (!message.trim()) throw new Error("An announcement needs a message.");
@@ -239,7 +289,7 @@ export async function createAnnouncement(
 
   const params = new URLSearchParams();
   params.append("title", title.trim());
-  params.append("message", textToHtml(message.trim()));
+  params.append("message", buildAnnouncementBodyHtml(message, image));
   params.append("is_announcement", "true");
   if (delayedPostAt && delayedPostAt.trim()) {
     const when = new Date(delayedPostAt.trim());

@@ -13,6 +13,10 @@ describe("recording-launch", () => {
       expect(parseRecordingLaunch({ view: "discussions" })).toEqual({ view: "discussions" });
     });
 
+    it("accepts the announcement view - the new dedicated front door for recording FOR an announcement", () => {
+      expect(parseRecordingLaunch({ view: "announcement" })).toEqual({ view: "announcement" });
+    });
+
     it("accepts a view with a usable knowledgeContext", () => {
       expect(
         parseRecordingLaunch({ view: "discussions", knowledgeContext: { text: "hello", label: "1 page" } })
@@ -203,6 +207,25 @@ describe("recording-launch", () => {
         expect.objectContaining({
           type: RECORDING_LAUNCH_EVENT,
           detail: { view: "discussions" },
+        })
+      );
+      eventSpy.mockRestore();
+    });
+
+    // AiChatFab's "Record for Announcement" entry now navigates here instead
+    // of to "record" (see that file's own comment on why: the owner asked
+    // for recording FOR an announcement to be its own directly-reachable
+    // feature rather than something found only via a per-take button inside
+    // Record). This is the launch-seam half of that change - proving the new
+    // view is a valid, dispatchable target the same way every pre-existing
+    // view already was, not a guarded no-op that only compiles.
+    it("navigateToRecordingTool dispatches RECORDING_LAUNCH_EVENT for the announcement view", () => {
+      const eventSpy = vi.spyOn(window, "dispatchEvent");
+      navigateToRecordingTool("announcement");
+      expect(eventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: RECORDING_LAUNCH_EVENT,
+          detail: { view: "announcement" },
         })
       );
       eventSpy.mockRestore();

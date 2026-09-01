@@ -66,15 +66,26 @@ export { postCanvasGrades } from "./canvas/grades";
 
 export {
   type CanvasAnnouncement,
+  type AnnouncementBodyImage,
   getCourseName,
   getCourseInfo,
   exportCourseCartridge,
   listAnnouncements,
   createAnnouncement,
+  buildAnnouncementBodyHtml,
   createScheduledAnnouncementResilient,
   updateAnnouncementSchedule,
   getAnnouncementById,
 } from "./canvas/announcements";
+
+// Announcement image upload (companion image, see this wave's own
+// canvas/announcement-image-upload.ts header)
+export {
+  type AnnouncementImageUploadResult,
+  uploadAnnouncementImage,
+  type ResolvedAnnouncementImage,
+  resolveAnnouncementImage,
+} from "./canvas/announcement-image-upload";
 
 export {
   type CanvasConversationSummary,

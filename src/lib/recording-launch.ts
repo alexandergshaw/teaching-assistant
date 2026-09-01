@@ -1,8 +1,8 @@
 // In-memory + window-event bridge for launching a specific Recording-tab
-// inner view (record / discussions / speed / captions / slides / avatar)
-// from OUTSIDE RecordingTab - the Knowledge base's bulk bar ("Start
-// recording" on a page selection) and the always-mounted AiChatFab (the
-// Recording tab's inner tools, reachable from the fab).
+// inner view (record / announcement / discussions / speed / captions /
+// slides / avatar) from OUTSIDE RecordingTab - the Knowledge base's bulk bar
+// ("Start recording" on a page selection) and the always-mounted AiChatFab
+// (the Recording tab's inner tools, reachable from the fab).
 //
 // Modeled on workflow-schedule-handoff.ts's module-singleton + window-event
 // shape, deliberately NOT on course-handoff.ts's mount-only-effect shape.
@@ -39,6 +39,7 @@
  * not pull in a client component). */
 export type RecordingLaunchView =
   | "record"
+  | "announcement"
   | "discussions"
   | "speed"
   | "captions"
@@ -47,6 +48,7 @@ export type RecordingLaunchView =
 
 const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "record",
+  "announcement",
   "discussions",
   "speed",
   "captions",

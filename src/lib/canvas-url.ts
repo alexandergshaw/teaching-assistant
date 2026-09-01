@@ -57,6 +57,28 @@ export function moduleItemContentUrl(
 }
 
 /**
+ * The course-scoped reference for an uploaded file - the form Canvas
+ * rewrites per viewer through `Api#api_user_content` when it serves HTML
+ * content back (announcements, pages, discussions), rather than the raw
+ * per-upload `url` Canvas's upload response returns. That raw url requires
+ * this app's own bearer token (see canvas-modules/file-preview.ts, which
+ * fetches it with `Authorization: Bearer ...`) and 404s/401s for a student's
+ * browser, which never has that token.
+ *
+ * `GET /courses/:course_id/files/:file_id/download` is a documented Canvas
+ * web route (https://iu.instructure.com/doc/api/files.html: "Downloads the
+ * file"), course-scoped like moduleItemContentUrl above, and this repo's own
+ * extractCanvasFileIds already recognizes exactly this shape
+ * (`/courses/<id>/files/<id>/download`) when reading Canvas-authored HTML
+ * back - so this is the form Canvas itself already uses, not a new guess.
+ * Null when the course URL has no `/courses/<id>` segment to build from.
+ */
+export function courseFileDownloadUrl(courseUrl: string, fileId: number): string | null {
+  const base = courseUrl.match(/^(.*\/courses\/\d+)/);
+  return base ? `${base[1]}/files/${fileId}/download` : null;
+}
+
+/**
  * Pull the course id out of any Canvas course URL (a bare
  * .../courses/123, or any deeper link like .../courses/123/announcements).
  * Used by the announcements UI, which only needs the course — not a specific

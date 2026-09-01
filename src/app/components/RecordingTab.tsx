@@ -39,10 +39,21 @@ export type { Take } from "./recording/types";
 export default function RecordingTab({ active = true }: { active?: boolean }) {
   const { supabase, user } = useSupabase();
 
-  const [recView, setRecView] = useState<"record" | "discussions" | "speed" | "captions" | "slides" | "avatar">(() => {
+  // "announcement" (added alongside the pre-existing six): the owner's ask
+  // was that recording FOR an announcement be a distinct, directly-reachable
+  // feature rather than something found only via a per-take button buried
+  // inside the Record sub-view. This is a NEW front door onto the same
+  // underlying surface, not a replacement for the old one - see the shared
+  // gating below (the block that used to render only for recView==="record")
+  // for how both routes stay live at once.
+  const [recView, setRecView] = useState<
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement"
+  >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
-    return v === "discussions" || v === "speed" || v === "captions" || v === "slides" || v === "avatar" ? v : "record";
+    return v === "discussions" || v === "speed" || v === "captions" || v === "slides" || v === "avatar" || v === "announcement"
+      ? v
+      : "record";
   });
 
   useEffect(() => {
@@ -242,9 +253,23 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // pressing R while narrating starts a second recorder. Rather than editing
   // useRecorder.ts (a sibling's file), the existing `active` gate is fed a
   // narrower value - true only when this tab is on-screen, showing the
-  // record sub-view, and neither new pane is open.
+  // recording stage, and neither new pane is open.
+  //
+  // Extended to the "announcement" view alongside "record": both views now
+  // render the SAME recording-stage block (see the shared display gate a
+  // little further down) whenever no take/walkthrough pane has been opened
+  // yet, since drafting an announcement first requires a take to draft from.
+  // While that stage is what is on screen, the record shortcuts should work
+  // exactly as they do on the Record view - the opposite of the actual
+  // panel's suppression, which is untouched: once `announcementTake` is set
+  // and TakeAnnouncementPanel is what is showing, this still goes false via
+  // the `announcementTake === null` check, and pressing R while editing an
+  // announcement's subject/body still cannot start a second recorder.
   const recordSurfaceActive =
-    active && recView === "record" && walkthroughTake === null && announcementTake === null;
+    active &&
+    (recView === "record" || recView === "announcement") &&
+    walkthroughTake === null &&
+    announcementTake === null;
 
   const rec = useRecorder({
     active: recordSurfaceActive,
@@ -521,7 +546,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       subtitle="Record video from any attached camera or your screen, preview it live, and download the takes."
     >
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["discussions", "Discussion replies"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
             onClick={() => setRecView(key)}>
@@ -530,8 +555,27 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
         ))}
       </div>
 
-      <div style={{ display: recView === "record" ? undefined : "none" }}>
+      {/* Shared by "record" AND "announcement": the owner's ask was a
+          directly-reachable front door for recording FOR an announcement,
+          not a replacement for the existing per-take route reached from a
+          take's own row while on Record. TakeAnnouncementPanel is gated on
+          `announcementTake`, never on which of these two views is active
+          (AC16b's own reasoning: a take is an in-memory object URL, so
+          nothing about it can be restored from `recView` after a reload) -
+          so the same recording stage, takes list, and library picker serve
+          BOTH entry points: an instructor who opens this from the new
+          Announcement tab with no take yet can record one right here or pick
+          one from the library or the session's own takes list, exactly like
+          Record; an instructor who opens the panel from a take's row while
+          already on Record keeps that exact route too, unchanged. */}
+      <div style={{ display: recView === "record" || recView === "announcement" ? undefined : "none" }}>
         {error && <p role="alert" className={styles.error}>{error}</p>}
+
+        {recView === "announcement" && !walkthroughTake && !announcementTake && (
+          <p className={styles.fieldHint}>
+            Record a new take, or pick an existing one below (including from your recording library), to draft a Canvas announcement from it.
+          </p>
+        )}
 
         {/* AC16b: the walkthrough pane is a fifth pane of this always-mounted
             display:none stack, never a modal - reached only from a take's row

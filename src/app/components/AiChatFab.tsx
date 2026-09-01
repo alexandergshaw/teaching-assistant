@@ -583,17 +583,22 @@ export default function AiChatFab() {
         />
         <SpeedDialAction
           icon={<RecordingAnnouncementIcon />}
-          // The announcement pane itself only opens once a take exists (see
-          // RecordingTab.tsx - announcementTake gates it, not recView, since
-          // a take is an in-memory object URL that cannot be restored on its
-          // own) - this entry lands on Record, where "Draft announcement" is
-          // reached from a fresh recording, an existing take, or the saved
-          // library picker, matching every existing entry point into that
-          // flow.
+          // Lands directly on the Recording tab's own dedicated announcement
+          // view now, rather than on Record - the owner's ask was that
+          // recording FOR an announcement be reachable as its own feature,
+          // not only via a per-take button buried inside the Record
+          // sub-view. That view shares the same underlying recording stage,
+          // takes list, and library picker Record uses (see RecordingTab.tsx
+          // - the announcement panel itself is still gated on a take, not on
+          // which of the two views is active, since a take is an in-memory
+          // object URL that cannot be restored on its own), so this still
+          // lands somewhere an instructor can record a fresh take, pick an
+          // existing one, or pick a saved recording from the library - it is
+          // just no longer necessary to visit Record first to get there.
           title="Record for Announcement"
           onClick={() => {
             setDialOpen(false);
-            navigateToRecordingTool("record");
+            navigateToRecordingTool("announcement");
           }}
         />
       </SpeedDial>

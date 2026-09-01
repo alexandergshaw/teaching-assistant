@@ -3,6 +3,7 @@ import {
   truncateTranscriptForPrompt,
   buildTakeAnnouncementInstruction,
   buildAnnouncementImagePrompt,
+  buildAnnouncementImageAltText,
   TAKE_ANNOUNCEMENT_INSTRUCTION,
   TRANSCRIPT_PROMPT_CAP,
   IMAGE_PROMPT_TOPIC_CAP,
@@ -255,5 +256,37 @@ describe("buildAnnouncementImagePrompt", () => {
 
   it("IMAGE_PROMPT_TOPIC_CAP is 4000", () => {
     expect(IMAGE_PROMPT_TOPIC_CAP).toBe(4000);
+  });
+});
+
+describe("buildAnnouncementImageAltText", () => {
+  it("derives the alt text from the announcement's own subject, never the filename", () => {
+    expect(buildAnnouncementImageAltText("Week 4: Recursion")).toBe(
+      "Illustration accompanying the announcement: Week 4: Recursion"
+    );
+  });
+
+  it("trims a subject with surrounding whitespace", () => {
+    expect(buildAnnouncementImageAltText("  Week 4: Recursion  ")).toBe(
+      "Illustration accompanying the announcement: Week 4: Recursion"
+    );
+  });
+
+  it("falls back to a generic-but-honest, still non-empty description when the subject is blank", () => {
+    expect(buildAnnouncementImageAltText("")).toBe("Illustration accompanying this announcement");
+    expect(buildAnnouncementImageAltText("   ")).toBe("Illustration accompanying this announcement");
+  });
+
+  it("never returns an empty string for any input - the one property the alt attribute absolutely cannot violate", () => {
+    for (const subject of ["", "   ", "Week 4", "  x  ", "\n\t"]) {
+      expect(buildAnnouncementImageAltText(subject).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("sabotage check: this test would catch a regression back to filename-derived or empty alt text", () => {
+    const filenameDerivedAlt = "week-4-recursion-image"; // what a filename-derived alt would look like
+    const real = buildAnnouncementImageAltText("Week 4: Recursion");
+    expect(real).not.toBe(filenameDerivedAlt);
+    expect(real).not.toBe("");
   });
 });

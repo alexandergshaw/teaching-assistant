@@ -1,7 +1,7 @@
 "use server";
 
 import { deriveAltTextFromHtml, deriveLinkTextFromHtml } from "@/lib/embedded/accessibility";
-import { getCourseName, listAnnouncements, createAnnouncement, createScheduledAnnouncementResilient, updateAnnouncementSchedule, getAnnouncementById, listConversations, getConversation, replyToConversation, listCourses, listCoursesByTerm, setConversationWorkflowState, listCourseRoster, listAssignmentTextSubmissions, listCourseAssignmentDueDates, listAssignmentBriefsWithDue, listStudentGradeSummaries, type CanvasAnnouncement, type CanvasConversationSummary, type CanvasConversationDetail, type CanvasCourse, type CanvasRosterEntry, type CanvasTextSubmission } from "@/lib/canvas";
+import { getCourseName, listAnnouncements, createAnnouncement, createScheduledAnnouncementResilient, updateAnnouncementSchedule, getAnnouncementById, resolveAnnouncementImage, listConversations, getConversation, replyToConversation, listCourses, listCoursesByTerm, setConversationWorkflowState, listCourseRoster, listAssignmentTextSubmissions, listCourseAssignmentDueDates, listAssignmentBriefsWithDue, listStudentGradeSummaries, type CanvasAnnouncement, type CanvasConversationSummary, type CanvasConversationDetail, type CanvasCourse, type CanvasRosterEntry, type CanvasTextSubmission } from "@/lib/canvas";
 import { resolveInstitution, resolveInstitutionByCode } from "@/lib/canvas-core";
 import { callLlm, type LlmProvider } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
@@ -229,19 +229,33 @@ export async function listAnnouncementsAction(
   }
 }
 
-/** Post a new announcement to the course. */
+/**
+ * Post a new announcement to the course. `image` is optional and additive -
+ * every existing caller omits it, so behavior is unchanged. When supplied,
+ * resolveAnnouncementImage (@/lib/canvas) uploads it and resolves it to a
+ * course-scoped src; an upload failure never fails the post, surfacing as
+ * `imageError` on an otherwise-successful, text-only result instead.
+ */
 export async function createAnnouncementAction(
   courseUrl: string,
   title: string,
   message: string,
   acronym?: string,
   // ISO 8601 time to schedule visibility; omit/empty to post immediately.
-  delayedPostAt?: string
-): Promise<{ announcement: CanvasAnnouncement } | { error: string }> {
+  delayedPostAt?: string,
+  image?: { base64: string; mimeType: string; altText: string; fileName?: string }
+): Promise<{ announcement: CanvasAnnouncement; imageError?: string } | { error: string }> {
   try {
     await requireOwner();
-    const announcement = await createAnnouncement(courseUrl, title, message, acronym, delayedPostAt);
-    return { announcement };
+
+    if (!image) {
+      const announcement = await createAnnouncement(courseUrl, title, message, acronym, delayedPostAt);
+      return { announcement };
+    }
+
+    const { image: uploadedImage, imageError } = await resolveAnnouncementImage(courseUrl, image, acronym);
+    const announcement = await createAnnouncement(courseUrl, title, message, acronym, delayedPostAt, uploadedImage);
+    return imageError ? { announcement, imageError } : { announcement };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not post the announcement." };
   }

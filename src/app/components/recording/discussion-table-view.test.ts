@@ -477,7 +477,30 @@ describe("computeStoppedSessionSummary (S2 fix)", () => {
 // discussion-draft-loop.ts assertions below, then the edit was reverted and
 // the suite re-run green again - the same sabotage-then-revert discipline
 // this file's own header already commits to.
-describe("useDiscussionReplies.ts / discussion-draft-loop.ts / useReplyResources.ts - rawRows source guard (B1-B5, S5 fix)", () => {
+//
+// useDiscussionLoopStarter.ts split: the S5 loop-start gate itself (the
+// `if (!(capturing || rawRowsLength > 0 || hasActivatedRef.current)) return;`
+// decision) moved out of useDiscussionReplies.ts into this sibling leaf -
+// only the CALL SITE that computes `rawRowsLength` (`rowsApi.rawRows.length`,
+// still checked below) stayed behind. The guard is repointed here a second
+// time to also scan that file, for the same reason as the discussion-draft-
+// loop.ts repoint above: the gate itself, not just the value it closes over,
+// is what S5 exists to protect. Verified this repoint actually fires (see
+// this file's SABOTAGE CHECK further down and this task's own report for the
+// real-match/forbidden counts before and after).
+//
+// NOT widened into a directory-wide "no file here may read a filtered
+// `.rows`" scan, even though that would need no repointing on the NEXT split.
+// useReplyResources.ts's own `findMissing` (this file, below) reads the
+// FILTERED `argsRef.current.rowsApi.rows` on purpose - it is a
+// user-visible-selection action, not a whole-table dispatch, and is
+// documented as exactly that at its own call site. A blanket scan for
+// `rowsApi.rows` / `rowsApiRef.current.rows` across every file in this
+// directory would flag that legitimate, deliberate read as a violation. The
+// per-file allowlist stays hand-maintained for that reason: "which reads are
+// dispatches" is not something a regex can tell apart from "which reads are
+// a visible-selection action" without knowing the call site.
+describe("useDiscussionReplies.ts / discussion-draft-loop.ts / useReplyResources.ts / useDiscussionLoopStarter.ts - rawRows source guard (B1-B5, S5 fix)", () => {
   const readSource = (relPath: string): string => fs.readFileSync(path.resolve(process.cwd(), relPath), "utf-8");
 
   it("useDiscussionReplies.ts never reads a property/method off the FILTERED rowsApiRef.current.rows - B1/B2's two remaining dispatch sites (redraftAll, draftAllPending) go through .rawRows", () => {
@@ -511,6 +534,19 @@ describe("useDiscussionReplies.ts / discussion-draft-loop.ts / useReplyResources
     expect(src).toMatch(/rowsApi\.rawRows/);
   });
 
+  it("useDiscussionLoopStarter.ts's loop-start gate reads rawRowsLength, never a filtered rows.length - the gate itself, split out of useDiscussionReplies.ts (S5 fix, continued after the split)", () => {
+    const src = readSource("src/app/components/recording/useDiscussionLoopStarter.ts");
+    // The exact regressed shape: the gate condition testing a bare
+    // `rows.length` instead of the `rawRowsLength` parameter. Not a bare
+    // `/rows\.length/` substring check - this file's own header comment
+    // legitimately DISCUSSES "the filtered `rows.length`" in prose (to
+    // explain why it is not used), and that mention must not itself trip
+    // the guard the way a source-text-over-specify test would.
+    expect(src).not.toMatch(/\brows\.length\s*>\s*0/);
+    expect(src).not.toMatch(/rowsApiRef\.current\.rows\./);
+    expect(src).toMatch(/rawRowsLength\s*>\s*0/);
+  });
+
   it("SABOTAGE CHECK: fails if redraftAll's id list is reverted from rawRows back to rows", () => {
     // Verified by sabotage - see report.
     const src = readSource("src/app/components/recording/useDiscussionReplies.ts");
@@ -524,5 +560,12 @@ describe("useDiscussionReplies.ts / discussion-draft-loop.ts / useReplyResources
     const src = readSource("src/app/components/recording/discussion-draft-loop.ts");
     expect(src).not.toMatch(/const currentRows = rowsApiRef\.current\.rows;/);
     expect(src).not.toMatch(/rowsApiRef\.current\.rows\.find/);
+  });
+
+  it("SABOTAGE CHECK: fails if useDiscussionLoopStarter.ts's loop-start gate is reverted from rawRowsLength back to a filtered rows.length", () => {
+    // Verified by sabotage - see this task's own report for the before/after
+    // run.
+    const src = readSource("src/app/components/recording/useDiscussionLoopStarter.ts");
+    expect(src).not.toMatch(/if \(!\(capturing \|\| rows\.length > 0 \|\| hasActivatedRef\.current\)\)/);
   });
 });

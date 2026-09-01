@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCanvasUrl, moduleItemContentUrl, extractCanvasFileIds } from "./canvas-url";
+import { parseCanvasUrl, moduleItemContentUrl, extractCanvasFileIds, courseFileDownloadUrl } from "./canvas-url";
 
 describe("moduleItemContentUrl", () => {
   const courseUrl = "https://school.instructure.com/courses/1234";
@@ -102,5 +102,34 @@ describe("extractCanvasFileIds", () => {
   it("handles /preview suffix", () => {
     const html = '<a href="/files/555/preview">Preview</a>';
     expect(extractCanvasFileIds(html)).toEqual([555]);
+  });
+});
+
+describe("courseFileDownloadUrl", () => {
+  const courseUrl = "https://canvas.mccneb.edu/courses/123";
+
+  it("builds the course-scoped download URL from the course URL and file id (frozen literal)", () => {
+    expect(courseFileDownloadUrl(courseUrl, 999)).toBe("https://canvas.mccneb.edu/courses/123/files/999/download");
+  });
+
+  it("sabotage check: is not the same shape as a raw per-upload file url", () => {
+    const result = courseFileDownloadUrl(courseUrl, 999);
+    expect(result).not.toBe("https://canvas.mccneb.edu/files/999/download");
+    expect(result).not.toContain("/api/v1/");
+  });
+
+  it("uses the /courses/<id> prefix even when the course URL has a deeper path", () => {
+    expect(courseFileDownloadUrl(`${courseUrl}/announcements`, 42)).toBe(
+      "https://canvas.mccneb.edu/courses/123/files/42/download"
+    );
+  });
+
+  it("this app's own extractCanvasFileIds recognizes the shape courseFileDownloadUrl builds - round-trips back to the same file id", () => {
+    const built = courseFileDownloadUrl(courseUrl, 42)!;
+    expect(extractCanvasFileIds(`<a href="${built}">file</a>`)).toEqual([42]);
+  });
+
+  it("returns null when the course URL has no /courses/<id> segment", () => {
+    expect(courseFileDownloadUrl("https://canvas.mccneb.edu", 1)).toBeNull();
   });
 });

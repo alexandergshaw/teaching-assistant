@@ -10,13 +10,37 @@
 // dropped here.
 //
 // Owns: the extraction loop (AC10, AC10a, AC51) and the drafting queue
-// (AC25-AC28, AC52); draftAllPending / retryRow / redraftAll; the three
-// simple persisted controls (audience, courseId, saveVideo) and their
-// ta-rec-disc-audience / ta-rec-disc-course / ta-rec-disc-save-video keys;
-// lazy course loading (AC30, AC30a, AC37, AC46); the notices list (AC38) and
-// the session-summary inputs (AC7b) - the summary sentence itself is D's
-// rendering job, built from `rows` (state tallies) and `elapsedSec` (frozen
-// at stop by C1), both already in the sealed return below.
+// (AC25-AC28, AC52); draftAllPending / retryRow / redraftAll; lazy course
+// loading's own gate (AC30, AC30a, AC37, AC46 - the fetch itself is
+// useDiscussionCourses.ts); the notices list (AC38) and the session-summary
+// inputs (AC7b) - the summary sentence itself is D's rendering job, built
+// from `rows` (state tallies) and `elapsedSec` (frozen at stop by C1), both
+// already in the sealed return below.
+//
+// SPLIT HISTORY (recording-split.structure.test.ts's 1000-line ceiling on
+// this directory, non-recursive): 783 -> 820 -> 944 -> extracted to 900
+// (useDiscussionNotices.ts) -> grown back to 990 across two more waves. This
+// wave's extractions - discussion-persisted-controls.ts (the three simple
+// controls plus the composition object), useDiscussionCourses.ts (the lazy
+// course fetch), useDiscussionKnowledgeContext.ts (the Knowledge Base
+// context's state and reload notice), useDiscussionLoopWake.ts +
+// useDiscussionLoopStarter.ts (the wake-ticker mechanism, split into two
+// hooks so the latches/resolvers both loops close over can be created before
+// either loop exists, and the actual starting/pausing of the ticker - which
+// needs both loops as inputs - can happen after) and
+// useDiscussionRepliesRunLog.ts (the downloadable-log assembly memo) - were
+// each chosen because they have few inbound references and do NOT touch the
+// resource-search queue wiring, `enqueueDrafts`, or the four draft-dispatch
+// call sites (the extraction loop's own auto-enqueue, retryRow,
+// draftAllPending, redraftAll) that the next feature (resource controls:
+// one-click insert, eligible resource kinds, a video-length preference, and
+// a per-row resource search) will edit - those all stay here. `start()` also
+// stays here in full, never split: discussion-knowledge-context.test.ts's
+// source guard scans this file's literal text for `start()`'s own
+// takeRecordingKnowledgeContext() assignment (exactly one call site) and its
+// resolveStartKnowledgeContext(...) call - see that function's own body
+// below, not reproduced here, so this header comment cannot itself become a
+// second match for the guard's "exactly one call site" regex.
 //
 // CONTRACT NOTES BEYOND WHAT SECTION 12 PINS:
 //
@@ -42,14 +66,12 @@
 // './useReplyRows' is expected until sets A/C1/C2 land; report it, don't
 // create it.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   EXTRACT_BATCH_WIRE_BUDGET,
   draftDispatchForce,
   shouldLoopContinue,
-  shouldTickerRun,
 } from "./discussion-capture";
-import { startFrameTicker, type FrameTicker } from "@/lib/frame-ticker";
 import { useDiscussionCapture } from "./useDiscussionCapture";
 import { useReplyRows } from "./useReplyRows";
 import { useReplyResources } from "./useReplyResources";
@@ -57,24 +79,18 @@ import {
   extractDiscussionPostsAction,
   draftDiscussionRepliesAction,
 } from "@/app/actions/discussion-replies";
-import { listCourseHubAction } from "@/app/actions/course-hub-core";
 import { getStoredProvider } from "@/lib/llm-provider";
 // "Activate this recording from the Knowledge base" - the launch seam's
-// one-shot pickup. See knowledgeContextRef's own doc comment below (near
-// `start`) for why it is taken exactly once, here, rather than inside
-// discussion-draft-loop.ts's runDraftLoop.
-import { takeRecordingKnowledgeContext, type RecordingKnowledgeContext } from "@/lib/recording-launch";
+// one-shot pickup. See useDiscussionKnowledgeContext.ts's own doc comment
+// for why the TAKE stays here, in `start()`, rather than moving into that
+// hook alongside the STATE it manages.
+import { takeRecordingKnowledgeContext } from "@/lib/recording-launch";
 // GAP 2 fix: the DECISION half of the same feature - what context THIS run
 // ends up using, given the one-shot take's result - pulled into a pure,
 // unit-tested leaf. See that file's own header for why (the untested hop a
 // sibling wave sabotaged with zero test failures).
 import { resolveStartKnowledgeContext, knowledgeContextLabelFor } from "./discussion-knowledge-context";
-import {
-  EXTRACT_BATCH_SIZE,
-  normalizeAudience,
-  type DiscussionAudience,
-  type ReplyCompositionSettings,
-} from "@/lib/discussion-reply-prompt";
+import { EXTRACT_BATCH_SIZE } from "@/lib/discussion-reply-prompt";
 // Contract/documentation block (UseDiscussionRepliesReturn, DraftQueueItem,
 // LOOP_IDLE_POLL_MS, the two localStorage helpers) and the drafting queue's
 // consumer loop (runDraftLoop) both live in discussion-draft-loop.ts now -
@@ -88,144 +104,62 @@ import {
 // that existed before this split).
 import {
   runDraftLoop as runDraftLoopStep,
-  readLocalStorage,
   writeLocalStorage,
-  coerceReplyComposition,
-  LOOP_IDLE_POLL_MS,
   type UseDiscussionRepliesReturn,
   type DraftQueueItem,
 } from "./discussion-draft-loop";
 // docs/DEV_LOOP.md's "every feature needs a downloadable log" rule
 // (REGRESSION entries 369/372/373/374 record this surface's unpaid debt).
 // COLLECTION lives here (the three event-stream refs and the timestamps
-// below); ASSEMBLY (turning that plus `rawRows` into a full
-// DiscussionRepliesRunLog, and formatting it) is entirely in
-// discussion-replies-log.ts - see that file's header for the full split and
+// below); ASSEMBLY is useDiscussionRepliesRunLog.ts - see that file's header
 // for why parent resolution is a call to the SAME `resolveDraftParent` the
 // drafting loop itself uses, never a second copy.
 import {
-  buildDiscussionRepliesRunLog,
   makeDiscussionRepliesLogBatch,
   type DiscussionRepliesLogBatch,
   type DiscussionRepliesLogRetry,
-  type DiscussionRepliesRunLog,
 } from "./discussion-replies-log";
+import { useDiscussionRepliesRunLog } from "./useDiscussionRepliesRunLog";
 // The notices system (AC38): a capped, deduped list plus the log mirror
 // docs/DEV_LOOP.md's downloadable-log rule needs, and the forwarding of C1's
 // recorder/frame-encode notices and C2's persist-error into the same
 // channel. Split out purely to stay under recording-split.structure.test.ts's
 // 1000-line ceiling on this directory - see that file's own header.
 import { useDiscussionNotices } from "./useDiscussionNotices";
+// The three simple persisted controls plus the composition object (AC20,
+// docs/reply-composition-controls-acceptance-criteria.md C5/JOB1) - see that
+// file's own header for the full account.
+import { useDiscussionPersistedControls } from "./discussion-persisted-controls";
+// The lazy course list (AC30, AC30a, AC37, AC46) - see that file's own
+// header for the full account, including `hasActivatedRef`'s role in the
+// loop-start gate below.
+import { useDiscussionCourses } from "./useDiscussionCourses";
+// "Activate this recording from the Knowledge base" STATE (the label,
+// the ref mirror, the reload-visibility notice) - see that file's own
+// header for why the one-shot TAKE itself stays in this file's `start()`.
+import { useDiscussionKnowledgeContext } from "./useDiscussionKnowledgeContext";
+// The wake-ticker mechanism, split into two hooks - see
+// useDiscussionLoopWake.ts's own header for why creating the latches/
+// resolvers (this one) and starting/pausing the actual ticker
+// (useDiscussionLoopStarter.ts, below) cannot be the same hook call here.
+import { useDiscussionLoopWake } from "./useDiscussionLoopWake";
+import { useDiscussionLoopStarter } from "./useDiscussionLoopStarter";
 
 export type { UseDiscussionRepliesReturn } from "./discussion-draft-loop";
 
 export function useDiscussionReplies(active: boolean): UseDiscussionRepliesReturn {
-  // --- The three simple persisted controls (AC20). Keys are whole string
-  // literals throughout this file - AC55 forbids a template literal, since
-  // the canary derives its key set with a regex over the literal source. ---
-  const [audience, setAudienceState] = useState<DiscussionAudience>(() =>
-    normalizeAudience(readLocalStorage("ta-rec-disc-audience"))
-  );
-  const setAudience = useCallback((a: DiscussionAudience) => {
-    setAudienceState(a);
-    writeLocalStorage("ta-rec-disc-audience", a);
-  }, []);
+  const {
+    audience,
+    setAudience,
+    courseId,
+    setCourseId,
+    saveVideo,
+    setSaveVideo,
+    composition,
+    setComposition,
+  } = useDiscussionPersistedControls();
 
-  const [courseId, setCourseIdState] = useState<string>(
-    () => readLocalStorage("ta-rec-disc-course") ?? ""
-  );
-  const setCourseId = useCallback((id: string) => {
-    setCourseIdState(id);
-    writeLocalStorage("ta-rec-disc-course", id);
-  }, []);
-
-  const [saveVideo, setSaveVideoState] = useState<boolean>(
-    () => readLocalStorage("ta-rec-disc-save-video") === "1"
-  );
-  const setSaveVideo = useCallback((v: boolean) => {
-    setSaveVideoState(v);
-    writeLocalStorage("ta-rec-disc-save-video", v ? "1" : "0");
-  }, []);
-
-  // --- docs/reply-composition-controls-acceptance-criteria.md C5/JOB1: the
-  // three reply-composition controls (ingredients, address-by-name,
-  // formality), stored as one ReplyCompositionSettings object in React state
-  // but persisted as THREE SEPARATE keys - ta-rec-disc-ingredients (JSON
-  // array), ta-rec-disc-address-name ("1"/"0"), ta-rec-disc-formality (the
-  // literal stop name) - the same readLocalStorage/writeLocalStorage +
-  // useState-initializer + wrapped-setter idiom as audience/courseId/
-  // saveVideo above. Coercion is `coerceReplyComposition`
-  // (discussion-draft-loop.ts), a plain exported function per C5a - never
-  // inline here, since vitest renders no hook in this repo. ---
-  const [composition, setCompositionState] = useState<ReplyCompositionSettings>(() =>
-    coerceReplyComposition(
-      readLocalStorage("ta-rec-disc-ingredients"),
-      readLocalStorage("ta-rec-disc-address-name"),
-      readLocalStorage("ta-rec-disc-formality")
-    )
-  );
-  const setComposition = useCallback((next: ReplyCompositionSettings) => {
-    setCompositionState(next);
-    writeLocalStorage("ta-rec-disc-ingredients", JSON.stringify(next.ingredients));
-    writeLocalStorage("ta-rec-disc-address-name", next.addressByName ? "1" : "0");
-    writeLocalStorage("ta-rec-disc-formality", next.formality);
-  }, []);
-
-  // --- Lazy course list (AC30, AC30a, AC37, AC46). Gated on `active`,
-  // latched so it fires at most once for the hook's whole lifetime even
-  // though the panel is never unmounted on a tab switch. Deliberately NOT
-  // filtered on a Canvas URL (AC30) - this feature never posts anywhere. ---
-  const [courses, setCourses] = useState<Array<{ id: string; name: string }> | null>(null);
-  const [coursesLoading, setCoursesLoading] = useState(false);
-  const [coursesError, setCoursesError] = useState<string | null>(null);
-  const hasActivatedRef = useRef(false);
-
-  // LATCH CLASS (see NEW-1's wake-ticker cleanup effect below for the
-  // canonical writeup of the same rule): every "already did this once" ref
-  // in these hooks must either be reset in the cleanup of the SAME effect
-  // that sets it, or be resilient to a cancelled run - never a plain
-  // `if (ref.current) return; ref.current = true;` with no way back. This
-  // effect used to set `hasActivatedRef.current = true` synchronously before
-  // the fetch even started, so a run that was cancelled before it settled
-  // (React StrictMode's simulated mount/cleanup/remount; a returning user
-  // who lands on this view on first render) still permanently latched
-  // "activated" - the remount's guard then bailed out before ever starting a
-  // real fetch, leaving `coursesLoading` stuck `true` and `courses` stuck
-  // `null` for the session. A cancelled fetch must not count as having
-  // happened: the latch is set only once the fetch actually SETTLES
-  // (resolved or errored) while its own run is still the live one, inside
-  // the `finally` below - never on entry.
-  useEffect(() => {
-    if (!active || hasActivatedRef.current) return;
-    let cancelled = false;
-    setCoursesLoading(true);
-    (async () => {
-      try {
-        const result = await listCourseHubAction();
-        if (cancelled) return;
-        if ("error" in result) {
-          setCoursesError(result.error);
-          setCourses([]);
-        } else {
-          setCourses(result.courses.map((c) => ({ id: c.id, name: c.name })));
-          setCoursesError(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setCoursesError(err instanceof Error ? err.message : "Could not load your courses.");
-          setCourses([]);
-        }
-      } finally {
-        if (!cancelled) {
-          hasActivatedRef.current = true;
-          setCoursesLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active]);
+  const { courses, coursesLoading, coursesError, hasActivatedRef } = useDiscussionCourses(active);
 
   // --- Compose C1 and C2. ---
   const capture = useDiscussionCapture();
@@ -253,14 +187,12 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // run-timestamp fields and the running frame count. Plain React state, not
   // refs - this repo's `react-hooks/refs` lint rule forbids reading a ref's
   // `.current` during render (including inside a `useMemo` factory, which
-  // runs during render), and the `runLog` memo below needs every one of
-  // these values to build its input. Each is appended to with a functional
-  // updater at the moment its event happens, the same pattern
+  // runs during render), and useDiscussionRepliesRunLog.ts's memo needs
+  // every one of these values to build its input. Each is appended to with a
+  // functional updater at the moment its event happens, the same pattern
   // `setDraftQueueSize`/`setExtracting` already use from inside these same
-  // async loops. See discussion-replies-log.ts's header for why this
-  // collection lives here and formatting/assembly does not. `logAllNotices`
-  // itself now comes from useDiscussionNotices.ts above, not a local
-  // useState - see that hook's own header. ---
+  // async loops. `logAllNotices` itself comes from useDiscussionNotices.ts
+  // above, not a local useState - see that hook's own header. ---
   const [logStartedAt, setLogStartedAt] = useState("");
   const [logEndedAt, setLogEndedAt] = useState("");
   const [logFramesCaptured, setLogFramesCaptured] = useState(0);
@@ -306,167 +238,19 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     courseNameRef.current = match ? match.name : "";
   }, [courses, courseId]);
 
-  // --- "Activate this recording from the Knowledge base" (the owner ask
-  // this closes: replies drafted with the instructor's selected standards
-  // pages as context). Held as REACT STATE (never mutated as a bare ref from
-  // a callback - `react-hooks/immutability` forbids that once a ref is also
-  // read inside an effect, which the reload-visibility effect below does),
-  // mirrored into a ref for runDraftLoop exactly the way compositionRef
-  // mirrors `composition` right above. PER-RUN, not per-batch: taken exactly
-  // ONCE (inside `start` below) from takeRecordingKnowledgeContext()
-  // (src/lib/recording-launch.ts), a one-shot slot that clears itself on
-  // read - calling it anywhere that can run more than once per table's life
-  // (runDraftLoop's own per-batch dispatch, in particular) would deliver
-  // context to the FIRST batch only and starve every batch after it. See
-  // discussion-draft-loop.ts's own `knowledgeContextRef` doc comment for the
-  // full account.
-  //
-  // Persistence: deliberately NOT persisted across a reload, the same rule
-  // recording-launch.ts's own module state already follows (see that
-  // module's header) - persisting the actual page TEXT here would risk the
-  // same localStorage-quota failure useReplyRows.ts's `persistError` already
-  // guards the reply TABLE against. What IS persisted, deliberately small,
-  // is a LABEL ONLY ("ta-rec-disc-kb-context-label" below) - just enough to
-  // TELL a returning instructor their table's earlier drafts used context
-  // this fresh page load does not hold, never enough to reconstruct it.
-  const [knowledgeContext, setKnowledgeContext] = useState<RecordingKnowledgeContext | null>(null);
-  const knowledgeContextRef = useRef<RecordingKnowledgeContext | null>(knowledgeContext);
-  useEffect(() => {
-    knowledgeContextRef.current = knowledgeContext;
-  }, [knowledgeContext]);
-  // The one visible signal that this run's drafting is using different
-  // context than an ordinary run - DiscussionRepliesPanel.tsx now renders
-  // this near the controls that govern drafting (GAP 1 fix). Derived, never
-  // a second piece of state, via knowledgeContextLabelFor
-  // (discussion-knowledge-context.ts).
-  const knowledgeContextLabel = knowledgeContextLabelFor(knowledgeContext);
-  const kbContextReloadNoticeShownRef = useRef(false);
+  // --- "Activate this recording from the Knowledge base" STATE - see
+  // useDiscussionKnowledgeContext.ts's own header for the full account,
+  // including why the one-shot TAKE stays in `start()` below rather than
+  // moving into that hook. ---
+  const { setKnowledgeContext, knowledgeContextRef, knowledgeContextLabel } = useDiscussionKnowledgeContext({
+    rawRowsLength: rowsApi.rawRows.length,
+    pushNotice,
+  });
 
-  // Reload-visibility case: `knowledgeContext` never survives a reload by
-  // design, but this table's OWN rows (restored from "ta-rec-disc-table" by
-  // useReplyRows.ts) can - without this, a returning instructor whose
-  // earlier drafts used Knowledge Base context has no way to know a later
-  // redraft silently will not. Fires at most once, and only when there is
-  // something to warn about: a persisted label from an earlier `start()`, a
-  // restored table this fresh load can see, and no live context already
-  // held (a same-session Stop/Start already has `knowledgeContext` set, so
-  // this correctly does not fire mid-session).
-  useEffect(() => {
-    if (kbContextReloadNoticeShownRef.current) return;
-    if (knowledgeContext) return;
-    const priorLabel = readLocalStorage("ta-rec-disc-kb-context-label");
-    if (priorLabel && rowsApi.rawRows.length > 0) {
-      kbContextReloadNoticeShownRef.current = true;
-      pushNotice(
-        `Earlier replies in this table were drafted using Knowledge Base context (${priorLabel}). That context does not survive a reload - redrafting now will not include it unless you relaunch "Start recording" from the Knowledge Base with the same pages selected.`
-      );
-    }
-  }, [knowledgeContext, rowsApi.rawRows.length, pushNotice]);
-
-  // --- Mounted / loop-running latch. Doubles as AC43's isRunningRef (both
-  // loops check it at the top of every iteration and stop draining once it
-  // flips) and AC50's mountedRef (guards every post-await setState). ---
-  const loopsActiveRef = useRef(true);
-  useEffect(() => {
-    loopsActiveRef.current = true;
-    return () => {
-      loopsActiveRef.current = false;
-    };
-  }, []);
-
-  // --- BL1: the idle-wait source for both consumer loops below. A chained
-  // main-thread `setTimeout` (the previous `delay()` helper) accumulates
-  // timer nesting past Chromium's spec-compliant limit within ~2 seconds and
-  // lands permanently on the intensively-throttleable timer queue: clamped
-  // to ~1/s while this tab is hidden, ~1/min after five minutes hidden. That
-  // is exactly this feature's whole useful life - the user is looking at
-  // their LMS in another window - and it is the same throttling AC8 already
-  // moved the frame-SAMPLING ticker off of. The two DRAINING loops
-  // (extraction, drafting) were left on it: the sampler kept minting frames
-  // at full rate while consumption collapsed, so the pending queue (16
-  // frames) fills in ~19 seconds of scrolling and everything after that is
-  // silently dropped for minutes at a time.
-  //
-  // Fixed the same way: a second Worker-backed ticker (frame-ticker.ts's
-  // startFrameTicker - a worker's own postMessage hop is NOT on Chromium's
-  // throttleable queue, unlike a chained setTimeout) whose tick resolves
-  // every pending "wake" promise. Both loops `await waitForWake()` instead
-  // of `await delay(...)` on their idle paths.
-  const wakeResolversRef = useRef<Set<() => void>>(new Set());
-  const wakeTickerRef = useRef<FrameTicker | null>(null);
-
-  // NEW-1: the "have the loops been started at all, for the hook's whole
-  // mount-to-unmount lifetime" latch, and the generation counter that keeps a
-  // React StrictMode-orphaned pair of loop instances from running forever
-  // alongside a freshly-started pair. Declared here (ahead of both loops and
-  // the two effects below that touch them) so every reader of those effects
-  // can see both refs' full lifecycle in one place - see the effect below
-  // this block for why a plain boolean latch alone is not enough.
-  const loopsStartedRef = useRef(false);
-  const loopEpochRef = useRef(0);
-
-  const waitForWake = useCallback((): Promise<void> => {
-    return new Promise((resolve) => {
-      wakeResolversRef.current.add(resolve);
-    });
-  }, []);
-
-  const flushWakeResolvers = useCallback(() => {
-    const resolvers = wakeResolversRef.current;
-    wakeResolversRef.current = new Set();
-    resolvers.forEach((resolve) => resolve());
-  }, []);
-
-  // NEW-1 (BLOCKER, fixed here): this effect's cleanup is the ONE place that
-  // tears the wake mechanism down, and it now undoes everything the loop-
-  // start effect below latches - that symmetry is the actual fix. Before this
-  // change, nothing ever reset `loopsStartedRef`, so on any first mount where
-  // the loop-start condition already held (the ordinary returning-user case:
-  // a persisted table with rows, or `ta-rec-view` restored to "discussions"),
-  // React StrictMode's simulated destroy-then-create ran this cleanup
-  // (stopping and nulling the ticker) and then the loop-start effect's setup
-  // again - which returned early on the still-latched ref and never recreated
-  // the ticker. Both consumer loops then suspended on a `waitForWake()`
-  // promise nothing could ever resolve again: frames piled up to
-  // MAX_PENDING_FRAMES and nothing was ever extracted or drafted, for the
-  // whole `next dev` session, with every gate green.
-  //
-  // Resetting `loopsStartedRef.current = false` here lets the loop-start
-  // effect's next run actually restart things - but a reset guard alone is
-  // NOT sufficient, because `loopsActiveRef` (this component's OTHER "am I
-  // still mounted" ref) flips false-then-true-again fully SYNCHRONOUSLY
-  // across StrictMode's cleanup-then-remount (no microtask yields occur in
-  // between: React runs every effect's cleanup, then every effect's setup,
-  // all inside one synchronous pass). By the time a loop suspended in this
-  // cleanup's `flushWakeResolvers()` call actually resumes (a microtask,
-  // scheduled only after that whole synchronous pass finishes), the OLD
-  // loop's own `while (loopsActiveRef.current)` check would see `true` again
-  // - set by the remount, not by anything telling it "you are the stale
-  // instance" - and it would keep running side by side with the NEW pair the
-  // remount just started, doing the same work twice for the rest of the
-  // session. `loopEpochRef` is what actually distinguishes them: the
-  // loop-start effect bumps it every time it really starts a pair of loops,
-  // each loop instance captures the value it saw at its own start, and its
-  // `while` condition re-checks that captured value on every wake - so the
-  // orphaned pass-1 instance's stale epoch stops matching the moment the
-  // pass-2 instance bumps it, and pass-1 exits cleanly instead of running
-  // forever alongside pass-2.
-  //
-  // A REAL unmount (production, or the user navigating away) does not hit
-  // this ambiguity: `loopsActiveRef` is already false by the time this
-  // cleanup runs (its own effect, declared earlier above and therefore
-  // cleaned up AFTER this one, on the same real unmount) and there is no
-  // remount to bump the epoch back up, so the woken loop's very first re-
-  // check of `loopsActiveRef.current` is `false` and it exits for good -
-  // unchanged from AC48-AC51's existing guarantee.
-  useEffect(() => {
-    return () => {
-      loopsStartedRef.current = false;
-      wakeTickerRef.current?.stop();
-      wakeTickerRef.current = null;
-      flushWakeResolvers();
-    };
-  }, [flushWakeResolvers]);
+  // --- The wake-ticker mechanism's latches/resolvers - see
+  // useDiscussionLoopWake.ts's own header for the full account. ---
+  const { loopsActiveRef, loopEpochRef, loopsStartedRef, wakeTickerRef, waitForWake, flushWakeResolvers } =
+    useDiscussionLoopWake();
 
   // --- Shared drafting queue, declared here (ahead of both loops) so
   // runExtractionLoop's deps array below can reference enqueueDrafts without
@@ -474,11 +258,11 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // during render, in declaration order, unlike a function body's internal
   // references which only resolve when the closure is later invoked. ---
   const draftQueueRef = useRef<DraftQueueItem[]>([]);
-  // NEW-2: mirrored into React state purely so the ticker-idle effect below
-  // can see "there is now something queued to draft" - a bare ref, like
-  // `draftQueueRef` itself, never triggers a re-render. Kept in sync at both
-  // ends: bumped here on enqueue, and again in runDraftLoop right after a
-  // batch is spliced off the front.
+  // NEW-2: mirrored into React state purely so useDiscussionLoopStarter.ts's
+  // ticker-idle effect can see "there is now something queued to draft" - a
+  // bare ref, like `draftQueueRef` itself, never triggers a re-render. Kept
+  // in sync at both ends: bumped here on enqueue, and again in runDraftLoop
+  // right after a batch is spliced off the front.
   const [draftQueueSize, setDraftQueueSize] = useState(0);
 
   const enqueueDrafts = useCallback((ids: string[], force: boolean) => {
@@ -570,7 +354,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       }
       if (addedIds.length > 0) enqueueDrafts(addedIds, draftDispatchForce("auto"));
     }
-  }, [pushNotice, enqueueDrafts, waitForWake]);
+  }, [pushNotice, enqueueDrafts, waitForWake, loopsActiveRef, loopEpochRef]);
 
   // --- R-D: the resource-search queue (useReplyResources.ts). Instantiated
   // here - ahead of runDraftLoop below - so runDraftLoop's R6 trigger can
@@ -601,12 +385,12 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // Extracted to discussion-draft-loop.ts's own `runDraftLoop` (imported
   // above as `runDraftLoopStep`, since this local binding keeps the same
   // name every existing call site below already uses - `void
-  // runDraftLoop(epoch)` in the loop-start effect, and `runDraftLoop` in
-  // that effect's deps array). Deps here are exactly the refs/mutators/
-  // action the loop closed over before the split; the deps array stays
-  // [pushNotice, waitForWake] - unchanged from before, since every ref and
-  // setState identity below is already stable across renders, the same
-  // reasoning runExtractionLoop's own useCallback above already relies on.
+  // runDraftLoop(epoch)`, referenced by useDiscussionLoopStarter.ts's own
+  // deps array). Deps here are exactly the refs/mutators/action the loop
+  // closed over before the split; the deps array stays [pushNotice,
+  // waitForWake] - unchanged from before, since every ref and setState
+  // identity below is already stable across renders, the same reasoning
+  // runExtractionLoop's own useCallback above already relies on.
   const runDraftLoop = useCallback(
     (epoch: number) =>
       runDraftLoopStep(epoch, {
@@ -625,132 +409,29 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
         pushNotice,
         draftAction: draftDiscussionRepliesAction,
       }),
-    [pushNotice, waitForWake]
+    [pushNotice, waitForWake, loopsActiveRef, loopEpochRef, knowledgeContextRef]
   );
 
-  // --- NEW-2: whether either loop has anything to wake up FOR, right now.
-  // Computed in render (not derived only inside an effect) so both effects
-  // below can read the exact same, already-current value - the loop-start
-  // effect needs it to decide whether the ticker it is about to create
-  // should be immediately paused again, and the idle effect after it needs
-  // it to react to every later change.
-  //
-  // Deliberately does NOT include `rowsApi.rawRows.length > 0` - having a
-  // persisted table sitting there is why the loops were STARTED at all (so
-  // Retry/redraft can resume against it), but it says nothing about whether
-  // either loop has anything to do RIGHT NOW. Enqueuing a draft (retryRow,
-  // draftAllPending, redraftAll, or the extraction loop's own post-merge
-  // enqueue) bumps `draftQueueSize`, which is exactly what flips `hasWork`
-  // back to true and restarts the ticker - the loop that queued itself
-  // asleep on `waitForWake()` while idle wakes on the very next tick.
-  const hasWork = shouldTickerRun({
+  // --- Starts (and pauses/resumes) the shared wake ticker - see
+  // useDiscussionLoopStarter.ts's own header for the full account of the
+  // start gate and the idle pause/resume rule. ---
+  useDiscussionLoopStarter({
+    active,
+    coursesLoading,
     capturing: capture.capturing,
     pendingFrames: capture.pendingFrames,
     extracting,
     drafting,
     draftQueueSize,
-  });
-
-  // --- S8/AC37: start both loops (and the wake ticker that drives their
-  // idle waits) at most ONCE, for the hook's whole mount-to-unmount
-  // lifetime - never restarted, so this does not reopen AC43's "no effect
-  // keyed on `rows`" rule. But AC37 requires "the panel does no work at all
-  // when it has never been opened and no persisted table exists", and a
-  // `[]`-deps effect starts unconditionally on first mount of every page
-  // load, since this panel is kept mounted at all times (AC3). So START is
-  // gated on whichever of these becomes true FIRST: a capture is running, a
-  // persisted table already has rows (AC37's own exception - drafting must
-  // still be able to resume for it), or the panel has ever been activated
-  // (`hasActivatedRef`, set by the course-loading effect above). This is
-  // deliberately NOT gated on `active` itself (AC46 must hold: `active`
-  // reaches only the lazy course fetch) as the loops' own condition - but
-  // NEW-3: `active` still belongs in this effect's deps below, because
-  // flipping `active` true is what makes the course-loading effect above
-  // (declared earlier, so it runs first within the same commit) start
-  // fetching at all, and a first-ever capture on a panel that had never
-  // previously been activated would otherwise depend entirely on
-  // `capture.capturing` flipping - which cannot happen before the loops (and
-  // therefore `capture.start()`'s own downstream effects) exist to begin
-  // with. `active` itself is read nowhere in the body below; it is a
-  // trigger, not a condition. Do not remove it as "unused" - see AC46 in the
-  // acceptance criteria for the full account of why this is one
-  // active-reaching site, not the only one.
-  //
-  // `coursesLoading` is ALSO in this effect's deps, and it is the one that
-  // actually observes `hasActivatedRef.current`'s freshly-set value now.
-  // Since the latch-class fix above (see the course-loading effect's own
-  // comment), `hasActivatedRef.current` no longer flips synchronously in the
-  // same commit `active` becomes true - it flips later, asynchronously,
-  // inside that effect's `finally`, once the fetch actually settles. That
-  // `finally` also flips `coursesLoading` false in the same synchronous
-  // stretch, so it is the dependency that carries the ref's new value into a
-  // re-run of THIS effect; without it, a panel opened with zero persisted
-  // rows and no capture running would never see `hasActivatedRef.current`
-  // become true through any dependency change, and the idle loops (and
-  // AC37's exception for them) would never start until the user did
-  // something else that happened to touch `capture.capturing` or
-  // `rowsApi.rawRows.length`.
-  //
-  // S5 fix: this gate reads `rawRows.length`, not the filtered `rows.length`
-  // - a returning user with a persisted filter matching nothing must not
-  // have loop start silently fall through to `hasActivatedRef`/`capturing`
-  // (F0-2 forbids the filter changing anything but what is visible). ---
-  useEffect(() => {
-    if (loopsStartedRef.current) return;
-    if (!(capture.capturing || rowsApi.rawRows.length > 0 || hasActivatedRef.current)) return;
-    loopsStartedRef.current = true;
-    // NEW-1: bump the epoch BEFORE starting the loops, and capture the
-    // resulting value locally to hand to both - see the wake-ticker cleanup
-    // effect above for what this guards against.
-    const epoch = ++loopEpochRef.current;
-    wakeTickerRef.current = startFrameTicker(1000 / LOOP_IDLE_POLL_MS, flushWakeResolvers);
-    void runExtractionLoop(epoch);
-    void runDraftLoop(epoch);
-    // NEW-2: `hasWork` above was computed in THIS SAME render, so it is
-    // exactly as current as any other value this effect closes over. A
-    // resumed session (persisted rows, nothing actually drafting or
-    // capturing yet) starts the loops but has nothing for them to wake up
-    // for - stop the ticker immediately rather than waiting for some LATER
-    // change to `hasWork` that may not come for a while, or ever, before the
-    // user does anything. The idle effect right below keeps this in sync for
-    // every subsequent change.
-    if (!hasWork) {
-      wakeTickerRef.current.stop();
-      wakeTickerRef.current = null;
-    }
-  }, [
-    active,
-    coursesLoading,
-    capture.capturing,
-    rowsApi.rawRows.length,
+    rawRowsLength: rowsApi.rawRows.length,
+    hasActivatedRef,
+    loopsStartedRef,
+    loopEpochRef,
+    wakeTickerRef,
     flushWakeResolvers,
     runExtractionLoop,
     runDraftLoop,
-    hasWork,
-  ]);
-
-  // --- NEW-2: once started, the wake ticker used to run for the rest of the
-  // page's life - a dedicated Worker posting to the main thread and running
-  // two loop iterations roughly 3.3 times a second, forever, on a panel that
-  // is never unmounted (AC3), even with no capture running, an empty pending-
-  // frame queue and an empty draft queue. This effect pauses and resumes the
-  // SAME ticker the effect above created, tied to `hasWork` - it never
-  // creates the FIRST ticker (that stays the loop-start effect's job, so
-  // NEW-1's symmetric start/stop ownership is untouched) and never needs its
-  // own cleanup: the wake-ticker cleanup effect above is the sole final
-  // backstop on unmount, and `wakeTickerRef.current = null` after every stop
-  // here makes a second, redundant stop from that backstop a safe no-op.
-  useEffect(() => {
-    if (!loopsStartedRef.current) return;
-    if (hasWork) {
-      if (!wakeTickerRef.current) {
-        wakeTickerRef.current = startFrameTicker(1000 / LOOP_IDLE_POLL_MS, flushWakeResolvers);
-      }
-    } else if (wakeTickerRef.current) {
-      wakeTickerRef.current.stop();
-      wakeTickerRef.current = null;
-    }
-  }, [hasWork, flushWakeResolvers]);
+  });
 
   // --- Session actions. All read fresh state through the refs above and
   // keep a stable identity across renders (useCallback with [] deps), which
@@ -769,8 +450,8 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // DECISION is resolveStartKnowledgeContext / knowledgeContextLabelFor
     // (discussion-knowledge-context.ts) - see that file's header for the full
     // account of what a null vs. non-null `taken` means. Only the LABEL is
-    // persisted (never the page text) - see knowledgeContextRef's own doc
-    // comment above. `if (taken)` guards the write itself: a null take must
+    // persisted (never the page text) - see useDiscussionKnowledgeContext.ts's
+    // own header. `if (taken)` guards the write itself: a null take must
     // never re-fire it, since nothing changed.
     const taken = takeRecordingKnowledgeContext();
     if (taken) {
@@ -786,7 +467,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       // only real capture-start failures.
       pushNotice(`Could not start the screen capture: ${err instanceof Error ? err.message : "unknown error"}`);
     }
-  }, [pushNotice]);
+  }, [pushNotice, setKnowledgeContext, knowledgeContextRef]);
 
   const stop = useCallback(() => {
     setLogEndedAt(new Date().toISOString());
@@ -869,46 +550,19 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // deleted, alongside session start and unmount.
     captureRef.current.clearRecording();
     // "Activate this recording from the Knowledge base": deleting the table
-    // ends that table's "life" (knowledgeContextRef's own doc comment above)
-    // - a brand new table started after this must not silently inherit a
-    // stale context from the one just deleted.
+    // ends that table's "life" (useDiscussionKnowledgeContext.ts's own
+    // header) - a brand new table started after this must not silently
+    // inherit a stale context from the one just deleted.
     setKnowledgeContext(null);
     writeLocalStorage("ta-rec-disc-kb-context-label", "");
-  }, []);
+  }, [setKnowledgeContext]);
 
-  // --- docs/DEV_LOOP.md's downloadable-log rule: assembly. `courseName` is
-  // read the same way `courseNameRef` derives it (courses.find by id) rather
-  // than through that ref, so this memo's own dependency array can name the
-  // real reactive inputs (`courses`, `courseId`) instead of a ref whose
-  // writes React cannot see. `rawRows`, never the filtered `rows` - F0-2/F11's
+  // --- docs/DEV_LOOP.md's downloadable-log rule: assembly is entirely
+  // useDiscussionRepliesRunLog.ts's own memo - this file only gathers the
+  // inputs and calls it. `rawRows`, never the filtered `rows` - F0-2/F11's
   // rule applies here exactly as it does to every other whole-table read in
-  // this file: a search-box keystroke must never make the downloaded log
-  // silently omit a row the instructor cannot currently see. Assembly itself
-  // (turning this input plus `rawRows` into the full record, including the
-  // per-row `resolveDraftParent` recompute) is entirely
-  // discussion-replies-log.ts's `buildDiscussionRepliesRunLog` - this memo
-  // only gathers the inputs and calls it. ---
-  const runLog: DiscussionRepliesRunLog = useMemo(() => {
-    const courseName = courses?.find((c) => c.id === courseId)?.name ?? "";
-    return buildDiscussionRepliesRunLog(
-      {
-        startedAt: logStartedAt,
-        endedAt: logEndedAt,
-        audience,
-        courseName,
-        ingredients: composition.ingredients,
-        addressByName: composition.addressByName,
-        formality: composition.formality,
-        framesCaptured: logFramesCaptured,
-        droppedFrames: capture.droppedFrames,
-        stalled: capture.stalled,
-        batches: logBatches,
-        notices: logAllNotices,
-        retries: logRetries,
-      },
-      rowsApi.rawRows
-    );
-  }, [
+  // this file. ---
+  const runLog = useDiscussionRepliesRunLog({
     logStartedAt,
     logEndedAt,
     audience,
@@ -916,13 +570,13 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     courses,
     composition,
     logFramesCaptured,
-    capture.droppedFrames,
-    capture.stalled,
+    droppedFrames: capture.droppedFrames,
+    stalled: capture.stalled,
     logBatches,
     logAllNotices,
     logRetries,
-    rowsApi.rawRows,
-  ]);
+    rawRows: rowsApi.rawRows,
+  });
 
   return {
     audience,

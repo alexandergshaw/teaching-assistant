@@ -360,23 +360,29 @@ export default function TakeAnnouncementPanel({
               saving the announcement text is unaffected by anything in this
               block.
 
-              This image never posts with the announcement - see the
-              IMPORTANT note above imageState in useTakeAnnouncement.ts for
-              why (the plain-text-copyable constraint, and why a Canvas
-              attach is out of scope for this wave). The line right below is
-              the one place that fact is stated for the instructor, so it
-              stays visible for every state (generating/ready/failed/idle),
-              not just idle - an instructor who never sees this line and
-              assumes a "ready" image posts automatically is exactly the
-              failure this exists to prevent. */}
+              This image DOES post with the announcement now (see the note
+              above imageState in useTakeAnnouncement.ts): a "ready" image at
+              post time is uploaded to Canvas and embedded in the posted
+              HTML with alt text, while the Subject/Message fields above stay
+              plain text either way. If the upload fails, the announcement
+              still posts as text only, and lastMessage (rendered below the
+              controls) tells the instructor why. The line right below states
+              this for every state (generating/ready/failed/idle), not just
+              idle, so an instructor is never left assuming a "ready" image
+              silently did or didn't make it in. Download remains available
+              regardless - useful on its own, and the fallback when the
+              upload fails. */}
           <div>
             <p className={styles.ghMeta} style={{ marginBottom: 8 }}>
               Image
             </p>
             <p className={styles.fieldHint} style={{ marginBottom: 8 }}>
-              This image never posts with the announcement - the announcement
-              itself stays plain text. Download it and attach it yourself
-              wherever you are posting.
+              A ready image posts with the announcement automatically (with
+              alt text for screen readers) - the Subject and Message fields
+              above stay plain text either way. If the upload to Canvas
+              fails, the announcement still posts as text only, and you will
+              be told why below. You can also download the image and attach
+              it yourself wherever you are posting.
             </p>
             {imageState === "generating" && (
               <p role="status" aria-live="polite" className={styles.fieldHint}>

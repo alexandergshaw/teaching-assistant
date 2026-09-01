@@ -246,7 +246,12 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // file, and it adopts ModalShell from birth (it always rendered via
     // ModalShell, even before the move - the move only changed which file's
     // source the scan sees that import in).
-    expect(DIALOG_SITES.length).toBe(47);
+    //
+    // 48, not 47, as of the grading-via-recording rubric-input modal chunk:
+    // grading-recording/RubricInputModal.tsx is one more new dialog site, on
+    // the same terms as FeedbackExpandModal.tsx before it - it adopts
+    // ModalShell from birth.
+    expect(DIALOG_SITES.length).toBe(48);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -295,7 +300,11 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // which likewise adopts ModalShell from birth (see DIALOG_SITES.length's
     // comment above for why "from birth" still applies to code that moved
     // rather than being newly written).
-    expect(ADOPTING_PATHS.size).toBe(33);
+    //
+    // 34 as of the grading-via-recording rubric-input modal chunk - the
+    // thirty-three described above plus grading-recording/RubricInputModal.tsx,
+    // which likewise adopts ModalShell from birth.
+    expect(ADOPTING_PATHS.size).toBe(34);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

@@ -295,3 +295,27 @@ export function buildAnnouncementImagePrompt(subject: string, body: string): str
     topic || "(no announcement text yet)",
   ].join("\n");
 }
+
+/**
+ * Alt text for the announcement's companion image, posted into the Canvas
+ * HTML body alongside it (createAnnouncementAction, src/app/actions/
+ * canvas-inbox.ts, via buildAnnouncementBodyHtml in
+ * src/lib/canvas/announcements.ts). Students using a screen reader get
+ * nothing from an empty or filename-derived alt attribute - and a Canvas
+ * upload's filename is a generated slug (announcementImageFileName), not a
+ * description, so deriveAltTextFromHtml (src/lib/embedded/accessibility.ts,
+ * which derives alt text FROM a filename) is the wrong tool here. This
+ * instead derives the description from the announcement's own drafted
+ * subject line - the same short, specific text (~10 words,
+ * draftAnnouncementAction's own prompt) a sighted reader already sees above
+ * the image - so the alt text is meaningful and content-derived, not
+ * decorative boilerplate. Falls back to a generic-but-honest description
+ * when the subject has been edited down to blank, so the alt attribute is
+ * never empty either way.
+ */
+export function buildAnnouncementImageAltText(subject: string): string {
+  const trimmed = subject.trim();
+  return trimmed
+    ? `Illustration accompanying the announcement: ${trimmed}`
+    : "Illustration accompanying this announcement";
+}

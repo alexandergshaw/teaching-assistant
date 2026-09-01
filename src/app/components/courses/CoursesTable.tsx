@@ -657,7 +657,7 @@ export default function CoursesTable({
       {loading && (
         <div className={styles.finalizedLoading} role="status" aria-live="polite" style={{ alignItems: "center", gap: "var(--space-2)" }}>
           <CircularProgress size={22} />
-          <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading courses...</span>
+          <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading courses…</span>
         </div>
       )}
 

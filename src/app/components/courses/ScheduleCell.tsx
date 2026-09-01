@@ -107,12 +107,12 @@ export function ScheduleCsvCell({
             </Button>
             {canLms && (
               <button type="button" className={styles.linkButton} disabled={csvBusy} onClick={() => onCsvFromLms(course)}>
-                {csvBusy ? "Loading..." : "From LMS"}
+                {csvBusy ? "Loading…" : "From LMS"}
               </button>
             )}
             {canImport && (
               <button type="button" className={styles.linkButton} disabled={csvBusy} onClick={() => onCsvFromImport(course)}>
-                {csvBusy ? "Loading..." : "From import"}
+                {csvBusy ? "Loading…" : "From import"}
               </button>
             )}
           </div>
@@ -163,12 +163,12 @@ export function ScheduleCsvCell({
             </button>
             {canLms && (
               <button type="button" className={styles.linkButton} disabled={csvBusy} onClick={() => onCsvFromLms(course)}>
-                {csvBusy ? "Loading..." : "From LMS"}
+                {csvBusy ? "Loading…" : "From LMS"}
               </button>
             )}
             {canImport && (
               <button type="button" className={styles.linkButton} disabled={csvBusy} onClick={() => onCsvFromImport(course)}>
-                {csvBusy ? "Loading..." : "From import"}
+                {csvBusy ? "Loading…" : "From import"}
               </button>
             )}
           </div>
@@ -302,12 +302,12 @@ export function RubricCell({
             </Button>
             {canLms && (
               <button type="button" className={styles.linkButton} disabled={rubricBusy} onClick={() => onRubricFromLms(course)}>
-                {rubricBusy ? "Loading..." : "From LMS"}
+                {rubricBusy ? "Loading…" : "From LMS"}
               </button>
             )}
             {canImport && (
               <button type="button" className={styles.linkButton} disabled={rubricBusy} onClick={() => onRubricFromImport(course)}>
-                {rubricBusy ? "Loading..." : "From import"}
+                {rubricBusy ? "Loading…" : "From import"}
               </button>
             )}
           </div>
@@ -347,12 +347,12 @@ export function RubricCell({
             </button>
             {canLms && (
               <button type="button" className={styles.linkButton} disabled={rubricBusy} onClick={() => onRubricFromLms(course)}>
-                {rubricBusy ? "Loading..." : "From LMS"}
+                {rubricBusy ? "Loading…" : "From LMS"}
               </button>
             )}
             {canImport && (
               <button type="button" className={styles.linkButton} disabled={rubricBusy} onClick={() => onRubricFromImport(course)}>
-                {rubricBusy ? "Loading..." : "From import"}
+                {rubricBusy ? "Loading…" : "From import"}
               </button>
             )}
           </div>

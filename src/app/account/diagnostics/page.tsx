@@ -50,7 +50,7 @@ function describeProgress(
   failureReason: string | undefined
 ): string {
   if (!row.progressUrl) return "No progress object.";
-  if (entry === undefined && !failureReason) return "Progress: loading...";
+  if (entry === undefined && !failureReason) return "Progress: loading…";
   if (entry == null) return `Progress: could not be loaded - ${failureReason ?? "reason unknown"}`;
   const pct = entry.completion != null ? ` (${entry.completion}%)` : "";
   return `Progress: ${entry.workflowState}${pct}.`;
@@ -215,7 +215,7 @@ export default function DiagnosticsPage() {
                     onClick={refresh}
                     disabled={!courseUrl || loadState === "loading"}
                   >
-                    {loadState === "loading" ? "Loading..." : "Refresh"}
+                    {loadState === "loading" ? "Loading…" : "Refresh"}
                   </button>
                 </div>
 
@@ -228,7 +228,7 @@ export default function DiagnosticsPage() {
                 ) : loadState === "loading" && migrations.length === 0 ? (
                   <div className={styles.loadingRow} role="status" aria-live="polite">
                     <span className={styles.spinner} aria-hidden="true" />
-                    <span>Loading...</span>
+                    <span>Loading…</span>
                   </div>
                 ) : migrations.length === 0 ? (
                   <p className={styles.emptyState}>No content migrations found for this course.</p>
@@ -286,7 +286,7 @@ export default function DiagnosticsPage() {
                                   onClick={() => confirmCancel(row.id)}
                                   disabled={isBusy}
                                 >
-                                  {isBusy ? "Cancelling..." : "Yes, cancel job"}
+                                  {isBusy ? "Cancelling…" : "Yes, cancel job"}
                                 </button>
                                 <button
                                   type="button"

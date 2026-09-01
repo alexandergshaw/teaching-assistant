@@ -60,7 +60,7 @@ export function CopilotAgentsSection({
         multiline
         minRows={4}
         label="Instructions"
-        placeholder="Enter the instructions for Copilot..."
+        placeholder="Enter the instructions for Copilot…"
         value={copilotBody}
         onChange={(e) => onCopilotBodyChange(e.target.value)}
         disabled={copilotRunning}
@@ -88,7 +88,7 @@ export function CopilotAgentsSection({
         <div style={{ marginTop: "var(--space-3)" }}>
           {copilotRunning && (
             <p style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)", marginBottom: "var(--space-2)" }}>
-              Starting {copilotRows.filter((r) => r.status !== "pending").length} of {copilotRows.length}...
+              Starting {copilotRows.filter((r) => r.status !== "pending").length} of {copilotRows.length}…
             </p>
           )}
           <div
@@ -134,7 +134,7 @@ export function CopilotAgentsSection({
                 )}
                 {row.detail && row.status === "failed" && (
                   <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-secondary)" }} title={row.detail}>
-                    {row.detail.split("\n")[0].slice(0, 40)}...
+                    {row.detail.split("\n")[0].slice(0, 40)}…
                   </span>
                 )}
               </div>

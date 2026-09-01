@@ -380,11 +380,11 @@ export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, expo
               <span className={styles.courseResourceEmpty}>No exports yet - Course Refresh saves its cartridge here, or upload an LMS export.</span>
               <div className={styles.courseResourceActions}>
                 <Button variant="outlined" size="small" disabled={uploadingExport} onClick={openUploadPicker}>
-                  {uploadingExport ? "Uploading..." : "Upload export"}
+                  {uploadingExport ? "Uploading…" : "Upload export"}
                 </Button>
                 {canLms && (
                   <button type="button" className={styles.linkButton} disabled={exportBusy} onClick={() => onExportFromLms(course)}>
-                    {exportBusy ? "Exporting... (takes a minute)" : "Pull export from LMS"}
+                    {exportBusy ? "Exporting… (takes a minute)" : "Pull export from LMS"}
                   </button>
                 )}
               </div>
@@ -434,11 +434,11 @@ export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, expo
               </div>
               <div className={`${styles.courseResourceActions} ${tableStyles.mt3}`}>
                 <Button variant="outlined" size="small" disabled={uploadingExport} onClick={openUploadPicker}>
-                  {uploadingExport ? "Uploading..." : "Upload export"}
+                  {uploadingExport ? "Uploading…" : "Upload export"}
                 </Button>
                 {canLms && (
                   <button type="button" className={styles.linkButton} disabled={exportBusy} onClick={() => onExportFromLms(course)}>
-                    {exportBusy ? "Exporting... (takes a minute)" : "Pull export from LMS"}
+                    {exportBusy ? "Exporting… (takes a minute)" : "Pull export from LMS"}
                   </button>
                 )}
               </div>

@@ -81,14 +81,14 @@ export function VideoSource({
               <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
                 From the Files tab
               </p>
-              {libraryBusy && !libraryVideos && <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>Loading your library...</p>}
+              {libraryBusy && !libraryVideos && <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>Loading your library…</p>}
               {libraryVideos && libraryVideos.length === 0 && (
                 <p className={styles.fieldHint} style={{ margin: 0 }}>
                   No saved videos yet - record one on the Recording tab or upload on the Files tab.
                 </p>
               )}
               <Button variant="text" size="small" disabled={libraryBusy} onClick={() => void onLoadLibrary()}>
-                {libraryBusy ? "Loading..." : "Refresh"}
+                {libraryBusy ? "Loading…" : "Refresh"}
               </Button>
               {libraryVideos && libraryVideos.map((v) => (
                 <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
@@ -104,7 +104,7 @@ export function VideoSource({
                     disabled={importingKey !== null}
                     onClick={() => void onImportLibraryVideo(v)}
                   >
-                    {importingKey === "lib:" + v.id ? "Importing..." : "Import"}
+                    {importingKey === "lib:" + v.id ? "Importing…" : "Import"}
                   </Button>
                 </div>
               ))}
@@ -127,7 +127,7 @@ export function VideoSource({
                     disabled={importingKey !== null}
                     onClick={() => void onImportTake(take)}
                   >
-                    {importingKey === "take:" + take.id ? "Importing..." : "Import"}
+                    {importingKey === "take:" + take.id ? "Importing…" : "Import"}
                   </Button>
                 </div>
               ))}
@@ -140,7 +140,7 @@ export function VideoSource({
                 From backup folder ({backupDir.name})
               </p>
               <Button variant="text" size="small" disabled={folderBusy} onClick={() => void onBrowseFolder()}>
-                {folderBusy ? "Reading folder..." : folderVideos ? "Refresh" : "Browse"}
+                {folderBusy ? "Reading folder…" : folderVideos ? "Refresh" : "Browse"}
               </Button>
               {folderVideos && folderVideos.length === 0 && <p className={styles.fieldHint} style={{ margin: 0 }}>No videos found.</p>}
               {folderVideos && folderVideos.map((v) => (
@@ -154,7 +154,7 @@ export function VideoSource({
                     disabled={importingKey !== null}
                     onClick={() => void onImportFolderVideo(v.name)}
                   >
-                    {importingKey === "file:" + v.name ? "Importing..." : "Import"}
+                    {importingKey === "file:" + v.name ? "Importing…" : "Import"}
                   </Button>
                 </div>
               ))}

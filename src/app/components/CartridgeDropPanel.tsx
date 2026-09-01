@@ -426,7 +426,7 @@ export default function CartridgeDropPanel() {
         )}
         {triggersLoading && (
           <p role="status" aria-live="polite" style={{ margin: 0, fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
-            Loading auto-grading settings...
+            Loading auto-grading settings…
           </p>
         )}
         {!triggersLoading && (
@@ -464,7 +464,7 @@ export default function CartridgeDropPanel() {
         <div className={styles.loadingState} role="status" aria-live="polite">
           <span className={styles.spinner} aria-hidden="true" />
           <div>
-            <p className={styles.loadingTitle}>Loading submissions...</p>
+            <p className={styles.loadingTitle}>Loading submissions…</p>
           </div>
         </div>
       )}

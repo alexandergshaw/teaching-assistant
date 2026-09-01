@@ -161,12 +161,12 @@ export default function SyllabusCell({
           )}
           {canLms && (
             <button type="button" className={styles.linkButton} disabled={busy} onClick={() => onFromLms(course)}>
-              {busy ? "Loading..." : "From LMS"}
+              {busy ? "Loading…" : "From LMS"}
             </button>
           )}
           {canImport && (
             <button type="button" className={styles.linkButton} disabled={busy} onClick={() => onFromImport(course)}>
-              {busy ? "Loading..." : "From import"}
+              {busy ? "Loading…" : "From import"}
             </button>
           )}
           <button
@@ -176,7 +176,7 @@ export default function SyllabusCell({
             title={course.syllabusTemplateId ? undefined : "Choose a syllabus template for this course first"}
             onClick={() => void handleGenerate()}
           >
-            {generating ? "Generating..." : "Generate"}
+            {generating ? "Generating…" : "Generate"}
           </button>
         </div>
         {!course.syllabusTemplateId && (

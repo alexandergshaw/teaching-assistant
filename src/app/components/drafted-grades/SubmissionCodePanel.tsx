@@ -13,7 +13,7 @@ import type { SubmissionRepoFile } from "@/lib/submission-repo";
 const MonacoFileEditor = dynamic(() => import("../MonacoFileEditor"), {
   ssr: false,
   loading: () => (
-    <div style={{ padding: "var(--space-4)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading editor...</div>
+    <div style={{ padding: "var(--space-4)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading editor…</div>
   ),
 });
 
@@ -91,7 +91,7 @@ export default function SubmissionCodePanel({ submissionUrl }: { submissionUrl: 
   }
 
   if (state.status === "loading") {
-    return <span className={styles.fieldHint} role="status" aria-live="polite">Loading code from GitHub...</span>;
+    return <span className={styles.fieldHint} role="status" aria-live="polite">Loading code from GitHub…</span>;
   }
 
   if (state.status === "error") {
@@ -138,7 +138,7 @@ export default function SubmissionCodePanel({ submissionUrl }: { submissionUrl: 
           ))}
         </TextField>
         <Button variant="contained" size="small" onClick={() => void handleRun()} disabled={running}>
-          {running ? "Running..." : "Run"}
+          {running ? "Running…" : "Run"}
         </Button>
       </div>
 

@@ -145,7 +145,7 @@ function ActionCell({
               onInviteOrResend();
             }}
           >
-            {busy ? "Working..." : "Resend"}
+            {busy ? "Working…" : "Resend"}
           </button>
           <button
             type="button"
@@ -164,7 +164,7 @@ function ActionCell({
               }
             }}
           >
-            {busy ? "Working..." : "Cancel invitation"}
+            {busy ? "Working…" : "Cancel invitation"}
           </button>
         </div>
         {orgMissing && <p className={tableStyles.rosterActionReason}>Set the course&apos;s Organization first.</p>}
@@ -187,7 +187,7 @@ function ActionCell({
             onInviteOrResend();
           }}
         >
-          {busy ? "Working..." : "Invite"}
+          {busy ? "Working…" : "Invite"}
         </button>
         {orgMissing && <p className={tableStyles.rosterActionReason}>Set the course&apos;s Organization first.</p>}
         {outcome && <p className={tableStyles.rosterOutcome}>{outcome}</p>}
@@ -217,7 +217,7 @@ function ActionCell({
           onProvision();
         }}
       >
-        {busy ? "Working..." : label}
+        {busy ? "Working…" : label}
       </button>
       {configReason && <p className={tableStyles.rosterActionReason}>{configReason}</p>}
       {outcome && <p className={tableStyles.rosterOutcome}>{outcome}</p>}
@@ -372,7 +372,7 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
         {notChecked > 0 && <span>{notChecked} more student{notChecked === 1 ? "" : "s"} not checked this refresh.</span>}
         {refreshError && <span className={tableStyles.dangerLink}>{refreshError}</span>}
         <button type="button" className={styles.linkButton} disabled={checking} onClick={() => refresh()}>
-          {checking ? "Refreshing..." : "Refresh"}
+          {checking ? "Refreshing…" : "Refresh"}
         </button>
         <button type="button" className={styles.linkButton} onClick={() => setAutoRefresh((v) => !v)}>
           {autoRefresh ? "Pause auto-refresh" : "Resume auto-refresh"}
@@ -435,7 +435,7 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
                   </td>
                   <td>
                     {state === "unresolved" ? (
-                      <span className={styles.courseResourceEmpty}>Checking...</span>
+                      <span className={styles.courseResourceEmpty}>Checking…</span>
                     ) : (
                       <span className={`${styles.ghBadge} ${badgeClassFor(state)}`}>{STATUS_LABELS[state]}</span>
                     )}

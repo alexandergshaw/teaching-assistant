@@ -25,7 +25,7 @@ import type { GradeRow } from "./gradingResultsHelpers";
 const MonacoFileEditor = dynamic(() => import("../MonacoFileEditor"), {
   ssr: false,
   loading: () => (
-    <div style={{ padding: "var(--space-4)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading editor...</div>
+    <div style={{ padding: "var(--space-4)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading editor…</div>
   ),
 });
 

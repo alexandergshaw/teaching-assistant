@@ -95,7 +95,7 @@ export function TriggerSection({
           )
         }
       >
-        {triggerForm ? "Cancel trigger" : "Trigger on event..."}
+        {triggerForm ? "Cancel trigger" : "Trigger on event…"}
       </Button>
 
       {triggerForm && (

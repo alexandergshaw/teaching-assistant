@@ -90,7 +90,7 @@ export function CreateRepoPanel({
             options={repos.map((r) => ({ value: r.fullName, label: r.fullName, hint: r.isTemplate ? "template" : undefined }))}
             value={templateSource}
             onChange={(v) => setTemplateSource(v)}
-            placeholder="Choose a source repository..."
+            placeholder="Choose a source repository…"
             noOptionsText="No repositories"
           />
           {templateSource && !repos.find((r) => r.fullName === templateSource)?.isTemplate && (
@@ -118,7 +118,7 @@ export function CreateRepoPanel({
         onClick={createFromTemplate ? handleCreateFromTemplate : handleCreateRepo}
       >
         {createBusy
-          ? "Creating..."
+          ? "Creating…"
           : createFromTemplate
             ? "Create from template"
             : createPrompt.trim()

@@ -56,7 +56,7 @@ export function CopilotTab({
           fullWidth
           multiline
           minRows={4}
-          placeholder="Details for Copilot (optional): acceptance criteria, files to touch, constraints..."
+          placeholder="Details for Copilot (optional): acceptance criteria, files to touch, constraints…"
           value={copilotTaskBody}
           onChange={(e) => setCopilotTaskBody(e.target.value)}
           disabled={copilotBusy}
@@ -68,7 +68,7 @@ export function CopilotTab({
           disabled={copilotBusy || !copilotTaskTitle.trim()}
           onClick={handleCreateCopilotTask}
         >
-          {copilotBusy ? "Assigning..." : "Assign to Copilot"}
+          {copilotBusy ? "Assigning…" : "Assign to Copilot"}
         </Button>
         {copilotTaskMsg && (
           <p
@@ -103,7 +103,7 @@ export function CopilotTab({
         {copilotTasksState === "loading" && copilotTasks.length === 0 && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
             <CircularProgress size={24} />
-            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading Copilot tasks...</span>
+            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading Copilot tasks…</span>
           </div>
         )}
         {copilotTasksState === "error" && <p className={styles.error}>Could not load Copilot tasks.</p>}

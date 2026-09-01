@@ -249,7 +249,7 @@ export default function TaskAttachmentsDialog({
     const files = Array.from(fileList);
     busyRef.current = true;
     setBusy(true);
-    setStatusMessage(`Uploading ${files.length} file${files.length === 1 ? "" : "s"}...`);
+    setStatusMessage(`Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`);
     setStatusTone("info");
 
     const succeeded: string[] = [];
@@ -327,7 +327,7 @@ export default function TaskAttachmentsDialog({
     }
     busyRef.current = true;
     setBusy(true);
-    setStatusMessage(`Removing "${attachment.fileName}"...`);
+    setStatusMessage(`Removing "${attachment.fileName}"…`);
     setStatusTone("info");
 
     const deleteRow: DeleteTaskAttachmentRow = async () => {
@@ -400,7 +400,7 @@ export default function TaskAttachmentsDialog({
   // cross-origin there and an attached `.svg`/`.html` would render instead
   // of downloading.
   const handleDownload = async (attachment: TaskAttachment) => {
-    setStatusMessage(`Preparing "${attachment.fileName}" for download...`);
+    setStatusMessage(`Preparing "${attachment.fileName}" for download…`);
     setStatusTone("info");
     try {
       const { data, error } = await supabase.storage

@@ -76,7 +76,7 @@ export function PreviewExport({
           disabled={!voiceReady || voBusy !== null || captions.length === 0}
           onClick={() => void onGenerateAllVoices()}
         >
-          {voBusy === "all" ? "Voicing cue..." : "Generate all voices"}
+          {voBusy === "all" ? "Voicing cue…" : "Generate all voices"}
         </Button>
         <TextField
           select
@@ -115,7 +115,7 @@ export function PreviewExport({
           disabled={!videoUrl || captions.length === 0 || burning}
           onClick={() => void onBurnCaptions()}
         >
-          {burning ? `Exporting... ${burnProgress}%` : "Export video with captions"}
+          {burning ? `Exporting… ${burnProgress}%` : "Export video with captions"}
         </Button>
         {burning && (
           <Button variant="text" size="small" color="error" onClick={() => onAbortBurn?.()}>
@@ -195,7 +195,7 @@ export function PreviewExport({
               Download captioned video
             </Button>
             {burnSave === "saving" && (
-              <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library...</span>
+              <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library…</span>
             )}
             {burnSave === "done" && (
               <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>In library - see the Files tab</span>

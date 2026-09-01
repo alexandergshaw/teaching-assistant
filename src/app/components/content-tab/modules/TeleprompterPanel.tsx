@@ -144,7 +144,7 @@ export function TeleprompterPanel({ script, onExit }: TeleprompterPanelProps) {
             </p>
           )}
           {/* T7: the background model loads from a CDN and can fail - surfaced, not hidden. */}
-          {bgStatus === "loading" && <p className={styles.fieldHint}>Loading background blur model...</p>}
+          {bgStatus === "loading" && <p className={styles.fieldHint}>Loading background blur model…</p>}
           {bgStatus === "failed" && (
             <p className={styles.fieldHint} style={{ color: "var(--warning-ink)" }}>
               Background blur could not load (the model failed to download). The preview shows the raw camera image

@@ -88,7 +88,7 @@ export default function MonacoFileEditor({ path, value, onChange, height = "60vh
             }}
           >
             <span className={styles.spinner} aria-hidden="true" />
-            Loading editor...
+            Loading editor…
           </div>
         }
         options={{

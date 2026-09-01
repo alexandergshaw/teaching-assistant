@@ -204,7 +204,7 @@ export default function CommentEditModal({
             onClick={handleSave}
             disabled={saving || !isDirty}
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving…" : "Save"}
           </Button>
         </div>
     </ModalShell>

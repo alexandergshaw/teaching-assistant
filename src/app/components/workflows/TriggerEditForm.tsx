@@ -242,7 +242,7 @@ export function TriggerEditForm({
                 options={(orgs ?? []).map((o) => ({ value: o, label: o }))}
                 value={val}
                 onChange={(v) => setVal(v)}
-                placeholder={orgs === null ? "Loading organizations..." : "Choose an organization..."}
+                placeholder={orgs === null ? "Loading organizations…" : "Choose an organization…"}
                 loading={orgs === null}
                 noOptionsText="No organizations"
               />
@@ -321,7 +321,7 @@ export function TriggerEditForm({
               : void onCreate()
           }
         >
-          {triggerBusy ? "Saving..." : editingTriggerId ? "Save changes" : "Save trigger"}
+          {triggerBusy ? "Saving…" : editingTriggerId ? "Save changes" : "Save trigger"}
         </Button>
         {editingTriggerId && (
           <Button

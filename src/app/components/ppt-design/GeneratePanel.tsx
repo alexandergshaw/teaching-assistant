@@ -181,7 +181,7 @@ export default function GeneratePanel({
           >
             {generateBusy ? (
               <span role="status" aria-live="polite">
-                <CircularProgress size={16} sx={{ marginRight: "var(--space-2)" }} /> Generating...
+                <CircularProgress size={16} sx={{ marginRight: "var(--space-2)" }} /> Generating…
               </span>
             ) : (
               "Generate deck"
@@ -372,7 +372,7 @@ export default function GeneratePanel({
               disabled={savingFile}
               sx={{ textTransform: "none" }}
             >
-              {savingFile ? "Saving..." : "Save to Files"}
+              {savingFile ? "Saving…" : "Save to Files"}
             </Button>
             <Button
               variant="outlined"
@@ -381,7 +381,7 @@ export default function GeneratePanel({
               onClick={onSaveDraft}
               sx={{ textTransform: "none" }}
             >
-              {savingDraft ? "Saving..." : "Save a copy to Files"}
+              {savingDraft ? "Saving…" : "Save a copy to Files"}
             </Button>
           </div>
 

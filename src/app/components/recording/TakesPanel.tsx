@@ -195,14 +195,14 @@ export default function TakesPanel({
                 <span className={styles.ghMeta}>from: {take.sourceTakeName}</span>
               )}
               {extractingThis && (
-                <span className={styles.ghMeta}>Extracting audio... {extractingAudioId?.split("|")[1]}%</span>
+                <span className={styles.ghMeta}>Extracting audio… {extractingAudioId?.split("|")[1]}%</span>
               )}
               {take.backup === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Backed up</span>}
               {take.backup === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Backup failed</span>}
-              {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up...</span>}
+              {take.backup === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Backing up…</span>}
               {take.dbSave === "done" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>In library</span>}
               {take.dbSave === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Library save failed</span>}
-              {take.dbSave === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library...</span>}
+              {take.dbSave === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library…</span>}
               {posted && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Announcement posted</span>}
             </div>
             <details style={{ marginTop: "var(--space-2)" }}>

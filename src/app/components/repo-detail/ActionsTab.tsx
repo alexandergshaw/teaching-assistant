@@ -69,7 +69,7 @@ export function ActionsTab({ repoRef, branch, actions }: { repoRef: string; bran
         {actionsState === "loading" && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
             <CircularProgress size={24} />
-            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading workflows...</span>
+            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading workflows…</span>
           </div>
         )}
         {actionsState === "error" && <p className={styles.error}>{actionsError}</p>}
@@ -90,7 +90,7 @@ export function ActionsTab({ repoRef, branch, actions }: { repoRef: string; bran
                     {w.state === "active" ? "Disable" : "Enable"}
                   </Button>
                   <Button variant="outlined" size="small" disabled={dispatchingId === w.id || w.state !== "active"} onClick={() => handleDispatch(w)}>
-                    {dispatchingId === w.id ? "Running..." : `Run on ${branch}`}
+                    {dispatchingId === w.id ? "Running…" : `Run on ${branch}`}
                   </Button>
                 </div>
               </div>
@@ -119,7 +119,7 @@ export function ActionsTab({ repoRef, branch, actions }: { repoRef: string; bran
             <div style={{ display: "flex", gap: "var(--space-2)" }}>
               <Button variant="text" size="small" onClick={() => setDispatchInputs((rows) => [...rows, { key: "", value: "" }])}>Add input</Button>
               <Button variant="contained" size="small" disabled={dispatchBusy || !dispatchWorkflowId} onClick={handleDispatchWithInputs}>
-                {dispatchBusy ? "Running..." : `Run on ${branch}`}
+                {dispatchBusy ? "Running…" : `Run on ${branch}`}
               </Button>
             </div>
           </div>
@@ -155,7 +155,7 @@ export function ActionsTab({ repoRef, branch, actions }: { repoRef: string; bran
         {actionsState === "loading" && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
             <CircularProgress size={24} />
-            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading runs...</span>
+            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading runs…</span>
           </div>
         )}
         {runs.length === 0 && actionsState === "idle" && <p className={styles.fieldHint}>No runs match.</p>}
@@ -217,7 +217,7 @@ export function ActionsTab({ repoRef, branch, actions }: { repoRef: string; bran
                   {jobsLoadingRun === run.id && (
                     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-2)" }} role="status" aria-live="polite">
                       <CircularProgress size={20} />
-                      <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading jobs...</span>
+                      <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading jobs…</span>
                     </div>
                   )}
                   {jobsByRun[run.id] &&
@@ -254,7 +254,7 @@ export function ActionsTab({ repoRef, branch, actions }: { repoRef: string; bran
                   {artifactsLoadingRun === run.id && (
                     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-2)" }} role="status" aria-live="polite">
                       <CircularProgress size={20} />
-                      <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading artifacts...</span>
+                      <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading artifacts…</span>
                     </div>
                   )}
                   {artifactsByRun[run.id] && artifactsByRun[run.id].length === 0 && <p className={styles.fieldHint}>No artifacts.</p>}

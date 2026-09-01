@@ -94,7 +94,7 @@ export default function RepoGradesStatusBanners({
         <div className={styles.loadingState} role="status" aria-live="polite">
           <span className={styles.spinner} aria-hidden="true" />
           <div>
-            <p className={styles.loadingTitle}>Scanning {githubOrg} for repos...</p>
+            <p className={styles.loadingTitle}>Scanning {githubOrg} for repos…</p>
           </div>
         </div>
       )}
@@ -107,7 +107,7 @@ export default function RepoGradesStatusBanners({
 
       {hasCourse && !canvasGateBlockedReason && rosterLoading && (
         <p className={styles.fieldHint} role="status" aria-live="polite">
-          Loading the Canvas roster...
+          Loading the Canvas roster…
         </p>
       )}
 
@@ -119,7 +119,7 @@ export default function RepoGradesStatusBanners({
 
       {hasCourse && !canvasGateBlockedReason && assignmentsLoading && (
         <p className={styles.fieldHint} role="status" aria-live="polite">
-          Loading the course&apos;s Canvas assignments...
+          Loading the course&apos;s Canvas assignments…
         </p>
       )}
 

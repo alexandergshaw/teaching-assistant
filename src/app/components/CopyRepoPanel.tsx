@@ -572,7 +572,7 @@ export default function CopyRepoPanel({
               ]}
               value={destOwner}
               onChange={setDestOwner}
-              placeholder="Choose destination owner..."
+              placeholder="Choose destination owner…"
               loading={orgsLoading}
             />
             <TextField
@@ -617,7 +617,7 @@ export default function CopyRepoPanel({
                 .map((r) => ({ value: r.fullName, label: r.fullName, hint: r.isTemplate ? "template" : undefined }))}
               value={copyDestRepo}
               onChange={setCopyDestRepo}
-              placeholder="Choose destination repository..."
+              placeholder="Choose destination repository…"
             />
             {copyDestRepo && (
               <>
@@ -625,7 +625,7 @@ export default function CopyRepoPanel({
                   options={copyDestBranches.map((b) => ({ value: b, label: b }))}
                   value={copyDestBranch}
                   onChange={setCopyDestBranch}
-                  placeholder="Destination branch..."
+                  placeholder="Destination branch…"
                   loading={copyDestBranchesLoading}
                 />
                 <TextField
@@ -670,7 +670,7 @@ export default function CopyRepoPanel({
         <TextField
           size="small"
           fullWidth
-          placeholder="Search files..."
+          placeholder="Search files…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           disabled={treeState === "loading"}
@@ -718,7 +718,7 @@ export default function CopyRepoPanel({
           {treeState === "loading" && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
               <CircularProgress size={24} />
-              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading files...</span>
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading files…</span>
             </div>
           )}
           {treeState === "error" && (
@@ -864,7 +864,7 @@ export default function CopyRepoPanel({
           }
           onClick={handleCopy}
         >
-          {copyBusy ? "Copying..." : "Copy files"}
+          {copyBusy ? "Copying…" : "Copy files"}
         </Button>
 
         {copyError && (

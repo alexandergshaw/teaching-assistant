@@ -8,18 +8,31 @@
 // prop, computed by useResultsSort.ts exactly as it was computed inline
 // before).
 import Button from "@mui/material/Button";
-import type { SortColumn } from "./gradingResultsHelpers";
+import { sortColumnKey, type SortColumn, type SortDirection } from "./gradingResultsHelpers";
 
 export interface ResultsTableHeaderRowProps {
   rubricAreaNames: string[];
+  sortState: { column: SortColumn; direction: SortDirection };
   onSort: (column: SortColumn) => void;
   sortLabel: (column: SortColumn) => string;
 }
 
-export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: ResultsTableHeaderRowProps) {
+// Matches GradingTable.tsx's own sortAriaValue idiom (grading-recording
+// folder): "active" (is this the column the table is currently sorted by)
+// and "ascending" are resolved separately by the caller, so this stays a
+// pure ternary with no knowledge of SortColumn/SortState shapes.
+function sortAriaValue(active: boolean, ascending: boolean): "ascending" | "descending" | "none" {
+  if (!active) return "none";
+  return ascending ? "ascending" : "descending";
+}
+
+export function ResultsTableHeaderRow({ rubricAreaNames, sortState, onSort, sortLabel }: ResultsTableHeaderRowProps) {
+  const ariaSortFor = (column: SortColumn) =>
+    sortAriaValue(sortColumnKey(column) === sortColumnKey(sortState.column), sortState.direction === "asc");
+
   return (
     <tr>
-      <th>
+      <th aria-sort={ariaSortFor({ kind: "student" })}>
         <Button
           variant="text"
           size="small"
@@ -29,7 +42,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
           Student <span>{sortLabel({ kind: "student" })}</span>
         </Button>
       </th>
-      <th>
+      <th aria-sort={ariaSortFor({ kind: "files" })}>
         <Button
           variant="text"
           size="small"
@@ -40,7 +53,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
         </Button>
       </th>
       {rubricAreaNames.map((area) => (
-        <th key={area}>
+        <th key={area} aria-sort={ariaSortFor({ kind: "rubric", area })}>
           <Button
             variant="text"
             size="small"
@@ -51,7 +64,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
           </Button>
         </th>
       ))}
-      <th>
+      <th aria-sort={ariaSortFor({ kind: "total" })}>
         <Button
           variant="text"
           size="small"
@@ -61,7 +74,7 @@ export function ResultsTableHeaderRow({ rubricAreaNames, onSort, sortLabel }: Re
           Total <span>{sortLabel({ kind: "total" })}</span>
         </Button>
       </th>
-      <th>
+      <th aria-sort={ariaSortFor({ kind: "overall" })}>
         <Button
           variant="text"
           size="small"

@@ -551,9 +551,9 @@ export default function LecturePlanningTab() {
   const generateArmed = isGenerateConfirmArmed(generateArmedFor, plans);
 
   return (
-    <section className={styles.card}>
+    <>
       <div className={styles.header}>
-        <h2 style={{ fontSize: "var(--font-size-xl)" }}>Lecture Planning</h2>
+        <h2>Lecture Planning</h2>
         <p>
           Upload a zip of your template course repository to generate lecture materials — slide
           decks, module intros, and assignment instructions ready to teach from. Choose{" "}
@@ -885,6 +885,6 @@ export default function LecturePlanningTab() {
         onCopy={handleCopyRubric}
         onDownloadCsv={handleDownloadRubricCsv}
       />
-    </section>
+    </>
   );
 }

@@ -307,7 +307,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       {status === "loading" && (
         <div className={styles.loadingState} role="status" aria-live="polite">
           <div className={styles.spinner} />
-          <div className={styles.loadingTitle}>Loading drafted messages...</div>
+          <div className={styles.loadingTitle}>Loading drafted messages…</div>
         </div>
       )}
 
@@ -376,7 +376,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                             disabled={busy === draft.id}
                             onClick={() => void saveEdit(draft)}
                           >
-                            {busy === draft.id ? "Saving..." : "Save"}
+                            {busy === draft.id ? "Saving…" : "Save"}
                           </Button>
                           <Button
                             variant="outlined"
@@ -410,7 +410,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                             disabled={busy === draft.id}
                             onClick={() => setArmedFor(messageDraftArmSignature(draft, "post"))}
                           >
-                            {busy === draft.id ? "Sending..." : "Send"}
+                            {busy === draft.id ? "Sending…" : "Send"}
                           </Button>
                           {(draft.payload.recipientEmail || (draft.payload.kind === "announcement" && draft.payload.hubCourseId)) && (
                             <Button
@@ -419,7 +419,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                               disabled={busy === draft.id}
                               onClick={() => setArmedFor(messageDraftArmSignature(draft, "email"))}
                             >
-                              {busy === draft.id ? "Sending..." : "Send by email"}
+                              {busy === draft.id ? "Sending…" : "Send by email"}
                             </Button>
                           )}
                           {/* B4: guarded the same way Send/Send by email
@@ -433,7 +433,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                             disabled={busy === draft.id}
                             onClick={() => setArmedFor(messageDraftArmSignature(draft, "delete"))}
                           >
-                            {busy === draft.id ? "Deleting..." : "Delete"}
+                            {busy === draft.id ? "Deleting…" : "Delete"}
                           </Button>
                         </>
                       )}
@@ -504,7 +504,7 @@ export default function MessageDraftsTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                             disabled={busy === draft.id}
                             onClick={() => runArmedAction(draft, armedAction)}
                           >
-                            {busy === draft.id ? "Working..." : armedConfirmLabel(armedAction)}
+                            {busy === draft.id ? "Working…" : armedConfirmLabel(armedAction)}
                           </Button>
                           <Button size="small" disabled={busy === draft.id} onClick={() => setArmedFor(null)}>
                             Cancel

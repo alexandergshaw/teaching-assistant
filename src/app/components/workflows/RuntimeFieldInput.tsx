@@ -210,7 +210,7 @@ export function RuntimeFieldInput({
                 {...params}
                 required={required}
                 size="small"
-                placeholder={selected.length === 0 ? "Select or type one or more..." : undefined}
+                placeholder={selected.length === 0 ? "Select or type one or more…" : undefined}
                 slotProps={{
                   ...params.slotProps,
                   // Merge (not replace) params.slotProps.htmlInput - it
@@ -586,7 +586,7 @@ export function RuntimeFieldInput({
               options={lmsModuleOptions}
               value={moduleValue}
               onChange={onChange}
-              placeholder="Choose a module..."
+              placeholder="Choose a module…"
               noOptionsText={
                 lmsModuleError
                   ? `Error: ${lmsModuleError}`

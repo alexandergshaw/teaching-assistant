@@ -667,7 +667,7 @@ function DiscussionReplyRowImpl({
               {/* docs/discussion-reply-resources-acceptance-criteria.md R10:
                   resources render beneath the reply, never inside the
                   textbox. */}
-              {row.resourceState === "searching" && <p className={styles.fieldHint}>Finding resources...</p>}
+              {row.resourceState === "searching" && <p className={styles.fieldHint}>Finding resources…</p>}
               {row.resourceState === "failed" && (
                 <p className={styles.error}>
                   {row.resourceError}{" "}

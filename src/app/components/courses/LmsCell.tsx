@@ -118,7 +118,7 @@ export default function LmsCell({ course, onSave, menu }: LmsCellProps) {
               options={typeaheadOpts}
               value={currentUrl}
               onChange={setCanvasUrlDraft}
-              placeholder={opts === null ? "Loading courses..." : "Choose a connected course..."}
+              placeholder={opts === null ? "Loading courses…" : "Choose a connected course…"}
               loading={opts === null}
               noOptionsText="No connected courses"
             />

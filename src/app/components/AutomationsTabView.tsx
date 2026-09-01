@@ -218,7 +218,7 @@ export default function AutomationsTabView({ onOpenWorkflow }: AutomationsTabVie
   );
 
   if (loading) {
-    return <div style={{ padding: 20 }}>Loading automations...</div>;
+    return <div style={{ padding: 20 }}>Loading automations…</div>;
   }
 
   if (error) {

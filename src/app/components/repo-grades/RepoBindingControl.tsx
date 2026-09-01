@@ -83,7 +83,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
               void accept(candidate.canvasUserId, candidate.name);
             }}
           >
-            {busy ? "Confirming..." : "Confirm binding"}
+            {busy ? "Confirming…" : "Confirm binding"}
           </button>
         )}
         {candidate && !candidateConfirmable && (
@@ -100,7 +100,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
                 onChange={(e) => setPickedRosterId(e.target.value)}
                 disabled={busy || roster.length === 0}
               >
-                <option value="">{roster.length === 0 ? "No roster loaded" : "Choose a student..."}</option>
+                <option value="">{roster.length === 0 ? "No roster loaded" : "Choose a student…"}</option>
                 {roster.map((student) => (
                   <option key={student.id} value={student.id}>
                     {student.name}
@@ -117,7 +117,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
                   void accept(picked.id, picked.name);
                 }}
               >
-                {busy ? "Binding..." : "Bind"}
+                {busy ? "Binding…" : "Bind"}
               </button>
             </div>
           </>
@@ -181,7 +181,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
           onChange={(e) => setPickedRosterId(e.target.value)}
           disabled={busy || roster.length === 0}
         >
-          <option value="">{roster.length === 0 ? "No roster loaded" : "Choose a student..."}</option>
+          <option value="">{roster.length === 0 ? "No roster loaded" : "Choose a student…"}</option>
           {roster.map((student) => (
             <option key={student.id} value={student.id}>
               {student.name}
@@ -198,7 +198,7 @@ export default function RepoBindingControl({ row, roster, onAcceptBinding }: Rep
             void accept(picked.id, picked.name);
           }}
         >
-          {busy ? "Binding..." : "Bind"}
+          {busy ? "Binding…" : "Bind"}
         </button>
       </div>
       {error && <span className={pageStyles.error}>{error}</span>}

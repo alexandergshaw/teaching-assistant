@@ -55,7 +55,7 @@ export function TemplateFieldInput({
             }
           >
             {deckTemplates === null ? (
-              <MenuItem disabled>Loading templates...</MenuItem>
+              <MenuItem disabled>Loading templates…</MenuItem>
             ) : deckTemplates.length > 0 ? (
               [
                 ...deckTemplates.map((template) => (
@@ -95,7 +95,7 @@ export function TemplateFieldInput({
             }
           >
             {assignmentTemplates === null ? (
-              <MenuItem disabled>Loading templates...</MenuItem>
+              <MenuItem disabled>Loading templates…</MenuItem>
             ) : assignmentTemplates.length > 0 ? (
               [
                 ...assignmentTemplates.map((template) => (
@@ -135,7 +135,7 @@ export function TemplateFieldInput({
             }
           >
             {testTemplates === null ? (
-              <MenuItem disabled>Loading templates...</MenuItem>
+              <MenuItem disabled>Loading templates…</MenuItem>
             ) : testTemplates.length > 0 ? (
               [
                 ...testTemplates.map((template) => (
@@ -175,7 +175,7 @@ export function TemplateFieldInput({
             }
           >
             {classSessionTemplates === null ? (
-              <MenuItem disabled>Loading templates...</MenuItem>
+              <MenuItem disabled>Loading templates…</MenuItem>
             ) : classSessionTemplates.length > 0 ? (
               [
                 ...classSessionTemplates.map((template) => (

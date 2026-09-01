@@ -702,7 +702,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
             </div>
             {libraryError && <p role="alert" className={styles.error}>{libraryError}</p>}
             {libraryBusy && libraryFiles === null ? (
-              <p className={styles.fieldHint} role="status" aria-live="polite">Loading your recording library...</p>
+              <p className={styles.fieldHint} role="status" aria-live="polite">Loading your recording library…</p>
             ) : libraryFiles && libraryFiles.length === 0 ? (
               <p className={styles.fieldHint}>Nothing in your recording library yet.</p>
             ) : (
@@ -728,7 +728,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                     disabled={crossTakeBusy || libraryActionBusy !== null}
                     onClick={(e) => void handleLibraryTalkThrough(selectedLibraryFile, e.currentTarget)}
                   >
-                    {libraryActionBusy === "walkthrough" ? "Loading..." : "Talk through this"}
+                    {libraryActionBusy === "walkthrough" ? "Loading…" : "Talk through this"}
                   </Button>
                 )}
                 {selectedLibraryFile && (
@@ -738,7 +738,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                     disabled={crossTakeBusy || libraryActionBusy !== null}
                     onClick={(e) => void handleLibraryDraftAnnouncement(selectedLibraryFile, e.currentTarget)}
                   >
-                    {libraryActionBusy === "announcement" ? "Loading..." : "Draft announcement"}
+                    {libraryActionBusy === "announcement" ? "Loading…" : "Draft announcement"}
                   </Button>
                 )}
               </div>

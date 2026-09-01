@@ -129,7 +129,7 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
             </button>
             {canLms && (
               <button type="button" className={styles.linkButton} disabled={lmsBusy} onClick={() => void pullFromLms()}>
-                {lmsBusy ? "Loading..." : "From LMS"}
+                {lmsBusy ? "Loading…" : "From LMS"}
               </button>
             )}
           </div>
@@ -141,7 +141,7 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
           {canLms && (
             <div className={styles.courseResourceActions}>
               <button type="button" className={styles.linkButton} disabled={lmsBusy} onClick={() => void pullFromLms()}>
-                {lmsBusy ? "Loading..." : "From LMS"}
+                {lmsBusy ? "Loading…" : "From LMS"}
               </button>
             </div>
           )}
@@ -268,7 +268,7 @@ export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps
               title={githubOrg ? undefined : "Set the course's Organization first"}
               onClick={() => void pullFromOrg()}
             >
-              {pulling ? "Pulling..." : "Pull repos from org"}
+              {pulling ? "Pulling…" : "Pull repos from org"}
             </button>
           </div>
           {!githubOrg && <p className={styles.fieldHint}>Set the course&apos;s Organization first.</p>}

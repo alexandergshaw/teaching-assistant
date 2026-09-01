@@ -209,7 +209,7 @@ export function CommandProposalModal({ commandInterface, restoreFocusRef, fallba
           Close
         </Button>
         <Button variant="contained" size="small" onClick={onApplyCommand} disabled={applyBusy}>
-          {applyBusy ? "Applying..." : "Apply"}
+          {applyBusy ? "Applying…" : "Apply"}
         </Button>
       </div>
     </ModalShell>

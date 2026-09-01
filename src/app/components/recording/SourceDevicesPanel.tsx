@@ -384,7 +384,7 @@ export default function SourceDevicesPanel({
               }}
             />
           </div>
-          {bgStatus === "loading" && <span className={styles.ghMeta} role="status" aria-live="polite">Loading background model...</span>}
+          {bgStatus === "loading" && <span className={styles.ghMeta} role="status" aria-live="polite">Loading background model…</span>}
           {bgStatus === "failed" && <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>Background effects unavailable (model failed to load)</span>}
           {bgMode !== "none" && bgStatus === "ready" && <span className={styles.ghMeta}>Effect is applied to the recording; the preview stays raw.</span>}
 

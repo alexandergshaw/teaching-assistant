@@ -246,7 +246,7 @@ export default function PdfFixEditor({
             onClick={save}
             disabled={stage !== "ready"}
           >
-            {stage === "saving" ? "Saving..." : "Save to Canvas"}
+            {stage === "saving" ? "Saving…" : "Save to Canvas"}
           </Button>
         </div>
       </div>

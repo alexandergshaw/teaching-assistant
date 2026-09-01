@@ -50,7 +50,7 @@ export function RunInputTableToolbar({
       <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
         <TextField
           size="small"
-          placeholder="Search rows..."
+          placeholder="Search rows…"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           sx={{ width: 220 }}

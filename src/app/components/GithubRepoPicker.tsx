@@ -126,7 +126,7 @@ export default function GithubRepoPicker({
         renderInput={(params) => (
           <TextField
             {...params}
-            placeholder={state === "loading" ? "Loading repositories..." : placeholder}
+            placeholder={state === "loading" ? "Loading repositories…" : placeholder}
             slotProps={{
               ...params.slotProps,
               htmlInput: {
@@ -146,7 +146,7 @@ export default function GithubRepoPicker({
             options={branches.map((b, i) => ({ value: b, label: i === 0 ? b + " (default)" : b }))}
             value={branch ?? ""}
             onChange={(v) => onBranchChange(v)}
-            placeholder={branchState === "loading" ? "Loading branches..." : "Select a branch..."}
+            placeholder={branchState === "loading" ? "Loading branches…" : "Select a branch…"}
             disabled={disabled || branchState !== "ready"}
             loading={branchState === "loading"}
           />

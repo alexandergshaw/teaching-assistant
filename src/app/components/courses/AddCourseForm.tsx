@@ -289,7 +289,7 @@ export default function AddCourseForm({ editing, institutions, orgs, syllabi, on
         label="Canvas course URL"
         size="small"
         fullWidth
-        placeholder="https://canvas.../courses/123"
+        placeholder="https://canvas…/courses/123"
         value={form.canvasUrl}
         onChange={(e) => update({ canvasUrl: e.target.value })}
       />

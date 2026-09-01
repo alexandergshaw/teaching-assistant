@@ -749,7 +749,7 @@ export default function KnowledgeTab({
                     className={styles.kbEditTextarea}
                     value={draftBody}
                     onChange={(e) => setDraftBody(e.target.value)}
-                    placeholder="Write this page's policy, rule, or deadline in Markdown..."
+                    placeholder="Write this page's policy, rule, or deadline in Markdown…"
                   />
                 </div>
               ) : selectedPage.body.trim() ? (

@@ -218,7 +218,7 @@ export default function SyllabusTemplateLibrary({ activeTemplateId, onUse }: Syl
         <TextField size="small" placeholder="New template name" value={newName} onChange={(e) => setNewName(e.target.value)} disabled={creating} sx={{ flex: "1 1 180px" }} />
         <input ref={createFileRef} type="file" accept=".docx" disabled={creating} />
         <Button variant="outlined" size="small" onClick={handleCreate} disabled={creating || !newName.trim()}>
-          {creating ? "Saving..." : "Save template"}
+          {creating ? "Saving…" : "Save template"}
         </Button>
       </div>
       {state === "idle" && error && <p className={styles.error}>{error}</p>}

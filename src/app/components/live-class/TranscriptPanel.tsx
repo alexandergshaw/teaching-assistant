@@ -57,7 +57,7 @@ export default function TranscriptPanel({ entries }: TranscriptPanelProps) {
       >
         {entries.length === 0 ? (
           <p className={styles.fieldHint} style={{ margin: 0 }}>
-            Waiting for speech...
+            Waiting for speech…
           </p>
         ) : (
           entries.map((entry) => (

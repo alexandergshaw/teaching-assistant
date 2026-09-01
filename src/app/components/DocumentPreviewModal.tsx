@@ -135,7 +135,7 @@ export default function DocumentPreviewModal({
               onClick={handleSave}
               sx={{ textTransform: "none" }}
             >
-              {busy === "save" ? "Saving..." : "Save"}
+              {busy === "save" ? "Saving…" : "Save"}
             </Button>
           )}
           <Button size="small" variant="text" onClick={handleDownload} sx={{ textTransform: "none" }}>

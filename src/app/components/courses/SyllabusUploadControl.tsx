@@ -97,7 +97,7 @@ export function SyllabusUploadControl({
         disabled={busy}
         className={tableStyles.primaryButton}
       >
-        {busy ? "Uploading..." : "Upload Syllabus"}
+        {busy ? "Uploading…" : "Upload Syllabus"}
       </button>
       <input
         ref={fileInputRef}

@@ -144,7 +144,7 @@ export function ReleaseReviewModal({ scheduledRelease, restoreFocusRef, fallback
           onClick={onCommitRelease}
           disabled={commitBusy || nothingToCommit}
         >
-          {commitBusy ? "Committing..." : commitArmed ? "Confirm commit" : "Commit"}
+          {commitBusy ? "Committing…" : commitArmed ? "Confirm commit" : "Commit"}
         </Button>
       </div>
     </ModalShell>

@@ -129,7 +129,7 @@ export function PullsTab({
           disabled={prBusy || !prTitle.trim()}
           onClick={handleCreatePr}
         >
-          {prBusy ? "Opening..." : "Create pull request"}
+          {prBusy ? "Opening…" : "Create pull request"}
         </Button>
         </div>
       </details>
@@ -168,7 +168,7 @@ export function PullsTab({
         {pullsState === "loading" && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
             <CircularProgress size={24} />
-            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading pull requests...</span>
+            <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading pull requests…</span>
           </div>
         )}
         {pullsState === "error" && <p className={styles.error}>{pullsError}</p>}
@@ -230,7 +230,7 @@ export function PullsTab({
                           disabled={reviewingPr === p.number || approveMergingPr === p.number}
                           onClick={() => handleReviewPr(p.number, "APPROVE")}
                         >
-                          {reviewingPr === p.number ? "Working..." : "Approve"}
+                          {reviewingPr === p.number ? "Working…" : "Approve"}
                         </Button>
                         <Button
                           variant="text"
@@ -261,7 +261,7 @@ export function PullsTab({
                           disabled={approveMergingPr === p.number || mergingPr === p.number || reviewingPr === p.number}
                           onClick={() => handleApproveAndMerge(p.number)}
                         >
-                          {approveMergingPr === p.number ? "Working..." : "Approve & merge"}
+                          {approveMergingPr === p.number ? "Working…" : "Approve & merge"}
                         </Button>
                         <Button
                           variant="outlined"
@@ -269,7 +269,7 @@ export function PullsTab({
                           disabled={mergingPr === p.number || approveMergingPr === p.number}
                           onClick={() => handleMerge(p.number)}
                         >
-                          {mergingPr === p.number ? "Merging..." : "Merge"}
+                          {mergingPr === p.number ? "Merging…" : "Merge"}
                         </Button>
                       </>
                     )}
@@ -281,7 +281,7 @@ export function PullsTab({
                     {filesLoadingPr === p.number && (
                       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-3)" }} role="status" aria-live="polite">
                         <CircularProgress size={20} />
-                        <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading file changes...</span>
+                        <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading file changes…</span>
                       </div>
                     )}
                     {files && files.length === 0 && <p className={styles.fieldHint}>No file changes.</p>}

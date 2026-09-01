@@ -80,7 +80,7 @@ export function BulkBarHead({ moduleCount, itemCount, busy, onClear }: BulkBarHe
           `announceBusy` prop. */}
       {busy && (
         <span role="status" aria-live="polite" className={styles.bulkFieldLabel}>
-          Working...
+          Working…
         </span>
       )}
       <Button variant="outlined" size="small" onClick={onClear}>

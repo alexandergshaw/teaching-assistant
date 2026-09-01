@@ -150,7 +150,7 @@ export default function LinkUsernamesRosterSection({
                 void handleLinkFromRoster();
               }}
             >
-              {rosterBusy ? "Applying..." : "Apply usernames from the course table"}
+              {rosterBusy ? "Applying…" : "Apply usernames from the course table"}
             </button>
           </div>
         </>

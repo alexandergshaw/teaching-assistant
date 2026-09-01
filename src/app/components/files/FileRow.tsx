@@ -169,7 +169,7 @@ export function FileRow({
               void onPreview(file);
             }}
           >
-            {previewLoading ? "Loading..." : "Preview"}
+            {previewLoading ? "Loading…" : "Preview"}
           </Button>
           <Button
             size="small"
@@ -186,7 +186,7 @@ export function FileRow({
               onClick={() => void onStripAudio(file)}
               title="Create a copy of this video without its audio track"
             >
-              {stripping?.id === file.id ? `Stripping... ${stripping.pct}%` : "Strip audio"}
+              {stripping?.id === file.id ? `Stripping… ${stripping.pct}%` : "Strip audio"}
             </Button>
           )}
           <Button
@@ -216,7 +216,7 @@ export function FileRow({
       {expandedPlay === file.id && (
         <div className={styles.libExpand}>
           {!playUrls[file.id] ? (
-            <span className={styles.ccHint}>Loading...</span>
+            <span className={styles.ccHint}>Loading…</span>
           ) : isAudio ? (
             <audio
               controls
@@ -261,7 +261,7 @@ export function FileRow({
                     select
                     value={moduleId}
                     onChange={(e) => onModuleSelect(e.target.value === "" ? "" : Number(e.target.value))}
-                    placeholder="Choose a module..."
+                    placeholder="Choose a module…"
                     size="small"
                     sx={{ minWidth: 220 }}
                     disabled={modulesStatus !== "ready"}
@@ -272,7 +272,7 @@ export function FileRow({
                     ) : (
                       [
                         <MenuItem key="none" value="">
-                          Choose a module...
+                          Choose a module…
                         </MenuItem>,
                         ...modules.map((m) => (
                           <MenuItem key={m.id} value={m.id}>
@@ -290,7 +290,7 @@ export function FileRow({
                       onClick={() => void onAddToModule(file)}
                       disabled={adding || moduleId === ""}
                     >
-                      {adding ? "Adding..." : "Add"}
+                      {adding ? "Adding…" : "Add"}
                     </Button>
                     <Button
                       variant="outlined"

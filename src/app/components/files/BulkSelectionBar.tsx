@@ -74,7 +74,7 @@ export function BulkSelectionBar({
                 }
               }}
             >
-              Add to module...
+              Add to module…
             </Button>
           </span>
           <Button
@@ -107,7 +107,7 @@ export function BulkSelectionBar({
                     select
                     value={bulkModuleId}
                     onChange={(e) => onBulkModuleSelect(e.target.value === "" ? "" : Number(e.target.value))}
-                    placeholder="Choose a module..."
+                    placeholder="Choose a module…"
                     size="small"
                     sx={{ minWidth: 220, marginTop: 1 }}
                     disabled={modulesStatus !== "ready"}
@@ -118,7 +118,7 @@ export function BulkSelectionBar({
                     ) : (
                       [
                         <MenuItem key="none" value="">
-                          Choose a module...
+                          Choose a module…
                         </MenuItem>,
                         ...modules.map((m) => (
                           <MenuItem key={m.id} value={m.id}>
@@ -135,7 +135,7 @@ export function BulkSelectionBar({
                       onClick={onAddToModule}
                       disabled={adding || bulkModuleId === ""}
                     >
-                      {adding ? `${bulkAddStatus || "Adding..."}` : "Add"}
+                      {adding ? `${bulkAddStatus || "Adding…"}` : "Add"}
                     </Button>
                     <Button
                       variant="outlined"

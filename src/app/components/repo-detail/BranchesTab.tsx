@@ -64,7 +64,7 @@ export function BranchesTab({
             disabled={forkBusy}
             onClick={handleFork}
           >
-            {forkBusy ? "Forking..." : "Fork"}
+            {forkBusy ? "Forking…" : "Fork"}
           </Button>
         </div>
         {forkMsg && (

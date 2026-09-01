@@ -138,7 +138,7 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
           {busy && (
             <>
               <CircularProgress size={18} />
-              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Searching...</span>
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Searching…</span>
             </>
           )}
         </div>
@@ -221,7 +221,7 @@ export default function RecommendTextbooksModal({ course, onSaveTextbook, onClos
                       {savingIndex === index && (
                         <>
                           <CircularProgress size={16} />
-                          <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Saving...</span>
+                          <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Saving…</span>
                         </>
                       )}
                       {savedIndex === index && (

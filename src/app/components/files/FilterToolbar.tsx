@@ -124,7 +124,7 @@ export function FilterToolbar({
         <TextField
           size="small"
           type="search"
-          placeholder="Search files by name..."
+          placeholder="Search files by name…"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           aria-label="Search files by name"

@@ -58,7 +58,7 @@ export default function SessionSetupPanel({
           sx={{ minWidth: 220 }}
         >
           {settings.courses === null ? (
-            <MenuItem disabled>Loading courses...</MenuItem>
+            <MenuItem disabled>Loading courses…</MenuItem>
           ) : settings.courses.length > 0 ? (
             settings.courses.map((c) => (
               <MenuItem key={c.id} value={c.id}>
@@ -220,7 +220,7 @@ export default function SessionSetupPanel({
           onClick={onStart}
           disabled={starting || neitherPathSupported || !settings.courseId}
         >
-          {starting ? "Starting..." : "Start live class"}
+          {starting ? "Starting…" : "Start live class"}
         </Button>
       </div>
     </div>

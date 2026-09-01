@@ -444,7 +444,7 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
         failed += 1;
         continue;
       }
-      setBulkAddStatus(`Adding ${i + 1} of ${ids.length}...`);
+      setBulkAddStatus(`Adding ${i + 1} of ${ids.length}…`);
       try {
         await addOneToModule(file, bulkModuleId);
         added += 1;
@@ -755,7 +755,7 @@ export default function FilesTab({ onOpenWorkflow }: { onOpenWorkflow?: (workflo
           {status === "loading" && (
             <div className={styles.loadingState} role="status" aria-live="polite">
               <div className={styles.spinner} />
-              <div className={styles.loadingTitle}>Loading files...</div>
+              <div className={styles.loadingTitle}>Loading files…</div>
             </div>
           )}
 

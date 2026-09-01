@@ -93,7 +93,7 @@ function composeLiveSentence(args: {
   if (!capturing) return "";
   const parts: string[] = [];
   parts.push(count === 0 ? "Capturing - 0 posts so far." : `${count} post${count === 1 ? "" : "s"} found.`);
-  if (extracting) parts.push("Reading the screen...");
+  if (extracting) parts.push("Reading the screen…");
   if (pendingFrames > 0) parts.push("Catching up - scroll a little slower.");
   return parts.join(" ");
 }
@@ -728,7 +728,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
             <span>{fmt(elapsedSec)}</span>
             {/* F11: AC7's "N posts found" reads `totalCount`. */}
             <span>{totalCount === 0 ? "Capturing - 0 posts so far." : `${totalCount} post${totalCount === 1 ? "" : "s"} found`}</span>
-            {extracting && <span>Reading the screen...</span>}
+            {extracting && <span>Reading the screen…</span>}
             {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
           </div>
         )}

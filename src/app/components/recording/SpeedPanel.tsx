@@ -109,7 +109,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
               From the Files tab
             </p>
             {videoImport.libraryBusy && !videoImport.libraryVideos && (
-              <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>Loading your library...</p>
+              <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>Loading your library…</p>
             )}
             {videoImport.libraryVideos && videoImport.libraryVideos.length === 0 && (
               <p className={styles.fieldHint} style={{ margin: 0 }}>
@@ -117,7 +117,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
               </p>
             )}
             <Button variant="text" size="small" disabled={videoImport.libraryBusy} onClick={() => void videoImport.loadLibrary()}>
-              {videoImport.libraryBusy ? "Loading..." : "Refresh"}
+              {videoImport.libraryBusy ? "Loading…" : "Refresh"}
             </Button>
             {videoImport.libraryVideos && videoImport.libraryVideos.map((v) => (
               <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
@@ -133,7 +133,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
                   disabled={speed.busy || videoImport.importingKey !== null}
                   onClick={() => void videoImport.handleImportLibraryVideo(v)}
                 >
-                  {videoImport.importingKey === "lib:" + v.id ? "Importing..." : "Import"}
+                  {videoImport.importingKey === "lib:" + v.id ? "Importing…" : "Import"}
                 </Button>
               </div>
             ))}
@@ -155,7 +155,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
                     disabled={speed.busy || videoImport.importingKey !== null}
                     onClick={() => void videoImport.handleImportTake(take)}
                   >
-                    {videoImport.importingKey === "take:" + take.id ? "Importing..." : "Import"}
+                    {videoImport.importingKey === "take:" + take.id ? "Importing…" : "Import"}
                   </Button>
                 </div>
               ))}
@@ -173,7 +173,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
                 disabled={videoImport.folderBusy}
                 onClick={() => void videoImport.handleBrowseFolder(backupDir)}
               >
-                {videoImport.folderBusy ? "Reading folder..." : videoImport.folderVideos ? "Refresh" : "Browse"}
+                {videoImport.folderBusy ? "Reading folder…" : videoImport.folderVideos ? "Refresh" : "Browse"}
               </Button>
               {videoImport.folderVideos && videoImport.folderVideos.length === 0 && (
                 <p className={styles.fieldHint} style={{ margin: 0 }}>No videos found.</p>
@@ -189,7 +189,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
                     disabled={speed.busy || videoImport.importingKey !== null}
                     onClick={() => void videoImport.handleImportFolderVideo(backupDir, v.name)}
                   >
-                    {videoImport.importingKey === "file:" + v.name ? "Importing..." : "Import"}
+                    {videoImport.importingKey === "file:" + v.name ? "Importing…" : "Import"}
                   </Button>
                 </div>
               ))}
@@ -267,7 +267,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
             />
           </div>
           <p className={styles.fieldHint} aria-hidden="true">
-            {speed.progressLine ?? `Re-encoding at ${formatSpeedLabel(speed.rate)}...`}
+            {speed.progressLine ?? `Re-encoding at ${formatSpeedLabel(speed.rate)}…`}
           </p>
           <div className={styles.ghActions}>
             {speed.stage === "rendering" ? (
@@ -276,7 +276,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
               </Button>
             ) : (
               <Button variant="outlined" disabled>
-                {speed.stage === "reading" ? "Reading the video..." : "Saving..."}
+                {speed.stage === "reading" ? "Reading the video…" : "Saving…"}
               </Button>
             )}
           </div>

@@ -93,7 +93,7 @@ export function CommandInterfaceSection({
             onReviewCommand();
           }}
         >
-          {generateBusy ? "Generating..." : "Review proposal"}
+          {generateBusy ? "Generating…" : "Review proposal"}
         </Button>
         <span className={styles.bulkHint}>
           Proposes rewriting the title/description of selected items, renaming selected modules, or creating new modules - reviewed here before

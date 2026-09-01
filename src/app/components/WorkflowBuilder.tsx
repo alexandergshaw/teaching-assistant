@@ -403,7 +403,7 @@ export default function WorkflowBuilder({
                     {...params}
                     autoFocus
                     label="Add action"
-                    placeholder="Search actions..."
+                    placeholder="Search actions…"
                   />
                 )}
               />
@@ -427,7 +427,7 @@ export default function WorkflowBuilder({
               value={appendSourceId}
               onChange={setAppendSourceId}
               label="Append steps from workflow"
-              placeholder="Choose a workflow..."
+              placeholder="Choose a workflow…"
             />
           </div>
           <Button
@@ -449,7 +449,7 @@ export default function WorkflowBuilder({
               value={includeSourceId}
               onChange={setIncludeSourceId}
               label="Include workflow"
-              placeholder="Choose a workflow..."
+              placeholder="Choose a workflow…"
             />
           </div>
           <Button

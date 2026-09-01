@@ -576,7 +576,7 @@ export function WorkflowPanel({
                   disabled={running || !!runPause || !!runInput || !!expandedError || allStepsDisabled}
                   size="small"
                 >
-                  {running ? "Running..." : "Run"}
+                  {running ? "Running…" : "Run"}
                 </Button>
                 {allStepsDisabled && (
                   <span className={styles.fieldHint} style={{ color: "var(--danger)" }}>
@@ -623,7 +623,7 @@ export function WorkflowPanel({
                     <div style={{ marginBottom: "var(--space-3)", display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
                       {isCourseFanoutRun && (
                         <Button size="small" variant="outlined" onClick={onStopAfterCourse} disabled={stopRequested}>
-                          {stopRequested ? "Stopping after this course..." : "Stop after this course"}
+                          {stopRequested ? "Stopping after this course…" : "Stop after this course"}
                         </Button>
                       )}
                       <Button
@@ -637,7 +637,7 @@ export function WorkflowPanel({
                           }
                         }}
                       >
-                        {abortRequested ? "Stopping..." : "Abort run"}
+                        {abortRequested ? "Stopping…" : "Abort run"}
                       </Button>
                     </div>
                   )}

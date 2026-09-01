@@ -353,7 +353,7 @@ export default function SyllabusMode({
           </div>
           <TextField
             id="adaptTextbookText"
-            label="...or paste the details as text"
+            label="…or paste the details as text"
             multiline
             minRows={3}
             size="small"
@@ -384,7 +384,7 @@ export default function SyllabusMode({
         <div className={styles.loadingState} role="status" aria-live="polite">
           <div className={styles.spinner} />
           <div>
-            <p className={styles.loadingTitle}>Analyzing your syllabus...</p>
+            <p className={styles.loadingTitle}>Analyzing your syllabus…</p>
             <p className={styles.loadingText}>
               Reading the document, scanning any codebase you provided, and drafting the class-specific fields. This can take a moment.
             </p>
@@ -398,7 +398,7 @@ export default function SyllabusMode({
         onClick={onAnalyzeSyllabus}
         disabled={adaptStatus !== "idle"}
       >
-        {adaptStatus === "analyzing" ? "Analyzing..." : adaptSections ? "Re-analyze" : "Analyze syllabus"}
+        {adaptStatus === "analyzing" ? "Analyzing…" : adaptSections ? "Re-analyze" : "Analyze syllabus"}
       </Button>
 
       {adaptSections && adaptSections.length > 0 && (
@@ -429,7 +429,7 @@ export default function SyllabusMode({
               actions: [
                 {
                   key: "ai",
-                  label: adaptRegenKey === s.key ? "..." : "AI",
+                  label: adaptRegenKey === s.key ? "…" : "AI",
                   title: "Regenerate this section with AI",
                   tone: "accent",
                   onClick: () => onRegenerateAdaptSection(s),
@@ -460,7 +460,7 @@ export default function SyllabusMode({
               onClick={onBuildAdaptedSyllabus}
               disabled={adaptStatus !== "idle"}
             >
-              {adaptStatus === "building" ? "Building..." : "Download adapted syllabus (.docx)"}
+              {adaptStatus === "building" ? "Building…" : "Download adapted syllabus (.docx)"}
             </Button>
             <Button
               variant="outlined"
@@ -468,7 +468,7 @@ export default function SyllabusMode({
               onClick={() => onSaveFinalized((adaptCourseCode.trim() && adaptCourseName.trim()) ? `${adaptCourseCode.trim()} ${adaptCourseName.trim()}` : adaptSyllabusName.replace(/\.docx$/i, "") || "Syllabus")}
               disabled={saveBusy || adaptStatus !== "idle"}
             >
-              {saveBusy ? "Saving..." : "Save to library"}
+              {saveBusy ? "Saving…" : "Save to library"}
             </Button>
             <Button
               variant="outlined"
@@ -477,7 +477,7 @@ export default function SyllabusMode({
               disabled={savingCourse || adaptStatus !== "idle"}
               title="Save this syllabus and create a Course pre-filled from these fields"
             >
-              {savingCourse ? "Saving..." : "Save as course"}
+              {savingCourse ? "Saving…" : "Save as course"}
             </Button>
           </div>
 
@@ -497,7 +497,7 @@ export default function SyllabusMode({
                     type="text"
                     size="small"
                     fullWidth
-                    placeholder="https://canvas.../courses/123"
+                    placeholder="https://canvas…/courses/123"
                     value={placeCourseUrl}
                     onChange={(e) => onPlaceCourseUrlChange(e.target.value)}
                     onKeyDown={(e) => {
@@ -509,7 +509,7 @@ export default function SyllabusMode({
                   />
                 </div>
                 <Button variant="contained" size="small" onClick={onLoadPlaceModules} disabled={placeBusy !== "idle"}>
-                  {placeBusy === "loading" ? "Loading..." : "Load modules"}
+                  {placeBusy === "loading" ? "Loading…" : "Load modules"}
                 </Button>
               </div>
               {placeModules && (
@@ -549,7 +549,7 @@ export default function SyllabusMode({
                     onClick={onAddToModule}
                     disabled={placeBusy !== "idle" || placeModuleId === ""}
                   >
-                    {placeBusy === "adding" ? "Adding..." : "Add to module"}
+                    {placeBusy === "adding" ? "Adding…" : "Add to module"}
                   </Button>
                 </div>
               )}

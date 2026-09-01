@@ -350,7 +350,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
         <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-3)" }}>
           <summary>Members</summary>
         <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-          {membersState === "loading" && <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>Loading members...</p>}
+          {membersState === "loading" && <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>Loading members…</p>}
           {membersState === "error" && membersError && <p className={styles.error}>{membersError}</p>}
           {membersState === "ready" && members.length === 0 && <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>No members.</p>}
           {membersState === "ready" &&
@@ -397,7 +397,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
               onClick={handleInvite}
               disabled={inviteBusy || !inviteValue.trim()}
             >
-              {inviteBusy ? "Inviting..." : "Invite"}
+              {inviteBusy ? "Inviting…" : "Invite"}
             </Button>
           </div>
           {inviteMsg && (inviteMsg.startsWith("Error:") ? <p className={styles.error}>{inviteMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-1)" }}>{inviteMsg}</p>)}
@@ -411,13 +411,13 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
             options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
             value={accessRepo}
             onChange={(v) => setAccessRepo(v)}
-            placeholder="Select a repository..."
+            placeholder="Select a repository…"
             noOptionsText="No repositories"
           />
 
           {accessRepo && (
             <>
-              {collaboratorsLoading && <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>Loading collaborators...</p>}
+              {collaboratorsLoading && <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)" }}>Loading collaborators…</p>}
               {!collaboratorsLoading &&
                 collaborators.map((collab) => (
                   <div key={collab.login} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", marginBottom: "var(--space-2)" }}>
@@ -477,7 +477,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                   onClick={handleAccessApply}
                   disabled={accessBusy || !accessUsername.trim()}
                 >
-                  {accessBusy ? "Applying..." : "Apply"}
+                  {accessBusy ? "Applying…" : "Apply"}
                 </Button>
               </div>
               {accessMsg && (accessMsg.startsWith("Error:") ? <p className={styles.error}>{accessMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-1)" }}>{accessMsg}</p>)}
@@ -495,7 +495,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
             options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
             value={prRepo}
             onChange={(v) => setPrRepo(v)}
-            placeholder="Select a repository..."
+            placeholder="Select a repository…"
             noOptionsText="No repositories"
           />
 
@@ -507,7 +507,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                     options={prBranches.map((b) => ({ value: b, label: b }))}
                     value={prHead}
                     onChange={(v) => setPrHead(v)}
-                    placeholder="Head branch..."
+                    placeholder="Head branch…"
                     noOptionsText="No branches"
                   />
                 </div>
@@ -516,7 +516,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                     options={prBranches.map((b) => ({ value: b, label: b }))}
                     value={prBase}
                     onChange={(v) => setPrBase(v)}
-                    placeholder="Base branch..."
+                    placeholder="Base branch…"
                     noOptionsText="No branches"
                   />
                 </div>
@@ -552,7 +552,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 onClick={handleCreatePr}
                 disabled={prBusy || !prHead || !prBase || !prTitle.trim()}
               >
-                {prBusy ? "Creating..." : "Create PR"}
+                {prBusy ? "Creating…" : "Create PR"}
               </Button>
 
               {prMsg && (prMsg.startsWith("Error:") ? <p className={styles.error}>{prMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-2)" }}>{prMsg}</p>)}
@@ -577,7 +577,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
             options={repos.map((r) => ({ value: r.fullName, label: r.name }))}
             value={bpRepo}
             onChange={(v) => setBpRepo(v)}
-            placeholder="Select a repository..."
+            placeholder="Select a repository…"
             noOptionsText="No repositories"
           />
 
@@ -587,7 +587,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 options={bpBranches.map((b) => ({ value: b, label: b }))}
                 value={bpBranch}
                 onChange={(v) => setBpBranch(v)}
-                placeholder="Select a branch..."
+                placeholder="Select a branch…"
                 noOptionsText="No branches"
               />
 
@@ -653,7 +653,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 onClick={handleBranchProtection}
                 disabled={bpBusy || !bpBranch}
               >
-                {bpBusy ? "Applying..." : "Apply protection"}
+                {bpBusy ? "Applying…" : "Apply protection"}
               </Button>
 
               {bpMsg && (bpMsg.startsWith("Error:") ? <p className={styles.error}>{bpMsg}</p> : <p style={{ color: "var(--text-secondary)", fontSize: "var(--font-size-md)", marginTop: "var(--space-2)" }}>{bpMsg}</p>)}
@@ -726,7 +726,7 @@ export default function OrgManagementPanel({ org, repos, onReposChanged }: OrgMa
                 </div>
                 <div style={{ marginTop: "var(--space-2)" }}>
                   <Button variant="contained" size="small" color="error" disabled={delBusy || delSelected.size === 0} onClick={handleDeleteRepos}>
-                    {delBusy ? "Deleting..." : `Delete ${delSelected.size || ""} selected`.replace("  ", " ")}
+                    {delBusy ? "Deleting…" : `Delete ${delSelected.size || ""} selected`.replace("  ", " ")}
                   </Button>
                 </div>
                 {delNote && (

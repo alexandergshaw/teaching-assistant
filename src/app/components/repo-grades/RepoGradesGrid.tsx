@@ -341,7 +341,7 @@ function ColumnHeaderControls({
       ? `Nothing to grade in ${column.folder}`
       : `Grade ${scopedToSelection ? `${gradeTargetCount} selected` : `all ${gradeTargetCount}`} repo${gradeTargetCount === 1 ? "" : "s"} in ${column.folder}${scanTruncated ? " (scan incomplete)" : ""}`;
   const gradeAllLabel =
-    gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}...` : restingGradeLabel;
+    gradingThisColumn && bulkProgress ? `Grading ${bulkProgress.done} of ${bulkProgress.total}…` : restingGradeLabel;
 
   // N4 items 11/13: this column's own sort - a click toggles ascending/
   // descending on THIS folder's score via toggleRepoGradeSort's "folder"
@@ -364,7 +364,7 @@ function ColumnHeaderControls({
         value={column.assignmentId ?? ""}
         onChange={(e) => onAssignmentChange(column.folder, e.target.value || null)}
       >
-        <option value="">Choose an assignment...</option>
+        <option value="">Choose an assignment…</option>
         {assignments.map((assignment) => (
           <option key={assignment.id} value={assignment.id}>
             {assignment.name}
@@ -421,7 +421,7 @@ function ColumnHeaderControls({
           onPostColumn(column, pointsPossible);
         }}
       >
-        {busy ? "Posting..." : `${alreadyAttempted ? "Re-post" : "Post"} ${plan.postable.length} grade(s)`}
+        {busy ? "Posting…" : `${alreadyAttempted ? "Re-post" : "Post"} ${plan.postable.length} grade(s)`}
       </Button>
     </div>
   );

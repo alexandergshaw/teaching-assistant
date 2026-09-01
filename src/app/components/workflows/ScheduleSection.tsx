@@ -79,7 +79,7 @@ export function ScheduleSection({
           )
         }
       >
-        {scheduleForm ? "Cancel schedule" : "Schedule..."}
+        {scheduleForm ? "Cancel schedule" : "Schedule…"}
       </Button>
 
       {scheduleForm && (

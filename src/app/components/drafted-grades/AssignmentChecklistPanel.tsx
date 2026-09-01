@@ -90,7 +90,7 @@ export default function AssignmentChecklistPanel({
     return (
       <>
         <Button size="small" variant="text" onClick={() => void derive()} disabled={state.status === "loading"} style={{ minWidth: 0 }}>
-          {state.status === "loading" ? "Deriving checklist..." : "Derive checklist"}
+          {state.status === "loading" ? "Deriving checklist…" : "Derive checklist"}
         </Button>
         {state.status === "error" && (
           <span className={styles.fieldHint} style={{ margin: 0, color: "var(--danger)", flexBasis: "100%" }}>

@@ -120,7 +120,7 @@ export function WorkflowListSidebar({
         size="small"
         value={workflowSearch}
         onChange={(e) => onSearchChange(e.target.value)}
-        placeholder="Search workflows..."
+        placeholder="Search workflows…"
         aria-label="Search workflows"
         sx={{ marginBottom: 1 }}
         data-testid="workflow-search"

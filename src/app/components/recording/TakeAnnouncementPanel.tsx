@@ -89,10 +89,10 @@ export interface TakeAnnouncementPanelProps {
 }
 
 function progressLabel(phase: string, chunk?: number, of?: number): string {
-  if (phase === "preparing") return "Preparing audio...";
+  if (phase === "preparing") return "Preparing audio…";
   if (phase === "transcribing") return `Transcribing - chunk ${chunk} of ${of}`;
-  if (phase === "drafting") return "Writing the announcement...";
-  return "Posting...";
+  if (phase === "drafting") return "Writing the announcement…";
+  return "Posting…";
 }
 
 export default function TakeAnnouncementPanel({
@@ -444,7 +444,7 @@ export default function TakeAnnouncementPanel({
             </p>
             {imageState === "generating" && (
               <p role="status" aria-live="polite" className={styles.fieldHint}>
-                Generating an image for this announcement...
+                Generating an image for this announcement…
               </p>
             )}
             {imageState === "ready" && imageBase64 && imageMimeType && (
@@ -543,10 +543,10 @@ export default function TakeAnnouncementPanel({
               onClick={handlePostButtonClick}
               aria-describedby={armed ? POST_CONFIRM_CONSEQUENCE_ID : undefined}
             >
-              {posting ? "Posting..." : armed ? "Confirm post" : "Post to Canvas"}
+              {posting ? "Posting…" : armed ? "Confirm post" : "Post to Canvas"}
             </Button>
             <Button size="small" variant="outlined" onClick={saveDraft} disabled={busy || posting || savingDraft}>
-              {savingDraft ? "Saving..." : "Save to drafts"}
+              {savingDraft ? "Saving…" : "Save to drafts"}
             </Button>
             {postUnavailableReason && <span className={styles.previewMeta}>{postUnavailableReason}</span>}
             {draftSaved && <span className={styles.previewMeta}>Saved to drafts.</span>}

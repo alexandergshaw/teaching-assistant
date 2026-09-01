@@ -67,7 +67,7 @@ export function RunInputRowDetail({ colSpan, detail, DetailSectionsView, onRunCo
         }}
       >
         {detail.status === "loading" && (
-          <div className={styles.fieldHint} role="status" aria-live="polite">Loading submission...</div>
+          <div className={styles.fieldHint} role="status" aria-live="polite">Loading submission…</div>
         )}
         {detail.status === "error" && (
           <div style={{ color: "var(--danger)" }}>{detail.error}</div>
@@ -119,7 +119,7 @@ export function RunInputRowDetail({ colSpan, detail, DetailSectionsView, onRunCo
                   onClick={onRunCode}
                   style={{ marginTop: "var(--space-2)" }}
                 >
-                  {detail.run?.status === "running" ? "Running..." : detail.run?.result ? "Run again" : "Run code"}
+                  {detail.run?.status === "running" ? "Running…" : detail.run?.result ? "Run again" : "Run code"}
                 </Button>
                 {detail.run?.result && (
                   <div className={styles.workflowCard} style={{ marginTop: "var(--space-3)" }}>

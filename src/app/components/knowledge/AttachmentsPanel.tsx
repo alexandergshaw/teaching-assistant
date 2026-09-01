@@ -267,7 +267,7 @@ export default function AttachmentsPanel({
               disabled={uploading || atCap}
               onClick={() => fileInputRef.current?.click()}
             >
-              {uploading ? "Uploading..." : "Attach files"}
+              {uploading ? "Uploading…" : "Attach files"}
             </Button>
             <input
               ref={fileInputRef}
@@ -293,7 +293,7 @@ export default function AttachmentsPanel({
 
           {attachments === null ? (
             <p className={styles.fieldHint} style={{ margin: 0 }}>
-              Loading attachments...
+              Loading attachments…
             </p>
           ) : attachments.length === 0 ? (
             <p className={styles.fieldHint} style={{ margin: 0 }}>
@@ -323,7 +323,7 @@ export default function AttachmentsPanel({
                       onClick={() => void handleDownload(attachment)}
                       disabled={downloadingId === attachment.id}
                     >
-                      {downloadingId === attachment.id ? "Downloading..." : "Download"}
+                      {downloadingId === attachment.id ? "Downloading…" : "Download"}
                     </Button>
                     <Button
                       size="small"
@@ -332,7 +332,7 @@ export default function AttachmentsPanel({
                       disabled={removingId === attachment.id}
                     >
                       {removingId === attachment.id
-                        ? "Removing..."
+                        ? "Removing…"
                         : confirmRemoveId === attachment.id
                           ? "Confirm"
                           : "Remove"}

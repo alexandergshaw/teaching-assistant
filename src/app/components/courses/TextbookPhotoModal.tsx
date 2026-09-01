@@ -378,7 +378,7 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
           {extracting && (
             <>
               <CircularProgress size={18} />
-              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Extracting...</span>
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Extracting…</span>
             </>
           )}
         </div>
@@ -422,7 +422,7 @@ export default function TextbookPhotoModal({ course, onSaveTextbook, onClose }: 
           {saving && (
             <>
               <CircularProgress size={18} />
-              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Saving...</span>
+              <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Saving…</span>
             </>
           )}
           {saved && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Saved to Textbook</span>}

@@ -222,9 +222,9 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
             onClick={() => void captionGen.handleGenerate(recordingContext.context, recordingContext.usePageContext)}
           >
             {captionGen.busy === "sampling"
-              ? "Reading video..."
+              ? "Reading video…"
               : captionGen.busy === "describing"
-                ? "Writing captions..."
+                ? "Writing captions…"
                 : captionGen.captions
                   ? "Regenerate captions"
                   : "Generate captions"}

@@ -261,7 +261,7 @@ export default function RemediationEditor({
             onClick={save}
             disabled={stage !== "ready" || !body.trim()}
           >
-            {stage === "saving" ? "Saving..." : "Save to Canvas"}
+            {stage === "saving" ? "Saving…" : "Save to Canvas"}
           </Button>
         </div>
       </div>

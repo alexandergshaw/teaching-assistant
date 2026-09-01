@@ -248,7 +248,7 @@ export default function GradingTab({
               name="canvasUrl"
               type="url"
               required
-              placeholder="Paste a discussion or assignment link (.../discussion_topics/… or .../assignments/…)"
+              placeholder="Paste a discussion or assignment link (…/discussion_topics/… or …/assignments/…)"
               value={canvasUrl}
               onChange={(e) => {
                 setCanvasUrl(e.target.value);
@@ -272,7 +272,7 @@ export default function GradingTab({
                 : canvasUrlKind === "assignment"
                   ? `Detected: assignment. Each student's submission text and uploaded files are pulled via the Canvas API and graded with the ${graderLabel}.`
                   : canvasUrl.trim()
-                    ? "Unrecognized Canvas URL. Expecting a link like .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
+                    ? "Unrecognized Canvas URL. Expecting a link like …/courses/123/discussion_topics/456 or …/courses/123/assignments/456."
                     : `Paste a Canvas discussion or assignment link, then retrieve it. The type is detected automatically and graded with the ${graderLabel}.`}
             </p>
             {canvasMeta.status !== "idle" && (
@@ -347,7 +347,7 @@ export default function GradingTab({
           {pending ? (
             <>
               <span className={styles.btnSpinner} aria-hidden="true" />
-              Grading...
+              Grading…
             </>
           ) : (
             "Start Review"

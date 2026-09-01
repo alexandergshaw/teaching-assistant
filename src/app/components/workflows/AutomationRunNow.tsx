@@ -92,7 +92,7 @@ export function AutomationRunNow({ kind, id, workflowId, workflows, isWorkflowHe
         style={disabled && !busy ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
         onClick={() => void handleClick()}
       >
-        {busy ? "Running..." : "Run now"}
+        {busy ? "Running…" : "Run now"}
       </button>
 
       {state.kind === "result" && (

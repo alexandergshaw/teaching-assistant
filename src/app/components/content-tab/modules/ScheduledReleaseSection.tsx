@@ -87,7 +87,7 @@ export function ScheduledReleaseSection({
             onReviewRelease();
           }}
         >
-          {reviewBusy ? "Building plan..." : "Review release plan"}
+          {reviewBusy ? "Building plan…" : "Review release plan"}
         </Button>
         {dateInvalid && (
           <span role="status" aria-live="polite" className={styles.bulkHint}>

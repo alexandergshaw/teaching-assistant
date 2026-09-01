@@ -90,7 +90,7 @@ function EmbedBlock({
       <div className={kbStyles.embedBroken}>
         {attachmentsLoaded
           ? `Attachment "${label}" is no longer available - it may have been removed.`
-          : "Loading attachment..."}
+          : "Loading attachment…"}
       </div>
     );
   }
@@ -112,7 +112,7 @@ function EmbedBlock({
             Could not load &ldquo;{attachment.fileName}&rdquo;: {resolved.message}
           </div>
         ) : (
-          <div className={kbStyles.embedLoading}>Loading {attachment.fileName}...</div>
+          <div className={kbStyles.embedLoading}>Loading {attachment.fileName}…</div>
         )}
         <figcaption className={kbStyles.embedCaption}>{caption}</figcaption>
       </figure>
@@ -132,7 +132,7 @@ function EmbedBlock({
       ) : resolved.status === "error" ? (
         <span className={kbStyles.embedError}>{resolved.message}</span>
       ) : (
-        <span className={kbStyles.embedCardMeta}>Loading...</span>
+        <span className={kbStyles.embedCardMeta}>Loading…</span>
       )}
     </div>
   );

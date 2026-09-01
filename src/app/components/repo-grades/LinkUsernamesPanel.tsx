@@ -321,7 +321,7 @@ export default function LinkUsernamesPanel({
               onChange={(e) => onAssignmentIdChange(e.target.value)}
               disabled={anyAssignmentListLoading || liveLinkBlockedReason !== null}
             >
-              <option value="">{anyAssignmentListLoading ? "Loading..." : "Choose an assignment..."}</option>
+              <option value="">{anyAssignmentListLoading ? "Loading…" : "Choose an assignment…"}</option>
               {assignmentOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -336,7 +336,7 @@ export default function LinkUsernamesPanel({
                 void handleLink();
               }}
             >
-              {linkBusy ? "Linking..." : "Link GitHub usernames"}
+              {linkBusy ? "Linking…" : "Link GitHub usernames"}
             </button>
           </div>
 
@@ -353,10 +353,10 @@ export default function LinkUsernamesPanel({
             </p>
           )}
 
-          {assignmentsLoading && <p className={pageStyles.fieldHint} role="status" aria-live="polite">Loading the course&apos;s Canvas assignments...</p>}
+          {assignmentsLoading && <p className={pageStyles.fieldHint} role="status" aria-live="polite">Loading the course&apos;s Canvas assignments…</p>}
           {assignmentsError && <p className={pageStyles.error}>{assignmentsError}</p>}
           {exportAssignmentsLoading && (
-            <p className={pageStyles.fieldHint} role="status" aria-live="polite">Loading the saved export&apos;s assignments...</p>
+            <p className={pageStyles.fieldHint} role="status" aria-live="polite">Loading the saved export&apos;s assignments…</p>
           )}
           {exportAssignmentsError && <p className={pageStyles.error}>{exportAssignmentsError}</p>}
           {linkError && <p className={pageStyles.error}>{linkError}</p>}
@@ -421,7 +421,7 @@ export default function LinkUsernamesPanel({
             }}
           >
             {confirmBusy
-              ? "Confirming..."
+              ? "Confirming…"
               : `Confirm all ${confirmableSummary.confirmable} suggested binding${
                   confirmableSummary.confirmable === 1 ? "" : "s"
                 }`}

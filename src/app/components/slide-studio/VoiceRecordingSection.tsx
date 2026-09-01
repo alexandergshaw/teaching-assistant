@@ -142,7 +142,7 @@ export function VoiceRecordingSection({
                   disabled={!sampleBlob || cloneBusy || !cloneName.trim() || !voiceReady}
                   onClick={() => void handleCreateCloneFromSample()}
                 >
-                  {cloneBusy ? "Creating..." : "Create voice clone"}
+                  {cloneBusy ? "Creating…" : "Create voice clone"}
                 </Button>
               </div>
               {!voiceReady && <p className={styles.fieldHint} style={{ margin: 0 }}>Requires ELEVENLABS_API_KEY.</p>}

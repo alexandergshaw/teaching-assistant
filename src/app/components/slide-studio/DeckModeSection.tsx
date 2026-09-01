@@ -82,7 +82,7 @@ export function DeckModeSection({
               onClick={handleDraftNarration}
               disabled={busy !== "idle"}
             >
-              {busy === "narrating" ? "Writing narration..." : "Draft narration"}
+              {busy === "narrating" ? "Writing narration…" : "Draft narration"}
             </Button>
           </div>
 
@@ -144,7 +144,7 @@ export function DeckModeSection({
                   disabled={outputMode === "av" ? !avatarReady || avatarBusy || !narrations : !voiceReady || genBusy || !narrations}
                   onClick={() => void (outputMode === "av" ? handleGenerateAvatar() : handleGenerateAudio())}
                 >
-                  {outputMode === "av" ? (avatarBusy ? avatarStatus ?? "Rendering..." : "Generate audio + video") : (genBusy ? genProgress ?? "Generating..." : "Generate audio")}
+                  {outputMode === "av" ? (avatarBusy ? avatarStatus ?? "Rendering…" : "Generate audio + video") : (genBusy ? genProgress ?? "Generating…" : "Generate audio")}
                 </Button>
                 <Button variant="text" size="small" onClick={handleCopyAll}>
                   Copy full script
@@ -155,7 +155,7 @@ export function DeckModeSection({
                   disabled={stitchBusy || !narrations || !narrations.some((n) => audioBySlide[n.slide])}
                   onClick={() => void handleStitch()}
                 >
-                  {stitchBusy ? stitchProgress ?? "Stitching..." : "Stitch deck video"}
+                  {stitchBusy ? stitchProgress ?? "Stitching…" : "Stitch deck video"}
                 </Button>
               </div>
               {stitchError && <p className={styles.error}>{stitchError}</p>}

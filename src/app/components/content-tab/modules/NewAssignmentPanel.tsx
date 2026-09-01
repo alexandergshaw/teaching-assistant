@@ -324,7 +324,7 @@ export function NewAssignmentPanel({
                 disabled={naBusy || !naName.trim()}
                 onClick={handleCreateAssignment}
               >
-                {naBusy ? "Creating..." : "Create assignment"}
+                {naBusy ? "Creating…" : "Create assignment"}
               </Button>
             </div>
           </div>

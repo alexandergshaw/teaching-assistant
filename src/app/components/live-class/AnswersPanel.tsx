@@ -221,7 +221,7 @@ export default function AnswersPanel({
         Questions &amp; answers
         {pendingCount > 0 && (
           <span className={styles.ghMeta} style={{ marginLeft: "var(--space-2)", fontWeight: 400 }}>
-            answering {pendingCount}...
+            answering {pendingCount}…
           </span>
         )}
       </h3>
@@ -230,7 +230,7 @@ export default function AnswersPanel({
         <TextField
           size="small"
           fullWidth
-          placeholder="Ask a follow-up question..."
+          placeholder="Ask a follow-up question…"
           value={followUp}
           onChange={(e) => setFollowUp(e.target.value)}
           onKeyDown={(e) => {

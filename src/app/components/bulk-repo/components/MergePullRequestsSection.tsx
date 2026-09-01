@@ -208,7 +208,7 @@ export function MergePullRequestsSection({
 
       {prMatches.length === 0 && (
         <p className={styles.fieldHint}>
-          {prPreviewing ? "Loading pull requests..." : "No matching open pull requests."}
+          {prPreviewing ? "Loading pull requests…" : "No matching open pull requests."}
         </p>
       )}
 

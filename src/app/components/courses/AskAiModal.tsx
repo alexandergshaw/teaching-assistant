@@ -111,7 +111,7 @@ export default function AskAiModal({
             {busy && (
               <>
                 <CircularProgress size={18} />
-                <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Asking...</span>
+                <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Asking…</span>
               </>
             )}
           </div>

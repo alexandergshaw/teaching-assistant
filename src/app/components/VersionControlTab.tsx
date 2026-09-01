@@ -161,8 +161,8 @@ export default function VersionControlTab() {
               onChange={setSelectedOrg}
               placeholder={
                 orgsState === "loading"
-                  ? "Loading organizations..."
-                  : "Choose an organization..."
+                  ? "Loading organizations…"
+                  : "Choose an organization…"
               }
               loading={orgsState === "loading"}
               noOptionsText="No organizations"

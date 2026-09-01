@@ -189,7 +189,7 @@ export default function AttachmentPreviewModal({
         </div>
         <div className={kbStyles.attachmentPreviewActions}>
           <button type="button" className={styles.previewCloseButton} onClick={onDownload} disabled={downloading}>
-            {downloading ? "Downloading..." : "Download"}
+            {downloading ? "Downloading…" : "Download"}
           </button>
           <button type="button" className={styles.previewCloseButton} onClick={onClose}>
             Close
@@ -203,7 +203,7 @@ export default function AttachmentPreviewModal({
           another application.
         </p>
       ) : status === "loading" ? (
-        <p className={styles.previewMeta} role="status" aria-live="polite">Loading preview...</p>
+        <p className={styles.previewMeta} role="status" aria-live="polite">Loading preview…</p>
       ) : status === "error" ? (
         <p className={styles.error}>{error}</p>
       ) : mode === "image" && objectUrl ? (

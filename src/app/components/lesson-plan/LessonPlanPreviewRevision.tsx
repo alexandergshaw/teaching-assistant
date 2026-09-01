@@ -33,7 +33,7 @@ export default function LessonPlanPreviewRevision({
         onClick={onRegenerate}
         disabled={isRegenerating}
       >
-        {isRegenerating ? "Regenerating..." : "Regenerate"}
+        {isRegenerating ? "Regenerating…" : "Regenerate"}
       </Button>
     </div>
   );

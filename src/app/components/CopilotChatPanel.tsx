@@ -86,7 +86,7 @@ export default function CopilotChatPanel({ filePath, fileContent }: CopilotChatP
           disabled={modelsState !== "idle"}
           sx={{ marginLeft: "auto", minWidth: 160 }}
         >
-          {modelsState === "loading" && <MenuItem value="">Loading models...</MenuItem>}
+          {modelsState === "loading" && <MenuItem value="">Loading models…</MenuItem>}
           {modelsState === "error" && <MenuItem value="">Models unavailable</MenuItem>}
           {models.map((m) => (
             <MenuItem key={m.id} value={m.id}>{m.name || m.id}</MenuItem>
@@ -104,7 +104,7 @@ export default function CopilotChatPanel({ filePath, fileContent }: CopilotChatP
         {busy && (
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
             <CircularProgress size={16} />
-            <span className={styles.fieldHint}>Thinking...</span>
+            <span className={styles.fieldHint}>Thinking…</span>
           </div>
         )}
         {error && <p className={styles.error}>{error}</p>}
@@ -121,7 +121,7 @@ export default function CopilotChatPanel({ filePath, fileContent }: CopilotChatP
           fullWidth
           multiline
           maxRows={4}
-          placeholder="Ask Copilot about this file..."
+          placeholder="Ask Copilot about this file…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {

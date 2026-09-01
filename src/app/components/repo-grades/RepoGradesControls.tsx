@@ -139,7 +139,7 @@ function describeRubricPlaceholder(source: RepoGradeRubricSource, readOnly: bool
     return "Resolved from each column's mapped Canvas assignment when you grade.";
   }
   if (readOnly && resolving) {
-    return "Resolving this rubric...";
+    return "Resolving this rubric…";
   }
   if (!readOnly) {
     return "Paste a grading rubric, or leave blank to generate one from the instructions above.";
@@ -342,7 +342,7 @@ export default function RepoGradesControls({
           disabled={coursesLoading}
           onChange={(e) => onCourseIdChange(e.target.value)}
         >
-          <MenuItem value="">{coursesLoading ? "Loading courses..." : "Choose a course..."}</MenuItem>
+          <MenuItem value="">{coursesLoading ? "Loading courses…" : "Choose a course…"}</MenuItem>
           {courses.map((c) => (
             <MenuItem key={c.id} value={c.id}>
               {c.name}
@@ -370,7 +370,7 @@ export default function RepoGradesControls({
               sx={{ flex: "1 1 220px" }}
             />
             <button type="button" className={styles.linkButton} disabled={scanLoading} onClick={() => onRefreshScan()}>
-              {scanLoading ? "Scanning..." : "Refresh"}
+              {scanLoading ? "Scanning…" : "Refresh"}
             </button>
           </div>
         </div>

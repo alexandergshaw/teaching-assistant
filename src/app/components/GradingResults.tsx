@@ -408,7 +408,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // Sort state, the derived sorted row list, and the handlers that read/write
   // them - see ./grading-results/useResultsSort.ts's own header comment for
   // why this is a pure relocation, not a behaviour change.
-  const { sortedResults, handleSort, sortLabel } = useResultsSort(run);
+  const { sortedResults, sortState, handleSort, sortLabel } = useResultsSort(run);
 
   const handleDownloadFile = (
     name: string,
@@ -501,7 +501,12 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       <div className={styles.matrixWrap}>
         <table className={styles.matrix}>
           <thead>
-            <ResultsTableHeaderRow rubricAreaNames={run.rubricAreaNames} onSort={handleSort} sortLabel={sortLabel} />
+            <ResultsTableHeaderRow
+              rubricAreaNames={run.rubricAreaNames}
+              sortState={sortState}
+              onSort={handleSort}
+              sortLabel={sortLabel}
+            />
           </thead>
           <tbody>
             {sortedResults.map((result) => {

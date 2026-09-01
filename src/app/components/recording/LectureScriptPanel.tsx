@@ -59,7 +59,7 @@ export default function LectureScriptPanel({
             disabled={scriptBusy || !scriptTopic.trim()}
             onClick={() => void handleGenerateScript()}
           >
-            {scriptBusy ? "Writing..." : script ? "Regenerate" : "Generate script"}
+            {scriptBusy ? "Writing…" : script ? "Regenerate" : "Generate script"}
           </Button>
         </div>
         <TextField

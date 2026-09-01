@@ -157,7 +157,7 @@ export default function RepoSettingsPanel({ repo, onUpdated }: { repo: GithubRep
         disabled={saveBusy}
         sx={{ mt: "var(--space-3)" }}
       >
-        {saveBusy ? "Saving..." : "Save changes"}
+        {saveBusy ? "Saving…" : "Save changes"}
       </Button>
 
       {saveMsg && (

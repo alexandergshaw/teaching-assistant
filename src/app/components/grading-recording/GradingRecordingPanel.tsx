@@ -554,7 +554,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           {capturing ? "Stop capture" : "Start capture"}
         </Button>
         <Button variant="outlined" size="small" disabled={gradingBusy} onClick={() => void handleGradeAll()}>
-          {gradingBusy ? "Grading..." : "Grade submissions"}
+          {gradingBusy ? "Grading…" : "Grade submissions"}
         </Button>
       </div>
       <p className={styles.fieldHint}>You can also stop from your browser&apos;s sharing bar.</p>
@@ -595,7 +595,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
                 ? "Capturing - 0 submissions so far."
                 : `${gradingRows.totalCount} submission${gradingRows.totalCount === 1 ? "" : "s"} found`}
             </span>
-            {extracting && <span>Reading the screen...</span>}
+            {extracting && <span>Reading the screen…</span>}
             {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
           </div>
         )}

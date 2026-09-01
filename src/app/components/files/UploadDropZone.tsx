@@ -19,7 +19,7 @@ export function UploadDropZone({ uploads, onDrop, fileCount }: UploadDropZonePro
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
           {uploads.map((row, idx) => (
             <span key={idx} className={styles.ccHint} style={{ color: row.status === "error" ? "var(--danger)" : undefined }}>
-              {row.name}: {row.status === "uploading" ? "uploading..." : row.status === "done" ? "uploaded" : `failed (${row.error})`}
+              {row.name}: {row.status === "uploading" ? "uploading…" : row.status === "done" ? "uploaded" : `failed (${row.error})`}
             </span>
           ))}
         </div>

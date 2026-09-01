@@ -136,7 +136,7 @@ export default function PublishToCanvasPage({ filePath, content }: PublishToCanv
                   }
                   onClick={handleCreate}
                 >
-                  {busy ? "Creating..." : "Create page"}
+                  {busy ? "Creating…" : "Create page"}
                 </Button>
                 <Button
                   variant="text"

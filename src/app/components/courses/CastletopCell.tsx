@@ -225,7 +225,7 @@ export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellPr
             onClick={handleGenerate}
             className={tableStyles.mb3}
           >
-            {generating ? "Generating..." : "Generate"}
+            {generating ? "Generating…" : "Generate"}
           </Button>
 
           <div className={`${tableStyles.stackSm} ${tableStyles.mb3}`}>
@@ -315,7 +315,7 @@ export function CastletopCell({ course, onCourseUpdated, menu }: CastletopCellPr
                       disabled={removingPath === file.path}
                       onClick={() => handleRemoveFile(file.path)}
                     >
-                      {removingPath === file.path ? "Removing..." : "Remove"}
+                      {removingPath === file.path ? "Removing…" : "Remove"}
                     </button>
                   </div>
                 </div>

@@ -168,7 +168,7 @@ export function RunInputPrompt({
           style={{ marginTop: "var(--space-2)" }}
         >
           <MenuItem value="" disabled>
-            Choose...
+            Choose…
           </MenuItem>
           {runInput.options.map((opt) => (
             <MenuItem key={opt.value} value={opt.value}>
@@ -198,7 +198,7 @@ export function RunInputPrompt({
             }}
             style={{ marginTop: "var(--space-2)" }}
           >
-            Choose zip...
+            Choose zip…
           </Button>
           {state.files.length > 0 && (
             <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 0" }}>

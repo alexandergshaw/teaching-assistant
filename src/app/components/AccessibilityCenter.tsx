@@ -360,7 +360,7 @@ export default function AccessibilityCenter() {
                 disabled={a11y.linkStatus === "running"}
                 title="Run Canvas's link validator and merge broken links into this list"
               >
-                {a11y.linkStatus === "running" ? "Checking links..." : a11y.linkStatus === "done" ? "Recheck links" : "Check links"}
+                {a11y.linkStatus === "running" ? "Checking links…" : a11y.linkStatus === "done" ? "Recheck links" : "Check links"}
               </Button>
               <Button
                 variant={reviewQueueNow.length === 0 ? "outlined" : "contained"}
@@ -377,7 +377,7 @@ export default function AccessibilityCenter() {
                 onClick={() => a11y.rescanAll()}
                 disabled={a11y.status === "scanning"}
               >
-                {a11y.status === "scanning" ? "Scanning..." : "Rescan"}
+                {a11y.status === "scanning" ? "Scanning…" : "Rescan"}
               </Button>
               <Button
                 variant="outlined"
@@ -416,7 +416,7 @@ export default function AccessibilityCenter() {
                 title="Auto-fix the selected items (AI alt/link text, headings, titles, language) and save to Canvas without opening an editor"
                 sx={{ marginLeft: "auto", fontSize: "var(--font-size-sm)" }}
               >
-                {fixing ? `Fixing ${fixing.done}/${fixing.total}...` : "Fix selected without preview"}
+                {fixing ? `Fixing ${fixing.done}/${fixing.total}…` : "Fix selected without preview"}
               </Button>
             </div>
           )}

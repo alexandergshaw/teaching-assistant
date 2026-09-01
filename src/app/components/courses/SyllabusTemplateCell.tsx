@@ -160,7 +160,7 @@ export default function SyllabusTemplateCell({ course, templates, onSave, onTemp
           disabled={uploading}
           onClick={() => fileInputRef.current?.click()}
         >
-          {uploading ? "Uploading..." : "Upload a template"}
+          {uploading ? "Uploading…" : "Upload a template"}
         </button>
         <input
           ref={fileInputRef}

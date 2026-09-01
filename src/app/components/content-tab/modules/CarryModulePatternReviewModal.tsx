@@ -288,7 +288,7 @@ export function CarryModulePatternReviewModal({
           Cancel
         </Button>
         <Button variant="contained" size="small" onClick={onApply} disabled={applyBusy}>
-          {applyBusy ? "Applying..." : "Apply"}
+          {applyBusy ? "Applying…" : "Apply"}
         </Button>
       </div>
     </ModalShell>

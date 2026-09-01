@@ -337,7 +337,7 @@ export default function LecturePlanPreviewModal({
             onClick={activeTab === "slides" ? handleReviseSlides : handleReviseProse}
             disabled={reviseBusy || !reviseInstr.trim()}
           >
-            {reviseBusy ? "Revising..." : "Revise with AI"}
+            {reviseBusy ? "Revising…" : "Revise with AI"}
           </Button>
           <Button
             variant="outlined"

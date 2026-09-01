@@ -111,7 +111,7 @@ export default function FilePreviewModal({
                 onClick={handleRun}
                 disabled={running}
               >
-                {running ? "Running..." : "Run"}
+                {running ? "Running…" : "Run"}
               </Button>
             )}
             <button type="button" className={styles.previewCloseButton} onClick={onClose}>

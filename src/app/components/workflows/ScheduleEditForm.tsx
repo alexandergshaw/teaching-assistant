@@ -172,7 +172,7 @@ export function ScheduleEditForm({
           sx={{ minWidth: 150 }}
         >
           <MenuItem value="none">Does not repeat</MenuItem>
-          <MenuItem value="interval">Every...</MenuItem>
+          <MenuItem value="interval">Every…</MenuItem>
           <MenuItem value="daily">Daily</MenuItem>
           <MenuItem value="weekly">Weekly</MenuItem>
         </TextField>
@@ -262,7 +262,7 @@ export function ScheduleEditForm({
               : void onCreate()
           }
         >
-          {scheduleBusy ? "Saving..." : editingScheduleId ? "Save changes" : "Save schedule"}
+          {scheduleBusy ? "Saving…" : editingScheduleId ? "Save changes" : "Save schedule"}
         </Button>
         {editingScheduleId && (
           <Button

@@ -737,7 +737,7 @@ export function BulkModulesSection({
               onReviewCarryPattern();
             }}
           >
-            {carryReviewBusy ? "Reading module..." : "Review carry plan"}
+            {carryReviewBusy ? "Reading module…" : "Review carry plan"}
           </Button>
           <span className={styles.bulkHint}>
             Carries the template module&apos;s item types, order, points, submission types and relative due dates onto every other selected

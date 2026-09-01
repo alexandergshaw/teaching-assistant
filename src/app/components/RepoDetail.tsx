@@ -83,10 +83,10 @@ export default function RepoDetail() {
             onChange={(v) => setRepoRef(v)}
             placeholder={
               reposState === "loading"
-                ? "Loading repositories..."
+                ? "Loading repositories…"
                 : reposState === "error"
                   ? "Error loading repositories"
-                  : "Choose a repository..."
+                  : "Choose a repository…"
             }
             disabled={reposState === "loading"}
             loading={reposState === "loading"}

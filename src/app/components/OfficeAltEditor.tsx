@@ -208,7 +208,7 @@ export default function OfficeAltEditor({
                 disabled={suggestingAll || stage !== "ready"}
                 sx={{ flexShrink: 0, fontSize: "var(--font-size-xs)" }}
               >
-                {suggestingAll ? "Suggesting..." : "Suggest missing with AI"}
+                {suggestingAll ? "Suggesting…" : "Suggest missing with AI"}
               </Button>
             )}
           </div>
@@ -313,7 +313,7 @@ export default function OfficeAltEditor({
                       title="Suggest alt text with AI"
                       sx={{ flexShrink: 0, fontSize: "var(--font-size-sm)" }}
                     >
-                      {suggesting[im.id] ? "..." : "Suggest"}
+                      {suggesting[im.id] ? "…" : "Suggest"}
                     </Button>
                   </div>
                   </div>
@@ -370,7 +370,7 @@ export default function OfficeAltEditor({
               onClick={save}
               disabled={stage !== "ready" || images.length === 0}
             >
-              {stage === "saving" ? "Saving..." : "Save to Canvas"}
+              {stage === "saving" ? "Saving…" : "Save to Canvas"}
             </Button>
           </div>
         </div>

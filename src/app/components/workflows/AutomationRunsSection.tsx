@@ -174,7 +174,7 @@ export function AutomationRunsSection({
 
       {status === "loading" && (
         <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>
-          Loading recent runs...
+          Loading recent runs…
         </p>
       )}
 
@@ -223,7 +223,7 @@ export function AutomationRunsSection({
                         onClick={() => void handleDownloadArtifact(artifact.id)}
                         style={{ textAlign: "left" }}
                       >
-                        {artifactBusyId === artifact.id ? "Preparing..." : artifact.name}
+                        {artifactBusyId === artifact.id ? "Preparing…" : artifact.name}
                       </button>
                     ))
                   )}
@@ -247,7 +247,7 @@ export function AutomationRunsSection({
 
       {logRunId && logBusy && (
         <p className={styles.fieldHint} style={{ margin: 0 }}>
-          Loading log...
+          Loading log…
         </p>
       )}
 

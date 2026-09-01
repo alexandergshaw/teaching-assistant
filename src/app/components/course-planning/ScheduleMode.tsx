@@ -142,7 +142,7 @@ export default function ScheduleMode({
           onClick={onGenerateSchedule}
           disabled={isGeneratingSchedule || !courseDescription.trim()}
         >
-          {isGeneratingSchedule ? "Generating schedule..." : "Generate Schedule"}
+          {isGeneratingSchedule ? "Generating schedule…" : "Generate Schedule"}
         </Button>
       </>
     );
@@ -239,7 +239,7 @@ export default function ScheduleMode({
               disabled={isGeneratingProjectPrompt}
               title="Use this schedule for Course Project Planning and generate the Copilot prompt"
             >
-              {isGeneratingProjectPrompt ? "Generating prompt..." : "Use for Project Planning"}
+              {isGeneratingProjectPrompt ? "Generating prompt…" : "Use for Project Planning"}
             </Button>
           </div>
         </>

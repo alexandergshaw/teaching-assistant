@@ -36,7 +36,7 @@ function ScopePicker({
           onChange={(_, v) => onChange(v.join("\n"))}
           loading={loading}
           renderInput={(params) => (
-            <TextField {...params} size="small" placeholder={loading ? "Loading..." : "Select..."} />
+            <TextField {...params} size="small" placeholder={loading ? "Loading…" : "Select…"} />
           )}
         />
       )}

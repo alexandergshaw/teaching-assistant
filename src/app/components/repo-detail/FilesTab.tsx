@@ -29,7 +29,7 @@ const MonacoFileEditor = dynamic(() => import("../MonacoFileEditor"), {
           animation: "ta-spin 0.8s linear infinite",
         }}
       />
-      Loading editor...
+      Loading editor…
     </div>
   ),
 });
@@ -153,7 +153,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
           />
           <div style={{ display: "flex", gap: "var(--space-2)" }}>
             <Button variant="contained" size="small" disabled={creatingFile || !newFilePath.trim()} onClick={handleCreateFile}>
-              {creatingFile ? "Creating..." : `Create file on ${branch}`}
+              {creatingFile ? "Creating…" : `Create file on ${branch}`}
             </Button>
             <Button variant="text" size="small" onClick={() => setShowNewFile(false)}>
               Cancel
@@ -227,7 +227,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
           </p>
           <div style={{ display: "flex", gap: "var(--space-2)" }}>
             <Button variant="contained" size="small" disabled={creatingFolder || !newFolderPath.trim()} onClick={handleCreateFolder}>
-              {creatingFolder ? "Creating..." : bulkFolders ? `Create folders on ${branch}` : `Create folder on ${branch}`}
+              {creatingFolder ? "Creating…" : bulkFolders ? `Create folders on ${branch}` : `Create folder on ${branch}`}
             </Button>
             <Button variant="text" size="small" onClick={() => setShowNewFolder(false)}>
               Cancel
@@ -243,10 +243,10 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
           <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: "var(--font-size-md)", fontWeight: 500 }}>{selectedPaths.size} selected</span>
             <Button variant="outlined" size="small" color="error" disabled={bulkBusy} onClick={handleBulkDelete}>
-              {bulkBusy ? "Working..." : "Delete"}
+              {bulkBusy ? "Working…" : "Delete"}
             </Button>
             <Button variant="outlined" size="small" disabled={bulkBusy} onClick={() => setShowMove((v) => !v)}>
-              {showMove ? "Cancel move" : "Move to..."}
+              {showMove ? "Cancel move" : "Move to…"}
             </Button>
             <Button variant="text" size="small" onClick={clearSelection}>
               Clear
@@ -263,7 +263,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                 sx={{ minWidth: 260, "& .MuiInputBase-input": { fontFamily: "monospace", fontSize: "var(--font-size-sm)" } }}
               />
               <Button variant="contained" size="small" disabled={bulkBusy} onClick={handleBulkMove}>
-                {bulkBusy ? "Moving..." : `Move ${selectedPaths.size} to ${moveDest.trim() ? moveDest.trim() : "root"}`}
+                {bulkBusy ? "Moving…" : `Move ${selectedPaths.size} to ${moveDest.trim() ? moveDest.trim() : "root"}`}
               </Button>
             </div>
           )}
@@ -350,7 +350,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
             {treeState === "loading" && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
                 <CircularProgress size={24} />
-                <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading files...</span>
+                <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading files…</span>
               </div>
             )}
             {treeState === "error" && <p className={styles.error}>Failed to load files</p>}
@@ -479,7 +479,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
               {fileState === "loading" ? (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--space-2)", padding: "var(--space-4)" }} role="status" aria-live="polite">
                   <CircularProgress size={24} />
-                  <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading file...</span>
+                  <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading file…</span>
                 </div>
               ) : (
                 <>
@@ -506,7 +506,7 @@ export function FilesTab({ branch, files }: { branch: string; files: FilesTabSta
                       disabled={committing || !commitMessage.trim() || editContent === fileContent}
                       onClick={handleCommit}
                     >
-                      {committing ? "Committing..." : `Commit to ${branch}`}
+                      {committing ? "Committing…" : `Commit to ${branch}`}
                     </Button>
                   </div>
                   {commitMsg && (

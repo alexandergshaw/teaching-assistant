@@ -405,7 +405,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
       {status === "loading" && (
         <div className={styles.loadingState} role="status" aria-live="polite">
           <div className={styles.spinner} />
-          <div className={styles.loadingTitle}>Loading drafted grades...</div>
+          <div className={styles.loadingTitle}>Loading drafted grades…</div>
         </div>
       )}
 
@@ -441,7 +441,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
               <TextField
                 size="small"
                 type="search"
-                placeholder="Search by student, assignment, or course..."
+                placeholder="Search by student, assignment, or course…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 sx={{ flex: "1 1 200px", maxWidth: 300 }}
@@ -543,7 +543,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                       {editingDraftId === draft.id ? (
                         <>
                           <Button variant="contained" size="small" disabled={busy === draft.id} onClick={() => void saveEdit(draft)}>
-                            {busy === draft.id ? "Saving..." : "Save"}
+                            {busy === draft.id ? "Saving…" : "Save"}
                           </Button>
                           <Button variant="outlined" size="small" disabled={busy === draft.id} onClick={cancelEdit}>
                             Cancel
@@ -575,7 +575,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                 onClick={() => void handlePost(draft, gradeCount)}
                               >
                                 {busy === draft.id
-                                  ? "Posting..."
+                                  ? "Posting…"
                                   : postArmed
                                     ? `Confirm post ${gradeCount} grade${gradeCount === 1 ? "" : "s"} to ${courses.length > 0 ? courses.join(", ") : "Canvas"} - no undo`
                                     : "Post"}
@@ -771,7 +771,7 @@ export default function DraftedGradesTab({ onOpenWorkflow }: { onOpenWorkflow?: 
                                             <div className={styles.draftExpand}>
                                               {(() => {
                                                 const sub = submissions[expandKey];
-                                                if (!sub || sub.status === "loading") return <span className={styles.fieldHint} role="status" aria-live="polite">Loading submission...</span>;
+                                                if (!sub || sub.status === "loading") return <span className={styles.fieldHint} role="status" aria-live="polite">Loading submission…</span>;
                                                 if (sub.status === "error") return <div className={styles.error}>{sub.error || "Could not load the submission."}</div>;
                                                 const d = sub.data!;
                                                 const isGithubSubmission = !!d.url && looksLikeGithubUrl(d.url);

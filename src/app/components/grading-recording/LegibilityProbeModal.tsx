@@ -258,7 +258,7 @@ export function LegibilityProbeModal({
             {capturing ? "Stop capture" : "Start capture"}
           </Button>
           <Button variant="outlined" size="small" onClick={() => void handleRunProbe()} disabled={!canRun}>
-            {busy ? "Reading..." : "Run legibility probe"}
+            {busy ? "Reading…" : "Run legibility probe"}
           </Button>
         </div>
         <p className={styles.fieldHint}>

@@ -79,7 +79,7 @@ export default function ProjectMode({
         onClick={onGenerateProjectPrompt}
         disabled={isGeneratingProjectPrompt || !projectFileName}
       >
-        {isGeneratingProjectPrompt ? "Generating prompt..." : "Generate Copilot Prompt"}
+        {isGeneratingProjectPrompt ? "Generating prompt…" : "Generate Copilot Prompt"}
       </Button>
       {projectPrompt && (
         <div className={styles.field}>
@@ -163,7 +163,7 @@ export default function ProjectMode({
                 sx={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}
               />
               <Button variant="contained" size="small" onClick={onCreateRepo} disabled={creatingRepo}>
-                {creatingRepo ? "Creating repo..." : "Create GitHub repo"}
+                {creatingRepo ? "Creating repo…" : "Create GitHub repo"}
               </Button>
             </div>
             {createRepoError && <p className={styles.error}>{createRepoError}</p>}

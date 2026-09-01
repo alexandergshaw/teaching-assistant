@@ -267,7 +267,7 @@ export function AddItemRow({
 
         {addType[mc.id] === "VideoLibrary" && videoPickerModuleId === mc.id && (
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", flex: "1 1 100%", maxWidth: "100%" }}>
-            {videoPickerLoading && <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading your library...</span>}
+            {videoPickerLoading && <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading your library…</span>}
             {videoPickerError && <span style={{ fontSize: "var(--font-size-md)", color: "var(--danger)" }}>{videoPickerError}</span>}
             {!videoPickerLoading && videoPickerFiles && videoPickerFiles.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
@@ -285,7 +285,7 @@ export function AddItemRow({
                       onClick={() => void addVideoFromLibrary(mc, file)}
                       disabled={videoPickerBusy || busy}
                     >
-                      {videoPickerBusy ? "Adding..." : "Add"}
+                      {videoPickerBusy ? "Adding…" : "Add"}
                     </Button>
                   </div>
                 ))}
@@ -299,7 +299,7 @@ export function AddItemRow({
 
         {addType[mc.id] === "RepoLink" && repoPickerModuleId === mc.id && (
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", flex: "1 1 100%", maxWidth: "100%" }}>
-            {repoPickerLoading && <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading your repositories...</span>}
+            {repoPickerLoading && <span style={{ fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>Loading your repositories…</span>}
             {repoPickerError && <span style={{ fontSize: "var(--font-size-md)", color: "var(--danger)" }}>{repoPickerError}</span>}
             {!repoPickerLoading && ownedRepos && (
               <>
@@ -334,7 +334,7 @@ export function AddItemRow({
                     onClick={() => void addRepoLink(mc)}
                     disabled={repoPickerBusy || busy || !(addRepoValue[mc.id] ?? "").match(/^[^/\s]+\/[^/\s]+$/)}
                   >
-                    {repoPickerBusy ? "Adding..." : "Add"}
+                    {repoPickerBusy ? "Adding…" : "Add"}
                   </Button>
                   <Button variant="text" size="small" onClick={() => closeRepoPicker()} disabled={repoPickerBusy || busy}>
                     Cancel

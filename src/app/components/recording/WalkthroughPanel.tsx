@@ -25,11 +25,11 @@ function stageStatusText(
   savedTakeName: string | null
 ): string {
   switch (stage) {
-    case "loading": return "Loading the recording...";
+    case "loading": return "Loading the recording…";
     case "ready": return "Ready - press Start walkthrough to begin.";
     case "recording": return "Recording.";
     case "paused": return "Paused.";
-    case "finishing": return "Finishing...";
+    case "finishing": return "Finishing…";
     case "done": return savedTakeName ? `Saved as ${savedTakeName}.` : "Saved.";
     case "error": return "Could not start the walkthrough.";
     default: return "";
@@ -218,7 +218,7 @@ export default function WalkthroughPanel({
         )}
         {(stage === "loading" || stage === "finishing") && (
           <Button variant="contained" disabled>
-            {stage === "loading" ? "Loading..." : "Finishing..."}
+            {stage === "loading" ? "Loading…" : "Finishing…"}
           </Button>
         )}
         <Button

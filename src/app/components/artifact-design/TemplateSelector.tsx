@@ -112,7 +112,7 @@ export default function TemplateSelector({
         </h3>
         {loading ? (
           <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", marginBottom: "var(--space-4)", textAlign: "center", padding: "var(--space-4) 0" }}>
-            Loading...
+            Loading…
           </div>
         ) : custom.length === 0 ? (
           <div style={{ fontSize: "var(--font-size-md)", color: "var(--text-muted)", marginBottom: "var(--space-4)", textAlign: "center", padding: "var(--space-4) 0" }}>

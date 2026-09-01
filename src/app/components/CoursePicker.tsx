@@ -304,10 +304,10 @@ export default function CoursePicker({
                 !activeInstitution
                   ? "No school selected"
                   : coursesState === "loading"
-                  ? "Loading courses..."
+                  ? "Loading courses…"
                   : courses.length === 0
                   ? "No courses found"
-                  : "Select a course..."
+                  : "Select a course…"
               }
               disabled={coursesState === "loading" || courses.length === 0}
               loading={coursesState === "loading"}
@@ -354,7 +354,7 @@ export default function CoursePicker({
             </>
           )}
           {exportSectionState.kind === "loading" && (
-            <p className={styles.fieldHint}>Loading your saved courses...</p>
+            <p className={styles.fieldHint}>Loading your saved courses…</p>
           )}
           {exportSectionState.kind === "error" && (
             <p className={styles.fieldHint}>{exportSectionState.message}</p>

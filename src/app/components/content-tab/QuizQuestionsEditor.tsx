@@ -169,7 +169,7 @@ export function QuizQuestionsEditor({
                     </span>
                     <span style={{ flex: 1 }} />
                     <Button variant="contained" size="small" disabled={busyKey === q.key} onClick={() => void saveQuestion(q)}>
-                      {busyKey === q.key ? "Saving..." : q.id === 0 ? "Add" : "Save"}
+                      {busyKey === q.key ? "Saving…" : q.id === 0 ? "Add" : "Save"}
                     </Button>
                     <Button variant="outlined" size="small" color="error" disabled={busyKey === q.key} onClick={() => void deleteQuestion(q)}>
                       Delete

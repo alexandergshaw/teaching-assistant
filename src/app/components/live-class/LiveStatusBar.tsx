@@ -84,7 +84,7 @@ export default function LiveStatusBar({
           {moduleName ? ` - ${moduleName}` : ""}
         </span>
         <span className={styles.ghMeta}>{PATH_LABELS[activePath]}</span>
-        {pendingAnswerCount > 0 && <span className={styles.ghMeta}>Answering {pendingAnswerCount} question{pendingAnswerCount === 1 ? "" : "s"}...</span>}
+        {pendingAnswerCount > 0 && <span className={styles.ghMeta}>Answering {pendingAnswerCount} question{pendingAnswerCount === 1 ? "" : "s"}…</span>}
       </div>
 
       {recentWarning && (
@@ -95,7 +95,7 @@ export default function LiveStatusBar({
 
       <div className={styles.ghActions}>
         <Button variant="contained" color="error" onClick={onStop} disabled={ending}>
-          {ending ? "Ending session..." : "End class"}
+          {ending ? "Ending session…" : "End class"}
         </Button>
       </div>
     </div>

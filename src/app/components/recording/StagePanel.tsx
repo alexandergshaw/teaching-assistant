@@ -384,8 +384,8 @@ export default function StagePanel({
           <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--space-2) var(--space-4)", background: "color-mix(in srgb, var(--navy) 72%, transparent)", pointerEvents: "none" }}>
             <span style={{ color: "var(--on-navy)", fontWeight: 600, fontSize: "var(--font-size-lg)" }}>
               {cardNotice.kind === "title"
-                ? `Title card is recording - your video starts in ${cardNotice.secondsLeft}...`
-                : `Adding the closing card (${cardNotice.secondsLeft}s)...`}
+                ? `Title card is recording - your video starts in ${cardNotice.secondsLeft}…`
+                : `Adding the closing card (${cardNotice.secondsLeft}s)…`}
             </span>
           </div>
         )}
@@ -672,7 +672,7 @@ export default function StagePanel({
               Pause
             </Button>
             <Button variant="contained" color="error" onClick={stopRecording} disabled={finishing}>
-              {finishing ? "Finishing..." : "Stop"}
+              {finishing ? "Finishing…" : "Stop"}
             </Button>
           </>
         ) : (
@@ -681,7 +681,7 @@ export default function StagePanel({
               Resume
             </Button>
             <Button variant="contained" color="error" onClick={stopRecording} disabled={finishing}>
-              {finishing ? "Finishing..." : "Stop"}
+              {finishing ? "Finishing…" : "Stop"}
             </Button>
           </>
         )}

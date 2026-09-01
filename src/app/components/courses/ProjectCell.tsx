@@ -180,7 +180,7 @@ export function ProjectCell({
               <>
                 <CircularProgress size={16} />
                 <span style={{ fontSize: "var(--font-size-xs)", color: "var(--text-muted)" }}>
-                  {busy === "generate" ? "Generating..." : "Clearing..."}
+                  {busy === "generate" ? "Generating…" : "Clearing…"}
                 </span>
               </>
             )}

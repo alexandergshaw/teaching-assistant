@@ -191,7 +191,7 @@ export function ScheduledReleasesPanel() {
                           disabled={cancellingId === release.id}
                           onClick={() => handleCancel(release)}
                         >
-                          {cancellingId === release.id ? "Cancelling..." : cancelButtonLabel(release.wasPublished)}
+                          {cancellingId === release.id ? "Cancelling…" : cancelButtonLabel(release.wasPublished)}
                         </button>
                       ) : (
                         <span className={styles.fieldHint}>-</span>

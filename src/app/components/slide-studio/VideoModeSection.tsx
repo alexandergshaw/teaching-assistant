@@ -93,7 +93,7 @@ export function VideoModeSection({
             disabled={!vidUrl || genBusyV}
             onClick={() => void handleGenerateNarration()}
           >
-            {genBusyV ? "Generating narration..." : "Generate narration"}
+            {genBusyV ? "Generating narration…" : "Generate narration"}
           </Button>
         </div>
       </div>
@@ -180,7 +180,7 @@ export function VideoModeSection({
             disabled={voBusyV !== null || !segments.some((s) => s.text.trim())}
             onClick={() => void handleGenerateAllVoices()}
           >
-            {voBusyV === "all" ? "Generating voices..." : "Generate all voices"}
+            {voBusyV === "all" ? "Generating voices…" : "Generate all voices"}
           </Button>
         </>
       )}
@@ -205,7 +205,7 @@ export function VideoModeSection({
               disabled={!segments || !Object.keys(segAudio).length || applyBusy}
               onClick={() => void handleApplyNarration()}
             >
-              {applyBusy ? `Applying... ${applyPct}%` : "Apply narration to video"}
+              {applyBusy ? `Applying… ${applyPct}%` : "Apply narration to video"}
             </Button>
           </div>
         </div>
@@ -234,7 +234,7 @@ export function VideoModeSection({
               Download video
             </a>
             <span className={styles.ghMeta}>
-              {resultSave === "saving" && "Saving to library..."}
+              {resultSave === "saving" && "Saving to library…"}
               {resultSave === "done" && "In library - see the Files tab"}
               {resultSave === "failed" && "Library save failed"}
             </span>

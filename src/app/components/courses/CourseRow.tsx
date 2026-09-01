@@ -301,7 +301,7 @@ export default function CourseRow({
               ) : undefined
             }
             emptyLabel="None"
-            placeholder="Cengage | https://..."
+            placeholder="Cengage | https://…"
             hint="One per line: Name | link (link optional)."
             onSave={save("integrations")}
             menu={cellMenuFor("integrations")}

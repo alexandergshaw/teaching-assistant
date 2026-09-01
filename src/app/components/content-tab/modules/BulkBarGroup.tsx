@@ -154,7 +154,7 @@ export function BulkBarGroup({ group, facts, runtime, state, children, announceB
       {runtime.busy && announceBusy && (
         <span role="status" aria-live="polite">
           {" "}
-          Working...
+          Working…
         </span>
       )}
       {/* Finding 4's suppressed case: still visible (context for which
@@ -162,7 +162,7 @@ export function BulkBarGroup({ group, facts, runtime, state, children, announceB
           region duplicating the one bar-level announcement ModulesView.tsx
           renders for the shared opBusy signal - see the announceBusy prop's
           own doc comment above. */}
-      {runtime.busy && !announceBusy && <span> Working...</span>}
+      {runtime.busy && !announceBusy && <span> Working…</span>}
     </span>
   );
 

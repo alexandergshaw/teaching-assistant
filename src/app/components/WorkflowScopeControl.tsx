@@ -68,7 +68,7 @@ export default function WorkflowScopeControl({
             onChange={(_, v) => onVal(v.join("\n"))}
             loading={loading}
             renderInput={(params) => (
-              <TextField {...params} size="small" placeholder={loading ? "Loading..." : "Select..."} />
+              <TextField {...params} size="small" placeholder={loading ? "Loading…" : "Select…"} />
             )}
           />
         )}

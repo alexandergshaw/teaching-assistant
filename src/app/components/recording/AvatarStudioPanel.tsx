@@ -273,7 +273,7 @@ export default function AvatarStudioPanel({
         <div aria-live="polite">
           {(captureState === "previewing" || captureState === "recording") && !frameRateAssessment && (
             <p className={styles.fieldHint} style={{ margin: 0 }}>
-              Checking the camera&apos;s frame rate...
+              Checking the camera&apos;s frame rate…
             </p>
           )}
           {(captureState === "previewing" || captureState === "recording") &&
@@ -320,7 +320,7 @@ export default function AvatarStudioPanel({
               disabled={capturePreviewStarting}
               onClick={() => void startCapturePreview()}
             >
-              {capturePreviewStarting ? "Starting..." : "Start camera"}
+              {capturePreviewStarting ? "Starting…" : "Start camera"}
             </Button>
           )}
           {captureState === "previewing" && (
@@ -389,7 +389,7 @@ export default function AvatarStudioPanel({
               }
               onClick={() => void saveTake()}
             >
-              {saveState === "saving" ? "Saving..." : "Save to library"}
+              {saveState === "saving" ? "Saving…" : "Save to library"}
             </Button>
           </div>
         )}
@@ -438,7 +438,7 @@ export default function AvatarStudioPanel({
                   disabled={trainBusy || !consentChecked || configured === false}
                   onClick={() => void startTraining()}
                 >
-                  {trainBusy ? "Starting..." : "Start training"}
+                  {trainBusy ? "Starting…" : "Start training"}
                 </Button>
               </div>
               {trainError && <p className={styles.error}>{trainError}</p>}
@@ -451,7 +451,7 @@ export default function AvatarStudioPanel({
         <h2 className={styles.adaptPanelTitle}>Your likenesses</h2>
         {likenessesError && <p className={styles.error}>{likenessesError}</p>}
         {!likenessesLoaded && !likenessesError && (
-          <p className={styles.fieldHint} role="status" aria-live="polite">Loading your likenesses...</p>
+          <p className={styles.fieldHint} role="status" aria-live="polite">Loading your likenesses…</p>
         )}
         {likenessesLoaded && likenesses.length === 0 && !likenessesError && (
           <p className={styles.fieldHint}>No likenesses yet - record and save a sample above to train one.</p>
@@ -550,7 +550,7 @@ export default function AvatarStudioPanel({
             disabled={scriptBusy || !prompt.trim() || configured === false}
             onClick={() => void generateScript()}
           >
-            {scriptBusy ? "Writing..." : script ? "Regenerate script" : "Generate script"}
+            {scriptBusy ? "Writing…" : script ? "Regenerate script" : "Generate script"}
           </Button>
         </div>
         {scriptError && <p className={styles.error}>{scriptError}</p>}
@@ -581,7 +581,7 @@ export default function AvatarStudioPanel({
                 }
                 onClick={() => void startVideo()}
               >
-                {videoBusy ? "Rendering..." : "Render video"}
+                {videoBusy ? "Rendering…" : "Render video"}
               </Button>
             </div>
             {videoBusy && videoStatus && <p className={styles.ghMeta}>Provider status: {videoStatus}</p>}

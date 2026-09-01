@@ -33,7 +33,7 @@ export function RepoSelector({
         size="small"
         fullWidth
         label="Filter repositories"
-        placeholder="Type to filter..."
+        placeholder="Type to filter…"
         value={filterText}
         onChange={(e) => onFilterChange(e.target.value)}
         sx={{ mb: "var(--space-3)" }}

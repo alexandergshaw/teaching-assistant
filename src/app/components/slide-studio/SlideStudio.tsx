@@ -57,7 +57,7 @@ export default function SlideStudio() {
 
       <StockVoiceSection voiceCloning={voiceCloning} voiceReady={deckMode.voiceReady} />
 
-      {busy === "extracting" && <p className={styles.ghMeta}>Reading deck...</p>}
+      {busy === "extracting" && <p className={styles.ghMeta}>Reading deck…</p>}
     </div>
   );
 }

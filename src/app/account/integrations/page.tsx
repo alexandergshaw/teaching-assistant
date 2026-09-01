@@ -125,7 +125,7 @@ export default function IntegrationsPage() {
             {loading ? (
               <div className={styles.loadingRow} role="status" aria-live="polite">
                 <span className={styles.spinner} aria-hidden="true" />
-                <span>Loading...</span>
+                <span>Loading…</span>
               </div>
             ) : connected ? (
               <div className={styles.factor}>
@@ -165,7 +165,7 @@ export default function IntegrationsPage() {
             {loading ? (
               <div className={styles.loadingRow} role="status" aria-live="polite">
                 <span className={styles.spinner} aria-hidden="true" />
-                <span>Loading...</span>
+                <span>Loading…</span>
               </div>
             ) : institutions.length === 0 ? (
               <p className={styles.emptyState}>Add a school in the Settings menu first, then connect its Outlook mailbox here.</p>

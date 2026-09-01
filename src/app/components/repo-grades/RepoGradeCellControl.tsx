@@ -298,7 +298,7 @@ export default function RepoGradeCellControl({
   // while in flight, or while idle-and-not-yet-postable (the postReason span
   // below already explains why).
   const postButtonLabel =
-    edit.postStatus === "posting" ? "Posting..." : edit.postStatus === "posted" ? "Re-post" : edit.postStatus === "error" ? "Retry" : "Post";
+    edit.postStatus === "posting" ? "Posting…" : edit.postStatus === "posted" ? "Re-post" : edit.postStatus === "error" ? "Retry" : "Post";
   const postButtonDisabled = edit.postStatus === "posting" || (edit.postStatus === "idle" && !postability.postable);
   // B4: "first post" is exactly the idle/never-attempted case - a retry
   // (postStatus "error") or a re-post (postStatus "posted") is already an
@@ -549,7 +549,7 @@ export default function RepoGradeCellControl({
             onGrade();
           }}
         >
-          {edit.grading ? "Grading..." : "Grade"}
+          {edit.grading ? "Grading…" : "Grade"}
         </button>
         {onPostOne && (
           <Button
@@ -615,7 +615,7 @@ export default function RepoGradeCellControl({
       {edit.postStatus !== "idle" && (
         <span className={postStatusClass}>
           {edit.postStatus === "posting"
-            ? "Posting..."
+            ? "Posting…"
             : edit.postStatus === "posted"
               ? "Posted to Canvas"
               : edit.postStatus === "skipped"

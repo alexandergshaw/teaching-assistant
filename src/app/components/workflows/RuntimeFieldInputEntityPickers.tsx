@@ -61,8 +61,8 @@ export function EntityFieldInput({
             onChange={onChange}
             placeholder={
               orgs === null
-                ? "Loading organizations..."
-                : "Choose an organization..."
+                ? "Loading organizations…"
+                : "Choose an organization…"
             }
             loading={orgs === null}
             noOptionsText="No organizations"
@@ -109,7 +109,7 @@ export function EntityFieldInput({
                     {...params}
                     size="small"
                     placeholder={
-                      orgs === null ? "Loading organizations..." : "Select organizations..."
+                      orgs === null ? "Loading organizations…" : "Select organizations…"
                     }
                   />
                 )}
@@ -212,7 +212,7 @@ export function EntityFieldInput({
                   })}
                 </MenuItem>
               ) : (
-                <MenuItem disabled>Loading courses...</MenuItem>
+                <MenuItem disabled>Loading courses…</MenuItem>
               )
             ) : hubCourses.length > 0 ? (
               [
@@ -292,8 +292,8 @@ export function EntityFieldInput({
                     size="small"
                     placeholder={
                       lmsCourseOptions === null
-                        ? "Loading courses..."
-                        : "Select courses..."
+                        ? "Loading courses…"
+                        : "Select courses…"
                     }
                   />
                 )}
@@ -320,7 +320,7 @@ export function EntityFieldInput({
             }))}
             value={value}
             onChange={onChange}
-            placeholder="Choose an institution..."
+            placeholder="Choose an institution…"
             noOptionsText="No institutions available"
           />
         )}
@@ -370,8 +370,8 @@ export function EntityFieldInput({
                     size="small"
                     placeholder={
                       hubCourses === null
-                        ? "Loading courses..."
-                        : "Select courses..."
+                        ? "Loading courses…"
+                        : "Select courses…"
                     }
                   />
                 )}

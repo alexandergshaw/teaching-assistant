@@ -47,7 +47,7 @@ export function WorkflowDescription({ description }: { description: string }) {
   return (
     <div style={{ margin: "0 0 var(--space-2) 0" }}>
       <p className={styles.fieldHint} style={{ margin: 0 }}>
-        {open ? trimmed : `${preview}...`}
+        {open ? trimmed : `${preview}…`}
       </p>
       <DisclosureToggle open={open} onClick={() => setOpen(!open)}>
         {open ? "Show less" : "Show more"}

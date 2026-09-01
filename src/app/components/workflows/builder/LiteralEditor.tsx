@@ -51,7 +51,7 @@ function LiteralEditor({
           <TextField
             {...params}
             size="small"
-            placeholder={selected.length === 0 ? "Select or type one or more..." : undefined}
+            placeholder={selected.length === 0 ? "Select or type one or more…" : undefined}
           />
         )}
         sx={sx}
@@ -64,7 +64,7 @@ function LiteralEditor({
     const missing = !!value && !opts.some((c) => c.id === value);
     return (
       <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
-        helperText={picker.hubCourses === null ? "Loading courses..." : opts.length === 0 ? "No course tiles yet." : undefined}>
+        helperText={picker.hubCourses === null ? "Loading courses…" : opts.length === 0 ? "No course tiles yet." : undefined}>
         <MenuItem value="">Choose a course tile</MenuItem>
         {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
         {opts.map((c) => (
@@ -90,7 +90,7 @@ function LiteralEditor({
     const missing = !!value && !opts.includes(value);
     return (
       <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
-        helperText={picker.orgs === null ? "Loading organizations..." : opts.length === 0 ? "No organizations." : undefined}>
+        helperText={picker.orgs === null ? "Loading organizations…" : opts.length === 0 ? "No organizations." : undefined}>
         <MenuItem value="">Choose an organization</MenuItem>
         {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
         {opts.map((o) => (
@@ -169,7 +169,7 @@ function LiteralEditor({
     const missing = !!value && !opts.some((t) => t.id === value);
     return (
       <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
-        helperText={picker.deckTemplates === null ? "Loading templates..." : opts.length === 0 ? "No templates yet." : undefined}>
+        helperText={picker.deckTemplates === null ? "Loading templates…" : opts.length === 0 ? "No templates yet." : undefined}>
         <MenuItem value="">Choose a template</MenuItem>
         {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
         {opts.map((t) => (
@@ -183,7 +183,7 @@ function LiteralEditor({
     const missing = !!value && !opts.some((t) => t.id === value);
     return (
       <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
-        helperText={picker.assignmentTemplates === null ? "Loading templates..." : opts.length === 0 ? "No templates yet." : undefined}>
+        helperText={picker.assignmentTemplates === null ? "Loading templates…" : opts.length === 0 ? "No templates yet." : undefined}>
         <MenuItem value="">Choose a template</MenuItem>
         {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
         {opts.map((t) => (
@@ -197,7 +197,7 @@ function LiteralEditor({
     const missing = !!value && !opts.some((t) => t.id === value);
     return (
       <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
-        helperText={picker.testTemplates === null ? "Loading templates..." : opts.length === 0 ? "No templates yet." : undefined}>
+        helperText={picker.testTemplates === null ? "Loading templates…" : opts.length === 0 ? "No templates yet." : undefined}>
         <MenuItem value="">Choose a template</MenuItem>
         {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
         {opts.map((t) => (
@@ -211,7 +211,7 @@ function LiteralEditor({
     const missing = !!value && !opts.some((t) => t.id === value);
     return (
       <TextField select size="small" value={value} onChange={(e) => onChange(e.target.value)} sx={sx}
-        helperText={picker.classSessionTemplates === null ? "Loading templates..." : opts.length === 0 ? "No templates yet." : undefined}>
+        helperText={picker.classSessionTemplates === null ? "Loading templates…" : opts.length === 0 ? "No templates yet." : undefined}>
         <MenuItem value="">Choose a template</MenuItem>
         {missing && <MenuItem value={value}>{value} (unavailable)</MenuItem>}
         {opts.map((t) => (

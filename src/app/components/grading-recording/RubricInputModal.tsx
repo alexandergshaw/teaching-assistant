@@ -278,7 +278,7 @@ export function RubricInputModal({
           }}
         >
           <label className={styles.downloadButton} style={{ cursor: busy ? "not-allowed" : "pointer" }}>
-            {busy ? "Reading file..." : "Choose a file"}
+            {busy ? "Reading file…" : "Choose a file"}
             <input
               ref={fileInputRef}
               type="file"

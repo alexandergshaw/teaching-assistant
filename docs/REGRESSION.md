@@ -35356,6 +35356,24 @@ Checked and clean: `grading.ts` (Canvas and zip) and `github.ts`'s
 `gradeReposAction` take instructions from a typed field or Canvas metadata,
 never from inside a submission - neither carries this defect.
 
+> **CORRECTED 2026-08-31 (see entry 374). The "clean" verdict on
+> `gradeReposAction` was wrong, and it misled three later passes in sequence.**
+> It conflated two different questions: *where the instructions come from* (a
+> typed field - true, and irrelevant) with *whether the instructions file is
+> also sitting in the digest as a submission file* (it is - every `module_NN/`
+> folder ships a `README.md`, and on this path nothing removes it). So a student
+> who submitted nothing yields a digest containing the worked-solution README,
+> which is then graded as their work - the same defect as this entry, arriving
+> by a different route.
+>
+> The reason recorded for NOT applying `excludeInstructionsFromDigest` here was
+> also false: it was said that a student file which merely "begins the same way"
+> could be wrongly dropped. `github.digest.ts:393-402` holds an untruncated file
+> to **exact trimmed equality**, and gates the prefix branch strictly on
+> `f.truncated`. The only student file this can remove is one byte-identical to
+> the instructions - which IS this defect, not a false positive. Entry 374
+> applies it.
+
 ### One claim in the verification pass was wrong, and was settled empirically
 
 The verifier concluded the reported student would still be graded off the
@@ -35922,3 +35940,178 @@ the agent.
   while a capture is running. Below the 1000px breakpoint the blocks stack, so
   the cost there is extra scroll, not a broken layout.
 - This surface **still owes a downloadable log** (four entries running).
+
+## 374. The bulk repo grader stops grading empty folders - and what it still grades
+
+Entry 370 fixed `gradeRepoAction`. It did not fix `gradeReposAction`, and
+`GradingTab.tsx:207` still renders `GithubGradingPanel`, which is the only thing
+that calls it. So the defect stayed live on a surface the app shows: an empty
+scoped folder produced a digest whose entire text was `# Repository: owner/repo`,
+handed straight to `gradeEntries`, where `prompts.ts:70` ("award full points for
+that area" when nothing violates it) means a student who submitted nothing can
+still be awarded full marks. This closes that path.
+
+### The fix
+
+- **`isScaffoldingFile` moved to `github.digest.ts`** and is re-exported by
+  `github.ts`; both action files now import the same function. It could not live
+  in either action file - `use-server-exports.test.ts` allows a `"use server"`
+  file to export nothing but async functions and types, so a synchronous
+  predicate has to sit in a plain module. There is now exactly one definition in
+  `src`, and entry 370's tests bind to it through `importOriginal`, not to a copy.
+- **`gradeReposAction` partitions before it grades.** Repos with nothing
+  student-authored are filtered out of `digests` and reported in their own
+  `noSubmissionRepos` array, mirroring `truncatedRepos`. Both provider branches
+  consume the filtered list, so neither `gradeEntries` nor `gradeEntriesEmbedded`
+  nor any `callLlm` can see a skipped repo.
+- **The rubric can no longer be generated off an empty repo.** `entries[0]` -
+  which `github.ts:701` uses to generate a rubric for the whole class when the
+  rubric field is blank - is now drawn from the filtered list. One student's
+  empty folder can no longer shape what every other student is graded against.
+- **All-empty is its own branch.** When every queued repo is skipped the function
+  returns an empty run rather than letting `generateRubric` read `entries[0]` off
+  an empty array or letting the embedded path report a misleading "provide a
+  rubric" error. The real story is that every repo was empty, not that the rubric
+  was missing.
+- **The fact is a field, never text in a score.** No `GradeResult` is built for a
+  skipped repo, so nothing lands in `totalScore` for the six sites in this repo
+  that take the first number found anywhere in a score string. The notice
+  (`describeGithubGradingNoSubmission`) contains no fraction.
+- **It is rendered, including when it is the only thing to render.** The results
+  block's gate became `run && (run.results.length > 0 || noSubmissionRepos.length
+  > 0)`, with `GradingResults` separately gated on having rows - an
+  all-no-submission batch, which is exactly when an instructor most needs to be
+  told, shows the notice and no empty table. Kept visually and structurally
+  separate from the truncation notice: a truncated repo still produced a grade, a
+  skipped one produced none, and conflating them tells an instructor the wrong
+  thing about who still needs attention.
+- **It survives a reload.** `noSubmissionRepos` is persisted with the run, so a
+  restored run cannot silently claim everything queued was graded.
+
+### FIX 1 was deliberately not applied here, and the recorded reason was wrong
+
+`gradeReposAction` has no `readmePath` - it never auto-picks a README - so FIX 1
+would fall back to `excludeInstructionsFromDigest`'s content match against the
+instructor's typed textarea. The implementation recorded that as "could silently
+exclude a student's real files that happen to start the same way". That is not
+what the function does: the content branch is **exact equality**, and the prefix
+branch is gated strictly on `f.truncated`, which entry 370 item 3 added for
+precisely this reason. The real limitation is different and is recorded below.
+
+### Gates
+
+`tsc --noEmit` 0. `eslint` 0 errors, 6 warnings, all pre-existing. `vitest`
+**741 files, 15326 tests** (the +7 over the 15319 baseline came from a concurrent
+change to `prompts.test.ts`, not from this group; this group added 12 - six in
+`github.grading.test.ts`, six in `github-grading-run-store.test.ts`).
+`use-server-exports`, `no-emojis` (the committed test) and the registry
+client-bundle guard all green. Entry 371's submitted-file-names test was
+re-run with `--reporter=verbose` and confirmed to execute and assert in 1ms
+rather than time out.
+
+### Limits
+
+- **This closes the second of the two grading paths, and nothing else in the
+  ask.** A no-submission student still gets NO ROW - not a 0, and not a comment
+  explaining what was looked for and where. The unmerged-branch check (the most
+  common innocent cause of a missing submission) is not here either. Both are
+  later groups. What shipped is a guard and a notice, not a grade.
+- **On this path the rule catches only a literally empty folder.** `.gitkeep`
+  never reaches `digest.files` (`isTextCandidate` rejects an extensionless file,
+  and a 0-byte blob is dropped earlier), so `isScaffoldingFile` is dead code here
+  exactly as entry 370 recorded it for the other path. In production the filter
+  is equivalent to `digest.files.length === 0`. **A folder holding only the
+  assignment `README.md` - which is the reported course's actual didn't-submit
+  shape, and the case entry 370's own test calls its highest-value one - is still
+  graded on this path**, because FIX 1 is what catches that over in
+  `gradeRepoAction` and FIX 1 is not applied here. The absence of a no-submission
+  notice is therefore not evidence that everyone submitted.
+- **"No submission" is asserted where "could not determine" is the honest
+  answer.** `digest.files` is also empty when every file was skipped for its type
+  (a `.docx`, a `.pdf`, a misspelled extension), when every fetch threw, or when
+  GitHub's tree listing was truncated. `skipped`, `prefixMatchedNothing` and
+  `treeTruncated` are all computed by `ingestRepo` and none are read here. Only
+  the fetch/size/budget cases also raise the truncation notice; a type-skip
+  raises nothing, so a student who submitted a Word document is reported as
+  having submitted nothing.
+- **The panel cannot post to Canvas.** `canvasUrl=""` and rows carry no `userId`,
+  so a wrong grade here is displayed, exported to CSV and hand-copied by the
+  instructor rather than written to a gradebook automatically. That lowers the
+  blast radius and changes its shape: the student still receives the grade, but
+  without a Canvas submission comment, which makes it harder to reconstruct in an
+  appeal, not easier.
+- **A stored run saved before this change does not survive the validator.**
+  Measured, not reasoned: HEAD's serializer output run through the new parser
+  returns null, so `loadStoredGithubGradingRun` yields nothing and the panel shows
+  no restored run and no explanation. Every instructor with a completed run in
+  localStorage loses it silently on first load after deploy.
+  *[If BLOCKER 1 is fixed before push, replace this bullet with: "A stored run
+  saved before this change restores with `noSubmissionRepos: []` - verified by
+  running HEAD's serializer output through the new parser - because a pre-change
+  run skipped nothing by construction. A wrong-typed value still invalidates."]*
+- **No component is rendered by any test in this repo.** vitest is node-env and
+  collects only `src/**/*.test.ts`. The notice's wording, pluralisation and
+  blank-name filtering are tested as a pure function; that it is mounted, and
+  where, was established by reading `GithubGradingPanel.tsx`, not by a test.
+- **No grading run was executed against a real repository.** Everything here is
+  verified by reading and by unit tests against constructed digests - and five of
+  the six new action tests use a `.gitkeep` fixture that production cannot emit.
+
+### Written before the fixes - here is what actually shipped
+
+The review above found two blockers and they are both closed in this same
+commit. Recording what changed, because the entry's body describes the
+pre-fix state:
+
+**Blocker 1 - every stored run was silently discarded on first load.** The new
+`noSubmissionRepos` was made REQUIRED, so a run saved before this change failed
+the strict validator and restored as no run at all. An instructor who graded 66
+repos on Friday and reopened the tab on Monday to hand-copy the scores would
+have found the table gone, with no message. Measured, not argued: the
+post-change parser returned NULL on a pre-change blob. Fixed by restoring an
+ABSENT field as `[]` while still rejecting a PRESENT wrong-typed value as
+corrupt. `[]` is not a guess - the field records which repos this run SKIPPED,
+and the old code graded everything it ingested, so "none" is exactly right.
+This is unlike `truncatedRepos`, where the old code genuinely did not compute
+the fact.
+
+**Blocker 2 - the guard was inert against the only shape this course
+produces.** `isScaffoldingFile` is effectively dead in production, so the filter
+reduced to `files.length === 0`. Every `module_NN/` folder ships a `README.md`,
+so a student who submitted nothing yielded `files = [README.md]` and sailed
+through into the grader - landing in the same band as entry 370's incident,
+now with a reassuring notice making the instructor MORE likely to trust it.
+Fixed by applying `excludeInstructionsFromDigest` on this path before the
+emptiness check.
+
+**The instruction not to apply it was mine, and it was wrong.** It came from
+this file's own "checked and clean" note on `gradeReposAction` (now corrected
+in place at entry 370), which said a student file merely "beginning the same
+way" could be dropped. `github.digest.ts:393-402` holds an untruncated file to
+exact trimmed equality and gates the prefix branch strictly on `f.truncated`.
+The only student file it can remove is one byte-identical to the instructions -
+which IS the defect. **One wrong sentence in this log propagated through an
+adversarial pass, an orchestrator instruction and an implementation before a
+reviewer caught it.** A false "checked and clean" is more expensive than no
+note at all.
+
+**"Could not determine" is now distinct from "no submission".** `digest.files`
+is also empty when every submitted file was type-skipped (`.docx`, `.pdf`, a
+typo'd extension), and type-skips deliberately do not set `truncated`, so
+nothing hedged the claim. A student submitting `Solution.docx` HAS done the
+work; reporting that as "submitted nothing" is a false statement about a real
+person's effort. Those repos now land in a separate `undeterminedRepos` array
+with its own notice naming the likely cause. Pinned by a test asserting the
+copy never says the student did not submit.
+
+**A reachability gap was caught by the implementer on itself.** The first fix
+computed and returned `undeterminedRepos` and nothing displayed or persisted
+it - the ship-dead pattern, for the second time this session, and for the same
+reason both times: the file assignment omitted the consumer. It was reported
+rather than hidden, and wired in a follow-up wave.
+
+`isScaffoldingFile` also gained the dedicated unit tests a comment in
+`github-repos.grading.test.ts` had claimed it already had. It had none.
+
+Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
+pre-existing warnings, `vitest` **741 files / 15342 tests** all passing.

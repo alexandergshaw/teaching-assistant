@@ -102,3 +102,81 @@ describe("buildSystemPrompt - stated filename requirements are an explicit viola
     expect(prompt).toMatch(/2:1 positive-to-negative ratio/i);
   });
 });
+
+// A third live grading defect, from the same course: a README's own worked
+// example (a different scenario, which the README itself says it is) got
+// copied wholesale by 7 of 11 students in place of the assigned calculator,
+// and one of them was scored 25/25 on "Functional Arithmetic Operations"
+// with two of four required operations absent. The model read resemblance
+// to instructions-printed code as correctness, and a genuinely-absent
+// operation had no rule making it a violation at all. These tests pin the
+// FACT that the prompt now (a) disclaims instructions-printed example code
+// as a reference solution, (b) makes an absent required behavior an
+// explicit violation - the behavioral parallel to entry 371's file-name
+// clause, sitting in the same place among the other explicit-violation
+// rules - and (c) requires the model to enumerate stated requirements and
+// check the submission against each one before scoring. Never the exact
+// prose beyond the handful of load-bearing phrases already relied on
+// elsewhere in this file.
+
+describe("buildSystemPrompt - example code in the instructions is not a reference solution", () => {
+  it("states that example code, sample solutions, or worked examples in the instructions are not a reference solution", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.");
+
+    expect(prompt).toMatch(/reference solution/i);
+    expect(prompt).toMatch(/resemblance/i);
+  });
+
+  it("states that submitting the instructions' own example instead of the assigned task does not meet the requirements the example does not cover", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.");
+
+    expect(prompt).toMatch(/different scenario or task/i);
+  });
+});
+
+describe("buildSystemPrompt - a missing required behavior is an explicit violation", () => {
+  it("states that a required behavior absent from the submission is an explicit rubric violation, not ambiguity", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.");
+
+    expect(prompt).toMatch(/required functionality/i);
+    expect(prompt).toMatch(/absent from the submission is an explicit rubric violation/i);
+  });
+
+  it("states the rule is inert when the instructions state no required functionality, mirroring the filename rule's carve-out", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.");
+
+    expect(prompt).toMatch(/no required functionality.*not apply/i);
+  });
+
+  it("sits with the other explicit-violation rules: after the filename rule, before the overallComment summary rule", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.");
+
+    const filenameRuleIndex = prompt.indexOf("required file names for the submission");
+    const referenceSolutionRuleIndex = prompt.indexOf("not a reference solution");
+    const behaviorRuleIndex = prompt.indexOf("required functionality the submission must implement");
+    const overallCommentSummaryIndex = prompt.indexOf("In overallComment, summarize strengths");
+
+    expect(filenameRuleIndex).toBeGreaterThan(-1);
+    expect(referenceSolutionRuleIndex).toBeGreaterThan(filenameRuleIndex);
+    expect(behaviorRuleIndex).toBeGreaterThan(referenceSolutionRuleIndex);
+    expect(overallCommentSummaryIndex).toBeGreaterThan(behaviorRuleIndex);
+  });
+});
+
+describe("buildSystemPrompt - enumerate stated requirements and cite evidence", () => {
+  it("requires enumerating each rubric area's stated requirements and checking the submission against each one before scoring", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.");
+
+    expect(prompt).toMatch(/enumerate/i);
+    expect(prompt).toMatch(/state plainly that it is absent/i);
+  });
+
+  it("extends the existing overallComment evidence requirement rather than adding a new per-criterion field", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.");
+
+    // The JSON contract still carries only "area" and "score" - no per-
+    // criterion comment field was opened for this.
+    expect(prompt).toMatch(/no per-criterion comment/i);
+    expect(prompt).not.toContain('"comment"');
+  });
+});

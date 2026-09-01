@@ -38,6 +38,7 @@ import {
   downloadRepoZipball,
   ingestRepo,
   excludeInstructionsFromDigest,
+  isScaffoldingFile,
   type GithubRepo,
   type CopyRepoOptions,
   type CopyRepoResult,
@@ -636,22 +637,14 @@ function repoDigestToEmbeddedEntry(digest: RepoDigest, label?: string): StudentS
  * pinned 7-argument call - see repoGradesRubricPicker.wiring.test.ts) keeps
  * omitting it and keeps today's behavior.
  */
-// Scaffolding basenames that never count as a student submission on their
-// own - the conservative floor FIX 2 (github-repos.ts's own header, and this
-// function's doc comment below) requires: ".gitkeep" is a universal, tool-
-// generated marker for "this empty folder must exist in git", never
-// something a student wrote or was asked to write. Deliberately NOT extended
-// with anything course-specific (a "tests/" folder of instructor-provided
-// harness files, a starter "main.py" stub, ...) - that would hardcode one
-// course's layout into every course's grading, which is exactly what this
-// fix must not do. The assignment-instructions file itself (the README
-// picked by pickReadmeInstructions, or content-matched by
-// excludeInstructionsFromDigest) is excluded separately, before this check
-// ever runs - see gradedDigest below.
-function isScaffoldingFile(path: string): boolean {
-  const base = (path.split("/").pop() ?? path).toLowerCase();
-  return base === ".gitkeep";
-}
+// isScaffoldingFile (the FIX 2 no-submission rule's ".gitkeep" check) lives
+// in src/lib/github.digest.ts (imported above via "@/lib/github"), not here -
+// a "use server" file may export nothing but async functions and type-only
+// exports (src/lib/use-server-exports.test.ts), so a synchronous predicate
+// cannot be exported from this file. gradeReposAction (app/actions/github.ts)
+// applies the SAME rule via that same shared import rather than a second
+// copy - see that function's own comment, and isScaffoldingFile's own doc
+// comment in github.digest.ts, for the full rationale.
 
 export async function gradeRepoAction(
   repoRef: string,

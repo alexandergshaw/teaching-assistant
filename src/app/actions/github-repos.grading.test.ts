@@ -37,12 +37,16 @@ vi.mock("@/lib/supabase/auth", () => ({ requireOwner: vi.fn(async () => ({ id: "
 
 vi.mock("@/lib/github", async (importOriginal) => {
   // Partial mock: everything gradeRepoAction actually calls that hits the
-  // network/LLM/db is replaced above, but `excludeInstructionsFromDigest` -
-  // the other half of FIX 1 - is kept REAL via importOriginal. It is pure
-  // (no I/O) and already has its own dedicated unit tests
-  // (github.digest.test.ts); re-mocking it here would hide any wiring
-  // mismatch between the two files, which is exactly what this test exists
-  // to catch.
+  // network/LLM/db is replaced above, but `excludeInstructionsFromDigest` and
+  // `isScaffoldingFile` (FIX 1's other half, and FIX 2's no-submission rule -
+  // now shared with gradeReposAction in github.ts, see
+  // src/lib/github.digest.ts's isScaffoldingFile doc comment) are kept REAL
+  // via importOriginal. Both are pure (no I/O) and both have dedicated unit
+  // tests in github.digest.test.ts - `excludeInstructionsFromDigest` always
+  // did; `isScaffoldingFile` did NOT until 2026-08-31, when this very comment
+  // was found asserting coverage that did not exist. Re-mocking either here
+  // would hide any wiring mismatch between the two files, which is exactly
+  // what this test exists to catch.
   const actual = await importOriginal<typeof import("@/lib/github")>();
   return {
     parseRepoRef: (ref: string) => {
@@ -51,6 +55,7 @@ vi.mock("@/lib/github", async (importOriginal) => {
     },
     ingestRepo: (...args: unknown[]) => ingestRepo(...args),
     excludeInstructionsFromDigest: actual.excludeInstructionsFromDigest,
+    isScaffoldingFile: actual.isScaffoldingFile,
   };
 });
 

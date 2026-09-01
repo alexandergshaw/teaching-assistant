@@ -7,7 +7,7 @@ import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText } from "@/l
 import { attachCodeRuns } from "@/lib/code-runner";
 import { rememberRubric } from "@/lib/research/rubric-bank";
 import { callLlm, type LlmProvider } from "@/lib/llm";
-import { githubConfigured, githubWebhookSecret, listRepos, listOwnedOrgs, listOrgRepos, listBranches, ingestRepo, parseRepoRef, createRepo, createOrgRepo, startCopilotBuild, createCopilotAgentTask, listCopilotTasks, deletePaths, movePaths, generateFromTemplate, putFile, getFileText, getRepo, listWorkflows, dispatchWorkflow, findWorkflowRunSince, downloadArtifactZip, createOrgPushHook, setRepoCollaborator, updateRepo, deleteRepo, listCommits, getRepoTree, listRunArtifacts, type GithubRepo, type RepoDigest, type WorkflowRunInfo, type WorkflowInfo, type RepoPermission, type CopilotTask, setRepoTopics } from "@/lib/github";
+import { githubConfigured, githubWebhookSecret, listRepos, listOwnedOrgs, listOrgRepos, listBranches, ingestRepo, parseRepoRef, createRepo, createOrgRepo, startCopilotBuild, createCopilotAgentTask, listCopilotTasks, deletePaths, movePaths, generateFromTemplate, putFile, getFileText, getRepo, listWorkflows, dispatchWorkflow, findWorkflowRunSince, downloadArtifactZip, createOrgPushHook, setRepoCollaborator, updateRepo, deleteRepo, listCommits, getRepoTree, listRunArtifacts, isScaffoldingFile, excludeInstructionsFromDigest, type GithubRepo, type RepoDigest, type WorkflowRunInfo, type WorkflowInfo, type RepoPermission, type CopilotTask, setRepoTopics } from "@/lib/github";
 import { listGithubModels, chatWithGithubModel, type GithubModel, type ModelUsage, type ChatMessage } from "@/lib/github-models";
 import { requireOwner } from "@/lib/supabase/auth";
 import { normalizeGradingFolder } from "@/lib/github-grading-folder";
@@ -611,20 +611,37 @@ export async function gradeReposAction(
   // today's behavior: GithubGradingPanel.tsx never passes it, so this fix
   // changes no existing course's grades on that surface.
   runCode?: boolean
-): Promise<{ run: GradingRun; rubric: string; truncatedRepos?: string[] } | { error: string }> {
+): Promise<
+  | {
+      run: GradingRun;
+      rubric: string;
+      truncatedRepos?: string[];
+      noSubmissionRepos?: string[];
+      // SHOULD 1: a digest can come back with zero gradable files for two
+      // different reasons - genuinely nothing was submitted, or something
+      // WAS submitted but none of it was readable as text (a `.docx`/`.pdf`/
+      // mistyped extension - a type-skip, github.digest.ts's
+      // RepoDigestSkipCounts.type). Those are different claims about the
+      // student's work, so they get separate arrays rather than one that
+      // conflates "nothing here" with "something here I couldn't read" -
+      // see the computation below for why they can be told apart.
+      undeterminedRepos?: string[];
+    }
+  | { error: string }
+> {
   try {
     await requireOwner();
     // One common folder scopes every repo in the queue for this run (AC A2),
     // not a per-repo value - normalized once, outside the loop.
     const pathPrefix = normalizeGradingFolder(gradingFolder) || undefined;
-    const digests: Array<{ label?: string; digest: RepoDigest }> = [];
+    const rawDigests: Array<{ label?: string; digest: RepoDigest }> = [];
     for (const item of repos) {
       const parsed = parseRepoRef(item.repoRef);
       if (!parsed) continue;
       const digest = await ingestRepo(parsed.owner, parsed.repo, { pathPrefix }, item.branch || undefined);
-      digests.push({ label: item.label, digest });
+      rawDigests.push({ label: item.label, digest });
     }
-    if (digests.length === 0) return { error: "No valid repositories to grade." };
+    if (rawDigests.length === 0) return { error: "No valid repositories to grade." };
     const instructions = assignmentInstructions.trim() || "Evaluate each student's repository.";
 
     // `digest.truncated` used to be read (fileCount/text) and dropped right
@@ -632,9 +649,82 @@ export async function gradeReposAction(
     // budget cut off part of a repo before grading ever saw it. Surfaced
     // below (both return branches) as the labels/full names of the repos it
     // happened to, rather than a single flag that would hide which student.
-    const truncatedRepos = digests
+    const truncatedRepos = rawDigests
       .filter(({ digest }) => digest.truncated)
       .map(({ label, digest }) => label?.trim() || digest.fullName);
+
+    // FIX 1 (entry 370), ported from gradeRepoAction's identical check
+    // (github-repos.ts). This function has no readmePath (it never
+    // auto-picks a README the way useReadmeInstructions does over there), so
+    // instructionsPath stays unset - only excludeInstructionsFromDigest's
+    // instructionsText branch can ever fire here, matched against the
+    // instructor's typed assignmentInstructions. That branch removes a file
+    // ONLY on exact trimmed equality with those instructions (or, for a file
+    // THIS digest itself truncated, a strict prefix of them) - it can never
+    // remove a student's real file that merely happens to start the same way
+    // (excludeInstructionsFromDigest's own doc comment in github.digest.ts
+    // works through why). Applied to every queued repo's digest BEFORE the
+    // FIX 2 emptiness check below: this course ships a README (often a full
+    // worked solution) in every module_NN/ folder, so a student who
+    // submitted nothing yields a digest containing only that README - past
+    // FIX 2's old .gitkeep-only guard, and graded as the student's own work.
+    // That is entry 370's defect on this exact path, independently
+    // rediscovered; applying FIX 1 here is the fix, not a regression of the
+    // "no readmePath" reasoning above, which only ever concerned
+    // instructionsPath.
+    const gradedDigests = rawDigests.map(({ label, digest }) => ({
+      label,
+      digest: excludeInstructionsFromDigest(digest, { instructionsText: assignmentInstructions }),
+    }));
+
+    // FIX 2 (entry 370), same rule as gradeRepoAction's (github-repos.ts),
+    // now applied AFTER FIX 1 above so the instructions file itself has
+    // already been removed from `digest.files`: a repo with nothing left
+    // after removing both the instructions file and universal scaffolding
+    // (.gitkeep) must never reach gradeEntries/callLlm below - there is
+    // nothing to grade, and asking a model to comment on an empty submission
+    // is exactly what produced entry 370. Reported as its own sibling array
+    // (mirroring truncatedRepos above), never folded into a GradeResult row
+    // and never encoded into a score string - see this function's return
+    // type and github-grading-run-store.ts's strict validator, which
+    // requires it.
+    const emptyDigests = gradedDigests.filter(({ digest }) => !digest.files.some((f) => !isScaffoldingFile(f.path)));
+    const digests = gradedDigests.filter(({ digest }) => digest.files.some((f) => !isScaffoldingFile(f.path)));
+
+    // SHOULD 1: `emptyDigests` above conflates two different facts unless
+    // split further. `digest.skipped.type` (RepoDigestSkipCounts,
+    // github.digest.ts) counts files that existed but were excluded by the
+    // extension allowlist BEFORE `digest.files` was ever built (a `.docx`,
+    // a `.pdf`, a mistyped extension) - and type-skips deliberately do not
+    // set `truncated` (github.digest.ts:304), so nothing else hedges this
+    // claim. A repo with a positive type-skip count had something submitted
+    // that this pipeline could not read, which is a materially different,
+    // weaker claim than "nothing was submitted" - reporting the former as
+    // the latter is the same shape of overconfident, wrong claim entry 370
+    // made about a different empty-looking digest. Every real ingestRepo
+    // call populates `skipped`, so this costs nothing extra to compute.
+    const noSubmissionRepos = emptyDigests
+      .filter(({ digest }) => !digest.skipped || digest.skipped.type === 0)
+      .map(({ label, digest }) => label?.trim() || digest.fullName);
+    const undeterminedRepos = emptyDigests
+      .filter(({ digest }) => digest.skipped && digest.skipped.type > 0)
+      .map(({ label, digest }) => label?.trim() || digest.fullName);
+
+    // Every queued repo had nothing student-authored in it: no rubric to
+    // generate off real work and no entries to grade, so return immediately
+    // rather than let generateRubric read entries[0] off an empty array or
+    // let an "embedded" rubric-build report a misleading "provide a rubric"
+    // error - the real story is every repo was empty, not that the rubric
+    // was missing.
+    if (digests.length === 0) {
+      return {
+        run: { results: [], rubricAreaNames: [], fullCreditChecklist: [] },
+        rubric: rubric.trim() || "",
+        truncatedRepos,
+        noSubmissionRepos,
+        undeterminedRepos,
+      };
+    }
 
     // Embedded Deterministic Engine: grade each repo in-process against the
     // supplied rubric, or one generated from the instructions. No model call.
@@ -650,7 +740,7 @@ export async function gradeReposAction(
       // function's own doc comment on `runCode` for the full rationale.
       if (runCode) await attachCodeRuns(embeddedEntries);
       const run = gradeEntriesEmbedded(embeddedEntries, builtRubric);
-      return { run, rubric: renderRubricText(builtRubric), truncatedRepos };
+      return { run, rubric: renderRubricText(builtRubric), truncatedRepos, noSubmissionRepos, undeterminedRepos };
     }
 
     // F2: reuse the same shape-conversion the embedded path already does a
@@ -660,7 +750,7 @@ export async function gradeReposAction(
     const entries: StudentSubmissionEntry[] = digests.map(({ label, digest }) => repoDigestToEmbeddedEntry(digest, label));
     const effectiveRubric = rubric.trim() || (await generateRubric(`${instructions}\n\n${entries[0].content}`, provider));
     const run = await gradeEntries(entries, instructions, effectiveRubric, provider);
-    return { run, rubric: effectiveRubric, truncatedRepos };
+    return { run, rubric: effectiveRubric, truncatedRepos, noSubmissionRepos, undeterminedRepos };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not grade the repositories." };
   }

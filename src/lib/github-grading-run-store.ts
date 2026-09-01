@@ -41,6 +41,32 @@ export interface StoredGithubGradingRun {
   // untrustworthy and restores as "no run" rather than as a run that silently
   // claims nothing was cut.
   truncatedRepos: string[];
+  // FIX 2 (entry 370), ported to gradeReposAction (github.ts) - which repos
+  // (by label/full name) had nothing student-authored to grade this run, so
+  // they were skipped before gradeEntries/callLlm ever saw them. UNLIKE
+  // truncatedRepos above, a blob saved before this field existed is NOT
+  // untrustworthy: pre-change code graded every repo it ingested (there was
+  // no skip-before-grading step yet to record), so the true answer for every
+  // old run is "no repo was skipped" - a genuinely known fact, not a guess.
+  // An absent field therefore degrades to [] (see parseStoredGithubGradingRun
+  // below) rather than invalidating the whole run; a PRESENT but wrong-typed
+  // value is still rejected, since that is a corrupt run, not an old one.
+  noSubmissionRepos: string[];
+  // gradeReposAction (github.ts) further split the old noSubmissionRepos
+  // bucket in two: repos with genuinely nothing student-authored (still
+  // noSubmissionRepos above) vs. repos where files WERE found but every one
+  // was skipped as an unreadable type (.docx/.pdf/a mistyped extension) -
+  // this array. Conflating the two would tell an instructor a student who
+  // did the work submitted nothing, which is false. Same upgrade idiom as
+  // noSubmissionRepos above, not a stricter one: a blob saved before this
+  // split existed had any such repo already folded into that coarser
+  // noSubmissionRepos array (the split did not exist yet to separate it
+  // out), so an ABSENT field here is not a corrupt/untrustworthy run - it is
+  // simply an old run recorded at the coarser granularity, and defaults to
+  // [] rather than discarding the run (see parseStoredGithubGradingRun
+  // below). A PRESENT but wrong-typed value is still rejected, since that is
+  // a corrupt run, not an old one.
+  undeterminedRepos: string[];
   run: GradingRun;
 }
 
@@ -65,6 +91,8 @@ export function serializeGithubGradingRun(input: {
   gradedAt: string;
   lastGradedFolder: string;
   truncatedRepos: string[];
+  noSubmissionRepos: string[];
+  undeterminedRepos: string[];
 }): string {
   const stripped = stripGradingRunForDraft(input.run);
   // stripGradeResultForDraft (grading-review-rows.ts, shared with
@@ -86,6 +114,8 @@ export function serializeGithubGradingRun(input: {
     gradedAt: input.gradedAt,
     lastGradedFolder: input.lastGradedFolder,
     truncatedRepos: input.truncatedRepos,
+    noSubmissionRepos: input.noSubmissionRepos,
+    undeterminedRepos: input.undeterminedRepos,
     run: { ...stripped, results: resultsWithTruncation },
   };
   return JSON.stringify(stored);
@@ -240,9 +270,44 @@ export function parseStoredGithubGradingRun(raw: string | null): StoredGithubGra
   // as untrustworthy rather than defaulting to "nothing was truncated".
   const truncatedRepos = parseStringArray(parsed.truncatedRepos);
   if (truncatedRepos === null) return null;
+  // UNLIKE truncatedRepos above - see the interface's doc comment: a blob
+  // predating this field was produced by code that graded every repo it
+  // ingested, so the correct default for an ABSENT field is [] (nothing was
+  // skipped), not "untrustworthy, discard the run". A PRESENT field of the
+  // wrong type is still rejected below - that is a corrupt run, not an old
+  // one, and must not be papered over the same way.
+  let noSubmissionRepos: string[];
+  if (parsed.noSubmissionRepos === undefined) {
+    noSubmissionRepos = [];
+  } else {
+    const parsedNoSubmissionRepos = parseStringArray(parsed.noSubmissionRepos);
+    if (parsedNoSubmissionRepos === null) return null;
+    noSubmissionRepos = parsedNoSubmissionRepos;
+  }
+  // UNLIKE truncatedRepos, matching noSubmissionRepos immediately above (not
+  // a third idiom): a blob predating this field had any such repo already
+  // folded into the coarser noSubmissionRepos array above, so an ABSENT
+  // field is not untrustworthy and defaults to [] - see the interface's doc
+  // comment. A PRESENT field of the wrong type is still rejected below, same
+  // as noSubmissionRepos - that is a corrupt run, not an old one.
+  let undeterminedRepos: string[];
+  if (parsed.undeterminedRepos === undefined) {
+    undeterminedRepos = [];
+  } else {
+    const parsedUndeterminedRepos = parseStringArray(parsed.undeterminedRepos);
+    if (parsedUndeterminedRepos === null) return null;
+    undeterminedRepos = parsedUndeterminedRepos;
+  }
   const run = parseGradingRun(parsed.run);
   if (run === null) return null;
-  return { gradedAt: parsed.gradedAt, lastGradedFolder: parsed.lastGradedFolder, truncatedRepos, run };
+  return {
+    gradedAt: parsed.gradedAt,
+    lastGradedFolder: parsed.lastGradedFolder,
+    truncatedRepos,
+    noSubmissionRepos,
+    undeterminedRepos,
+    run,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +333,8 @@ export function persistGithubGradingRun(input: {
   gradedAt: string;
   lastGradedFolder: string;
   truncatedRepos: string[];
+  noSubmissionRepos: string[];
+  undeterminedRepos: string[];
 }): void {
   if (typeof window === "undefined") return;
   try {
@@ -341,4 +408,56 @@ export function describeGithubGradingTruncation(
         ? `The assembled submission text was cut before grading for ${students.length} student${students.length === 1 ? "" : "s"}: ${students.join(", ")}.`
         : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// FIX 2 (entry 370), ported to gradeReposAction - a no-submission repo never
+// reaches gradeEntries/callLlm (github.ts), so it has no row in `run.results`
+// at all. This notice is how the instructor learns it was skipped rather
+// than silently missing from the results table. Kept distinct from
+// describeGithubGradingTruncation above and never merged into it: a
+// truncated repo still produced a grade, a no-submission repo produced NONE
+// - conflating the two would tell an instructor the wrong thing about which
+// students still need attention. Kept as a pure helper for the same node-env
+// testability reason as the truncation notice above.
+
+/**
+ * Builds the no-submission notice for a completed run, or null when every
+ * queued repo had something student-authored to grade. Deliberately returns
+ * null rather than a "0 skipped" message, matching
+ * describeGithubGradingTruncation's own reasoning.
+ */
+export function describeGithubGradingNoSubmission(noSubmissionRepos: string[]): string | null {
+  const repos = noSubmissionRepos.map((name) => name.trim()).filter((name) => name.length > 0);
+  if (repos.length === 0) return null;
+  return `No submission was found for ${repos.length} repo${repos.length === 1 ? "" : "s"}, so ${
+    repos.length === 1 ? "it was" : "they were"
+  } not graded: ${repos.join(", ")}.`;
+}
+
+// ---------------------------------------------------------------------------
+// undeterminedRepos (gradeReposAction, github.ts) - the second half of the
+// split this file's header/interface comment describes: a repo whose folder
+// ingest came back empty NOT because nothing was submitted, but because
+// every file it found was skipped as an unreadable type (.docx/.pdf/a
+// mistyped extension - github.digest.ts's RepoDigestSkipCounts.type). That
+// student did submit work; the pipeline just could not read it. Reporting
+// this the same way as describeGithubGradingNoSubmission above would make a
+// false claim about a real person's effort, so it gets its own wording
+// (never "no submission") and its own notice, never merged into that one -
+// GithubGradingPanel.tsx renders both as separate blocks for the same reason
+// describeGithubGradingTruncation's two messages are kept apart.
+
+/**
+ * Builds the undetermined-submission notice for a completed run, or null
+ * when every empty-looking repo was genuinely empty. Deliberately returns
+ * null rather than an all-clear line, matching
+ * describeGithubGradingNoSubmission's own reasoning.
+ */
+export function describeGithubGradingUndetermined(undeterminedRepos: string[]): string | null {
+  const repos = undeterminedRepos.map((name) => name.trim()).filter((name) => name.length > 0);
+  if (repos.length === 0) return null;
+  return `Files were found but none could be read for ${repos.length} repo${repos.length === 1 ? "" : "s"}, so ${
+    repos.length === 1 ? "it was" : "they were"
+  } not graded - the submitted file type is likely not supported yet: ${repos.join(", ")}.`;
 }

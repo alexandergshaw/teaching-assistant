@@ -60,6 +60,7 @@ export {
   ingestRepo,
   downloadRepoZipball,
   excludeInstructionsFromDigest,
+  isScaffoldingFile,
 } from "./github.digest";
 
 export type {

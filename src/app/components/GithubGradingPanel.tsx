@@ -28,7 +28,9 @@ import { assignmentFoldersFromTree } from "@/lib/repo-assignment-folders";
 import { useLmsAssignmentPull } from "./github-grading/useLmsAssignmentPull";
 import LmsAssignmentPullSection from "./github-grading/LmsAssignmentPullSection";
 import {
+  describeGithubGradingNoSubmission,
   describeGithubGradingTruncation,
+  describeGithubGradingUndetermined,
   describeRestoredGithubGradingRun,
   loadStoredGithubGradingRun,
   persistGithubGradingRun,
@@ -131,6 +133,24 @@ export default function GithubGradingPanel() {
   // run - persisted alongside the run itself (see github-grading-run-store.ts)
   // so a restored run does not silently drop this warning.
   const [truncatedRepos, setTruncatedRepos] = useState<string[]>(restoredGithubGradingRun?.truncatedRepos ?? []);
+  // FIX 2 (entry 370), ported to gradeReposAction (github.ts): repos (by
+  // label/full name) whose scoped folder had nothing student-authored in it
+  // this run - excluded from grading entirely (no LLM call), so they have no
+  // row in `run.results` and must be surfaced separately or an instructor
+  // would read their absence as "not queued" rather than "found nothing".
+  // Persisted alongside the run (github-grading-run-store.ts) exactly like
+  // truncatedRepos above.
+  const [noSubmissionRepos, setNoSubmissionRepos] = useState<string[]>(restoredGithubGradingRun?.noSubmissionRepos ?? []);
+  // gradeReposAction's other half of the split noSubmissionRepos comment
+  // above describes: repos where files WERE found but every one was skipped
+  // as an unreadable type (.docx/.pdf/a mistyped extension), so the digest
+  // still came back empty and the repo still has no row in `run.results` -
+  // but unlike noSubmissionRepos, that student did submit work. Persisted
+  // alongside noSubmissionRepos/truncatedRepos (github-grading-run-store.ts)
+  // and rendered as its own, separately-worded notice - never merged into
+  // noSubmissionRepos's, which would falsely tell the instructor the student
+  // submitted nothing.
+  const [undeterminedRepos, setUndeterminedRepos] = useState<string[]>(restoredGithubGradingRun?.undeterminedRepos ?? []);
   // R2.5: true only until the next successful grading pass - flips false the
   // moment a fresh run replaces it, so the "restored" banner never lingers
   // on results the instructor just produced themselves.
@@ -340,6 +360,8 @@ export default function GithubGradingPanel() {
     setError(null);
     setRun(null);
     setTruncatedRepos([]);
+    setNoSubmissionRepos([]);
+    setUndeterminedRepos([]);
     // AC A1/A2: one common folder scopes every repo in the queue for this
     // run. Blank reproduces today's whole-repo read exactly.
     const r = await gradeReposAction(
@@ -356,6 +378,13 @@ export default function GithubGradingPanel() {
     }
     const gradedAtIso = new Date().toISOString();
     const runTruncatedRepos = r.truncatedRepos ?? [];
+    // FIX 2 (entry 370): repos gradeReposAction found nothing student-
+    // authored in and excluded from grading entirely - see the state
+    // declaration above for why this must be shown, not just dropped.
+    const runNoSubmissionRepos = r.noSubmissionRepos ?? [];
+    // Files were found for these repos but none could be read (unsupported
+    // type) - a materially different, weaker claim than no-submission above.
+    const runUndeterminedRepos = r.undeterminedRepos ?? [];
     setRun(r.run);
     setRubric(r.rubric);
     // AC A5: captured separately from the live `gradingFolder` control so
@@ -366,6 +395,8 @@ export default function GithubGradingPanel() {
     // C2: which repos, if any, had their folder ingest hit a cap this run -
     // rendered below near the results (describeGithubGradingTruncation).
     setTruncatedRepos(runTruncatedRepos);
+    setNoSubmissionRepos(runNoSubmissionRepos);
+    setUndeterminedRepos(runUndeterminedRepos);
     // R2.5: this run was just produced, not restored - any earlier restored
     // banner must disappear now that it has been superseded.
     setRunIsRestored(false);
@@ -373,13 +404,16 @@ export default function GithubGradingPanel() {
     // back) does not discard the model spend that just produced these scores
     // and comments. Best-effort: a quota failure inside this call loses
     // persistence for this one run only - the results above are already in
-    // React state regardless. truncatedRepos travels with it (C2) so a
-    // restored run does not silently claim nothing was cut.
+    // React state regardless. truncatedRepos/noSubmissionRepos travel with it
+    // (C2, FIX 2) so a restored run does not silently claim nothing was cut
+    // or that every queued repo was graded.
     persistGithubGradingRun({
       run: r.run,
       gradedAt: gradedAtIso,
       lastGradedFolder: gradingFolder,
       truncatedRepos: runTruncatedRepos,
+      noSubmissionRepos: runNoSubmissionRepos,
+      undeterminedRepos: runUndeterminedRepos,
     });
   };
 
@@ -728,13 +762,67 @@ export default function GithubGradingPanel() {
 
       {error && <p className={styles.error}>{error}</p>}
 
-      {run && run.results.length > 0 && (
+      {run && (run.results.length > 0 || noSubmissionRepos.length > 0 || undeterminedRepos.length > 0) && (
         <div style={{ marginTop: 16 }}>
           {/* AC A5: ties the scope description to what THIS run actually
               covered, even if the folder box above has since been edited. */}
           <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", margin: "0 0 8px" }}>
             {describeGradingFolder(normalizeGradingFolder(lastGradedFolder ?? ""))}
           </p>
+          {/* FIX 2 (entry 370): repos that had nothing student-authored to
+              grade this run, so they were skipped before any LLM call and
+              have no row below. Rendered as its own warning-styled notice -
+              never merged into the truncation notice (a truncated repo still
+              produced a grade; a no-submission repo produced none) and never
+              folded into a score string anywhere (github-grading-run-store.ts's
+              describeGithubGradingNoSubmission). Shown even when nothing else
+              in the queue was gradable (run.results is then empty). */}
+          {(() => {
+            const notice = describeGithubGradingNoSubmission(noSubmissionRepos);
+            if (!notice) return null;
+            return (
+              <div
+                role="status"
+                style={{
+                  margin: "0 0 10px",
+                  padding: "10px 14px",
+                  border: "1px solid var(--warning-border)",
+                  background: "var(--warning-surface)",
+                  borderRadius: 8,
+                }}
+              >
+                <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--warning-ink)" }}>{notice}</p>
+              </div>
+            );
+          })()}
+          {/* gradeReposAction's other split: repos where files WERE found but
+              none could be read (unsupported type), so they also have no row
+              below. Its own warning-styled notice, worded so it never implies
+              the student failed to submit - kept separate from the
+              no-submission notice above (github-grading-run-store.ts's
+              describeGithubGradingUndetermined) for the same reason that
+              notice is kept separate from the truncation notice below: a
+              no-submission repo and an undetermined-file-type repo are
+              different, non-interchangeable claims about a student's work.
+              Shown even when nothing else in the queue was gradable. */}
+          {(() => {
+            const notice = describeGithubGradingUndetermined(undeterminedRepos);
+            if (!notice) return null;
+            return (
+              <div
+                role="status"
+                style={{
+                  margin: "0 0 10px",
+                  padding: "10px 14px",
+                  border: "1px solid var(--warning-border)",
+                  background: "var(--warning-surface)",
+                  borderRadius: 8,
+                }}
+              >
+                <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--warning-ink)" }}>{notice}</p>
+              </div>
+            );
+          })()}
           {/* C2: named separately, never merged - see describeGithubGradingTruncation.
               Renders nothing when nothing was truncated. */}
           {(() => {
@@ -755,29 +843,31 @@ export default function GithubGradingPanel() {
               </div>
             );
           })()}
-          <GradingResults
-            run={run}
-            canvasUrl=""
-            copiedKey={copiedKey}
-            onCopy={onCopy}
-            onOpenPreview={handleOpenPreview}
-            // F4: an empty Files column means something different for a
-            // restored run than for a fresh one - see filesColumnEmptyLabel
-            // in gradingResultsHelpers.ts. runIsRestored already tracks
-            // exactly this fact (R2.5), so no new state was needed here.
-            filesRetained={!runIsRestored}
-            banner={
-              // R2.5: a restored run must be obviously restored, not passed
-              // off as fresh - an instructor who cannot tell the difference
-              // may act on stale scores elsewhere believing they just
-              // produced them.
-              runIsRestored && gradedAt ? (
-                <p role="status" className={styles.fieldHint} style={{ margin: "0 0 10px" }}>
-                  {describeRestoredGithubGradingRun(gradedAt)}
-                </p>
-              ) : undefined
-            }
-          />
+          {run.results.length > 0 && (
+            <GradingResults
+              run={run}
+              canvasUrl=""
+              copiedKey={copiedKey}
+              onCopy={onCopy}
+              onOpenPreview={handleOpenPreview}
+              // F4: an empty Files column means something different for a
+              // restored run than for a fresh one - see filesColumnEmptyLabel
+              // in gradingResultsHelpers.ts. runIsRestored already tracks
+              // exactly this fact (R2.5), so no new state was needed here.
+              filesRetained={!runIsRestored}
+              banner={
+                // R2.5: a restored run must be obviously restored, not passed
+                // off as fresh - an instructor who cannot tell the difference
+                // may act on stale scores elsewhere believing they just
+                // produced them.
+                runIsRestored && gradedAt ? (
+                  <p role="status" className={styles.fieldHint} style={{ margin: "0 0 10px" }}>
+                    {describeRestoredGithubGradingRun(gradedAt)}
+                  </p>
+                ) : undefined
+              }
+            />
+          )}
         </div>
       )}
 

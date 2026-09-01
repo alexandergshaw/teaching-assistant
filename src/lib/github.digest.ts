@@ -412,6 +412,33 @@ export function excludeInstructionsFromDigest(
   return { ...digest, files, fileCount: files.length, text };
 }
 
+/**
+ * True for a filename that never counts as a student submission on its own -
+ * the conservative floor gradeRepoAction's/gradeReposAction's own FIX 2
+ * (entry 370, `github-repos.ts`/`app/actions/github.ts`) require: ".gitkeep"
+ * is a universal, tool-generated marker for "this empty folder must exist in
+ * git", never something a student wrote or was asked to write. Deliberately
+ * NOT extended with anything course-specific (a "tests/" folder of
+ * instructor-provided harness files, a starter "main.py" stub, ...) - that
+ * would hardcode one course's layout into every course's grading, which is
+ * exactly what this fix must not do. The assignment-instructions file itself
+ * (the README picked by pickReadmeInstructions, or content-matched by
+ * excludeInstructionsFromDigest above) is excluded separately, before either
+ * caller applies this check.
+ *
+ * Lives here (a plain module), not in either "use server" action file that
+ * uses it: a "use server" file may export nothing but async functions and
+ * type-only exports (src/lib/use-server-exports.test.ts enforces this
+ * repo-wide), so a synchronous predicate like this one cannot be exported
+ * from github-repos.ts or app/actions/github.ts directly. Both import it
+ * from here (re-exported by ./github.ts) instead of each keeping - or
+ * worse, re-deriving - their own copy.
+ */
+export function isScaffoldingFile(path: string): boolean {
+  const base = (path.split("/").pop() ?? path).toLowerCase();
+  return base === ".gitkeep";
+}
+
 /** Download a repo as a zip archive (GitHub's zipball) at `ref` / default branch. */
 export async function downloadRepoZipball(owner: string, repo: string, ref?: string): Promise<Buffer> {
   const branch = ref || (await getRepo(owner, repo)).defaultBranch;

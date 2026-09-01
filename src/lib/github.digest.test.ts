@@ -3,6 +3,7 @@ import {
   ingestRepo,
   selectDigestFiles,
   excludeInstructionsFromDigest,
+  isScaffoldingFile,
   DEFAULT_BUDGET,
   SCOPED_BUDGET,
   type SelectDigestFilesOpts,
@@ -384,5 +385,50 @@ describe("excludeInstructionsFromDigest", () => {
     expect(result.skipped).toEqual({ type: 1, size: 2, budget: 3, fetchError: 4 });
     expect(result.description).toBe("A description.");
     expect(result.fullName).toBe("org/repo");
+  });
+});
+
+// Dedicated unit tests for isScaffoldingFile - added because a comment in
+// github-repos.grading.test.ts asserted these existed when they did not, and
+// the function is the shared no-submission floor for BOTH grading paths
+// (gradeRepoAction in github-repos.ts and gradeReposAction in app/actions/
+// github.ts). Entry 370's Limits record that in production this predicate is
+// effectively dead - selectDigestFiles drops 0-byte blobs and isTextCandidate
+// rejects extensionless files, so a real .gitkeep never reaches it - which is
+// precisely why it needs direct tests: nothing else exercises its actual
+// behaviour, and a change here would be invisible to every integration test.
+describe("isScaffoldingFile", () => {
+  it("is true for .gitkeep, at the repo root and at any depth", () => {
+    expect(isScaffoldingFile(".gitkeep")).toBe(true);
+    expect(isScaffoldingFile("assignments/module_02/.gitkeep")).toBe(true);
+  });
+
+  it("matches on the BASE NAME only, case-insensitively", () => {
+    expect(isScaffoldingFile("a/b/.GitKeep")).toBe(true);
+    expect(isScaffoldingFile(".GITKEEP")).toBe(true);
+  });
+
+  it("is false for a real submission, including files that merely contain the marker", () => {
+    expect(isScaffoldingFile("assignments/module_02/calculator.py")).toBe(false);
+    expect(isScaffoldingFile("README.md")).toBe(false);
+    // A directory named .gitkeep does not make its contents scaffolding.
+    expect(isScaffoldingFile(".gitkeep/calculator.py")).toBe(false);
+    // Substring, not base name - must not match.
+    expect(isScaffoldingFile("my.gitkeep.py")).toBe(false);
+    expect(isScaffoldingFile(".gitkeeper")).toBe(false);
+  });
+
+  it("is deliberately NOT extended with course-specific scaffolding", () => {
+    // The doc comment commits to this: hardcoding one course's layout into
+    // every course's grading is the thing this predicate must not do. A
+    // future edit that "helpfully" adds these should fail here first.
+    expect(isScaffoldingFile("tests/test_module_02.py")).toBe(false);
+    expect(isScaffoldingFile("main.py")).toBe(false);
+    expect(isScaffoldingFile(".github/workflows/assignment-tests.yml")).toBe(false);
+  });
+
+  it("never throws on degenerate input", () => {
+    expect(isScaffoldingFile("")).toBe(false);
+    expect(isScaffoldingFile("/")).toBe(false);
   });
 });

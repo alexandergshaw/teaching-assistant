@@ -8,7 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { GradeResult, GradingRun } from "@/lib/grade";
 import {
+  describeGithubGradingNoSubmission,
   describeGithubGradingTruncation,
+  describeGithubGradingUndetermined,
   describeRestoredGithubGradingRun,
   loadStoredGithubGradingRun,
   parseStoredGithubGradingRun,
@@ -63,6 +65,16 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "week-1",
       truncatedRepos: ["student/hw1"],
+      // FIX 2 (entry 370): a run that also had a no-submission repo must
+      // round-trip that fact too - included alongside truncatedRepos in the
+      // SAME run so this one test proves both new/existing sibling arrays
+      // survive save+load together, not just in isolation.
+      noSubmissionRepos: ["student/hw2"],
+      // undeterminedRepos must round-trip alongside noSubmissionRepos in the
+      // SAME run, staying its own distinct array rather than being merged
+      // into noSubmissionRepos - a different repo name proves they were not
+      // concatenated/deduped into one list.
+      undeterminedRepos: ["student/hw3"],
     });
     const restored = parseStoredGithubGradingRun(json);
 
@@ -70,6 +82,12 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
     expect(restored!.gradedAt).toBe("2026-08-24T12:00:00.000Z");
     expect(restored!.lastGradedFolder).toBe("week-1");
     expect(restored!.truncatedRepos).toEqual(["student/hw1"]);
+    expect(restored!.noSubmissionRepos).toEqual(["student/hw2"]);
+    expect(restored!.undeterminedRepos).toEqual(["student/hw3"]);
+    // Distinct and not merged: hw2 belongs only to noSubmissionRepos, hw3
+    // only to undeterminedRepos.
+    expect(restored!.noSubmissionRepos).not.toContain("student/hw3");
+    expect(restored!.undeterminedRepos).not.toContain("student/hw2");
     expect(restored!.run.results).toEqual([
       {
         student: "Jane Doe",
@@ -100,7 +118,14 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
         fixtureResult({ userId: undefined, gradedRepo: undefined, gradedRef: undefined }),
       ],
     });
-    const json = serializeGithubGradingRun({ run, gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [] });
+    const json = serializeGithubGradingRun({
+      run,
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+    });
     const restored = parseStoredGithubGradingRun(json);
     expect(restored).not.toBeNull();
     expect(restored!.run.results[0].userId).toBeUndefined();
@@ -116,7 +141,14 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
         fixtureResult({ student: "Never Set", submissionTruncated: undefined }),
       ],
     });
-    const json = serializeGithubGradingRun({ run, gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [] });
+    const json = serializeGithubGradingRun({
+      run,
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+    });
     const restored = parseStoredGithubGradingRun(json);
     expect(restored).not.toBeNull();
     expect(restored!.run.results[0].submissionTruncated).toBe(true);
@@ -128,7 +160,14 @@ describe("serializeGithubGradingRun / parseStoredGithubGradingRun - round trip",
 describe("serializeGithubGradingRun - R2.4 strip", () => {
   it("never leaves the raw file bytes, preview content, or file name reachable in the serialized string", () => {
     const run = fixtureRun();
-    const json = serializeGithubGradingRun({ run, gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [] });
+    const json = serializeGithubGradingRun({
+      run,
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+    });
     expect(json).not.toContain("QUJDREVGRw");
     expect(json).not.toContain("print('hi')");
     expect(json).not.toContain("main.py");
@@ -166,16 +205,92 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
   it("returns null when truncatedRepos (C2) is missing or not a string array - an older stored blob predating this field restores as no run, rather than silently claiming nothing was truncated", () => {
     const run = fixtureRun();
     expect(
-      parseStoredGithubGradingRun(JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", run }))
+      parseStoredGithubGradingRun(JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", noSubmissionRepos: [], run }))
     ).toBeNull();
     expect(
       parseStoredGithubGradingRun(
-        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: "nope", run })
+        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: "nope", noSubmissionRepos: [], run })
       )
     ).toBeNull();
     expect(
       parseStoredGithubGradingRun(
-        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [1, 2], run })
+        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [1, 2], noSubmissionRepos: [], run })
+      )
+    ).toBeNull();
+  });
+
+  // FIX 2 (entry 370): UNLIKE truncatedRepos above, this field's sibling
+  // upgrade path is NOT strict-validation - pre-change code graded every
+  // repo it ingested (there was no skip-before-grading step to record), so
+  // an older stored blob predating this field is not untrustworthy: the true
+  // fact for that old run is "no repo was skipped", so it must restore, with
+  // noSubmissionRepos defaulting to []. A PRESENT but wrong-typed value is
+  // still a corrupt run, not an old one, and is still rejected.
+  it("restores noSubmissionRepos as [] when the field is absent (an older stored blob), but still rejects a PRESENT wrong-typed value as corrupt", () => {
+    const run = fixtureRun();
+    const restoredOld = parseStoredGithubGradingRun(
+      JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "week-1", truncatedRepos: [], run })
+    );
+    expect(restoredOld).not.toBeNull();
+    expect(restoredOld!.noSubmissionRepos).toEqual([]);
+    // The rest of the run must restore normally too - this is not "no run",
+    // it is a full run whose new field defaults.
+    expect(restoredOld!.lastGradedFolder).toBe("week-1");
+    expect(restoredOld!.run.results[0].student).toBe("Jane Doe");
+
+    expect(
+      parseStoredGithubGradingRun(
+        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], noSubmissionRepos: "nope", run })
+      )
+    ).toBeNull();
+    expect(
+      parseStoredGithubGradingRun(
+        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], noSubmissionRepos: [1, 2], run })
+      )
+    ).toBeNull();
+  });
+
+  // Same idiom as noSubmissionRepos immediately above (not a third one): a
+  // blob predating this split had any undetermined repo already folded into
+  // the coarser noSubmissionRepos array, so an ABSENT field is not
+  // untrustworthy and defaults to [], while a PRESENT wrong-typed value is
+  // still a corrupt run and is rejected.
+  it("restores undeterminedRepos as [] when the field is absent (an older stored blob predating this split), but still rejects a PRESENT wrong-typed value as corrupt", () => {
+    const run = fixtureRun();
+    const restoredOld = parseStoredGithubGradingRun(
+      JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "week-1", truncatedRepos: [], noSubmissionRepos: [], run })
+    );
+    expect(restoredOld).not.toBeNull();
+    expect(restoredOld!.undeterminedRepos).toEqual([]);
+    // The rest of the run - including its sibling arrays - must restore
+    // normally too: this is not "no run", it is a full run whose new field
+    // defaults.
+    expect(restoredOld!.lastGradedFolder).toBe("week-1");
+    expect(restoredOld!.noSubmissionRepos).toEqual([]);
+    expect(restoredOld!.run.results[0].student).toBe("Jane Doe");
+
+    expect(
+      parseStoredGithubGradingRun(
+        JSON.stringify({
+          gradedAt: "2026-08-24T12:00:00.000Z",
+          lastGradedFolder: "",
+          truncatedRepos: [],
+          noSubmissionRepos: [],
+          undeterminedRepos: "nope",
+          run,
+        })
+      )
+    ).toBeNull();
+    expect(
+      parseStoredGithubGradingRun(
+        JSON.stringify({
+          gradedAt: "2026-08-24T12:00:00.000Z",
+          lastGradedFolder: "",
+          truncatedRepos: [],
+          noSubmissionRepos: [],
+          undeterminedRepos: [1, 2],
+          run,
+        })
       )
     ).toBeNull();
   });
@@ -183,12 +298,12 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
   it("returns null when run is missing or not an object", () => {
     expect(
       parseStoredGithubGradingRun(
-        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [] })
+        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], noSubmissionRepos: [] })
       )
     ).toBeNull();
     expect(
       parseStoredGithubGradingRun(
-        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], run: "nope" })
+        JSON.stringify({ gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [], noSubmissionRepos: [], run: "nope" })
       )
     ).toBeNull();
   });
@@ -200,6 +315,7 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "",
       truncatedRepos: [],
+      noSubmissionRepos: [],
       run: { results: [good, bad], rubricAreaNames: ["Clarity"], fullCreditChecklist: [] },
     };
     expect(parseStoredGithubGradingRun(JSON.stringify(stored))).toBeNull();
@@ -210,6 +326,7 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "",
       truncatedRepos: [],
+      noSubmissionRepos: [],
       run: { results: [], rubricAreaNames: [1, 2], fullCreditChecklist: [] },
     };
     expect(parseStoredGithubGradingRun(JSON.stringify(withBadRubricNames))).toBeNull();
@@ -218,6 +335,7 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "",
       truncatedRepos: [],
+      noSubmissionRepos: [],
       run: { results: [], rubricAreaNames: [], fullCreditChecklist: "not-an-array" },
     };
     expect(parseStoredGithubGradingRun(JSON.stringify(withBadChecklist))).toBeNull();
@@ -229,6 +347,7 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "",
       truncatedRepos: [],
+      noSubmissionRepos: [],
       run: { results: [bad], rubricAreaNames: ["Clarity"], fullCreditChecklist: [] },
     };
     expect(parseStoredGithubGradingRun(JSON.stringify(stored))).toBeNull();
@@ -239,6 +358,7 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "",
       truncatedRepos: [],
+      noSubmissionRepos: [],
       run: { results: [fixtureResult()], rubricAreaNames: ["Clarity"], fullCreditChecklist: [] },
     };
     const restored = parseStoredGithubGradingRun(JSON.stringify(stored));
@@ -252,6 +372,7 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "",
       truncatedRepos: [],
+      noSubmissionRepos: [],
       run: { results: [raw], rubricAreaNames: ["Clarity"], fullCreditChecklist: [] },
     };
     const restored = parseStoredGithubGradingRun(JSON.stringify(stored));
@@ -276,6 +397,7 @@ describe("parseStoredGithubGradingRun - R2.3 never trust stored data", () => {
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "week-1",
       truncatedRepos: [],
+      noSubmissionRepos: [],
       run: { results: [oldResult], rubricAreaNames: ["Clarity"], fullCreditChecklist: [] },
     };
     const restored = parseStoredGithubGradingRun(JSON.stringify(stored));
@@ -341,19 +463,25 @@ describe("loadStoredGithubGradingRun / persistGithubGradingRun", () => {
     expect(loadStoredGithubGradingRun()).toBeNull();
   });
 
-  it("round-trips a persisted run, including which repos were truncated (C2)", () => {
+  it("round-trips a persisted run, including which repos were truncated (C2), which had no submission (FIX 2, entry 370), and which were undetermined (unreadable file type) - as distinct, unmerged arrays", () => {
     const run = fixtureRun();
     persistGithubGradingRun({
       run,
       gradedAt: "2026-08-24T12:00:00.000Z",
       lastGradedFolder: "week-1",
       truncatedRepos: ["student/hw1"],
+      noSubmissionRepos: ["student/hw9"],
+      undeterminedRepos: ["student/hw7"],
     });
     const loaded = loadStoredGithubGradingRun();
     expect(loaded).not.toBeNull();
     expect(loaded!.gradedAt).toBe("2026-08-24T12:00:00.000Z");
     expect(loaded!.lastGradedFolder).toBe("week-1");
     expect(loaded!.truncatedRepos).toEqual(["student/hw1"]);
+    expect(loaded!.noSubmissionRepos).toEqual(["student/hw9"]);
+    expect(loaded!.undeterminedRepos).toEqual(["student/hw7"]);
+    expect(loaded!.noSubmissionRepos).not.toContain("student/hw7");
+    expect(loaded!.undeterminedRepos).not.toContain("student/hw9");
     expect(loaded!.run.results[0].student).toBe("Jane Doe");
     // R2.4: bytes never make the round trip.
     expect(loaded!.run.results[0].submittedFiles).toEqual([]);
@@ -362,7 +490,14 @@ describe("loadStoredGithubGradingRun / persistGithubGradingRun", () => {
   it("does nothing when persisting with window undefined (SSR-safe write)", () => {
     delete (globalThis as { window?: unknown }).window;
     expect(() =>
-      persistGithubGradingRun({ run: fixtureRun(), gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [] })
+      persistGithubGradingRun({
+        run: fixtureRun(),
+        gradedAt: "2026-08-24T12:00:00.000Z",
+        lastGradedFolder: "",
+        truncatedRepos: [],
+        noSubmissionRepos: [],
+        undeterminedRepos: [],
+      })
     ).not.toThrow();
     expect(fakeStorage.getItem("ta-github-grading-run")).toBeNull();
   });
@@ -370,7 +505,14 @@ describe("loadStoredGithubGradingRun / persistGithubGradingRun", () => {
   it("does not throw, and does not persist, when localStorage refuses the write (quota exceeded)", () => {
     fakeStorage.throwOnSet = true;
     expect(() =>
-      persistGithubGradingRun({ run: fixtureRun(), gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [] })
+      persistGithubGradingRun({
+        run: fixtureRun(),
+        gradedAt: "2026-08-24T12:00:00.000Z",
+        lastGradedFolder: "",
+        truncatedRepos: [],
+        noSubmissionRepos: [],
+        undeterminedRepos: [],
+      })
     ).not.toThrow();
     fakeStorage.throwOnSet = false;
     // The failed write must not have left a partial/corrupt value behind either.
@@ -379,13 +521,22 @@ describe("loadStoredGithubGradingRun / persistGithubGradingRun", () => {
 
   it("a quota failure loses persistence for only that run - a later successful write still works", () => {
     fakeStorage.throwOnSet = true;
-    persistGithubGradingRun({ run: fixtureRun(), gradedAt: "2026-08-24T12:00:00.000Z", lastGradedFolder: "", truncatedRepos: [] });
+    persistGithubGradingRun({
+      run: fixtureRun(),
+      gradedAt: "2026-08-24T12:00:00.000Z",
+      lastGradedFolder: "",
+      truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
+    });
     fakeStorage.throwOnSet = false;
     persistGithubGradingRun({
       run: fixtureRun(),
       gradedAt: "2026-08-24T13:00:00.000Z",
       lastGradedFolder: "week-2",
       truncatedRepos: [],
+      noSubmissionRepos: [],
+      undeterminedRepos: [],
     });
     const loaded = loadStoredGithubGradingRun();
     expect(loaded).not.toBeNull();
@@ -460,5 +611,94 @@ describe("describeGithubGradingTruncation - C2", () => {
     expect(notice).not.toBeNull();
     expect(notice!.ingestMessage).toContain("1 repo:");
     expect(notice!.ingestMessage).toContain("student/hw1");
+  });
+});
+
+describe("describeGithubGradingNoSubmission - FIX 2 (entry 370), ported to gradeReposAction", () => {
+  it("returns null when nothing was found to be empty (no permanent all-clear line)", () => {
+    expect(describeGithubGradingNoSubmission([])).toBeNull();
+  });
+
+  it("names every no-submission repo and uses plural wording for more than one", () => {
+    const notice = describeGithubGradingNoSubmission(["student/hw1", "student/hw2"]);
+    expect(notice).not.toBeNull();
+    expect(notice).toContain("student/hw1");
+    expect(notice).toContain("student/hw2");
+    expect(notice).toContain("2 repos");
+    expect(notice).toContain("they were");
+  });
+
+  it("uses singular wording for exactly one no-submission repo", () => {
+    const notice = describeGithubGradingNoSubmission(["student/hw1"]);
+    expect(notice).not.toBeNull();
+    expect(notice).toContain("1 repo,");
+    expect(notice).not.toContain("1 repos");
+    expect(notice).toContain("it was");
+  });
+
+  it("filters out blank/whitespace-only repo names rather than listing them", () => {
+    const notice = describeGithubGradingNoSubmission(["  ", "", "student/hw1"]);
+    expect(notice).not.toBeNull();
+    expect(notice).toContain("1 repo,");
+    expect(notice).toContain("student/hw1");
+  });
+
+  // G1a: the no-submission fact must never be encoded into a score string
+  // that a numeric-extraction parser could misread. This notice is a
+  // completely separate value from any GradeResult's totalScore - proven
+  // here by construction (the function's only input is the repo-name list,
+  // never a score), not by a substring check on the message text.
+  it("never mentions a score - the fact lives in its own field, not a parseable sentence", () => {
+    const notice = describeGithubGradingNoSubmission(["student/hw1"]);
+    expect(notice).not.toBeNull();
+    expect(notice).not.toMatch(/\d+\s*\/\s*\d+/);
+  });
+});
+
+describe("describeGithubGradingUndetermined - files found but unreadable, distinct from no-submission", () => {
+  it("returns null when nothing was undetermined (no permanent all-clear line)", () => {
+    expect(describeGithubGradingUndetermined([])).toBeNull();
+  });
+
+  it("names every undetermined repo and uses plural wording for more than one", () => {
+    const notice = describeGithubGradingUndetermined(["student/hw1", "student/hw2"]);
+    expect(notice).not.toBeNull();
+    expect(notice).toContain("student/hw1");
+    expect(notice).toContain("student/hw2");
+    expect(notice).toContain("2 repos");
+    expect(notice).toContain("they were");
+  });
+
+  it("uses singular wording for exactly one undetermined repo", () => {
+    const notice = describeGithubGradingUndetermined(["student/hw1"]);
+    expect(notice).not.toBeNull();
+    expect(notice).toContain("1 repo,");
+    expect(notice).not.toContain("1 repos");
+    expect(notice).toContain("it was");
+  });
+
+  it("filters out blank/whitespace-only repo names rather than listing them", () => {
+    const notice = describeGithubGradingUndetermined(["  ", "", "student/hw1"]);
+    expect(notice).not.toBeNull();
+    expect(notice).toContain("1 repo,");
+    expect(notice).toContain("student/hw1");
+  });
+
+  // The whole reason this notice exists separately from
+  // describeGithubGradingNoSubmission: it must never claim the student
+  // submitted nothing. Pinned here so a future edit cannot accidentally
+  // collapse the two messages back into one.
+  it("never says the student did not submit - it says files were found but unreadable", () => {
+    const notice = describeGithubGradingUndetermined(["student/hw1"]);
+    expect(notice).not.toBeNull();
+    expect(notice).not.toMatch(/no submission/i);
+    expect(notice).not.toMatch(/not submit/i);
+    expect(notice).toMatch(/files were found/i);
+  });
+
+  it("never mentions a score - the fact lives in its own field, not a parseable sentence", () => {
+    const notice = describeGithubGradingUndetermined(["student/hw1"]);
+    expect(notice).not.toBeNull();
+    expect(notice).not.toMatch(/\d+\s*\/\s*\d+/);
   });
 });

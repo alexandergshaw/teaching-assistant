@@ -17,6 +17,23 @@ import { parseLenientJsonArray } from "@/lib/lenient-json";
 import { getWritingStyleBlock } from "./shared";
 import { findResourceLinksForConceptsAction } from "./learning-resource-links";
 import { RESOURCE_KINDS, type ResourceKind } from "@/lib/resource-kind";
+// Resource-controls feature: the "preferred video length" setting's sentence
+// builder - a plain, synchronous, exported function, so it lives in its own
+// leaf rather than here (a "use server" module may export only async
+// functions and type-only exports - src/lib/use-server-exports.test.ts).
+import { videoLengthPreferenceSentence } from "@/lib/video-length-preference";
+// PRIVACY FIX (BLOCKER 3): the bulk resource-search pass used to map a raw
+// post straight through `deriveResourceConcept` with no redaction at all -
+// `deriveResourceConcept` deliberately never reads an author FIELD, which is
+// true and beside the point, since the leak is names in the post BODY (a
+// self-introducing first post - "Hi everyone, I'm Maria and..." - is the
+// commonest genre on a discussion board). This path fires unattended on
+// EVERY reply that lands (R6), so it out-volumes the per-row path that was
+// already hardened. `redactAuthorNameFromPost` is the SAME leaf
+// (discussion-reply-redact.ts) the per-row targeted search
+// (useReplyResources.ts's `deriveRowSearchConcept`) already uses - one
+// implementation, two callers, never a second copy of the redaction rule.
+import { redactAuthorNameFromPost } from "@/lib/discussion-reply-redact";
 import {
   EXTRACT_BATCH_SIZE,
   DRAFT_BATCH_SIZE,
@@ -27,7 +44,6 @@ import {
   DEFAULT_REPLY_COMPOSITION,
   buildPostExtractionPrompt,
   buildReplyDraftingPrompt,
-  deriveResourceConcept,
   type DiscussionAudience,
   type ThreadPosition,
   type ReplyIngredient,
@@ -361,6 +377,28 @@ const REPLY_RESOURCE_PROFILE = {
 };
 
 /**
+ * The "eligible resource kinds" setting (discussion-persisted-controls.ts's
+ * `resourceKinds`): narrows REPLY_RESOURCE_PROFILE's five-way default down to
+ * whatever the instructor left checked. `undefined` (the setting was never
+ * threaded through - every pre-existing call site in this file's own test
+ * suite) means "no override", not "search nothing" - it resolves to the full
+ * RESOURCE_KINDS list, byte-identical to today. An explicit EMPTY array is a
+ * real, legal, different state (mirrors C2c's "zero ingredients selected" -
+ * an instructor who deliberately unchecks every kind gets no resources
+ * searched at all, not a silent revert to the default five) - handled by its
+ * own early return in gatherReplyResourcesAction below, before this function
+ * is ever reached. Always filters FROM RESOURCE_KINDS (never restates the
+ * five kinds as a fresh literal) so this can never select a kind
+ * coerceResourceKind would not itself recognize (R2's own rule, extended to
+ * this setting).
+ */
+function effectiveResourceKinds(resourceKinds?: readonly ResourceKind[]): readonly ResourceKind[] {
+  if (!resourceKinds || resourceKinds.length === 0) return RESOURCE_KINDS;
+  const allowed = new Set(resourceKinds);
+  return RESOURCE_KINDS.filter((k) => allowed.has(k));
+}
+
+/**
  * Gather real, grounded resources (docs, video, written tutorials, news,
  * papers) for a batch of discussion posts, reusing
  * findResourceLinksForConceptsAction (src/app/actions/learning-resource-links.ts)
@@ -385,16 +423,48 @@ const REPLY_RESOURCE_PROFILE = {
  * entry that shares it - never by array index. Two posts whose text
  * truncates to the identical concept string legitimately receive the same
  * resources.
+ *
+ * BLOCKER 3: each post's `text` is redacted against its own `author` (see
+ * `redactAuthorNameFromPost`, discussion-reply-redact.ts) BEFORE the concept
+ * is derived/truncated - a post's own body can self-introduce the author by
+ * name ("Hi everyone, I'm Maria...") even though no `author` FIELD is ever
+ * folded into the concept string itself.
  */
 export async function gatherReplyResourcesAction(
-  posts: Array<{ id: string; text: string }>,
+  // BLOCKER 3: `author` is a NEW optional field, deliberately trailing
+  // `text` rather than replacing the two-field shape - every pre-existing
+  // call site in this file's own test suite that omits it keeps compiling
+  // and behaving exactly as before (no author to strip, same as an empty
+  // one - see redactAuthorNameFromPost). The one production caller that
+  // matters (useReplyResources.ts's drain, R6's automatic bulk path) now
+  // supplies it from `ReplyRow.author`.
+  posts: Array<{ id: string; text: string; author?: string }>,
   courseName: string,
-  provider: LlmProvider
+  provider: LlmProvider,
+  // Resource-controls feature: "eligible resource kinds" (undefined = no
+  // override, the full RESOURCE_KINDS default - every pre-existing call site
+  // stays byte-identical) and the "preferred video length" setting. Both NEW
+  // TRAILING parameters, after `provider` - deliberately, mirroring
+  // draftDiscussionRepliesAction's own `knowledgeContext` addition
+  // (discussion-replies.ts/discussion-draft-loop.ts) so no existing 3-argument
+  // call site in this file's own test suite shifts onto the wrong parameter.
+  resourceKinds?: readonly ResourceKind[],
+  videoLengthPreference?: { minMinutes?: number; maxMinutes?: number }
 ): Promise<{ resources: Array<{ id: string; resources: ReplyResource[] }>; degraded: boolean } | { error: string }> {
   try {
     await requireOwner();
 
     if (posts.length > RESOURCE_BATCH_SIZE) return { error: "Too many posts in one batch." };
+
+    // Eligible-kinds setting: an explicit EMPTY array is "search nothing" -
+    // a real, legal state (mirrors C2c's "zero ingredients"), not a
+    // malformed input to fall back from. Short-circuits before any call,
+    // exactly like the embedded-provider branch just below and the
+    // empty-concept branch further down - same shape, same reasoning: a
+    // capability the instructor deliberately turned off is not a failure.
+    if (resourceKinds && resourceKinds.length === 0) {
+      return { resources: posts.map((p) => ({ id: p.id, resources: [] })), degraded: false };
+    }
 
     // R4e: the reused action returns { error } outright for the embedded
     // provider (it makes no network call and can neither search nor verify a
@@ -407,29 +477,60 @@ export async function gatherReplyResourcesAction(
       return { resources: posts.map((p) => ({ id: p.id, resources: [] })), degraded: true };
     }
 
+    // BLOCKER 3: redact BEFORE deriving/truncating the concept, not after -
+    // `redactAuthorNameFromPost` does both steps (redact, then
+    // deriveResourceConcept) as one leaf call, mirroring
+    // `deriveRowSearchConcept`'s own ordering for the per-row path.
     const entries = posts
-      .map((p) => ({ id: p.id, concept: deriveResourceConcept(p.text) }))
+      .map((p) => ({ id: p.id, concept: redactAuthorNameFromPost(p.text, p.author) }))
       .filter((e) => e.concept.length > 0);
 
     if (entries.length === 0) {
       return { resources: posts.map((p) => ({ id: p.id, resources: [] })), degraded: false };
     }
 
+    // Eligible-kinds setting, continued: `kinds` narrows the RESEARCH
+    // request itself (it drives both the grounded call's own description of
+    // what to look for and the structuring call's allowed-kind JSON schema -
+    // see learning-resource-links.ts's ResourceProfile/kindSchemaAlternation/
+    // kindDescriptionList) - but that is prompt-level guidance, not an
+    // enforced filter: nothing there stops a model from returning a kind it
+    // was not asked for anyway. So `kinds` is the SEARCH-side narrowing, and
+    // the `allowedKinds.has(link.kind)` check further down (right before a
+    // survivor becomes a ReplyResource) is the RESULT-side hard filter that
+    // actually guarantees a deselected kind never reaches a reply - belt and
+    // braces, deliberately, not either alone.
+    const kinds = effectiveResourceKinds(resourceKinds);
+    const guidance = videoLengthPreferenceSentence(videoLengthPreference);
+    const profile: { kinds: readonly ResourceKind[]; resourceTypeSentence: string; extraGuidance?: string } = {
+      kinds,
+      resourceTypeSentence: REPLY_RESOURCE_PROFILE.resourceTypeSentence,
+    };
+    if (guidance) profile.extraGuidance = guidance;
+
     const result = await findResourceLinksForConceptsAction(
       entries.map((e) => e.concept),
       courseName,
       provider,
       undefined,
-      REPLY_RESOURCE_PROFILE
+      profile
     );
 
     if ("error" in result) return { error: result.error };
+
+    // RESULT-side hard filter (see the comment above `kinds` for why this is
+    // needed even though the request already narrowed `profile.kinds`): a
+    // deselected kind is dropped here regardless of what the model actually
+    // returned, so unchecking a kind is guaranteed to change what comes back
+    // - not merely likely to, if the model happens to comply.
+    const allowedKinds = new Set(kinds);
 
     // Group survivors by concept STRING first (never by index - see this
     // function's own doc comment / R4b), then cap each group at 3 (R4f)
     // before it is read back for every post that shares the string.
     const linksByConcept = new Map<string, ReplyResource[]>();
     for (const link of result.links) {
+      if (!allowedKinds.has(link.kind)) continue;
       const list = linksByConcept.get(link.concept);
       const resource: ReplyResource = { title: link.title, url: link.url, kind: link.kind };
       if (link.whatYouGet.trim()) resource.note = link.whatYouGet.trim();

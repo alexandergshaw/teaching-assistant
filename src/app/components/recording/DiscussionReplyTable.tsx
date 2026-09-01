@@ -29,7 +29,7 @@ import styles from "../../page.module.css";
 // used instead).
 import tableStyles from "../workflows/AutomationsTable.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
-import { type ReplyRow, type ReplySort } from "./discussion-capture";
+import { type ReplyRow, type ReplyResource, type ReplySort } from "./discussion-capture";
 import { CloseIcon } from "./discussion-icons";
 import DiscussionReplyRow, { DISCUSSION_TABLE_COLUMN_COUNT } from "./DiscussionReplyRow";
 import type { LlmProvider } from "@/lib/llm";
@@ -75,6 +75,13 @@ export interface DiscussionReplyTableProps {
   retryRow: (id: string) => void;
   retryResources: (id: string) => void;
   removeResource: (id: string, url: string) => void;
+  /** Resource-controls feature: one-click insert (MOVE, not copy - see
+   *  useDiscussionReplies.ts's `insertResource` doc comment). Forwarded
+   *  straight through, unwrapped, mirroring every other row callback here. */
+  insertResource: (id: string, resource: ReplyResource) => void;
+  /** Resource-controls feature: per-row targeted search. Forwarded straight
+   *  through from R-D (useReplyResources.ts's `searchRow`). */
+  searchRow: (id: string) => void;
   registerRemoveRef: (id: string, el: HTMLButtonElement | null) => void;
   announce: (text: string) => void;
   onCopyError: (text: string) => void;
@@ -95,6 +102,8 @@ export default function DiscussionReplyTable({
   retryRow,
   retryResources,
   removeResource,
+  insertResource,
+  searchRow,
   registerRemoveRef,
   announce,
   onCopyError,
@@ -249,6 +258,8 @@ export default function DiscussionReplyTable({
                   onRetry={retryRow}
                   onRetryResources={retryResources}
                   onRemoveResource={removeResource}
+                  onInsertResource={insertResource}
+                  onSearchRow={searchRow}
                   registerRemoveRef={registerRemoveRef}
                   announce={announce}
                   onCopyError={onCopyError}

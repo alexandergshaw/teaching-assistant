@@ -31,7 +31,7 @@ import { Button, IconButton, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
 import { CopyIcon, CheckIcon, ArrowUpIcon, ArrowDownIcon, CloseIcon } from "./discussion-icons";
-import { replyClipboardText, type ReplyRow, type ReplyRowState } from "./discussion-capture";
+import { replyClipboardText, type ReplyRow, type ReplyRowState, type ReplyResource } from "./discussion-capture";
 import { RESOURCE_KIND_LABELS } from "@/lib/resource-kind";
 // F1a/F2/F3 (docs/discussion-reply-sort-filter-acceptance-criteria.md section
 // 3): the dependency-free name-split leaf. Read `person-name.ts`'s own header
@@ -148,6 +148,18 @@ export interface DiscussionReplyRowProps {
   onRetryResources: (id: string) => void;
   /** R10: one-click remove per resource link. */
   onRemoveResource: (id: string, url: string) => void;
+  /** Resource-controls feature: one-click insert. A MOVE, not a copy - see
+   *  useDiscussionReplies.ts's `insertResource` doc comment for the full
+   *  reasoning. This row calls it and nothing else; the combined
+   *  edit-then-remove is entirely that function's own responsibility. */
+  onInsertResource: (id: string, resource: ReplyResource) => void;
+  /** Resource-controls feature: per-row targeted search ("search for
+   *  resources specific to that reply and its original message"). Shows its
+   *  own pending/failed state through this row's existing `resourceState`
+   *  rendering below - no separate UI state needed, and it never touches
+   *  the table-wide resource queue (useReplyResources.ts's `searchRow` doc
+   *  comment has the full account). */
+  onSearchRow: (id: string) => void;
   /** AC19/modal-focus-restoration decision 5: a keyed ref map so focus after
    * a removal can move to the NEXT row's Remove button - never
    * document.body. Registered on both the armed and unarmed Remove button
@@ -181,6 +193,8 @@ function DiscussionReplyRowImpl({
   onRetry,
   onRetryResources,
   onRemoveResource,
+  onInsertResource,
+  onSearchRow,
   registerRemoveRef,
   announce,
   onCopyError,
@@ -265,6 +279,16 @@ function DiscussionReplyRowImpl({
       pendingResourceFocusFallbackRef.current = true;
     }
     onRemoveResource(row.id, url);
+  };
+
+  // Resource-controls feature: one-click insert. Always falls back to the
+  // reply textarea for focus afterward (never the next resource's own
+  // Remove button, unlike handleRemoveResource above) - after inserting a
+  // link into the reply, the natural next place for focus is the box that
+  // just changed, not a sibling resource's own remove control.
+  const handleInsertResource = (resource: ReplyResource) => {
+    pendingResourceFocusFallbackRef.current = true;
+    onInsertResource(row.id, resource);
   };
 
   const handleCopy = async () => {
@@ -617,6 +641,29 @@ function DiscussionReplyRowImpl({
                 inputRef={replyInputRef}
               />
 
+              {/* Resource-controls feature: per-row targeted search - "each
+                  reply should also have a button to search for resources
+                  specific to that reply and its original message". Shares
+                  this row's own `resourceState` rendering below for its
+                  pending/failed feedback (searching.../Retry links) rather
+                  than a separate UI state - useReplyResources.ts's own
+                  `searchRow` doc comment has the full account of why that is
+                  safe (it uses the same
+                  markResourceSearching/applyResources/markResourceFailed
+                  mutators the bulk pass already does). Disabled while
+                  ALREADY searching (bulk or per-row - both set the same
+                  resourceState) to avoid a redundant concurrent dispatch. */}
+              <Button
+                size="small"
+                variant="text"
+                style={{ minWidth: 0, alignSelf: "flex-start" }}
+                disabled={row.resourceState === "searching"}
+                aria-label={`Search for resources for the reply to ${row.author}`}
+                onClick={() => onSearchRow(row.id)}
+              >
+                Search for resources
+              </Button>
+
               {/* docs/discussion-reply-resources-acceptance-criteria.md R10:
                   resources render beneath the reply, never inside the
                   textbox. */}
@@ -643,6 +690,24 @@ function DiscussionReplyRowImpl({
                         <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ minWidth: 0 }}>
                           {r.title}
                         </a>
+                        {/* Resource-controls feature: one-click insert. A
+                            MOVE (see onInsertResource's own doc comment) -
+                            this button and its resource both disappear from
+                            this list the moment it is clicked, which is what
+                            makes a second click on the SAME resource
+                            structurally impossible rather than merely
+                            discouraged. Text label, not icon-only: "Insert"
+                            has no standard, instantly-recognizable glyph in
+                            this app's existing icon set. */}
+                        <Button
+                          size="small"
+                          variant="text"
+                          style={{ minWidth: 0 }}
+                          aria-label={`Insert the link ${r.title} into the reply to ${row.author}`}
+                          onClick={() => handleInsertResource(r)}
+                        >
+                          Insert
+                        </Button>
                         {/* F6: keyed by url, mirroring registerRemoveRef's
                             row-scoped pattern above - the focus target after
                             THIS button unmounts. */}

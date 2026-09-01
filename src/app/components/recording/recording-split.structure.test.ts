@@ -242,9 +242,12 @@ describe("recording-split structure", () => {
         "ta-rec-disc-formality",
         "ta-rec-disc-ingredients",
         "ta-rec-disc-kb-context-label",
+        "ta-rec-disc-resource-kinds",
         "ta-rec-disc-save-video",
         "ta-rec-disc-sort",
         "ta-rec-disc-table",
+        "ta-rec-disc-video-max",
+        "ta-rec-disc-video-min",
         "ta-rec-echo",
         "ta-rec-gain",
         "ta-rec-mic",
@@ -380,8 +383,8 @@ describe("recording-split structure", () => {
         expect(discKeys.length).toBeGreaterThan(0);
       });
 
-      it("finds exactly ten ta-rec-disc-* keys (C5c-ii's nine, plus the 'activate from Knowledge base' group's own ta-rec-disc-kb-context-label)", () => {
-        expect(discKeys).toHaveLength(10);
+      it("finds exactly thirteen ta-rec-disc-* keys (C5c-ii's nine, the 'activate from Knowledge base' group's own ta-rec-disc-kb-context-label, and the resource-controls group's own resource-kinds/video-min/video-max)", () => {
+        expect(discKeys).toHaveLength(13);
       });
 
       it.each(discKeys)(

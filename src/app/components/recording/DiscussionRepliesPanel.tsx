@@ -48,6 +48,10 @@ import DiscussionReplyTable from "./DiscussionReplyTable";
 // extracted into its own file rather than grown inline here - see that
 // file's own header for why.
 import DiscussionReplyControls from "./DiscussionReplyControls";
+// Resource-controls feature: "eligible resource kinds" and "preferred video
+// length" - extracted into its own file for the same reason
+// DiscussionReplyControls was (this panel's own 1000-line ceiling).
+import DiscussionResourceSettings from "./DiscussionResourceSettings";
 // F8/F9 fixes: neither needs a new field on UseDiscussionRepliesReturn (out
 // of this fixer pass's file set) - useLlmProvider is a standalone reactive
 // store read (docs/discussion-reply-resources-acceptance-criteria.md R4e),
@@ -124,6 +128,16 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     // its setter straight back as that component's onChange.
     composition,
     setComposition,
+    // Resource-controls feature: fully owned (persistence, coercion) by
+    // useDiscussionReplies - this panel only threads the values into
+    // DiscussionResourceSettings and passes its setters straight back as
+    // that component's onChange handlers, exactly mirroring `composition`
+    // above.
+    resourceKinds,
+    setResourceKinds,
+    videoLengthMinMinutes,
+    videoLengthMaxMinutes,
+    setVideoLengthPreference,
     // GAP 1 fix: the one visible signal that this run's drafts are using
     // the instructor's selected Knowledge Base pages as context - see the
     // standing hint rendered just above DiscussionReplyControls below.
@@ -190,6 +204,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     findMissing,
     retryResources,
     removeResource,
+    searchRow,
+    insertResource,
     runLog,
   } = useDiscussionReplies(active);
 
@@ -665,6 +681,21 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
         <p className={styles.fieldHint}>{`Drafting with Knowledge Base context: ${knowledgeContextLabel}.`}</p>
       )}
       <DiscussionReplyControls composition={composition} onChange={setComposition} />
+      {/* Resource-controls feature: eligible resource kinds and preferred
+          video length - placed right after the composition cluster, same
+          "inline, before Start capture, no disclosure" reasoning as that
+          cluster's own C0-0 placement note above: both govern what the
+          resource pass does the moment a reply lands, so a control
+          discovered later (or behind a click) would be discovered only
+          after the first search already ran under whatever it defaulted
+          to. */}
+      <DiscussionResourceSettings
+        resourceKinds={resourceKinds}
+        onChangeResourceKinds={setResourceKinds}
+        videoLengthMinMinutes={videoLengthMinMinutes}
+        videoLengthMaxMinutes={videoLengthMaxMinutes}
+        onChangeVideoLength={setVideoLengthPreference}
+      />
 
       <div className={styles.ghActions}>
         <Button variant="contained" size="small" onClick={handleStartStop}>
@@ -879,6 +910,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           retryRow={retryRow}
           retryResources={retryResources}
           removeResource={removeResource}
+          insertResource={insertResource}
+          searchRow={searchRow}
           registerRemoveRef={registerRemoveRef}
           announce={announce}
           onCopyError={handleCopyError}

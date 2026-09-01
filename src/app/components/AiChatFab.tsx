@@ -6,6 +6,7 @@ import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
 import LiveClassWindow, { LIVE_CLASS_WINDOW_W, LIVE_CLASS_WINDOW_H, LiveClassIcon } from "./live-class/LiveClassWindow";
 import WeeklyChecklistOverviewModal, { ChecklistIcon } from "./courses/WeeklyChecklistOverviewModal";
+import { LegibilityProbeModal } from "./grading-recording/LegibilityProbeModal";
 import { useLiveClassSession } from "./live-class/useLiveClassSession";
 import {
   isLiveClassSessionActive,
@@ -90,6 +91,18 @@ export default function AiChatFab() {
   // mount, i.e. every open, plus a manual Refresh control), not by refusing
   // to persist the boolean.
   const [checklistOverviewOpen, setChecklistOverviewOpen] = useState<boolean>(() => readLS("checklist-overview-open", false));
+
+  // Legibility probe (R1/R1a/R1b): a FOURTH modal-shaped dial entry, same
+  // open/closed persistence idiom as checklistOverviewOpen immediately above
+  // - the fab is the only surface this diagnostic can reach from (it is
+  // mounted in layout.tsx, outside page.tsx, same reason the three original
+  // dial actions open floating windows/modals instead of navigating - see
+  // this file's own reasoning on navigateToRecordingTool further down for
+  // the contrasting case). Unlike the capture/transcript it displays - which
+  // LegibilityProbeModal itself discards on close (see that file's header) -
+  // there is nothing sensitive in "was this diagnostic left open", so it
+  // persists the same boolean way every other dial-opened surface here does.
+  const [legibilityProbeOpen, setLegibilityProbeOpen] = useState<boolean>(() => readLS("legibility-probe-open", false));
 
   // HOISTED above the window body (H3): this is the one and only instance of
   // the live-class session controller for the whole app, owned by this
@@ -230,6 +243,7 @@ export default function AiChatFab() {
   useEffect(() => { writeLS("chat-open", chatOpen); }, [chatOpen]);
   useEffect(() => { writeLS("live-class-open", liveClassOpen); }, [liveClassOpen]);
   useEffect(() => { writeLS("checklist-overview-open", checklistOverviewOpen); }, [checklistOverviewOpen]);
+  useEffect(() => { writeLS("legibility-probe-open", legibilityProbeOpen); }, [legibilityProbeOpen]);
 
   // Persist position to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
@@ -553,6 +567,26 @@ export default function AiChatFab() {
           }}
         />
 
+        {/* Legibility probe (R1/R1a/R1b, docs/grading-via-recording-
+            acceptance-criteria.md section 1): the diagnostic that decides
+            whether the rest of grading-via-recording is worth building - see
+            LegibilityProbeModal.tsx's own header for what it does and
+            deliberately does not do. Grouped with the three modal/window
+            actions above it, not with the two navigate entries below -
+            LegibilityProbeModal opens as a modal (ModalShell), the same
+            shape as WeeklyChecklistOverviewModal just above, not a
+            navigateToRecordingTool() view change. Labeled as the diagnostic
+            it is ("Check screen legibility"), never as grading - it does not
+            grade anything and the owner should not expect it to. */}
+        <SpeedDialAction
+          icon={<LegibilityProbeIcon />}
+          title="Check screen legibility"
+          onClick={() => {
+            setDialOpen(false);
+            setLegibilityProbeOpen((open) => !open);
+          }}
+        />
+
         {/* Reachable-from-the-fab entries for the Recording tab's grading
             tools (Discussions, Announcements - the owner's confirmed scope;
             "the coming grading-via-recording" has no surface to link to yet
@@ -692,6 +726,15 @@ export default function AiChatFab() {
       {checklistOverviewOpen && (
         <WeeklyChecklistOverviewModal onClose={() => setChecklistOverviewOpen(false)} />
       )}
+
+      {/* Mounted only while open, same as WeeklyChecklistOverviewModal just
+          above - LegibilityProbeModal itself discards its capture and
+          transcript on close (see that file's header), so there is no
+          staleness concern the checklist's own comment warns about; this
+          only controls whether the dialog is on screen at all. */}
+      {legibilityProbeOpen && (
+        <LegibilityProbeModal onClose={() => setLegibilityProbeOpen(false)} />
+      )}
     </>
   );
 }
@@ -725,6 +768,23 @@ function RecordingDiscussionsIcon() {
         strokeLinejoin="round"
         fill="none"
       />
+    </svg>
+  );
+}
+
+// An open eye - stands for "can this be read", distinct from every other
+// icon in this dial (none of which is about reading/legibility).
+function LegibilityProbeIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <circle cx="12" cy="12" r="3" fill="currentColor" />
     </svg>
   );
 }

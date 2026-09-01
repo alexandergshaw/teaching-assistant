@@ -18,6 +18,8 @@ import {
   partitionResourceOutcome,
   shouldPushDegradedNotice,
   resourceQueueProgressText,
+  redactAuthorNameFromText,
+  deriveRowSearchConcept,
 } from "./useReplyResources";
 // F1 fix: isResourceBatchFresh moved to useReplyRows.ts, which owns
 // resourceSeqRef (the state the comparison actually reads) and is now the
@@ -220,5 +222,92 @@ describe("resourceQueueProgressText (F9)", () => {
 
   it("SABOTAGE CHECK (f): a busy queue's text must never claim present-tense 'finding' - the exact stall this fix removes", () => {
     expect(resourceQueueProgressText(5, true)).not.toMatch(/Finding resources/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE PRIVACY BLOCKER: redactAuthorNameFromText / deriveRowSearchConcept.
+// Since entry 373 a drafted reply can open with the student's first name
+// ("Maria, your point about..."); the per-row targeted search sends the
+// post AND the reply to an external resource search, so the author's name
+// must never leave the app in that request. This is not a nicety - it is
+// pinned as a required test per the resource-controls brief.
+// ---------------------------------------------------------------------------
+
+describe("redactAuthorNameFromText (the privacy blocker)", () => {
+  it("the exact case the brief names: a reply opening 'Maria, your point about...' produces text containing no 'Maria'", () => {
+    const result = redactAuthorNameFromText("Maria, your point about the second reading was great.", "Maria Lopez");
+    expect(result.toLowerCase()).not.toContain("maria");
+    expect(result).toBe("your point about the second reading was great.");
+  });
+
+  it("strips the derived LAST name too, not only the greeting first name - the post half can independently mention the full name", () => {
+    const result = redactAuthorNameFromText("A post signed off as Maria Lopez, discussing recursion.", "Maria Lopez");
+    expect(result.toLowerCase()).not.toContain("maria");
+    expect(result.toLowerCase()).not.toContain("lopez");
+  });
+
+  it("strips a mid-sentence, case-varied occurrence, not just a leading greeting", () => {
+    const result = redactAuthorNameFromText("Great job, MARIA! Loved reading this.", "Maria Lopez");
+    expect(result.toLowerCase()).not.toContain("maria");
+  });
+
+  it("strips an all-lowercase occurrence too", () => {
+    const result = redactAuthorNameFromText("as maria pointed out earlier", "Maria Lopez");
+    expect(result.toLowerCase()).not.toContain("maria");
+  });
+
+  it("does NOT strip a name that only shares a substring - word-boundary matching, not a bare .includes()", () => {
+    // "Marian" contains "Maria" as a substring; \b matching must not gut it.
+    const result = redactAuthorNameFromText("The Marian era of the reform.", "Maria Lopez");
+    expect(result).toContain("Marian");
+  });
+
+  it("a mononym author (single token) still gets its greeting name stripped", () => {
+    const result = redactAuthorNameFromText("Aisha, nice work on this.", "Aisha");
+    expect(result.toLowerCase()).not.toContain("aisha");
+  });
+
+  it("empty author leaves the text untouched aside from the trim/whitespace cleanup", () => {
+    expect(redactAuthorNameFromText("Just some text.", "")).toBe("Just some text.");
+  });
+
+  it("SABOTAGE CHECK: a name embedded in a comma-form 'Last, First' author string is still fully stripped from both derived forms", () => {
+    const result = redactAuthorNameFromText("Diego mentioned Chen's paper and Diego's own point.", "Chen, Diego");
+    expect(result.toLowerCase()).not.toContain("diego");
+    expect(result.toLowerCase()).not.toContain("chen");
+  });
+});
+
+describe("deriveRowSearchConcept (post + reply, redacted, then normalized like the bulk pass)", () => {
+  it("combines post and reply text into one concept", () => {
+    const concept = deriveRowSearchConcept("A post about recursion in Python.", "Nice example of a base case.", "Sam Lee");
+    expect(concept).toContain("recursion");
+    expect(concept).toContain("base case");
+  });
+
+  it("the combined concept contains no form of the author's name, even when both halves mention it", () => {
+    const concept = deriveRowSearchConcept(
+      "Sam Lee here, discussing merge sort complexity.",
+      "Sam, your analysis of merge sort was spot on.",
+      "Sam Lee"
+    );
+    expect(concept.toLowerCase()).not.toContain("sam");
+    expect(concept.toLowerCase()).not.toContain("lee");
+  });
+
+  it("empty post and empty reply yields an empty concept - nothing to search for", () => {
+    expect(deriveRowSearchConcept("", "", "Sam Lee")).toBe("");
+    expect(deriveRowSearchConcept("   ", "  \n ", "Sam Lee")).toBe("");
+  });
+
+  it("a post with no reply yet still yields a searchable concept from the post alone", () => {
+    const concept = deriveRowSearchConcept("A detailed post about binary search trees.", "", "Sam Lee");
+    expect(concept).toContain("binary search trees");
+  });
+
+  it("SABOTAGE CHECK: dropping the redaction step would leak the name straight through - pinned against the exact function this hook calls, not a re-implementation", () => {
+    const concept = deriveRowSearchConcept("Post text.", "Maria, thanks for sharing.", "Maria Lopez");
+    expect(concept).not.toMatch(/\bmaria\b/i);
   });
 });

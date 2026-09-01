@@ -33,6 +33,21 @@ import type { UseReplyRowsReturn } from "./useReplyRows";
 import { gatherReplyResourcesAction } from "@/app/actions/discussion-replies";
 import { getStoredProvider } from "@/lib/llm-provider";
 import type { LlmProvider } from "@/lib/llm";
+import type { ResourceKind } from "@/lib/resource-kind";
+// The per-row targeted search (resource-controls feature: "each reply
+// should also have a button to search for resources specific to that reply
+// and its original message") reuses the SAME concept-normalization rule the
+// bulk pass already applies via gatherReplyResourcesAction - never a second
+// truncation rule.
+import { deriveResourceConcept } from "@/lib/discussion-reply-prompt";
+// THE PRIVACY BLOCKER: redactAuthorNameFromText now lives in
+// discussion-reply-redact.ts, a dependency-free leaf importable by BOTH this
+// "use client" hook (the per-row targeted search, below) and
+// discussion-replies.ts's "use server" gatherReplyResourcesAction (the bulk
+// path, BLOCKER 3) - one implementation, two callers. Re-exported from here
+// too, unchanged, so this hook's own test file's existing import path keeps
+// working.
+import { redactAuthorNameFromText } from "@/lib/discussion-reply-redact";
 
 // F1 fix note: `isResourceBatchFresh` used to be defined and exported from
 // THIS file, with its own sabotage-checked test block - and nothing in
@@ -109,6 +124,34 @@ export function resourceQueueProgressText(queueSize: number, laneBusy: boolean):
   return `Finding resources for ${queueSize} more repl${plural}...`;
 }
 
+// redactAuthorNameFromText itself now lives in discussion-reply-redact.ts
+// (see this file's import above for why it had to move out of a "use
+// client" hook file) - re-exported here unchanged so existing imports of it
+// from this module keep working.
+export { redactAuthorNameFromText };
+
+/**
+ * The per-row targeted search's own concept, distinct from the bulk pass's
+ * `{ id: r.id, text: r.post, author: r.author }` (post only, redacted
+ * server-side since BLOCKER 3 - see discussion-reply-redact.ts) - the ask is
+ * "search for resources specific to that reply and its original message", so
+ * this combines BOTH, redacts the combined text HERE (client-side, before
+ * the request is even sent - see redactAuthorNameFromText's own doc comment
+ * for why the post half needs its own redaction pass independent of the
+ * reply half), and only then hands the result to `deriveResourceConcept` for
+ * the same normalize/truncate rule the bulk pass already applies - one
+ * truncation rule, not two. "" (nothing to search for) when post and reply
+ * are both empty/whitespace-only; a caller must treat "" as "do not dispatch
+ * a search" the same way the bulk pass's own empty-concept entries are
+ * dropped before ever reaching the network (gatherReplyResourcesAction's own
+ * `entries.length === 0` branch).
+ */
+export function deriveRowSearchConcept(post: string, reply: string, author: string): string {
+  const combined = [post, reply].filter((t) => t.trim().length > 0).join(" ");
+  if (!combined.trim()) return "";
+  return deriveResourceConcept(redactAuthorNameFromText(combined, author));
+}
+
 /** F5: partitions a resource batch's ids by whether each is still unchanged
  * since dispatch, using the caller-supplied `isUnchangedSince` predicate
  * (useReplyRows.ts's `resourceSeqRef`-backed check). Pure: takes the
@@ -161,6 +204,19 @@ export interface UseReplyResourcesReturn {
   enqueueResources: (ids: string[]) => void;
   findMissing: () => void;
   retryResources: (id: string) => void;
+  /** Per-row targeted search ("each reply should also have a button to
+   *  search for resources specific to that reply and its original
+   *  message"). Deliberately NOT routed through `enqueueResources`/the
+   *  bulk queue - it dispatches immediately, on its own, using
+   *  `deriveRowSearchConcept` (post + reply, redacted) rather than the
+   *  bulk pass's post-only concept, and touches only THIS row's own
+   *  `resourceState`/`resources`/`resourceSeq` (the same mutators the bulk
+   *  drain already uses - `markResourceSearching`/`applyResources`/
+   *  `markResourceFailed`/`resourcesUnchangedSince`) - never
+   *  `resourceQueueRef`, `inFlightRef` or `searchingResources`, so it
+   *  cannot disturb the bulk queue's own progress line or in-flight state.
+   *  A no-op when the row is gone or has nothing to search for. */
+  searchRow: (id: string) => void;
 }
 
 export interface UseReplyResourcesArgs {
@@ -173,6 +229,15 @@ export interface UseReplyResourcesArgs {
    *  dispatch time, the same way useDiscussionReplies.ts's own
    *  `courseNameRef` is read inside its two loops. */
   courseNameRef: MutableRefObject<string>;
+  /** Resource-controls feature: the persisted "eligible resource kinds"
+   *  setting, read fresh at dispatch time by both the bulk drain and
+   *  `searchRow` - mirrors `courseNameRef`'s own freshness reasoning. */
+  resourceKindsRef: MutableRefObject<readonly ResourceKind[]>;
+  /** Resource-controls feature: the persisted "preferred video length"
+   *  setting, read fresh the same way. See discussion-replies.ts's own
+   *  `videoLengthPreferenceSentence` for why this can only ever reach the
+   *  model as a stated preference, never an enforced filter. */
+  videoLengthPreferenceRef: MutableRefObject<{ minMinutes?: number; maxMinutes?: number }>;
   pushNotice: (text: string) => void;
 }
 
@@ -229,7 +294,13 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
         const posts = ids
           .map((id) => currentRows.find((r) => r.id === id))
           .filter((r): r is ReplyRow => !!r)
-          .map((r) => ({ id: r.id, text: r.post }));
+          // BLOCKER 3: `author` now travels alongside `text` so
+          // gatherReplyResourcesAction can redact the post BODY server-side
+          // (discussion-reply-redact.ts) before any concept derived from it
+          // reaches the web search - this is the automatic path (fires on
+          // every reply landing, R6) that a self-introducing first post
+          // ("Hi everyone, I'm Maria and...") most commonly hits.
+          .map((r) => ({ id: r.id, text: r.post, author: r.author }));
 
         if (posts.length === 0) continue; // every id was actually removed from the table (rawRows), not merely filtered out
 
@@ -239,10 +310,12 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
         const snapshot = rowsApi.snapshotResourceSeq(postIds);
         const provider = getStoredProvider();
         const courseName = argsRef.current.courseNameRef.current;
+        const resourceKinds = argsRef.current.resourceKindsRef.current;
+        const videoLengthPreference = argsRef.current.videoLengthPreferenceRef.current;
 
         let result: Awaited<ReturnType<typeof gatherReplyResourcesAction>>;
         try {
-          result = await gatherReplyResourcesAction(posts, courseName, provider);
+          result = await gatherReplyResourcesAction(posts, courseName, provider, resourceKinds, videoLengthPreference);
         } catch (err) {
           result = { error: err instanceof Error ? err.message : "Could not find resources for these replies." };
         }
@@ -350,11 +423,71 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
     [enqueueResources]
   );
 
+  // Per-row targeted search - see UseReplyResourcesReturn.searchRow's own
+  // doc comment for why this bypasses the bulk queue entirely rather than
+  // going through `enqueueResources`. Uses `rawRows` (never the filtered
+  // `rows`), mirroring every other whole-table/single-row lookup in this
+  // codebase's own B3/B5 discipline - a row hidden by an active search-box
+  // filter must still be reachable by its own button.
+  const dispatchRowSearch = useCallback(async (id: string, concept: string) => {
+    const rowsApi = argsRef.current.rowsApi;
+    rowsApi.markResourceSearching([id]);
+    const snapshot = rowsApi.snapshotResourceSeq([id]);
+    const provider = getStoredProvider();
+    const courseName = argsRef.current.courseNameRef.current;
+    const resourceKinds = argsRef.current.resourceKindsRef.current;
+    const videoLengthPreference = argsRef.current.videoLengthPreferenceRef.current;
+
+    let result: Awaited<ReturnType<typeof gatherReplyResourcesAction>>;
+    try {
+      result = await gatherReplyResourcesAction([{ id, text: concept }], courseName, provider, resourceKinds, videoLengthPreference);
+    } catch (err) {
+      result = { error: err instanceof Error ? err.message : "Could not find resources for this reply." };
+    }
+    if (!mountedRef.current) return;
+
+    const freshRowsApi = argsRef.current.rowsApi;
+    const isUnchangedSince = () => freshRowsApi.resourcesUnchangedSince(id, snapshot);
+
+    if ("error" in result) {
+      // Mirrors the bulk drain's own R7 partition, at single-row scale: an
+      // id changed mid-flight (the instructor removed a link while THIS
+      // search was running) resolves to "failed" with the discard message
+      // rather than staying wedged at "searching" forever.
+      freshRowsApi.markResourceFailed([id], isUnchangedSince() ? result.error : RESOURCE_DISCARDED_MESSAGE);
+      argsRef.current.pushNotice(result.error);
+      return;
+    }
+
+    if (shouldPushDegradedNotice(result.degraded, provider)) {
+      argsRef.current.pushNotice(RESOURCE_DEGRADED_NOTICE);
+    }
+
+    if (!isUnchangedSince()) {
+      freshRowsApi.markResourceFailed([id], RESOURCE_DISCARDED_MESSAGE);
+      return;
+    }
+    const found = result.resources.find((r) => r.id === id)?.resources;
+    if (found !== undefined) freshRowsApi.applyResources(id, found);
+  }, []);
+
+  const searchRow = useCallback(
+    (id: string) => {
+      const row = argsRef.current.rowsApi.rawRows.find((r) => r.id === id);
+      if (!row) return;
+      const concept = deriveRowSearchConcept(row.post, row.reply, row.author);
+      if (!concept) return;
+      void dispatchRowSearch(id, concept);
+    },
+    [dispatchRowSearch]
+  );
+
   return {
     resourceQueueSize,
     searchingResources,
     enqueueResources,
     findMissing,
     retryResources,
+    searchRow,
   };
 }

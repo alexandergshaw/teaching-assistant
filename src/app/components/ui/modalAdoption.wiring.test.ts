@@ -251,7 +251,12 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // grading-recording/RubricInputModal.tsx is one more new dialog site, on
     // the same terms as FeedbackExpandModal.tsx before it - it adopts
     // ModalShell from birth.
-    expect(DIALOG_SITES.length).toBe(48);
+    //
+    // 49, not 48, as of the grading-via-recording legibility-probe chunk:
+    // grading-recording/LegibilityProbeModal.tsx is one more new dialog
+    // site, on the same terms as RubricInputModal.tsx before it - it adopts
+    // ModalShell from birth.
+    expect(DIALOG_SITES.length).toBe(49);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -304,7 +309,11 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // 34 as of the grading-via-recording rubric-input modal chunk - the
     // thirty-three described above plus grading-recording/RubricInputModal.tsx,
     // which likewise adopts ModalShell from birth.
-    expect(ADOPTING_PATHS.size).toBe(34);
+    // 35 as of the grading-via-recording legibility-probe chunk - the
+    // thirty-four described above plus
+    // grading-recording/LegibilityProbeModal.tsx, which likewise adopts
+    // ModalShell from birth.
+    expect(ADOPTING_PATHS.size).toBe(35);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

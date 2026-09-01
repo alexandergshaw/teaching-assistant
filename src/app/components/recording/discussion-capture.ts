@@ -132,6 +132,40 @@ export function framesDifferEnough(a: FrameSignature | null, b: FrameSignature, 
 }
 
 // ---------------------------------------------------------------------------
+// LP3 FIX (legibility-probe honesty defect): a queued frame now carries the
+// REAL parameters it was actually encoded with, from where the encoding
+// happens (useDiscussionCapture.ts's handleTick) - including the width the
+// SOURCE track reported at that exact moment and, when a frame was
+// re-encoded at half quality to fit EXTRACT_BATCH_WIRE_BUDGET (AC10b/S5),
+// the quality it was ACTUALLY re-encoded at rather than the nominal
+// FRAME_JPEG_QUALITY constant. This is additive to `{ base64 }` - every
+// existing consumer (extractDiscussionPostsAction, probeFrameLegibilityAction,
+// both typed `Array<{ base64: string }>`) keeps working unchanged against the
+// wider shape structurally. Only LegibilityProbeModal.tsx reads the extra
+// fields, to report what a submission-page frame was ACTUALLY sent at
+// instead of a nominal constant read at a different time (probe time,
+// against a possibly-resized preview) than the frame was encoded at
+// (capture time).
+export interface CapturedFrame {
+  base64: string;
+  /** getDisplayMedia's raw device framebuffer width/height AT THE MOMENT
+   *  this frame was drawn - never re-read later from a live <video>, which
+   *  could have resized or changed source since. */
+  sourceWidth: number;
+  sourceHeight: number;
+  /** The width/height this frame was actually encoded at -
+   *  resolveTargetWidth(sourceWidth) and the matching proportional height,
+   *  evaluated at encode time. */
+  encodedWidth: number;
+  encodedHeight: number;
+  /** The JPEG quality this frame was actually encoded at - FRAME_JPEG_QUALITY
+   *  normally, or FRAME_JPEG_QUALITY / 2 when the frame was re-encoded to fit
+   *  EXTRACT_BATCH_WIRE_BUDGET (AC10b/S5). Never a nominal constant restated
+   *  without regard to whether a re-encode actually happened for THIS frame. */
+  encodedQuality: number;
+}
+
+// ---------------------------------------------------------------------------
 // AC10a: the pure batch packer. Bytes are the real ceiling, count is a cap on
 // top of it - see the AC for the measured 1920-wide-window numbers that make
 // a count-only cap a latent outage for tall-window users.
@@ -143,10 +177,17 @@ export function framesDifferEnough(a: FrameSignature | null, b: FrameSignature, 
  * non-empty, even if that frame alone exceeds `maxWireBytes` - the caller
  * (the server action, via `checkWireBudget`) is expected to produce a
  * user-facing refusal for that case rather than the client silently
- * stalling with an unsendable frame wedged at the head of the queue. */
-export function packFrameBatch(frames: ReadonlyArray<{ base64: string }>, maxCount: number, maxWireBytes: number): Array<{ base64: string }> {
+ * stalling with an unsendable frame wedged at the head of the queue.
+ *
+ * Generic over `T` (constrained to `{ base64: string }`) rather than fixed to
+ * that exact shape, so a caller queuing a WIDER frame (CapturedFrame above,
+ * with its per-frame encode parameters) gets those extra fields back out
+ * through packing unchanged, instead of the packer silently dropping them
+ * down to `{ base64 }`. Behaviour for a caller passing the narrow shape is
+ * identical to before - only the type parameter is new. */
+export function packFrameBatch<T extends { base64: string }>(frames: ReadonlyArray<T>, maxCount: number, maxWireBytes: number): T[] {
   if (frames.length === 0) return [];
-  const packed: Array<{ base64: string }> = [frames[0]];
+  const packed: T[] = [frames[0]];
   for (let i = 1; i < frames.length && packed.length < maxCount; i++) {
     const candidate = [...packed, frames[i]];
     if (sumBase64WireBytes(candidate.map((f) => f.base64)) > maxWireBytes) break;

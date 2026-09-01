@@ -1,0 +1,71 @@
+/* Colocated styles for LegibilityProbeModal. Mirrors
+   DiscussionRepliesPanel.module.css's .previewVideo/.statusRow/.statusText
+   trio (same capture-preview idiom, reused here rather than reinvented) and
+   adds only what this modal needs beyond that: a thumbnail strip for
+   requirement 5 ("show the frames alongside the transcription"). This file
+   is invisible to recording-split.structure.test.ts's key-canary scan (it
+   filters src/app/components/recording/**) and to the ta-rec-* key canary,
+   which only reads the hooks - no persisted storage key is ever named here
+   because this modal persists nothing (see LegibilityProbeModal.tsx's own
+   header comment for why). */
+
+.previewVideo {
+  width: 240px;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  border: 1px solid var(--field-border);
+  background: #000;
+  object-fit: cover;
+}
+
+.statusRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.statusText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.paramsLine {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-family: var(--mono-font, monospace);
+  margin: 0 0 12px;
+}
+
+.thumbGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 16px;
+}
+
+.thumb {
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--field-border);
+  background: #000;
+}
+
+.transcript {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--card-background);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}

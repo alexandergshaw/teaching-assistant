@@ -36697,3 +36697,219 @@ modelled on is a class-forbidding NEGATIVE one. Reshaping it is owed.
 
 Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
 pre-existing warnings, `vitest` **756 files / 15671 tests** all passing.
+
+## 378. Four controls over what a reply's resources may be, an instrument to ask whether the screen can be read at all, and a ceiling gate that starts by excusing itself
+
+Four pieces in one tree. One of them sends a student's discussion post to a
+third-party web search, so it got the scrutiny first, and it is the piece that
+does not come out clean.
+
+**One click inserts a resource, and it is a MOVE.** `appendResourceToReply` only
+appends - the entire prior reply survives as an exact prefix, which is what makes
+it structurally unable to clobber text the instructor is mid-way through typing.
+The reply `TextField` is fully controlled off `row.reply` with no local buffer, and
+`insertResource` re-reads `rawRows` at click time, so there is no stale snapshot to
+write back either. The format is `${title} - ${url}` after a blank line, which is
+byte-identical to `replyClipboardText`'s existing shape rather than a second
+convention. The MOVE half is real: `removeResource` drops the url from
+`row.resources`, so that resource's own Insert button unmounts and a second click on
+it is impossible - **within one suggestion list**. Across a second resource pass it is
+not: `applyResources` replaces `resources` wholesale, so a re-search that returns the
+same url remounts the button and a click appends the line a second time.
+
+**Deselecting a resource kind is enforced twice, and the RESULT-side half is the
+one that counts.** `profile.kinds` narrows the research request, but that is prompt
+guidance and nothing stops a model returning a kind it was not asked for; the
+`allowedKinds.has(link.kind)` check drops a non-compliant link before it can become a
+`ReplyResource`. The test constructs exactly that - a model that returns a `video`
+against a `["doc"]` request - rather than asserting the prompt was narrowed, which is
+the assertion that would have passed either way. Both the bulk drain and the new
+per-row search reach the same action with the same ref read fresh at dispatch, so
+there is one code path, not two. An explicitly EMPTY selection short-circuits before
+any network call and survives a reload (`coerceResourceKinds` returns `[]` for `"[]"`
+and the full set only for genuinely malformed JSON - its sabotage check pins that the
+two resolve differently).
+
+**The video-length preference is honest on all four surfaces.** The label, the UI
+hint, the prompt sentence and the doc comments all say preference and not guarantee,
+and the sentence itself explains WHY ("a video's exact length cannot be confirmed from
+these search results"). Spot-checked rather than taken on trust: no field on
+`CandidateResourceItem`/`ResourceLink` carries a duration, the research prompt never
+asks for one, and `checkUrlsReachable` only resolves a URL. There is nothing to
+filter on. It does not, however, validate min against max - `{min: 20, max: 5}`
+reaches the model as "between 20 and 5 minutes".
+
+**The probe asks one question and refuses to answer any other.** Rule 2 of the only
+prompt it has forbids grading, scoring, structure extraction and inference; rule 5
+forbids inventing a student name or a score. An empty read is refused twice - once by
+`describeEmptyLlmText` in the action, once by `deriveProbeResultNotice`, which returns
+`kind: "error"` with a message that says in words "do not treat this as success" and
+renders with the error style, `role="alert"` and `aria-live="assertive"`. A near-empty
+read (<= 40 chars) gets the same danger styling; the threshold sits deliberately below
+a genuine "I could not read this" explanation, and an 87-character realistic one is
+pinned as NOT flagged. It is reachable: `AiChatFab` renders a "Check screen legibility"
+dial entry and mounts the modal, and `AiChatFab` is mounted in `layout.tsx` - so the
+corrected reachability notice in that file is, this time, true. Every new export in
+this batch traces to a production caller.
+
+**The repo-wide 1000-line gate is right about the arithmetic and wrong about its own
+allow-list.** The existing `recording-split.structure.test.ts` counts with
+`split("\n").length`, which is one more than `@(Get-Content).Count` for any file
+ending in a newline - confirmed directly: `canvas-inbox.ts` measures 1000 by
+Get-Content and 1001 by split, so that gate's real ceiling has been 999. The new gate
+pops the trailing empty element and reproduces Get-Content exactly, its allow-list is
+a literal path map (no globs), and each entry is a ratchet pinned to the file's count
+so a listed file may shrink but never grow. Its `recording/` exclusion matches that
+gate's non-recursive `readdirSync` precisely, so a file in a future `recording/`
+subdirectory would still be caught here. Re-derived independently: exactly five files
+in `src/` exceed 1000 lines and the list names exactly those five at exactly those
+counts.
+
+Final gates: `tsc` 0 errors, `eslint` 0 errors / 6 pre-existing warnings, `vitest`
+**763 files / 15773 tests** all passing (756/15660 at entry 377: +7 files, +113 tests).
+The `ta-rec-*` key canary is 55, re-derived independently with an ordinal sort; the
+`ta-rec-disc-*` half grew 10 -> 13, each new key at its correct ordinal position with
+both a read and a write.
+
+### Limits
+
+- **The author-name redaction is defeated by six inputs, and a student's name reaches
+  a third-party web search in every one.** The strip is `new RegExp("\\b" + name +
+  "\\b", "gi")` over three derived forms. `\b` in a non-unicode JS regex is defined
+  over `[A-Za-z0-9_]`, so a name whose first or last character is outside that set
+  never matches at all: `\bJosé\b` against `"José,"` asks for a boundary between `é`
+  and `,`, both non-word, and fails - `José, your point about photosynthesis is
+  strong.` goes out verbatim. The same exempts every name written in a non-Latin
+  script. Separately, only three joined forms are stripped, so for `Ana Maria Santos
+  Silva` (firstName `Ana Maria Santos`, lastName `Silva`) a bare `Santos` survives,
+  as does `Reyes` from a `Lopez-Reyes` author, as does any middle token when the
+  post's spacing differs from the author string's. And only the ROW'S OWN author is
+  redacted - `I agree with Marcus about the Krebs cycle.` is untouched. The tests
+  pin only pure-ASCII single-token names, so the suite is green and the guarantee is
+  not held.
+- **The BULK resource pass applies no redaction at all, and it is the automatic
+  one.** `gatherReplyResourcesAction` maps the raw post through `deriveResourceConcept`
+  - whitespace-collapse and a 400-character truncate - and hands it straight to a
+  prompt instructed to search the web. The doc comment defending it argues that no
+  author FIELD is folded in, which is true and beside the point: the leak is names in
+  the post BODY, and a self-introducing first post is the most common genre on a
+  discussion board. This path fires unattended on every model-authored reply landing,
+  for every row, so it carries more volume than the per-row search that was hardened.
+- **The probe reports a JPEG quality it did not use, in exactly the case it exists
+  to diagnose.** The modal reports `FRAME_JPEG_QUALITY` (0.55) unconditionally, but
+  `useDiscussionCapture` silently re-encodes any frame over the wire budget at
+  `FRAME_JPEG_QUALITY / 2` (0.275) and queues only `{ base64 }` - the frame carries no
+  record of which quality was used. Heavy frames are precisely the dense, high-
+  resolution pages most likely to read back as garbage, so an instructor diagnosing an
+  illegible 4K submission is told compression was 0.55 when it was 0.275 and goes and
+  changes the wrong setting. The source and target dimensions have the same shape of
+  problem in reverse: they are read from the live `<video>` at RUN time, while the
+  queued frames were encoded at whatever the dimensions were at CAPTURE time. Only
+  `wireBytes` is measured off the frames actually sent.
+- **Video length is a preference the pipeline cannot enforce, because a duration is
+  never known.** Nothing between the grounded search call and the reachability check
+  ever learns how long a video runs. The setting reaches the model as one sentence and
+  the model may ignore it; no result-side filter is possible, unlike the resource-kind
+  setting next to it. Every surface says so, which is the right outcome, but an
+  instructor who sets 5-15 minutes and receives a 90-minute lecture has hit the design,
+  not a bug.
+- **The R1 measurement has still not been run by anyone.** The instrument exists,
+  is reachable and is tested; nobody has yet captured a real submission page and read
+  what came back. The question the grading-via-recording AC is blocked on - can the
+  model read a student's work off a screen recording at all - is exactly as open as it
+  was before this batch.
+- **The ceiling gate's allow-list launders this batch's own growth.**
+  `src/app/actions/discussion-replies.test.ts` is entered at `maxLines: 1105` with the
+  reason "already over the ceiling before this gate existed; not touched by this
+  change". It IS touched by this change: `git show HEAD:` gives 1023 and the working
+  tree gives 1105, so the batch added 82 lines to a file already 23 over the ceiling
+  and then pinned the ratchet at the grown number. The honest ratchet is 1023, which
+  the tree would fail - forcing the split DEV_LOOP.md asks for.
+- **The `split("\n")` vs `Get-Content` discrepancy is documented, not reconciled.**
+  The recording gate still counts one line high; the new gate counts correctly. They
+  now disagree by one for every trailing-newline file, so a file's allowance changes
+  depending on which directory it sits in. The union is stricter rather than looser,
+  so nothing escapes, but the inconsistency was left standing.
+- **No component is rendered by any test in this repo.** `vitest` is node-env and
+  collects only `src/**/*.test.ts`. The entire 282-line probe modal, the new
+  `DiscussionResourceSettings` control cluster, the per-row "Search for resources"
+  button and the per-resource "Insert" button are verified **by reading**. A green
+  suite says nothing about whether any of them render, are labelled, or are reachable
+  by keyboard.
+- **Two ordinary instructor actions produce a discard error.** `insertResource` calls
+  `removeResource`, which bumps `resourceSeq`; if a search for that row is in flight,
+  the returning result fails the R7 guard and the row is marked FAILED with "Discarded
+  because these links changed while the search was running." So "click Search, then
+  insert a link I already like while I wait" throws away the search and shows an
+  error. The same guard is correct for a genuine removal.
+
+### Written before the blocker fixes - what actually shipped
+
+Five blockers. Every gate was green on all five.
+
+**B1/B2 - the name redaction was defeatable, and its tests were green because
+they only used names it could handle.** `\b` in a non-unicode JS regex is defined
+over `[A-Za-z0-9_]`, so for an accented name the trailing boundary sits between
+two non-word characters and never matches: **every name beginning or ending in a
+non-ASCII letter, and every non-Latin-script name, was exempt outright.** And
+only three JOINED forms were stripped, so `Santos` survived from "Ana Maria
+Santos Silva" and `Reyes` from "Lopez-Reyes". The review executed each attack and
+reported the exact sentence that would reach the third-party search.
+
+Fixed with `(?<![\p{L}\p{N}_])...(?![\p{L}\p{N}_])` under the `u` flag, applied
+to **every token** of the author string (split on comma, whitespace, hyphen and
+apostrophe), longest-first so a hyphenated name is removed as one unit before its
+fragments are tried. All six attacks re-run clean, plus Cyrillic, `O'Brien` and
+possessives - and the over-redaction guards still hold (`Marian` survives when
+the author is Maria).
+
+**B3 - the BULK path redacted nothing, and it is the automatic one.**
+`gatherReplyResourcesAction` passed raw post text to a web-search prompt. The
+doc comment defending it argued no author FIELD is folded in - true, and beside
+the point: the leak is names in the post BODY, and a self-introducing first post
+is the commonest genre on a board. This fires unattended on every reply that
+lands, so it out-volumed the per-row path that had been hardened. Redaction now
+lives in ONE leaf (`src/lib/discussion-reply-redact.ts`) imported by both the
+client hook and the `"use server"` action.
+
+**B4 - the new ceiling gate recorded its own batch's growth as the baseline.**
+It allow-listed `discussion-replies.test.ts` at 1105 with the reason "not touched
+by this change"; `git show HEAD:` says **1023**. The batch grew it 82 lines, past
+a ceiling it was already 23 over, then wrote the grown number in as the ratchet.
+
+It was already doing harm: a later agent, blocked by the 1105 pin, **trimmed
+comments to land at exactly 1105** rather than splitting. A gate that teaches
+agents to shave line counts is worse than none. Fixed by actually splitting the
+file three ways along its existing describe boundaries - 70 tests before, 70
+after - and REMOVING the allow-list entry rather than re-pinning it. The other
+four entries were re-checked against HEAD and are honest.
+
+**B5 - the legibility probe reported a compression setting it did not use.** It
+printed the nominal JPEG quality unconditionally, while the capture hook silently
+re-encodes any over-budget frame at HALF that and discards the real parameters.
+The frames this hits are exactly the dense, high-resolution pages the instrument
+exists to diagnose - so an instructor would have concluded the model cannot read
+at 0.55 when half the frames went out at 0.275, and changed the wrong setting.
+Each frame now carries what it was actually encoded at, and a mixed run says so:
+`JPEG quality 0.55 (4 of 6), 0.275 (2 of 6) ... 2 of 6 frames were re-encoded`.
+Source and target dimensions had the same defect - read at probe time from a live
+preview that may have been resized since capture.
+
+**Two SHOULDs also closed.** One-click insert is a MOVE, so a second insert is
+impossible within one list - but `applyResources` replaces the list wholesale, so
+a second resource pass returning the same URL could remount it and duplicate the
+line. Fixed by checking the reply text for the URL rather than keeping an
+"already inserted" list, which would drift from text the instructor edits by
+hand - and which would wrongly block re-insertion after a manual delete. And an
+inverted video-length range ("between 20 and 5 minutes") could reach the prompt:
+now flagged at the control with a message rather than silently swapped (a swap
+hides the instructor's transposition from them) and dropped entirely at the
+sentence builder, which has no channel to report it.
+
+**A test-quality note worth keeping.** The redaction suite was green throughout
+because every fixture was an ASCII single-token name. Not one of the six defeats
+had a case. A test suite proves the function works on the inputs it was given;
+it says nothing about the guarantee unless the inputs were chosen adversarially.
+
+Final gates for the shipped state: `tsc` 0 errors, `eslint` 0 errors / 6
+pre-existing warnings, `vitest` **767 files / 15819 tests** all passing.

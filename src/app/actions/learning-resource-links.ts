@@ -155,6 +155,22 @@ interface ResourceProfile {
   kinds: readonly ResourceKind[];
   /** e.g. "official documentation, video tutorials, and written tutorials" */
   resourceTypeSentence: string;
+  /** discussion-reply resources feature, video-length-preference setting:
+   *  an optional extra sentence appended to the end of the research prompt's
+   *  guidance paragraph (researchConceptOnce below), verbatim. Never mentions
+   *  a hard requirement - this action has no way to confirm a candidate
+   *  video's actual runtime (no field on CandidateResourceItem/ResourceLink
+   *  carries a duration, and neither the grounded search call nor the
+   *  reachability check below ever inspects one), so any caller-supplied
+   *  text here MUST be worded as a preference the model may or may not be
+   *  able to satisfy, never as a guarantee - see discussion-replies.ts's
+   *  own `videoLengthPreferenceSentence` for the one real caller. Omitted
+   *  (undefined) leaves the prompt byte-identical to a call that never
+   *  mentioned this field at all, via the same `? ... : ""` pattern
+   *  `resourceProfile` itself already uses at its own call site - every
+   *  existing 3- and 4-argument call to findResourceLinksForConceptsAction
+   *  (including this feature's own default-profile calls) is unaffected. */
+  extraGuidance?: string;
 }
 
 // Today's exact three-kind behaviour (REGRESSION 324). This is the default
@@ -347,13 +363,19 @@ async function researchConceptOnce(
   profile: ResourceProfile
 ): Promise<{ items: CandidateResourceItem[]; sources: Source[] }> {
   const kindLabel = courseKind.trim() ? ` for a ${courseKind.trim()} course` : "";
+  // Video-length-preference setting (discussion-reply resources feature):
+  // appended verbatim, never reworded here - see ResourceProfile.extraGuidance's
+  // own doc comment for why this must stay a stated preference. "" (the
+  // common case - every existing caller) leaves the template literal below
+  // byte-identical to before this field existed.
+  const guidance = profile.extraGuidance ? `\n\n${profile.extraGuidance}` : "";
   const prompt = `You are an expert educator finding learning resources${kindLabel} for a student studying one concept.
 
 CONCEPT: ${concept}
 
 Search the web first, then report up to ${MAX_ITEMS_PER_CONCEPT} real resources for a student learning this concept: ${profile.resourceTypeSentence}, appropriate to the course level.
 
-For each resource you find, write a short paragraph in plain prose giving: the resource's title, whether it is ${kindDescriptionList(profile.kinds)}, the exact URL of the page you visited to find it, and one sentence on what a student gets from it.
+For each resource you find, write a short paragraph in plain prose giving: the resource's title, whether it is ${kindDescriptionList(profile.kinds)}, the exact URL of the page you visited to find it, and one sentence on what a student gets from it.${guidance}
 
 If a web search turns up nothing relevant for this concept, say so plainly instead of inventing a resource.`;
 

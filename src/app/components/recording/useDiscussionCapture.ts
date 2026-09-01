@@ -28,7 +28,7 @@ import {
   resolveTargetWidth,
   packFrameBatch,
 } from "./discussion-capture";
-import type { FrameSignature } from "./discussion-capture";
+import type { FrameSignature, CapturedFrame } from "./discussion-capture";
 
 export interface UseDiscussionCaptureReturn {
   capturing: boolean;
@@ -59,8 +59,12 @@ export interface UseDiscussionCaptureReturn {
   stop: () => void;
   /** Removes and returns up to `max` frames, oldest first, packed to fit
    *  `maxWireBytes` (AC10a). Never returns more than asked for; always
-   *  returns at least one frame when the queue is non-empty. */
-  takeFrameBatch: (max: number, maxWireBytes: number) => Array<{ base64: string }>;
+   *  returns at least one frame when the queue is non-empty. Each frame
+   *  carries the REAL parameters it was encoded with (CapturedFrame) - not
+   *  just `base64` - so a caller that needs to report what actually happened
+   *  (LegibilityProbeModal.tsx) never has to re-derive it from a nominal
+   *  constant read at a different time than the encode. */
+  takeFrameBatch: (max: number, maxWireBytes: number) => CapturedFrame[];
   clearRecording: () => void;
 }
 
@@ -144,7 +148,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
   // (AC42). droppedFramesRef is the source of truth mutated synchronously in
   // the handler; the `droppedFrames` state above is mirrored from it on
   // every increment purely so the UI re-renders (F4 - a bare ref never does).
-  const pendingQueueRef = useRef<Array<{ base64: string }>>([]);
+  const pendingQueueRef = useRef<CapturedFrame[]>([]);
   const droppedFramesRef = useRef(0);
 
   // Optional MediaRecorder (AC31, AC48, AC49).
@@ -230,8 +234,17 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     lastSignatureRef.current = signature;
     lastKeepAtRef.current = now;
 
-    const targetWidth = resolveTargetWidth(video.videoWidth);
-    const targetHeight = Math.round(video.videoHeight * (targetWidth / video.videoWidth));
+    // LP3 FIX: read the source dimensions ONCE, here, at the moment this
+    // frame is actually drawn - and carry them (and the target/encode
+    // parameters derived from them) on the frame itself. A probe or any
+    // other consumer reading these off a live <video> later would be
+    // reading CURRENT preview state, not what THIS frame was encoded with -
+    // wrong the instant a window resizes or the display changes between
+    // capture and read.
+    const sourceWidth = video.videoWidth;
+    const sourceHeight = video.videoHeight;
+    const targetWidth = resolveTargetWidth(sourceWidth);
+    const targetHeight = Math.round(sourceHeight * (targetWidth / sourceWidth));
 
     let canvas = fullCanvasRef.current;
     if (!canvas) {
@@ -250,6 +263,13 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     const dataUrl = canvas.toDataURL("image/jpeg", FRAME_JPEG_QUALITY);
     let base64 = dataUrl.split(",")[1] ?? "";
     if (!base64) return;
+    // LP3 FIX: the quality this frame actually ends up encoded at -
+    // FRAME_JPEG_QUALITY unless the re-encode branch below fires, in which
+    // case it becomes FRAME_JPEG_QUALITY / 2. Carried on the frame itself
+    // (CapturedFrame.encodedQuality) so a consumer reports THIS frame's real
+    // quality, never a nominal constant that is wrong for exactly the
+    // over-budget frames the legibility probe exists to diagnose.
+    let encodedQuality = FRAME_JPEG_QUALITY;
 
     // AC10b/S5: a single frame that alone exceeds the per-batch wire budget
     // wedges the queue head - AC10a always sends at least one frame, even
@@ -261,6 +281,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
       const halfQualityBase64 = halfQualityUrl.split(",")[1] ?? "";
       if (halfQualityBase64 && halfQualityBase64.length <= EXTRACT_BATCH_WIRE_BUDGET) {
         base64 = halfQualityBase64;
+        encodedQuality = FRAME_JPEG_QUALITY / 2;
       } else {
         setFrameEncodeNotice(
           "One captured frame was too large to send even after re-encoding it at a lower quality, and was dropped."
@@ -276,7 +297,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
       setDroppedFrames(droppedFramesRef.current);
       return;
     }
-    pendingQueueRef.current.push({ base64 });
+    pendingQueueRef.current.push({ base64, sourceWidth, sourceHeight, encodedWidth: targetWidth, encodedHeight: targetHeight, encodedQuality });
     setPendingFrames(pendingQueueRef.current.length);
   }, []);
 
@@ -490,7 +511,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
   // owner for the packing rule is what BL4 asks for. This is the stateful
   // half (removing the packed frames from the live queue); the packing
   // decision itself is the tested pure function.
-  const takeFrameBatch = useCallback((max: number, maxWireBytes: number): Array<{ base64: string }> => {
+  const takeFrameBatch = useCallback((max: number, maxWireBytes: number): CapturedFrame[] => {
     const queue = pendingQueueRef.current;
     const batch = packFrameBatch(queue, max, maxWireBytes);
     pendingQueueRef.current = queue.slice(batch.length);

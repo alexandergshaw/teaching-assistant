@@ -71,7 +71,10 @@ import {
   EXTRACT_BATCH_WIRE_BUDGET,
   draftDispatchForce,
   shouldLoopContinue,
+  type ReplyResource,
 } from "./discussion-capture";
+// Resource-controls feature: the one-click insert's pure text-append leaf.
+import { appendResourceToReply, replyAlreadyHasResource } from "./discussion-reply-insert";
 import { useDiscussionCapture } from "./useDiscussionCapture";
 import { useReplyRows } from "./useReplyRows";
 import { useReplyResources } from "./useReplyResources";
@@ -157,6 +160,11 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     setSaveVideo,
     composition,
     setComposition,
+    resourceKinds,
+    setResourceKinds,
+    videoLengthMinMinutes,
+    videoLengthMaxMinutes,
+    setVideoLengthPreference,
   } = useDiscussionPersistedControls();
 
   const { courses, coursesLoading, coursesError, hasActivatedRef } = useDiscussionCourses(active);
@@ -231,6 +239,22 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   useEffect(() => {
     compositionRef.current = composition;
   }, [composition]);
+
+  // Resource-controls feature: mirrors compositionRef exactly - both the
+  // bulk resource drain and the per-row search (useReplyResources.ts) read
+  // these at dispatch time, never a closure captured before the last await.
+  const resourceKindsRef = useRef(resourceKinds);
+  useEffect(() => {
+    resourceKindsRef.current = resourceKinds;
+  }, [resourceKinds]);
+
+  const videoLengthPreferenceRef = useRef<{ minMinutes?: number; maxMinutes?: number }>({
+    minMinutes: videoLengthMinMinutes,
+    maxMinutes: videoLengthMaxMinutes,
+  });
+  useEffect(() => {
+    videoLengthPreferenceRef.current = { minMinutes: videoLengthMinMinutes, maxMinutes: videoLengthMaxMinutes };
+  }, [videoLengthMinMinutes, videoLengthMaxMinutes]);
 
   const courseNameRef = useRef("");
   useEffect(() => {
@@ -368,6 +392,8 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     pendingFrames: capture.pendingFrames,
     extracting,
     courseNameRef,
+    resourceKindsRef,
+    videoLengthPreferenceRef,
     pushNotice,
   });
   const resourcesApiRef = useRef(resourcesApi);
@@ -493,6 +519,40 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     rowsApiRef.current.removeResource(id, url);
   }, []);
 
+  // Resource-controls feature: one-click insert. A MOVE, not a copy - see
+  // UseDiscussionRepliesReturn.insertResource's own doc comment
+  // (discussion-draft-loop.ts) for why: appendResourceToReply (a pure,
+  // tested leaf) computes the next reply text, `editReply` writes it (the
+  // same C2 mutator every hand-typed keystroke already goes through, so
+  // this row picks up `userEdited: true` exactly like manual text would -
+  // an inserted link is protected the same way as anything else the
+  // instructor put in the box), and `removeResource` (R10's existing
+  // mutator, already bumping resourceSeq to guard an in-flight re-search)
+  // removes it from the suggestion list - so the SAME resource's Insert
+  // control unmounts with it and a second click on it is structurally
+  // impossible WITHIN one render of the list, not merely discouraged. Reads
+  // `rawRows`, never the filtered `rows`, mirroring every other single-row
+  // lookup in this file's own B3/B5 discipline. A no-op when the row is gone.
+  //
+  // FIX 2 (review pass): the per-list guard above does not cover a resource
+  // pass running AGAIN (retry / redraft / per-row search) and returning the
+  // same URL - `applyResources` replaces the row's list wholesale, so that
+  // URL remounts as a "new" entry and Insert becomes clickable on it again.
+  // `replyAlreadyHasResource` guards THAT case by checking the live reply
+  // text for the URL immediately before appending - see its own doc comment
+  // (discussion-reply-insert.ts) for why that beats a separate "already
+  // inserted" list. The suggestion is still removed from the row's list
+  // either way, matching the existing one-click-dismisses-it behaviour.
+  const insertResource = useCallback((id: string, resource: ReplyResource) => {
+    const row = rowsApiRef.current.rawRows.find((r) => r.id === id);
+    if (!row) return;
+    if (!replyAlreadyHasResource(row.reply, resource)) {
+      const nextReply = appendResourceToReply(row.reply, resource);
+      rowsApiRef.current.editReply(id, nextReply);
+    }
+    rowsApiRef.current.removeResource(id, resource.url);
+  }, []);
+
   const retryRow = useCallback(
     (id: string) => {
       // S1: force wins here - Retry is a targeted, single-row explicit user
@@ -594,6 +654,11 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
 
     composition,
     setComposition,
+    resourceKinds,
+    setResourceKinds,
+    videoLengthMinMinutes,
+    videoLengthMaxMinutes,
+    setVideoLengthPreference,
 
     knowledgeContextLabel,
 
@@ -638,6 +703,8 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     findMissing: resourcesApi.findMissing,
     retryResources: resourcesApi.retryResources,
     removeResource,
+    searchRow: resourcesApi.searchRow,
+    insertResource,
 
     runLog,
   };

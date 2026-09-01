@@ -27,8 +27,13 @@ import {
   resolveDraftParent,
   shouldLoopContinue,
   type ReplyRow,
+  type ReplyResource,
   type ReplySort,
 } from "./discussion-capture";
+// Resource-controls feature: the eligible-kinds setting's own type, threaded
+// through UseDiscussionRepliesReturn below the same way DiscussionAudience/
+// ReplyCompositionSettings already are.
+import type { ResourceKind } from "@/lib/resource-kind";
 import { getStoredProvider } from "@/lib/llm-provider";
 import {
   DRAFT_BATCH_SIZE,
@@ -96,6 +101,42 @@ export interface UseDiscussionRepliesReturn {
    *  and silently dropped on the other. */
   composition: ReplyCompositionSettings;
   setComposition: (next: ReplyCompositionSettings) => void;
+
+  /** Resource-controls feature: which resource kinds the resource pass may
+   *  search for and return. Fully owned by discussion-persisted-controls.ts
+   *  (persistence, coercion) - forwarded straight through, exactly like
+   *  `composition` above. See that file's own UseDiscussionPersistedControlsReturn
+   *  doc comment for the full contract, including why an empty array is
+   *  legal ("search nothing"). */
+  resourceKinds: readonly ResourceKind[];
+  setResourceKinds: (next: readonly ResourceKind[]) => void;
+
+  /** Resource-controls feature: the "preferred video length" setting - see
+   *  discussion-persisted-controls.ts's own doc comment for why this can
+   *  only ever be a stated preference, never an enforced filter. */
+  videoLengthMinMinutes?: number;
+  videoLengthMaxMinutes?: number;
+  setVideoLengthPreference: (min: number | undefined, max: number | undefined) => void;
+
+  /** Resource-controls feature: per-row targeted search ("each reply should
+   *  also have a button to search for resources specific to that reply and
+   *  its original message"). Forwarded straight through from R-D's
+   *  `useReplyResources.ts` - see that hook's own `searchRow` doc comment
+   *  for why it bypasses the bulk queue entirely. */
+  searchRow: (id: string) => void;
+
+  /** Resource-controls feature: one-click insert ("it should be a simple
+   *  one click to add in a found resource's link to a reply"). A MOVE, not a
+   *  copy - appends the resource's link to the end of the row's reply text
+   *  (`appendResourceToReply`, discussion-reply-insert.ts) via C2's
+   *  `editReply`, then removes it from the row's resource list via C2's
+   *  `removeResource` - the SAME two mutators every other row action in this
+   *  file already reaches through `rowsApiRef`. MOVE (not copy) is
+   *  deliberate: once inserted, the resource's own Insert control unmounts
+   *  with it, so a second click on the SAME resource is structurally
+   *  impossible rather than merely discouraged - see this function's own
+   *  implementation in useDiscussionReplies.ts. */
+  insertResource: (id: string, resource: ReplyResource) => void;
 
   /**
    * "Activate this recording from the Knowledge base": the label of the

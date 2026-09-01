@@ -34,6 +34,12 @@ import {
   type DiscussionAudience,
   type ReplyCompositionSettings,
 } from "@/lib/discussion-reply-prompt";
+// Resource-controls feature: "eligible resource kinds" and "preferred video
+// length" - two more persisted settings that belong next to `composition`
+// (all four are drafting/resource inputs the panel reads and the resource
+// pass consumes, exactly the reasoning this file's own header already gives
+// for owning `composition`).
+import { RESOURCE_KINDS, type ResourceKind } from "@/lib/resource-kind";
 
 export interface UseDiscussionPersistedControlsReturn {
   audience: DiscussionAudience;
@@ -48,6 +54,69 @@ export interface UseDiscussionPersistedControlsReturn {
    *  compositionRef. */
   composition: ReplyCompositionSettings;
   setComposition: (next: ReplyCompositionSettings) => void;
+
+  /** Resource-controls feature: which resource kinds the resource pass is
+   *  allowed to search for and return. Default (a fresh table, or any
+   *  unparseable persisted value) is the full RESOURCE_KINDS set - byte-
+   *  identical to the resource pass's own pre-existing behaviour. An
+   *  explicit EMPTY array is legal (mirrors `composition.ingredients`'s own
+   *  "zero selected" precedent) and means "search nothing" - see
+   *  discussion-replies.ts's gatherReplyResourcesAction for how that is
+   *  enforced on both the request and the result. */
+  resourceKinds: readonly ResourceKind[];
+  setResourceKinds: (next: readonly ResourceKind[]) => void;
+
+  /** Resource-controls feature: the "preferred video length" setting, min
+   *  and/or max minutes. `undefined` means "no preference set" for that
+   *  bound. SURVEY FINDING (see discussion-replies.ts's own
+   *  `videoLengthPreferenceSentence`): nothing in the resource pipeline ever
+   *  learns a candidate video's actual runtime, so this can only ever reach
+   *  the model as a stated preference, never an enforced filter - the panel
+   *  labels this control "Preferred video length" for exactly that reason,
+   *  never as a guarantee. */
+  videoLengthMinMinutes?: number;
+  videoLengthMaxMinutes?: number;
+  setVideoLengthPreference: (min: number | undefined, max: number | undefined) => void;
+}
+
+/**
+ * Coercion for `ta-rec-disc-resource-kinds`. Mirrors `coerceReplyComposition`
+ * (discussion-draft-loop.ts)'s own "zero selected survives, only a genuinely
+ * unparseable/non-array blob falls back to the default" discipline for
+ * `ingredients` - never throws. Always filters FROM RESOURCE_KINDS (never a
+ * fresh literal), so a persisted value can never resurrect a kind the shared
+ * leaf's own `coerceResourceKind` would not itself recognize.
+ */
+export function coerceResourceKinds(raw: string | null): readonly ResourceKind[] {
+  if (raw === null) return RESOURCE_KINDS;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return RESOURCE_KINDS;
+    const seen = new Set<ResourceKind>();
+    for (const v of parsed) {
+      if (typeof v === "string" && (RESOURCE_KINDS as readonly string[]).includes(v)) {
+        seen.add(v as ResourceKind);
+      }
+    }
+    return RESOURCE_KINDS.filter((k) => seen.has(k));
+  } catch {
+    return RESOURCE_KINDS;
+  }
+}
+
+/**
+ * Coercion for `ta-rec-disc-video-min` / `ta-rec-disc-video-max`. A blank
+ * string (never written, or explicitly cleared by `setVideoLengthPreference`
+ * below) and anything that does not parse to a positive finite number both
+ * mean "no preference set" - never `NaN`, never a negative or zero minute
+ * count reaching state.
+ */
+export function coerceVideoLengthMinutes(raw: string | null): number | undefined {
+  if (raw === null) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === "") return undefined;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 export function useDiscussionPersistedControls(): UseDiscussionPersistedControlsReturn {
@@ -92,6 +161,28 @@ export function useDiscussionPersistedControls(): UseDiscussionPersistedControls
     writeLocalStorage("ta-rec-disc-formality", next.formality);
   }, []);
 
+  // Resource-controls feature.
+  const [resourceKinds, setResourceKindsState] = useState<readonly ResourceKind[]>(() =>
+    coerceResourceKinds(readLocalStorage("ta-rec-disc-resource-kinds"))
+  );
+  const setResourceKinds = useCallback((next: readonly ResourceKind[]) => {
+    setResourceKindsState(next);
+    writeLocalStorage("ta-rec-disc-resource-kinds", JSON.stringify(next));
+  }, []);
+
+  const [videoLengthMinMinutes, setVideoLengthMinState] = useState<number | undefined>(() =>
+    coerceVideoLengthMinutes(readLocalStorage("ta-rec-disc-video-min"))
+  );
+  const [videoLengthMaxMinutes, setVideoLengthMaxState] = useState<number | undefined>(() =>
+    coerceVideoLengthMinutes(readLocalStorage("ta-rec-disc-video-max"))
+  );
+  const setVideoLengthPreference = useCallback((min: number | undefined, max: number | undefined) => {
+    setVideoLengthMinState(min);
+    setVideoLengthMaxState(max);
+    writeLocalStorage("ta-rec-disc-video-min", min !== undefined ? String(min) : "");
+    writeLocalStorage("ta-rec-disc-video-max", max !== undefined ? String(max) : "");
+  }, []);
+
   return {
     audience,
     setAudience,
@@ -101,5 +192,10 @@ export function useDiscussionPersistedControls(): UseDiscussionPersistedControls
     setSaveVideo,
     composition,
     setComposition,
+    resourceKinds,
+    setResourceKinds,
+    videoLengthMinMinutes,
+    videoLengthMaxMinutes,
+    setVideoLengthPreference,
   };
 }

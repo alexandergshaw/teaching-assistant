@@ -37771,6 +37771,37 @@ reason, the mutation confirmed present, restored, confirmed green.
   either a genuine current-moment gauge (correctly reset) or already
   collected into an append-only log stream separately from the hook's live
   value - checked and confirmed, not assumed.
+  2026-09-02 CORRECTION (the other follow-up, the FILE-bytes-as-WIRE-bytes
+  one): confirmed real from the code, not just re-asserted. `EXTRACT_BATCH_WIRE_BUDGET`
+  (`discussion-capture.ts:74`) is `3_000_000` - the app's own `formatMB` renders
+  that as 2.9MB, not 3.5MB, and it is `packFrameBatch` (`discussion-capture.ts:188`)
+  that actually gates a batch, never against 3.5MB. "The wire budget" this note
+  meant is `UPLOAD_WIRE_BUDGET_BYTES` (3.5MB, `upload-budget.ts:41`) - the
+  DEFAULT `checkWireBudget` falls back to only because
+  `extractDiscussionPostsAction` (`discussion-replies.ts:176`) calls it with no
+  third argument, not the constant AC10a's packer is actually sized against.
+  Re-deriving the correction with the exact base64 relationship (base64 turns
+  every 3 file bytes into 4 wire characters, i.e. plain x4/3 at this scale)
+  lands on **4.64MB**, not the 4.55MB stated above - close, but this entry's
+  4.55 could not be independently reproduced from the numbers on record here,
+  so it should be read as an estimate rather than an exact figure. Both
+  agree on the conclusion: read as wire bytes, the original 3.48MB figure is
+  over every budget that actually applies (2.9MB real batch ceiling, 3.5MB
+  `UPLOAD_WIRE_BUDGET_BYTES`, 4.5MB `VERCEL_BODY_LIMIT_BYTES`), not 99.4% inside
+  one. Also confirmed: this is a documentation-only defect, not a shipped one.
+  `packFrameBatch` and the single-frame check in `useDiscussionCapture.ts:279`
+  both gate on the real, already-encoded `base64.length` at capture time -
+  true wire bytes, computed at runtime, never read from this doc - so no
+  packed batch today can actually exceed `EXTRACT_BATCH_WIRE_BUDGET`; a tall
+  window just yields fewer frames per batch (more, smaller batches), not a
+  refusal. The risk is forward-looking only: a future change trusting this
+  passage's false 99.4%-safe headroom to raise `EXTRACT_BATCH_SIZE`, loosen
+  `EXTRACT_BATCH_WIRE_BUDGET`, or drop the byte-based packing check would ship
+  a real defect; none of that has happened. Full derivation and the corrected
+  calibration table now live inline in
+  `discussion-reply-capture-acceptance-criteria.md` as a dated correction note
+  next to the original claim, per this repo's convention of correcting in
+  place rather than silently overwriting.
 - 149 of 1033 CSS module classes still have no reference anywhere, so the
   definitions->references guard that would have caught `.selectionAiButton`
   needs a ratchet rather than a strict assertion. Measured, not built.

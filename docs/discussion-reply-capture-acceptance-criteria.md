@@ -496,6 +496,90 @@ worth recording so nobody adds a safety factor for them: photographic avatars
 cost +8%, and ClearType subpixel fringing costs **-5%**, not more - the fringe is
 a low-pass blur on luma and JPEG likes it.
 
+2026-09-02 CORRECTION (per `REGRESSION.md` entry 383's Limits): every number in
+the two paragraphs above is FILE bytes (the JPEG's on-disk/Blob size) reported
+as if it were WIRE bytes (the base64-encoded string that actually rides in the
+request body). This is exactly the failure class `src/lib/upload-budget.ts`'s
+own header calls out as the recurring mistake in this repo ("a file that is
+base64-encoded into a JSON body rides the wire at 4/3 its size on disk"), and a
+second, independent error compounds it: **"the 3.5MB budget" is the wrong
+constant.** `EXTRACT_BATCH_WIRE_BUDGET` (`discussion-capture.ts:74`) - the
+constant this very passage's own AC10a paragraph names two sentences earlier as
+"the REAL batch ceiling" - is `3_000_000`, which the app's own `formatMB`
+renders as **2.9MB**, not 3.5MB. 3.5MB is `UPLOAD_WIRE_BUDGET_BYTES`
+(`upload-budget.ts:41`), a different, larger budget that only applies here
+because `extractDiscussionPostsAction` (`discussion-replies.ts:176`) calls
+`checkWireBudget` with no third argument and so falls back to that default -
+irrelevant to what AC10a is actually about, which is the client-side packer's
+own ceiling.
+
+The unit error is independently provable from this passage's own numbers, no
+re-measurement required: `packFrameBatch` (`discussion-capture.ts:188`) never
+lets a packed batch's real (`sumBase64WireBytes`) wire total exceed
+`EXTRACT_BATCH_WIRE_BUDGET` - it checks the running sum before admitting each
+frame and stops short rather than crossing it. A six-frame batch whose WIRE
+total is 3.48MB (3,650,000 bytes) could therefore never have been produced by
+that function against a 3,000,000-byte ceiling: admitting the sixth frame
+would have been refused. The only way six frames of this size were ever
+observed together is if the quantity measured was each frame's file size, not
+the wire size the batch is actually gated on.
+
+**Derived corrections** (applying the exact base64 relationship, not a fresh
+measurement - see AC10a's own dispute resolution in this file's companion
+analysis: base64 turns every 3 input bytes into 4 output characters, padded up
+to a multiple of 4, i.e. exactly `4 * ceil(F/3)`; at these MB-scale sizes the
+`ceil(F * 4/3)` shortcut `wireBytesForFile` actually uses differs from the
+exact formula by at most 2-3 bytes, negligible here, so plain **x4/3** is used
+below):
+
+- Headline: six frames of a 1920x3000 window, file bytes 3.48MB -> **derived
+  wire bytes 4.64MB** (3.48 x 4/3). Against the constants that actually govern
+  this path: **159% of `EXTRACT_BATCH_WIRE_BUDGET`'s real 2.9MB**, 126% of the
+  3.5MB `UPLOAD_WIRE_BUDGET_BYTES` the original text (wrongly) cited, and
+  **103% of `VERCEL_BODY_LIMIT_BYTES`'s 4.5MB platform cap** - before counting
+  any of the surrounding JSON envelope. `REGRESSION.md` entry 383 states this
+  corrected figure as 4.55MB; that is close to but not identical to the 4.64MB
+  this exact x4/3 derivation produces, and the small gap could not be resolved
+  without knowing exactly how entry 383's number was computed. Both readings
+  agree on the conclusion that matters: the reported 3.48MB, read as wire
+  bytes, is over every budget that applies here, not 99.4% inside one.
+- Calibration table, file bytes -> derived wire bytes (x4/3), per frame and x6:
+  - 1280x720: 107-126KB -> 142.7-168.0KB; x6 0.63-0.74MB -> 0.84-0.99MB
+  - 1280x1600: 252-292KB -> 336.0-389.3KB; x6 1.48-1.71MB -> 1.97-2.28MB
+  - 1920x1080: 203KB -> 270.7KB; x6 1.19MB -> 1.59MB
+  - 1920x2400: 465KB -> 620.0KB; x6 2.72MB -> 3.63MB
+
+Note that the 1920x2400 row's derived x6 wire total (3.63MB) already exceeds
+both the real 2.9MB batch ceiling and the (wrongly cited) 3.5MB figure - this
+was never a problem unique to the extreme 3000px-tall case the original text
+singled out; every window shape in this table taller than roughly 1080px
+already implies more wire bytes than a real six-frame batch could legally
+carry, once read in the correct unit. The photographic-avatar (+8%) and
+ClearType (-5%) percentage adjustments above are unaffected by this
+correction - a relative adjustment is the same percentage in either unit,
+since both scale by the same x4/3 factor.
+
+**Consequence for behaviour: this was a documentation defect, not a shipped
+one, and no user is affected today.** `packFrameBatch` and the single-frame
+check in `useDiscussionCapture.ts:279` (`if (base64.length >
+EXTRACT_BATCH_WIRE_BUDGET)`) both gate on the real, already-base64-encoded
+`base64.length` at capture time - true wire bytes, computed at runtime,
+completely independent of any number written in this document. The packer
+cannot be fooled by this doc's arithmetic because it never reads this doc; it
+re-derives the real total every time a frame is considered for the batch. The
+practical effect of the window sizes above being larger than this passage
+claimed is that **fewer than six frames get packed per batch** for a tall
+window (more, smaller batches - more round trips, not a refusal), and a
+single-frame refusal (AC10b) only fires for one frame alone exceeding 2.9MB
+wire, far above anything in this calibration table even after correction. The
+risk this correction exists to prevent is forward-looking: if a future change
+had trusted this passage's false 99.4%-safe headroom - to raise
+`EXTRACT_BATCH_SIZE`, loosen `EXTRACT_BATCH_WIRE_BUDGET`, or drop the
+byte-based packing check in favour of a count-only one - that change would
+have shipped a real defect. No such change has been made; the byte-based
+packing rule this passage argues for is itself what keeps every real batch
+under budget regardless of this arithmetic error.
+
 **AC10b.** A single frame that alone exceeds the budget is re-encoded once at
 `FRAME_JPEG_QUALITY / 2`, and dropped with a notice if it still does not fit.
 Otherwise the queue head wedges permanently and every frame behind it starves.

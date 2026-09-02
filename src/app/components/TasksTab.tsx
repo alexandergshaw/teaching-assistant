@@ -26,7 +26,6 @@ import {
 } from "@/lib/course-tasks";
 import {
   ALL_FILTER,
-  baseTaskCatalogOverride,
   buildTasksCsv,
   computeTaskProgress,
   describeTaskColumnFilters,
@@ -48,22 +47,15 @@ import {
   type TaskRowFilters,
   type TaskSortState,
 } from "@/lib/course-tasks-view";
-import {
-  debounceElapsed,
-  groupPositionAssignments,
-  isValidDropTarget,
-  moveToGroupEdge,
-  moveWithinGroup,
-  positionWithinGroup,
-  stepWithinGroup,
-  type ReorderableColumn,
-} from "./tasks/columnOrder";
+import { type ReorderableColumn } from "./tasks/columnOrder";
 import { useCourseTasksData } from "./tasks/useCourseTasksData";
 import { useTaskCellErrors } from "./tasks/useTaskCellErrors";
 import { useTaskBulkActions } from "./tasks/useTaskBulkActions";
+import { useTaskColumnReorder } from "./tasks/useTaskColumnReorder";
+import { useTaskAttachmentsDialog } from "./tasks/useTaskAttachmentsDialog";
 import { shouldShowEmptyState, shouldShowMainContent, errorBannerText } from "./tasks/taskLoadState";
 import TasksToolbar from "./tasks/TasksToolbar";
-import TasksGrid, { type Density, type TasksGridHandle } from "./tasks/TasksGrid";
+import TasksGrid, { type Density } from "./tasks/TasksGrid";
 import ManageTasksDialog from "./tasks/ManageTasksDialog";
 import TaskAttachmentsDialog from "./tasks/TaskAttachmentsDialog";
 import { taskAttachmentsAt } from "@/lib/course-task-attachments";
@@ -523,72 +515,19 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
 
   // -----------------------------------------------------------------------
   // Column reorder (AC1-AC7): drag, Shift+Left/Right, and the column menu's
-  // move commands all funnel through applyReorder - the ONE place that
-  // turns a columnOrder.ts result into a bulk write (AC2). A move that
-  // returns null (already at the edge, cross-group, unknown id) is simply
-  // dropped; the pure layer already decided it was not a real move.
-  const [reorderAnnouncement, setReorderAnnouncement] = useState("");
-  const lastReorderFlushRef = useRef<number | null>(null);
-  const pendingReorderRef = useRef<{ text: string; timeout: number } | null>(null);
-
-  // AC5 item 19: debounced to 100ms via the pure debounceElapsed helper, so
-  // a fast drag's rapid position changes announce at most every 100ms - the
-  // trailing-most text always wins once the interval elapses.
-  const announceReorder = useCallback((text: string) => {
-    const now = Date.now();
-    if (debounceElapsed(lastReorderFlushRef.current, now)) {
-      lastReorderFlushRef.current = now;
-      setReorderAnnouncement(text);
-      return;
-    }
-    if (pendingReorderRef.current) window.clearTimeout(pendingReorderRef.current.timeout);
-    const timeout = window.setTimeout(() => {
-      lastReorderFlushRef.current = Date.now();
-      setReorderAnnouncement(text);
-      pendingReorderRef.current = null;
-    }, 100);
-    pendingReorderRef.current = { text, timeout };
-  }, []);
-
-  const applyReorder = useCallback(
-    async (moved: ReorderableColumn[] | null, movedTaskId: string) => {
-      if (!moved) return;
-      const groupId = moved.find((c) => c.id === movedTaskId)?.group;
-      if (!groupId) return;
-      const label = resolvedCatalog.find((t) => t.id === movedTaskId)?.label ?? movedTaskId;
-      const nextOverrides = groupPositionAssignments(moved, groupId).map((a) => ({
-        ...baseTaskCatalogOverride(a.taskId, builtIns, data.overrides),
-        position: a.position,
-      }));
-      const result = await saveDefs(nextOverrides);
-      if (!result.ok) {
-        announceReorder(`Could not reorder ${label}: ${result.error ?? "save failed"}.`);
-        return;
-      }
-      // AC5 item 20: the pure module supplies index/total only - the label
-      // and group label come from here, which already holds both.
-      const pos = positionWithinGroup(moved, movedTaskId);
-      const groupLabel = groups.find((g) => g.id === groupId)?.label ?? "";
-      if (pos) announceReorder(`${label} moved to position ${pos.index} of ${pos.total} in ${groupLabel}.`);
-    },
-    [resolvedCatalog, builtIns, data.overrides, saveDefs, groups, announceReorder]
-  );
-
-  const handleReorderStep = (taskId: string, direction: "left" | "right") =>
-    void applyReorder(stepWithinGroup(reorderColumns, taskId, direction), taskId);
-
-  const handleReorderDrop = (draggedTaskId: string, targetTaskId: string) => {
-    if (!isValidDropTarget(reorderColumns, draggedTaskId, targetTaskId)) return;
-    void applyReorder(moveWithinGroup(reorderColumns, draggedTaskId, targetTaskId), draggedTaskId);
-  };
-
-  const handleMoveColumn = (taskId: string, kind: "left" | "right" | "start" | "end") => {
-    const moved =
-      kind === "left" || kind === "right"
-        ? stepWithinGroup(reorderColumns, taskId, kind)
-        : moveToGroupEdge(reorderColumns, taskId, kind);
-    void applyReorder(moved, taskId);
-  };
+  // move commands all funnel through useTaskColumnReorder.ts's applyReorder
+  // - the ONE place that turns a columnOrder.ts result into a bulk write
+  // (AC2). Extracted out of this file (a self-contained "use*" hook's worth
+  // of state - see that module's own header) once this file again closed on
+  // this repo's 1000-line ceiling.
+  const { reorderAnnouncement, handleReorderStep, handleReorderDrop, handleMoveColumn } = useTaskColumnReorder({
+    reorderColumns,
+    resolvedCatalog,
+    groups,
+    builtIns,
+    overrides: data.overrides,
+    saveDefs,
+  });
 
   // -----------------------------------------------------------------------
   // Manage Tasks dialog (AC9)
@@ -612,70 +551,22 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   // -----------------------------------------------------------------------
   // Attachments dialog (docs/task-cell-attachments-acceptance-criteria.md
   // AC5) - exactly ONE TaskAttachmentsDialog is rendered below, driven by
-  // this single {courseId, taskId} | null state (item 23). `gridRef` reaches
-  // into TasksGrid's OWN roving-tabindex ref registry (item 25) rather than
-  // a second registry built just for this - see TasksGrid.tsx's
-  // TasksGridHandle for the mechanism.
-  const [attachmentTarget, setAttachmentTarget] = useState<{ courseId: string; taskId: string } | null>(null);
-  const gridRef = useRef<TasksGridHandle>(null);
-  // Accessibility review fix 6: the cell to restore focus to once the
-  // dialog's exit transition has actually finished - captured here (rather
-  // than read back out of `attachmentTarget`, which handleCloseAttachments
-  // clears immediately) because handleAttachmentsExited fires on a LATER
-  // render, after `attachmentTarget` is already null.
-  const pendingAttachmentFocusRef = useRef<{ courseId: string; taskId: string } | null>(null);
-  // Regression fix: `attachmentTarget` nulls on close (handleCloseAttachments,
-  // below) while the dialog is still visible for its own fade-out transition,
-  // so deriving the title's course/task labels from `attachmentTarget` alone
-  // collapses them to "" for the duration of that transition (the heading
-  // reads "Attachments - , "). This mirrors `attachmentTarget` but is set on
-  // open and cleared only in handleAttachmentsExited once the transition (and
-  // the dialog) is actually gone - the SAME moment pendingAttachmentFocusRef
-  // above already clears on, not a second mechanism. State, not a ref: a ref
-  // read during render is a lint error (react-hooks/refs) and would not
-  // reliably re-render this component's own JSX when it changed.
-  const [attachmentDisplayTarget, setAttachmentDisplayTarget] = useState<{ courseId: string; taskId: string } | null>(
-    null
-  );
-
-  const handleOpenAttachments = useCallback((courseId: string, taskId: string) => {
-    setAttachmentTarget({ courseId, taskId });
-    setAttachmentDisplayTarget({ courseId, taskId });
-  }, []);
-
-  // Item 25: closing the dialog only ever clears the state that controls
-  // whether it is mounted - it must NOT itself move DOM focus. React
-  // batches this alongside the Dialog's `open` prop going false, so the
-  // dialog is still mounted and its FocusTrap still active for several more
-  // renders (the whole exit transition); calling gridRef.focusCell here
-  // would race MUI's own internal focus handling (see item 6's fix in
-  // TaskAttachmentsDialog.tsx). The actual restoration is deferred to
-  // handleAttachmentsExited below, which the dialog only calls once its
-  // trap is fully gone. `attachmentDisplayTarget` is deliberately NOT cleared
-  // here either, for the identical reason.
-  const handleCloseAttachments = useCallback(() => {
-    pendingAttachmentFocusRef.current = attachmentTarget;
-    setAttachmentTarget(null);
-  }, [attachmentTarget]);
-
-  // Accessibility review fix 6: the ONE place DOM focus actually moves back
-  // to the grid - wired to TaskAttachmentsDialog's onExited (MUI's Fade
-  // onExited, which only fires after the exit transition, and therefore
-  // the focus trap, is completely done). Also the one place
-  // `attachmentDisplayTarget` clears, for the same reason.
-  const handleAttachmentsExited = useCallback(() => {
-    const target = pendingAttachmentFocusRef.current;
-    pendingAttachmentFocusRef.current = null;
-    setAttachmentDisplayTarget(null);
-    if (target) gridRef.current?.focusCell(target.courseId, target.taskId);
-  }, []);
-
-  const attachmentCourseName = attachmentDisplayTarget
-    ? (allRows.find((r) => r.course.id === attachmentDisplayTarget.courseId)?.course.name ?? "")
-    : "";
-  const attachmentTaskLabel = attachmentDisplayTarget
-    ? (resolvedCatalog.find((t) => t.id === attachmentDisplayTarget.taskId)?.label ?? "")
-    : "";
+  // useTaskAttachmentsDialog.ts's `attachmentTarget` (item 23). Extracted
+  // out of this file (another self-contained "use*" hook's worth of state -
+  // see that module's own header) alongside the column-reorder hook above,
+  // once this file again closed on this repo's 1000-line ceiling. `gridRef`
+  // still reaches into TasksGrid's OWN roving-tabindex ref registry (item
+  // 25); this file passes it straight through as `<TasksGrid ref={gridRef}>`
+  // below.
+  const {
+    gridRef,
+    attachmentTarget,
+    attachmentCourseName,
+    attachmentTaskLabel,
+    handleOpenAttachments,
+    handleCloseAttachments,
+    handleAttachmentsExited,
+  } = useTaskAttachmentsDialog({ allRows, resolvedCatalog });
 
   // -----------------------------------------------------------------------
   // Sub-view tabs (AC1 item 3, AC12 item 65): role="tablist"/"tab" with

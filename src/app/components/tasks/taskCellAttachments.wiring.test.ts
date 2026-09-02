@@ -309,9 +309,17 @@ describe("the count is threaded from the tab down to the cell (AC4 item 20)", ()
 
 describe("exactly one attachments dialog exists, at tab level (AC5 items 22-25)", () => {
   const tab = readSource("src/app/components/TasksTab.tsx");
+  // The dialog's open/close/exited state (attachmentTarget, gridRef, the
+  // actual focus-restoration call) was extracted into
+  // useTaskAttachmentsDialog.ts once TasksTab.tsx again closed on this
+  // repo's 1000-line ceiling - TasksTab.tsx still renders the ONE
+  // TaskAttachmentsDialog (checked below), but the focus-restoration call
+  // itself now lives in this hook, not in TasksTab.tsx's own source text.
+  const hook = readSource("src/app/components/tasks/useTaskAttachmentsDialog.ts");
 
-  it("canary: the file was read", () => {
+  it("canary: both files were read", () => {
     expect(tab.length).toBeGreaterThan(200);
+    expect(hook.length).toBeGreaterThan(200);
   });
 
   it("renders the dialog once, driven by a single selected-cell state", () => {
@@ -320,7 +328,7 @@ describe("exactly one attachments dialog exists, at tab level (AC5 items 22-25)"
   });
 
   it("restores focus to the grid cell that opened it, so the roving-tabindex grid does not lose its focused cell", () => {
-    const s = present(tab, "TasksTab.tsx");
+    const s = present(hook, "useTaskAttachmentsDialog.ts");
     expect(s).toMatch(/focusCell|focusTaskCell|restoreFocus/);
   });
 });

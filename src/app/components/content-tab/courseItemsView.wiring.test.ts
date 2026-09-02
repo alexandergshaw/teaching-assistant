@@ -17,9 +17,18 @@ import type { CanvasRubric } from "@/lib/canvas-modules";
 
 const VIEW_PATH = join(process.cwd(), "src/app/components/content-tab/CourseItemsView.tsx");
 const SELECTION_PATH = join(process.cwd(), "src/app/components/content-tab/useFlatItemSelection.ts");
+// The bulk-action bar (rendered once a row is selected) was extracted into
+// its own leaf, CourseItemsBulkBar.tsx, once CourseItemsView.tsx again
+// closed on this repo's 1000-line ceiling - the same way the per-row render
+// was pulled into CourseItemRow.tsx earlier (see CourseItemRow.wiring.test.ts).
+// Every assertion below that pins the BULK BAR's own JSX (not a handler
+// function's body, which stayed in CourseItemsView.tsx) now reads THIS file
+// instead.
+const BULK_BAR_PATH = join(process.cwd(), "src/app/components/content-tab/CourseItemsBulkBar.tsx");
 
 const viewSource = readFileSync(VIEW_PATH, "utf8");
 const selectionSource = readFileSync(SELECTION_PATH, "utf8");
+const bulkBarSource = readFileSync(BULK_BAR_PATH, "utf8");
 
 /** Source with comments stripped, so a name mentioned only in prose (this
  *  file's own header, or CourseItemsView's own doc comments) is never
@@ -31,6 +40,13 @@ function stripComments(text: string): string {
 
 const stripped = stripComments(viewSource);
 const selectionStripped = stripComments(selectionSource);
+const bulkBarStripped = stripComments(bulkBarSource);
+
+describe("canary: the bulk bar leaf was actually read", () => {
+  it("is non-trivial", () => {
+    expect(bulkBarStripped.length).toBeGreaterThan(500);
+  });
+});
 
 describe("CourseItemsView exports Contract 2's exact shape", () => {
   it("exports the CourseItemsViewProps interface with every fixed field", () => {
@@ -171,20 +187,25 @@ describe("New Quiz routing and labelling (D1, C2/C4, finding 6)", () => {
 });
 
 describe("B3: rubrics and submission type are offered for Assignments only", () => {
+  // This gating is JSX inside the bulk bar, which now lives in
+  // CourseItemsBulkBar.tsx (see this file's header) - not in CourseItemsView.tsx.
   it("gates both the rubric row and the submission-type row on kind === \"Assignment\"", () => {
-    const rubricGuardIdx = stripped.indexOf('kind === "Assignment" && (');
+    const rubricGuardIdx = bulkBarStripped.indexOf('kind === "Assignment" && (');
     expect(rubricGuardIdx, "no kind === \"Assignment\" gated block found").toBeGreaterThan(-1);
-    const subtypeGuardIdx = stripped.indexOf('kind === "Assignment" && (', rubricGuardIdx + 1);
+    const subtypeGuardIdx = bulkBarStripped.indexOf('kind === "Assignment" && (', rubricGuardIdx + 1);
     expect(subtypeGuardIdx, "only one kind === \"Assignment\" gated block found - expected rubric AND submission type").toBeGreaterThan(rubricGuardIdx);
 
-    const rubricBlockEnd = stripped.indexOf("bulkRubric", rubricGuardIdx);
-    const subtypeBlockEnd = stripped.indexOf("bulkUpdateSubmissionType", subtypeGuardIdx);
+    const rubricBlockEnd = bulkBarStripped.indexOf("bulkRubric", rubricGuardIdx);
+    const subtypeBlockEnd = bulkBarStripped.indexOf("bulkUpdateSubmissionType", subtypeGuardIdx);
     expect(rubricBlockEnd).toBeGreaterThan(rubricGuardIdx);
     expect(subtypeBlockEnd).toBeGreaterThan(subtypeGuardIdx);
   });
 
   it("never offers Move or Remove from module (D5) - this view has no module context at all", () => {
     expect(stripped).not.toMatch(/bulkMoveToModule|bulkRemoveFromModule|Move to module|Remove from module/);
+    // The bulk bar leaf inherited this view's controls verbatim - it must
+    // never have grown these either.
+    expect(bulkBarStripped).not.toMatch(/bulkMoveToModule|bulkRemoveFromModule|Move to module|Remove from module/);
   });
 });
 
@@ -235,23 +256,32 @@ describe("FINDING 1: rubric/submission-type writes are gated per ROW, not just p
     expect(stripped).toMatch(/\$\{skipped \? `, \$\{skipped\} skipped \(not an ordinary assignment\)` : ""\}/g);
   });
 
-  it("computes eligibleAssignmentCount from ordinaryAssignmentSelection and disables both buttons when it is zero, in addition to the pre-existing gates", () => {
+  it("computes eligibleAssignmentCount from ordinaryAssignmentSelection", () => {
     expect(stripped).toMatch(/const eligibleAssignmentCount =/);
-    const rubricButtonIdx = stripped.indexOf("onClick={bulkRubric}");
+  });
+
+  // The button JSX these two checks target lives in CourseItemsBulkBar.tsx
+  // now (see this file's header) - CourseItemsView.tsx only computes
+  // eligibleAssignmentCount (checked above) and passes it down as a prop.
+  it("disables both the rubric and submission-type buttons when eligibleAssignmentCount is zero, in addition to the pre-existing gates", () => {
+    const rubricButtonIdx = bulkBarStripped.indexOf("onClick={bulkRubric}");
     expect(rubricButtonIdx).toBeGreaterThan(-1);
-    const rubricButtonStart = stripped.lastIndexOf("<Button", rubricButtonIdx);
-    const rubricDisabled = stripped.slice(rubricButtonStart, rubricButtonIdx);
+    const rubricButtonStart = bulkBarStripped.lastIndexOf("<Button", rubricButtonIdx);
+    const rubricDisabled = bulkBarStripped.slice(rubricButtonStart, rubricButtonIdx);
     expect(rubricDisabled).toMatch(/eligibleAssignmentCount === 0/);
 
-    const subtypeButtonIdx = stripped.indexOf("onClick={bulkUpdateSubmissionType}");
+    const subtypeButtonIdx = bulkBarStripped.indexOf("onClick={bulkUpdateSubmissionType}");
     expect(subtypeButtonIdx).toBeGreaterThan(-1);
-    const subtypeButtonStart = stripped.lastIndexOf("<Button", subtypeButtonIdx);
-    const subtypeDisabled = stripped.slice(subtypeButtonStart, subtypeButtonIdx);
+    const subtypeButtonStart = bulkBarStripped.lastIndexOf("<Button", subtypeButtonIdx);
+    const subtypeDisabled = bulkBarStripped.slice(subtypeButtonStart, subtypeButtonIdx);
     expect(subtypeDisabled).toMatch(/eligibleAssignmentCount === 0/);
   });
 
   it("surfaces a hint when the selection is non-empty but nothing in it is eligible", () => {
-    expect(stripped).toMatch(/selection\.selected\.size > 0 && eligibleAssignmentCount === 0/);
+    // CourseItemsView.tsx passes `selection.selected.size` down as the
+    // `selectedCount` prop (see CourseItemsBulkBar.tsx's own props) - the
+    // bulk bar itself has no `selection` object to read.
+    expect(bulkBarStripped).toMatch(/selectedCount > 0 && eligibleAssignmentCount === 0/);
   });
 });
 
@@ -302,8 +332,12 @@ describe("B4: delete arming changes the button's own label, not only a note", ()
     expect(stripped).toMatch(/import\s*\{\s*isConfirmArmed,\s*selectionSignature\s*\}\s*from\s*["']\.\/modules\/confirmArming["']/);
   });
 
+  // This ternary is JSX inside the bulk bar's own Delete button, which now
+  // lives in CourseItemsBulkBar.tsx (see this file's header) -
+  // CourseItemsView.tsx only computes the `confirmDelete` boolean
+  // (isConfirmArmed/selectionSignature, checked above) and passes it down.
   it("the delete Button's own children switch on confirmDelete, rendering two DIFFERENT expressions (finding 7: structure, never prose spelling)", () => {
-    const ternaryMatch = stripped.match(/\{confirmDelete\s*\?\s*([^:{}]+?)\s*:\s*([^}]+?)\}/);
+    const ternaryMatch = bulkBarStripped.match(/\{confirmDelete\s*\?\s*([^:{}]+?)\s*:\s*([^}]+?)\}/);
     expect(ternaryMatch, "no confirmDelete ternary found").not.toBeNull();
     const armedExpr = ternaryMatch![1].trim();
     const unarmedExpr = ternaryMatch![2].trim();
@@ -312,7 +346,7 @@ describe("B4: delete arming changes the button's own label, not only a note", ()
     // either label must not break this test.
     expect(armedExpr).not.toBe(unarmedExpr);
 
-    const idx = stripped.indexOf(ternaryMatch![0]);
+    const idx = bulkBarStripped.indexOf(ternaryMatch![0]);
     expect(idx).toBeGreaterThan(-1);
     // Structural anchor: this expression must be inside a <Button ...> tag,
     // not a sibling <span>/<p> note next to it (the failure mode this AC
@@ -320,8 +354,8 @@ describe("B4: delete arming changes the button's own label, not only a note", ()
     // Button's DIRECT child, not wrapped in yet another element nested
     // inside the Button, which would just relocate the same failure mode
     // one level deeper.
-    const buttonStart = stripped.lastIndexOf("<Button", idx);
-    const tagEnd = stripped.indexOf(">", buttonStart);
+    const buttonStart = bulkBarStripped.lastIndexOf("<Button", idx);
+    const tagEnd = bulkBarStripped.indexOf(">", buttonStart);
     expect(buttonStart).toBeGreaterThan(-1);
     expect(tagEnd).toBeGreaterThan(buttonStart);
     expect(idx).toBeGreaterThan(tagEnd);
@@ -329,7 +363,7 @@ describe("B4: delete arming changes the button's own label, not only a note", ()
     // label expression - any other character (a wrapping tag's `<`, text, or
     // anything else) means the label is no longer the Button's immediate
     // child content.
-    expect(stripped.slice(tagEnd + 1, idx).trim()).toBe("");
+    expect(bulkBarStripped.slice(tagEnd + 1, idx).trim()).toBe("");
   });
 });
 

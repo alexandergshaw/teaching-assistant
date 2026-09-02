@@ -42,6 +42,7 @@ import { effectiveKindOf, groupSelectedByEffectiveKind } from "./courseItems-rou
 import { buildModuleIndex, modulesForItem } from "./courseItems-modules";
 import { ordinaryAssignmentSelection } from "./courseItems-eligibility";
 import { CourseItemRow } from "./CourseItemRow";
+import { CourseItemsBulkBar } from "./CourseItemsBulkBar";
 import { interpretRubricsResult } from "./modules/useRubrics";
 import {
   DEFAULT_COURSE_ITEM_FILTERS,
@@ -67,14 +68,6 @@ export interface CourseItemsViewProps {
   sourceContext: ContentSourceContext;
   setNote: (n: { kind: "success" | "error"; text: string } | null) => void;
 }
-
-const SUBMISSION_TYPE_OPTIONS = [
-  { value: "online_text_entry", label: "Text entry" },
-  { value: "online_upload", label: "File upload" },
-  { value: "online_url", label: "Website URL" },
-  { value: "on_paper", label: "On paper" },
-  { value: "none", label: "No submission" },
-];
 
 export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNote }: CourseItemsViewProps) {
   // D4: gated as ONE unit, exactly like FilesView's `filesGate` - a stored
@@ -727,160 +720,34 @@ export function CourseItemsView({ courseUrl, acronym, kind, sourceContext, setNo
       </div>
 
       {selection.selected.size > 0 && (
-        <div className={styles.bulkBar}>
-          <div className={styles.bulkBarHead}>
-            <span className={styles.bulkCount}>
-              {selection.selected.size} {selection.selected.size === 1 ? kindLabelSingular : kindLabelPlural} selected
-            </span>
-            <Button variant="outlined" size="small" onClick={selection.clear}>
-              Clear
-            </Button>
-          </div>
-
-          <div className={styles.bulkRow}>
-            <span className={styles.bulkLabel}>Publish</span>
-            <Button variant="outlined" size="small" disabled={busy} onClick={() => bulkPublish(true)}>
-              Publish
-            </Button>
-            <Button variant="outlined" size="small" disabled={busy} onClick={() => bulkPublish(false)}>
-              Unpublish
-            </Button>
-          </div>
-
-          <div className={styles.bulkRow}>
-            <span className={styles.bulkLabel}>Due date</span>
-            <TextField
-              type="datetime-local"
-              size="small"
-              sx={{ width: 188 }}
-              value={bulkDue}
-              onChange={(e) => setBulkDue(e.target.value)}
-              aria-label="Due date"
-            />
-            <Button variant="contained" size="small" disabled={busy} onClick={bulkSetDue}>
-              Set
-            </Button>
-          </div>
-
-          <div className={styles.bulkRow}>
-            <span className={styles.bulkLabel}>Points</span>
-            <TextField
-              type="number"
-              size="small"
-              sx={{ width: 74 }}
-              placeholder="points"
-              value={bulkPoints}
-              onChange={(e) => setBulkPoints(e.target.value)}
-              aria-label="Points"
-            />
-            <Button variant="outlined" size="small" disabled={busy} onClick={bulkSetPoints}>
-              Set points
-            </Button>
-          </div>
-
-          {/* FINDING 1: rubric association and submission-type change only
-              ever apply to an ORDINARY assignment - never a New Quiz, a
-              classic-quiz shadow row, or a graded-discussion shadow row, even
-              though all three can now appear in this tab (bulk.ts's own bug
-              fix). Both controls below stay gated on kind === "Assignment"
-              (the Quizzes tab never renders them at all), but are now ALSO
-              disabled whenever the current selection contains zero eligible
-              rows - communicated up front, before a click, rather than only
-              after one via the error note in bulkRubric/
-              bulkUpdateSubmissionType. A selection that mixes eligible and
-              ineligible rows still applies to the eligible subset (never
-              silently drops the rest without saying so - see those
-              functions' own "skipped" wording). */}
-          {kind === "Assignment" && selection.selected.size > 0 && eligibleAssignmentCount === 0 && (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
-              None of the selected rows are ordinary assignments - New Quizzes, classic quizzes, and graded
-              discussions cannot receive a rubric or submission-type change here.
-            </p>
-          )}
-
-          {kind === "Assignment" && (
-            <div className={styles.bulkRow}>
-              <span className={styles.bulkLabel}>Rubric</span>
-              <TextField
-                select
-                size="small"
-                sx={{ maxWidth: 190 }}
-                value={bulkRubricId}
-                disabled={rubrics.length === 0}
-                onChange={(e) => setBulkRubricId(e.target.value === "" ? "" : Number(e.target.value))}
-                aria-label="Rubric"
-              >
-                <MenuItem value="">{rubrics.length === 0 ? "No rubrics" : "Rubric…"}</MenuItem>
-                {rubrics.map((r) => (
-                  <MenuItem key={r.id} value={r.id}>
-                    {r.title}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={busy || bulkRubricId === "" || eligibleAssignmentCount === 0}
-                onClick={bulkRubric}
-              >
-                Associate
-              </Button>
-            </div>
-          )}
-
-          {kind === "Assignment" && (
-            <div className={styles.bulkRow}>
-              <span className={styles.bulkLabel}>Submission type</span>
-              <TextField
-                select
-                size="small"
-                sx={{ minWidth: 180 }}
-                value={bulkSubType}
-                onChange={(e) => setBulkSubType(e.target.value)}
-                aria-label="Submission type"
-              >
-                <MenuItem value="">Change submission type…</MenuItem>
-                {SUBMISSION_TYPE_OPTIONS.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={busy || bulkSubType === "" || eligibleAssignmentCount === 0}
-                onClick={bulkUpdateSubmissionType}
-              >
-                Apply
-              </Button>
-            </div>
-          )}
-
-          <div className={styles.bulkRow}>
-            <span className={styles.bulkLabel}>Description</span>
-            <TextField
-              multiline
-              minRows={4}
-              fullWidth
-              value={bulkDescription}
-              onChange={(e) => setBulkDescription(e.target.value)}
-              placeholder="Description (HTML allowed) — replaces the description on selected items"
-              aria-label="Description to set on the selected items"
-              size="small"
-            />
-            <Button variant="contained" size="small" disabled={busy} onClick={bulkSetDescription}>
-              Set description
-            </Button>
-          </div>
-
-          <div className={styles.bulkRow}>
-            <span className={styles.bulkLabel}>Delete</span>
-            <Button variant="outlined" size="small" color="error" disabled={busy} onClick={bulkDeleteContent}>
-              {confirmDelete ? "Confirm delete" : "Delete from Canvas"}
-            </Button>
-          </div>
-        </div>
+        <CourseItemsBulkBar
+          kind={kind}
+          kindLabelSingular={kindLabelSingular}
+          kindLabelPlural={kindLabelPlural}
+          selectedCount={selection.selected.size}
+          onClearSelection={selection.clear}
+          busy={busy}
+          bulkPublish={bulkPublish}
+          bulkDue={bulkDue}
+          setBulkDue={setBulkDue}
+          bulkSetDue={bulkSetDue}
+          bulkPoints={bulkPoints}
+          setBulkPoints={setBulkPoints}
+          bulkSetPoints={bulkSetPoints}
+          eligibleAssignmentCount={eligibleAssignmentCount}
+          bulkRubricId={bulkRubricId}
+          setBulkRubricId={setBulkRubricId}
+          rubrics={rubrics}
+          bulkRubric={bulkRubric}
+          bulkSubType={bulkSubType}
+          setBulkSubType={setBulkSubType}
+          bulkUpdateSubmissionType={bulkUpdateSubmissionType}
+          bulkDescription={bulkDescription}
+          setBulkDescription={setBulkDescription}
+          bulkSetDescription={bulkSetDescription}
+          confirmDelete={confirmDelete}
+          bulkDeleteContent={bulkDeleteContent}
+        />
       )}
 
       {status === "loading" ? (

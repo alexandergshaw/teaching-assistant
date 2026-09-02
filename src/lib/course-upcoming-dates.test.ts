@@ -7,6 +7,7 @@ import {
   upcomingCourseDates,
   formatUpcomingDate,
   UPCOMING_HORIZON_DAYS,
+  UPCOMING_LOOKBACK_DAYS,
   type CourseUpcomingCandidate,
 } from "./course-upcoming-dates";
 import { coursesInSession } from "./courses-in-session";
@@ -53,6 +54,10 @@ function checklistItem(overrides: Partial<WeeklyChecklistItem> = {}): WeeklyChec
 describe("module constants", () => {
   it("pins the horizon at 14 days", () => {
     expect(UPCOMING_HORIZON_DAYS).toBe(14);
+  });
+
+  it("pins the lookback at 3 days", () => {
+    expect(UPCOMING_LOOKBACK_DAYS).toBe(3);
   });
 
   it("uses UPCOMING_HORIZON_DAYS as the default horizon, not a separate literal", () => {
@@ -869,5 +874,51 @@ describe("upcomingCourseDates - a missing time sorts after every timed entry on 
     const late = course({ id: "late", name: "Zulu", gradesDueDate: "2026-03-15", gradesDueTime: "23:59" });
     const out = upcomingCourseDates([untimed, early, late], [], NOW);
     expect(out.map((e) => e.courseId)).toEqual(["early", "late", "untimed"]);
+  });
+});
+
+// This feature's own audit item B8: without an explicit lookbackDays, a
+// deadline that has already passed simply vanishes with no trace - the
+// pre-existing behaviour above ("excludes anything past the horizon or
+// already in the past") stays true by DEFAULT, and every test above this
+// point calls upcomingCourseDates with no fifth argument, so none of them is
+// affected by what follows. lookbackDays is strictly opt-in.
+describe("upcomingCourseDates - lookbackDays (B8: a missed deadline should not simply vanish)", () => {
+  it("defaults to 0 - a date from yesterday is excluded exactly as before when lookbackDays is omitted", () => {
+    const c = course({ gradesDueDate: "2026-03-09" });
+    expect(upcomingCourseDates([c], [], NOW)).toEqual([]);
+  });
+
+  it("includes a date within the lookback window when lookbackDays is passed explicitly", () => {
+    const c = course({ id: "yesterday", gradesDueDate: "2026-03-09" });
+    const out = upcomingCourseDates([c], [], NOW, UPCOMING_HORIZON_DAYS, UPCOMING_LOOKBACK_DAYS);
+    expect(out.map((e) => e.courseId)).toEqual(["yesterday"]);
+  });
+
+  it("still excludes a date older than the lookback window", () => {
+    const tooOld = course({ id: "too-old", gradesDueDate: "2026-03-06" }); // 4 days before NOW
+    expect(upcomingCourseDates([tooOld], [], NOW, UPCOMING_HORIZON_DAYS, 3)).toEqual([]);
+  });
+
+  it("includes a date exactly on the lookback boundary", () => {
+    const edge = course({ id: "edge", gradesDueDate: "2026-03-07" }); // exactly 3 days before NOW
+    const out = upcomingCourseDates([edge], [], NOW, UPCOMING_HORIZON_DAYS, 3);
+    expect(out.map((e) => e.courseId)).toEqual(["edge"]);
+  });
+
+  it("still includes today and future dates unchanged when lookbackDays is set", () => {
+    const today = course({ id: "today", endDate: "2026-03-10" });
+    const future = course({ id: "future", gradesDueDate: "2026-03-15" });
+    const out = upcomingCourseDates([today, future], [], NOW, UPCOMING_HORIZON_DAYS, 3);
+    expect(out.map((e) => e.courseId).sort()).toEqual(["future", "today"]);
+  });
+
+  it("computes the lookback in CALENDAR days across a month boundary, not epoch-ms", () => {
+    // 2026-03-01, 09:30 local; 3 calendar days back is 2026-02-26.
+    const mar1 = new Date(2026, 2, 1, 9, 30, 0);
+    const inWindow = course({ id: "in", gradesDueDate: "2026-02-26" });
+    const outWindow = course({ id: "out", gradesDueDate: "2026-02-25" });
+    const out = upcomingCourseDates([inWindow, outWindow], [], mar1, UPCOMING_HORIZON_DAYS, 3);
+    expect(out.map((e) => e.courseId)).toEqual(["in"]);
   });
 });

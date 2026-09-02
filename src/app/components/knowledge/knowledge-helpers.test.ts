@@ -13,7 +13,14 @@ import {
   visiblePageIds,
   allVisibleSelected,
   describeSelectedPages,
+  SHOW_ALL_SELECTED_PAGES,
   parseBulkSelectedIds,
+  selectAllVisibleVisualState,
+  describeKnowledgeContextLabel,
+  kbBulkActionConsequenceTag,
+  computeBulkDeleteTargets,
+  bulkDeleteInclusiveCount,
+  describeBulkDeleteOutcome,
 } from "./knowledge-helpers";
 import { buildPageTree, type InstitutionPage } from "@/lib/knowledge-base";
 
@@ -438,5 +445,169 @@ describe("parseTagsInput", () => {
   it("returns an empty array for a blank string", () => {
     expect(parseTagsInput("")).toEqual([]);
     expect(parseTagsInput("   ")).toEqual([]);
+  });
+});
+
+describe("describeSelectedPages with SHOW_ALL_SELECTED_PAGES (K6 expander)", () => {
+  const pages = [
+    page({ id: "a", title: "A", position: 0 }),
+    page({ id: "b", title: "B", position: 1 }),
+    page({ id: "c", title: "C", position: 2 }),
+    page({ id: "d", title: "D", position: 3 }),
+  ];
+
+  it("folds past the default cap when not expanded", () => {
+    const result = describeSelectedPages(pages, new Set(["a", "b", "c", "d"]), 3);
+    expect(result.overflowCount).toBe(1);
+  });
+
+  it("shows every selected title with no overflow when passed SHOW_ALL_SELECTED_PAGES", () => {
+    const result = describeSelectedPages(pages, new Set(["a", "b", "c", "d"]), SHOW_ALL_SELECTED_PAGES);
+    expect(result.overflowCount).toBe(0);
+    expect(result.shownTitles).toEqual(["A", "B", "C", "D"]);
+  });
+});
+
+describe("selectAllVisibleVisualState (K6 - the checkbox must not lie about a hidden selection)", () => {
+  it("is unchecked and non-indeterminate for an empty visibleIds list", () => {
+    expect(selectAllVisibleVisualState(new Set(), [])).toEqual({ checked: false, indeterminate: false });
+  });
+
+  it("is unchecked and non-indeterminate when nothing at all is selected", () => {
+    expect(selectAllVisibleVisualState(new Set(), ["a", "b"])).toEqual({ checked: false, indeterminate: false });
+  });
+
+  it("is checked (not indeterminate) when the selection is EXACTLY the visible set", () => {
+    expect(selectAllVisibleVisualState(new Set(["a", "b"]), ["a", "b"])).toEqual({ checked: true, indeterminate: false });
+  });
+
+  it("is indeterminate, NOT checked, when only some visible ids are selected", () => {
+    expect(selectAllVisibleVisualState(new Set(["a"]), ["a", "b"])).toEqual({ checked: false, indeterminate: true });
+  });
+
+  it(
+    "THE K6 BUG: every visible id selected, but many MORE pages selected outside view (e.g. a collapsed " +
+      "branch) - must read indeterminate, never a false full checkmark that would then deselect only the " +
+      "visible ones on click and leave the rest stranded with no visible indication",
+    () => {
+      // 40-page selection collapsed down to 6 visible roots, all 6 of which
+      // happen to be selected - the exact scenario the audit named.
+      const visibleIds = ["r1", "r2", "r3", "r4", "r5", "r6"];
+      const selected = new Set([...visibleIds, ...Array.from({ length: 34 }, (_, i) => `hidden-${i}`)]);
+      expect(selectAllVisibleVisualState(selected, visibleIds)).toEqual({ checked: false, indeterminate: true });
+    }
+  );
+});
+
+describe("describeKnowledgeContextLabel (K1 - the omission must reach the label the landing panel renders)", () => {
+  it("states a plain count when nothing was omitted", () => {
+    expect(describeKnowledgeContextLabel(5, 5, 0)).toBe("5 Knowledge Base pages");
+  });
+
+  it("uses the singular noun for exactly one page", () => {
+    expect(describeKnowledgeContextLabel(1, 1, 0)).toBe("1 Knowledge Base page");
+  });
+
+  it("states the included-of-total count and names the omitted count when the budget dropped pages", () => {
+    expect(describeKnowledgeContextLabel(40, 28, 12)).toBe(
+      "28 of 40 Knowledge Base pages (12 omitted - too large for the context budget)"
+    );
+  });
+});
+
+describe("kbBulkActionConsequenceTag (K7)", () => {
+  it("gives each tier a distinct, non-empty tag", () => {
+    const tags = new Set([
+      kbBulkActionConsequenceTag("read-only"),
+      kbBulkActionConsequenceTag("fan-out"),
+      kbBulkActionConsequenceTag("destructive"),
+    ]);
+    expect(tags.size).toBe(3);
+    for (const tag of tags) expect(tag.length).toBeGreaterThan(0);
+  });
+
+  it("names the destructive tier as irreversible", () => {
+    expect(kbBulkActionConsequenceTag("destructive")).toMatch(/cannot be undone/i);
+  });
+});
+
+describe("computeBulkDeleteTargets (K10 - never double-delete a covered descendant)", () => {
+  const pages = [
+    page({ id: "root", title: "Root", position: 0 }),
+    page({ id: "child-a", title: "Child A", parentId: "root", position: 0 }),
+    page({ id: "grandchild", title: "Grandchild", parentId: "child-a", position: 0 }),
+    page({ id: "other-root", title: "Other Root", position: 1 }),
+  ];
+
+  it("treats a page with no selected ancestor as top-level", () => {
+    const { topLevelIds, skippedIds } = computeBulkDeleteTargets(pages, new Set(["root"]));
+    expect(topLevelIds).toEqual(["root"]);
+    expect(skippedIds).toEqual([]);
+  });
+
+  it("skips a descendant whose ancestor is ALSO selected, rather than sending it to delete twice", () => {
+    const { topLevelIds, skippedIds } = computeBulkDeleteTargets(pages, new Set(["root", "child-a", "grandchild"]));
+    expect(topLevelIds).toEqual(["root"]);
+    expect(skippedIds.sort()).toEqual(["child-a", "grandchild"]);
+  });
+
+  it("treats two unrelated selected pages as both top-level", () => {
+    const { topLevelIds, skippedIds } = computeBulkDeleteTargets(pages, new Set(["root", "other-root"]));
+    expect(topLevelIds.sort()).toEqual(["other-root", "root"]);
+    expect(skippedIds).toEqual([]);
+  });
+
+  it("ignores a selected id that no longer exists in pages", () => {
+    const { topLevelIds, skippedIds } = computeBulkDeleteTargets(pages, new Set(["root", "gone"]));
+    expect(topLevelIds).toEqual(["root"]);
+    expect(skippedIds).toEqual([]);
+  });
+});
+
+describe("bulkDeleteInclusiveCount (K10 - the confirm must state the REAL blast radius, not the checkbox count)", () => {
+  const pages = [
+    page({ id: "root", title: "Root", position: 0 }),
+    page({ id: "child-a", title: "Child A", parentId: "root", position: 0 }),
+    page({ id: "child-b", title: "Child B", parentId: "root", position: 1 }),
+    page({ id: "grandchild", title: "Grandchild", parentId: "child-a", position: 0 }),
+  ];
+  const tree = buildPageTree(pages);
+
+  it("counts a leaf top-level target as just itself", () => {
+    expect(bulkDeleteInclusiveCount(tree, ["grandchild"])).toBe(1);
+  });
+
+  it(
+    "counts every descendant of a top-level target EVEN THOUGH THEY WERE NEVER TICKED - only 'root' is " +
+      "selected, but the cascade removes 3 more pages, and the confirm must say 4, not 1",
+    () => {
+      expect(bulkDeleteInclusiveCount(tree, ["root"])).toBe(4);
+    }
+  );
+
+  it("sums across multiple independent top-level targets without double-counting", () => {
+    expect(bulkDeleteInclusiveCount(tree, ["child-a", "child-b"])).toBe(3); // child-a + grandchild + child-b
+  });
+});
+
+describe("describeBulkDeleteOutcome (K10 - the {done, failed, skipped} note)", () => {
+  it("states a clean success with no failed/skipped clauses", () => {
+    expect(describeBulkDeleteOutcome(3, { doneCount: 3, failed: [], skipped: [] })).toBe("3 of 3 pages deleted.");
+  });
+
+  it("names every failed title and every skipped title, distinctly", () => {
+    const text = describeBulkDeleteOutcome(7, {
+      doneCount: 3,
+      failed: [{ title: "Late policy", message: "network error" }, { title: "Grading rubric", message: "network error" }],
+      skipped: [{ title: "Sub-page" }, { title: "Another sub-page" }],
+    });
+    expect(text).toContain("3 of 7 pages deleted.");
+    expect(text).toContain("2 failed: Late policy, Grading rubric.");
+    expect(text).toContain("2 not deleted directly");
+    expect(text).toContain("Sub-page, Another sub-page");
+  });
+
+  it("uses the singular noun for a total of exactly one page", () => {
+    expect(describeBulkDeleteOutcome(1, { doneCount: 1, failed: [], skipped: [] })).toBe("1 of 1 page deleted.");
   });
 });

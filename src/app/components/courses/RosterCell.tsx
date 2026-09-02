@@ -5,7 +5,20 @@
 // StudentReposSection): same table editors and view states (stats,
 // view/hide preview, copy, From LMS for roster). Only the outer wrapper
 // changed, from a card <div> to a table <td>.
-import { useState, type ReactNode } from "react";
+//
+// 2026-09-01 roster editor UX pass (docs/REGRESSION.md, this feature's own
+// entry): the editor used to derive its rows from the saved draft text on
+// EVERY keystroke (`rows = rosterToRows(draft)`, written back through
+// `rowsToRoster` on every change). That made a row vanish mid-typing the
+// instant an un-handled student's name went blank (rowsToRoster's own
+// "drop a row with nothing in either field" filter), corrupted any name
+// containing "|" (rosterToRows splits on the LAST one), and desynced the
+// DOM from React state on a trailing space. The editor now owns its OWN
+// row state (`rows`, each with a stable `id` minted once) and serializes
+// through `rowsToRoster` exactly once, at Save - `rosterToRows`/
+// `rowsToRoster` themselves are UNCHANGED, since REGRESSION 361 pins that
+// format as load-bearing for three separate writers.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import type { Course } from "@/lib/supabase/courses";
@@ -13,14 +26,25 @@ import {
   rosterStats,
   rosterToRows,
   rowsToRoster,
-  studentReposToRows,
   rowsToStudentReposText,
   mergeOrgReposIntoStudentRepos,
 } from "@/lib/courses-tab-helpers";
+import { isValidGithubUsername } from "@/lib/github-usernames";
+import { updateEditorRow, removeEditorRow, addEditorRow } from "@/lib/roster-editor-rows";
+import { findRosterRowDuplicates, describeRosterDuplicate } from "@/lib/roster-row-checks";
+import { parseRosterImportText, formatRosterImportSummary, type RosterImportResult } from "@/lib/roster-import";
 import { listOrgReposAction } from "@/app/actions";
 import { StudentRepoRoster } from "./StudentRepoRoster";
+import { EditableRowList, type EditableRowListColumn } from "./EditableRowList";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
+import rosterEditorStyles from "./RosterEditor.module.css";
+
+interface RosterRow {
+  id: string;
+  student: string;
+  username: string;
+}
 
 export interface RosterCellProps {
   course: Course;
@@ -38,39 +62,152 @@ export interface RosterCellProps {
   ownedRepos: string[] | null;
 }
 
+function useIdMinter() {
+  const counterRef = useRef(0);
+  return () => `row-${(counterRef.current += 1)}`;
+}
+
+/** role="status" line for a transient one-line message (Copied, a removal
+ * announcement, ...) - present and empty in the initial markup, matching
+ * the live-region idiom StudentRepoRoster.tsx already uses, and self-clears
+ * a few seconds after each write. Kept local to this file (not routed
+ * through StudentRepoRoster's own live region) because it concerns entirely
+ * different information and is visible even while the roster is collapsed,
+ * where StudentRepoRoster is not mounted at all. */
+function useTransientNote(clearAfterMs = 4000) {
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    if (!note) return;
+    const t = setTimeout(() => setNote(""), clearAfterMs);
+    return () => clearTimeout(t);
+  }, [note, clearAfterMs]);
+  return [note, setNote] as const;
+}
+
 export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraft, menu, ownedRepos }: RosterCellProps) {
+  const mintId = useIdMinter();
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [rows, setRows] = useState<RosterRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [filterSignal, setFilterSignal] = useState(0);
+  const [rowSearch, setRowSearch] = useState("");
+  const [pendingFocusRowId, setPendingFocusRowId] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importPreview, setImportPreview] = useState<RosterImportResult | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"" | "copied" | "error">("");
+  const [rowNote, setRowNote] = useTransientNote();
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!copyStatus) return;
+    const t = setTimeout(() => setCopyStatus(""), 4000);
+    return () => clearTimeout(t);
+  }, [copyStatus]);
+
+  const seedRows = (text: string) => rosterToRows(text).map((r) => ({ id: mintId(), ...r }));
 
   const startEdit = () => {
-    setDraft(course.roster ?? "");
+    setRows(seedRows(course.roster ?? ""));
+    setImportOpen(false);
+    setImportText("");
+    setImportPreview(null);
     setEditing(true);
   };
 
   const pullFromLms = async () => {
     const result = await fetchLmsRosterDraft(course);
     if (result !== null) {
-      setDraft(result);
+      setRows(seedRows(result));
       setEditing(true);
     }
   };
 
   const commit = async () => {
     setSaving(true);
-    const ok = await onSave(draft);
+    const raw = rowsToRoster(rows.map(({ student, username }) => ({ student, username })));
+    const ok = await onSave(raw);
     setSaving(false);
     if (ok !== false && ok !== null) setEditing(false);
   };
 
-  const rows = rosterToRows(draft);
-  const setRows = (next: Array<{ student: string; username: string }>) => setDraft(rowsToRoster(next));
-  const updateRow = (i: number, patch: Partial<{ student: string; username: string }>) =>
-    setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const updateRow = (id: string, patch: Partial<RosterRow>) => setRows((prev) => updateEditorRow(prev, id, patch));
+
+  const addRow = () => {
+    const id = mintId();
+    setRows((prev) => addEditorRow(prev, { id, student: "", username: "" }));
+    setPendingFocusRowId(id);
+  };
+
+  const removeRow = (id: string) => {
+    setRows((prev) => {
+      const target = prev.find((r) => r.id === id);
+      const label = target ? target.student.trim() || target.username.trim() || "this row" : "this row";
+      const { rows: next, focusRowId } = removeEditorRow(prev, id);
+      setRowNote(`Removed ${label}'s row.`);
+      if (focusRowId) {
+        setPendingFocusRowId(focusRowId);
+      } else {
+        setPendingFocusRowId(null);
+        requestAnimationFrame(() => addButtonRef.current?.focus());
+      }
+      return next;
+    });
+  };
+
+  const openImportPanel = () => {
+    if (!editing) startEdit();
+    setImportOpen(true);
+    setImportText("");
+    setImportPreview(null);
+  };
+
+  const applyImport = () => {
+    if (!importPreview || importPreview.rows.length === 0) return;
+    setRows((prev) => [...prev, ...importPreview.rows.map((r) => ({ id: mintId(), ...r }))]);
+    setImportOpen(false);
+    setImportText("");
+    setImportPreview(null);
+  };
+
+  const copyRoster = async () => {
+    try {
+      await navigator.clipboard.writeText(course.roster ?? "");
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("error");
+    }
+  };
+
+  const duplicates = useMemo(() => findRosterRowDuplicates(rows), [rows]);
+
+  const filteredOrder = useMemo(() => {
+    const term = rowSearch.trim().toLowerCase();
+    if (!term) return undefined;
+    return rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.student.toLowerCase().includes(term) || r.username.toLowerCase().includes(term))
+      .map(({ i }) => i);
+  }, [rows, rowSearch]);
+
+  const columns: EditableRowListColumn<RosterRow>[] = [
+    { key: "student", label: "Student", placeholder: "Smith, John" },
+    {
+      key: "username",
+      label: "GitHub username",
+      placeholder: "jsmith-gh",
+      width: 150,
+      hint: (value) =>
+        value.trim() && !isValidGithubUsername(value.trim())
+          ? "Not a valid GitHub username - letters, numbers and single hyphens only."
+          : null,
+    },
+  ];
 
   const hasRoster = Boolean(course.roster && course.roster.trim());
   const stats = hasRoster ? rosterStats(course.roster ?? "") : null;
+  const complementCount = stats ? stats.students - stats.withUsernames : 0;
 
   return (
     <td style={{ minWidth: 220 }}>
@@ -84,28 +221,79 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
       </div>
       {editing ? (
         <div className={styles.tileEditor}>
-          <div className={tableStyles.editorHeadRow}>
-            <span className={`${styles.ghMeta} ${tableStyles.flex1}`}>Student</span>
-            <span className={`${styles.ghMeta} ${tableStyles.w150}`}>GitHub username</span>
-            <span style={{ width: 24 }} />
-          </div>
-          <div className={tableStyles.editorRowsScroll}>
-            {rows.map((r, i) => (
-              <div key={i} className={tableStyles.editorRow}>
-                <TextField size="small" value={r.student} onChange={(e) => updateRow(i, { student: e.target.value })} sx={{ flex: 1 }} placeholder="Smith, John" />
-                <TextField size="small" value={r.username} onChange={(e) => updateRow(i, { username: e.target.value })} sx={{ width: 150 }} placeholder="jsmith-gh" />
-                <button type="button" className={`${styles.linkButton} ${tableStyles.dangerLink}`} style={{ width: 24 }} title="Remove student" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}>
-                  x
-                </button>
-              </div>
-            ))}
-            {rows.length === 0 && <p className={styles.fieldHint}>No students yet.</p>}
-          </div>
-          <div>
-            <Button variant="text" size="small" onClick={() => setRows([...rows, { student: "New student", username: "" }])}>
+          <TextField
+            size="small"
+            value={rowSearch}
+            onChange={(e) => setRowSearch(e.target.value)}
+            placeholder="Search students…"
+            slotProps={{ htmlInput: { "aria-label": "Search roster rows being edited" } }}
+          />
+          <EditableRowList<RosterRow>
+            rows={rows}
+            displayOrder={filteredOrder}
+            columns={columns}
+            onChangeRow={updateRow}
+            onRemoveRow={removeRow}
+            labelForRow={(r) => r.student.trim() || r.username.trim()}
+            rowExtra={(row, index) => {
+              const message = describeRosterDuplicate(row, index, duplicates);
+              return message ? <p className={rosterEditorStyles.warningText}>{message}</p> : null;
+            }}
+            emptyMessage="No students yet."
+            focusRowId={pendingFocusRowId}
+            onFocusHandled={() => setPendingFocusRowId(null)}
+          />
+          <p className={styles.fieldHint} role="status" aria-live="polite">
+            {rowNote}
+          </p>
+          <div className={tableStyles.rowSm}>
+            <Button ref={addButtonRef} variant="text" size="small" onClick={addRow}>
               Add student
             </Button>
+            <Button variant="text" size="small" onClick={openImportPanel}>
+              Import list
+            </Button>
           </div>
+          {importOpen && (
+            <div className={tableStyles.stackSm}>
+              <TextField
+                multiline
+                minRows={4}
+                size="small"
+                value={importText}
+                onChange={(e) => {
+                  setImportText(e.target.value);
+                  setImportPreview(null);
+                }}
+                placeholder={'One student per line: "Name | handle", "Name, handle", or "Name" + Tab + "handle"'}
+                slotProps={{ htmlInput: { "aria-label": "Paste a student list" } }}
+              />
+              <div className={tableStyles.rowSm}>
+                <Button size="small" variant="outlined" disabled={!importText.trim()} onClick={() => setImportPreview(parseRosterImportText(importText))}>
+                  Review
+                </Button>
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => {
+                    setImportOpen(false);
+                    setImportText("");
+                    setImportPreview(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+              {importPreview && (
+                <>
+                  <p className={styles.fieldHint}>{formatRosterImportSummary(importPreview)}</p>
+                  <Button size="small" variant="contained" disabled={importPreview.rows.length === 0} onClick={applyImport}>
+                    Add to roster
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
           <div className={styles.tileEditorActions}>
             <Button variant="contained" size="small" disabled={saving} onClick={() => void commit()}>
               {saving ? "Saving…" : "Save"}
@@ -118,13 +306,27 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
       ) : hasRoster && stats ? (
         <>
           <span className={styles.courseResourceValue}>
-            {stats.students} students{stats.withUsernames > 0 ? ` - ${stats.withUsernames} with GitHub usernames` : ""}
-          </span>
+            {stats.students} student{stats.students === 1 ? "" : "s"}
+          </span>{" "}
+          {complementCount > 0 ? (
+            <button
+              type="button"
+              className={`${styles.ghBadge} ${styles.ghBadgeWarning} ${rosterEditorStyles.badgeButtonReset}`}
+              onClick={() => {
+                setExpanded(true);
+                setFilterSignal((n) => n + 1);
+              }}
+            >
+              {complementCount} with no GitHub username
+            </button>
+          ) : (
+            <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>all handles present</span>
+          )}
           <div className={styles.courseResourceActions}>
             <button type="button" className={styles.linkButton} onClick={() => setExpanded((v) => !v)}>
               {expanded ? "Hide" : "View"}
             </button>
-            <button type="button" className={styles.linkButton} onClick={() => void navigator.clipboard.writeText(course.roster ?? "")}>
+            <button type="button" className={styles.linkButton} onClick={() => void copyRoster()}>
               Copy
             </button>
             {canLms && (
@@ -132,24 +334,40 @@ export function RosterCell({ course, onSave, canLms, lmsBusy, fetchLmsRosterDraf
                 {lmsBusy ? "Loading…" : "From LMS"}
               </button>
             )}
+            <button type="button" className={styles.linkButton} onClick={openImportPanel}>
+              Import list
+            </button>
           </div>
-          {expanded && <StudentRepoRoster course={course} ownedRepos={ownedRepos} />}
+          <p className={styles.fieldHint} role="status" aria-live="polite">
+            {copyStatus === "copied" ? "Copied" : copyStatus === "error" ? "Could not copy the roster" : ""}
+          </p>
+          {expanded && <StudentRepoRoster course={course} ownedRepos={ownedRepos} focusUnhandledSignal={filterSignal} />}
         </>
       ) : (
         <>
           <span className={styles.courseResourceEmpty}>Not set</span>
-          {canLms && (
-            <div className={styles.courseResourceActions}>
+          <div className={styles.courseResourceActions}>
+            {canLms && (
               <button type="button" className={styles.linkButton} disabled={lmsBusy} onClick={() => void pullFromLms()}>
                 {lmsBusy ? "Loading…" : "From LMS"}
               </button>
-            </div>
-          )}
+            )}
+            <button type="button" className={styles.linkButton} onClick={openImportPanel}>
+              Import list
+            </button>
+          </div>
         </>
       )}
       {!editing && menu && <span className={tableStyles.cellMenu}>{menu}</span>}
     </td>
   );
+}
+
+interface StudentRepoRow {
+  id: string;
+  student: string;
+  canvasUserId: string;
+  repo: string;
 }
 
 export interface StudentReposCellProps {
@@ -161,17 +379,35 @@ export interface StudentReposCellProps {
 }
 
 export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps) {
+  const mintId = useIdMinter();
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [rows, setRows] = useState<StudentRepoRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [orgPrefix, setOrgPrefix] = useState("");
   const [pulling, setPulling] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
   const [pullNote, setPullNote] = useState<string | null>(null);
+  const [pendingFocusRowId, setPendingFocusRowId] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"" | "copied" | "error">("");
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!copyStatus) return;
+    const t = setTimeout(() => setCopyStatus(""), 4000);
+    return () => clearTimeout(t);
+  }, [copyStatus]);
 
   const startEdit = () => {
-    setDraft(rowsToStudentReposText((course.studentRepos ?? []).map((r) => ({ student: r.student, canvasUserId: r.canvasUserId ?? "", repo: r.repo }))));
+    // Reads studentRepos fields directly, WITHOUT a rowsToStudentReposText
+    // -> studentReposToRows round trip through "|"-joined text (the format
+    // both those helpers stay pinned to, unchanged, per REGRESSION 361) -
+    // a student/repo value that itself contains "|" would otherwise be
+    // mis-split on seed, same class of defect R1 fixes for the roster
+    // editor.
+    setRows(
+      (course.studentRepos ?? []).map((r) => ({ id: mintId(), student: r.student, canvasUserId: r.canvasUserId ?? "", repo: r.repo }))
+    );
     setPullError(null);
     setPullNote(null);
     setEditing(true);
@@ -179,15 +415,32 @@ export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps
 
   const commit = async () => {
     setSaving(true);
-    const ok = await onSave(draft);
+    const raw = rowsToStudentReposText(rows.map(({ student, canvasUserId, repo }) => ({ student, canvasUserId, repo })));
+    const ok = await onSave(raw);
     setSaving(false);
     if (ok !== false && ok !== null) setEditing(false);
   };
 
-  const rows = studentReposToRows(draft);
-  const setRows = (next: Array<{ student: string; canvasUserId: string; repo: string }>) => setDraft(rowsToStudentReposText(next));
-  const updateRow = (i: number, patch: Partial<{ student: string; canvasUserId: string; repo: string }>) =>
-    setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const updateRow = (id: string, patch: Partial<StudentRepoRow>) => setRows((prev) => updateEditorRow(prev, id, patch));
+
+  const addRow = () => {
+    const id = mintId();
+    setRows((prev) => addEditorRow(prev, { id, student: "", canvasUserId: "", repo: "" }));
+    setPendingFocusRowId(id);
+  };
+
+  const removeRow = (id: string) => {
+    setRows((prev) => {
+      const { rows: next, focusRowId } = removeEditorRow(prev, id);
+      if (focusRowId) {
+        setPendingFocusRowId(focusRowId);
+      } else {
+        setPendingFocusRowId(null);
+        requestAnimationFrame(() => addButtonRef.current?.focus());
+      }
+      return next;
+    });
+  };
 
   const githubOrg = (course.githubOrg ?? "").trim();
 
@@ -210,11 +463,26 @@ export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps
     const merged = mergeOrgReposIntoStudentRepos(existingRows, result.repos.map((r) => r.fullName));
     const added = merged.length - existingRows.length;
     const alreadyPresent = result.repos.length - added;
-    setRows(merged.map((r) => ({ student: r.student, canvasUserId: r.canvasUserId ?? "", repo: r.repo })));
+    setRows(merged.map((r) => ({ id: mintId(), student: r.student, canvasUserId: r.canvasUserId ?? "", repo: r.repo })));
     setPullNote(`Added ${added} repo${added === 1 ? "" : "s"}${alreadyPresent > 0 ? ` (${alreadyPresent} already listed)` : ""}.`);
   };
 
+  const columns: EditableRowListColumn<StudentRepoRow>[] = [
+    { key: "student", label: "Student", placeholder: "Smith, John" },
+    { key: "canvasUserId", label: "Canvas user id", placeholder: "canvas-id", width: 150 },
+    { key: "repo", label: "Repo", placeholder: "owner/repo" },
+  ];
+
   const hasRepos = course.studentRepos && course.studentRepos.length > 0;
+
+  const copyStudentRepos = async () => {
+    try {
+      await navigator.clipboard.writeText(course.studentRepos.map((r) => `${r.student} -> ${r.repo}`).join("\n"));
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("error");
+    }
+  };
 
   return (
     <td style={{ minWidth: 220 }}>
@@ -228,27 +496,18 @@ export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps
       </div>
       {editing ? (
         <div className={styles.tileEditor}>
-          <div className={tableStyles.editorHeadRow}>
-            <span className={`${styles.ghMeta} ${tableStyles.flex1}`}>Student</span>
-            <span className={`${styles.ghMeta} ${tableStyles.w150}`}>Canvas user id</span>
-            <span className={`${styles.ghMeta} ${tableStyles.flex1}`}>Repo</span>
-            <span style={{ width: 24 }} />
-          </div>
-          <div className={tableStyles.editorRowsScroll}>
-            {rows.map((r, i) => (
-              <div key={i} className={tableStyles.editorRow}>
-                <TextField size="small" value={r.student} onChange={(e) => updateRow(i, { student: e.target.value })} sx={{ flex: 1 }} placeholder="Smith, John" />
-                <TextField size="small" value={r.canvasUserId} onChange={(e) => updateRow(i, { canvasUserId: e.target.value })} sx={{ width: 150 }} placeholder="canvas-id" />
-                <TextField size="small" value={r.repo} onChange={(e) => updateRow(i, { repo: e.target.value })} sx={{ flex: 1 }} placeholder="owner/repo" />
-                <button type="button" className={`${styles.linkButton} ${tableStyles.dangerLink}`} style={{ width: 24 }} title="Remove student" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}>
-                  x
-                </button>
-              </div>
-            ))}
-            {rows.length === 0 && <p className={styles.fieldHint}>No student repos yet.</p>}
-          </div>
+          <EditableRowList<StudentRepoRow>
+            rows={rows}
+            columns={columns}
+            onChangeRow={updateRow}
+            onRemoveRow={removeRow}
+            labelForRow={(r) => r.student.trim() || r.repo.trim()}
+            emptyMessage="No student repos yet."
+            focusRowId={pendingFocusRowId}
+            onFocusHandled={() => setPendingFocusRowId(null)}
+          />
           <div>
-            <Button variant="text" size="small" onClick={() => setRows([...rows, { student: "New student", canvasUserId: "", repo: "" }])}>
+            <Button ref={addButtonRef} variant="text" size="small" onClick={addRow}>
               Add student
             </Button>
           </div>
@@ -292,14 +551,13 @@ export function StudentReposCell({ course, onSave, menu }: StudentReposCellProps
             <button type="button" className={styles.linkButton} onClick={() => setExpanded((v) => !v)}>
               {expanded ? "Hide" : "View"}
             </button>
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() => void navigator.clipboard.writeText(course.studentRepos.map((r) => `${r.student} -> ${r.repo}`).join("\n"))}
-            >
+            <button type="button" className={styles.linkButton} onClick={() => void copyStudentRepos()}>
               Copy
             </button>
           </div>
+          <p className={styles.fieldHint} role="status" aria-live="polite">
+            {copyStatus === "copied" ? "Copied" : copyStatus === "error" ? "Could not copy the roster" : ""}
+          </p>
           {expanded && (
             <div className={styles.rosterPreview}>
               {course.studentRepos.map((r, i) => (

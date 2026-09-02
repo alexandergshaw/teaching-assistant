@@ -59,6 +59,22 @@ export function ArrowDownIcon() {
   );
 }
 
+// D5 (docs/aesthetics-pass-acceptance-criteria.md section 4b): the per-row
+// overflow menu trigger - Remove, plus D1's manual "handled" toggle and D9's
+// skip toggle, move behind this. Same 20px shape convention as the rest of
+// this file (this cluster is AM23's one named 20px exception - see this
+// file's own header).
+
+export function MoreIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">
+      <circle cx="4" cy="10" r="1.6" />
+      <circle cx="10" cy="10" r="1.6" />
+      <circle cx="16" cy="10" r="1.6" />
+    </svg>
+  );
+}
+
 // docs/discussion-reply-resources-acceptance-criteria.md R10: one-click
 // remove per resource link.
 

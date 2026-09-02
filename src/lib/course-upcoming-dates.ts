@@ -110,6 +110,20 @@ import type { CourseSessionCandidate } from "./courses-in-session";
 
 export const UPCOMING_HORIZON_DAYS = 14;
 
+// AC/B8 (this feature's own follow-up audit, docs/aesthetics-pass-
+// acceptance-criteria.md's sibling hand-off brief for InSessionBanner.tsx):
+// a short lookback so a deadline that passed a day or two ago does not
+// simply vanish from the strip - previously the window filter's lower bound
+// was `today` itself (see `upcomingCourseDates` below), so a missed deadline
+// from yesterday disappeared completely, "the one you most need on a glance
+// bar" per that brief. Deliberately short (3 days, not the 14-day forward
+// horizon) - this is a glance-bar for what still needs attention, not a
+// history log. Default is 0 (see `upcomingCourseDates`'s own `lookbackDays`
+// parameter) so every EXISTING call site and test is byte-for-byte
+// unaffected unless it opts in explicitly - InSessionBanner.tsx is the one
+// caller that does.
+export const UPCOMING_LOOKBACK_DAYS = 3;
+
 export type UpcomingDateKind = "class-start" | "grades-due" | "class-end" | "break-start" | "checklist";
 
 export interface UpcomingCourseDate {
@@ -495,15 +509,29 @@ function entryDedupeKey(entry: UpcomingCourseDate): string {
  * outright (AC5): its under-way contributions are skipped entirely rather
  * than merged in alongside the class-start entry, so one banner entry can
  * never simultaneously claim "starting soon" and "grades due".
+ *
+ * `lookbackDays` (default 0, matching every existing call site byte-for-byte)
+ * moves the window's LOWER bound from `today` to `today - lookbackDays`
+ * calendar days, computed the same overflow-safe way `horizonDays` already
+ * extends the upper bound (see the module comment's "horizon arithmetic"
+ * section - the same reasoning applies in the negative direction). This is
+ * this feature's B8 fix: without it, a missed deadline from yesterday simply
+ * disappeared from the strip with no trace, "the one you most need on a
+ * glance bar". InSessionBanner.tsx is the one caller that passes
+ * `UPCOMING_LOOKBACK_DAYS` explicitly; every other/existing caller keeps
+ * `lookbackDays` at its default and is completely unaffected - the window's
+ * lower bound stays exactly `today`.
  */
 export function upcomingCourseDates(
   underWay: CourseUpcomingCandidate[],
   startingSoon: CourseUpcomingCandidate[],
   referenceDate: Date,
-  horizonDays: number = UPCOMING_HORIZON_DAYS
+  horizonDays: number = UPCOMING_HORIZON_DAYS,
+  lookbackDays: number = 0
 ): UpcomingCourseDate[] {
   const today = toDateString(referenceDate);
   const horizonEnd = addCalendarDays(referenceDate, horizonDays);
+  const lookbackStart = lookbackDays > 0 ? addCalendarDays(referenceDate, -lookbackDays) : today;
   // Both lists are filtered through isNonNullObject before any `.id`/field
   // read - underWay/startingSoon are documented as "already exactly what
   // coursesUnderWay/coursesStartingSoon would produce", but this function is
@@ -523,7 +551,7 @@ export function upcomingCourseDates(
     raw.push(...startingSoonEntriesForCourse(course));
   }
 
-  const inWindow = raw.filter((entry) => entry.date >= today && entry.date <= horizonEnd);
+  const inWindow = raw.filter((entry) => entry.date >= lookbackStart && entry.date <= horizonEnd);
 
   const seen = new Set<string>();
   const deduped: UpcomingCourseDate[] = [];

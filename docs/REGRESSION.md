@@ -37495,3 +37495,119 @@ consolidation with no class deleted.
   without rendering); ellipsis spelling (99 `...` vs 59 the character), which is
   copy and outside AC14; and MUI `sx` numeric spacing units, left alone
   app-wide rather than half-converted.
+## 382. Five surfaces rethought, and the four defects the aesthetics pass could not have found
+
+Five UX audits (roster column, discussion sub-tabs, in-session banner, knowledge
+bulk actions, FAB) then five disjoint implementation chunks. The audits are the
+durable part: each was told to name what is ALREADY right, and each found at
+least one thing that was not an aesthetics problem at all.
+
+### The defects that were never about looks
+
+- **The roster was being replaced, not merged** (fixed separately in ec0a4a6).
+  Silent data loss with no undo, from a button on a different screen, and it
+  fired in unattended workflow runs too.
+- **Knowledge bulk actions computed a partial result and discarded it.**
+  `buildKnowledgeContextBlock` returns `omittedPages`; the caller destructured
+  only `.text`. Select 40 pages, 12 exceed the budget, 28 go - while the UI
+  claimed "These pages are sent to the model". REGRESSION 380's shape two, on
+  the path that feeds grading. `knowledge-context.ts` needed no change; the bug
+  was entirely in the caller.
+- **A live control rendering at the bottom of `<body>`.** SelectionChatWidget's
+  trigger lost `className={styles.selectionAiButton}` in 6c3729e; its
+  `style={{top,left}}` is inert because MUI IconButton is `position: static`.
+  `.selectionAiButton` sat in page.module.css looking maintained - an earlier
+  pass even tokenised its control height. The class guard checks
+  references -> definitions, so a class losing its LAST reference is invisible
+  to it.
+- **An unguarded `localStorage.getItem` in a component mounted on every route.**
+  The write was wrapped in try/catch; the read was not. Blocked site data
+  throws there, in a `useState` initializer, during first client render: white
+  screen, whole app.
+
+### The banner's label was false
+
+`coursesInSession` compares calendar-date strings only - no clock, no weekday,
+no meeting time - so "In session now" was true for every course for the entire
+term. Renamed to "Teaching this term". Wiring real meeting times was
+deliberately NOT done: `parseDayTime` lives in `registry-helpers.ts`, which
+imports `@/app/actions`, and pulling it into a client component would drag
+server actions into the client bundle. Recommendation recorded in the
+component instead.
+
+The salience was also inverted - the inert fact carried the bordered, filled,
+primary treatment while the deadline was borderless grey - and the 28ch cap
+truncated course name -> label -> DATE, so the date was always the first
+casualty and `at 5:00 PM` was always lost. Dates now render first, the
+treatments are swapped, and a `title` carries the full string.
+
+### What the agents refused, and were right to
+
+- The knowledge agent **refused to adopt ModalShell** for the delete banner:
+  `modalAdoptionScan.ts` already lists it in PERMANENT_EXCLUSIONS and a
+  repo-wide count canary freezes that. It hand-rolled the focus management
+  instead.
+- It **removed `role="tree"` rather than half-implementing it** - doing it
+  properly needs two independent selection concepts reconciled plus a roving
+  tabindex model, and a role promising structure while delivering none is worse
+  than no role.
+- The FAB agent **corrected the orchestrator's option count**: the brief said
+  seven to four while also forbidding removal of the FAB-only legibility probe.
+  Five is the honest number.
+- The banner agent **caught a height regression in its own work**: giving
+  `.upcomingItem` a real border would have added ~2px to the strip's tallest
+  chip. It used an inset box-shadow instead - same hairline, zero layout.
+- The discussion agent **disabled Move up/down under an active status chip**
+  rather than ship a silent "swap targets a hidden neighbour" bug, because
+  `moveRow`'s signature is fixed by an out-of-scope orchestrator.
+- The roster agent **left CoursesTable.module.css byte-identical** rather than
+  push a 939-line file over the cap, extracting to a new stylesheet instead.
+
+### Click costs
+
+| job | before | after |
+|---|---|---|
+| 28 students from a pasted list | ~57 | 4 |
+| find the students with no GitHub handle | scan 30 rows | 1 |
+| retire twelve scattered knowledge pages | 36+ | 2 |
+| act on six search hits | not expressible | 7 |
+| know which discussion replies are done | impossible | a filter chip |
+
+### Gates
+
+`tsc --noEmit` 0 errors. `eslint` 0 errors on every touched file. `vitest`
+**812 files / 16483 tests** passing. Sabotage checks: 4 (roster), 8
+(discussion), 5 (knowledge), 4 (FAB), 2 hand-checked (banner) - each broken,
+confirmed red for the right reason, the mutation confirmed present in the file,
+restored, confirmed green.
+
+### Limits
+
+- **No component is rendered by any test here.** Every focus-management,
+  ARIA and layout claim in this entry is verified by reading. The roster work
+  mitigated this by extracting every testable rule into pure `src/lib` modules
+  that ARE tested; the hook-level glue is not.
+- `DiscussionRepliesPanel.tsx` is **971** and `DiscussionReplyRow.tsx` **916**,
+  both over the 950 soft cap though under the 1000 ceiling. The next group
+  working there has ~29 lines of headroom.
+- **`handledAt` and `skipped` are a persisted side-channel, not `ReplyRow`
+  fields**, because `useDiscussionReplies.ts` and `discussion-draft-loop.ts`
+  were outside the chunk's file set. Consequence: `draftAllPending`,
+  `redraftAll` and `findMissing` do NOT honour `skipped`. That is an
+  orchestrator scoping error, not an implementer shortcut, and it is flagged as
+  a follow-up.
+- The discussion tab-strip ARIA fix is **partial**: roving tabindex and arrow
+  keys landed; `id`/`aria-controls` and `role="tabpanel"` did not, because the
+  eight content divs are scattered through a file the brief restricted.
+- **Entry 90.8's z-index numbers are superseded.** Floating windows moved
+  9998 -> 10000 (above the FAB's 9999), badges to 10001/10002, the modal
+  backdrop to 10010; every prior invariant is preserved against new numbers.
+- **Entry 289's overdue decision was departed from**: same-day-but-passed now
+  counts as overdue. Flagged in code; that entry should be amended.
+- **149 of 1033 CSS module classes have no reference anywhere** (109 in
+  page.module.css). A definitions -> references guard - which would have caught
+  `.selectionAiButton` - therefore cannot be added strictly; it needs a
+  ratchet with today's orphans allow-listed. Measured, not built.
+- Roster import accepts `Name, handle`, which is genuinely ambiguous with this
+  tool's own "Last, First" convention: `"Smith, John"` parses as student Smith,
+  handle John. Documented and tested; the Review step is the safety net.

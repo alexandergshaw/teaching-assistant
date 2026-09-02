@@ -35,10 +35,48 @@
 // schools in one sitting. The write-through (toggle/selectAllVisible/clear
 // below) is left in place so that within-session round trip keeps working;
 // only the "resurrect it after a reload" read is removed.
+//
+// K6 fix: "Start recording"/"Grade via recording" navigate to a DIFFERENT
+// top-level tab BY DESIGN (page.tsx keeps that tab's own component mounted
+// permanently - see recording-launch.ts's own header comment - but unmounts
+// KnowledgeTab). Coming back therefore REMOUNTS this hook, and until this
+// fix that always meant `useState(() => new Set())` - the very selection
+// the instructor just used to launch the recording was gone the moment they
+// looked back at it. That is a different event from a reload (B5's case)
+// even though this hook cannot tell them apart from `active`/`prevActive`
+// alone (both look like "fresh mount, nothing stored yet"): a reload
+// re-evaluates every JS module from scratch, while a same-session tab
+// switch does not touch the module graph at all - only React unmounts this
+// component. `sessionSelectionCache` below is a plain module-scoped `Map`,
+// the exact idiom recording-launch.ts's own `pendingKnowledgeContext`
+// already uses for a one-session, not-in-localStorage value: a hard reload
+// re-initializes it to empty for free (the module re-evaluates), while a
+// KnowledgeTab unmount/remount within the same running session leaves it
+// untouched, so the lazy useState initializer below picks the selection
+// back up. This is deliberately NOT localStorage (that would resurrect a
+// month-old selection on every future reload too, exactly what B5 forbids)
+// and deliberately NOT the same object identity as the per-institution
+// `readBulkSelectedIds`/`writeBulkSelectedIds` localStorage pair, which
+// keeps serving the reload-vs-switch distinction those already draw.
 
 import { useCallback, useState } from "react";
 import type { InstitutionPage } from "@/lib/knowledge-base";
 import { allVisibleSelected, readBulkSelectedIds, writeBulkSelectedIds } from "./knowledge-helpers";
+
+/** Module-scoped, per-institution, NOT persisted to localStorage - see the
+ *  module comment above. Cleared for free by a hard reload; survives a
+ *  same-session KnowledgeTab unmount/remount. */
+const sessionSelectionCache = new Map<string, Set<string>>();
+
+/** Write-through used by every mutation below: keeps the per-institution
+ *  localStorage copy (in-session institution-switch convenience, B5) and
+ *  the module-scoped session cache (K6's navigate-away-and-back fix) in
+ *  sync with each other on every change, so neither can drift from what the
+ *  hook's own `selected` state actually holds. */
+function persistSelection(institution: string, next: Set<string>): void {
+  sessionSelectionCache.set(institution, next);
+  if (institution) writeBulkSelectedIds(institution, next);
+}
 
 // ── Pure Set-algebra (exported for unit tests - X1) ─────────────────────────
 
@@ -114,11 +152,15 @@ export interface UseKbSelectionReturn {
 }
 
 export function useKbSelection(active: string, pages: InstitutionPage[] | null): UseKbSelectionReturn {
-  // B5: NEVER seed from localStorage on initial mount - see the module
-  // comment above. A fresh mount (page load, or navigating back to this
-  // tab) always starts with nothing selected; only the in-session
-  // institution-switch branch below reads readBulkSelectedIds.
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  // B5/K6: never seed from localStorage on initial mount - a genuine reload
+  // always starts empty (B5). The module-scoped `sessionSelectionCache` DOES
+  // get consulted here, but that is not a localStorage read: a hard reload
+  // re-evaluates this module and resets the cache to empty right along with
+  // it (see the module comment above for why that is the distinction that
+  // matters), so this line still starts empty on every real reload - it
+  // only recovers a selection across a same-session KnowledgeTab
+  // unmount/remount (K6's "Start recording" round trip).
+  const [selected, setSelected] = useState<Set<string>>(() => sessionSelectionCache.get(active) ?? new Set());
 
   // Reset on institution change, prune on page-list reload - both during
   // render (compare-and-adjust), never an effect (S4). An institution change
@@ -138,14 +180,19 @@ export function useKbSelection(active: string, pages: InstitutionPage[] | null):
     // itself non-empty) - not the initial resolution of `active` from ""
     // (not yet loaded/chosen) to the first real institution, which must
     // start empty per the module comment above, the same as any other
-    // fresh mount.
-    setSelected(active && prevActive ? readBulkSelectedIds(active) : new Set());
+    // fresh mount. Prefers the session cache (kept in sync by
+    // persistSelection below) over a fresh localStorage read - both should
+    // always agree, but the cache is the value most recently written this
+    // session, without the JSON round trip.
+    setSelected(
+      active && prevActive ? sessionSelectionCache.get(active) ?? readBulkSelectedIds(active) : new Set()
+    );
   } else if (pages !== prunedForPages) {
     setPrunedForPages(pages);
     const pruned = pruneSelection(selected, pages);
     if (pruned !== selected) {
       setSelected(pruned);
-      if (active) writeBulkSelectedIds(active, pruned);
+      if (active) persistSelection(active, pruned);
     }
   }
 
@@ -157,7 +204,7 @@ export function useKbSelection(active: string, pages: InstitutionPage[] | null):
     (id: string) => {
       const next = toggleSelected(selected, id);
       setSelected(next);
-      if (active) writeBulkSelectedIds(active, next);
+      if (active) persistSelection(active, next);
     },
     [selected, active]
   );
@@ -166,14 +213,14 @@ export function useKbSelection(active: string, pages: InstitutionPage[] | null):
     (visibleIds: string[]) => {
       const next = mergeOrClearVisible(selected, visibleIds);
       setSelected(next);
-      if (active) writeBulkSelectedIds(active, next);
+      if (active) persistSelection(active, next);
     },
     [selected, active]
   );
 
   const clear = useCallback(() => {
     setSelected(new Set());
-    if (active) writeBulkSelectedIds(active, new Set());
+    if (active) persistSelection(active, new Set());
   }, [active]);
 
   return { selected, toggle, selectAllVisible, clear };

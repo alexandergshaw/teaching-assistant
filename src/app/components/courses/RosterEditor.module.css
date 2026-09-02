@@ -1,0 +1,38 @@
+/* Roster editor UX pass (2026-09-01): a handful of classes for RosterCell's
+   editor and StudentRepoRoster's badge/duplicate-warning treatments,
+   split into its own stylesheet rather than added to
+   CoursesTable.module.css, which was already at 939 lines (close to the
+   960-line ceiling docs/DEV_LOOP.md treats as a verification failure) -
+   the three classes originally added there would have pushed it to 968.
+   Imported alongside CoursesTable.module.css (RosterCell.tsx,
+   EditableRowList.tsx, StudentRepoRoster.tsx), never in place of it. */
+
+/* Row numbers in a fixed leading column (R8 - ergonomics at 30 rows in a
+   ~5-row window). Width, not padding/margin/gap, so AM4 leaves it a
+   literal. */
+.rowNumberCol {
+  width: 22px;
+  flex: none;
+  text-align: right;
+  color: var(--text-secondary);
+}
+
+/* Turns a .ghBadge <span> into an accessible, clickable trigger (R5's "the
+   complement badge is a button that expands the panel already filtered")
+   without touching page.module.css, which a sibling owns - .ghBadge's own
+   background/padding/radius/font already come from there. Only the
+   button-element defaults this class exists to strip are added here. */
+.badgeButtonReset {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* R8's duplicate-row warning - names the consequence (a shared generated
+   repo name), so it reads as a caution rather than a hard error; --warning-
+   ink is the same token .ghBadgeWarning already uses for its own text. */
+.warningText {
+  color: var(--warning-ink);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}

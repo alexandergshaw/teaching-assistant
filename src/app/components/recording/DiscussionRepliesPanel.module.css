@@ -135,7 +135,10 @@
   border-radius: var(--radius-sm);
   background: var(--card-background);
   font-size: var(--font-size-md);
-  line-height: 1.45;
+  /* AM24 (aesthetics-pass-acceptance-criteria.md, D11): 1.45 falls in the
+     1.35-1.45 band the token contract maps to --line-snug, not a bare
+     literal. */
+  line-height: var(--line-snug);
 }
 
 .postCell:focus-visible {
@@ -236,4 +239,127 @@ tr.bodyRow td {
   padding: var(--space-3) var(--space-2);
   color: var(--text-secondary);
   font-size: var(--font-size-md);
+}
+
+/* D4 (aesthetics-pass-acceptance-criteria.md section 4b): the sticky review
+   bar - the action bar, the search box and D3's status chips scroll away
+   with the rest of a ~6,600px table (30 rows x ~220px) otherwise. The five
+   declarations below (position/top/z-index/background/padding-bottom) are
+   copied VERBATIM from
+   src/app/components/courses/CoursesTable.module.css:70-76 (.actionBar) - see
+   that file's own header comment for the full reasoning on the offset
+   arithmetic and the z-index choice; nothing about it is re-derived here.
+   The flex layout is additive - .actionBar wraps a single row, this wraps
+   three (chips, search, buttons). */
+.stickyToolbar {
+  position: sticky;
+  top: calc(var(--topbar-height, 58px) + var(--in-session-banner-height, 0px) + 45px);
+  z-index: 20;
+  background: var(--card-background);
+  padding-bottom: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* D5: Move up/down decongest into a hover/focus-reveal cluster - the SAME
+   recipe CoursesTable.module.css:300-389 uses for its own per-cell menu
+   trigger (.cellMenu), copied WHOLE per AM11's own citation of that range
+   (opacity + pointer-events + :focus-within + the always-visible touch
+   fallback + the explicit :focus-visible rule that file's comment records as
+   necessary because MUI's ButtonBase unconditionally sets `outline: 0` and
+   wins the cascade over this app's global focus-ring rule regardless of
+   injection order) - minus the absolute-positioning half of that recipe,
+   which is for a corner-anchored overlay trigger and does not apply to this
+   inline button pair sitting in normal flow inside the actions cell. */
+.hoverReveal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hoverReveal {
+    transition: opacity 120ms ease-out;
+  }
+}
+
+td:hover .hoverReveal,
+.hoverReveal:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .hoverReveal {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.hoverReveal :global(.MuiButtonBase-root):focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+/* D8: the drafting state's placeholder is currently an empty box (the reply
+   textarea's placeholder is gated on state === "pending", so "drafting"
+   renders blank). A skeleton line plus a captioned sentence, both aria-hidden
+   - the caption below it (rendered as a normal .fieldHint paragraph in
+   DiscussionReplyRow.tsx) is what a screen reader actually hears. */
+.skeletonLine {
+  display: block;
+  height: 10px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--text-secondary) 18%, transparent);
+  margin-bottom: var(--space-1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeletonLine {
+    animation: discReplySkeletonPulse 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes discReplySkeletonPulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* D8: the real provider failure reason, relocated from the narrow Status
+   cell (where it rendered at styles.error's --font-size-lg, the loudest text
+   in the row, in its narrowest column) into the reply block, at
+   --font-size-md - still the real reason (never collapsed to a generic
+   string), just no longer the loudest thing on the row. */
+.replyErrorText {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--font-size-md);
+}
+
+/* D9: a `skipped` row ("this post doesn't need a reply") - reversible in one
+   click, so quieted rather than removed. Applied to BOTH <tr>s of one
+   logical row (DiscussionReplyRow.tsx renders two per row - see this file's
+   own "Reply width UX pass" comment above .rowBody). */
+.rowSkipped {
+  opacity: 0.65;
+}
+
+/* D11 (AM25, "one styling authority per element"): DiscussionReplyRow.tsx
+   used to pair this class with an inline `style={{ flexDirection: "column",
+   alignItems: "stretch" }}` overriding .resourceItem's own row layout - two
+   authorities on the same element, whichever wins decided by emotion's
+   injection order rather than anything visible in the source. Composed with
+   .resourceItem instead (the base gap/min-width stay; only the axis and
+   alignment differ). */
+.resourceItemStacked {
+  flex-direction: column;
+  align-items: stretch;
 }

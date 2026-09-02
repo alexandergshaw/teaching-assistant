@@ -326,18 +326,29 @@
 /* Each in-session course as a real, keyboard-operable button (not a bare div
    with a click handler) styled as a chip. Visible focus ring comes from the
    app-wide :focus-visible rule in globals.css, same as every other plain
-   button here - no bespoke focus styling needed. */
+   button here - no bespoke focus styling needed.
+
+   THIS IS DELIBERATELY THE QUIET TREATMENT (B3, this feature's own
+   follow-up audit) - borderless, secondary-coloured, regular weight. It used
+   to be the loud one (bordered, filled, weight 600) and .upcomingItem below
+   was the quiet one; that was backwards. "Biology 101 is running this term"
+   is a fact the instructor already knows and does not change hour to hour;
+   "Grades due today at 5:00 PM" is the fact that costs money if missed. The
+   loud styling belongs on the second one, not the first. border stays a real
+   1px solid TRANSPARENT (not `none`) rather than removing it outright, so
+   the hover state below - which sets a real border-color - costs no layout
+   shift: the border's own width is already reserved at rest. */
 .courseChip {
   display: inline-flex;
   align-items: center;
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);
-  border: 1px solid var(--field-border);
-  background: var(--field-background);
-  color: var(--text-primary);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
   font: inherit;
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: border-color var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
 }
@@ -443,49 +454,256 @@
    that same element's overflow, only by an ANCESTOR's (see .strip above for
    the ancestor-overflow case this chip actually has to worry about).
 
-   No border and a plain background transition (unchanged from before) is
-   what makes this read as "a distinct, quieter sibling of the course chip"
-   (AC4): .courseChip is a solid, bordered pill because clicking it is
-   itself the point (an action); this stays an unbordered, softer-cornered
-   chip because it states a fact you can ALSO click, not a fact whose whole
-   purpose is to be clicked. */
+   THIS IS NOW THE LOUD TREATMENT (B3, this feature's own follow-up audit) -
+   bordered, filled, and its date span (below) is the bold one. It used to be
+   the borderless, quieter sibling and .courseChip above carried the border
+   and fill; that was backwards (see .courseChip's own comment for the full
+   reasoning). background is var(--field-background) - the same fill
+   .courseChip used to carry. This also resolves a separate, smaller defect
+   (B10): this chip previously had NO rest-state affordance at all, and its
+   only hover cue lived inside @media (hover: hover) - on a touch device
+   roughly half the strip's clickable surface read as inert text. A visible
+   border and fill at rest fixes that independent of hover/pointer type.
+
+   The "border" is an INSET box-shadow (`box-shadow: inset 0 0 0 1px
+   var(--field-border)`), not a real `border` property - deliberately, per
+   the same AC4 exemption docs/aesthetics-pass-acceptance-criteria.md AM2
+   documents for a hairline edge that is not elevation: a REAL 1px border
+   changes this element's rendered box size (this chip had `border: none`
+   before, so a genuine border would add 2px of height - 1px top, 1px bottom
+   - that nothing else here compensates for, since padding is already at the
+   AM20 floor of var(--space-1) and cannot be trimmed to offset it). An inset
+   box-shadow paints entirely INSIDE the existing padding-box and adds zero
+   layout size, so this chip's own rendered height is unchanged before vs.
+   after this pass - which matters here specifically because .strip sizes
+   itself (align-items: center) off its tallest child, and this chip is
+   already documented (docs/REGRESSION.md entry 290) as the taller of the two
+   chip kinds even before this pass. A real border would have made the whole
+   strip - and so the whole banner, via the ResizeObserver mirror - a few
+   pixels taller than before. */
 .upcomingItem {
   display: inline-block;
   max-width: 28ch;
   padding: var(--space-1) var(--space-2);
   border: none;
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--field-background);
+  box-shadow: inset 0 0 0 1px var(--field-border);
   font: inherit;
   text-align: left;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background-color var(--transition-fast);
+  transition: box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
 
+/* box-shadow/background only, no `color` override: unlike .courseChip's
+   hover (which recolours its own text and needs the dark-theme --accent-ink
+   restoration documented on that rule), this chip's text lives in the three
+   child spans below and keeps their own colours on hover in both themes - so
+   there is no text-on-accent-soft contrast case to guard here, and no dark
+   override is needed. */
 @media (hover: hover) and (pointer: fine) {
   .upcomingItem:hover {
-    background: var(--surface-subtle);
+    box-shadow: inset 0 0 0 1px var(--accent);
+    background: var(--accent-soft);
   }
 }
 
 .upcomingItem:active {
-  background: var(--surface-muted);
+  background: var(--accent-soft-strong);
 }
 
-.upcomingCourseName {
+/* Reordered to DATE -> label -> course name (B4, see InSessionBanner.tsx's
+   own comment on this chip for the full reasoning): the date is now first so
+   this chip's ellipsis truncates the course name - already visible six
+   pixels to the left as its own chip in .courseList - rather than the date,
+   which is nowhere else on screen and was previously ALWAYS the first thing
+   lost. The date is also now the visually prominent (weight 600, primary
+   colour) span, and the course name is toned down to match the label - the
+   inverse of this chip's original weighting, which put the emphasis on the
+   name it duplicates. */
+.upcomingDate {
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
-.upcomingLabel,
-.upcomingDate {
+.upcomingLabel {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   font-weight: 500;
+}
+
+/* max-width/overflow/text-overflow here (B4) is a SECOND, tighter cap beyond
+   the chip's own 28ch: a course name on its own can still be long enough to
+   consume the whole chip and starve the label next to it, even with the date
+   now protected by going first. display: inline-block is required for
+   max-width/text-overflow to apply at all (same reasoning as .upcomingItem's
+   own comment on why it is inline-block rather than inline-flex) - which
+   means the leading space that visually separates this span from
+   .upcomingLabel can NOT live inside this span as a text node the way the
+   other two chip segments do: a space at the very start of THIS span's own
+   text would be the start of ITS OWN line box once it is a block container,
+   and CSS Text 3 collapses a collapsible space there, exactly the failure
+   this chip's very first version documents for inline-flex. InSessionBanner
+   .tsx keeps that separating space as a SIBLING text node instead (outside
+   this span, inside the button's own shared inline formatting context),
+   which sidesteps the problem entirely - do not move it back inside this
+   span. vertical-align: bottom keeps this span's own inline-block baseline
+   strut from opening a visible gap against the plain-inline text either side
+   of it. */
+.upcomingCourseName {
+  display: inline-block;
+  max-width: 12ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+/* B9: a non-colour urgency mark (a small leading dot), layered on top of
+   position (dates lead the strip, B5) and the existing relative words
+   ("Today"/"Tomorrow", plus "Overdue" - InSessionBanner.tsx) - colour is the
+   LAST and weakest signal here, never the only one, and only ever an -ink
+   token (never a bare --warning/--danger, which measure under 4.5:1 as text
+   at this size - see .count's own comment above for the same reasoning
+   applied to a different element). Rendered only for "overdue"/"dueToday"
+   (InSessionBanner.tsx) - a plain future date carries no dot at all. */
+.urgencyDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--space-1);
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.urgencyDotOverdue {
+  background: var(--danger-ink);
+}
+
+.urgencyDotToday {
+  background: var(--warning-ink);
+}
+
+/* B3's tracked-uppercase zone labels ("Due" / "Term" in the JSX), pinned to
+   AM5's micro-label idiom exactly (docs/aesthetics-pass-acceptance-criteria
+   .md): font-size-2xs/700/0.06em/text-secondary. 11px text inside a row
+   whose tallest item is a 13px chip (.courseChip/.upcomingItem's own
+   font-size-sm content) adds no height - align-items: center on .strip
+   already centers it against that taller content. This also gives sighted
+   users the group boundary that previously existed only in the two <ul>'s
+   aria-labels. */
+.zoneLabel {
+  flex-shrink: 0;
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* The real vertical divider between the two zones (B3) - align-self: stretch
+   matches the divider's height to .strip's own cross-axis size (governed by
+   its tallest child), adding no height of its own; only a 1px width. Only
+   rendered (InSessionBanner.tsx) when BOTH zones are present. */
+.divider {
+  flex-shrink: 0;
+  align-self: stretch;
+  width: 1px;
+  background: var(--border-soft);
+}
+
+/* The toggle's "Next" segment (B6): replaces what used to be a bare
+   "Upcoming N" count with the single soonest entry's own label and date
+   (`summarizeUpcoming`, src/lib/upcoming-summary-label.ts), plus a "+N more"
+   tail when more than one entry exists. height: 20px matches .count/
+   .countNeutral's own height exactly - the same box height that governs this
+   toggle row's total height (see docs/REGRESSION.md entry 290's own 36px
+   math) - so this segment cannot change the toggle row's rendered height.
+   The inner .dueSummaryText span, not this element itself, carries
+   max-width/overflow/text-overflow: an inline-flex container (needed here
+   for exact vertical centering at a fixed height) does not reliably apply
+   text-overflow to its own overflowing content - the same "needs a real
+   block container" constraint .upcomingCourseName's own comment documents -
+   so the ellipsis-bearing text lives in a nested inline-block instead. */
+.dueSummary {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  max-width: 220px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.dueSummaryText {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* B7: the collapsed row shown when a load attempt AND its one retry have
+   both failed - see InSessionBanner.tsx's own comment on the `failed` state
+   for why this is a claim of uncertainty, never of zero. This is a NEW state
+   with no pre-existing rendered height to preserve (the banner previously
+   only ever rendered nothing or the full chip strip), so there is no prior
+   measurement to match - but it reuses .toggle's own padding
+   (var(--space-2) var(--space-6)) so it is close to that row's height by
+   construction, and either way the ResizeObserver mirror measures whatever
+   this state's real height turns out to be; nothing here is hardcoded past
+   it. */
+.unavailableRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-6);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.unavailableText {
+  font-weight: 500;
+}
+
+/* Same inset-box-shadow "border" as .upcomingItem above, for the same
+   reason: a real border here would add its own width to this button's
+   rendered height on top of the row's own padding, whereas an inset shadow
+   paints inside the existing box for free. */
+.retryButton {
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--field-border);
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: box-shadow var(--transition-fast), background-color var(--transition-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .retryButton:hover {
+    box-shadow: inset 0 0 0 1px var(--accent);
+    background: var(--accent-soft);
+  }
 }
 
 /* Visually-hidden text that makes the toggle's bare count numerals

@@ -257,12 +257,14 @@ describe("recording-split structure", () => {
         "ta-rec-disc-audience",
         "ta-rec-disc-course",
         "ta-rec-disc-filter",
+        "ta-rec-disc-flags",
         "ta-rec-disc-formality",
         "ta-rec-disc-ingredients",
         "ta-rec-disc-kb-context-label",
         "ta-rec-disc-resource-kinds",
         "ta-rec-disc-save-video",
         "ta-rec-disc-sort",
+        "ta-rec-disc-status-filter",
         "ta-rec-disc-table",
         "ta-rec-disc-video-max",
         "ta-rec-disc-video-min",
@@ -401,8 +403,8 @@ describe("recording-split structure", () => {
         expect(discKeys.length).toBeGreaterThan(0);
       });
 
-      it("finds exactly thirteen ta-rec-disc-* keys (C5c-ii's nine, the 'activate from Knowledge base' group's own ta-rec-disc-kb-context-label, and the resource-controls group's own resource-kinds/video-min/video-max)", () => {
-        expect(discKeys).toHaveLength(13);
+      it("finds exactly fifteen ta-rec-disc-* keys (C5c-ii's nine, the 'activate from Knowledge base' group's own ta-rec-disc-kb-context-label, the resource-controls group's own resource-kinds/video-min/video-max, and the aesthetics-pass redesign's own flags/status-filter)", () => {
+        expect(discKeys).toHaveLength(15);
       });
 
       it.each(discKeys)(

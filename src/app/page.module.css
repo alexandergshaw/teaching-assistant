@@ -3531,14 +3531,17 @@ a.instFieldValue:hover {
   background: color-mix(in srgb, var(--navy) 55%, transparent);
   /* Above the app chrome: the top bar is z-index 50 (TopBar.module.css), the
      in-session banner 45 (InSessionBanner.module.css), the Tabs strip 40
-     (page.tsx) and .ccStickyHeader 30 (this file). The 9999 this value beats
-     is AiChatFab.tsx's floating button, so 10000 clears that too. This only
-     holds if this element is not itself nested inside a stacking context (a
-     sticky/backdrop-filter header traps it, capping it at the header's own
+     (page.tsx) and .ccStickyHeader 30 (this file). Modals must also clear
+     the FAB stack in full - trigger 9999, floating windows 10000
+     (.selectionChatWindow), the live badge 10001, the unread badge 10002 -
+     so a modal is never left underneath any of those (F7). 10010 leaves
+     headroom above all four without crowding them. This only holds if this
+     element is not itself nested inside a stacking context (a sticky/
+     backdrop-filter header traps it, capping it at the header's own
      z-index and sizing `position: fixed` to the header's box instead of the
      viewport) - so this backdrop must always be rendered at a view root, not
      from inside a header like that. */
-  z-index: 10000;
+  z-index: 10010;
   backdrop-filter: blur(2px);
 }
 
@@ -4017,9 +4020,20 @@ a.instFieldValue:hover {
   transform: scale(1.1);
 }
 
+/* F7: was z-index 9998 - BELOW the FAB trigger's 9999 - so the chat window,
+   the Live Class window and the Checklist Overview window (all three use
+   this class) rendered UNDER the FAB. Dragging any of them toward the
+   bottom-right corner put the always-on-top FAB visually in front of its
+   OWN child window, occluding it. Now 10000, above the trigger (9999), so a
+   window always wins against the button that opened it. Still below
+   fabLiveBadge (10001) and fabUnreadBadge (10002) below - dragging a window
+   over that corner must not be able to hide either badge, the same
+   invariant regression 90's own z-index comment already documented for the
+   old numbers - and further below .previewBackdrop (10010), so a modal
+   still always wins against every floating window. */
 .selectionChatWindow {
   position: fixed;
-  z-index: 9998;
+  z-index: 10000;
   width: 360px;
   height: 420px;
   min-width: 280px;
@@ -4278,7 +4292,11 @@ a.instFieldValue:hover {
    or forcing the pill off the LEFT edge of a very narrow window. */
 .fabLiveBadge {
   position: fixed;
-  z-index: 10000;
+  /* F7: raised from 10000 to 10001, one step above .selectionChatWindow's
+     new 10000 (was 9998), so a window dragged over this corner still
+     cannot hide the badge - preserving the exact invariant regression 90's
+     own comment already required, just against the corrected numbers. */
+  z-index: 10001;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -4316,7 +4334,9 @@ a.instFieldValue:hover {
    underneath. */
 .fabUnreadBadge {
   position: fixed;
-  z-index: 10001;
+  /* F7: raised from 10001 to 10002, keeping this one step above
+     .fabLiveBadge exactly as before the renumbering. */
+  z-index: 10002;
   box-sizing: border-box;
   display: flex;
   align-items: center;

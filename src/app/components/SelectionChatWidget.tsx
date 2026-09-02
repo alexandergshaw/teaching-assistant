@@ -7,6 +7,7 @@ import { getStoredProvider } from "@/lib/llm-provider";
 import AiChatWindow from "./AiChatWindow";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import type { ChatMessage } from "@/lib/chat/types";
+import styles from "../page.module.css";
 
 interface SelectionPos {
   text: string;
@@ -174,8 +175,19 @@ export default function SelectionChatWidget() {
   return (
     <div ref={widgetRef}>
       {icon && !chat && (
+        // F1: this className was lost in a prior commit and never restored -
+        // without it, MUI's IconButton stays `position: static` (its own
+        // default), so the `style={{top, left}}` below is inert (a static
+        // element ignores top/left) and the button rendered as an unstyled
+        // grey circle at the bottom of <body>, below the entire app, not
+        // beside the selection. .selectionAiButton (page.module.css) is what
+        // actually supplies `position: fixed` (making the inline top/left
+        // take effect), the circular sizing, the accent background, and the
+        // elevation - restoring it is the fix, not the inline style, which
+        // was never the problem.
         <IconButton
           size="small"
+          className={styles.selectionAiButton}
           style={iconStyle}
           onClick={openChat}
           title="Ask AI about selected text"
@@ -212,11 +224,20 @@ export default function SelectionChatWidget() {
 
 // 20px (AM11's "toolbars and buttons" tier) - this is a standalone click
 // target, not a dense-row action.
+//
+// F5: viewBox normalized from "0 0 16 16" to "0 0 24 24" (the same 24-unit
+// space every other icon in this pass uses) - the path coordinates below
+// are the original 16-unit sparkle scaled by exactly 1.5x, so the drawn
+// shape is pixel-identical, only the coordinate space changed. A 16-unit
+// path at a 20px render size was the one icon in the app rendering ~25%
+// heavier than its 24-unit neighbors (a 16-unit glyph fills more of its own
+// viewBox at the same stroke/fill proportions, since there is less
+// surrounding space to scale down).
 function SparkleIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
       <path
-        d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5L8 1z"
+        d="M12 1.5l2.25 6.75L21 10.5l-6.75 2.25L12 19.5l-2.25-6.75L3 10.5l6.75-2.25L12 1.5z"
         fill="currentColor"
       />
     </svg>

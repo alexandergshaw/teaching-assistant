@@ -53,7 +53,13 @@ function normalizeName(name: string): string {
  * normalizeName unchanged, which is exactly the key a comma-form name
  * produces once inverted, so both spellings collide on purpose.
  */
-function canonicalNameKey(name: string): string {
+// Exported (2026-09-01, roster editor UX pass): the Roster column's
+// per-student provisioning panel (StudentRepoRoster.tsx) needs this SAME
+// canonicalization to look up a username that lives on `studentRepos` but
+// not on the hand-typed roster text - see that file's own comment on why.
+// This is the only edit made to this file for that feature; the overlay
+// function itself (roster -> studentRepos direction) is unchanged.
+export function canonicalNameKey(name: string): string {
   const normalized = normalizeName(name);
   const commaIndex = normalized.indexOf(",");
   if (commaIndex === -1) return normalized;

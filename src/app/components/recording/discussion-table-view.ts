@@ -250,6 +250,127 @@ export function copyAllButtonLabel(count: number, filterActive: boolean): string
   return filterActive ? `Copy shown replies (${count})` : `Copy every reply (${count})`;
 }
 
+// ---------------------------------------------------------------------------
+// D3 (aesthetics-pass redesign, docs/aesthetics-pass-acceptance-criteria.md
+// section 4b): the status filter chips - "find the six I haven't answered"
+// was otherwise impossible, since the text filter (F8 above) only matches
+// [author, post, reply]. A SEPARATE filter dimension from the text search box
+// - the two compose (a chip AND a search term both narrow together), so this
+// stays a plain function over whatever array the caller already has (the
+// panel applies it AFTER filterRowsByQuery/sortReplyRowsForTable), never a
+// second reimplementation of either.
+//
+// "uncopied" reads a `handledAt` map rather than a boolean on the row itself
+// - see discussion-reply-flags.ts's own header for why `handledAt` and
+// `skipped` are NOT ReplyRow fields in this build: the mutators that would
+// set them have no path back through useDiscussionReplies.ts's pinned return
+// shape (a different, concurrent file set's file), so both live in a small
+// side table instead, keyed by row id. Passing plain Readonly<Record<...>>
+// data in (rather than a callback predicate) keeps this function pure and
+// keeps a memoized row's props to plain values - see the flags file's own
+// header for the full reasoning.
+// ---------------------------------------------------------------------------
+
+export type ReplyStatusFilter = "all" | "needs-draft" | "failed" | "edited" | "uncopied";
+
+export const REPLY_STATUS_FILTERS: ReadonlyArray<ReplyStatusFilter> = ["all", "needs-draft", "failed", "edited", "uncopied"];
+
+export const REPLY_STATUS_FILTER_LABELS: Record<ReplyStatusFilter, string> = {
+  all: "All",
+  "needs-draft": "Needs a draft",
+  failed: "Failed",
+  edited: "Edited by you",
+  uncopied: "Not yet copied",
+};
+
+export function isReplyStatusFilter(value: unknown): value is ReplyStatusFilter {
+  return typeof value === "string" && (REPLY_STATUS_FILTERS as readonly string[]).includes(value);
+}
+
+/** The narrow structural slice this module actually reads - generic the same
+ * way `filterRowsByQuery`'s `haystack` accessor is, so a caller passing a
+ * real `ReplyRow` (which has all four fields and more) satisfies this with
+ * no cast. */
+export interface ReplyStatusFilterRow {
+  id: string;
+  state: string;
+  userEdited: boolean;
+  reply: string;
+}
+
+/** A skipped row (D9) never matches a SPECIFIC status chip - it opted out of
+ * the workflow those chips are triage tools for - but still counts under
+ * "All". `filter === "all"` short-circuits before the skip check for exactly
+ * that reason. */
+export function replyMatchesStatusFilter(
+  row: ReplyStatusFilterRow,
+  filter: ReplyStatusFilter,
+  handledAt: Readonly<Record<string, number>>,
+  skipped: Readonly<Record<string, boolean>>
+): boolean {
+  if (filter === "all") return true;
+  if (skipped[row.id]) return false;
+  switch (filter) {
+    case "needs-draft":
+      return row.state === "pending";
+    case "failed":
+      return row.state === "failed";
+    case "edited":
+      return row.userEdited;
+    case "uncopied":
+      return !!row.reply && handledAt[row.id] === undefined;
+    default:
+      return true;
+  }
+}
+
+/** F9's own by-reference discipline, carried over: "all" returns the input
+ * array BY REFERENCE (no allocation, and a downstream memoized row list sees
+ * the identical array reference when nothing is being narrowed). */
+export function filterRowsByStatus<T extends ReplyStatusFilterRow>(
+  rows: ReadonlyArray<T>,
+  filter: ReplyStatusFilter,
+  handledAt: Readonly<Record<string, number>>,
+  skipped: Readonly<Record<string, boolean>>
+): T[] {
+  if (filter === "all") return rows as T[];
+  return rows.filter((row) => replyMatchesStatusFilter(row, filter, handledAt, skipped));
+}
+
+/** Chip counts are computed over the caller's array as given - the panel
+ * passes `rawRows` (F0-2/F11's own discipline: a chip count is exactly the
+ * same class of "whole-table number" a progress string or an arming
+ * signature is, and must not silently shrink because the search box also
+ * happens to be narrowing the table at the same moment). */
+/** D3/S4: a status chip narrows scope exactly the way the search box does,
+ * so it must count as "a filter is active" the same way non-empty
+ * `filterText` already does - `copyAllButtonLabel`'s own `filterActive`
+ * parameter, and the toolbar's "Showing N of M" line, both read this rather
+ * than re-deriving the OR themselves, so the rule has exactly one
+ * implementation and one test. Pulled out as its own function (rather than
+ * left as an inline boolean expression in useDiscussionReplyFiltering.ts,
+ * which this repo's vitest never renders) specifically so "does a
+ * chip-only filter count as active" has a test surface at all. */
+export function isAnyReplyFilterActive(filterText: string, statusFilter: ReplyStatusFilter): boolean {
+  return filterText.trim() !== "" || statusFilter !== "all";
+}
+
+export function computeReplyStatusCounts(
+  rows: ReadonlyArray<ReplyStatusFilterRow>,
+  handledAt: Readonly<Record<string, number>>,
+  skipped: Readonly<Record<string, boolean>>
+): Record<ReplyStatusFilter, number> {
+  const counts: Record<ReplyStatusFilter, number> = { all: rows.length, "needs-draft": 0, failed: 0, edited: 0, uncopied: 0 };
+  for (const row of rows) {
+    if (skipped[row.id]) continue;
+    if (row.state === "pending") counts["needs-draft"] += 1;
+    if (row.state === "failed") counts.failed += 1;
+    if (row.userEdited) counts.edited += 1;
+    if (row.reply && handledAt[row.id] === undefined) counts.uncopied += 1;
+  }
+  return counts;
+}
+
 export interface StoppedSessionSummaryInput {
   /** MUST be the UNFILTERED table (useReplyRows.ts's `rawRows`), never the
    *  filtered display array - see this function's own test for the

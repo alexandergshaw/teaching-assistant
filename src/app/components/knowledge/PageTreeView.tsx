@@ -48,8 +48,36 @@ export default function PageTreeView({
     return <p className={styles.kbTreeEmpty}>No pages yet. Add the first one above.</p>;
   }
 
+  // K4: `role="tree"` used to sit here at depth 0 with no `role="treeitem"`
+  // anywhere in this file and no `role="group"` on a child list - a tree
+  // that announces as containing nothing, which a screen reader user
+  // experiences as WORSE than no role at all (it promises structure, then
+  // delivers none). DECISION: removed rather than implemented properly. A
+  // correct ARIA tree here would need aria-expanded on every parent,
+  // aria-selected wired to ONE of two independent selection concepts this
+  // component already has (the single "current page" via onSelect, and the
+  // bulk-checkbox multi-select via onToggleSelect) - the ARIA tree pattern
+  // assumes exactly one selection model, and reconciling that with two is a
+  // real design question, not a mechanical fix - plus a full roving-tabindex
+  // keyboard model (Up/Down/Left/Right/Home/End). That is a properly scoped
+  // a11y project of its own, not a safe addition alongside K1-K10's already
+  // large surface. Removing the role is a strict improvement today (no
+  // longer promises structure it does not deliver) and does not foreclose
+  // implementing the real thing later - nothing about this markup would
+  // need to change shape to add it back correctly.
+  //
+  // K5: `.kbTreeScroll`'s max-height/overflow-y used to apply at EVERY
+  // depth, since the recursive call always passed the same class - every
+  // expanded branch became its OWN nested 560px scroll container. Still
+  // applying `.kbTreeScroll` at every depth (it also carries the flex/gap
+  // layout every row needs - page.module.css, read-only here), but a nested
+  // level ADDITIONALLY gets `.kbNestedTreeGroup` (KnowledgeTab.module.css,
+  // this feature's own file, since page.module.css cannot be edited here),
+  // which resets ONLY max-height/overflow so a nested branch is plain flow
+  // inside the root's single scroll region instead of a second, redundant
+  // scroller.
   return (
-    <div className={styles.kbTreeScroll} role={depth === 0 ? "tree" : undefined}>
+    <div className={depth === 0 ? styles.kbTreeScroll : `${styles.kbTreeScroll} ${kbStyles.kbNestedTreeGroup}`}>
       {nodes.map((node) => (
         <TreeNode
           key={node.id}

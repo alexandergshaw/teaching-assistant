@@ -559,9 +559,41 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       title="Record from a camera"
       subtitle="Record video from any attached camera or your screen, preview it live, and download the takes."
     >
+      {/* D6 (docs/aesthetics-pass-acceptance-criteria.md section 4b): this
+          strip rendered eight role="tab" buttons with aria-selected but no
+          roving tabindex or arrow-key handler, so all eight sat in the Tab
+          order at once - fixed here, confined to this block per this
+          agent's file scope ("ONLY the sub-tab strip's ARIA"). Roving
+          tabIndex (0 on the selected tab, -1 on the rest) plus ArrowLeft/
+          ArrowRight/Home/End, walking the DOM siblings within this tablist
+          rather than a second parallel array of keys, which the
+          inner-view-strip structure test's own single-line regex
+          (recording-split.structure.test.ts) would otherwise be a second
+          place to keep in sync with the literal below.
+          NOT done here, and out of this scope by the brief's own
+          restriction ("touch nothing else in that file"): id/aria-controls
+          on these buttons and role="tabpanel"/aria-labelledby on the eight
+          content divs scattered through the rest of this 800+ line file -
+          a real fix needs both sides wired together, and only one side is
+          in this agent's file set. */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
         {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["grading", "Grading (from a recording)"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
+            tabIndex={recView === key ? 0 : -1}
+            onKeyDown={(e) => {
+              const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
+              const idx = tabs.indexOf(e.currentTarget);
+              if (idx === -1) return;
+              let nextIdx: number;
+              if (e.key === "ArrowRight") nextIdx = (idx + 1) % tabs.length;
+              else if (e.key === "ArrowLeft") nextIdx = (idx - 1 + tabs.length) % tabs.length;
+              else if (e.key === "Home") nextIdx = 0;
+              else if (e.key === "End") nextIdx = tabs.length - 1;
+              else return;
+              e.preventDefault();
+              tabs[nextIdx].focus();
+              tabs[nextIdx].click();
+            }}
             className={`${styles.lessonInnerTab}${recView === key ? ` ${styles.lessonInnerTabActive}` : ""}`}
             onClick={() => setRecView(key)}>
             <span className={styles.tabLabelWrap}>{label}</span>

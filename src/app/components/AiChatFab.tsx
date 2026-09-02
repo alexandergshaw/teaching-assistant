@@ -1,11 +1,8 @@
 "use client";
 import { useState, useRef, useCallback, useEffect, useSyncExternalStore } from "react";
-import SpeedDial from "@mui/material/SpeedDial";
-import SpeedDialAction from "@mui/material/SpeedDialAction";
-import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import AiChatWindow from "./AiChatWindow";
-import LiveClassWindow, { LIVE_CLASS_WINDOW_W, LIVE_CLASS_WINDOW_H, LiveClassIcon } from "./live-class/LiveClassWindow";
-import WeeklyChecklistOverviewModal, { ChecklistIcon } from "./courses/WeeklyChecklistOverviewModal";
+import LiveClassWindow, { LIVE_CLASS_WINDOW_W, LIVE_CLASS_WINDOW_H } from "./live-class/LiveClassWindow";
+import WeeklyChecklistOverviewModal from "./courses/WeeklyChecklistOverviewModal";
 import { LegibilityProbeModal } from "./grading-recording/LegibilityProbeModal";
 import { useLiveClassSession } from "./live-class/useLiveClassSession";
 import {
@@ -15,6 +12,9 @@ import {
   computeLiveBadgePosition,
   computeUnreadBadgePosition,
 } from "./live-class/fab-live-indicator";
+import FabQuickActionsMenu from "./FabQuickActionsMenu";
+import { ChatIcon } from "./fab-icons";
+import { clampPosToViewport, supportsGetDisplayMedia, supportsMicrophone } from "./fab-menu-logic";
 import { usePromptSuggestions } from "@/hooks/usePromptSuggestions";
 import { useWindowHeaderDrag } from "@/hooks/useWindowHeaderDrag";
 import type {
@@ -78,7 +78,6 @@ function subscribe() { return () => {}; }
 
 export default function AiChatFab() {
   const mounted = useSyncExternalStore(subscribe, () => true, () => false);
-  const [dialOpen, setDialOpen] = useState(false);
 
   // Restore open/closed state from localStorage.
   const [chatOpen, setChatOpen] = useState<boolean>(() => readLS("chat-open", false));
@@ -206,7 +205,13 @@ export default function AiChatFab() {
   // hydration mismatch.
   const [chatPos, setChatPosState] = useState<Pos>(() => {
     const saved = readLS<Pos | null>("chat-pos", null);
-    if (saved) return saved;
+    if (saved) {
+      // F2: a position saved on a wider monitor must not reopen off-viewport
+      // on a narrower one - see fab-menu-logic.ts's clampPosToViewport.
+      return typeof window !== "undefined"
+        ? clampPosToViewport(saved, { width: CHAT_W, height: CHAT_H }, { width: window.innerWidth, height: window.innerHeight })
+        : saved;
+    }
     if (typeof window !== "undefined" && readLS<boolean>("chat-open", false)) {
       return {
         x: Math.max(8, window.innerWidth - CHAT_W - DIAL_RIGHT - 8),
@@ -223,7 +228,17 @@ export default function AiChatFab() {
 
   const [liveClassPos, setLiveClassPosState] = useState<Pos>(() => {
     const saved = readLS<Pos | null>("live-class-pos", null);
-    if (saved) return saved;
+    if (saved) {
+      // F2: same clamp as chatPos above - restoring blindly is exactly the
+      // bug this pass fixes.
+      return typeof window !== "undefined"
+        ? clampPosToViewport(
+            saved,
+            { width: LIVE_CLASS_WINDOW_W, height: LIVE_CLASS_WINDOW_H },
+            { width: window.innerWidth, height: window.innerHeight }
+          )
+        : saved;
+    }
     if (typeof window !== "undefined" && readLS<boolean>("live-class-open", false)) {
       return computeDefaultWindowPos(
         { width: window.innerWidth, height: window.innerHeight },
@@ -248,6 +263,19 @@ export default function AiChatFab() {
   // Persist position to localStorage whenever it changes.
   useEffect(() => { writeLS("chat-pos", chatPos); }, [chatPos]);
   useEffect(() => { writeLS("live-class-pos", liveClassPos); }, [liveClassPos]);
+
+  // Shared by both places that can open the chat window without an
+  // explicit prior position (the "open-ai-chat" listener below and the
+  // menu's handleOpenChat further down) - a bottom-right default, computed
+  // once and only when nothing has ever been saved.
+  const ensureChatDefaultPos = useCallback(() => {
+    if (!readLS<Pos | null>("chat-pos", null)) {
+      setChatPos({
+        x: Math.max(8, window.innerWidth - CHAT_W - DIAL_RIGHT - 8),
+        y: Math.max(8, window.innerHeight - CHAT_H - 100),
+      });
+    }
+  }, [setChatPos]);
 
   // Listen for the "open-ai-chat" event. Three dispatchers today, all going
   // through src/lib/chat/open-chat.ts: the context menu (ContextMenu.tsx, no
@@ -286,16 +314,11 @@ export default function AiChatFab() {
         setSelectionContext({ text: detail.selectionContext.text, label: detail.selectionContext.label });
       }
       setChatOpen(true);
-      if (!readLS<Pos | null>("chat-pos", null)) {
-        setChatPos({
-          x: Math.max(8, window.innerWidth - CHAT_W - DIAL_RIGHT - 8),
-          y: Math.max(8, window.innerHeight - CHAT_H - 100),
-        });
-      }
+      ensureChatDefaultPos();
     };
     window.addEventListener(OPEN_AI_CHAT_EVENT, handler);
     return () => window.removeEventListener(OPEN_AI_CHAT_EVENT, handler);
-  }, [setChatPos]);
+  }, [ensureChatDefaultPos]);
 
   // Chat/Live Class window headers: drag to reposition. Both windows used to
   // keep their own byte-for-byte copy of this mousedown/mousemove/mouseup
@@ -303,6 +326,54 @@ export default function AiChatFab() {
   // Checklist Overview) needed the identical algorithm.
   const onChatHeaderMouseDown = useWindowHeaderDrag(chatPosRef, setChatPos);
   const onLiveClassHeaderMouseDown = useWindowHeaderDrag(liveClassPosRef, setLiveClassPos);
+
+  // F2: every quick-actions menu entry OPENS its destination - it never
+  // toggles closed one that is already open (closing is that window's own
+  // header "x" control's job). Clicking "AI Chatbot" while the chat is
+  // already open is therefore a harmless no-op, exactly matching the
+  // "open-ai-chat" event listener above, which has always done this
+  // unconditionally - the toggle-vs-open inconsistency between that event
+  // path and the menu's own actions is the bug this fixes.
+  const handleOpenChat = useCallback(() => {
+    setChatOpen(true);
+    ensureChatDefaultPos();
+  }, [ensureChatDefaultPos]);
+
+  const handleOpenLiveClass = useCallback(() => {
+    setLiveClassOpen(true);
+    if (!readLS<Pos | null>("live-class-pos", null)) {
+      setLiveClassPos(
+        computeDefaultWindowPos(
+          { width: window.innerWidth, height: window.innerHeight },
+          { width: LIVE_CLASS_WINDOW_W, height: LIVE_CLASS_WINDOW_H },
+          { right: DIAL_RIGHT, bottom: 100 }
+        )
+      );
+    }
+  }, [setLiveClassPos]);
+
+  const handleOpenChecklist = useCallback(() => {
+    setChecklistOverviewOpen(true);
+  }, []);
+
+  const handleOpenLegibilityProbe = useCallback(() => {
+    setLegibilityProbeOpen(true);
+  }, []);
+
+  // F4: the three former recording-variant entries (Discussions,
+  // Announcement, Grading) are merged into this one call, landing on the
+  // Recording tab's base "record" view rather than opening a nested
+  // submenu. A nested MUI submenu would need its own hand-rolled keyboard
+  // handling (MUI's core Menu has no built-in submenu support) to get right
+  // the same roving-tabIndex/Escape/focus-restore behavior the top-level
+  // Menu gets for free - not a good trade against a destination that
+  // already exposes all eight views in its own labelled, accessible tab
+  // strip once you land there. Deliberately navigateToRecordingTool (not
+  // openRecordingTool) - see the two-line comment further below where this
+  // used to be inlined three times, one per removed entry, for why.
+  const handleOpenRecordingTools = useCallback(() => {
+    navigateToRecordingTool("record");
+  }, []);
 
   const handleSend = useCallback(async (text: string, attachments: ChatAttachment[]) => {
     const provider = getStoredProvider();
@@ -434,6 +505,18 @@ export default function AiChatFab() {
 
   if (!mounted) return null;
 
+  // F6: two menu actions can only fail AFTER the click today - the
+  // legibility probe needs getDisplayMedia, Live Class needs a microphone.
+  // Feature-detected once per render (mounted above already guarantees
+  // we're past SSR) and passed down so FabQuickActionsMenu can disable-with-
+  // reason BEFORE the click, rather than only after.
+  const liveClassDisabledReason = supportsMicrophone(typeof navigator !== "undefined" ? navigator : undefined)
+    ? undefined
+    : "This browser does not support microphone capture.";
+  const legibilityProbeDisabledReason = supportsGetDisplayMedia(typeof navigator !== "undefined" ? navigator : undefined)
+    ? undefined
+    : "This browser does not support screen-share capture.";
+
   // The embedded provider is text-only (see routeRequest) and cannot read
   // files - disable the attach control rather than letting a file get
   // silently ignored. Read directly rather than via the reactive
@@ -489,173 +572,24 @@ export default function AiChatFab() {
 
   return (
     <>
-      <SpeedDial
-        ariaLabel="Quick actions"
-        sx={{
-          position: "fixed",
-          bottom: DIAL_BOTTOM,
-          right: DIAL_RIGHT,
-          zIndex: 9999,
-          "& .MuiSpeedDial-fab": {
-            background: "var(--accent)",
-            color: "var(--text-on-accent)",
-            // A permanently-floating trigger gets the strongest elevation
-            // tier (docs/aesthetics-pass-acceptance-criteria.md's shadow
-            // scale reserves --shadow-lg for "floating windows" - the FAB is
-            // the entry point for exactly those).
-            boxShadow: "var(--shadow-lg)",
-            "&:hover": { background: "var(--accent-hover)" },
-          },
-        }}
-        icon={<SpeedDialIcon />}
-        open={dialOpen}
-        onOpen={(_, reason) => {
-          // Open only on an explicit click — never on hover.
-          if (reason === "toggle") setDialOpen(true);
-        }}
-        onClose={(_, reason) => {
-          // Keep open when the mouse moves away; close on click-away, Escape, or focus loss.
-          if (reason !== "mouseLeave") setDialOpen(false);
-        }}
-      >
-        <SpeedDialAction
-          icon={<ChatIcon />}
-          title="AI Chatbot"
-          onClick={() => {
-            setDialOpen(false);
-            const nextOpen = !chatOpen;
-            setChatOpen(nextOpen);
-            if (nextOpen && !readLS<Pos | null>("chat-pos", null)) {
-              setChatPos({
-                x: Math.max(8, window.innerWidth - CHAT_W - DIAL_RIGHT - 8),
-                y: Math.max(8, window.innerHeight - CHAT_H - 100),
-              });
-            }
-          }}
-        />
-        <SpeedDialAction
-          icon={<LiveClassIcon />}
-          title={
-            isLiveClassSessionActive(liveClass.phase)
-              ? `Live Class - recording ${formatElapsedCompact(liveClass.elapsedSeconds)}`
-              : "Live Class"
-          }
-          onClick={() => {
-            setDialOpen(false);
-            const nextOpen = !liveClassOpen;
-            setLiveClassOpen(nextOpen);
-            if (nextOpen && !readLS<Pos | null>("live-class-pos", null)) {
-              setLiveClassPos(
-                computeDefaultWindowPos(
-                  { width: window.innerWidth, height: window.innerHeight },
-                  { width: LIVE_CLASS_WINDOW_W, height: LIVE_CLASS_WINDOW_H },
-                  { right: DIAL_RIGHT, bottom: 100 }
-                )
-              );
-            }
-          }}
-        />
-        <SpeedDialAction
-          icon={<ChecklistIcon />}
-          // AC4: relabeled from "Weekly Checklist Overview" - see
-          // WeeklyChecklistOverviewModal.tsx's own AC4/AC5 comment; the
-          // import name and file this opens stay WeeklyChecklistOverviewModal.
-          title="Checklist Overview"
-          onClick={() => {
-            setDialOpen(false);
-            // Toggles, same as the other two windows above - a second click
-            // on this dial entry closes an already-open window rather than
-            // being a no-op.
-            setChecklistOverviewOpen((open) => !open);
-          }}
-        />
-
-        {/* Legibility probe (R1/R1a/R1b, docs/grading-via-recording-
-            acceptance-criteria.md section 1): the diagnostic that decides
-            whether the rest of grading-via-recording is worth building - see
-            LegibilityProbeModal.tsx's own header for what it does and
-            deliberately does not do. Grouped with the three modal/window
-            actions above it, not with the two navigate entries below -
-            LegibilityProbeModal opens as a modal (ModalShell), the same
-            shape as WeeklyChecklistOverviewModal just above, not a
-            navigateToRecordingTool() view change. Labeled as the diagnostic
-            it is ("Check screen legibility"), never as grading - it does not
-            grade anything and the owner should not expect it to. */}
-        <SpeedDialAction
-          icon={<LegibilityProbeIcon />}
-          title="Check screen legibility"
-          onClick={() => {
-            setDialOpen(false);
-            setLegibilityProbeOpen((open) => !open);
-          }}
-        />
-
-        {/* Reachable-from-the-fab entries for the Recording tab's grading
-            tools (Discussions, Announcements, and now grading-via-recording
-            itself). Unlike the three actions above, these NAVIGATE (Manual > Recording > a specific inner
-            view) rather than opening a floating window - the fab lives
-            outside page.tsx (layout.tsx) and has no access to
-            setActiveTab/setManualView, so this goes through
-            navigateToRecordingTool() (src/lib/recording-launch.ts), the one
-            mechanism that crosses that boundary, exactly the way the
-            Knowledge tab's own "Ask AI" reaches this same component through
-            open-ai-chat. navigateToRecordingTool (not openRecordingTool) is
-            deliberate here: none of these fab entries ever carries a
-            knowledgeContext of its own, and a bare-view openRecordingTool()
-            call clears any pending one - which would silently throw away a
-            Knowledge-tab selection the instructor made moments earlier, just
-            because they happened to reach this same pane through the fab
-            instead of the Knowledge tab's own "Start recording"/"Grade via
-            recording" button. All three actions close the dial like every
-            action above; none opens a window here, so there is no dialOpen
-            toggle-back needed. */}
-        <SpeedDialAction
-          icon={<RecordingDiscussionsIcon />}
-          title="Discussion Replies (Recording)"
-          onClick={() => {
-            setDialOpen(false);
-            navigateToRecordingTool("discussions");
-          }}
-        />
-        <SpeedDialAction
-          icon={<RecordingAnnouncementIcon />}
-          // Lands directly on the Recording tab's own dedicated announcement
-          // view now, rather than on Record - the owner's ask was that
-          // recording FOR an announcement be reachable as its own feature,
-          // not only via a per-take button buried inside the Record
-          // sub-view. That view shares the same underlying recording stage,
-          // takes list, and library picker Record uses (see RecordingTab.tsx
-          // - the announcement panel itself is still gated on a take, not on
-          // which of the two views is active, since a take is an in-memory
-          // object URL that cannot be restored on its own), so this still
-          // lands somewhere an instructor can record a fresh take, pick an
-          // existing one, or pick a saved recording from the library - it is
-          // just no longer necessary to visit Record first to get there.
-          title="Record for Announcement"
-          onClick={() => {
-            setDialOpen(false);
-            navigateToRecordingTool("announcement");
-          }}
-        />
-        {/* Grading-via-recording's own fab entry (docs/grading-via-recording-
-            acceptance-criteria.md item 3): navigates, exactly like the two
-            entries above, rather than opening a modal - this is item 3's own
-            "navigate idiom, not the modal idiom" requirement. Deliberately
-            navigateToRecordingTool, never openRecordingTool with
-            openRubric: true - a plain fab visit is not "I just selected
-            Knowledge pages to grade with" (see recording-launch.ts's own doc
-            comment on RecordingLaunch.openRubric), so this must not surprise
-            the instructor with the rubric modal the Knowledge base's own
-            "Grade via recording" button intentionally opens. */}
-        <SpeedDialAction
-          icon={<RecordingGradingIcon />}
-          title="Grading (from a recording)"
-          onClick={() => {
-            setDialOpen(false);
-            navigateToRecordingTool("grading");
-          }}
-        />
-      </SpeedDial>
+      {/* F3/F4/F5/F6 redesign: a five-entry, persistently-labelled Menu
+          replacing the old seven-entry SpeedDial - see
+          FabQuickActionsMenu.tsx's own header for the full reasoning (why a
+          Menu instead of staticTooltipLabel, why keepMounted must stay
+          false, why the three former recording-variant entries collapsed
+          into one). Every handler here OPENS its destination (F2) - see
+          each handleOpen* above for why none of them toggle. */}
+      <FabQuickActionsMenu
+        bottom={DIAL_BOTTOM}
+        right={DIAL_RIGHT}
+        onOpenChat={handleOpenChat}
+        onOpenLiveClass={handleOpenLiveClass}
+        onOpenChecklist={handleOpenChecklist}
+        onOpenLegibilityProbe={handleOpenLegibilityProbe}
+        onOpenRecordingTools={handleOpenRecordingTools}
+        liveClassDisabledReason={liveClassDisabledReason}
+        legibilityProbeDisabledReason={legibilityProbeDisabledReason}
+      />
 
       {/* The FAB's own persistent recording indicator (H4 / regression
           90.11): visible for as long as a live-class session is active, even
@@ -756,96 +690,6 @@ export default function AiChatFab() {
         <LegibilityProbeModal onClose={() => setLegibilityProbeOpen(false)} />
       )}
     </>
-  );
-}
-
-function ChatIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-      <path
-        d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-// Two speech bubbles (overlapping), distinguishing "Discussion Replies" from
-// the single-bubble ChatIcon above without pulling in @mui/icons-material
-// (forbidden - inline SVGs only).
-function RecordingDiscussionsIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-      <path
-        d="M9 3h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-1v3l-3.5-3H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
-        fill="currentColor"
-      />
-      <path
-        d="M6 8H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h.5v2.5L8.5 19H12a2 2 0 0 0 2-2v-1"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
-// An open eye - stands for "can this be read", distinct from every other
-// icon in this dial (none of which is about reading/legibility).
-function LegibilityProbeIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-      <path
-        d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        fill="none"
-      />
-      <circle cx="12" cy="12" r="3" fill="currentColor" />
-    </svg>
-  );
-}
-
-// A checkmark on a lined page - stands for "grading" without borrowing
-// ChecklistIcon (a different feature above) or any speech-bubble shape
-// already used by the two icons before it in this dial.
-function RecordingGradingIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-      <rect x="4" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
-      <path d="M7.5 8h7M7.5 11.5h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path
-        d="M14.5 14.5l1.7 1.7L20 12.6"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
-// A megaphone - stands for "announce" without borrowing ChatIcon's speech
-// bubble, which this fab already uses for something else.
-function RecordingAnnouncementIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-      <path
-        d="M3 10v4a1 1 0 0 0 1 1h2l1 5h2l-1-5h1l9 4V6l-9 4H4a1 1 0 0 0-1 1z"
-        fill="currentColor"
-      />
-      <path
-        d="M19 9a4 4 0 0 1 0 6"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        fill="none"
-      />
-    </svg>
   );
 }
 

@@ -24,6 +24,12 @@ import {
   REPLY_ROW_HAYSTACK,
   copyAllButtonLabel,
   computeStoppedSessionSummary,
+  isReplyStatusFilter,
+  replyMatchesStatusFilter,
+  filterRowsByStatus,
+  computeReplyStatusCounts,
+  isAnyReplyFilterActive,
+  type ReplyStatusFilterRow,
 } from "./discussion-table-view";
 import { swapAdjacentRows, type ReplyRow, type ReplySort } from "./discussion-capture";
 
@@ -567,5 +573,156 @@ describe("useDiscussionReplies.ts / discussion-draft-loop.ts / useReplyResources
     // run.
     const src = readSource("src/app/components/recording/useDiscussionLoopStarter.ts");
     expect(src).not.toMatch(/if \(!\(capturing \|\| rows\.length > 0 \|\| hasActivatedRef\.current\)\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D3 status filter (docs/aesthetics-pass-acceptance-criteria.md section 4b).
+// Sabotage-checked: replyMatchesStatusFilter's "uncopied" branch inverted
+// (=== undefined flipped to !== undefined), filterRowsByStatus's "all"
+// fast path changed from by-reference to `rows.slice()`, and a skipped row
+// made to still match a specific chip. Each was applied to the source,
+// confirmed red, confirmed present in the diff, then reverted.
+// ---------------------------------------------------------------------------
+
+function makeStatusRow(overrides: Partial<ReplyStatusFilterRow>): ReplyStatusFilterRow {
+  return { id: "disc-1", state: "pending", userEdited: false, reply: "", ...overrides };
+}
+
+describe("isReplyStatusFilter (D3)", () => {
+  it("accepts every member of the five-value set", () => {
+    for (const v of ["all", "needs-draft", "failed", "edited", "uncopied"]) {
+      expect(isReplyStatusFilter(v)).toBe(true);
+    }
+  });
+
+  it("rejects anything outside the set, including non-strings", () => {
+    expect(isReplyStatusFilter("bogus")).toBe(false);
+    expect(isReplyStatusFilter(null)).toBe(false);
+    expect(isReplyStatusFilter(undefined)).toBe(false);
+    expect(isReplyStatusFilter(3)).toBe(false);
+  });
+});
+
+describe("replyMatchesStatusFilter (D3)", () => {
+  it("'all' matches every row, including a skipped one", () => {
+    expect(replyMatchesStatusFilter(makeStatusRow({ id: "s" }), "all", {}, { s: true })).toBe(true);
+  });
+
+  it("'needs-draft' matches only pending rows", () => {
+    expect(replyMatchesStatusFilter(makeStatusRow({ state: "pending" }), "needs-draft", {}, {})).toBe(true);
+    expect(replyMatchesStatusFilter(makeStatusRow({ state: "ready" }), "needs-draft", {}, {})).toBe(false);
+  });
+
+  it("'failed' matches only failed rows", () => {
+    expect(replyMatchesStatusFilter(makeStatusRow({ state: "failed" }), "failed", {}, {})).toBe(true);
+    expect(replyMatchesStatusFilter(makeStatusRow({ state: "ready" }), "failed", {}, {})).toBe(false);
+  });
+
+  it("'edited' matches only userEdited rows", () => {
+    expect(replyMatchesStatusFilter(makeStatusRow({ userEdited: true }), "edited", {}, {})).toBe(true);
+    expect(replyMatchesStatusFilter(makeStatusRow({ userEdited: false }), "edited", {}, {})).toBe(false);
+  });
+
+  it("'uncopied' matches a row with a reply and no handledAt entry - sabotage target 1", () => {
+    expect(replyMatchesStatusFilter(makeStatusRow({ reply: "hello" }), "uncopied", {}, {})).toBe(true);
+    expect(replyMatchesStatusFilter(makeStatusRow({ reply: "hello" }), "uncopied", { "disc-1": 1000 }, {})).toBe(false);
+    expect(replyMatchesStatusFilter(makeStatusRow({ reply: "" }), "uncopied", {}, {})).toBe(false);
+  });
+
+  it("a skipped row never matches a SPECIFIC chip, only 'all' - sabotage target 3", () => {
+    const row = makeStatusRow({ id: "s", state: "pending", userEdited: true, reply: "hi" });
+    const skipped = { s: true };
+    expect(replyMatchesStatusFilter(row, "needs-draft", {}, skipped)).toBe(false);
+    expect(replyMatchesStatusFilter(row, "edited", {}, skipped)).toBe(false);
+    expect(replyMatchesStatusFilter(row, "uncopied", {}, skipped)).toBe(false);
+  });
+});
+
+describe("filterRowsByStatus (D3)", () => {
+  it("returns the SAME array reference for 'all' - sabotage target 2", () => {
+    const rows = [makeStatusRow({ id: "a" }), makeStatusRow({ id: "b" })];
+    expect(filterRowsByStatus(rows, "all", {}, {})).toBe(rows);
+  });
+
+  it("narrows to only the matching rows for a specific filter", () => {
+    const rows = [
+      makeStatusRow({ id: "a", state: "pending" }),
+      makeStatusRow({ id: "b", state: "failed" }),
+      makeStatusRow({ id: "c", state: "ready" }),
+    ];
+    expect(filterRowsByStatus(rows, "failed", {}, {}).map((r) => r.id)).toEqual(["b"]);
+  });
+});
+
+describe("isAnyReplyFilterActive (D3/S4)", () => {
+  it("is false when neither filter is active", () => {
+    expect(isAnyReplyFilterActive("", "all")).toBe(false);
+    expect(isAnyReplyFilterActive("   ", "all")).toBe(false);
+  });
+
+  it("is true for a non-empty text query alone", () => {
+    expect(isAnyReplyFilterActive("maria", "all")).toBe(true);
+  });
+
+  it("is true for a status chip alone, with NO text query - the exact case 'Copy every reply (6)' must not lie under", () => {
+    expect(isAnyReplyFilterActive("", "failed")).toBe(true);
+  });
+
+  it("is true when both are active", () => {
+    expect(isAnyReplyFilterActive("maria", "edited")).toBe(true);
+  });
+});
+
+describe("computeReplyStatusCounts (D3)", () => {
+  it("counts each bucket independently, over the array as given (the caller passes rawRows, per F11's own discipline)", () => {
+    const rows = [
+      makeStatusRow({ id: "a", state: "pending" }),
+      makeStatusRow({ id: "b", state: "failed" }),
+      makeStatusRow({ id: "c", state: "ready", userEdited: true, reply: "x" }),
+      makeStatusRow({ id: "d", state: "ready", reply: "y" }),
+    ];
+    const counts = computeReplyStatusCounts(rows, { d: 1000 }, {});
+    expect(counts.all).toBe(4);
+    expect(counts["needs-draft"]).toBe(1);
+    expect(counts.failed).toBe(1);
+    expect(counts.edited).toBe(1);
+    expect(counts.uncopied).toBe(1); // only "c" has a reply and no handledAt entry
+  });
+
+  it("excludes skipped rows from every bucket except 'all'", () => {
+    const rows = [makeStatusRow({ id: "a", state: "pending" }), makeStatusRow({ id: "b", state: "pending" })];
+    const counts = computeReplyStatusCounts(rows, {}, { a: true });
+    expect(counts.all).toBe(2);
+    expect(counts["needs-draft"]).toBe(1); // only "b" - "a" is skipped
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D3's own F0-2/F11 obligation: the status filter must enter NEITHER
+// destructive arming signature (deleteSignature/redraftSignature,
+// DiscussionRepliesPanel.tsx). Both are built from an inline template
+// literal / draftingArmSignature call in that file, not a function this leaf
+// exports, so there is nothing to unit-test directly - the guard here is a
+// source-text scan, the same idiom the sibling describe block above (B1-B5)
+// already uses for an analogous cross-file property.
+//
+// SABOTAGE CHECK: with `statusFilter` spliced into `deleteSignature`'s
+// template literal, this test went red; reverted, confirmed green.
+// ---------------------------------------------------------------------------
+
+describe("DiscussionRepliesPanel.tsx - status filter stays out of both arming signatures (D3/F0-2/F11)", () => {
+  const src = fs.readFileSync(path.resolve(process.cwd(), "src/app/components/recording/DiscussionRepliesPanel.tsx"), "utf-8");
+
+  it("deleteSignature's own line does not reference statusFilter", () => {
+    const line = src.split("\n").find((l) => l.includes("const deleteSignature ="));
+    expect(line, "expected to find the deleteSignature declaration").toBeTruthy();
+    expect(line).not.toMatch(/statusFilter/);
+  });
+
+  it("redraftSignature's draftingArmSignature({...}) call does not pass statusFilter", () => {
+    const match = src.match(/const redraftSignature = draftingArmSignature\(\{[\s\S]*?\}\);/);
+    expect(match, "expected to find the redraftSignature call").toBeTruthy();
+    expect(match![0]).not.toMatch(/statusFilter/);
   });
 });

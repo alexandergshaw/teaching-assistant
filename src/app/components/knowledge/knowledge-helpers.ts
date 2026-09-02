@@ -89,14 +89,41 @@ export function visiblePageIds(nodes: InstitutionPageNode[], expanded: Set<strin
 
 /**
  * Whether every currently-visible page is already selected - the "Select
- * all" affordance's checked state (S3). False for an empty `visibleIds`
- * (nothing to select, so the control reads as off rather than vacuously
- * "checked"). This repo uses no indeterminate checkbox state anywhere, so a
- * partial selection also simply reads as unchecked - matching `allSelected`
- * in useModuleSelection.ts.
+ * all visible" affordance's checked state (S3). False for an empty
+ * `visibleIds` (nothing to select, so the control reads as off rather than
+ * vacuously "checked").
  */
 export function allVisibleSelected(selected: Set<string>, visibleIds: string[]): boolean {
   return visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+}
+
+/**
+ * K6 fix: "Select all" used to paint fully CHECKED whenever every VISIBLE
+ * page happened to be selected, even when many MORE pages were selected
+ * outside view (inside a collapsed branch). On a 40-page tree collapsed to
+ * ~6 roots, that meant: 40 selected, box reads checked, click deselects the
+ * 6 visible roots, box reads unchecked - but 34 pages are STILL selected,
+ * with nothing on screen saying so. That is a control lying about what it
+ * represents.
+ *
+ * The click action stays scoped to `visibleIds` (S3's own contract, and
+ * `mergeOrClearVisible` above is unchanged) - only the VISUAL state changes:
+ * `checked` now requires the selection to be EXACTLY the visible set (no
+ * hidden extra pages riding along), and `indeterminate` covers every other
+ * non-empty case, including "all visible are selected, but so is something
+ * else out of view." A screen reader (and a sighted user) now sees a dash,
+ * not a false checkmark, whenever the box's own semantics ("select/deselect
+ * what's on screen") would not tell the whole story.
+ */
+export interface SelectAllVisibleVisualState {
+  checked: boolean;
+  indeterminate: boolean;
+}
+
+export function selectAllVisibleVisualState(selected: Set<string>, visibleIds: string[]): SelectAllVisibleVisualState {
+  if (visibleIds.length === 0) return { checked: false, indeterminate: false };
+  const checked = allVisibleSelected(selected, visibleIds) && selected.size === visibleIds.length;
+  return { checked, indeterminate: !checked && selected.size > 0 };
 }
 
 /**
@@ -127,7 +154,7 @@ export interface SelectedPagesDescription {
 export function describeSelectedPages(
   pages: InstitutionPage[],
   selected: Set<string>,
-  maxShown = 3
+  maxShown = 8
 ): SelectedPagesDescription {
   const titles = pages
     .filter((p) => selected.has(p.id))
@@ -142,6 +169,12 @@ export function describeSelectedPages(
       : shownTitles.join(", ");
   return { shownTitles, overflowCount, text };
 }
+
+/** Pass as `maxShown` to describeSelectedPages for the bulk bar's "show all"
+ *  expander (K6) - never folds anything into "+N more", since the whole
+ *  point of expanding is to see every selected title, including ones sitting
+ *  inside a collapsed branch. */
+export const SHOW_ALL_SELECTED_PAGES = Number.POSITIVE_INFINITY;
 
 // ---------------------------------------------------------------------------
 // Move up / down arithmetic (AC7's "keep it simple" reordering).
@@ -477,4 +510,146 @@ export function useKbInstitutionSelection(urlInstitution?: string | null): {
   const setActive = useCallback((code: string) => setStored(code), []);
 
   return { institutions, active, setActive };
+}
+
+// ---------------------------------------------------------------------------
+// K1 - the omission a partial buildKnowledgeContextBlock result used to be
+// discarded and never shown to the instructor. "Start recording" and "Grade
+// via recording" (KnowledgeTab.tsx) build their context block CLIENT-side
+// (unlike "Ask AI", which sends page ids and gets an honest, server-computed
+// count back) and hand it to openRecordingTool as a `label` string that the
+// landing panel already renders verbatim (GradingRecordingPanel.tsx:549,
+// useDiscussionKnowledgeContext's discussions equivalent) - so encoding the
+// omission INTO that label, rather than inventing a new field on
+// RecordingLaunch (a file outside this feature's scope), surfaces it exactly
+// where the instructor is looking once they land, with no new wiring.
+// ---------------------------------------------------------------------------
+
+/**
+ * The label carried on a "Start recording"/"Grade via recording" launch
+ * (K1). Honest about what actually made it into the context block:
+ * states the real included/total count and names the omitted count instead
+ * of a flat "N pages" that silently hides a truncation. Attachments are
+ * never part of these two launches' payload (only the server-side "Ask AI"
+ * path extracts attachment text) - `text` never mentions them, so it never
+ * implies something these two buttons do not do.
+ */
+export function describeKnowledgeContextLabel(totalSelected: number, includedPages: number, omittedPages: number): string {
+  const noun = `Knowledge Base page${totalSelected === 1 ? "" : "s"}`;
+  if (omittedPages === 0) return `${totalSelected} ${noun}`;
+  return `${includedPages} of ${totalSelected} ${noun} (${omittedPages} omitted - too large for the context budget)`;
+}
+
+// ---------------------------------------------------------------------------
+// K7 - consequence tiering for the bulk bar's buttons. Mirrors the
+// modules bulk bar's groupTier idea (content-tab/modules/bulkBarGroups.ts)
+// at the scale this bar actually needs (three or four buttons, not thirteen
+// groups): a small, pure, always-visible tag per tier - never a `title`
+// tooltip (E3's rule, restated here since a KB-specific reader may not have
+// read the modules doc).
+// ---------------------------------------------------------------------------
+
+export type KbBulkActionTier = "read-only" | "fan-out" | "destructive";
+
+/** Always-visible consequence text appended next to a bulk-bar button's
+ *  label - never a `title` attribute (unreachable by keyboard, unannounced). */
+export function kbBulkActionConsequenceTag(tier: KbBulkActionTier): string {
+  switch (tier) {
+    case "read-only":
+      return "opens the chat only - nothing is written";
+    case "fan-out":
+      return "leaves this tab and starts a drafting/grading pipeline";
+    case "destructive":
+      return "destructive - cannot be undone";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// K10 - bulk delete, armed and scoped the way the modules bulk bar's own
+// deletes are (content-tab/modules/confirmArming.ts's selectionSignature/
+// isConfirmArmed, reused unmodified rather than re-implemented here).
+// ---------------------------------------------------------------------------
+
+/**
+ * Splits a bulk-delete selection into the ids that must actually be sent to
+ * deleteInstitutionPageAction ("top-level" - no SELECTED ancestor, since the
+ * server cascade-deletes descendants and calling delete twice on the same
+ * subtree would just error on the second call) and the ids that are already
+ * covered by one of those calls (a descendant whose own ancestor is also
+ * selected). Built from the flat `pages` list's own `parentId` chain, not
+ * the tree, so it needs no `expanded`/collapse state at all.
+ */
+export interface BulkDeleteTargets {
+  topLevelIds: string[];
+  skippedIds: string[];
+}
+
+export function computeBulkDeleteTargets(pages: InstitutionPage[], selected: Set<string>): BulkDeleteTargets {
+  const byId = new Map(pages.map((p) => [p.id, p]));
+  const hasSelectedAncestor = (id: string): boolean => {
+    let current = byId.get(id);
+    const seen = new Set<string>();
+    while (current && current.parentId) {
+      if (seen.has(current.parentId)) return false; // defensive: never loop on corrupt data
+      seen.add(current.parentId);
+      if (selected.has(current.parentId)) return true;
+      current = byId.get(current.parentId);
+    }
+    return false;
+  };
+  const topLevelIds: string[] = [];
+  const skippedIds: string[] = [];
+  for (const id of selected) {
+    if (!byId.has(id)) continue; // already gone - S4's own pruning handles this on the next render
+    if (hasSelectedAncestor(id)) skippedIds.push(id);
+    else topLevelIds.push(id);
+  }
+  return { topLevelIds, skippedIds };
+}
+
+/**
+ * The REAL blast radius a bulk delete confirm must state (K10): every
+ * top-level target plus every one of its descendants, deduped - never the
+ * raw checkbox count, which can understate what the cascade actually
+ * removes (an unselected descendant of a selected page is deleted too).
+ */
+export function bulkDeleteInclusiveCount(tree: InstitutionPageNode[], topLevelIds: string[]): number {
+  return topLevelIds.reduce((sum, id) => sum + 1 + countDescendants(tree, id), 0);
+}
+
+export interface BulkDeleteFailure {
+  title: string;
+  message: string;
+}
+
+export interface BulkDeleteSkip {
+  title: string;
+}
+
+export interface BulkDeleteOutcome {
+  doneCount: number;
+  failed: BulkDeleteFailure[];
+  skipped: BulkDeleteSkip[];
+}
+
+/**
+ * Renders the {done, failed, skipped} shape REGRESSION 380 names as the
+ * pattern every bulk mutation in this app must report (never a bare
+ * "posted"/"deleted" boolean that hides a partial outcome). `total` is the
+ * inclusive count (bulkDeleteInclusiveCount above), so the leading fraction
+ * is the real blast radius, not the checkbox count.
+ */
+export function describeBulkDeleteOutcome(total: number, outcome: BulkDeleteOutcome): string {
+  const parts = [`${outcome.doneCount} of ${total} page${total === 1 ? "" : "s"} deleted.`];
+  if (outcome.failed.length > 0) {
+    parts.push(`${outcome.failed.length} failed: ${outcome.failed.map((f) => f.title).join(", ")}.`);
+  }
+  if (outcome.skipped.length > 0) {
+    parts.push(
+      `${outcome.skipped.length} not deleted directly (covered by a selected parent page): ${outcome.skipped
+        .map((s) => s.title)
+        .join(", ")}.`
+    );
+  }
+  return parts.join(" ");
 }

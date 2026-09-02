@@ -55,6 +55,104 @@
   transform: rotate(90deg);
 }
 
+/* K5: applied ALONGSIDE page.module.css's .kbTreeScroll (never instead of
+   it - that class also carries the flex/gap layout every row needs) at
+   every depth greater than 0, resetting ONLY the max-height/overflow-y that
+   class also sets so a nested branch stops being its own 560px scroll
+   container and simply flows inside the root's one scroll region. */
+.kbNestedTreeGroup {
+  max-height: none;
+  overflow-y: visible;
+}
+
+/* K2: three surfaces (the search-hit panel, the delete-confirmation
+   banner, and the bulk action bar) used to mount/unmount ABOVE the page
+   tree inside the same flex column as page.module.css's .kbTreePane - so
+   ticking the very first checkbox inserted a multi-row card above the tree,
+   pushing every row (including the one the cursor was just on) down the
+   page. page.module.css cannot be edited from this file set, so the fix
+   lives entirely here: `.kbOverlayAnchor` is a ZERO-HEIGHT flow placeholder
+   (it always occupies the same, constant amount of space - none - whether
+   or not anything is mounted inside it), and its child, when mounted, is
+   POSITIONED ABSOLUTELY relative to it - out of normal flow entirely, so it
+   can never push a later sibling (the tree) down regardless of its own
+   size. It overlays whatever would otherwise render at that point instead
+   of displacing it - the trade this makes explicitly, in exchange for a
+   tree that never moves out from under a click. All three surfaces this
+   fixes already render on an opaque card background (.kbSearchPanel,
+   .kbWarnBanner, .bulkBar - page.module.css), so the overlay is legible
+   against whatever it sits over. */
+.kbOverlayAnchor {
+  position: relative;
+  height: 0;
+}
+
+.kbOverlayCard {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+}
+
+/* K3: page.module.css's `.bulkLabel { flex: 0 0 76px }` reserves a 76px
+   gutter per row, meant for the modules bulk bar's per-row uppercase micro
+   heading. That file's own D0 fix scopes the gutter removal to
+   `.bulkBarBody .bulkLabel` ONLY (the modules bar's own wrapper) - its
+   comment names this file as one of the bars still left on the old rule,
+   since this bar has no `.bulkBarBody` wrapper of its own and
+   page.module.css cannot be edited here. Same fix, this file's own class:
+   used INSTEAD OF styles.bulkLabel in KnowledgeTab.tsx's bulk bar (never
+   alongside it - two conflicting `flex` declarations on the same element
+   would just race on source order). */
+.kbBulkLabel {
+  flex: 0 0 auto;
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* K7: always-visible consequence tags next to each bulk-bar action (never a
+   `title` - unreachable by keyboard, unannounced). Mirrors the modules bulk
+   bar's tier-driven weight (BulkBarGroup.tsx's bulkGroupFanOut/
+   bulkGroupDanger classes) at the scale this bar needs - a handful of
+   buttons, not thirteen groups - using this feature's own stylesheet rather
+   than importing page.module.css classes owned by a concurrent change. */
+.kbConsequenceTag {
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.kbConsequenceTagFanOut {
+  color: var(--warning-ink, var(--text-secondary));
+}
+
+.kbConsequenceTagDanger {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* K6: a search-hit row gained a checkbox (previously title+snippet only,
+   with no way to select a search match without opening it from the tree).
+   `.kbSearchHitRow` is the new outer flex row; `.kbSearchHitButton`
+   modifies page.module.css's own `.kbSearchHit` (still applied alongside it,
+   never instead) so it stops claiming the whole row now that the checkbox
+   sits beside it. */
+.kbSearchHitRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.kbSearchHitButton {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
 /* ── Attachments panel (attach/embed feature) ────────────────────────────
    A page's uploaded files: list, upload, download, remove, and (while
    editing) insert an embed reference into the body. Lives in its own

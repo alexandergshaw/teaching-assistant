@@ -16,10 +16,17 @@ import panelStyles from "./DiscussionRepliesPanel.module.css";
 import { fmt } from "./types";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 import { tableClipboardText, draftingArmSignature } from "./discussion-capture";
-import { copyAllButtonLabel, computeStoppedSessionSummary } from "./discussion-table-view";
-import { CopyIcon, CheckIcon } from "./discussion-icons";
+import { copyAllButtonLabel, computeStoppedSessionSummary, REPLY_STATUS_FILTER_LABELS } from "./discussion-table-view";
 import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } from "./useReplyResources";
 import { useDiscussionReplies } from "./useDiscussionReplies";
+// D1/D3/D7/D9 (docs/aesthetics-pass-acceptance-criteria.md section 4b): see
+// that file's own header for the full account of this panel's own hook-count
+// pressure and why handledAt/skipped are a side channel rather than ReplyRow
+// fields.
+import { useDiscussionReplyFiltering } from "./useDiscussionReplyFiltering";
+// D3 (status filter chips) + D4 (sticky review bar): landed in a new sibling
+// file - see that file's own header for why (this panel's own line ceiling).
+import DiscussionReplyToolbar from "./DiscussionReplyToolbar";
 // docs/DEV_LOOP.md's "every feature needs a downloadable log" rule
 // (REGRESSION entries 369/372/373/374 record this surface's unpaid debt).
 // This panel only formats/downloads - collection and assembly are entirely
@@ -209,6 +216,28 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     runLog,
   } = useDiscussionReplies(active);
 
+  // D1/D3/D7/D9: see useDiscussionReplyFiltering.ts's own header for why this
+  // panel's worth of new hook state is one call to a dedicated hook, not
+  // ~10 individual useState/useCallback/useMemo calls inline here - this
+  // component was already 932 of its 1000-line ceiling, and every other
+  // feature added to it in this folder has been extracted the same way.
+  const {
+    statusFilter,
+    setStatusFilter,
+    statusCounts,
+    visibleRows,
+    filterActive,
+    handledAtById,
+    skippedById,
+    markHandled,
+    toggleHandled,
+    toggleSkipped,
+    searchInputRef,
+    handleClearFilters,
+    handleEditReply,
+    handleInsertResourceForRow,
+  } = useDiscussionReplyFiltering({ rawRows, rows, filterText, setFilterText, editReply, insertResource });
+
   // docs/DEV_LOOP.md's downloadable-log rule: the two format handlers,
   // mirroring RepoGradingLogPanel.tsx's own handleDownload exactly - the one
   // clock read in this panel (everything downstream, the filename stamp and
@@ -325,15 +354,22 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // Reading `rows.filter(...)` copies exactly what F13/F14 tell the user is
   // currently visible ("Showing N of M"), which this set's brief did not
   // ask to change - flagged here as a judgment call, not silently assumed.
-  const copyableRows = rows.filter((r) => !!r.reply || !!r.resources?.length);
-  // S4 fix (sort-filter review): the SCOPING above is correct (verified: the
-  // count and the dispatch both read the same `rows` array, so they cannot
-  // drift) - the LABEL was the lie. "Copy every reply (4)" while 37 rows
-  // exist and "Showing 4 of 37" sits a few pixels away claims a bigger
-  // export than what lands on the clipboard. `copyAllButtonLabel` (the
-  // decision, unit-tested in discussion-table-view.test.ts) rewords it to
-  // be honest under a filter; the button's behaviour is unchanged.
-  const copyAllLabel = copyAllButtonLabel(copyableRows.length, filterText.trim() !== "");
+  //
+  // D3/D9 extension: `visibleRows` (text filter AND the new status chip),
+  // minus any row marked `skipped` - D9 requires the skip exclusion reach
+  // this export, and `visibleRows`/`skippedById` are both already owned by
+  // this panel, so it is implemented here even though the three BULK actions
+  // (draftAllPending/redraftAll/findMissing) cannot be reached the same way -
+  // see discussion-reply-flags.ts's header for why those three are a
+  // documented gap, not an oversight.
+  const copyableRows = visibleRows.filter((r) => (!!r.reply || !!r.resources?.length) && !skippedById[r.id]);
+  // S4 fix (sort-filter review), extended for D3: "Copy every reply (4)"
+  // while 37 rows exist is the lie this label exists to avoid - a status
+  // chip narrows scope exactly the same way the search box does, so
+  // `filterActive` (useDiscussionReplyFiltering.ts) counts either one, or
+  // "Copy every reply (6)" reintroduces that exact lie under a chip instead
+  // of a search term.
+  const copyAllLabel = copyAllButtonLabel(copyableRows.length, filterActive);
   const [allCopied, setAllCopied] = useState(false);
   const allCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -343,7 +379,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     []
   );
   const handleCopyAll = useCallback(async () => {
-    const text = tableClipboardText(rows);
+    const text = tableClipboardText(visibleRows.filter((r) => !skippedById[r.id]));
     if (!text) return;
     try {
       if (!navigator.clipboard || !window.isSecureContext) throw new Error("clipboard unavailable");
@@ -356,7 +392,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
       announce(message);
       setCopyError(message);
     }
-  }, [rows, announce]);
+  }, [visibleRows, skippedById, announce]);
 
   // docs/discussion-reply-resources-acceptance-criteria.md R11/R11a:
   // `Find resources` states the row count it is about to search - computed
@@ -475,10 +511,14 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   const actionsContainerRef = useRef<HTMLDivElement | null>(null);
   const pendingFocusIdRef = useRef<string | null>(null);
   const pendingFocusFallbackRef = useRef(false);
-  const rowsRef = useRef(rows);
+  // D3: tracks `visibleRows` (both filters), not just the text-filtered
+  // `rows` - the neighbour this looks up must match what is ACTUALLY
+  // rendered, or a status chip active at removal time could hand focus to a
+  // row the chip itself is hiding.
+  const rowsRef = useRef(visibleRows);
   useEffect(() => {
-    rowsRef.current = rows;
-  }, [rows]);
+    rowsRef.current = visibleRows;
+  }, [visibleRows]);
 
   const registerRemoveRef = useCallback((id: string, el: HTMLButtonElement | null) => {
     if (el) removeRefs.current.set(id, el);
@@ -559,6 +599,25 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           reply to each one.
         </p>
       </div>
+
+      {/* D11 (AM11, "Notices ... Inline, at the top of the panel they
+          concern"): this list used to render roughly 60% down the panel,
+          after the status row, the post-stop summary and the drop sentence.
+          Relocated here, immediately after the header - the download-log row
+          included, since a notice a failed or empty run produced is exactly
+          the kind of thing that needs to be seen without scrolling. */}
+      {notices.length > 0 && (
+        <div className={styles.field}>
+          {notices.map((n) => (
+            <p key={n.id} className={styles.error}>
+              {n.text}{" "}
+              <button type="button" className={styles.linkButton} onClick={() => dismissNotice(n.id)}>
+                Dismiss
+              </button>
+            </p>
+          ))}
+        </div>
+      )}
 
       {/* docs/DEV_LOOP.md: "a downloadable log ... displayed in a prominent
           location". Placed immediately under the header, before every other
@@ -758,19 +817,6 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
         </p>
       )}
 
-      {notices.length > 0 && (
-        <div className={styles.field}>
-          {notices.map((n) => (
-            <p key={n.id} className={styles.error}>
-              {n.text}{" "}
-              <button type="button" className={styles.linkButton} onClick={() => dismissNotice(n.id)}>
-                Dismiss
-              </button>
-            </p>
-          ))}
-        </div>
-      )}
-
       {showNeverOpened && (
         <p className={styles.fieldHint}>No replies yet - start a capture, then scroll through the discussion board in the other window.</p>
       )}
@@ -801,7 +847,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
         </p>
       )}
 
-      {/* S4: rendered UNCONDITIONALLY (only the buttons inside are gated on
+      {/* S4: rendered UNCONDITIONALLY (only the toolbar inside is gated on
           `totalCount > 0`) - this is the fallback focus target for both a
           per-row removal with no neighbouring row and a table-level delete,
           and it must still exist in the DOM after either one to receive
@@ -810,52 +856,39 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           that emptied the table, dropping focus to <body>. F11: the gate
           itself reads `totalCount`, not the filtered `rows.length` - Draft/
           Find/Delete are whole-table actions (F12) and must stay available
-          even while the current filter shows nothing. */}
+          even while the current filter shows nothing.
+          D4: the action bar's own contents moved into DiscussionReplyToolbar
+          (a NEW sibling file, sitting inside this SAME persistent div so the
+          sticky container and the focus-fallback target are one and the
+          same element) - see that file's own header. */}
       <div className={styles.ghActions} ref={actionsContainerRef} tabIndex={-1}>
         {totalCount > 0 && (
-          <>
-            {/* Reply-width UX pass, section 5d target #2: the biggest click
-                saving in the feature - exporting a 40-row table used to be
-                40 clicks. First in the bar, before "Draft the missing
-                replies", per the UX note's own ordering. */}
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={allCopied ? <CheckIcon /> : <CopyIcon />}
-              disabled={copyableRows.length === 0}
-              title={allCopied ? "Copied" : copyAllLabel}
-              onClick={() => void handleCopyAll()}
-            >
-              {copyAllLabel}
-            </Button>
-            <Button size="small" variant="outlined" disabled={drafting} onClick={draftAllPending}>
-              Draft the missing replies
-            </Button>
-            {/* docs/discussion-reply-resources-acceptance-criteria.md R11/
-                R11a: states the row count it is about to search. */}
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={eligibleForResources.length === 0}
-              onClick={() => findMissing()}
-            >
-              {`Find resources (${eligibleForResources.length})`}
-            </Button>
-            {deleteArmed ? (
-              <>
-                <Button size="small" color="error" onClick={() => { handleClearTable(); setDeleteArmedFor(null); }} aria-describedby={DELETE_CONSEQUENCE_ID}>
-                  Confirm delete
-                </Button>
-                <Button size="small" onClick={() => setDeleteArmedFor(null)}>
-                  Cancel
-                </Button>
-              </>
-            ) : (
-              <Button size="small" color="error" variant="outlined" onClick={() => setDeleteArmedFor(deleteSignature)}>
-                Delete table
-              </Button>
-            )}
-          </>
+          <DiscussionReplyToolbar
+            totalCount={totalCount}
+            visibleCount={visibleRows.length}
+            filterText={filterText}
+            setFilterText={setFilterText}
+            searchInputRef={searchInputRef}
+            statusFilter={statusFilter}
+            setStatusFilter={setStatusFilter}
+            statusCounts={statusCounts}
+            copyAllLabel={copyAllLabel}
+            allCopied={allCopied}
+            onCopyAll={() => void handleCopyAll()}
+            copyAllDisabled={copyableRows.length === 0}
+            drafting={drafting}
+            onDraftMissing={draftAllPending}
+            findResourcesCount={eligibleForResources.length}
+            onFindMissing={() => findMissing()}
+            deleteArmed={deleteArmed}
+            onArmDelete={() => setDeleteArmedFor(deleteSignature)}
+            onConfirmDelete={() => {
+              handleClearTable();
+              setDeleteArmedFor(null);
+            }}
+            onCancelDelete={() => setDeleteArmedFor(null)}
+            deleteConsequenceId={DELETE_CONSEQUENCE_ID}
+          />
         )}
       </div>
       {/* F11: names `totalCount`, matching `deleteSignature` above - the
@@ -896,22 +929,28 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           reading `rows` in its now-filtered sense. */}
       {totalCount > 0 && (
         <DiscussionReplyTable
-          rows={rows}
-          totalCount={totalCount}
+          rows={visibleRows}
           filterText={filterText}
-          setFilterText={setFilterText}
+          statusFilterLabel={statusFilter === "all" ? null : REPLY_STATUS_FILTER_LABELS[statusFilter]}
+          onClearFilters={handleClearFilters}
           sort={sort}
           setSort={setSort}
           llmProvider={llmProvider}
           addressByName={composition.addressByName}
-          editReply={editReply}
+          reorderDisabled={statusFilter !== "all"}
+          editReply={handleEditReply}
           moveRow={moveRow}
           onRemove={handleRemove}
           retryRow={retryRow}
           retryResources={retryResources}
           removeResource={removeResource}
-          insertResource={insertResource}
+          insertResource={handleInsertResourceForRow}
           searchRow={searchRow}
+          handledAtById={handledAtById}
+          skippedById={skippedById}
+          onMarkHandled={markHandled}
+          onToggleHandled={toggleHandled}
+          onToggleSkip={toggleSkipped}
           registerRemoveRef={registerRemoveRef}
           announce={announce}
           onCopyError={handleCopyError}

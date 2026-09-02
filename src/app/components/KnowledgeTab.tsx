@@ -45,7 +45,7 @@
 // cannot see), the small compositions that coordinate between hooks
 // (switchInstitution, selectPage, openSearchHit), and rendering.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Checkbox from "@mui/material/Checkbox";
@@ -58,13 +58,21 @@ import PageTreeView from "./knowledge/PageTreeView";
 import ParentPicker from "./knowledge/ParentPicker";
 import AttachmentsPanel from "./knowledge/AttachmentsPanel";
 import PageBody from "./knowledge/PageBody";
+import KnowledgeBulkBar from "./knowledge/KnowledgeBulkBar";
 import { useKbPageTree } from "./knowledge/useKbPageTree";
 import { useKbEditSession } from "./knowledge/useKbEditSession";
 import { useKbAttachments } from "./knowledge/useKbAttachments";
 import { useKbTreeActions } from "./knowledge/useKbTreeActions";
 import { useKbInstitutionPicker } from "./knowledge/useKbInstitutionPicker";
 import { useKbSelection } from "./knowledge/useKbSelection";
-import { allVisibleSelected, visiblePageIds, describeSelectedPages } from "./knowledge/knowledge-helpers";
+import { useKbBulkActions } from "./knowledge/useKbBulkActions";
+import {
+  visiblePageIds,
+  describeSelectedPages,
+  selectAllVisibleVisualState,
+  describeKnowledgeContextLabel,
+  SHOW_ALL_SELECTED_PAGES,
+} from "./knowledge/knowledge-helpers";
 import { openChat } from "@/lib/chat/open-chat";
 import { buildKnowledgeContextBlock } from "@/lib/chat/knowledge-context";
 import { openRecordingTool } from "@/lib/recording-launch";
@@ -175,15 +183,32 @@ export default function KnowledgeTab({
   // expand/collapse state (S3) - recomputed only when the tree shape or
   // expansion changes, not on every render.
   const visibleIds = useMemo(() => visiblePageIds(tree, expanded), [tree, expanded]);
-  const allVisSelected = allVisibleSelected(kbSelection.selected, visibleIds);
+  // K6: checked/indeterminate driven by the FULL selection vs the visible
+  // set, not just "are the visible ones all ticked" - see
+  // selectAllVisibleVisualState's own doc for why a plain boolean here used
+  // to paint a false "fully checked" box while dozens of pages sat selected
+  // inside a collapsed branch.
+  const selectAllVisual = selectAllVisibleVisualState(kbSelection.selected, visibleIds);
+  // K6: an expandable "Show all" for the bulk bar's selection description -
+  // collapsed to describeSelectedPages' own default cap normally, expanded
+  // to the full selection (never folded into "+N more") once toggled.
+  const [showAllSelected, setShowAllSelected] = useState(false);
   // B5: names the selection by TITLE, including pages sitting inside a
   // collapsed branch - built off the full flat `pages` list, never
   // `visibleIds` above, so a page with no checkbox currently on screen is
   // still legible here instead of silently riding along unseen.
   const selectionDescription = useMemo(
-    () => describeSelectedPages(pages ?? [], kbSelection.selected),
-    [pages, kbSelection.selected]
+    () => describeSelectedPages(pages ?? [], kbSelection.selected, showAllSelected ? SHOW_ALL_SELECTED_PAGES : undefined),
+    [pages, kbSelection.selected, showAllSelected]
   );
+  const bulkDelete = useKbBulkActions({
+    active,
+    pages,
+    tree,
+    selected: kbSelection.selected,
+    refresh,
+    setActionError,
+  });
 
   // Switch this tab's own institution (AC5): guarded exactly like selectPage
   // below, since it discards the current page's unsaved edits just as surely.
@@ -250,6 +275,35 @@ export default function KnowledgeTab({
     canMoveDown,
   } = treeActions;
 
+  // K9: the delete confirmation banner (.kbWarnBanner, role="alertdialog")
+  // is NOT converted to the shared ModalShell mechanism - modalAdoptionScan.ts
+  // (src/app/components/ui/) already lists this exact banner in
+  // PERMANENT_EXCLUSIONS with the recorded reason "not an overlay dialog - no
+  // backdrop or portal, nothing to adopt", and modalAdoption.wiring.test.ts
+  // pins the repo-wide dialog-site/adopting counts against that list -
+  // importing ModalShell/useModalDismiss here would both violate that
+  // recorded decision and redden a frozen canary this file set may not edit.
+  // Instead this hand-rolls the two pieces the banner was actually missing
+  // (focus moves INTO it on open, and back to the control that opened it on
+  // close - matching AttachmentsPanel.tsx's own previewTriggerRef precedent)
+  // without importing the shared hook, exactly the way the six existing
+  // HOOK_DESTRUCTURE_SITES hand-wire pieces of it today.
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const deleteBannerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (deleteTargetPage) {
+      deleteBannerRef.current?.focus();
+    } else if (deleteTriggerRef.current) {
+      // Runs for BOTH the confirm path (confirmDeleteRequest unmounts the
+      // banner internally) and the Cancel path (setDeleteTarget(null) below)
+      // - either way `deleteTargetPage` goes back to null, which is the one
+      // signal this effect needs; it does not need to know which button
+      // caused it.
+      deleteTriggerRef.current.focus();
+      deleteTriggerRef.current = null;
+    }
+  }, [deleteTargetPage]);
+
   // Select a page. Returns whether the switch happened - callers that also
   // want to expand ancestors (search results) check this before doing so.
   const selectPage = (id: string): boolean => {
@@ -311,7 +365,17 @@ export default function KnowledgeTab({
         ? {
             knowledgeContext: {
               text: block.text,
-              label: `${selectedPages.length} Knowledge Base page${selectedPages.length === 1 ? "" : "s"}`,
+              // K1: buildKnowledgeContextBlock's includedPages/omittedPages
+              // were computed and then thrown away here - a selection that
+              // did not fit the budget was truncated on a page boundary with
+              // NOTHING telling the instructor a page went missing, right
+              // beneath a disclosure that unconditionally claimed every
+              // selected page was sent. describeKnowledgeContextLabel states
+              // the real included-of-total count whenever anything was
+              // dropped; this label is what GradingRecordingPanel.tsx/the
+              // discussions equivalent actually render to the instructor
+              // once they land, so this is where the omission has to reach.
+              label: describeKnowledgeContextLabel(selectedPages.length, block.includedPages, block.omittedPages),
             },
           }
         : {}),
@@ -343,9 +407,14 @@ export default function KnowledgeTab({
       openRubric: true,
       ...(block.text
         ? {
+            // K1: same fix as startRecordingWithSelection above - see its
+            // comment. This is the higher-stakes of the two paths (the
+            // pipeline this lands on writes feedback a student reads), so a
+            // silently-dropped rubric/policy page here is the worse of the
+            // two instances of the same defect.
             knowledgeContext: {
               text: block.text,
-              label: `${selectedPages.length} Knowledge Base page${selectedPages.length === 1 ? "" : "s"}`,
+              label: describeKnowledgeContextLabel(selectedPages.length, block.includedPages, block.omittedPages),
             },
           }
         : {}),
@@ -460,7 +529,16 @@ export default function KnowledgeTab({
       {addInstitutionFeedback}
       {removeInstitutionError && <p className={styles.error}>{removeInstitutionError}</p>}
 
-      {actionError && <p className={styles.error}>{actionError}</p>}
+      {/* K8: this used to be a bare <p>, with no role at all, while the
+          loading text a few lines below correctly carried role="status"
+          aria-live="polite" - the asymmetry was backwards, since an ERROR is
+          the more urgent of the two. role="alert" is an implicit assertive
+          live region - no aria-live attribute needed alongside it. */}
+      {actionError && (
+        <p className={styles.error} role="alert">
+          {actionError}
+        </p>
+      )}
 
       <div className={styles.kbLayout}>
         {/* Left pane: search, toolbar, tree */}
@@ -473,25 +551,45 @@ export default function KnowledgeTab({
             fullWidth
           />
 
-          {search.trim() && (
-            <div className={styles.kbSearchPanel}>
-              {searchHits.length === 0 ? (
-                <p className={styles.kbTreeEmpty}>No pages match &ldquo;{search.trim()}&rdquo;.</p>
-              ) : (
-                searchHits.map((hit) => (
-                  <button
-                    key={hit.page.id}
-                    type="button"
-                    className={styles.kbSearchHit}
-                    onClick={() => openSearchHit(hit.page.id)}
-                  >
-                    <span className={styles.kbSearchHitTitle}>{hit.page.title.trim() || "Untitled page"}</span>
-                    <span className={styles.kbSearchHitSnippet}>{hit.snippet || "No content."}</span>
-                  </button>
-                ))
-              )}
-            </div>
-          )}
+          {/* K2: wrapped in .kbOverlayAnchor (this file's own class - see its
+              doc comment in KnowledgeTab.module.css) so mounting/unmounting
+              this panel as the search box is typed into never pushes the
+              tree below. */}
+          <div className={kbStyles.kbOverlayAnchor}>
+            {search.trim() && (
+              <div className={`${styles.kbSearchPanel} ${kbStyles.kbOverlayCard}`}>
+                {searchHits.length === 0 ? (
+                  <p className={styles.kbTreeEmpty}>No pages match &ldquo;{search.trim()}&rdquo;.</p>
+                ) : (
+                  searchHits.map((hit) => (
+                    <div key={hit.page.id} className={kbStyles.kbSearchHitRow}>
+                      {/* K6: search used to render a hit panel with no
+                          checkboxes at all, so "select the pages matching
+                          X" was not expressible without opening each hit
+                          from the tree. Wired to the SAME selection
+                          toggle() every tree-row checkbox uses. */}
+                      <Checkbox
+                        size="small"
+                        checked={kbSelection.selected.has(hit.page.id)}
+                        onChange={() => kbSelection.toggle(hit.page.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Select ${hit.page.title.trim() || "Untitled page"}`}
+                        sx={{ padding: "var(--space-1)", flexShrink: 0 }}
+                      />
+                      <button
+                        type="button"
+                        className={`${styles.kbSearchHit} ${kbStyles.kbSearchHitButton}`}
+                        onClick={() => openSearchHit(hit.page.id)}
+                      >
+                        <span className={styles.kbSearchHitTitle}>{hit.page.title.trim() || "Untitled page"}</span>
+                        <span className={styles.kbSearchHitSnippet}>{hit.snippet || "No content."}</span>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
 
           <div className={styles.kbTreeToolbar}>
             <Button
@@ -523,7 +621,20 @@ export default function KnowledgeTab({
               <Button size="small" onClick={() => void reorder("down")} disabled={controlsDisabled || !canMoveDown}>
                 Move down
               </Button>
-              <Button size="small" color="error" onClick={() => setDeleteTarget(selectedPage.id)} disabled={controlsDisabled}>
+              <Button
+                size="small"
+                color="error"
+                onClick={(e) => {
+                  // K9: captured at the moment of opening (event.currentTarget,
+                  // never document.activeElement - AttachmentsPanel.tsx's
+                  // previewTriggerRef is the exact precedent this mirrors),
+                  // so focus can return here once the banner closes instead
+                  // of falling to <body>.
+                  deleteTriggerRef.current = e.currentTarget;
+                  setDeleteTarget(selectedPage.id);
+                }}
+                disabled={controlsDisabled}
+              >
                 Delete
               </Button>
             </div>
@@ -539,92 +650,103 @@ export default function KnowledgeTab({
             />
           )}
 
-          {deleteTargetPage && (
-            <div className={styles.kbWarnBanner} role="alertdialog">
-              <span>
-                Delete &ldquo;{deleteTargetPage.title.trim() || "Untitled page"}&rdquo;
-                {deleteDescendantCount > 0
-                  ? ` and its ${deleteDescendantCount} sub-page${deleteDescendantCount === 1 ? "" : "s"}`
-                  : ""}
-                ? This cannot be undone.
-              </span>
-              <div className={styles.kbWarnActions}>
-                <Button size="small" color="error" variant="contained" onClick={() => void confirmDeleteRequest()}>
-                  Delete
-                </Button>
-                <Button size="small" onClick={() => setDeleteTarget(null)}>
-                  Cancel
-                </Button>
+          {/* K2: same zero-height-anchor overlay treatment as the search
+              panel above - this banner used to insert above the tree in
+              normal flow, so opening it (or the bulk bar below also being
+              open at the same time) could shift tree rows under the
+              cursor. */}
+          <div className={kbStyles.kbOverlayAnchor}>
+            {deleteTargetPage && (
+              <div
+                ref={deleteBannerRef}
+                className={`${styles.kbWarnBanner} ${kbStyles.kbOverlayCard}`}
+                role="alertdialog"
+                aria-modal="true"
+                aria-label="Confirm delete page"
+                tabIndex={-1}
+              >
+                <span>
+                  Delete &ldquo;{deleteTargetPage.title.trim() || "Untitled page"}&rdquo;
+                  {deleteDescendantCount > 0
+                    ? ` and its ${deleteDescendantCount} sub-page${deleteDescendantCount === 1 ? "" : "s"}`
+                    : ""}
+                  ? This cannot be undone.
+                </span>
+                <div className={styles.kbWarnActions}>
+                  <Button size="small" color="error" variant="contained" onClick={() => void confirmDeleteRequest()}>
+                    Delete
+                  </Button>
+                  <Button size="small" onClick={() => setDeleteTarget(null)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Select-all over the currently visible pages (S3) - shown
               whenever there is at least one page, independent of whether
               anything is selected yet (matches FilesView.tsx's own
               "Select all" placement above its bulk bar). */}
           {pages && pages.length > 0 && (
-            <div className={styles.kbTreeToolbar}>
+            <div className={styles.kbTreeToolbar} style={{ flexDirection: "column", alignItems: "flex-start", gap: "var(--space-1)" }}>
               <FormControlLabel
                 className={styles.fieldHint}
                 style={{ display: "inline-flex", gap: "var(--space-2)", alignItems: "center", margin: 0 }}
                 control={
                   <Checkbox
                     size="small"
-                    checked={allVisSelected}
+                    checked={selectAllVisual.checked}
+                    // K6: MUI's own indeterminate prop - previously never
+                    // used anywhere in this repo, but the audit named this
+                    // exact control as the case that needed it: with 40
+                    // pages selected across a collapsed tree, this box used
+                    // to paint fully CHECKED (every VISIBLE root happened to
+                    // be selected), and a click then deselected just those 6
+                    // roots while 34 pages stayed selected with nothing
+                    // showing it. Indeterminate now covers every case where
+                    // "checked" would overclaim.
+                    indeterminate={selectAllVisual.indeterminate}
                     onChange={() => kbSelection.selectAllVisible(visibleIds)}
                     disabled={visibleIds.length === 0}
                   />
                 }
-                label="Select all"
+                label="Select all visible"
               />
+              {/* K6: renamed from "Select all" - the control only ever
+                  merges/unmerges the pages currently ON SCREEN
+                  (visiblePageIds), never a page sitting inside a collapsed
+                  branch. Stated once, plainly, rather than left implicit. */}
+              <span className={styles.fieldHint} style={{ margin: 0 }}>
+                Selects only the pages currently shown - a page inside a collapsed section is not affected.
+              </span>
             </div>
           )}
 
-          {/* Bulk action bar (S6) - appears only once a selection exists,
-              reusing the .bulkBar/.bulkBarHead/.bulkCount shell FilesView.tsx
-              already uses (no new CSS). "Ask AI" (A1) is the one bulk action
-              today - it opens the chat carrying the selection as context in
-              a single click (D3), with no options to configure first. */}
-          {kbSelection.selected.size > 0 && (
-            <div className={styles.bulkBar}>
-              <div className={styles.bulkBarHead}>
-                <span className={styles.bulkCount}>
-                  {kbSelection.selected.size} page{kbSelection.selected.size === 1 ? "" : "s"} selected
-                </span>
-                <Button variant="outlined" size="small" onClick={kbSelection.clear}>
-                  Clear
-                </Button>
-              </div>
-              {/* B5: names the selection by title (including pages inside a
-                  collapsed branch, which have no checkbox visible right now)
-                  so the count above is legible without expanding the tree. */}
-              <div className={styles.bulkRow}>
-                <span className={styles.bulkLabel}>Selected</span>
-                <span className={styles.fieldHint} style={{ margin: 0 }}>
-                  {selectionDescription.text}
-                </span>
-              </div>
-              <div className={styles.bulkRow}>
-                <span className={styles.bulkLabel}>Actions</span>
-                <Button variant="contained" size="small" onClick={askAiAboutSelection}>
-                  Ask AI
-                </Button>
-                <Button variant="outlined" size="small" onClick={startRecordingWithSelection}>
-                  Start recording
-                </Button>
-                <Button variant="outlined" size="small" onClick={startGradingWithSelection}>
-                  Grade via recording
-                </Button>
-              </div>
-              {/* B5: nothing else on this surface says selecting a page sends
-                  its full text to the model - state it once, here, next to
-                  the actions that actually do it. */}
-              <p className={styles.fieldHint} style={{ margin: 0 }}>
-                These pages are sent to the model as context for the action you pick.
-              </p>
-            </div>
-          )}
+          {/* Bulk action bar (S6) - appears only once a selection exists.
+              K2: overlay-anchored like the search panel and delete banner
+              above - the first checkbox tick used to insert this whole card
+              above the tree in normal flow, jumping every row (including the
+              one just clicked) down under the cursor. Extracted to
+              KnowledgeBulkBar.tsx (pure structural split, K1-K10's own fixes
+              pushed this file over the 950-line cap) - the anchor wrapper
+              itself stays here since it also wraps two OTHER surfaces this
+              component does not own. */}
+          <div className={kbStyles.kbOverlayAnchor}>
+            {kbSelection.selected.size > 0 && (
+              <KnowledgeBulkBar
+                selectedCount={kbSelection.selected.size}
+                selectionDescription={selectionDescription}
+                showAllSelected={showAllSelected}
+                onShowAllSelectedChange={setShowAllSelected}
+                onClear={kbSelection.clear}
+                onAskAi={askAiAboutSelection}
+                onStartRecording={startRecordingWithSelection}
+                onStartGrading={startGradingWithSelection}
+                bulkDelete={bulkDelete}
+              />
+            )}
+          </div>
 
           {loadState === "loading" && <p className={styles.fieldHint} role="status" aria-live="polite">Loading {active} pages…</p>}
           {loadState === "error" && <p className={styles.error}>{loadError}</p>}

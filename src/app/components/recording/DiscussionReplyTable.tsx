@@ -2,13 +2,15 @@
 
 // Split out of DiscussionRepliesPanel.tsx (that file was pressing on the
 // 1000-line ceiling enforced by recording-split.structure.test.ts over
-// src/app/components/recording/). This is a pure extraction of the
-// `totalCount > 0` subtree (the search box, the two standing hints, and the
-// table itself: the sortable headers, the body, and the row mapping) - the
-// panel keeps the gate that decides whether to render this component at all
-// (see that file's own "F11/F13" comment), the controls, the status row, the
-// notices, the empty states, the post-stop summary and the armed destructive
-// buttons.
+// src/app/components/recording/). Originally a pure extraction of the
+// `totalCount > 0` subtree; the search box and "Showing N of M" have since
+// moved out AGAIN, into DiscussionReplyToolbar.tsx (D4's sticky bar), so this
+// file now holds only the two standing hints and the table itself - the
+// sortable headers, the body, the row mapping, and F13's (now four-branch,
+// per D3) empty-filter state. The panel keeps the gate that decides whether
+// to render this component at all (see that file's own "F11/F13" comment),
+// the controls, the status row, the notices, the other empty states, the
+// post-stop summary and the armed destructive buttons.
 //
 // Every callback prop below is expected to be a STABLE reference from the
 // panel (either forwarded straight through from useDiscussionReplies.ts, or
@@ -19,7 +21,6 @@
 // inline arrow, no fresh object literal at this new component boundary -
 // exactly as the panel used to pass them directly.
 
-import { TextField, IconButton, InputAdornment } from "@mui/material";
 import styles from "../../page.module.css";
 // Section 6: the shared table skin - AutomationsTable.module.css's own
 // header declares it the idiom the app's tables read as one system under.
@@ -30,7 +31,6 @@ import styles from "../../page.module.css";
 import tableStyles from "../workflows/AutomationsTable.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
 import { type ReplyRow, type ReplyResource, type ReplySort } from "./discussion-capture";
-import { CloseIcon } from "./discussion-icons";
 import DiscussionReplyRow, { DISCUSSION_TABLE_COLUMN_COUNT } from "./DiscussionReplyRow";
 import type { LlmProvider } from "@/lib/llm";
 
@@ -57,9 +57,14 @@ function SortGlyph({ asc }: { asc: boolean }) {
 
 export interface DiscussionReplyTableProps {
   rows: ReplyRow[];
-  totalCount: number;
+  /** D3: the current text query and status-chip label, used ONLY to build
+   *  the right empty-state message and to know a Clear control is needed at
+   *  all - the actual filtering already happened before `rows` reached this
+   *  component (the panel applies filterRowsByQuery then filterRowsByStatus).
+   *  `statusFilterLabel` is null for "all". */
   filterText: string;
-  setFilterText: (text: string) => void;
+  statusFilterLabel: string | null;
+  onClearFilters: () => void;
   sort: ReplySort;
   setSort: (sort: ReplySort) => void;
   llmProvider: LlmProvider;
@@ -71,6 +76,19 @@ export interface DiscussionReplyTableProps {
   addressByName: boolean;
   editReply: (id: string, text: string) => void;
   moveRow: (id: string, dir: "up" | "down") => void;
+  /** D3 mitigation: `moveRow` (useReplyRows.ts) computes visible adjacency
+   *  from the TEXT filter only - it has no way to know about this group's
+   *  NEW status filter, since that concept lives entirely in this file set
+   *  and the mutator's signature is pinned two files upstream
+   *  (useDiscussionReplies.ts, out of scope - see discussion-reply-flags.ts's
+   *  header for the full account of why). Reordering while a status chip
+   *  narrows the view would therefore silently swap against a neighbour the
+   *  status filter itself is hiding, reintroducing the exact "swap targets
+   *  an invisible neighbour and nothing appears to happen" bug F15 fixed for
+   *  the text filter. Rather than ship that silently, reordering is refused
+   *  (aria-disabled, with an announced reason) whenever a status chip other
+   *  than "All" is active - see DiscussionReplyRow.tsx's handleMoveUp/Down. */
+  reorderDisabled: boolean;
   onRemove: (id: string) => void;
   retryRow: (id: string) => void;
   retryResources: (id: string) => void;
@@ -82,6 +100,15 @@ export interface DiscussionReplyTableProps {
   /** Resource-controls feature: per-row targeted search. Forwarded straight
    *  through from R-D (useReplyResources.ts's `searchRow`). */
   searchRow: (id: string) => void;
+  /** D1/D9: see discussion-reply-flags.ts's own header for why these are a
+   *  side channel rather than ReplyRow fields. Plain per-row VALUES (not the
+   *  whole flags map) so an unrelated row's flag changing does not defeat
+   *  this row's own React.memo. */
+  handledAtById: Readonly<Record<string, number>>;
+  skippedById: Readonly<Record<string, boolean>>;
+  onMarkHandled: (id: string) => void;
+  onToggleHandled: (id: string) => void;
+  onToggleSkip: (id: string) => void;
   registerRemoveRef: (id: string, el: HTMLButtonElement | null) => void;
   announce: (text: string) => void;
   onCopyError: (text: string) => void;
@@ -89,72 +116,47 @@ export interface DiscussionReplyTableProps {
 
 export default function DiscussionReplyTable({
   rows,
-  totalCount,
   filterText,
-  setFilterText,
+  statusFilterLabel,
+  onClearFilters,
   sort,
   setSort,
   llmProvider,
   addressByName,
   editReply,
   moveRow,
+  reorderDisabled,
   onRemove,
   retryRow,
   retryResources,
   removeResource,
   insertResource,
   searchRow,
+  handledAtById,
+  skippedById,
+  onMarkHandled,
+  onToggleHandled,
+  onToggleSkip,
   registerRemoveRef,
   announce,
   onCopyError,
 }: DiscussionReplyTableProps) {
+  // D3, extending F13: a fourth branch - the current filter (text, status, or
+  // both) matches nothing. `rows.length === 0` here can only mean at least
+  // one of the two is active (see the by-reference "all"/"" fast paths both
+  // filter functions use), so this string is never built for nothing to say.
+  const query = filterText.trim();
+  const emptyMessage =
+    query && statusFilterLabel
+      ? `No replies match "${query}" in "${statusFilterLabel}".`
+      : query
+      ? `No replies match "${query}".`
+      : statusFilterLabel
+      ? `No replies are "${statusFilterLabel}".`
+      : "No replies match the current filter.";
+
   return (
     <>
-      {/* F8/F0-2: the search box, bound to the hook's filterText. */}
-      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-        <TextField
-          type="search"
-          size="small"
-          label="Search replies"
-          placeholder="Search by name or keyword"
-          value={filterText}
-          onChange={(e) => setFilterText(e.target.value)}
-          sx={{ minWidth: 220, maxWidth: 320 }}
-          // Item 3's own "clear affordance" on the field itself, distinct
-          // from F14's dedicated Clear control below (which sits next to
-          // the "Showing N of M" count and only appears once a filter is
-          // actually active) - this one lives on the box at all times a
-          // query is typed, matching the standard search-field pattern.
-          slotProps={{
-            input: {
-              endAdornment: filterText ? (
-                <InputAdornment position="end">
-                  <IconButton size="small" aria-label="Clear search" onClick={() => setFilterText("")}>
-                    <CloseIcon />
-                  </IconButton>
-                </InputAdornment>
-              ) : undefined,
-            },
-          }}
-        />
-        {/* F14: "Showing 4 of 37 replies." - the denominator is
-            `totalCount`, the SAME unfiltered count every other line on
-            this panel reads (F11), so a filtered table can never be
-            mistaken for a short one; the numerator is `rows.length`,
-            which is exactly what is rendered below. Rendered only while
-            a filter is active (F0-2: absent, the plain table already
-            communicates its own size via AC7's post-stop summary etc. -
-            this line exists specifically to disambiguate "filtered"
-            from "short"). */}
-        {filterText.trim() !== "" && (
-          <span className={styles.fieldHint} style={{ margin: 0 }}>
-            {`Showing ${rows.length} of ${totalCount} repl${totalCount === 1 ? "y" : "ies"}.`}{" "}
-            <button type="button" className={styles.linkButton} onClick={() => setFilterText("")}>
-              Clear
-            </button>
-          </span>
-        )}
-      </div>
       {/* docs/discussion-reply-resources-acceptance-criteria.md R10a:
           the standing hint, once, near the table. */}
       <p className={styles.fieldHint}>
@@ -229,9 +231,16 @@ export default function DiscussionReplyTable({
                 rows - just not ones matching the query. */}
             {rows.length === 0 ? (
               <tr>
+                {/* D7: this whole <tr> unmounts the instant a filter clears -
+                    the THIRD of the three focus-drop sites this group fixes.
+                    onClearFilters (the panel's handleClearFilters, threaded
+                    down through the toolbar's own copy of the same helper)
+                    focuses the search input, which survives this row's
+                    unmount untouched, so a plain synchronous call is enough -
+                    no keyed-ref/useLayoutEffect dance is needed here. */}
                 <td colSpan={DISCUSSION_TABLE_COLUMN_COUNT} className={panelStyles.filterEmptyCell}>
-                  {`No replies match "${filterText.trim()}".`}{" "}
-                  <button type="button" className={styles.linkButton} onClick={() => setFilterText("")}>
+                  {emptyMessage}{" "}
+                  <button type="button" className={styles.linkButton} onClick={onClearFilters}>
                     Clear
                   </button>
                 </td>
@@ -252,6 +261,7 @@ export default function DiscussionReplyTable({
                   // here are already scoped correctly by construction.
                   isFirst={i === 0}
                   isLast={i === rows.length - 1}
+                  reorderDisabled={reorderDisabled}
                   onEditReply={editReply}
                   onMove={moveRow}
                   onRemove={onRemove}
@@ -260,6 +270,11 @@ export default function DiscussionReplyTable({
                   onRemoveResource={removeResource}
                   onInsertResource={insertResource}
                   onSearchRow={searchRow}
+                  handledAt={handledAtById[row.id]}
+                  skipped={!!skippedById[row.id]}
+                  onMarkHandled={onMarkHandled}
+                  onToggleHandled={onToggleHandled}
+                  onToggleSkip={onToggleSkip}
                   registerRemoveRef={registerRemoveRef}
                   announce={announce}
                   onCopyError={onCopyError}

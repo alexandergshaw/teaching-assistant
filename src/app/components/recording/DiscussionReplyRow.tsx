@@ -27,10 +27,10 @@
 // stronger than a column header because it names the subject too.
 
 import { memo, useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
-import { Button, IconButton, TextField } from "@mui/material";
+import { Button, IconButton, Menu, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
-import { CopyIcon, CheckIcon, ArrowUpIcon, ArrowDownIcon, CloseIcon } from "./discussion-icons";
+import { CopyIcon, CheckIcon, ArrowUpIcon, ArrowDownIcon, CloseIcon, MoreIcon } from "./discussion-icons";
 import { replyClipboardText, type ReplyRow, type ReplyRowState, type ReplyResource } from "./discussion-capture";
 import { RESOURCE_KIND_LABELS } from "@/lib/resource-kind";
 // F1a/F2/F3 (docs/discussion-reply-sort-filter-acceptance-criteria.md section
@@ -106,10 +106,20 @@ const visuallyHiddenHint: React.CSSProperties = {
  * "Name" header/cell splits into independent First/Last columns. */
 export const DISCUSSION_TABLE_COLUMN_COUNT = 5;
 
+// D2 (docs/aesthetics-pass-acceptance-criteria.md section 4b): the mapping
+// was backwards. A machine-drafted, UNTOUCHED reply was rendering the
+// loudest, greenest badge in the row ("Ready", ghBadgeSuccess) while
+// hand-written prose - the higher-trust state - rendered quieter ("Yours",
+// ghBadgeNeutral). Green now means "the instructor has actually copied this
+// out" (the `handledAt` badge below, R10's ban on a green RESOURCE badge is
+// unaffected - this is the instructor's own recorded action, not a claim
+// about a link). `handledAt` deliberately does NOT enter this map - it is
+// orthogonal to `state` exactly as `resourceState` already is, and renders as
+// its own badge below, never folded into this lookup.
 const STATE_BADGE: Record<ReplyRowState, { label: string; variant: "ghBadgeNeutral" | "ghBadgeWarning" | "ghBadgeSuccess" | "ghBadgeDanger" }> = {
   pending: { label: "Waiting", variant: "ghBadgeNeutral" },
   drafting: { label: "Drafting", variant: "ghBadgeWarning" },
-  ready: { label: "Ready", variant: "ghBadgeSuccess" },
+  ready: { label: "Drafted", variant: "ghBadgeNeutral" },
   failed: { label: "Failed", variant: "ghBadgeDanger" },
 };
 
@@ -133,6 +143,11 @@ export interface DiscussionReplyRowProps {
    *  `discussion-draft-loop.ts` calls at dispatch time, so the marker can
    *  never drift from what dispatch actually decided. */
   addressByName: boolean;
+  /** D3 mitigation (DiscussionReplyTable.tsx's own doc comment on the same
+   *  prop has the full account): true whenever a status chip other than
+   *  "All" is active. `moveRow` cannot see that filter, so reordering is
+   *  refused rather than silently swapping against a hidden neighbour. */
+  reorderDisabled: boolean;
   onEditReply: (id: string, text: string) => void;
   /** BL3: one stable callback (the orchestrator's own `moveRow`, passed
    *  through unwrapped) rather than two inline arrows built fresh on every
@@ -160,6 +175,21 @@ export interface DiscussionReplyRowProps {
    *  the table-wide resource queue (useReplyResources.ts's `searchRow` doc
    *  comment has the full account). */
   onSearchRow: (id: string) => void;
+  /** D1 (docs/aesthetics-pass-acceptance-criteria.md section 4b): the
+   *  moment a successful Copy reply set this row's `handledAt`, keyed by row
+   *  id in a side table this file set owns entirely (see
+   *  discussion-reply-flags.ts's header for why it is not a ReplyRow field
+   *  in this build). `undefined` means "never copied out". */
+  handledAt: number | undefined;
+  /** D1: set optimistically on a successful Copy reply (handleCopy below). */
+  onMarkHandled: (id: string) => void;
+  /** D1: the per-row overflow menu's manual set/clear, for an instructor who
+   *  pasted the reply from elsewhere. */
+  onToggleHandled: (id: string) => void;
+  /** D9: "this post doesn't need a reply" - reversible in one click, unlike
+   *  Remove. */
+  skipped: boolean;
+  onToggleSkip: (id: string) => void;
   /** AC19/modal-focus-restoration decision 5: a keyed ref map so focus after
    * a removal can move to the NEXT row's Remove button - never
    * document.body. Registered on both the armed and unarmed Remove button
@@ -187,6 +217,7 @@ function DiscussionReplyRowImpl({
   isFirst,
   isLast,
   addressByName,
+  reorderDisabled,
   onEditReply,
   onMove,
   onRemove,
@@ -195,6 +226,11 @@ function DiscussionReplyRowImpl({
   onRemoveResource,
   onInsertResource,
   onSearchRow,
+  handledAt,
+  onMarkHandled,
+  onToggleHandled,
+  skipped,
+  onToggleSkip,
   registerRemoveRef,
   announce,
   onCopyError,
@@ -209,9 +245,14 @@ function DiscussionReplyRowImpl({
   // copying the post would clear the reply's own confirmation.
   const [postCopied, setPostCopied] = useState(false);
   const postCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // AC19: "Remove" arms only when the row holds hand-written work
-  // (row.userEdited) - re-scrolling to recapture a machine-read post costs
-  // nothing to redo, prose the instructor typed does.
+  // D5 (docs/aesthetics-pass-acceptance-criteria.md section 4b): Remove used
+  // to arm ONLY when `row.userEdited` - a machine-drafted reply was one
+  // unconfirmed click away from permanent deletion (it also deletes the
+  // captured POST, not just the reply), with no undo, on a live board that
+  // may have moved by the time the instructor re-scrolled to recapture it.
+  // Arms for EVERY row now; the AC's stated rationale for the old asymmetry
+  // ("re-scrolling costs nothing") is withdrawn as false at 30 posts on a
+  // board that may no longer be open.
   const [removeArmed, setRemoveArmed] = useState(false);
   // Editing (or a fresh draft landing) invalidates a pending remove
   // confirmation - the thing it was armed to protect has changed under it.
@@ -224,6 +265,12 @@ function DiscussionReplyRowImpl({
     setLastReplyForArm(row.reply);
     if (removeArmed) setRemoveArmed(false);
   }
+
+  // D5: the per-row overflow menu (Remove, plus D1's manual handled toggle
+  // and D9's skip toggle) - TakesPanel.tsx's own per-take MUI Menu
+  // (TakesPanel.tsx:4,208) is the idiom copied here.
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const closeMenu = useCallback(() => setMenuAnchor(null), []);
 
   useEffect(
     () => () => {
@@ -306,6 +353,15 @@ function DiscussionReplyRowImpl({
       // scope) - a second copy click restarts the window rather than letting
       // an earlier timer clear a later confirmation early.
       copyTimerRef.current = setTimeout(() => setCopied(false), COPY_RESET_MS);
+      // D1: set optimistically on a successful copy.
+      onMarkHandled(row.id);
+      // D10: AC16 pins that the BUTTON's own text must not swap - only what
+      // the CONFIRMATION says changes. `replyClipboardText` (D10's own
+      // "leave the payload clean" rule) never gains the author's name - that
+      // would be a name pasted straight into a Canvas composer (R9b) - so the
+      // name only ever reaches the confirmation, never what actually lands
+      // on the clipboard.
+      announce(`Copied the reply to ${row.author}.`);
     } catch {
       // S3/AC16: both channels - the polite live region for assistive tech,
       // and the panel's visible error line for a sighted user. Neither
@@ -330,6 +386,13 @@ function DiscussionReplyRowImpl({
   };
 
   const handleMoveUp = () => {
+    // D3 mitigation: refuse rather than silently swap against a neighbour
+    // the active status filter is hiding - see this row's own `reorderDisabled`
+    // prop doc comment (and DiscussionReplyTable.tsx's matching one) for why.
+    if (reorderDisabled) {
+      announce("Clear the status filter to reorder rows.");
+      return;
+    }
     // AC14: the boundary button stays focusable (aria-disabled, never
     // disabled) and its handler is a no-op that announces, rather than doing
     // nothing silently.
@@ -341,6 +404,10 @@ function DiscussionReplyRowImpl({
   };
 
   const handleMoveDown = () => {
+    if (reorderDisabled) {
+      announce("Clear the status filter to reorder rows.");
+      return;
+    }
     if (isLast) {
       announce("Already last.");
       return;
@@ -348,14 +415,37 @@ function DiscussionReplyRowImpl({
     onMove(row.id, "down");
   };
 
-  const handleRemoveClick = () => {
-    if (row.userEdited && !removeArmed) {
+  // D5: arms for EVERY row now (see the `removeArmed` doc comment above) and
+  // lives behind the overflow menu - the first click swaps this MenuItem's
+  // own label to "Confirm removal" and deliberately does NOT close the menu,
+  // so the second click is still reachable without reopening anything. Any
+  // OTHER way the menu closes (Escape, a backdrop click) disarms it, via the
+  // Menu's own onClose below.
+  const handleRemoveFromMenu = () => {
+    if (!removeArmed) {
       setRemoveArmed(true);
-      announce(`Removing the reply to ${row.author} will lose what you wrote. Click Remove again to confirm.`);
+      announce(`Removing the reply to ${row.author} cannot be undone. Choose "Confirm removal" to proceed.`);
       return;
     }
     setRemoveArmed(false);
+    closeMenu();
     onRemove(row.id);
+  };
+
+  // D1: the overflow menu's manual set/clear - for an instructor who pasted
+  // this reply from elsewhere and wants the table to reflect that.
+  const handleToggleHandledFromMenu = () => {
+    closeMenu();
+    onToggleHandled(row.id);
+    announce(handledAt !== undefined ? `Cleared "handled" for the reply to ${row.author}.` : `Marked the reply to ${row.author} as handled.`);
+  };
+
+  // D9: reversible in one click - the last reason an instructor destroyed a
+  // captured post outright (Remove) was having no way to say "skip this one".
+  const handleToggleSkipFromMenu = () => {
+    closeMenu();
+    onToggleSkip(row.id);
+    announce(skipped ? `Unskipped the post by ${row.author}.` : `Skipped the post by ${row.author} - no reply needed.`);
   };
 
   const badge = STATE_BADGE[row.state];
@@ -385,10 +475,17 @@ function DiscussionReplyRowImpl({
   const greetingDegraded = isGreetingDegradedForAuthor(addressByName, row.author);
   const greetingHintId = `disc-greeting-hint-${row.id}`;
 
+  // D9: applied to BOTH <tr>s of one logical row - this component renders
+  // two per row (the header bar and the full-width continuation), so a class
+  // on only one would leave the row split visually between a dimmed half and
+  // a full-strength half.
+  const summaryRowClassName = skipped ? `${panelStyles.summaryRow} ${panelStyles.rowSkipped}` : panelStyles.summaryRow;
+  const bodyRowClassName = skipped ? `${panelStyles.bodyRow} ${panelStyles.rowSkipped}` : panelStyles.bodyRow;
+
   return (
     <>
       {/* --- the header bar: First / Last / Captured / Status / Actions --- */}
-      <tr className={panelStyles.summaryRow}>
+      <tr className={summaryRowClassName}>
         <th scope="row" aria-describedby={greetingDegraded ? greetingHintId : undefined}>
           {nameParts.firstName}
           {/* C1c-i: the same visible-marker idiom as the "(derived)" surname
@@ -447,9 +544,27 @@ function DiscussionReplyRowImpl({
         <td>{formatCapturedTime(row.firstSeenAt)}</td>
         <td>
           <span className={`${styles.ghBadge} ${styles[badge.variant]}`}>{badge.label}</span>
-          {row.userEdited && (
+          {/* D2: green now means "the instructor has actually copied this
+              reply out" - the highest-trust state, not the model's own
+              untouched draft. Checked FIRST: a row can be both userEdited
+              and handledAt-set (edited, then copied), and "copied" is the
+              more complete fact of the two. */}
+          {handledAt !== undefined ? (
+            <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`} style={{ marginLeft: "var(--space-1)" }}>
+              {`Copied ${formatCapturedTime(handledAt)}`}
+            </span>
+          ) : (
+            row.userEdited && (
+              <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`} style={{ marginLeft: "var(--space-1)" }}>
+                Edited by you
+              </span>
+            )
+          )}
+          {/* D9: a post the instructor marked "no reply needed" - reversible
+              via the overflow menu below. */}
+          {skipped && (
             <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: "var(--space-1)" }}>
-              Yours
+              Skipped
             </span>
           )}
           {/* docs/discussion-thread-structure-acceptance-criteria.md T5/T1a:
@@ -483,14 +598,12 @@ function DiscussionReplyRowImpl({
               Replying to {row.replyingToAuthor}
             </p>
           )}
-          {/* AC17a: plain text, never role="alert" - a failed batch fails up
-              to five rows at once and five assertive interruptions in a row
-              is the exact defect this avoids. */}
-          {row.state === "failed" && row.error && (
-            <p className={styles.error} style={{ marginTop: "var(--space-1)" }}>
-              {row.error}
-            </p>
-          )}
+          {/* D8: the real failure reason moved OUT of this cell - see the
+              reply block below. This narrow column was rendering it at
+              styles.error's --font-size-lg, the loudest text in the row, in
+              its narrowest column. The reason itself is unchanged (still the
+              real provider message, never collapsed to a generic string -
+              DEV_LOOP.md's own recorded regression on this exact point). */}
         </td>
         <td>
           <div className={`${styles.ghActions} ${panelStyles.rowActions}`}>
@@ -523,55 +636,73 @@ function DiscussionReplyRowImpl({
                 Retry draft
               </Button>
             )}
-            {/* Section 5b: Move up/down become icon-only IconButtons to free
-                ~180px for Copy reply to go first. aria-disabled (never
-                disabled) and the tab-order rule survive verbatim. */}
+            {/* D5: Move up/down decongest into a hover/focus-reveal cluster
+                (.hoverReveal, DiscussionRepliesPanel.module.css - the same
+                recipe CoursesTable.module.css:300-389 uses for its own
+                per-cell menu trigger, copied whole). Still icon-only
+                IconButtons, still aria-disabled (never disabled), still
+                after Copy reply in DOM order - only the reveal behaviour and
+                the physical grouping are new. */}
+            <div className={panelStyles.hoverReveal}>
+              <IconButton
+                size="small"
+                aria-disabled={isFirst || reorderDisabled}
+                onClick={handleMoveUp}
+                title="Move up"
+                aria-label={`Move the reply to ${row.author} up`}
+                sx={isFirst || reorderDisabled ? { opacity: 0.5 } : undefined}
+              >
+                <ArrowUpIcon />
+              </IconButton>
+              <IconButton
+                size="small"
+                aria-disabled={isLast || reorderDisabled}
+                onClick={handleMoveDown}
+                title="Move down"
+                aria-label={`Move the reply to ${row.author} down`}
+                sx={isLast || reorderDisabled ? { opacity: 0.5 } : undefined}
+              >
+                <ArrowDownIcon />
+              </IconButton>
+            </div>
+            {/* D5: Remove (plus D1's manual handled toggle and D9's skip
+                toggle) moves behind a per-row overflow menu - the idiom is
+                TakesPanel.tsx's own per-take MUI Menu (TakesPanel.tsx:4,208).
+                The trigger itself is what `registerRemoveRef` now points at
+                (the same generic "this row's remove-related focus target"
+                contract the panel's keyed-ref focus restoration already
+                expects - see DiscussionRepliesPanel.tsx's own comment on
+                that map), since the actual Remove control only exists while
+                the menu is open. */}
             <IconButton
               size="small"
-              aria-disabled={isFirst}
-              onClick={handleMoveUp}
-              title="Move up"
-              aria-label={`Move the reply to ${row.author} up`}
-              sx={isFirst ? { opacity: 0.5 } : undefined}
+              ref={(el) => registerRemoveRef(row.id, el)}
+              aria-label={`More actions for the reply to ${row.author}`}
+              aria-haspopup="menu"
+              aria-expanded={menuAnchor !== null}
+              onClick={(e) => setMenuAnchor(e.currentTarget)}
             >
-              <ArrowUpIcon />
+              <MoreIcon />
             </IconButton>
-            <IconButton
-              size="small"
-              aria-disabled={isLast}
-              onClick={handleMoveDown}
-              title="Move down"
-              aria-label={`Move the reply to ${row.author} down`}
-              sx={isLast ? { opacity: 0.5 } : undefined}
+            <Menu
+              anchorEl={menuAnchor}
+              open={menuAnchor !== null}
+              onClose={() => {
+                closeMenu();
+                // Any close OTHER than the confirm click itself (which
+                // already resets this and closes the menu in
+                // handleRemoveFromMenu) disarms a pending remove - Escape or
+                // a backdrop click must not leave the NEXT open of this menu
+                // silently pre-armed.
+                setRemoveArmed(false);
+              }}
             >
-              <ArrowDownIcon />
-            </IconButton>
-            {/* AC19: two literal branches (not one Button with a ternary
-                aria-label) so React reconciles them as updates to the SAME
-                underlying element - no remount, no lost focus on arming.
-                TaskAttachmentsDialog.tsx:571-598 is the precedent. */}
-            {removeArmed ? (
-              <Button
-                size="small"
-                color="error"
-                ref={(el) => registerRemoveRef(row.id, el)}
-                aria-label={`Confirm removal of the reply to ${row.author}`}
-                onClick={handleRemoveClick}
-                onBlur={() => setRemoveArmed(false)}
-              >
-                Confirm
-              </Button>
-            ) : (
-              <Button
-                size="small"
-                color="error"
-                ref={(el) => registerRemoveRef(row.id, el)}
-                aria-label={`Remove the reply to ${row.author}`}
-                onClick={handleRemoveClick}
-              >
-                Remove
-              </Button>
-            )}
+              <MenuItem onClick={handleToggleSkipFromMenu}>{skipped ? "Unskip this post" : "Skip - no reply needed"}</MenuItem>
+              <MenuItem onClick={handleToggleHandledFromMenu}>{handledAt !== undefined ? "Clear handled" : "Mark as handled"}</MenuItem>
+              <MenuItem onClick={handleRemoveFromMenu} sx={{ color: "var(--danger)" }}>
+                {removeArmed ? "Confirm removal" : "Remove"}
+              </MenuItem>
+            </Menu>
           </div>
         </td>
       </tr>
@@ -579,7 +710,7 @@ function DiscussionReplyRowImpl({
       {/* --- the continuation row: full width, ALWAYS open, no disclosure
           click. Post and reply side by side in a CSS grid; resources render
           beneath the reply, never inside the textbox. --- */}
-      <tr className={panelStyles.bodyRow}>
+      <tr className={bodyRowClassName}>
         <td colSpan={DISCUSSION_TABLE_COLUMN_COUNT}>
           <div className={panelStyles.rowBody}>
             <div className={panelStyles.postBlock}>
@@ -618,6 +749,37 @@ function DiscussionReplyRowImpl({
             </div>
 
             <div className={panelStyles.replyBlock}>
+              {/* D10: the transient confirmation sentence - reuses the same
+                  `copied`/COPY_RESET_MS local state the icon swap already
+                  keeps row-local (React.memo). The button's own text never
+                  swaps (AC16); only this line and the icon do. */}
+              {copied && (
+                <p className={styles.ghMeta} style={{ margin: 0 }}>
+                  {`Copied the reply to ${row.author}.`}
+                </p>
+              )}
+              {/* D8: "Drafting" used to render an empty box - the placeholder
+                  below is gated on state === "pending", so a drafting row
+                  showed nothing at all. A skeleton (aria-hidden - decorative)
+                  plus a real, screen-reader-visible caption. */}
+              {row.state === "drafting" && (
+                <>
+                  <div aria-hidden="true">
+                    <span className={panelStyles.skeletonLine} style={{ width: "92%" }} />
+                    <span className={panelStyles.skeletonLine} style={{ width: "78%" }} />
+                    <span className={panelStyles.skeletonLine} style={{ width: "55%" }} />
+                  </div>
+                  <p className={styles.fieldHint} style={{ margin: 0 }}>{`Drafting a reply to ${row.author}…`}</p>
+                </>
+              )}
+              {/* D8: the real provider failure reason, relocated here from
+                  the narrow Status cell (styles.error's --font-size-lg, the
+                  loudest text in the row, in its narrowest column) - into the
+                  reply block, at --font-size-md. The reason itself is
+                  unchanged: still the real message, never a generic string
+                  (AC17a's plain-text-not-role=alert treatment is unchanged
+                  too - a failed batch can fail up to five rows at once). */}
+              {row.state === "failed" && row.error && <p className={panelStyles.replyErrorText}>{row.error}</p>}
               <TextField
                 value={row.reply}
                 onChange={(e) => onEditReply(row.id, e.target.value)}
@@ -679,12 +841,17 @@ function DiscussionReplyRowImpl({
               {!!row.resources?.length && (
                 <ul className={panelStyles.resourceList}>
                   {row.resources.map((r) => (
-                    // F4 fix: stacked (badge/link/remove on one line, the
-                    // note beneath) rather than .resourceItem's default
-                    // single-line row - overridden inline rather than by
-                    // adding a class to DiscussionRepliesPanel.module.css,
-                    // which is out of this fixer pass's file set.
-                    <li key={r.url} className={panelStyles.resourceItem} style={{ flexDirection: "column", alignItems: "stretch" }}>
+                    // D11 (AM25, "one styling authority per element"): this
+                    // used to be .resourceItem PLUS an inline style
+                    // overriding that same class's flex-direction/align-items
+                    // - two authorities on one element, on the grounds (a
+                    // module out of a since-closed fixer pass's file set)
+                    // that no longer apply now that this file owns
+                    // DiscussionRepliesPanel.module.css directly.
+                    // .resourceItemStacked composes with .resourceItem
+                    // instead (F4's stacked layout - badge/link/remove on one
+                    // line, the note beneath).
+                    <li key={r.url} className={`${panelStyles.resourceItem} ${panelStyles.resourceItemStacked}`}>
                       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", minWidth: 0 }}>
                         <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>{RESOURCE_KIND_LABELS[r.kind]}</span>
                         <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ minWidth: 0 }}>

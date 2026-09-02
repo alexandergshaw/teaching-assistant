@@ -14,8 +14,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Autocomplete from "@mui/material/Autocomplete";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import type { Course } from "@/lib/supabase/courses";
-import { rosterToRows } from "@/lib/courses-tab-helpers";
+import { rosterToRows, rowsToRoster } from "@/lib/courses-tab-helpers";
 import { repoSlug, studentRepoName } from "@/lib/student-repo-names";
 import {
   STATUS_LABELS,
@@ -26,15 +28,71 @@ import {
 } from "@/lib/student-repo-status";
 import type { RepoPermission } from "@/lib/github";
 import { useStudentRepoInvitations, rowKey } from "./useStudentRepoInvitations";
+import { overlayRosterUsernames, canonicalNameKey } from "@/app/components/repo-grades/rosterUsernameOverlay";
+import {
+  filterRosterProvisionRows,
+  sortRosterProvisionRows,
+  rosterProvisionFilterIsActive,
+  ariaSortForField,
+  toggleRosterProvisionSort,
+  DEFAULT_ROSTER_PROVISION_SORT,
+  type RosterProvisionRow,
+  type RosterProvisionFilter,
+  type RosterProvisionSortState,
+} from "@/lib/roster-provision-table";
 import styles from "../../page.module.css";
 import tableStyles from "./CoursesTable.module.css";
 
 export interface StudentRepoRosterProps {
   course: Course;
   ownedRepos: string[] | null;
+  /** Bumped by RosterCell's complement badge (R5 - "N with no GitHub
+   * username" as a one-click filter). Any change (including the value
+   * already being positive on first mount, e.g. the badge triggered this
+   * panel's very first expand) arms the "Needs a GitHub username" filter
+   * and clears the others, so the badge's promise ("expands the panel
+   * already filtered to the un-handled students") holds whether this panel
+   * is mounting fresh or was already open. */
+  focusUnhandledSignal?: number;
 }
 
 type RowState = StudentRepoInvitationState | "unresolved";
+
+function rosterFilterStorageKey(field: string, courseId: string): string {
+  return `ta-roster-provision-filter-${field}-${courseId}`;
+}
+
+function usePersistedBoolean(key: string, fallback: boolean) {
+  const [value, setValue] = useState(() => {
+    if (typeof window === "undefined") return fallback;
+    const stored = localStorage.getItem(key);
+    return stored === null ? fallback : stored === "1";
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem(key, value ? "1" : "0");
+  }, [key, value]);
+  return [value, setValue] as const;
+}
+
+function sortStorageKey(courseId: string): string {
+  return `ta-roster-provision-sort-${courseId}`;
+}
+
+function parseStoredSort(raw: string | null): RosterProvisionSortState {
+  if (!raw) return DEFAULT_ROSTER_PROVISION_SORT;
+  try {
+    const parsed = JSON.parse(raw) as Partial<RosterProvisionSortState>;
+    if (
+      (parsed.field === "student" || parsed.field === "username" || parsed.field === "status") &&
+      (parsed.direction === "asc" || parsed.direction === "desc")
+    ) {
+      return { field: parsed.field, direction: parsed.direction };
+    }
+  } catch {
+    // Malformed/foreign value - fall back rather than throw.
+  }
+  return DEFAULT_ROSTER_PROVISION_SORT;
+}
 
 const ACCESS_OPTIONS: Array<{ value: RepoPermission; label: string }> = [
   { value: "push", label: "Push (default)" },
@@ -75,6 +133,13 @@ function badgeClassFor(state: StudentRepoInvitationState): string {
     case "expired":
     case "error":
       return styles.ghBadgeDanger;
+    // R11: "no-username" and "not-invited" used to share ghBadgeNeutral -
+    // one appearance for two states that mean opposite things (ours vs
+    // GitHub's). "missing" ("No repo yet") stays neutral alongside
+    // "not-invited" below; only the roster's own gap gets the warning
+    // treatment.
+    case "no-username":
+      return styles.ghBadgeWarning;
     default:
       return styles.ghBadgeNeutral;
   }
@@ -225,7 +290,7 @@ function ActionCell({
   );
 }
 
-export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps) {
+export function StudentRepoRoster({ course, ownedRepos, focusUnhandledSignal }: StudentRepoRosterProps) {
   const [templateRepo, setTemplateRepo] = usePersistedString(fieldStorageKey("template", course.id), "");
   const [prefix, setPrefix] = usePersistedString(
     fieldStorageKey("prefix", course.id),
@@ -237,6 +302,50 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
 
   const org = (course.githubOrg ?? "").trim();
   const rosterRows = useMemo(() => rosterToRows(course.roster ?? ""), [course.roster]);
+
+  // R7: the roster's OWN text is not the only place a username lives - a
+  // student's Canvas submission may already have written one onto
+  // course.studentRepos (buildRosterUpdate, roster-merge.ts) without the
+  // instructor ever typing it into this tile. overlayRosterUsernames folds
+  // roster -> studentRepos; used here in reverse (read direction) via
+  // canonicalNameKey, so a roster row with a blank username can borrow one
+  // that studentRepos already has for the same student, marked `fromCanvas`
+  // for display. rosterRows itself (order/index) is NEVER reordered by
+  // this - only the username shown/used for a row that had none.
+  const overlay = useMemo(
+    () => overlayRosterUsernames(course.studentRepos ?? [], course.roster ?? null),
+    [course.studentRepos, course.roster]
+  );
+  const usernameByCanonicalName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of overlay.rows) {
+      const key = canonicalNameKey(row.student);
+      const username = (row.username ?? "").trim();
+      if (key && username && !map.has(key)) map.set(key, username);
+    }
+    return map;
+  }, [overlay]);
+  const effectiveRosterRows = useMemo(
+    () =>
+      rosterRows.map((r) => {
+        if (r.username.trim()) return { student: r.student, username: r.username, fromCanvas: false };
+        const found = usernameByCanonicalName.get(canonicalNameKey(r.student));
+        return found ? { student: r.student, username: found, fromCanvas: true } : { student: r.student, username: r.username, fromCanvas: false };
+      }),
+    [rosterRows, usernameByCanonicalName]
+  );
+  // Fed to the poll hook so status resolution/repo naming see the SAME
+  // effective username the table displays - otherwise a row shown with a
+  // "(from Canvas)" handle would still report "No username" underneath it.
+  // rowsToRoster can drop a row only when BOTH fields are blank, which
+  // effectiveRosterRows never introduces (it only ever fills a blank
+  // username, never touches student) - the one pre-existing edge case (a
+  // roster line with neither field, e.g. a bare "|") is inherited from
+  // rosterToRows itself, not introduced here.
+  const effectiveRosterText = useMemo(
+    () => rowsToRoster(effectiveRosterRows.map(({ student, username }) => ({ student, username }))),
+    [effectiveRosterRows]
+  );
 
   const {
     rows,
@@ -252,7 +361,34 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
     provisionRow,
     inviteOrResendRow,
     revokeRow,
-  } = useStudentRepoInvitations({ active: true, courseId: course.id, org, prefix, rosterText: course.roster ?? "" });
+  } = useStudentRepoInvitations({ active: true, courseId: course.id, org, prefix, rosterText: effectiveRosterText });
+
+  // R12: search text and the two state checkboxes persist per course
+  // (every new textbox/select/checkbox does); sort persists too, matching
+  // WeeklyChecklistOverviewModal's own precedent for a sortable table.
+  const [search, setSearch] = usePersistedString(rosterFilterStorageKey("search", course.id), "");
+  const [needsUsername, setNeedsUsername] = usePersistedBoolean(rosterFilterStorageKey("needs-username", course.id), false);
+  const [needsRepo, setNeedsRepo] = usePersistedBoolean(rosterFilterStorageKey("needs-repo", course.id), false);
+  const [sort, setSort] = useState<RosterProvisionSortState>(() =>
+    typeof window === "undefined" ? DEFAULT_ROSTER_PROVISION_SORT : parseStoredSort(localStorage.getItem(sortStorageKey(course.id)))
+  );
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem(sortStorageKey(course.id), JSON.stringify(sort));
+  }, [course.id, sort]);
+
+  // R5: the Roster cell's complement badge ("N with no GitHub username")
+  // bumps this on every click - including the very first, whether this
+  // panel is mounting fresh (the badge itself just triggered View) or was
+  // already open. Effects run on mount too, so a positive value already
+  // present at mount arms the filter exactly the same way a later change
+  // does.
+  useEffect(() => {
+    if (!focusUnhandledSignal) return;
+    setNeedsUsername(true);
+    setNeedsRepo(false);
+    setSearch("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusUnhandledSignal]);
 
   const resolvedByKey = useMemo(() => {
     const map = new Map<string, StudentRepoInvitationRow>();
@@ -305,6 +441,35 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // R12: filtering/sorting is PRESENTATION ONLY. `i` is tagged onto every
+  // row HERE, from `effectiveRosterRows` (the true, unfiltered roster
+  // order) - filterRosterProvisionRows/sortRosterProvisionRows below only
+  // ever reorder/drop entries of THIS array, so `i` always stays the row's
+  // real position no matter how the display is filtered or sorted. Nothing
+  // downstream (rowKey, provisionRow/inviteOrResendRow/revokeRow, the
+  // AC3.5a 80-row budget) ever sees a recomputed index - useStudentRepoInvitations
+  // itself is never told about the filter/sort at all (rosterText above is
+  // always the full, unfiltered effective roster).
+  const indexedRows: RosterProvisionRow[] = useMemo(
+    () =>
+      effectiveRosterRows.map((r, i) => {
+        const key = rowKey(r.student, r.username, i);
+        const resolved = resolvedByKey.get(key) ?? null;
+        const state: RowState = resolved?.state ?? "unresolved";
+        return { i, student: r.student, username: normalizeHandle(r.username), state };
+      }),
+    [effectiveRosterRows, resolvedByKey]
+  );
+  const activeFilter: RosterProvisionFilter = useMemo(
+    () => ({ search, needsUsername, needsRepo }),
+    [search, needsUsername, needsRepo]
+  );
+  const filterActive = rosterProvisionFilterIsActive(activeFilter);
+  const displayedRows = useMemo(
+    () => sortRosterProvisionRows(filterRosterProvisionRows(indexedRows, activeFilter), sort),
+    [indexedRows, activeFilter, sort]
+  );
 
   if (rosterRows.length === 0) {
     return <span className={styles.courseResourceEmpty}>Not set</span>;
@@ -379,6 +544,36 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
         </button>
       </div>
 
+      {/* R12: presentation-only filtering, modelled on
+          WeeklyChecklistOverviewModal.tsx's own search + checkbox toolbar
+          (TasksToolbar.tsx's FormControlLabel+Checkbox idiom, not chips).
+          summary.text above is a frozen contract and is NEVER touched by
+          this - the "Showing N of M" line below is additive, shown only
+          while a filter is active. */}
+      <div className={tableStyles.rowSm}>
+        <TextField
+          size="small"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search students…"
+          sx={{ minWidth: 160, flex: "1 1 160px" }}
+          slotProps={{ htmlInput: { "aria-label": "Search the provisioning table" } }}
+        />
+        <FormControlLabel
+          control={<Checkbox size="small" checked={needsUsername} onChange={(e) => setNeedsUsername(e.target.checked)} />}
+          label="Needs a GitHub username"
+        />
+        <FormControlLabel
+          control={<Checkbox size="small" checked={needsRepo} onChange={(e) => setNeedsRepo(e.target.checked)} />}
+          label="No repo yet"
+        />
+      </div>
+      {filterActive && (
+        <p className={styles.fieldHint}>
+          Showing {displayedRows.length} of {effectiveRosterRows.length} student{effectiveRosterRows.length === 1 ? "" : "s"}.
+        </p>
+      )}
+
       <div ref={liveRegionRef} role="status" aria-live="polite" className={tableStyles.focusAnnouncement} />
 
       <div className={tableStyles.rosterTableWrap}>
@@ -388,15 +583,42 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
           </caption>
           <thead>
             <tr>
-              <th scope="col">Student</th>
-              <th scope="col">GitHub username</th>
+              {/* R12: aria-sort on Student/GitHub username/Status, copying
+                  WeeklyChecklistOverviewModal.tsx's sortable-header idiom.
+                  Repository/Action stay plain headers - there is no
+                  meaningful sort on a computed repo name or an action
+                  button. */}
+              <th
+                scope="col"
+                aria-sort={ariaSortForField(sort, "student")}
+                className={tableStyles.sortableHeader}
+                onClick={() => setSort((s) => toggleRosterProvisionSort(s, "student"))}
+              >
+                Student
+              </th>
+              <th
+                scope="col"
+                aria-sort={ariaSortForField(sort, "username")}
+                className={tableStyles.sortableHeader}
+                onClick={() => setSort((s) => toggleRosterProvisionSort(s, "username"))}
+              >
+                GitHub username
+              </th>
               <th scope="col">Repository</th>
-              <th scope="col">Status</th>
+              <th
+                scope="col"
+                aria-sort={ariaSortForField(sort, "status")}
+                className={tableStyles.sortableHeader}
+                onClick={() => setSort((s) => toggleRosterProvisionSort(s, "status"))}
+              >
+                Status
+              </th>
               <th scope="col">Action</th>
             </tr>
           </thead>
           <tbody>
-            {rosterRows.map((r, i) => {
+            {displayedRows.map(({ i }) => {
+              const r = effectiveRosterRows[i];
               const key = rowKey(r.student, r.username, i);
               const handle = normalizeHandle(r.username);
               const resolved = resolvedByKey.get(key) ?? null;
@@ -414,7 +636,10 @@ export function StudentRepoRoster({ course, ownedRepos }: StudentRepoRosterProps
                   <th scope="row">{r.student}</th>
                   <td>
                     {handle ? (
-                      <span className={styles.ghMetaMono}>{handle}</span>
+                      <>
+                        <span className={styles.ghMetaMono}>{handle}</span>
+                        {r.fromCanvas && <span className={styles.ghMeta}> (from Canvas)</span>}
+                      </>
                     ) : (
                       <span className={styles.courseResourceEmpty}>Not set</span>
                     )}

@@ -459,16 +459,29 @@ export default function WeeklyChecklistOverviewModal({ onClose }: { onClose: () 
   );
 }
 
+// F5: was two solid fills (one of three different construction styles the
+// FAB's dial used to mix). Now stroke 1.5 throughout, matching every other
+// icon in the FAB's quick-actions menu (see fab-icons.tsx's own header for
+// the unification this belongs to) while keeping the same silhouette -
+// three ruled lines, each with its own checkmark - so it still reads
+// instantly as "Checklist" wherever it already appeared (this file's own
+// header, and the menu).
 export function ChecklistIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
       <path
-        d="M9 5h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2zm0 6h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2zm0 6h11a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2z"
-        fill="currentColor"
+        d="M9 6h11M9 12h11M9 18h11"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
       />
       <path
-        d="M4.7 4.3a1 1 0 0 1 1.4 0L7 5.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0L4.7 5.7a1 1 0 0 1 0-1.4zm0 6a1 1 0 0 1 1.4 0L7 11.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0l-1.6-1.6a1 1 0 0 1 0-1.4zm0 6a1 1 0 0 1 1.4 0L7 17.3l1.9-1.9a1 1 0 1 1 1.4 1.4l-2.6 2.6a1 1 0 0 1-1.4 0l-1.6-1.6a1 1 0 0 1 0-1.4z"
-        fill="currentColor"
+        d="M4.5 6l1.25 1.25L8 4.75M4.5 12l1.25 1.25L8 10.75M4.5 18l1.25 1.25L8 16.75"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
       />
     </svg>
   );

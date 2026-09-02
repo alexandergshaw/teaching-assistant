@@ -663,6 +663,103 @@ export function lmsRenderSourcesFor(c: Course): LmsRenderSources {
 }
 
 // ---------------------------------------------------------------------------
+// LMS connection status (F1/F2 - "the LMS box is not a connection box, it is
+// a text field that looks like one")
+//
+// canLms (above) answers ONE question - "is a live pull possible right now" -
+// which is exactly what gates Roster/Syllabus/Schedule/Rubric's "From LMS"
+// affordances and "Pull export from LMS". It deliberately says nothing about
+// WHY a pull is not possible, or whether a pull that IS possible actually
+// succeeds. LmsCell rendered "Canvas" + "Open LMS course" whenever
+// course.canvasUrl was set, with no regard for canLms at all - a course with
+// a canvasUrl and no institution read identically to a fully working one,
+// while five controls silently disappeared underneath it. This is the
+// reporting layer that closes that gap, WITHOUT changing canLms's own
+// semantics or writing course.institution anywhere (see docs/REGRESSION.md
+// :25549/:25566-25572 - backfilling institution is a deliberately separate,
+// open question).
+//
+// Three of the four states below are LOCAL facts (no network round trip
+// needed - they follow from the course row alone):
+//   - "not-linked": no canvasUrl at all.
+//   - "needs-institution": canvasUrl is set but institution is not - exactly
+//     the state that silently disables the five controls above.
+// The other two require a LIVE result, which this function never fetches
+// itself - it is handed whatever useCoursesData's existing per-course
+// getCourseNotificationsAction call already produced (see
+// splitCourseNotifResults below, and useCoursesData.ts's own effect):
+//   - "connected": the live call succeeded.
+//   - "failed": the live call returned an error (a malformed course URL, a
+//     revoked/expired token, etc).
+//   - "unknown": canLms is true but no live result has landed for this
+//     course yet (the effect has not run, is still in flight, or this course
+//     was not part of its own last completed batch). This is deliberately
+//     NOT "connected" - a course that has never actually been checked must
+//     never render as healthy just because its two local fields look right
+//     (checkInstitutionsAction-style env presence is not a live signal
+//     either, and courses.types.ts stores no lastSyncedAt/status to fall
+//     back on - the two local fields plus this one live result are the only
+//     inputs that exist).
+export type LmsConnectionStatus =
+  | { kind: "not-linked" }
+  | { kind: "needs-institution" }
+  | { kind: "unknown" }
+  | { kind: "connected"; needsGrading: number; unread: number }
+  | { kind: "failed"; reason: string };
+
+/**
+ * Derives the LMS connection status pill's state from a course's own two
+ * local fields plus (optionally) the live per-course result useCoursesData
+ * already fetches. `liveError` takes precedence over `liveCheck` when a
+ * caller somehow has both (the two are mutually exclusive in practice - see
+ * splitCourseNotifResults - but the precedence is asserted explicitly rather
+ * than left as an accident of argument order).
+ */
+export function lmsConnectionStatusFor(
+  c: Course,
+  liveCheck?: { needsGrading: number; unread: number },
+  liveError?: string
+): LmsConnectionStatus {
+  const hasUrl = Boolean((c.canvasUrl ?? "").trim());
+  if (!hasUrl) return { kind: "not-linked" };
+
+  const hasInstitution = Boolean((c.institution ?? "").trim());
+  if (!hasInstitution) return { kind: "needs-institution" };
+
+  if (liveError) return { kind: "failed", reason: liveError };
+  if (liveCheck) return { kind: "connected", needsGrading: liveCheck.needsGrading, unread: liveCheck.unread };
+  return { kind: "unknown" };
+}
+
+/** One entry of useCoursesData's per-course live Canvas check - the same
+ * union getCourseNotificationsAction itself returns. */
+export type CourseNotifResult = { needsGrading: number; unread: number } | { error: string };
+
+/**
+ * Splits a batch of [courseId, result] entries into an ok map and an error
+ * map, both keyed by course id. This is the fix for the bug this feature
+ * reports on: useCoursesData's per-course live Canvas call
+ * (getCourseNotificationsAction) already runs on every page load for every
+ * course with both a canvasUrl and an institution, and its error branch -
+ * "Set this course's institution to load notifications.",
+ * "Course URL must look like .../courses/123." (course-hub-integrations.ts)
+ * - was being thrown away (`if (!("error" in r)) map[id] = r;`, discarding
+ * the else branch entirely). Extracted as its own pure function so the split
+ * itself is unit-testable without rendering useCoursesData's hook.
+ */
+export function splitCourseNotifResults(
+  entries: readonly (readonly [string, CourseNotifResult])[]
+): { ok: Record<string, { needsGrading: number; unread: number }>; errors: Record<string, string> } {
+  const ok: Record<string, { needsGrading: number; unread: number }> = {};
+  const errors: Record<string, string> = {};
+  for (const [id, r] of entries) {
+    if ("error" in r) errors[id] = r.error;
+    else ok[id] = r;
+  }
+  return { ok, errors };
+}
+
+// ---------------------------------------------------------------------------
 // Inline cell save-patch computation
 //
 // This mirrors the tile editors' save-path patch computation (formerly

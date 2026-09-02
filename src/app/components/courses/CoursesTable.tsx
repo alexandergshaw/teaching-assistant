@@ -139,6 +139,11 @@ export interface CoursesTableProps {
    * see courseCalendarBlockers in course-calendar-events.ts. */
   googleCalendarConnected: boolean | null;
   notifByCourse: Record<string, { needsGrading: number; unread: number }>;
+  /** F1/F2: same per-course live Canvas check as notifByCourse, keyed by
+   * course id, but the error branch - see useCoursesData's own doc comment
+   * on this field. Forwarded to CourseRow/LmsCell for the LMS connection
+   * status pill; never used for anything else here. */
+  lmsErrorByCourse: Record<string, string>;
   onSyncAllCalendars: () => void;
   syncingAllCalendars: boolean;
   saveField: (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>) => Promise<Course | null>;
@@ -184,6 +189,7 @@ export default function CoursesTable({
   ownedRepos,
   googleCalendarConnected,
   notifByCourse,
+  lmsErrorByCourse,
   onSyncAllCalendars,
   syncingAllCalendars,
   saveField,
@@ -716,6 +722,8 @@ export default function CoursesTable({
                     const n = notifByCourse[c.id];
                     return n ? n.needsGrading + n.unread : 0;
                   })()}
+                  lmsLiveCheck={notifByCourse[c.id]}
+                  lmsLiveError={lmsErrorByCourse[c.id]}
                   saveField={saveField}
                   onCourseUpdated={onCourseUpdated}
                   setError={setError}

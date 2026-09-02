@@ -66,6 +66,7 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
     load,
     reloadSyllabi,
     notifByCourse,
+    lmsErrorByCourse,
     ownedRepos,
     googleCalendarConnected,
   } = useCoursesData();
@@ -352,6 +353,7 @@ export default function CoursesTab({ onNavigate, focusCourseId = null, onFocusHa
         ownedRepos={ownedRepos}
         googleCalendarConnected={googleCalendarConnected}
         notifByCourse={notifByCourse}
+        lmsErrorByCourse={lmsErrorByCourse}
         onSyncAllCalendars={() => void handleSyncAllCalendars()}
         syncingAllCalendars={syncingAllCalendars}
         saveField={saveField}

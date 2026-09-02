@@ -37611,3 +37611,133 @@ restored, confirmed green.
 - Roster import accepts `Name, handle`, which is genuinely ambiguous with this
   tool's own "Last, First" convention: `"Smith, John"` parses as student Smith,
   handle John. Documented and tested; the Review step is the safety net.
+## 383. A connection box that never checked the connection, and four gaps closed by the agents that found them
+
+Continues 382. Five separate pushes: the deferred presentation items, two
+correctness fixes on the roster, the skipped/handledAt promotion plus the
+banner overflow, and the LMS connection pill.
+
+### The LMS box was a text field that looked like a connection
+
+`canLms` is `Boolean(canvasUrl && institution)`. `LmsCell` reads an institution
+to populate its picker and then saves only `{canvasUrl}` - it never writes
+`institution`. So a row rendered "Canvas" and an "Open LMS course" link while
+`canLms` was false, which silently removed **From LMS** from Roster, Syllabus,
+Schedule of Topics and Rubric, and **Pull export from LMS** from the export
+box. Five controls vanished across one row with no message anywhere.
+`REGRESSION.md:25549` already recorded this as the COMMON case, left OPEN.
+
+The diagnosis was already on the wire and being thrown away:
+`useCoursesData.ts` fires `getCourseNotificationsAction` per course on every
+load and did `if (!("error" in r)) map[id] = r` - discarding an error whose
+text is literally *"Set this course's institution to load notifications."*
+
+The pill now reports five states, and the important one is that
+**"Connection not yet checked" is its own state**: only a successful round trip
+can tell a healthy course from one with a dead token, so nothing renders as
+healthy by default. `checkInstitutionsAction` cannot help here - it checks only
+that env vars EXIST and makes no network call, so it cannot see an expired
+token, and it is institution-scoped rather than per-course.
+
+**The `institution` write was deliberately NOT added.** Closing that gap
+requires backfilling every saved row or breaking existing single-institution
+users, and the recorded decision to leave it open stands. This surfaces the
+state instead.
+
+### Two correctness bugs on the roster, neither about looks
+
+**"Link GitHub usernames" replaced the roster instead of merging it.**
+`buildRosterUpdate` derived the roster text from `studentRepos`, keeping only
+entries WITH a username, and never received the existing roster at all. Every
+student without a handle, and every student who did not submit, was erased -
+silently, no undo, from a button on a different screen. The same helpers are
+called from two workflow steps, so it fired unattended too. All three now merge:
+every existing line survives, a blank handle is filled, a genuine disagreement
+is REPORTED in `conflicts` rather than resolved silently.
+
+**One provision refreshed the whole class.** 28 students cost 28 full refreshes,
+about 1,764 GitHub requests serialized against a 5,000/hour budget, on the night
+before term. Now ~4-5 requests per action, ~120 for a class. `checkedAt` is
+deliberately NOT bumped by a single-row refresh - it describes the last
+whole-table check, and moving it would make "Checked N minutes ago" lie about
+every other row.
+
+### What the agents caught that no gate could
+
+- **A test that could not fail, caught by its own author.** The LMS agent's
+  first `FilesCell` test asserted the helper's CALL SITE rather than where the
+  result was RENDERED. It found this by sabotaging, fixed the test, then
+  re-sabotaged to confirm the fix actually worked.
+- **A sabotage that did not apply.** Commenting out a `removeItem` line left the
+  canary green, because the regex still matched the commented substring. The
+  line had to be deleted outright. Reported rather than trusted.
+- **A height regression caught in the author's own diff.** Giving
+  `.upcomingItem` a real border would have added ~2px to the strip's tallest
+  chip and moved a height the ResizeObserver publishes; an inset box-shadow gave
+  the same hairline with zero layout impact.
+- **An orchestrator instruction that was wrong twice.** The courses brief
+  described "the workflows treatment" as step cards with an index badge and a
+  sidebar nav with counts. The audit read the source: neither exists in
+  `StepCard.tsx` or `WorkflowListSidebar.tsx`. Two of five bullets described
+  nothing. It also found the hover-reveal idiom is BETTER in the courses table -
+  AM11 names `CoursesTable.module.css` as the reference the rest copies.
+
+### The side channel is gone
+
+`skipped` and `handledAt` are real `ReplyRow` fields. Promoting them deleted a
+231-line module, its pruning logic, and the flag-diverges-from-row bug class.
+`DISCUSSION_TABLE_VERSION` stayed 1 - `deserializeReplyTable` returns `[]` on a
+mismatch, so a bump would discard every user's table - and legacy flags migrate
+on mount before the key is removed. The `ta-` canary gained a `"remove"`
+call-kind and a MIGRATION_ONLY_KEYS carve-out, documented as a carve-out rather
+than a loosened assertion.
+
+**The gap was an orchestrator scoping error, not an implementer shortcut.** The
+original agent built three of four exclusions, wrote down exactly what it could
+not reach and why, and flagged the rest. That record is why closing it took one
+wave.
+
+### The banner stops hiding content
+
+The strip was `nowrap` over `overflow-x: auto` behind a STATIC fade that could
+not distinguish "more content" from "end of content". At six courses and eight
+dates ~37% was off-screen; at fourteen courses every upcoming date was.
+Expanded is now a column with each zone wrapping - nothing capped, nothing
+hidden, no scroller, so the fade is deleted rather than made conditional.
+The 5px padding survives (focus-ring clearance, not scroll padding);
+`scroll-padding-inline` is deleted with its reason written down.
+
+### Gates
+
+`tsc` 0 errors. `eslint` clean on every touched file. `vitest` **816 files /
+16518 tests**. Sabotage checks: 4 roster-merge, 4 request-storm, 5
+skipped/handledAt, 9 banner, 4 LMS - each broken, confirmed red for the right
+reason, the mutation confirmed present, restored, confirmed green.
+
+### Limits
+
+- **No component is rendered by any test here.** Every pill state, focus path
+  and layout claim is verified by reading. The roster and LMS work mitigated
+  this by extracting testable rules into pure functions that ARE tested; the
+  hook and JSX glue is not.
+- The LMS pill's "Connected" state is only as fresh as the last page load -
+  there is no polling, no retry, and no stored `lastSyncedAt` anywhere in the
+  schema. A token that dies mid-session still reads Connected until reload.
+- `useReplyRows.ts` is now 940 lines against a 950 soft cap.
+- The banner's expanded height now varies with item count AND viewport width.
+  The ResizeObserver catches both, but the existing one-frame settle lag is
+  more visible on collapse than it was.
+- Four LMS capabilities remain implemented, exported and unreachable:
+  `handleLmsStartDate`, `handleLmsWeeks`, `handleImportStartDate`,
+  `handleImportWeeks` - zero call sites. Start date and Weeks render as plain
+  editable cells with no From-LMS affordance. Confirmed by grep, not built.
+- **Two follow-ups recorded, neither fixed here:** the SHIPPED grading panel
+  under-reports dropped frames, because the capture hook zeroes its counter on
+  every `start()` while the panel reads the live value at download time - two
+  Start/Stop cycles lose the first one's drops. And
+  `discussion-reply-capture-acceptance-criteria.md:485-494` reports FILE bytes
+  as WIRE bytes, so its "3.48MB against the 3.5MB budget" is really 4.55MB -
+  over the batch budget, the wire budget, and Vercel's platform cap.
+- 149 of 1033 CSS module classes still have no reference anywhere, so the
+  definitions->references guard that would have caught `.selectionAiButton`
+  needs a ratchet rather than a strict assertion. Measured, not built.

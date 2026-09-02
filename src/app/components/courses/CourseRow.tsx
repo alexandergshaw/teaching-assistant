@@ -65,6 +65,13 @@ export interface CourseRowProps {
   /** null while the page's one-time connection check is still in flight. */
   googleCalendarConnected: boolean | null;
   notifTotal: number;
+  /** F1/F2: this row's live Canvas check result (ok) and/or error, both keyed
+   * by course id upstream (useCoursesData/CoursesTable) - handed to LmsCell
+   * so its connection-status pill can distinguish "connected", "failed", and
+   * "never checked yet" instead of only "has a canvasUrl at all". At most one
+   * of the two is ever set for a given course - see splitCourseNotifResults. */
+  lmsLiveCheck?: { needsGrading: number; unread: number };
+  lmsLiveError?: string;
   saveField: (course: Course, field: TableEditableField, rawValue: string, extra?: Partial<CourseInput>) => Promise<Course | null>;
   onCourseUpdated: (course: Course) => void;
   setError: (message: string | null) => void;
@@ -107,6 +114,8 @@ export default function CourseRow({
   ownedRepos,
   googleCalendarConnected,
   notifTotal,
+  lmsLiveCheck,
+  lmsLiveError,
   saveField,
   onCourseUpdated,
   setError,
@@ -219,6 +228,8 @@ export default function CourseRow({
       <LmsCell
         course={course}
         onSave={(v, extra) => saveField(course, "lms", v, extra).then((result) => result !== null)}
+        liveCheck={lmsLiveCheck}
+        liveError={lmsLiveError}
         menu={cellMenuFor("lms")}
       />
     ),

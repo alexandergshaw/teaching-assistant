@@ -16,6 +16,7 @@ import {
   removeCourseExportFileAction,
 } from "@/app/actions";
 import type { Course, CourseMaterialFile } from "@/lib/supabase/courses";
+import { hasOnlyGeneratedExports } from "@/lib/courses-table-helpers";
 import { useSupabase } from "@/context/SupabaseProvider";
 import {
   uploadCourseZip,
@@ -353,11 +354,24 @@ export function LmsExportsCell({ course, onCourseUpdated, setError, canLms, expo
   };
 
   const summary = course.exportFiles.length > 0 ? `${course.exportFiles.length} file${course.exportFiles.length !== 1 ? "s" : ""}` : "Not set";
+  // F3: hasOnlyGeneratedExports (courses-table-helpers.ts) already existed
+  // to explain this exact gap (REGRESSION entry 196 AC3) but had zero
+  // callers outside its own test - a course holding nothing but
+  // app-generated cartridges read identically to one holding a real
+  // instructor export, in the at-rest cell AND in canImport/
+  // lmsRenderSourcesFor's own eligibility logic. Surfaced here, at rest, not
+  // only two clicks deep in the popover - this is purely informational and
+  // does not change canImport/latestSourceExportFile's own rule (never read
+  // a generated file back in as course input).
+  const onlyGenerated = hasOnlyGeneratedExports(course);
 
   return (
     <td style={{ minWidth: 190 }}>
       <div className={`${tableStyles.stackXs} ${tableStyles.alignStart}`}>
         <span className={course.exportFiles.length > 0 ? styles.courseResourceValue : styles.courseResourceEmpty}>{summary}</span>
+        {onlyGenerated && (
+          <span className={tableStyles.metaCompact}>App-generated only - no instructor-provided export</span>
+        )}
         <button type="button" className={styles.linkButton} onClick={(e) => setAnchorEl(e.currentTarget)}>
           Manage
         </button>

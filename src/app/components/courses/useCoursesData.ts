@@ -13,6 +13,7 @@ import {
 import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
+import { splitCourseNotifResults } from "@/lib/courses-table-helpers";
 
 export interface UseCoursesDataReturn {
   courses: Course[];
@@ -30,6 +31,14 @@ export interface UseCoursesDataReturn {
   load: (opts?: { silent?: boolean }) => Promise<void>;
   reloadSyllabi: () => Promise<void>;
   notifByCourse: Record<string, { needsGrading: number; unread: number }>;
+  /** F2: the SAME per-course live Canvas check as notifByCourse, but the
+   * error branch - "Set this course's institution to load notifications.",
+   * "Course URL must look like .../courses/123." - instead of the ok one.
+   * Previously discarded entirely (see splitCourseNotifResults's own doc
+   * comment); kept here, keyed by course id, so LmsCell's connection-status
+   * pill can report a live failure instead of rendering identically to a
+   * healthy course. */
+  lmsErrorByCourse: Record<string, string>;
   ownedRepos: string[] | null;
   /** null while the one-time connection check (below) is still in flight -
    * see courseCalendarBlockers's own doc comment for why that reads as "not
@@ -50,6 +59,7 @@ export function useCoursesData(): UseCoursesDataReturn {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notifByCourse, setNotifByCourse] = useState<Record<string, { needsGrading: number; unread: number }>>({});
+  const [lmsErrorByCourse, setLmsErrorByCourse] = useState<Record<string, string>>({});
   const [ownedRepos, setOwnedRepos] = useState<string[] | null>(null);
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState<boolean | null>(null);
 
@@ -171,9 +181,13 @@ export function useCoursesData(): UseCoursesDataReturn {
         targets.map(async (c) => [c.id, await getCourseNotificationsAction(c.canvasUrl as string, c.institution as string)] as const)
       );
       if (cancelled) return;
-      const map: Record<string, { needsGrading: number; unread: number }> = {};
-      for (const [id, r] of entries) if (!("error" in r)) map[id] = r;
-      setNotifByCourse(map);
+      // F2: previously discarded every error branch entirely
+      // (`if (!("error" in r)) map[id] = r;`) - splitCourseNotifResults keeps
+      // both halves, so a course whose live check FAILED is distinguishable
+      // from one that simply has not been checked yet.
+      const { ok, errors } = splitCourseNotifResults(entries);
+      setNotifByCourse(ok);
+      setLmsErrorByCourse(errors);
     })();
     return () => {
       cancelled = true;
@@ -196,6 +210,7 @@ export function useCoursesData(): UseCoursesDataReturn {
     load,
     reloadSyllabi,
     notifByCourse,
+    lmsErrorByCourse,
     ownedRepos,
     googleCalendarConnected,
   };

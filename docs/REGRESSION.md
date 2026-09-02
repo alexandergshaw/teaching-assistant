@@ -38038,3 +38038,96 @@ restored green.
   while the draft loop re-reads context per batch. The moment a picker can
   change the selection mid-run, that label lies unless it is rewritten on every
   change.
+## 389. Adjusting the carried Knowledge selection from the recording side, and why "remove" was the hard half
+
+The owner asked for "the option to select more or less from the recording page".
+The two halves looked symmetrical and were not. Adding was assumed to be the
+expensive one and removing the cheap one; the reverse was closer to true, and
+getting that backwards would have shipped a lie.
+
+### Removing was not free, and the reason generalizes
+
+`RecordingKnowledgeContext.text` is the **already-flattened, joined prompt
+string**, and the carried `pages` were `{ id, title }` with no body. So a remove
+control built on that shape could only do one of two things: hide a title from
+a display list while the model still received that page's content - **the exact
+lie AC1 forbids, merely inverted** - or string-surgery the blob by matching
+`"Selected page: <title>"` headers, which breaks on duplicate titles and on any
+body containing that literal.
+
+The general shape: **carrying a rendering of data is not carrying the data.**
+A display derived from a flattened artifact can only ever be cosmetic, and a
+control attached to that display will lie the moment anyone acts on it.
+
+The fix cost zero fetches, because the body was already resident at the launch
+site one step before it was discarded. Widening the carried page to
+`{ id, title, body }` turned removal into a client-side recompute.
+
+### The label would have started lying the moment removal shipped
+
+The discussions draft loop re-reads context **per batch dispatch** from a ref,
+so an edit mid-run takes effect on the very next batch. But
+`ta-rec-disc-kb-context-label` was written **once, in `start()`**. Nothing was
+wrong with that until a control existed that could change the selection - at
+which point later replies would draft against one selection while the stored
+label named another, misreporting the single question that key exists to answer.
+
+Now rewritten on every edit, gated so it fires only after `start()` has written
+it at least once, so a session that never captured anything still leaves no
+label behind. Grading needed no equivalent change: it reads the context from
+state per invocation, which was already correct. **A latent bug with no trigger
+is still a bug; adding the trigger is what makes it urgent.**
+
+### Adding can silently evict what you already had
+
+The budget loop uses `continue`, not `break`. So adding a page can push a
+**different, previously-included** page out of context. Dropping that quietly
+would have been the worst outcome available to this feature: the instructor
+deliberately adds material and is told nothing about what they lost.
+Pushed-out titles are diffed by id against the previous carried set and
+reported on a standing, dismissible line.
+
+The test for that binary-searches the real budget function for a page that fits
+alone, then proves it gets evicted once a second page is merely present while
+the later page is still included. Pinning a hardcoded threshold would have made
+it a test of one magic number rather than a test of skip-versus-truncate.
+
+### Bodies are fetched only for what is chosen
+
+The picker's tree loads through a narrowed summary read that returns no bodies
+at all; the batch body fetch is called with exactly the pending ids. Sabotaging
+it to fetch the full list goes red. The institution comes from the Knowledge
+tab's own stored choice, snapshotted when the picker opens; with none selected
+the picker fetches nothing and says so rather than rendering an empty tree that
+reads as "you have no pages."
+
+### A tested export with no consumer
+
+`formatContextPagesList` was written earlier the same day, superseded hours
+later by the interactive list, and left exported with seven passing tests and
+zero callers. Deleted, along with its suite. A tested export that nothing calls
+reads as maintained code - the same false signal that once left a live control
+rendering unstyled while its CSS sat in the stylesheet looking current. The
+suite count fell by exactly seven, which is the confirmation it was inert.
+
+### Gates
+
+`tsc` 0 errors. `eslint` clean. `vitest` **831 files / 16838 tests**.
+`next build` compiles clean and finishes TypeScript; its only failure is the
+expected prerender tail on missing local Supabase keys. Gates run directly
+against a quiet tree rather than taken on agent report. Eleven sabotage checks
+across the two halves, each confirmed red on the exact assertion, restored, and
+one restore verified byte-for-byte rather than by re-reading.
+
+### Limits
+
+- **No component is rendered by any test here.** Every picker interaction,
+  chip, and layout claim rests on reading source and on pure-function tests.
+- `DiscussionRepliesPanel.tsx` reached **990 lines against the 1000 ceiling** at
+  this commit - ten lines of headroom, which blocks the next feature to touch
+  it until something is extracted.
+- `buildPageTree` is still not genericized to accept the summary shape, so the
+  picker nests locally. Two tree builders now exist over the same data.
+- Removal recovery is an inline undo plus relaunching from Knowledge; there is
+  no persisted history of what was removed, so a removal lost to a reload is
+  not recoverable from the panel.

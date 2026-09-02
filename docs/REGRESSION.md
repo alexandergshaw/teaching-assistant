@@ -37738,6 +37738,39 @@ reason, the mutation confirmed present, restored, confirmed green.
   `discussion-reply-capture-acceptance-criteria.md:485-494` reports FILE bytes
   as WIRE bytes, so its "3.48MB against the 3.5MB budget" is really 4.55MB -
   over the batch budget, the wire budget, and Vercel's platform cap.
+  2026-09-02 CORRECTION: the dropped-frames follow-up is fixed. Verified real
+  first (confirmed in `useDiscussionCapture.ts`'s `start()`, which zeroes
+  `droppedFramesRef`/`droppedFrames` on every cycle while `teardown()`
+  deliberately leaves it alone "for the session summary"), and found to have a
+  SECOND, previously unnoted instance: `useDiscussionReplies.ts` (discussion
+  reply capture) also read `capture.droppedFrames` straight through, into
+  both its downloadable run log and its own returned `droppedFrames` field
+  (which `DiscussionRepliesPanel.tsx` reads for its post-stop notice) -
+  `module-deck-capture/ModuleDeckCapturePanel.tsx` was the only one of the
+  three consumers that already had this right (its own AM-G comment names
+  only the grading panel, not the discussion side, as the bug it was written
+  not to repeat). Both remaining consumers now fold the live value through a
+  pure function, `accumulateDroppedFrames`, added to the shared leaf both
+  already import (`recording/discussion-capture.ts`) - the identical fold
+  `module-deck-capture/module-deck-dispatch.ts`'s own same-named function
+  already implements, deliberately NOT consolidated onto one copy here (out
+  of scope for this fix; touching a sibling feature's file was judged not
+  worth the risk) - noted as a follow-up: two copies of the same tiny fold
+  now exist, one per directory. Chosen semantics: the reported number
+  is drops across the WHOLE run log's session (every Start/Stop cycle since
+  the page's first Start), matching `logFramesCaptured`'s own existing
+  accumulation pattern - not "since the hook mounted" and not "in the most
+  recent cycle alone". Pinned by `discussion-capture.test.ts` (the pure
+  fold, including the exact two-cycle 6-then-3-should-total-9 case) plus a
+  new `GradingRecordingPanel.wiring.test.ts` and
+  `useDiscussionReplies.wiring.test.ts` (source-text checks that neither
+  consumer reads the live value directly into its log/notice, sabotage-
+  confirmed red against the pre-fix shape, then green). No other counter
+  read at download time shares this reset-on-start defect class:
+  `pendingFrames`/`recordingError`/`frameEncodeNotice`/`elapsedSec` are each
+  either a genuine current-moment gauge (correctly reset) or already
+  collected into an append-only log stream separately from the hook's live
+  value - checked and confirmed, not assumed.
 - 149 of 1033 CSS module classes still have no reference anywhere, so the
   definitions->references guard that would have caught `.selectionAiButton`
   needs a ratchet rather than a strict assertion. Measured, not built.

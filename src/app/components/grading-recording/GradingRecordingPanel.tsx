@@ -52,7 +52,7 @@ import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useDiscussionCapture } from "../recording/useDiscussionCapture";
-import { EXTRACT_BATCH_WIRE_BUDGET } from "../recording/discussion-capture";
+import { EXTRACT_BATCH_WIRE_BUDGET, accumulateDroppedFrames } from "../recording/discussion-capture";
 import {
   RECORDING_LAUNCH_EVENT,
   parseRecordingLaunch,
@@ -171,6 +171,36 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     }
     prevEncodeNoticeRef.current = frameEncodeNotice;
   }, [frameEncodeNotice]);
+
+  // docs/REGRESSION.md entry 383's Limits, verified real: useDiscussionCapture's
+  // own `droppedFrames` resets to 0 on every start() (see that hook's own
+  // header/start()), while `logStartedAt` below spans the WHOLE panel
+  // session, not just the latest cycle - reading `droppedFrames` live at
+  // download time silently lost every earlier Start/Stop cycle's count the
+  // moment a new cycle began (a second Start zeroes the hook's counter, and
+  // the run log/notice only ever reflected whichever cycle was most recent).
+  // `accumulateDroppedFrames` (recording/discussion-capture.ts) is the same
+  // tested fold the module-deck-capture panel already uses for this exact
+  // reason - see that panel's own AM-G comment, which names THIS file as the
+  // pre-existing bug it was written not to repeat. This effect is the ONLY
+  // place that calls it; `droppedFramesTotal` - never the hook's live
+  // `droppedFrames` - is what reaches the run log and the persistent
+  // "scrolled past faster than it could be read" notice below, so both
+  // report drops across the whole session, not just since the most recent
+  // Start.
+  const [droppedFramesTotal, setDroppedFramesTotal] = useState(0);
+  const droppedFramesTotalRef = useRef(0);
+  const prevLiveDroppedRef = useRef(0);
+  useEffect(() => {
+    const nextTotal = accumulateDroppedFrames(prevLiveDroppedRef.current, droppedFrames, droppedFramesTotalRef.current);
+    prevLiveDroppedRef.current = droppedFrames;
+    // react-hooks/set-state-in-effect: only reached when the total actually
+    // changed - never an unconditional top-level setState call.
+    if (nextTotal !== droppedFramesTotalRef.current) {
+      droppedFramesTotalRef.current = nextTotal;
+      setDroppedFramesTotal(nextTotal);
+    }
+  }, [droppedFrames]);
 
   const { courses, coursesLoading, coursesError } = useGradingCourses(active);
 
@@ -476,7 +506,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       courseName: selectedCourse?.name ?? "",
       rubricPresent: rubricText.trim() !== "",
       knowledgeContextPresent: knowledgeContext !== null,
-      droppedFrames,
+      droppedFrames: droppedFramesTotal,
       batches: logBatches,
       encodeNotices: logEncodeNotices,
       gradingRuns: logGradingRuns,
@@ -658,7 +688,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           inventing a second string for the same fact. Shown for the whole
           session (not gated on capturing/stopped) - the loss is permanent
           the moment it happens. */}
-      {droppedFrames > 0 && (
+      {droppedFramesTotal > 0 && (
         <p className={styles.error} role="alert">
           Some of the screen scrolled past faster than it could be read. Scroll back over that section to catch it.
         </p>

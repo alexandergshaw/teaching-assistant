@@ -42,6 +42,7 @@ import {
   draftDispatchForce,
   shouldLoopContinue,
   shouldTickerRun,
+  accumulateDroppedFrames,
   type FrameSignature,
 } from "./discussion-capture";
 
@@ -368,6 +369,67 @@ describe("draftDispatchForce (S1)", () => {
     expect(isDispatchableDraftItem({ force: draftDispatchForce("retry") }, rowAfterFailedRedraftOfEditedText)).toBe(
       true
     ); // the actual, un-sabotaged behavior
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/REGRESSION.md entry 383's Limits: accumulateDroppedFrames, the
+// monotone dropped-frames fold across Start/Stop cycles. Both
+// GradingRecordingPanel.tsx and useDiscussionReplies.ts thread the hook's
+// live droppedFrames value through this function instead of reading it
+// directly - see either call site's own comment for the full account.
+// ---------------------------------------------------------------------------
+
+describe("accumulateDroppedFrames (REGRESSION 383)", () => {
+  it("sums drops within a single cycle as the live value climbs", () => {
+    let total = 0;
+    total = accumulateDroppedFrames(0, 3, total);
+    total = accumulateDroppedFrames(3, 7, total);
+    expect(total).toBe(7);
+  });
+
+  it("THE regression test: two Start/Stop cycles, with drops in the first, report the TOTAL across both - not just the most recent cycle", () => {
+    let total = 0;
+    total = accumulateDroppedFrames(0, 6, total); // cycle 1 climbs to 6 live drops
+    total = accumulateDroppedFrames(6, 0, total); // Stop, then Start resets the hook's live counter to 0
+    total = accumulateDroppedFrames(0, 3, total); // cycle 2 climbs to 3 live drops
+    // Reading the live value alone at this point would report 3 - cycle 1's
+    // 6 drops silently vanished the moment cycle 2 started. The correct
+    // session total is 9.
+    expect(total).toBe(9);
+  });
+
+  it("handles three cycles, each contributing its own drops", () => {
+    let total = 0;
+    total = accumulateDroppedFrames(0, 4, total); // cycle 1: 4
+    total = accumulateDroppedFrames(4, 0, total); // restart
+    total = accumulateDroppedFrames(0, 1, total); // cycle 2: 1
+    total = accumulateDroppedFrames(1, 0, total); // restart
+    total = accumulateDroppedFrames(0, 6, total); // cycle 3: 6
+    expect(total).toBe(11);
+  });
+
+  it("a repeated observation of the same live value (no new drop) is a no-op", () => {
+    let total = 0;
+    total = accumulateDroppedFrames(0, 5, total);
+    total = accumulateDroppedFrames(5, 5, total);
+    expect(total).toBe(5);
+  });
+
+  it("SABOTAGE-relevant: reading the live value straight through (no accumulator) reproduces the exact under-report this function exists to prevent", () => {
+    // The sabotaged shape: a consumer that reads the hook's live droppedFrames
+    // directly instead of folding it through accumulateDroppedFrames - this
+    // is precisely GradingRecordingPanel.tsx's and useDiscussionReplies.ts's
+    // pre-fix behavior.
+    const liveValueOnly = (nextLive: number) => nextLive;
+    let sessionTotalViaAccumulator = 0;
+    sessionTotalViaAccumulator = accumulateDroppedFrames(0, 6, sessionTotalViaAccumulator);
+    sessionTotalViaAccumulator = accumulateDroppedFrames(6, 0, sessionTotalViaAccumulator);
+    sessionTotalViaAccumulator = accumulateDroppedFrames(0, 3, sessionTotalViaAccumulator);
+    const sabotagedLiveReadAfterSecondCycle = liveValueOnly(3);
+    expect(sabotagedLiveReadAfterSecondCycle).toBe(3); // the bug: cycle 1's 6 drops are gone
+    expect(sessionTotalViaAccumulator).toBe(9); // the fix: both cycles counted
+    expect(sessionTotalViaAccumulator).not.toBe(sabotagedLiveReadAfterSecondCycle);
   });
 });
 

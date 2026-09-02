@@ -60,10 +60,15 @@
 //    (AC10b/S5's re-encode-and-drop message) as REAL, always-present
 //    fields. `recordingError` and `frameEncodeNotice` are each forwarded
 //    into `notices` below (rendered as a dismissible notice, same channel
-//    as every other out-of-band failure); `droppedFrames` is passed
-//    straight through on this hook's own return so set D can render AC7b's
-//    drop sentence directly beneath the persistent post-stop summary, which
-//    is a more specific placement than the generic notices list gives it.
+//    as every other out-of-band failure); `droppedFrames` on THIS hook's own
+//    return is `droppedFramesTotal` (below), a monotone fold of C1's live
+//    value across every Start/Stop cycle in the session - never
+//    `capture.droppedFrames` straight through, which resets to 0 on every
+//    start() and would silently lose an earlier cycle's drops the moment a
+//    new cycle began (docs/REGRESSION.md entry 383's Limits, confirmed real
+//    here). Set D renders AC7b's drop sentence directly beneath the
+//    persistent post-stop summary from this total, a more specific
+//    placement than the generic notices list gives it.
 // 2. useReplyRows()'s return shape is NOT pinned anywhere in the AC (only
 //    prose ownership) - this file uses its real exported
 //    `UseReplyRowsReturn` type directly (S6: no hand-written duplicate, no
@@ -77,6 +82,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   EXTRACT_BATCH_WIRE_BUDGET,
+  accumulateDroppedFrames,
   draftDispatchForce,
   shouldLoopContinue,
   type ReplyResource,
@@ -220,6 +226,36 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   const [logFramesCaptured, setLogFramesCaptured] = useState(0);
   const [logBatches, setLogBatches] = useState<DiscussionRepliesLogBatch[]>([]);
   const [logRetries, setLogRetries] = useState<DiscussionRepliesLogRetry[]>([]);
+
+  // docs/REGRESSION.md entry 383's Limits, verified real: C1's own
+  // `droppedFrames` resets to 0 on every capture start() (see
+  // useDiscussionCapture.ts's own header/start()), while `logStartedAt`
+  // above spans the WHOLE panel session, not just the latest cycle -
+  // reading `capture.droppedFrames` live into this hook's run log/return
+  // silently lost every earlier Start/Stop cycle's count the moment a new
+  // cycle began. `accumulateDroppedFrames` (./discussion-capture) is the
+  // same tested fold the module-deck-capture panel already uses for this
+  // exact class of bug (its own AM-G comment names the grading panel as the
+  // pre-existing instance it was written not to repeat - this hook, feeding
+  // both the run log and DiscussionRepliesPanel.tsx's own post-stop notice,
+  // is a second, previously unnoted instance of the same defect). This
+  // effect is the ONLY place that calls it; `droppedFramesTotal` - never
+  // `capture.droppedFrames` directly - is what this hook threads into the
+  // run log and returns, so both report drops across the whole session, not
+  // just since the most recent Start.
+  const [droppedFramesTotal, setDroppedFramesTotal] = useState(0);
+  const droppedFramesTotalRef = useRef(0);
+  const prevLiveDroppedRef = useRef(0);
+  useEffect(() => {
+    const nextTotal = accumulateDroppedFrames(prevLiveDroppedRef.current, capture.droppedFrames, droppedFramesTotalRef.current);
+    prevLiveDroppedRef.current = capture.droppedFrames;
+    // react-hooks/set-state-in-effect: only reached when the total actually
+    // changed - never an unconditional top-level setState call.
+    if (nextTotal !== droppedFramesTotalRef.current) {
+      droppedFramesTotalRef.current = nextTotal;
+      setDroppedFramesTotal(nextTotal);
+    }
+  }, [capture.droppedFrames]);
 
   // --- Refs mirroring everything the two async loops read to decide what to
   // dispatch (AC41). Both loops are await-suspended across renders, so their
@@ -728,7 +764,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     courses,
     composition,
     logFramesCaptured,
-    droppedFrames: capture.droppedFrames,
+    droppedFrames: droppedFramesTotal,
     stalled: capture.stalled,
     logBatches,
     logAllNotices,
@@ -765,7 +801,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     capturing: capture.capturing,
     elapsedSec: capture.elapsedSec,
     pendingFrames: capture.pendingFrames,
-    droppedFrames: capture.droppedFrames,
+    droppedFrames: droppedFramesTotal,
     extracting,
     stalled: capture.stalled,
     notices,

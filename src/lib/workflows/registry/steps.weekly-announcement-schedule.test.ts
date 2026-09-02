@@ -85,6 +85,40 @@ describe("steps.weekly-announcement-schedule.ts stays client-bundle-safe", () =>
     // sanctioned route the step file uses.
     expect(source).not.toMatch(/from ["']@\/app\/actions["']/);
   });
+
+  // File-size-ceiling split (src/file-size-ceiling.structure.test.ts): the
+  // guard above only reads this file's OWN source, so it would stay green
+  // even if a leaf extracted out of this file introduced exactly the import
+  // it exists to catch. Extending it to the two leaves closes that gap the
+  // same way the package-run assertion above already does for
+  // announcement-package-run.ts.
+  it("steps.weekly-announcement-schedule.shared.ts never imports @/lib/supabase/server, @/app/actions/shared, next/headers, or @/app/actions at all", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("./steps.weekly-announcement-schedule.shared.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(source).not.toMatch(/from ["']@\/lib\/supabase\/server["']/);
+    expect(source).not.toMatch(/from ["']@\/app\/actions\/shared["']/);
+    expect(source).not.toMatch(/from ["']next\/headers["']/);
+    // Pure helpers/constants only - like announcement-package-run.ts, this
+    // leaf should never need the "@/app/actions" barrel at all.
+    expect(source).not.toMatch(/from ["']@\/app\/actions["']/);
+  });
+
+  it("steps.weekly-announcement-schedule.package-paths.ts never imports @/lib/supabase/server, @/app/actions/shared, or next/headers", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("./steps.weekly-announcement-schedule.package-paths.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(source).not.toMatch(/from ["']@\/lib\/supabase\/server["']/);
+    expect(source).not.toMatch(/from ["']@\/app\/actions\/shared["']/);
+    expect(source).not.toMatch(/from ["']next\/headers["']/);
+    // This leaf DOES use the same sanctioned "@/app/actions" route the
+    // parent step file uses (draftModuleAnnouncementsAction,
+    // draftPackageAnnouncementsAction, listCourseHubAction) - unlike
+    // announcement-package-run.ts, which takes every server call injected.
+    expect(source).toContain('from "@/app/actions"');
+  });
 });
 
 function testHelpers(overrides: Partial<StepRunHelpers> = {}): StepRunHelpers {

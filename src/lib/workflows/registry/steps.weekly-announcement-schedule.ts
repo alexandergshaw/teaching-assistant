@@ -42,18 +42,22 @@
 //
 // Every Canvas call and every mapping-table read/write lives behind server
 // actions (scheduleWeeklyAnnouncementsAction, planWeeklyAnnouncementsAction,
-// draftModuleAnnouncementsAction, draftPackageAnnouncementsAction - all
-// @/app/actions) - this file only plans, asks for ONE gather-and-draft call,
-// and renders the report the scheduling action (or, on the package path,
+// draftModuleAnnouncementsAction - all @/app/actions; draftPackageAnnouncementsAction
+// too, reached through steps.weekly-announcement-schedule.package-paths.ts
+// below) - this file only plans, asks for ONE gather-and-draft call, and
+// renders the report the scheduling action (or, on the package path,
 // announcement-package-run.ts's orchestrator) returns. This file's only
-// SERVER-ACTION import is the literal string "@/app/actions" - it also
-// imports cartridge-import.ts and common-cartridge.ts (pure/local, already
-// client-bundled by other registry steps - AC6 item 38 of the package-io
-// document) and announcement-package-run.ts (deliberately built to import
-// NEITHER "@/app/actions" nor any server-only module, so it can be unit
-// tested with injected fakes - see that file's own header comment). None of
-// that pulls in @/lib/supabase/server, @/app/actions/shared, or next/headers,
-// even transitively;
+// SERVER-ACTION import is the literal string "@/app/actions". The cartridge-
+// parsing/package-building sub-operations (cartridge-import.ts,
+// common-cartridge.ts, announcement-package-zip.ts, and
+// announcement-package-run.ts - deliberately built to import NEITHER
+// "@/app/actions" nor any server-only module, so it can be unit tested with
+// injected fakes, see that file's own header comment) live in
+// steps.weekly-announcement-schedule.package-paths.ts, split out only to
+// keep this file under the repo-wide 1000-line ceiling (see that file's own
+// header comment) - not to change what this file imports transitively. None
+// of it pulls in @/lib/supabase/server, @/app/actions/shared, or
+// next/headers, even transitively;
 // steps.weekly-announcement-schedule.test.ts (modeled on
 // course-schedule-docx.test.ts:40-48) reads this file's own source - and, as
 // of the package-io feature, announcement-package-run.ts's source too - and
@@ -73,34 +77,33 @@ import {
   scheduleWeeklyAnnouncementsAction,
   planWeeklyAnnouncementsAction,
   draftModuleAnnouncementsAction,
-  draftPackageAnnouncementsAction,
 } from "@/app/actions";
-import { type StepDefinition, type StepRunHelpers, type StepRunResult } from "@/lib/workflows/registry-helpers";
+import { type StepDefinition } from "@/lib/workflows/registry-helpers";
 import { resolveLmsFromTile, isCanvasLms, canvasOnlySkipText } from "@/lib/workflows/registry/lms-target-guard";
-import { parseCartridgeBlob, detectAppGeneratedCartridge } from "@/lib/cartridge-import";
-import { buildCommonCartridge } from "@/lib/workflows/common-cartridge";
-import { buildAnnouncementZip } from "@/lib/announcement-package-zip";
-import { resolveAnnouncementEmailCopy, parsePostTime } from "@/lib/announcement-schedule";
+// WEEKDAY_OPTIONS/LABELS, the three report/plan/draft helper functions, and
+// the WeekPlanEntry/WeeklyAnnouncementDraft structural types are pure and
+// shared with package-paths.ts below - both moved out to
+// steps.weekly-announcement-schedule.shared.ts (see its own header comment)
+// only to keep this file under the repo-wide 1000-line ceiling. Imported
+// here, never redefined, so the two files cannot drift apart.
 import {
-  resolvePackageStartDate,
-  resolvePackageWeekCount,
-  resolvePackageFormats,
-  runAndDeliverPackage,
-  type PackageFormatSelection,
-  type PackageMode,
-} from "@/lib/workflows/announcement-package-run";
-import type { Course } from "@/lib/supabase/courses";
-
-const WEEKDAY_OPTIONS = ["0", "1", "2", "3", "4", "5", "6"];
-const WEEKDAY_LABELS: Record<string, string> = {
-  "0": "Sunday",
-  "1": "Monday",
-  "2": "Tuesday",
-  "3": "Wednesday",
-  "4": "Thursday",
-  "5": "Friday",
-  "6": "Saturday",
-};
+  WEEKDAY_OPTIONS,
+  WEEKDAY_LABELS,
+  postTimeInvalidWarning,
+  prependWarningToReport,
+  prependWarningToLines,
+  type WeekPlanEntry,
+  type WeeklyAnnouncementDraft,
+} from "./steps.weekly-announcement-schedule.shared";
+// buildPackageForLiveSource (the live-Canvas-tile package build) and
+// runCartridgeSourcedPackage (the uploaded-cartridge/export package build)
+// are each a complete, independently-dispatched sub-operation - moved to
+// their own leaf for the same file-size reason (see that file's own header
+// comment). This file dispatches to them; it does not reimplement them.
+import {
+  buildPackageForLiveSource,
+  runCartridgeSourcedPackage,
+} from "./steps.weekly-announcement-schedule.package-paths";
 
 // The select's THREE values, per AC6 item 24a (module-content AC) and AC1
 // item 1 (package-io AC). "" (blank) is the default and MUST be a member of
@@ -147,340 +150,6 @@ const PACKAGE_FORMAT_LABELS: Record<string, string> = {
   imscc: "Course import package (.imscc)",
   zip: "Plain zip of the announcement documents",
 };
-
-// Local mirrors of shapes owned by files other agents are building
-// (@/app/actions/weekly-announcement-drafting.ts, canvas-inbox.ts). Kept
-// here as plain structural types, rather than imported, so this file's own
-// @/app/actions import stays the literal string the client-bundle guard test
-// checks for. Structurally identical to announcement-module-content.ts's
-// exported WeeklyAnnouncementDraft (and to
-// announcement-package-run.ts's PackageRunInputs.drafts element type), so an
-// array typed against this local shape is accepted anywhere either of those
-// is expected.
-type WeekPlanAction = "create" | "already-present" | "skip-past" | "reschedule" | "leave-posted" | "resolve-pending";
-type WeekPlanEntry = { week: number; action: WeekPlanAction };
-type WeeklyAnnouncementDraft = {
-  week: number;
-  title?: string;
-  message?: string;
-  note?: string;
-  defer?: boolean;
-};
-
-// T2 (docs/announcement-post-time-acceptance-criteria.md): blank still means
-// the documented 8:00 AM default and must never be reported as a problem -
-// parsePostTime's own `invalid` flag already makes that distinction (false
-// for blank, true only for a present-but-unparseable value), so this just
-// turns a true flag into one report line. Returns null for blank AND for a
-// value that parsed - both cases mean nothing needs saying. `raw` is passed
-// through as originally typed (never re-trimmed here) so the reported value
-// matches what the instructor actually entered.
-function postTimeInvalidWarning(raw: string): string | null {
-  const parsed = parsePostTime(raw);
-  if (!parsed.invalid) return null;
-  const hh = String(parsed.hour).padStart(2, "0");
-  const mm = String(parsed.minute).padStart(2, "0");
-  return `Note: the "Post time" value "${raw}" is not a valid 24-hour HH:MM time - this run used the default ${hh}:${mm} instead.`;
-}
-
-// Prepends postTimeInvalidWarning's note (when there is one) to a report
-// string / report-line list, so every one of this step's several return
-// sites can apply it the same way without repeating the null check. A null
-// warning returns its inputs completely unchanged - the ordinary case, since
-// the T1 time picker makes an invalid value nearly unreachable from the run
-// form itself.
-function prependWarningToReport(report: string, warning: string | null): string {
-  return warning ? `${warning}\n${report}` : report;
-}
-function prependWarningToLines(lines: string[], warning: string | null): string[] {
-  return warning ? [warning, ...lines] : lines;
-}
-
-// Shared bit of context every package call site (the uploaded-package
-// source, and the live-source "package"/"both" paths) needs to derive from
-// `values` - factored out once so the three cannot word/compute it
-// differently. Pure string/lookup work only; the actual DECISIONS
-// (resolveAnnouncementEmailCopy, resolvePackageFormats) are announcement-
-// package-run.ts's / announcement-schedule.ts's, not reinvented here.
-function resolvePackageDeliveryContext(
-  values: Record<string, unknown>,
-  lms: string,
-  weekdayRaw: string
-): {
-  formats: PackageFormatSelection;
-  flavor: "cc" | "canvas";
-  emailCopyNote: string;
-  emailCopyValue: boolean | null;
-  weekdayLabel: string;
-} {
-  const formats = resolvePackageFormats(String(values.packageFormats ?? ""));
-  // AC3 item 17: canvas flavor when the resolved target LMS is Canvas
-  // (produces a fuller Canvas-importable cartridge, including
-  // course_settings/module_meta.xml and the topicMeta.xml sidecar); cc
-  // flavor otherwise, matching buildCommonCartridge's own default.
-  const flavor: "cc" | "canvas" = lms.trim().toLowerCase() === "canvas" ? "canvas" : "cc";
-  const emailCopyResolution = resolveAnnouncementEmailCopy(lms, String(values.emailCopy ?? "").trim());
-  const weekdayLabel = WEEKDAY_LABELS[weekdayRaw] ?? weekdayRaw;
-  return {
-    formats,
-    flavor,
-    emailCopyNote: emailCopyResolution.note,
-    emailCopyValue: emailCopyResolution.value,
-    weekdayLabel,
-  };
-}
-
-// Shared package-build call for a LIVE source (draftFrom "" or "template") -
-// used by BOTH `deliver === "package"` (fresh drafting, every in-session
-// week) and `deliver === "both"` (reusing the live path's own already-
-// fetched `drafts`, per AC2 item 15 / AC6 item 39's "exactly one drafting
-// call" rule - see the `drafts` parameter below). Never called for a
-// draftFrom === "cartridge" run, which has its own tile-optional resolution
-// (runCartridgeSourcedPackage below) and never reaches here.
-async function buildPackageForLiveSource(ctx: {
-  tile: Course;
-  canvasUrl: string;
-  startDateRaw: string;
-  tileWeeks: number;
-  mode: PackageMode;
-  weekdayRaw: string;
-  weekday: number;
-  postTime: string;
-  title: string;
-  message: string;
-  extraNotes: string | undefined;
-  acronym: string | undefined;
-  values: Record<string, unknown>;
-  helpers: StepRunHelpers;
-  /** Present (even an empty array) only for the "both" reuse case - see
-   * this function's own header comment. Absent for a fresh `deliver ===
-   * "package"` build, which always drafts every in-session week itself. */
-  drafts?: WeeklyAnnouncementDraft[];
-}): Promise<{ outputs: Record<string, unknown>; reportLines: string[]; packagedCount: number }> {
-  const startDate = resolvePackageStartDate({
-    tileStartDate: ctx.startDateRaw,
-    packageStartAt: null,
-    explicitStartDate: String(ctx.values.startDate ?? ""),
-  });
-  if (!startDate) {
-    // Defensive only: this function is only ever called after the caller's
-    // own `!tile.startDate` check already passed, so `ctx.startDateRaw` is
-    // always a valid "YYYY-MM-DD" string in practice.
-    throw new Error("The course tile has no start date set.");
-  }
-  const weekCount =
-    resolvePackageWeekCount({
-      tileWeeks: ctx.tileWeeks,
-      packageModuleCount: null,
-      explicitWeekCount: String(ctx.values.weekCount ?? ""),
-    }) ?? ctx.tileWeeks;
-
-  const lms = await resolveLmsFromTile(ctx.tile, ctx.helpers);
-  const { formats, flavor, emailCopyNote, emailCopyValue, weekdayLabel } = resolvePackageDeliveryContext(
-    ctx.values,
-    lms,
-    ctx.weekdayRaw
-  );
-
-  return runAndDeliverPackage({
-    inputs: {
-      mode: ctx.mode,
-      startDate,
-      weekCount,
-      weekday: ctx.weekday,
-      postTimeRaw: ctx.postTime,
-      titleTemplate: ctx.title,
-      messageTemplate: ctx.message,
-      courseName: ctx.tile.name,
-      emailCopyNote,
-      emailCopyValue,
-      weekdayLabel,
-      formats,
-      drafts: ctx.drafts,
-    },
-    draftCallbacks: {
-      draft: (weeks, weekCountArg) =>
-        draftModuleAnnouncementsAction(ctx.canvasUrl, weeks, weekCountArg, ctx.acronym, {
-          provider: ctx.helpers.provider,
-          courseName: ctx.tile.name,
-          extraNotes: ctx.extraNotes,
-        }),
-    },
-    buildCallbacks: {
-      buildImscc: (weeks) => buildCommonCartridge(ctx.tile.name, weeks, { flavor }),
-      buildZip: (items, options) => buildAnnouncementZip(items, options),
-    },
-    save: { saveBundle: ctx.helpers.saveBundle, saveCourseExportFile: ctx.helpers.saveCourseExportFile },
-    baseFileName: ctx.tile.name,
-    tileId: ctx.tile.id,
-    sourceLabel: ctx.mode === "template" ? "the message template" : "Canvas module content",
-    deliveryLabel: "package only (no LMS changes)",
-  });
-}
-
-// AC1: an uploaded course cartridge or export as the term's content source.
-// FORCES package-only delivery (AC2 item 13) regardless of what `deliver`
-// holds, and never reaches any Canvas call, any mapping-table read/write, or
-// any of the live-path checks above (AC1 item 9: the course tile is OPTIONAL
-// here). Dispatched from `run` before the (otherwise unconditional)
-// `hubCourse` check below even runs.
-async function runCartridgeSourcedPackage(
-  values: Record<string, unknown>,
-  helpers: StepRunHelpers,
-  onProgress: (text: string) => void
-): Promise<StepRunResult> {
-  // AC1 item 3: named error, before any other work.
-  const files = Array.isArray(values.cartridge) ? (values.cartridge as File[]) : [];
-  if (files.length === 0) {
-    throw new Error(
-      "Upload a course cartridge or course export (.imscc or .zip) - the uploaded package source needs it."
-    );
-  }
-  const blob = files[0];
-
-  // AC1 item 5: refuse the app's own output fed back in, matching entries
-  // 202/206's exact wording.
-  if (await detectAppGeneratedCartridge(blob)) {
-    throw new Error(
-      "That cartridge was produced by this app, not exported from a real course - drafting announcements from it would feed the app its own output back in. Upload the LMS's own export instead."
-    );
-  }
-
-  onProgress("Reading the uploaded package...");
-  // AC1 item 4: parseCartridgeBlob already dispatches Blackboard / Canvas /
-  // generic Common Cartridge by content, and a Moodle .mbz surfaces that
-  // parser's own named error unchanged - nothing extra to do here.
-  const data = await parseCartridgeBlob(blob);
-  // AC1 item 6: never a silent empty success.
-  if (data.modules.length === 0) {
-    throw new Error("The uploaded package has no modules - nothing to draft each week's announcement from.");
-  }
-
-  const weekdayRaw = String(values.weekday ?? "").trim();
-  if (!WEEKDAY_OPTIONS.includes(weekdayRaw)) {
-    throw new Error("Choose a weekday to post on.");
-  }
-  const weekday = Number.parseInt(weekdayRaw, 10);
-  const postTime = String(values.postTime ?? "").trim();
-  const postTimeWarning = postTimeInvalidWarning(postTime);
-  const title = String(values.title ?? "").trim();
-  const message = String(values.message ?? "").trim();
-  const extraNotes = String(values.extraNotes ?? "").trim() || undefined;
-
-  // AC1 item 9: the course tile is OPTIONAL for an uploaded-package source -
-  // used only to name the output and to supply a course title when the
-  // package has none. No Canvas URL, no start date on the tile, and no LMS
-  // link are required.
-  const hubCourseId = String(values.hubCourse ?? "").trim();
-  let tile: Course | null = null;
-  if (hubCourseId) {
-    const list = await listCourseHubAction();
-    if (!("error" in list)) {
-      tile = list.courses.find((c) => c.id === hubCourseId) ?? null;
-    }
-  }
-
-  // AC1 item 10: explicit override > tile > package (see
-  // resolvePackageStartDate/resolvePackageWeekCount's own header comments in
-  // announcement-package-run.ts for why "override" is read as taking
-  // precedence over both other sources, not merely filling a gap neither
-  // leaves).
-  const startDate = resolvePackageStartDate({
-    tileStartDate: tile?.startDate ?? null,
-    packageStartAt: data.startAt,
-    explicitStartDate: String(values.startDate ?? ""),
-  });
-  if (!startDate) {
-    throw new Error("Set a start date - the uploaded package does not carry one and no course tile is selected.");
-  }
-  // packageModuleCount is always > 0 here (the zero-modules check above
-  // already threw), so resolvePackageWeekCount can only return null when
-  // BOTH other sources are also absent/invalid - which cannot happen once
-  // packageModuleCount is a valid fallback. The `?? data.modules.length` is
-  // therefore a type-level reassurance, not a reachable runtime fallback.
-  const weekCount =
-    resolvePackageWeekCount({
-      tileWeeks: tile?.weeks ?? null,
-      packageModuleCount: data.modules.length,
-      explicitWeekCount: String(values.weekCount ?? ""),
-    }) ?? data.modules.length;
-
-  const courseName = tile?.name || data.title || "Course";
-  const lms = tile ? await resolveLmsFromTile(tile, helpers) : "";
-  const { formats, flavor, emailCopyNote, emailCopyValue, weekdayLabel } = resolvePackageDeliveryContext(
-    values,
-    lms,
-    weekdayRaw
-  );
-
-  const deliverRaw = String(values.deliver ?? "").trim();
-  const overrideNote =
-    deliverRaw === "" || deliverRaw === "both"
-      ? "Source is an uploaded package, so nothing was written to the LMS - the package below is the whole output."
-      : undefined;
-
-  onProgress(`Drafting ${weekCount} week announcement${weekCount === 1 ? "" : "s"} from the uploaded package...`);
-
-  // AC6 item 39's structural-typing note (weekly-announcement-drafting.ts's
-  // own header comment): draftPackageAnnouncementsAction is a "use server"
-  // export and cannot re-export the CartridgeModule type, so it accepts a
-  // plain structural array instead - this mapping is exactly that shape.
-  const modules = data.modules.map((m) => ({
-    name: m.name,
-    position: m.position,
-    items: m.items.map((it) => ({ title: it.title, type: it.type, body: it.body })),
-  }));
-
-  const packaged = await runAndDeliverPackage({
-    inputs: {
-      mode: "module",
-      startDate,
-      weekCount,
-      weekday,
-      postTimeRaw: postTime,
-      titleTemplate: title,
-      messageTemplate: message,
-      courseName,
-      emailCopyNote,
-      emailCopyValue,
-      weekdayLabel,
-      formats,
-    },
-    draftCallbacks: {
-      draft: (weeks, weekCountArg) =>
-        draftPackageAnnouncementsAction(modules, weeks, weekCountArg, {
-          provider: helpers.provider,
-          courseName,
-          extraNotes,
-        }),
-    },
-    buildCallbacks: {
-      buildImscc: (weeks) => buildCommonCartridge(courseName, weeks, { flavor }),
-      buildZip: (items, options) => buildAnnouncementZip(items, options),
-    },
-    save: { saveBundle: helpers.saveBundle, saveCourseExportFile: helpers.saveCourseExportFile },
-    baseFileName: courseName,
-    tileId: tile?.id ?? null,
-    sourceLabel: "an uploaded course cartridge or export",
-    deliveryLabel: "package only (forced by the uploaded-package source)",
-    overrideNote,
-  });
-
-  const reportLines = prependWarningToLines(packaged.reportLines, postTimeWarning);
-  return {
-    outputs: {
-      // AC7 item 43: never implies anything was scheduled.
-      scheduledCount: 0,
-      report: reportLines.join("\n"),
-      ...packaged.outputs,
-    },
-    summary: {
-      kind: "list",
-      label: `${packaged.packagedCount} week(s) packaged from the uploaded package`,
-      items: reportLines,
-    },
-  };
-}
 
 export const weeklyAnnouncementScheduleSteps: StepDefinition[] = [
   {

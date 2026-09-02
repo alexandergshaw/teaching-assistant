@@ -541,6 +541,58 @@ export function describeKnowledgeContextLabel(totalSelected: number, includedPag
 }
 
 // ---------------------------------------------------------------------------
+// Knowledge -> Recording handoff (docs/knowledge-recording-handoff-acceptance-
+// criteria.md), AC1 - "never name a page the model did not read". Populates
+// RecordingKnowledgeContext.pages (recording-launch.ts) at the two launch
+// sites (KnowledgeTab.tsx's startRecordingWithSelection/
+// startGradingWithSelection).
+// ---------------------------------------------------------------------------
+
+/** A selected page's identity, as already held client-side by KnowledgeTab.tsx
+ *  before any launch (no fetch needed - see that file's own comment on why). */
+export interface SelectedContextPage {
+  id: string;
+  title: string;
+}
+
+/**
+ * Zips `selectedPages` (what a launch site passed as buildKnowledgeContextBlock's
+ * `pages` argument, IN THE SAME ORDER) against that call's own `pageResults`
+ * (per-page identity captured INSIDE the budget loop - see
+ * src/lib/chat/knowledge-context.ts's own doc on why inclusion is not a
+ * prefix), and returns only the entries the budget actually included.
+ *
+ * `pageResults` carries a title but no id (KnowledgeContextPage never had
+ * one) - the only way to recover which SELECTED page a `pageResults` entry
+ * refers to is position, not title (duplicate titles would collide) and not
+ * a re-derivation from the includedPages/omittedPages counts (AC1: a large
+ * page can be skipped while a later, smaller one is kept, so "the first N
+ * pages made it" is false). This function trusts that positional contract
+ * but does not blindly assume it holds: a length mismatch between the two
+ * arrays would silently misattribute inclusion to the wrong page, which is
+ * worse than naming none, so it is asserted (a loud dev-time signal, never a
+ * thrown error - this must still degrade rather than crash the launch) and
+ * the function returns [] rather than guessing.
+ */
+export function includedContextPages(
+  selectedPages: SelectedContextPage[],
+  pageResults: { title: string; included: boolean }[]
+): SelectedContextPage[] {
+  console.assert(
+    selectedPages.length === pageResults.length,
+    "includedContextPages: selectedPages/pageResults length mismatch - refusing to guess which pages were included"
+  );
+  if (selectedPages.length !== pageResults.length) return [];
+  const result: SelectedContextPage[] = [];
+  for (let i = 0; i < selectedPages.length; i++) {
+    if (pageResults[i].included) {
+      result.push({ id: selectedPages[i].id, title: selectedPages[i].title });
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // K7 - consequence tiering for the bulk bar's buttons. Mirrors the
 // modules bulk bar's groupTier idea (content-tab/modules/bulkBarGroups.ts)
 // at the scale this bar actually needs (three or four buttons, not thirteen
@@ -652,4 +704,53 @@ export function describeBulkDeleteOutcome(total: number, outcome: BulkDeleteOutc
     );
   }
   return parts.join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// Aesthetics/UX pass (2026-09) - the bulk bar's own resting height was the
+// bug: four stacked bulkRow sections (K1-K10's own additions) ran 300-400px,
+// and K2's overlay (kbOverlayAnchor/kbOverlayCard, KnowledgeTab.module.css)
+// mounted that whole card on top of the tree instead of displacing it - so
+// it covered almost every page row the moment anything was selected. The
+// redesign (KnowledgeBulkBar.tsx) shrinks the RESTING bar to one row (count,
+// Ask AI, an overflow menu, Clear) and moves everything else - the named
+// selection list, Start recording/Grade via recording, the model-context
+// disclosure, and delete - behind that menu, while KnowledgeTab.tsx now
+// mounts the bar UNCONDITIONALLY (a constant-height reserved slot,
+// KnowledgeTab.module.css's .kbBulkSlot) instead of only once something is
+// selected, so ticking the very first checkbox never inserts new flow height
+// in the first place - never needing K2's overlay trick for the resting bar
+// at all. See KnowledgeBulkBar.tsx's own header comment for the full design.
+// ---------------------------------------------------------------------------
+
+/**
+ * The ONE bar-level `role="status" aria-live="polite"` text the redesigned
+ * bar renders - covers three facts that would otherwise each want their own
+ * live region (a bulk delete in flight, its finished {done, failed, skipped}
+ * outcome, and the two-click delete arm's own confirmation sentence, now that
+ * the delete control itself lives inside the overflow menu rather than in
+ * its own always-visible row). Only one of these is ever really true at a
+ * time in practice - `requestBulkDelete` (useKbBulkActions.ts) clears
+ * `armedFor` the instant a delete actually starts, and `outcomeNote` is only
+ * ever set once `busy` has already gone back to false - but the precedence
+ * here (busy, then the last outcome, then the pending arm) is total and
+ * explicit regardless, so there is exactly one function deciding it rather
+ * than three independent JSX conditions that could, in principle, disagree.
+ * Returns null when there is nothing to announce - the caller renders no
+ * status element at all in that case, not an empty one.
+ */
+export function kbBulkBarStatusText(
+  busy: boolean,
+  outcomeNote: string | null,
+  armed: boolean,
+  inclusiveCount: number
+): string | null {
+  if (busy) return "Working…";
+  if (outcomeNote) return outcomeNote;
+  if (armed) {
+    return `Click "Confirm delete" again to permanently delete ${inclusiveCount} page${
+      inclusiveCount === 1 ? "" : "s"
+    } (including sub-pages of anything selected). This cannot be undone.`;
+  }
+  return null;
 }

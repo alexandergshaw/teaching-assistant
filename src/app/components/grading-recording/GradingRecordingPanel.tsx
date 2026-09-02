@@ -59,6 +59,8 @@ import {
   takeRecordingKnowledgeContext,
   type RecordingKnowledgeContext,
 } from "@/lib/recording-launch";
+import { returnToKnowledge } from "@/lib/knowledge-return";
+import { formatContextPagesList, returnTargetPageId } from "./grading-context-display";
 import { extractGradingSubmissionsAction } from "@/app/actions/grading-submission-extract";
 // The sibling GRADING action - coded against the exact signature this task's
 // brief pinned, before this file's own path (src/app/actions/grading-
@@ -545,8 +547,35 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           This course has no roster on file - names will show as &quot;No roster to check&quot; until one is added to its course tile.
         </p>
       )}
+      {/* AC2/AC4 of docs/knowledge-recording-handoff-acceptance-criteria.md:
+          extends this existing notice (already the reference implementation
+          the sibling "discussions" destination is matched against) with the
+          carried pages, capped, and a way back to where they were selected -
+          without touching the label sentence or its placement. `pages` is
+          ALREADY filtered to only what the budget included (AC1 -
+          KnowledgeTab.tsx's includedContextPages, before this ever launches),
+          so formatContextPagesList just formats whatever survived; nothing
+          here re-checks inclusion because there is nothing left here to
+          re-check it against. Renders nothing when knowledgeContext is null
+          (AC2's "carrying nothing renders nothing") - unchanged. */}
       {knowledgeContext && (
-        <p className={styles.fieldHint}>{`Grading with Knowledge Base context: ${knowledgeContext.label ?? "selected pages"}.`}</p>
+        <div className={styles.field} style={{ gap: "var(--space-1)" }}>
+          <p className={styles.fieldHint} style={{ margin: 0 }}>
+            {`Grading with Knowledge Base context: ${knowledgeContext.label ?? "selected pages"}.`}{" "}
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() => returnToKnowledge(returnTargetPageId(knowledgeContext.pages))}
+            >
+              Back to Knowledge
+            </button>
+          </p>
+          {formatContextPagesList(knowledgeContext.pages) && (
+            <p className={styles.fieldHint} style={{ margin: 0 }}>
+              {formatContextPagesList(knowledgeContext.pages)}
+            </p>
+          )}
+        </div>
       )}
 
       <div className={styles.ghActions}>

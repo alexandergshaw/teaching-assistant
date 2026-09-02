@@ -83,12 +83,80 @@ exist; the FAB never carries context, and a plain visit is not a selection.
 
 ## 4. AC3 - adjust from the recording side
 
-A picker on the recording side to select more or fewer pages.
+**Audited 2026-09-02. The remove/add pair is NOT symmetrical, and my original
+framing of it was wrong in both halves. Corrections below are load-bearing.**
+
+### 4a. Removal is not free today - but the fix is
+
+`RecordingKnowledgeContext.text` is the **already-flattened, joined prompt
+string**, and `pages` carries no `body`. So a remove control built on today's
+shape could only either hide a title from a display list while the model still
+receives that page's content on the next run - **the exact lie AC1 forbids,
+merely inverted** - or string-surgery the blob by matching `"Selected page:
+<title>"` headers, which breaks on duplicate titles or a body containing that
+literal.
+
+**The fix costs zero fetches.** The body is already resident at the launch site,
+one line above where it is discarded:
+`KnowledgeTab.tsx` maps `{ title, body }` into `buildKnowledgeContextBlock`,
+then builds `pages` via `includedContextPages(...)` whose `SelectedContextPage`
+(`knowledge-helpers.ts`) is `{ id, title }` - `body` is dropped explicitly.
+Widen `SelectedContextPage` and `RecordingKnowledgeContext.pages` to
+`{ id, title, body }` and removal becomes a client-side recompute of
+`buildKnowledgeContextBlock` over the remaining pages. No network call, no new
+server action, no institution problem (removal only ever subtracts from a set
+it already holds in full).
+
+### 4b. Adding a page is a separate, larger feature - deferred
+
+Do not bundle it into removal. It needs, none of which exist:
+
+- **Two new server actions.** Every query in `lib\knowledge-base.ts` is
+  `select("*")`; the only narrower one returns a count, not rows. There is no
+  id+title list path and no `getInstitutionPageAction` at all.
+- **Institution scope wired into the Recording tree.** `RecordingTab`'s `active`
+  prop is a visibility boolean, unrelated to institution; no institution value
+  reaches `RecordingTab`, `DiscussionRepliesPanel` or `GradingRecordingPanel`.
+  Built without this, a picker shows the wrong institution's pages or none.
+  `readKbInstitution()` (`knowledge-helpers.ts`) is a viable snapshot source,
+  matching the snapshot-at-click precedent the launch sites already use.
+- **Surgery on the sealed `UseDiscussionRepliesReturn`**
+  (`discussion-draft-loop.ts`), which today exposes only
+  `knowledgeContextLabel: string | null` - no ids, titles, bodies or setter.
+  Widening it touches three files, one of which has 27 lines of headroom.
+
+### 4c. Do NOT reuse `useKbPageTree` on the recording side
+
+It is a single-selection editing-surface hook, not a page-list source:
+
+- `applySelection` calls `writeSelectedPageId(active, id)` - the **same**
+  per-institution key the Knowledge tab reads for "which page is open". A
+  recording-side mount that ever calls it silently overwrites where the
+  instructor lands next time they open Knowledge.
+- Its load effect calls `listInstitutionPagesAction` directly with no cache,
+  dedupe or SWR layer, so a second mount is a **second full
+  institution-with-bodies fetch**.
+- `useKbSelection` (multi-select, its own persisted key, takes `pages` as an
+  argument and fetches nothing) is the shape a picker actually wants.
+
+### 4d. The persisted label must be rewritten on every edit
+
+The draft loop reads context **per batch dispatch**, fresh from
+`knowledgeContextRef` - so a selection edited mid-run takes effect on the very
+next batch. But `ta-rec-disc-kb-context-label` is written **once, in `start()`**.
+Any picker must rewrite that key on every selection change, or the label lies
+about what the table's replies actually used - the precise question it exists to
+answer. Grading needs no equivalent fix: it reads `knowledgeContext?.text` from
+state per invocation, which is correct.
+
+### 4e. Constraints
 
 - **New file.** `DiscussionRepliesPanel.tsx` is 973 lines against a hard 1000
-  ceiling enforced over `recording/` - the picker cannot live inside it.
-- Adjusting the selection re-derives the carried context. It must not require
-  returning to the Knowledge tab.
+  ceiling that is **repo-wide** (`src\file-size-ceiling.structure.test.ts`), not
+  scoped to `recording/` as an earlier draft of this doc implied.
+  `KnowledgeTab.tsx` at 947 is also close to it.
+- Adjusting the selection re-derives the carried context client-side. It must
+  not require returning to the Knowledge tab.
 - Whatever is displayed after an edit must still satisfy AC1.
 
 ## 5. AC4 - return to where the selection was made
@@ -123,3 +191,9 @@ Recorded so they are not re-derived:
   mount-only read but over-specified into forbidding the live-listener shape
   grading already uses - the repo's recorded "source-text tests over-specify"
   failure mode. Chunk 1 replaces those guards to pin the fact, not the spelling.
+- **"Removing a carried page is the easy half" was wrong** (2026-09-02 audit).
+  It was assumed cheap because the data is already there, but it is not there in
+  a form anything can subtract from: `text` is flattened and `pages` has no
+  `body`. Removal is cheap only AFTER `pages[].body` is added - see 4a. The
+  remove/add pair was never symmetrical, and treating it as one item would have
+  shipped either a cosmetic lie or fragile string parsing.

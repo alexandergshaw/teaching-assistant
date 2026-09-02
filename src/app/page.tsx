@@ -35,6 +35,7 @@ import styles from "./page.module.css";
 import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
 import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
+import { KNOWLEDGE_RETURN_EVENT } from "@/lib/knowledge-return";
 import { type ActiveTab } from "./url-state";
 
 const initialState: GradeActionState = { run: null, error: null };
@@ -126,6 +127,25 @@ export default function Home() {
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
   }, [setManualView, setActiveTab]);
+
+  // "Back to Knowledge" (docs/knowledge-recording-handoff-acceptance-criteria.md,
+  // AC4): the other half of the same "this is the ONLY place that can call
+  // setActiveTab" seam above - a recording destination's "Back to Knowledge"
+  // control (GradingRecordingPanel.tsx) dispatches KNOWLEDGE_RETURN_EVENT
+  // (src/lib/knowledge-return.ts) rather than reaching setActiveTab
+  // directly, for the identical reason RECORDING_LAUNCH_EVENT does: this
+  // component is the sole owner of that setter. Registered once, live, the
+  // same shape as the listener above - this component never unmounts for
+  // the life of the session, so it must observe every dispatch, not just
+  // the first. Carries no payload of its own to read here: WHICH page to
+  // land on rides knowledge-return.ts's own one-shot slot, drained by
+  // KnowledgeTab.tsx's mount effect once it exists to read it - this
+  // listener's only job is the tab switch that makes that mount happen.
+  useEffect(() => {
+    const handler = () => setActiveTab("knowledge");
+    window.addEventListener(KNOWLEDGE_RETURN_EVENT, handler);
+    return () => window.removeEventListener(KNOWLEDGE_RETURN_EVENT, handler);
+  }, [setActiveTab]);
 
   useEffect(() => {
     if (activeTab === "workflows" && workflowsView === "drafts") {

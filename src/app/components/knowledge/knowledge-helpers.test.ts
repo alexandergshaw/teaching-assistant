@@ -21,8 +21,11 @@ import {
   computeBulkDeleteTargets,
   bulkDeleteInclusiveCount,
   describeBulkDeleteOutcome,
+  kbBulkBarStatusText,
+  includedContextPages,
 } from "./knowledge-helpers";
 import { buildPageTree, type InstitutionPage } from "@/lib/knowledge-base";
+import { buildKnowledgeContextBlock } from "@/lib/chat/knowledge-context";
 
 function page(overrides: Partial<InstitutionPage> = {}): InstitutionPage {
   return {
@@ -609,5 +612,115 @@ describe("describeBulkDeleteOutcome (K10 - the {done, failed, skipped} note)", (
 
   it("uses the singular noun for a total of exactly one page", () => {
     expect(describeBulkDeleteOutcome(1, { doneCount: 1, failed: [], skipped: [] })).toBe("1 of 1 page deleted.");
+  });
+});
+
+describe("kbBulkBarStatusText (aesthetics/UX pass - the bulk bar's ONE bar-level live region, now that busy/outcome/armed each used to gate a separate `role=\"status\"` element)", () => {
+  it("returns null when there is nothing to announce", () => {
+    expect(kbBulkBarStatusText(false, null, false, 0)).toBeNull();
+  });
+
+  it("SABOTAGE TARGET: busy wins over everything else, even a stale outcome note or an armed delete", () => {
+    expect(kbBulkBarStatusText(true, "3 of 3 pages deleted.", true, 12)).toBe("Working…");
+  });
+
+  it("SABOTAGE TARGET: the outcome note wins over an armed delete once busy has cleared", () => {
+    expect(kbBulkBarStatusText(false, "3 of 3 pages deleted.", true, 12)).toBe("3 of 3 pages deleted.");
+  });
+
+  it("falls through to the armed confirmation sentence only once busy and outcomeNote are both clear", () => {
+    const text = kbBulkBarStatusText(false, null, true, 12);
+    expect(text).toContain("12 pages");
+    expect(text).toMatch(/cannot be undone/i);
+    expect(text).toMatch(/Confirm delete/);
+  });
+
+  it("uses the singular noun for an inclusive count of exactly one page", () => {
+    const text = kbBulkBarStatusText(false, null, true, 1);
+    expect(text).toContain("1 page");
+    expect(text).not.toContain("1 pages");
+  });
+});
+
+describe("includedContextPages (AC1 of docs/knowledge-recording-handoff-acceptance-criteria.md - never name a page the model did not read)", () => {
+  it("keeps every page when nothing was omitted (small selection, well under budget)", () => {
+    const selectedPages = [
+      { id: "p1", title: "Grading rubric" },
+      { id: "p2", title: "Late policy" },
+    ];
+    const block = buildKnowledgeContextBlock({
+      pages: [
+        { title: "Grading rubric", body: "Short body." },
+        { title: "Late policy", body: "Also short." },
+      ],
+      attachments: [],
+    });
+    expect(includedContextPages(selectedPages, block.pageResults)).toEqual(selectedPages);
+  });
+
+  it(
+    "SABOTAGE TARGET (AC1's core claim): a MIDDLE page omitted by the budget is never listed as included, " +
+      "even though a later, SHORTER page right after it survives - inclusion is not a prefix",
+    () => {
+      // The budget loop uses `continue`, not `break` (knowledge-context.ts) -
+      // a huge middle page is skipped while a later, tiny page still fits.
+      // A prefix-assuming implementation (or one that switches `continue` to
+      // `break`) would keep "Intro" and "Huge policy" and drop "Tiny note",
+      // exactly backwards from what actually got sent to the model.
+      const selectedPages = [
+        { id: "p1", title: "Intro" },
+        { id: "p2", title: "Huge policy" },
+        { id: "p3", title: "Tiny note" },
+      ];
+      const HUGE = "x".repeat(20000);
+      const block = buildKnowledgeContextBlock({
+        pages: [
+          { title: "Intro", body: "Short intro." },
+          { title: "Huge policy", body: HUGE },
+          { title: "Tiny note", body: "n" },
+        ],
+        attachments: [],
+        maxChars: 1000,
+      });
+      // Sanity-check the fixture actually exercises the omission path this
+      // test exists to pin - if this ever stops being true the test below
+      // would pass vacuously.
+      expect(block.omittedPages).toBeGreaterThan(0);
+      const result = includedContextPages(selectedPages, block.pageResults);
+      const resultIds = result.map((p) => p.id);
+      expect(resultIds).not.toContain("p2");
+      expect(resultIds).toContain("p1");
+      expect(resultIds).toContain("p3");
+    }
+  );
+
+  it("returns an EMPTY list, never a guess, when selectedPages/pageResults lengths diverge", () => {
+    const selectedPages = [
+      { id: "p1", title: "A" },
+      { id: "p2", title: "B" },
+    ];
+    const pageResults = [{ title: "A", included: true }]; // one short - a caller bug
+    expect(includedContextPages(selectedPages, pageResults)).toEqual([]);
+  });
+
+  it("returns an empty list for an empty selection", () => {
+    expect(includedContextPages([], [])).toEqual([]);
+  });
+
+  it("preserves input order in the result", () => {
+    const selectedPages = [
+      { id: "a", title: "A" },
+      { id: "b", title: "B" },
+      { id: "c", title: "C" },
+    ];
+    const pageResults = [
+      { title: "A", included: true },
+      { title: "B", included: false },
+      { title: "C", included: true },
+    ];
+    expect(includedContextPages(selectedPages, pageResults)).toEqual([
+      { id: "a", title: "A" },
+      { id: "c", title: "C" },
+    ]);
   });
 });

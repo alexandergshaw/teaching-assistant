@@ -135,6 +135,86 @@
   font-weight: 700;
 }
 
+/* ── Bulk action bar - aesthetics/UX pass redesign ──────────────────────────
+   The bug report: "the bulk actions tab for the selected knowledge pages...
+   covers almost all of" the page tree beneath it. K2's overlay above
+   (kbOverlayAnchor/kbOverlayCard - still used by the search-hit panel, the
+   delete banner, and one piece of this bar below) traded reflow for
+   coverage: fine for a card that shows for a moment over an opaque
+   background, wrong for a bulk bar that could run 300-400px (K1-K10's four
+   stacked bulkRow sections) and sit there for a whole grading pass.
+
+   `.kbBulkSlot` fixes this the other way: NORMAL FLOW, not an overlay, so it
+   never sits on top of a tree row - and a CONSTANT `min-height`, ALWAYS
+   present (KnowledgeTab.tsx renders <KnowledgeBulkBar> on every render now,
+   never gated behind `selected.size > 0`), so ticking the very first
+   checkbox never inserts new flow height in the first place - the reflow K2
+   was fixed to avoid, without needing K2's own overlay trick for this bar's
+   resting row at all. The one-control-row height this reserves, permanently,
+   whether zero or a thousand pages are selected, is a small and deliberate
+   trade against covering up to 400px of real content only once something IS
+   selected - see KnowledgeBulkBar.tsx's own header comment for the rest of
+   the design (what moved into the overflow menu, and why). */
+.kbBulkSlot {
+  display: flex;
+  flex-direction: column;
+  min-height: var(--control-height-md);
+}
+
+/* The resting row itself - count, Ask AI, the overflow menu trigger, Clear -
+   `nowrap` so it can never grow to a second line (the one way this row's
+   height could stop being constant); `.kbBulkCount` below is the only
+   variable-width piece, and truncates instead of wrapping. */
+.kbBulkSlotRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: nowrap;
+  min-height: var(--control-height-md);
+}
+
+.kbBulkCount {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+/* The "..." overflow-menu trigger's glyph - a single punctuation character
+   rather than a new icon file: courses/icons.tsx and discussion-icons.tsx's
+   own header comments both note @mui/icons-material is not a dependency in
+   this repo, and every feature that has needed a glyph so far drew its own
+   tiny inline SVG rather than pulling that package in. A single horizontal
+   ellipsis needs neither - it is already legible text, not an emoji. */
+.kbBulkOverflowGlyph {
+  font-size: var(--font-size-md);
+  line-height: 1;
+}
+
+/* A non-interactive information block inside the overflow menu (the selected-
+   page list + Show all/fewer, the per-action consequence context, and the
+   model-context disclosure) - MUI's Menu accepts plain children alongside
+   MenuItem; AC5 (MUI is for controls, not layout) already has a precedent for
+   a native element doing layout work inside an otherwise-MUI surface
+   (BulkBarGroup.tsx's own <details>/<summary>). Padded to roughly match a
+   MenuItem's own density rather than sitting flush against the menu's edges. */
+.kbMenuSection {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  max-width: 320px;
+}
+
+.kbMenuSection + .kbMenuSection {
+  border-top: 1px solid var(--card-border);
+}
+
 /* K6: a search-hit row gained a checkbox (previously title+snippet only,
    with no way to select a search match without opening it from the tree).
    `.kbSearchHitRow` is the new outer flex row; `.kbSearchHitButton`

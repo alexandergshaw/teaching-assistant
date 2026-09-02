@@ -71,11 +71,13 @@ import {
   describeSelectedPages,
   selectAllVisibleVisualState,
   describeKnowledgeContextLabel,
+  includedContextPages,
   SHOW_ALL_SELECTED_PAGES,
 } from "./knowledge/knowledge-helpers";
 import { openChat } from "@/lib/chat/open-chat";
 import { buildKnowledgeContextBlock } from "@/lib/chat/knowledge-context";
 import { openRecordingTool } from "@/lib/recording-launch";
+import { takeKnowledgeReturnPageId } from "@/lib/knowledge-return";
 import styles from "../page.module.css";
 import kbStyles from "./KnowledgeTab.module.css";
 
@@ -319,6 +321,42 @@ export default function KnowledgeTab({
     expandAncestorsOf(id);
   };
 
+  // Back to Knowledge (AC4): drains the one-shot page id a recording
+  // destination's "Back to Knowledge" control stashed via
+  // returnToKnowledge() (src/lib/knowledge-return.ts) - read ONCE, on THIS
+  // component's own mount, never via a live window listener the way
+  // RECORDING_LAUNCH_EVENT works in RecordingTab.tsx/GradingRecordingPanel.tsx.
+  // Those two stay mounted for the whole session, so a live listener is the
+  // only shape that ever sees a second launch - but page.tsx renders THIS
+  // component only as `{activeTab === "knowledge" && <KnowledgeTab .../>}`
+  // (verified in page.tsx, not assumed): it fully unmounts the instant the
+  // instructor leaves this tab, and the "Back to Knowledge" button lives on
+  // the Recording tab - exactly when this component does not exist yet, so
+  // a listener registered in its own mount effect could never see that
+  // dispatch. The payload rides a one-shot slot instead, drained here the
+  // moment this component (re)mounts - the same moment every such
+  // navigation needs it applied.
+  //
+  // Reuses openSearchHit above (select + expand ancestors) rather than
+  // reimplementing it. Guarded to run at most once per mount, and only once
+  // `pages` has loaded enough to validate the id - a stale id (deleted, or
+  // from a different institution) is silently skipped rather than handed to
+  // openSearchHit unchecked, which would otherwise leave a dangling
+  // selectedId.
+  const pendingReturnPageIdRef = useRef<string | null>(takeKnowledgeReturnPageId());
+  const appliedReturnPageIdRef = useRef(false);
+  useEffect(() => {
+    if (appliedReturnPageIdRef.current) return;
+    const pageId = pendingReturnPageIdRef.current;
+    if (!pageId || !pages) return;
+    appliedReturnPageIdRef.current = true;
+    if (pages.some((p) => p.id === pageId)) openSearchHit(pageId);
+    // Guarded above to fire at most once - `pages` (when it is safe to run)
+    // is the only real dependency; openSearchHit's fresh identity per render
+    // needs no separate tracking.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pages]);
+
   // Ask AI (A1/D3): ONE CLICK from the bulk bar opens the app-wide chat FAB
   // already carrying the current bulk selection as context - no
   // intermediate dialog, no "choose what to include" step. Dispatches
@@ -359,6 +397,18 @@ export default function KnowledgeTab({
       pages: selectedPages.map((p) => ({ title: p.title, body: p.body })),
       attachments: [],
     });
+    // AC1 of docs/knowledge-recording-handoff-acceptance-criteria.md: `pages`
+    // must never name a page the budget did not actually include -
+    // includedContextPages zips `selectedPages` positionally against THIS
+    // SAME call's own block.pageResults (both built from `selectedPages`, in
+    // order, immediately above) and drops anything the budget omitted. Never
+    // derived from selectedPages directly, and never from
+    // block.includedPages/omittedPages alone - see that function's own doc
+    // for why (inclusion is not a prefix).
+    const contextPages = includedContextPages(
+      selectedPages.map((p) => ({ id: p.id, title: p.title })),
+      block.pageResults
+    );
     openRecordingTool({
       view: "discussions",
       ...(block.text
@@ -376,6 +426,7 @@ export default function KnowledgeTab({
               // discussions equivalent actually render to the instructor
               // once they land, so this is where the omission has to reach.
               label: describeKnowledgeContextLabel(selectedPages.length, block.includedPages, block.omittedPages),
+              ...(contextPages.length > 0 ? { pages: contextPages } : {}),
             },
           }
         : {}),
@@ -402,6 +453,14 @@ export default function KnowledgeTab({
       pages: selectedPages.map((p) => ({ title: p.title, body: p.body })),
       attachments: [],
     });
+    // AC1: see startRecordingWithSelection's identical comment above - this
+    // is the higher-stakes of the two paths (the pipeline this lands on
+    // writes feedback a student reads), so naming a page the model never
+    // actually read here is the worse of the two instances of the same risk.
+    const contextPages = includedContextPages(
+      selectedPages.map((p) => ({ id: p.id, title: p.title })),
+      block.pageResults
+    );
     openRecordingTool({
       view: "grading",
       openRubric: true,
@@ -415,6 +474,7 @@ export default function KnowledgeTab({
             knowledgeContext: {
               text: block.text,
               label: describeKnowledgeContextLabel(selectedPages.length, block.includedPages, block.omittedPages),
+              ...(contextPages.length > 0 ? { pages: contextPages } : {}),
             },
           }
         : {}),
@@ -723,30 +783,29 @@ export default function KnowledgeTab({
             </div>
           )}
 
-          {/* Bulk action bar (S6) - appears only once a selection exists.
-              K2: overlay-anchored like the search panel and delete banner
-              above - the first checkbox tick used to insert this whole card
-              above the tree in normal flow, jumping every row (including the
-              one just clicked) down under the cursor. Extracted to
-              KnowledgeBulkBar.tsx (pure structural split, K1-K10's own fixes
-              pushed this file over the 950-line cap) - the anchor wrapper
-              itself stays here since it also wraps two OTHER surfaces this
-              component does not own. */}
-          <div className={kbStyles.kbOverlayAnchor}>
-            {kbSelection.selected.size > 0 && (
-              <KnowledgeBulkBar
-                selectedCount={kbSelection.selected.size}
-                selectionDescription={selectionDescription}
-                showAllSelected={showAllSelected}
-                onShowAllSelectedChange={setShowAllSelected}
-                onClear={kbSelection.clear}
-                onAskAi={askAiAboutSelection}
-                onStartRecording={startRecordingWithSelection}
-                onStartGrading={startGradingWithSelection}
-                bulkDelete={bulkDelete}
-              />
-            )}
-          </div>
+          {/* Bulk action bar (S6) - aesthetics/UX pass redesign. UNLIKE the
+              search panel and delete banner above, this is no longer
+              wrapped in K2's kbOverlayAnchor/kbOverlayCard overlay, and it is
+              no longer gated behind `selected.size > 0`: KnowledgeBulkBar
+              now renders on EVERY render, into KnowledgeTab.module.css's
+              `.kbBulkSlot` - a normal-flow row with a CONSTANT min-height
+              (see that class's own comment) - so ticking the very first
+              checkbox never inserts new flow height (never reintroducing
+              K2's original jump-the-tree bug) and the bar never sits on top
+              of a tree row while at rest (fixing the actual complaint - see
+              KnowledgeBulkBar.tsx's own header comment for the full design,
+              including the one place it still reuses K2's overlay trick). */}
+          <KnowledgeBulkBar
+            selectedCount={kbSelection.selected.size}
+            selectionDescription={selectionDescription}
+            showAllSelected={showAllSelected}
+            onShowAllSelectedChange={setShowAllSelected}
+            onClear={kbSelection.clear}
+            onAskAi={askAiAboutSelection}
+            onStartRecording={startRecordingWithSelection}
+            onStartGrading={startGradingWithSelection}
+            bulkDelete={bulkDelete}
+          />
 
           {loadState === "loading" && <p className={styles.fieldHint} role="status" aria-live="polite">Loading {active} pages…</p>}
           {loadState === "error" && <p className={styles.error}>{loadError}</p>}

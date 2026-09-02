@@ -176,10 +176,11 @@ export interface DiscussionReplyRowProps {
    *  comment has the full account). */
   onSearchRow: (id: string) => void;
   /** D1 (docs/aesthetics-pass-acceptance-criteria.md section 4b): the
-   *  moment a successful Copy reply set this row's `handledAt`, keyed by row
-   *  id in a side table this file set owns entirely (see
-   *  discussion-reply-flags.ts's header for why it is not a ReplyRow field
-   *  in this build). `undefined` means "never copied out". */
+   *  moment a successful Copy reply set this row's `handledAt` - a real
+   *  ReplyRow field (discussion-serialization.ts), passed here as a plain
+   *  primitive value (never the whole row-id-keyed map) so an unrelated
+   *  row's flag changing does not defeat this row's own React.memo.
+   *  `undefined` means "never copied out". */
   handledAt: number | undefined;
   /** D1: set optimistically on a successful Copy reply (handleCopy below). */
   onMarkHandled: (id: string) => void;

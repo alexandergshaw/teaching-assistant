@@ -89,9 +89,9 @@ export interface InSessionBannerProps {
  *    past, layered on top of (never replacing) `formatUpcomingDate`'s own
  *    relative wording.
  *
- * The two lists render DATES FIRST, then courses, inside one horizontally-
- * scrolling strip, each preceded by a small tracked-uppercase zone label
- * ("Due" / "Term") and separated by a real vertical divider. Dates lead
+ * The two lists render DATES FIRST, then courses, as two STACKED zones
+ * inside one wrapping panel, each preceded by a small tracked-uppercase zone
+ * label ("Due" / "Term") and separated by a real divider. Dates lead
  * because they are the perishable half - the ranked, time-sensitive
  * information - while "which courses are running" is comparatively inert and
  * does not change hour to hour. The upcoming chip is now the VISUALLY LOUD
@@ -104,15 +104,23 @@ export interface InSessionBannerProps {
  * entry is the only interaction, and it only takes the instructor to that
  * course in the Courses tab table (see onSelectCourse above and
  * handleSelect/handleUpcomingSelect below) - nothing here ever mutates a
- * course. Nothing is capped or truncated: both lists render as chips inside
- * ONE horizontally-scrolling strip (the "strip" element in the JSX below),
- * so the banner's height never depends on how many of either there are.
- * Horizontal overflow is signalled, not hidden: every chip stays in the DOM
- * and the accessibility tree, is reachable by Tab (which scrolls it into
- * view automatically - native behaviour, not reimplemented here) and by
- * touch/trackpad scroll, and the strip's own right-edge fade (see .stripFade
- * below) signals there may be more to scroll rather than hiding that fact
- * silently.
+ * course. Nothing is capped or truncated, and the toggle's own open/closed
+ * state is what carries the overflow, not a scrollbar: COLLAPSED is one
+ * summary row (the toggle button itself, below) whose height never depends
+ * on how many courses or dates exist - it always shows exactly one
+ * "Teaching this term N courses" segment and one "Next <soonest entry>"
+ * segment, never a per-item list. EXPANDED is a WRAPPING panel (the "strip"
+ * element in the JSX below) - every chip is laid out and visible, wrapping
+ * onto as many rows as it needs, with no horizontal scroll container
+ * anywhere in it. This replaces an earlier version of this same panel that
+ * was one horizontally-scrolling row with a static edge fade as its only
+ * "there's more" signal - that fade could not distinguish "more to scroll"
+ * from "nothing left to scroll" and never said how much more there was, and
+ * past a modest course/date count most of the panel's content sat
+ * permanently off-screen. See .strip's own comment in the CSS module for the
+ * full redesign reasoning, including what happens to the panel's height (it
+ * now varies with viewport width, not just item count - deliberately, see
+ * that comment).
  *
  * Collapsible; the open/closed state persists across reloads under
  * STORAGE_KEY, the same ta--prefixed localStorage convention every other
@@ -487,41 +495,45 @@ export default function InSessionBanner({ onSelectCourse }: InSessionBannerProps
       <div className={`${styles.contentWrap} ${open ? styles.contentWrapOpen : ""}`}>
         <div className={styles.contentInner}>
           {/* stripWrap carries the id aria-controls resolves to (it must
-              stay ONE element containing everything the toggle discloses)
-              and is the position: relative anchor .stripFade below is
-              absolutely positioned against, since the fade must NOT scroll
-              away with .strip's own content. */}
+              stay ONE element containing everything the toggle discloses).
+              It no longer anchors an absolutely-positioned fade - that
+              affordance (.stripFade) is retired along with the
+              horizontal-scrolling design it signalled; see .strip's own
+              comment in the CSS module for the overflow redesign. */}
           <div id="in-session-banner-content" className={styles.stripWrap}>
-            {/* Upcoming dates FIRST, then courses (B5): this used to be
-                courses-then-dates, fixed, in this same nowrap/overflow-x
-                strip - at six courses and eight dates roughly 37% sat
-                off-screen, and past about fourteen courses in session EVERY
-                upcoming date was off-screen at rest with no visible evidence
-                they existed beyond the toggle's old bare count. Reversing
-                the order puts the ranked, perishable half (upcoming dates)
-                where it is never scrolled away, and leaves the
-                comparatively inert "which courses are running" half to
-                absorb the overflow instead. Each zone gets its own small
-                tracked-uppercase label ("Due" / "Term", AM5's micro-label
-                idiom - font-size-2xs/700/0.06em/text-secondary) and the two
-                are separated by a real 1px vertical divider
-                (align-self: stretch, zero added height) - both are new
-                sighted-user affordances for the group boundary that
-                previously existed only in the two <ul>'s aria-labels.
-                flex-wrap: nowrap plus flex-shrink: 0 on both lists (CSS
-                module) is what keeps this exactly one line tall regardless
-                of how many courses or dates there are - see .strip's own
-                comment for the second-clipping-context reasoning behind its
-                padding. The strip itself carries no tabIndex: it is not a
-                tab stop, and keyboard users reach every chip through the
-                chips themselves - focusing an off-screen one scrolls it into
-                view by native browser behaviour. .contentInner, the
-                immediate ancestor, does clip overflow (overflow: clip - see
-                its own comment in the CSS module for why not
-                overflow: hidden), but has none of its own once the accordion
-                is open, so it is never a second scroll container - .strip
-                below is the one element that actually scrolls, and it is
-                what native focus-into-view moves. */}
+            {/* Upcoming dates FIRST, then courses (B5) - unchanged by this
+                pass. What changed is how overflow is handled: .strip (CSS
+                module) used to be flex-wrap: nowrap; overflow-x: auto, one
+                horizontally-scrolling row with a static right-edge fade as
+                its only "there's more" signal. It is now flex-direction:
+                column - the same zoneLabel-then-<ul> pairs, in the same DOM
+                order, simply STACK instead of sitting side by side, and each
+                zone's own <ul> (see .courseList/.upcomingList in the CSS
+                module) wraps its own chips onto as many rows as it needs
+                instead of extending a scrollable width. No wrapper elements
+                were added to get this - the existing per-zone Fragments
+                already produce exactly the right stacking order. The
+                tracked-uppercase zone labels ("Due" / "Term", AM5's
+                micro-label idiom) and the divider between them are
+                unchanged in the JSX; only the divider's CSS orientation
+                flipped from a vertical rule to a horizontal one (see
+                .divider's own comment in the CSS module - same property,
+                different axis, because the container itself changed axis).
+                The strip itself carries no tabIndex: it is not a tab stop,
+                and keyboard users reach every chip through the chips
+                themselves - nothing here is ever off-screen at rest any
+                more, so there is nothing for native focus-into-view to
+                scroll TO within this panel (the page itself may still
+                scroll, exactly as it would for any other content that grows
+                taller than the viewport - unrelated to this panel's own
+                layout). .contentInner, the immediate ancestor, still clips
+                overflow (overflow: clip - see its own comment in the CSS
+                module for why not overflow: hidden) for the same reason as
+                before: during the 180ms open/close transition it is briefly
+                visibility: visible while its own height is still animating,
+                and clip (unlike hidden) creates no scroll container for a
+                stray Tab to offset - a concern that if anything matters MORE
+                now that the expanded panel can be taller than before. */}
             <div className={styles.strip}>
               {upcoming.length > 0 && (
                 <>
@@ -643,20 +655,6 @@ export default function InSessionBanner({ onSelectCourse }: InSessionBannerProps
                 </>
               )}
             </div>
-            {/* Static right-edge fade: a scrolling strip with no visual
-                signal that there is more content is its own kind of hiding.
-                A conditional version (visible only while there is actually
-                more to scroll) needs either a JS scroll listener - which
-                this banner deliberately has none of, relying only on the
-                ResizeObserver above for its one external subscription - or
-                mask-image plus scroll-timeline/animation-timeline, which is
-                not safe to rely on across browsers yet. A plain static fade
-                is the sanctioned fallback for exactly that situation.
-                aria-hidden and pointer-events: none keep it decorative only
-                - out of the accessibility tree and out of the click/hover
-                target area, so it can never sit on top of the last chip and
-                swallow a click. */}
-            <div className={styles.stripFade} aria-hidden="true" />
           </div>
         </div>
       </div>

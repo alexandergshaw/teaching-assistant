@@ -91,10 +91,13 @@ export function isResourceLaneBusy(args: {
  * eligibility question, so both count here. `"done"` (searched, whatever
  * the outcome - including a row the instructor emptied by hand, R11) and
  * `"searching"` are excluded; `"failed"` is reachable only through that
- * row's own Retry, mirroring AC28a's bulk-versus-targeted drafting policy. */
-export function isFindMissingEligible(row: { resourceState?: ReplyRow["resourceState"]; reply: string }): boolean {
+ * row's own Retry, mirroring AC28a's bulk-versus-targeted drafting policy.
+ * D9 (aesthetics-pass redesign, docs/aesthetics-pass-acceptance-criteria.md
+ * section 4b): a skipped row is excluded outright, regardless of the above -
+ * it opted out of the reply workflow this bulk sweep serves. */
+export function isFindMissingEligible(row: { resourceState?: ReplyRow["resourceState"]; reply: string; skipped?: boolean }): boolean {
   const neverSearched = row.resourceState === undefined || row.resourceState === "idle";
-  return neverSearched && row.reply.length > 0;
+  return neverSearched && row.reply.length > 0 && row.skipped !== true;
 }
 
 /** F8/R4e: whether a degraded batch result should be surfaced through the

@@ -194,124 +194,119 @@
   }
 }
 
-/* Positions .stripFade against the strip below without the fade scrolling
-   away with it - the fade is an absolutely positioned sibling of .strip, so
-   it needs a non-scrolling, position: relative ancestor to anchor to, and
-   this is that ancestor (id="in-session-banner-content" lives on this
-   element in the JSX, so it also stays the one element aria-controls
-   resolves to). */
+/* No longer anchors anything - it used to be a position: relative ancestor
+   for .stripFade, an absolutely positioned edge gradient that is retired
+   along with the horizontal-scrolling design it signalled (see .strip's own
+   comment below for the overflow redesign). position: relative is left in
+   place anyway: it is inert with no positioned descendant, and this element
+   has to stay defined and stay the sole wrapper regardless -
+   id="in-session-banner-content" (JSX) is the element aria-controls resolves
+   to, and that id must stay on exactly ONE element containing everything the
+   toggle discloses. */
 .stripWrap {
   position: relative;
 }
 
-/* The banner's entire expanded content, courses then upcoming dates, as ONE
-   horizontally-scrolling strip - replaces the earlier stacked layout (a
-   wrapping chip row, then up to six full-width rows, then a standalone,
-   pluralized overflow note past each cap). flex-wrap: nowrap keeps this
-   exactly one line tall no matter how many chips it holds; overflow-x: auto
-   is what makes the excess reachable by scroll instead of wrapping the strip
-   taller. Every list inside is flex-shrink: 0 (see .courseList/.upcomingList
-   below) so a long roster shrinks nothing - it only extends the scrollable
-   width. flex-wrap: nowrap alone does not make the height constant, though:
-   globals.css puts a classic, layout-space-consuming scrollbar on every
-   element (scrollbar-width: thin, an 8px-tall *::-webkit-scrollbar), and
-   that gutter appears only once overflow-x: auto actually has something to
-   scroll - so without suppressing it below, .strip would grow 8-11px taller
-   the moment the roster first overflows, and publish that jump to every
-   sticky element under it through the ResizeObserver mirror. Height
-   invariance is scrollbar-width: none together with flex-wrap: nowrap, not
-   flex-wrap alone.
+/* The banner's entire expanded content: upcoming dates FIRST, then courses
+   (B5), as TWO STACKED zones inside one column-flex panel. This replaces an
+   earlier design where both zones sat side by side in ONE
+   horizontally-scrolling row (flex-wrap: nowrap; overflow-x: auto) with a
+   static right-edge fade (.stripFade, now deleted) as the only signal that
+   more content existed off to the right. That design failed its own job: at
+   six courses and eight dates roughly 37% of the row's content sat
+   off-screen at rest, and past about fourteen courses in session EVERY
+   upcoming date was off-screen with no visible evidence beyond the toggle's
+   own count - and a fade cannot distinguish "more to scroll" from "nothing
+   left to scroll", or say how much more there is.
 
-   Top/bottom padding is deliberately NOT snapped to the --space-* scale
-   (AC3's own escape hatch: these two pixels do real work, not decoration).
-   5px is the app-wide :focus-visible ring's own clearance math (the ring
-   paints 2px OUTSIDE the border box at a 2px offset - a 4px-wide band - and
-   5px/5px leaves it a real 1px margin against a clip edge instead of
-   landing exactly on one), and scroll-padding-inline below is that same
-   4px band plus a 2px margin. Snapping either to --space-1 (4px) would
-   remove that margin and reopen the exact clipped-ring bug this padding was
-   chosen to avoid - see the scroll-padding-inline comment for the rest of
-   that reasoning.
+   This pass makes the toggle's own collapsed/expanded state the overflow
+   control instead of a scrollbar - see InSessionBanner.tsx's own top-level
+   comment for the COLLAPSED half of that (the toggle row, unaffected by this
+   rule). EXPANDED is this panel: flex-direction: column stacks the two
+   zones - each zone is just its existing zoneLabel span followed by its own
+   <ul>, in the same DOM order as before, so no wrapper elements were needed
+   to get this layout - and each zone's own <ul> (see .courseList/
+   .upcomingList below) wraps its own chips onto as many rows as it needs
+   instead of extending a scrollable width. There is no horizontal scroll
+   container anywhere in this panel any more: every chip is simply laid out
+   and visible.
 
-   Right padding is 40px (--space-10), wider than .stripFade's own 32px
-   (--space-8) width just below, so the fade can never wash a chip's text
-   below the AA contrast floor at the two positions scroll position alone
-   cannot fix: the last chip at maximum scroll (flexbox preserves this
-   padding as real trailing space past it) and every chip when the strip
-   does not overflow at all (nothing to scroll to, so the fade would
-   otherwise sit over the trailing chip permanently - hiding information,
-   which is what this whole change exists to stop). Keep this wider than
-   .stripFade's width if either one changes - both values are unchanged by
-   this pass, only expressed as tokens now, so that relationship still
-   holds exactly.
+   align-items is left at its flex default (stretch - the cross axis is now
+   horizontal, since the main axis turned vertical) rather than the old row
+   layout's align-items: center. stretch is what gives each zone's <ul> the
+   panel's full width to wrap its own chips inside, instead of shrinking to
+   fit its own unwrapped content width.
 
-   scroll-padding-inline: 6px (the same 4px ring band plus a 2px margin as
-   the vertical clearance above) matters because scroll-into-view aligns the
-   scrolled element's BORDER box, which excludes the outline: without it, a
-   chip Tabbed in from off-screen lands flush against the scrollport's
-   leading edge and has its focus ring clipped there. Left un-snapped for
-   the same reason as the vertical padding above. */
+   The trade this makes, deliberately: the panel's height now depends on how
+   many chips exist AND on viewport width (a narrower viewport, or more
+   chips, means more wrapped rows, means a taller panel). This is accepted,
+   not a defect - the ResizeObserver mirror in InSessionBanner.tsx watches
+   the banner's own border box and fires on any change to it, a window
+   resize that changes the wrap count included, so --in-session-banner-height
+   never goes stale. See that effect's own comment for the one residual
+   timing note (the observer callback runs one frame after layout, so a
+   larger height delta from this panel makes that one-frame lag more visible
+   than the old fixed-height row ever did - still not a correctness break).
+
+   Padding is now symmetric (5px var(--space-6) both sides) rather than the
+   old right-padded 5px var(--space-10): that asymmetry existed only to keep
+   .stripFade's gradient from ever washing a chip's text below the AA
+   contrast floor, and with the fade gone there is nothing left to protect
+   against.
+
+   Two values are preserved from the old rule, and one is deliberately NOT
+   carried forward - all three were called out by name as needing an
+   explicit answer, not a silent drop, if this ever stopped being a scroll
+   container:
+   - The 5px TOP AND BOTTOM padding survives completely unchanged, still
+     un-snapped from the --space-* scale, still the app-wide :focus-visible
+     ring's own clearance math (the ring paints 2px OUTSIDE the border box at
+     a 2px offset - a 4px-wide band - and 5px leaves it a real 1px margin
+     against .contentInner's overflow: clip edge instead of landing exactly
+     on it). This was NEVER about scrolling - it is clearance against a
+     CLIPPING ancestor, not a scrolling one - so it matters exactly as much
+     here: a focus ring on the first wrapped row of either zone can still
+     poke above this panel's top edge, and one on the last wrapped row of the
+     last zone can still poke below its bottom edge, precisely as the single
+     row's ring could before.
+   - scroll-padding-inline: 6px is DELETED, not carried forward. It only ever
+     mattered for a horizontal SCROLL container's scroll-into-view alignment
+     (keeping a Tabbed-in chip's ring off the scrollport's leading edge), and
+     .strip is no longer a scroll container at all - every chip is always
+     fully laid out in the document, so there is no scrollport edge left for
+     a ring to land flush against and get clipped. If a future change
+     reintroduces horizontal scrolling here, reinstate this as part of that
+     change, not before. */
 .strip {
   display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: var(--space-4);
-  overflow-x: auto;
-  padding: 5px var(--space-10) 5px var(--space-6);
-  scroll-padding-inline: 6px;
-  /* Hides the scrollbar itself, not just the layout impact explained above -
-     a hidden scrollbar is normally a smell (it removes a discoverability
-     affordance), and is treated as safe here only because AC5's fade
-     already signals there is more to scroll, every chip is reachable by Tab
-     (which scrolls it into view natively), and the strip stays
-     wheel/trackpad/touch scrollable regardless. Do NOT switch to
-     overflow-x: scroll to get a constant height instead - that keeps the
-     height constant by spending the 8px permanently, the opposite of what
-     "preserve vertical space" asked for. */
-  scrollbar-width: none;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 5px var(--space-6);
 }
 
-.strip::-webkit-scrollbar {
-  display: none;
-}
+/* The in-session courses, as a real <ul>/<li> list, laid out as its own
+   WRAPPING row inside the .strip column (AC3: two separate lists, not one
+   flat list, so a bare course name like "Biology 101" is never ambiguous
+   among the dated entries next to it). role="list" plus role="listitem" on
+   the <li> (InSessionBanner.tsx) put back what list-style: none below strips
+   in Safari/VoiceOver, and what this list's own display: flex blockifies the
+   <li> children away from (display: list-item) - the same two-part reason
+   .upcomingList documents below.
 
-/* Static right-edge fade (AC5) - a scrolling strip with no visual signal
-   that there is more content is its own kind of hiding, and JS scroll
-   listeners are deliberately out of scope for this banner (see
-   InSessionBanner.tsx's own comment on this element for why a conditional,
-   scroll-position-aware fade is not attempted here). Absolutely positioned
-   against .stripWrap, not .strip itself, so the fade stays pinned to the
-   strip's visible right edge instead of scrolling away with its content.
-   pointer-events: none plus aria-hidden (JSX) keep it purely decorative -
-   it can never swallow a click meant for the last chip underneath it. The
-   gradient fades INTO var(--card-background), the same token .banner's own
-   background uses, so the fade reads as the strip dissolving into the
-   banner's surface rather than into a mismatched color. */
-.stripFade {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--space-8);
-  background: linear-gradient(to right, transparent, var(--card-background));
-  pointer-events: none;
-}
-
-/* The in-session courses, as a real <ul>/<li> list laid out in a row inside
-   .strip (AC3: two separate lists, not one flat list, so a bare course name
-   like "Biology 101" is never ambiguous among the dated entries next to
-   it). role="list" plus role="listitem" on the <li> (InSessionBanner.tsx)
-   put back what list-style: none below strips in Safari/VoiceOver, and what
-   this list's own display: flex blockifies the <li> children away from
-   (display: list-item) - the same two-part reason .upcomingList documents
-   below. flex-shrink: 0 on both the list and its items is what stops a long
-   roster from ever being squeezed narrower inside .strip's own flex row -
-   it can only make the strip's scrollable width longer, never shrink a chip
+   flex-wrap: wrap (was nowrap) is the entire overflow fix for this list: a
+   long roster now wraps onto as many rows as it needs, using the full width
+   .strip's own align-items: stretch gives this list, instead of extending a
+   horizontal scroll that no longer exists. This list itself no longer
+   carries flex-shrink: 0 - it is a flex item on .strip's now-VERTICAL main
+   axis, where shrinking would only ever affect its height, and nothing here
+   constrains .strip's height in a way that would apply shrink pressure.
+   flex-shrink: 0 on the INDIVIDUAL <li> below is a different, still-real
+   concern: it stops the browser squeezing any one chip narrower to make it
+   fit a wrapped row - a chip only ever moves to the next row, never shrinks
    (AC2). */
 .courseList {
   display: flex;
-  flex-wrap: nowrap;
-  flex-shrink: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
   list-style: none;
@@ -383,22 +378,24 @@
   background: var(--accent-soft-strong);
 }
 
-/* The upcoming dates, as a second real <ul>/<li> list laid out in a row
-   beside .courseList inside .strip (AC3), labelled distinctly
-   (aria-label="Upcoming dates" in the JSX) from the course list next to it.
-   role="list" plus role="listitem" on the <li> (InSessionBanner.tsx) put
-   back what list-style: none below strips in Safari/VoiceOver, and what
-   this list's own display: flex blockifies the <li> children away from
-   (display: list-item) - a lone role="list" can still report "list, 0
-   items" once the implicit item role is gone too, so both are needed
-   (the TaskAttachmentsDialog.tsx precedent this follows sets both for the
-   same reason). flex-shrink: 0, same as .courseList, for the same reason:
-   nothing in .strip is allowed to shrink, only the strip's own scrollable
-   width grows (AC2). */
+/* The upcoming dates, as a second real <ul>/<li> list, laid out as its own
+   WRAPPING row stacked above .courseList inside .strip (AC3), labelled
+   distinctly (aria-label="Upcoming dates" in the JSX) from the course list
+   below it. role="list" plus role="listitem" on the <li>
+   (InSessionBanner.tsx) put back what list-style: none below strips in
+   Safari/VoiceOver, and what this list's own display: flex blockifies the
+   <li> children away from (display: list-item) - a lone role="list" can
+   still report "list, 0 items" once the implicit item role is gone too, so
+   both are needed (the TaskAttachmentsDialog.tsx precedent this follows sets
+   both for the same reason).
+
+   flex-wrap: wrap (was nowrap), same overflow fix as .courseList and for the
+   same reason - see that rule's own comment for the full explanation of why
+   this list no longer carries flex-shrink: 0 either, while its individual
+   <li> below still does. */
 .upcomingList {
   display: flex;
-  flex-wrap: nowrap;
-  flex-shrink: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
   list-style: none;
@@ -451,8 +448,9 @@
    text), only the glyph run is shortened, so nothing that reads the
    accessible name loses information. overflow: hidden here is safe for the
    chip's OWN :focus-visible ring - an element's outline is never clipped by
-   that same element's overflow, only by an ANCESTOR's (see .strip above for
-   the ancestor-overflow case this chip actually has to worry about).
+   that same element's overflow, only by an ANCESTOR's (see .contentInner's
+   own comment for the one ancestor-overflow case this chip actually has to
+   worry about - .strip itself sets no overflow of its own).
 
    THIS IS NOW THE LOUD TREATMENT (B3, this feature's own follow-up audit) -
    bordered, filled, and its date span (below) is the bold one. It used to be
@@ -475,12 +473,13 @@
    AM20 floor of var(--space-1) and cannot be trimmed to offset it). An inset
    box-shadow paints entirely INSIDE the existing padding-box and adds zero
    layout size, so this chip's own rendered height is unchanged before vs.
-   after this pass - which matters here specifically because .strip sizes
-   itself (align-items: center) off its tallest child, and this chip is
+   after this pass - which matters here specifically because each wrapped
+   row's own height is governed by its tallest chip (ordinary flex per-line
+   sizing, now that .courseList/.upcomingList wrap), and this chip is
    already documented (docs/REGRESSION.md entry 290) as the taller of the two
-   chip kinds even before this pass. A real border would have made the whole
-   strip - and so the whole banner, via the ResizeObserver mirror - a few
-   pixels taller than before. */
+   chip kinds even before this pass. A real border would have made every row
+   containing one of these chips - and so the whole panel, and the whole
+   banner via the ResizeObserver mirror - a few pixels taller than before. */
 .upcomingItem {
   display: inline-block;
   max-width: 28ch;
@@ -593,12 +592,13 @@
 
 /* B3's tracked-uppercase zone labels ("Due" / "Term" in the JSX), pinned to
    AM5's micro-label idiom exactly (docs/aesthetics-pass-acceptance-criteria
-   .md): font-size-2xs/700/0.06em/text-secondary. 11px text inside a row
-   whose tallest item is a 13px chip (.courseChip/.upcomingItem's own
-   font-size-sm content) adds no height - align-items: center on .strip
-   already centers it against that taller content. This also gives sighted
-   users the group boundary that previously existed only in the two <ul>'s
-   aria-labels. */
+   .md): font-size-2xs/700/0.06em/text-secondary. Sits on its own stacked row
+   above its zone's wrapped chip list (.strip is now flex-direction: column),
+   rather than sharing a line with a 13px chip the way it used to when
+   .strip was a single row - it no longer needs vertical centering against a
+   taller sibling, since it never shares a line with one any more. This still
+   gives sighted users the group boundary that previously existed only in the
+   two <ul>'s aria-labels. */
 .zoneLabel {
   flex-shrink: 0;
   font-size: var(--font-size-2xs);
@@ -609,14 +609,20 @@
   white-space: nowrap;
 }
 
-/* The real vertical divider between the two zones (B3) - align-self: stretch
-   matches the divider's height to .strip's own cross-axis size (governed by
-   its tallest child), adding no height of its own; only a 1px width. Only
-   rendered (InSessionBanner.tsx) when BOTH zones are present. */
+/* The real divider between the two zones (B3) - was a 1px-WIDE vertical rule
+   when .strip laid the two zones out side by side in one row (align-self:
+   stretch matched its height to that row's cross-axis size, its tallest
+   chip). Now that .strip stacks the zones in a COLUMN, the same property and
+   value - align-self: stretch - matches the divider to the column's OWN
+   cross-axis size instead, which is its width: the exact same rule now draws
+   a full-width 1px-TALL horizontal rule spanning the panel, rather than a
+   vertical one spanning a row. height: 1px (was width: 1px) is the only
+   value that changed. Only rendered (InSessionBanner.tsx) when BOTH zones
+   are present - unchanged. */
 .divider {
   flex-shrink: 0;
   align-self: stretch;
-  width: 1px;
+  height: 1px;
   background: var(--border-soft);
 }
 

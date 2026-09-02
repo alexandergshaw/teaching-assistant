@@ -203,10 +203,17 @@ describe("recording-split structure", () => {
     // addressed to this exact key. That is enough to catch the proven
     // failure mode: a write call deleted outright while the read (and the
     // key string itself) survives untouched.
-    function isWired(key: string, callKind: "read" | "write"): boolean {
+    // "remove" (D1/D9 migration, aesthetics-pass redesign): a THIRD call
+    // shape, `localStorage.removeItem("KEY")`, checked alongside read/write
+    // for exactly one key ("ta-rec-disc-flags") - see that key's own
+    // carve-out in the per-key loop below for why a one-time migration
+    // source is checked against read+remove rather than read+write.
+    function isWired(key: string, callKind: "read" | "write" | "remove"): boolean {
       const directPattern =
         callKind === "read"
           ? new RegExp(`(readLocalStorage|readPersisted|localStorage\\.getItem)\\(\\s*["']${key}["']\\s*\\)`)
+          : callKind === "remove"
+          ? new RegExp(`localStorage\\.removeItem\\(\\s*["']${key}["']\\s*\\)`)
           : new RegExp(`(writeLocalStorage|localStorage\\.setItem)\\(\\s*["']${key}["']\\s*,`);
       if (directPattern.test(combinedRecordingSource)) return true;
 
@@ -219,6 +226,8 @@ describe("recording-split structure", () => {
         const pattern =
           callKind === "read"
             ? new RegExp(`(readLocalStorage|readPersisted|localStorage\\.getItem)\\(\\s*${name}\\s*\\)`)
+            : callKind === "remove"
+            ? new RegExp(`localStorage\\.removeItem\\(\\s*${name}\\s*\\)`)
             : new RegExp(`(writeLocalStorage|localStorage\\.setItem)\\(\\s*${name}\\s*,`);
         return pattern.test(combinedRecordingSource);
       });
@@ -407,11 +416,28 @@ describe("recording-split structure", () => {
         expect(discKeys).toHaveLength(15);
       });
 
+      // D1/D9 migration (aesthetics-pass redesign): "ta-rec-disc-flags" is
+      // the RETIRED side channel's own key (discussion-reply-flags.ts,
+      // deleted) - handledAt/skipped are now real ReplyRow fields, and this
+      // key survives only as useReplyRows.ts's one-time migration source: read
+      // once, on load, then `localStorage.removeItem`'d - never written
+      // again by this app. The honest claim for THIS key is therefore
+      // "read + remove", not "read + write" - proven by sabotage: with the
+      // migration's `localStorage.removeItem("ta-rec-disc-flags")` call
+      // deleted, `isWired(key, "remove")` for this key alone went false while
+      // every other key's assertions stayed green; reverted, confirmed green
+      // again.
+      const MIGRATION_ONLY_KEYS = new Set(["ta-rec-disc-flags"]);
+
       it.each(discKeys)(
-        '"%s" has both a read and a write call wired to that key (directly, or via a const STORAGE_KEY_* binding)',
+        '"%s" has both a read and a write call wired to that key (directly, or via a const STORAGE_KEY_* binding) - except a migration-only key, which needs read + remove instead (see MIGRATION_ONLY_KEYS above)',
         (key) => {
           expect(isWired(key, "read"), `expected a read call wired to "${key}"`).toBe(true);
-          expect(isWired(key, "write"), `expected a write call wired to "${key}"`).toBe(true);
+          if (MIGRATION_ONLY_KEYS.has(key)) {
+            expect(isWired(key, "remove"), `expected a localStorage.removeItem call wired to "${key}" (migration-only key)`).toBe(true);
+          } else {
+            expect(isWired(key, "write"), `expected a write call wired to "${key}"`).toBe(true);
+          }
         }
       );
     });

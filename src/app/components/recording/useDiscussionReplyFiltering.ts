@@ -1,24 +1,34 @@
 "use client";
 
 // D1/D3/D7/D9 (docs/aesthetics-pass-acceptance-criteria.md section 4b): the
-// panel-side wiring for handledAt/skipped (discussion-reply-flags.ts) and the
-// status filter chips (discussion-table-view.ts), pulled out of
-// DiscussionRepliesPanel.tsx into its own hook - this panel is 932 of its
-// 1000-line ceiling (AM12-capped) before this group started, and every other
-// feature added to it in this same folder has been extracted into a sibling
-// file or hook rather than grown inline (DiscussionReplyControls.tsx,
-// DiscussionResourceSettings.tsx, DiscussionReplyTable.tsx, and now
-// DiscussionReplyToolbar.tsx). One hook call here, rather than the ~10
-// individual useState/useCallback/useMemo calls this used to be inline in the
-// panel, also keeps that component's own hook shape close to what it was
-// before this group - see this repo's own convention of splitting a growing
-// component's hooks into a dedicated file (useDiscussionCourses.ts,
-// useDiscussionKnowledgeContext.ts, useDiscussionPersistedControls.ts are the
-// precedent, all doing exactly this for the SAME panel).
+// panel-side wiring for handledAt/skipped and the status filter chips
+// (discussion-table-view.ts), pulled out of DiscussionRepliesPanel.tsx into
+// its own hook - this panel is 932 of its 1000-line ceiling (AM12-capped)
+// before this group started, and every other feature added to it in this
+// same folder has been extracted into a sibling file or hook rather than
+// grown inline (DiscussionReplyControls.tsx, DiscussionResourceSettings.tsx,
+// DiscussionReplyTable.tsx, and now DiscussionReplyToolbar.tsx). One hook
+// call here, rather than the ~10 individual useState/useCallback/useMemo
+// calls this used to be inline in the panel, also keeps that component's own
+// hook shape close to what it was before this group - see this repo's own
+// convention of splitting a growing component's hooks into a dedicated file
+// (useDiscussionCourses.ts, useDiscussionKnowledgeContext.ts,
+// useDiscussionPersistedControls.ts are the precedent, all doing exactly
+// this for the SAME panel).
+//
+// handledAt/skipped used to live in a side-channel localStorage map
+// (discussion-reply-flags.ts, since deleted) because the mutator that would
+// set them on ReplyRow had no path back through useDiscussionReplies.ts's
+// pinned return shape at the time - see useReplyRows.ts's own migration
+// effect for how a returning user's side-channel marks were folded onto the
+// promoted fields exactly once. Now that the fields are real, this hook
+// derives handledAtById/skippedById straight off `rawRows` (a plain reduce,
+// memoized) instead of running its own localStorage-backed hook, and reaches
+// the two real mutators (setHandledAt/setSkipped) forwarded from
+// useReplyRows.ts through useDiscussionReplies.ts.
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReplyRow, ReplyResource } from "./discussion-capture";
-import { useDiscussionReplyFlags } from "./discussion-reply-flags";
 import {
   isReplyStatusFilter,
   computeReplyStatusCounts,
@@ -38,6 +48,10 @@ export interface UseDiscussionReplyFilteringArgs {
   setFilterText: (next: string) => void;
   editReply: (id: string, text: string) => void;
   insertResource: (id: string, resource: ReplyResource) => void;
+  /** D1/D9: the real ReplyRow mutators, forwarded from useReplyRows.ts
+   *  through useDiscussionReplies.ts (UseDiscussionRepliesReturn). */
+  setHandledAt: (id: string, at: number | null) => void;
+  setSkipped: (id: string, skipped: boolean) => void;
 }
 
 export interface UseDiscussionReplyFilteringReturn {
@@ -72,11 +86,43 @@ export function useDiscussionReplyFiltering({
   setFilterText,
   editReply,
   insertResource,
+  setHandledAt,
+  setSkipped,
 }: UseDiscussionReplyFilteringArgs): UseDiscussionReplyFilteringReturn {
-  // D1/D9: see discussion-reply-flags.ts's own header for the full account
-  // of why handledAt/skipped live here rather than as ReplyRow fields.
-  const liveIds = useMemo(() => rawRows.map((r) => r.id), [rawRows]);
-  const { handledAt: handledAtById, skipped: skippedById, markHandled, clearHandled, toggleHandled, toggleSkipped } = useDiscussionReplyFlags(liveIds);
+  // D1/D9: handledAt/skipped are now real ReplyRow fields - these are plain
+  // derived id -> value lookups, not a second copy of the state, and there is
+  // nothing left to prune (a removed row simply disappears from `rawRows`,
+  // taking its own fields with it). Each downstream row still only ever
+  // receives its OWN primitive value (handledAtById[row.id], never the whole
+  // map), so an unrelated row's flag changing does not defeat
+  // DiscussionReplyRow's own React.memo (see that file's own header).
+  const handledAtById = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const r of rawRows) if (r.handledAt !== undefined) map[r.id] = r.handledAt;
+    return map;
+  }, [rawRows]);
+  const skippedById = useMemo(() => {
+    const map: Record<string, boolean> = {};
+    for (const r of rawRows) if (r.skipped === true) map[r.id] = true;
+    return map;
+  }, [rawRows]);
+
+  const markHandled = useCallback((id: string) => setHandledAt(id, Date.now()), [setHandledAt]);
+  const clearHandled = useCallback((id: string) => setHandledAt(id, null), [setHandledAt]);
+  const toggleHandled = useCallback(
+    (id: string) => {
+      const row = rawRows.find((r) => r.id === id);
+      setHandledAt(id, row?.handledAt !== undefined ? null : Date.now());
+    },
+    [rawRows, setHandledAt]
+  );
+  const toggleSkipped = useCallback(
+    (id: string) => {
+      const row = rawRows.find((r) => r.id === id);
+      setSkipped(id, row?.skipped !== true);
+    },
+    [rawRows, setSkipped]
+  );
 
   // D3: the status filter chips. Persisted the same read-once-in-the-
   // initializer way useReplyRows.ts's own `sort`/`filterText` are.

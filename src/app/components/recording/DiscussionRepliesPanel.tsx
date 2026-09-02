@@ -21,8 +21,8 @@ import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } 
 import { useDiscussionReplies } from "./useDiscussionReplies";
 // D1/D3/D7/D9 (docs/aesthetics-pass-acceptance-criteria.md section 4b): see
 // that file's own header for the full account of this panel's own hook-count
-// pressure and why handledAt/skipped are a side channel rather than ReplyRow
-// fields.
+// pressure and how handledAt/skipped (real ReplyRow fields as of this
+// migration) are wired here.
 import { useDiscussionReplyFiltering } from "./useDiscussionReplyFiltering";
 // D3 (status filter chips) + D4 (sticky review bar): landed in a new sibling
 // file - see that file's own header for why (this panel's own line ceiling).
@@ -202,6 +202,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     moveRow,
     editReply,
     removeRow,
+    setHandledAt,
+    setSkipped,
     retryRow,
     draftAllPending,
     redraftAll,
@@ -236,7 +238,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     handleClearFilters,
     handleEditReply,
     handleInsertResourceForRow,
-  } = useDiscussionReplyFiltering({ rawRows, rows, filterText, setFilterText, editReply, insertResource });
+  } = useDiscussionReplyFiltering({ rawRows, rows, filterText, setFilterText, editReply, insertResource, setHandledAt, setSkipped });
 
   // docs/DEV_LOOP.md's downloadable-log rule: the two format handlers,
   // mirroring RepoGradingLogPanel.tsx's own handleDownload exactly - the one
@@ -358,10 +360,10 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // D3/D9 extension: `visibleRows` (text filter AND the new status chip),
   // minus any row marked `skipped` - D9 requires the skip exclusion reach
   // this export, and `visibleRows`/`skippedById` are both already owned by
-  // this panel, so it is implemented here even though the three BULK actions
-  // (draftAllPending/redraftAll/findMissing) cannot be reached the same way -
-  // see discussion-reply-flags.ts's header for why those three are a
-  // documented gap, not an oversight.
+  // this panel. The three BULK actions (draftAllPending/redraftAll/
+  // findMissing) carry the identical exclusion now too - see
+  // isDraftAllPendingEligible/isRedraftAllEligible (discussion-table-view.ts)
+  // and isFindMissingEligible's own D9 note (useReplyResources.ts).
   const copyableRows = visibleRows.filter((r) => (!!r.reply || !!r.resources?.length) && !skippedById[r.id]);
   // S4 fix (sort-filter review), extended for D3: "Copy every reply (4)"
   // while 37 rows exist is the lie this label exists to avoid - a status

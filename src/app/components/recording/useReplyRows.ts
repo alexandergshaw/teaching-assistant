@@ -61,6 +61,11 @@ import {
 // for the same reason (F15) - both plain `sortReplyRows`/`moveRow` imports
 // were removed from this file in favour of these two.
 import { filterRowsByQuery, sortReplyRowsForTable, moveVisibleRow, REPLY_ROW_HAYSTACK } from "./discussion-table-view";
+// D1/D9 migration: imported directly from discussion-serialization.ts, not
+// via the discussion-capture.ts re-export - that file's own re-export list
+// is a different, concurrently-owned surface this migration has no reason
+// to touch.
+import { mergeLegacyReplyFlags } from "./discussion-serialization";
 
 // AC55: localStorage keys are written as whole string literals - never a
 // template literal - so the key-inventory scan in
@@ -78,6 +83,10 @@ const STORAGE_KEY_SORT = "ta-rec-disc-sort";
 // comment on STORAGE_KEY_TABLE for why this file never spells out the scan's
 // own pattern in prose.
 const STORAGE_KEY_FILTER = "ta-rec-disc-filter";
+// D1/D9 migration: the RETIRED side channel's own key
+// (discussion-reply-flags.ts, deleted) - read once and removed below, never
+// written again, unlike the three STORAGE_KEY_* keys above.
+const LEGACY_FLAGS_KEY = "ta-rec-disc-flags";
 
 // AC23: two debounces. Structural changes (merge, reorder, remove, a
 // drafted reply landing) are rare and the user expects immediate
@@ -242,6 +251,15 @@ export interface UseReplyRowsReturn {
   editReply: (id: string, text: string) => void;
 
   removeRow: (id: string) => void;
+
+  /** D1: sets or clears the row's `handledAt` - `at: null` clears it. Not
+   *  gated on editSeqRef/tableEpochRef - see this mutator's implementation
+   *  for why both would be wrong here. */
+  setHandledAt: (id: string, at: number | null) => void;
+
+  /** D9: sets or clears the row's `skipped` flag - reversible, never
+   *  implies removeRow. */
+  setSkipped: (id: string, skipped: boolean) => void;
 
   /** AC19 + AC45. Empties the table and bumps tableEpochRef so an
    *  extraction merge already in flight cannot resurrect the posts just
@@ -427,6 +445,46 @@ export function useReplyRows(): UseReplyRowsReturn {
       return next;
     });
   }, []);
+
+  // D1/D9 migration (docs/aesthetics-pass-acceptance-criteria.md section 4b):
+  // ONE-TIME. handledAt/skipped used to live in a side-channel localStorage
+  // map (discussion-reply-flags.ts, deleted) because the mutator that would
+  // set them on ReplyRow had no path back through useDiscussionReplies.ts's
+  // pinned return shape at the time - see the fields' own doc comment
+  // (discussion-serialization.ts) for the full account. This effect folds
+  // any pre-existing side-channel data onto the newly-promoted fields so an
+  // existing user's marks are not silently discarded the moment this ships.
+  //
+  // Runs once on mount against `rowsRef.current` (this file's own
+  // single-writer invariant - file header). Ordering matters: the merged
+  // table is persisted BEFORE the legacy key is removed, so a crash between
+  // the two steps leaves the legacy key present and this effect simply
+  // re-runs (a no-op, per mergeLegacyReplyFlags's "does not overwrite" rule)
+  // on the next load, rather than losing data. Idempotent under StrictMode's
+  // double-invoke: the second pass finds the key already gone.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const legacyRaw = window.localStorage.getItem(LEGACY_FLAGS_KEY);
+    if (legacyRaw === null) return; // nothing to migrate
+    const merged = mergeLegacyReplyFlags(rowsRef.current, legacyRaw);
+    if (merged !== rowsRef.current) {
+      commitRows(merged);
+      try {
+        window.localStorage.setItem(STORAGE_KEY_TABLE, serializeReplyTable(merged));
+        setPersistError(null);
+      } catch {
+        setPersistError(STORAGE_FULL_MESSAGE);
+      }
+    }
+    try {
+      window.localStorage.removeItem(LEGACY_FLAGS_KEY);
+    } catch {
+      // Best-effort - a stale, unreadable key left behind is harmless: the
+      // merge above already applied, and a future load re-merging the same
+      // legacy data onto rows that already carry it is a no-op (see
+      // mergeLegacyReplyFlags's own "does not overwrite" rule).
+    }
+  }, [commitRows]);
 
   const setSort = useCallback((next: ReplySort) => {
     sortRef.current = next;
@@ -693,6 +751,45 @@ export function useReplyRows(): UseReplyRowsReturn {
   );
 
   // ---------------------------------------------------------------------
+  // D1/D9: the handledAt/skipped mutators - orthogonal per-row flags,
+  // promoted onto ReplyRow itself (see that type's own doc comment,
+  // discussion-serialization.ts). Neither gates on tableEpochRef/editSeqRef,
+  // for the same reason applyResources/removeResource below do not: both
+  // fields are disjoint from `reply`, so gating on the reply-edit generation
+  // would discard a legitimate mark over an unrelated typo fix. Each is a
+  // no-op (no commit, no scheduled save) when the value would not actually
+  // change, mirroring every other mutator's AC40 discipline.
+  // ---------------------------------------------------------------------
+
+  const setHandledAt = useCallback(
+    (id: string, at: number | null) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      if (idx === -1) return; // row removed or table cleared under us
+      const current = raw[idx].handledAt ?? null;
+      if (current === at) return; // no-op: same reference, no commit, no save
+      const next = raw.map((r, i) => (i === idx ? { ...r, handledAt: at === null ? undefined : at } : r));
+      commitRows(next);
+      scheduleSave(STRUCTURAL_DEBOUNCE_MS);
+    },
+    [commitRows, scheduleSave]
+  );
+
+  const setSkipped = useCallback(
+    (id: string, skipped: boolean) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      if (idx === -1) return;
+      const current = raw[idx].skipped === true;
+      if (current === skipped) return;
+      const next = raw.map((r, i) => (i === idx ? { ...r, skipped: skipped ? true : undefined } : r));
+      commitRows(next);
+      scheduleSave(STRUCTURAL_DEBOUNCE_MS);
+    },
+    [commitRows, scheduleSave]
+  );
+
+  // ---------------------------------------------------------------------
   // docs/discussion-reply-resources-acceptance-criteria.md R3/R7: the
   // resource mutators. Two guards the neighbouring drafting mutators use
   // are DELIBERATELY NOT copied here:
@@ -821,6 +918,8 @@ export function useReplyRows(): UseReplyRowsReturn {
     moveRow,
     editReply,
     removeRow,
+    setHandledAt,
+    setSkipped,
     clearTable,
     markDrafting,
     applyReply,

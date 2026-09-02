@@ -80,8 +80,10 @@ export interface DiscussionReplyTableProps {
    *  from the TEXT filter only - it has no way to know about this group's
    *  NEW status filter, since that concept lives entirely in this file set
    *  and the mutator's signature is pinned two files upstream
-   *  (useDiscussionReplies.ts, out of scope - see discussion-reply-flags.ts's
-   *  header for the full account of why). Reordering while a status chip
+   *  (useReplyRows.ts's `moveRow`, reached through useDiscussionReplies.ts).
+   *  Teaching it about the status filter means widening that signature and
+   *  every caller of it, which is a larger change than this refusal.
+   *  Reordering while a status chip
    *  narrows the view would therefore silently swap against a neighbour the
    *  status filter itself is hiding, reintroducing the exact "swap targets
    *  an invisible neighbour and nothing appears to happen" bug F15 fixed for
@@ -100,10 +102,15 @@ export interface DiscussionReplyTableProps {
   /** Resource-controls feature: per-row targeted search. Forwarded straight
    *  through from R-D (useReplyResources.ts's `searchRow`). */
   searchRow: (id: string) => void;
-  /** D1/D9: see discussion-reply-flags.ts's own header for why these are a
-   *  side channel rather than ReplyRow fields. Plain per-row VALUES (not the
-   *  whole flags map) so an unrelated row's flag changing does not defeat
-   *  this row's own React.memo. */
+  /** D1/D9: `handledAt` and `skipped` are real `ReplyRow` fields
+   *  (discussion-serialization.ts), alongside `userEdited` and the other
+   *  optional per-row state. They were briefly a localStorage side channel,
+   *  because the setter had to be forwarded through a return type pinned two
+   *  files upstream and that file was outside the wave's file set; promoting
+   *  them deleted that module, its pruning logic, and the whole
+   *  flag-diverges-from-row bug class.
+   *  Still passed here as plain per-row VALUES rather than a map, so an
+   *  unrelated row's flag changing does not defeat this row's React.memo. */
   handledAtById: Readonly<Record<string, number>>;
   skippedById: Readonly<Record<string, boolean>>;
   onMarkHandled: (id: string) => void;

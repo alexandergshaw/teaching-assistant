@@ -78,6 +78,12 @@ import { appendResourceToReply, replyAlreadyHasResource } from "./discussion-rep
 import { useDiscussionCapture } from "./useDiscussionCapture";
 import { useReplyRows } from "./useReplyRows";
 import { useReplyResources } from "./useReplyResources";
+// D9 (aesthetics-pass redesign, docs/aesthetics-pass-acceptance-criteria.md
+// section 4b): draftAllPending/redraftAll's own bulk-eligibility predicates -
+// pulled out as pure, tested leaves rather than inlined here, since this file
+// is a hook this repo's vitest never renders (discussion-table-view.ts's own
+// header).
+import { isDraftAllPendingEligible, isRedraftAllEligible } from "./discussion-table-view";
 import {
   extractDiscussionPostsAction,
   draftDiscussionRepliesAction,
@@ -512,6 +518,18 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     rowsApiRef.current.removeRow(id);
   }, []);
 
+  // D1/D9: plain row mutators, forwarded the same way editReply/removeRow
+  // above are - see discussion-serialization.ts's own doc comment on
+  // handledAt/skipped for why these are now real ReplyRow fields rather than
+  // the side channel an earlier wave was forced into.
+  const setHandledAt = useCallback((id: string, at: number | null) => {
+    rowsApiRef.current.setHandledAt(id, at);
+  }, []);
+
+  const setSkipped = useCallback((id: string, skipped: boolean) => {
+    rowsApiRef.current.setSkipped(id, skipped);
+  }, []);
+
   // R10: a plain row mutator, forwarded the same way editReply/removeRow
   // above are - no queue involvement, so it goes straight to C2 rather than
   // through resourcesApi.
@@ -577,10 +595,9 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   const draftAllPending = useCallback(() => {
     // B2 fix: `rawRows`, not `rows` - F12's whole-table list, and unlike
     // Copy/Find resources this button carries no count that could disclose
-    // a narrowed scope.
-    const ids = rowsApiRef.current.rawRows
-      .filter((r) => r.state === "pending" || r.state === "failed")
-      .map((r) => r.id);
+    // a narrowed scope. D9: isDraftAllPendingEligible also excludes a
+    // skipped row - it opted out of the reply workflow this dispatches into.
+    const ids = rowsApiRef.current.rawRows.filter(isDraftAllPendingEligible).map((r) => r.id);
     // S1: deliberately NOT forced - this is a BULK, un-targeted action across
     // every pending/failed row at once, and AC52's protection is exactly for
     // this case: a click meant for other rows must not silently overwrite
@@ -597,7 +614,8 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // B1 fix - REGRESSION entry 258's class, hit a third time: `rawRows`,
     // not `rows`. The confirmation names "every reply in the table" and
     // stays armed through a filter change (F11); dispatch must match that.
-    const ids = rowsApiRef.current.rawRows.map((r) => r.id);
+    // D9: isRedraftAllEligible excludes a skipped row from that count too.
+    const ids = rowsApiRef.current.rawRows.filter(isRedraftAllEligible).map((r) => r.id);
     // AC29: forced - this action is explicitly armed (a confirm step) and
     // allowed to overwrite hand-edited replies, because the user asked for
     // exactly that.
@@ -693,6 +711,8 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     moveRow,
     editReply,
     removeRow,
+    setHandledAt,
+    setSkipped,
     retryRow,
     draftAllPending,
     redraftAll,

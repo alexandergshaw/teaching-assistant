@@ -29,6 +29,8 @@ import {
   filterRowsByStatus,
   computeReplyStatusCounts,
   isAnyReplyFilterActive,
+  isDraftAllPendingEligible,
+  isRedraftAllEligible,
   type ReplyStatusFilterRow,
 } from "./discussion-table-view";
 import { swapAdjacentRows, type ReplyRow, type ReplySort } from "./discussion-capture";
@@ -710,6 +712,43 @@ describe("computeReplyStatusCounts (D3)", () => {
 // SABOTAGE CHECK: with `statusFilter` spliced into `deleteSignature`'s
 // template literal, this test went red; reverted, confirmed green.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// D9's exclusion list: draftAllPending/redraftAll bulk eligibility (the third,
+// findMissing, is covered by useReplyResources.test.ts's own
+// isFindMissingEligible suite).
+// ---------------------------------------------------------------------------
+
+describe("isDraftAllPendingEligible (D9)", () => {
+  it("eligible: pending, not skipped", () => {
+    expect(isDraftAllPendingEligible({ state: "pending" })).toBe(true);
+  });
+
+  it("eligible: failed, not skipped", () => {
+    expect(isDraftAllPendingEligible({ state: "failed" })).toBe(true);
+  });
+
+  it("not eligible: ready or drafting, regardless of skipped", () => {
+    expect(isDraftAllPendingEligible({ state: "ready" })).toBe(false);
+    expect(isDraftAllPendingEligible({ state: "drafting" })).toBe(false);
+  });
+
+  it("NOT eligible: skipped, even though pending - sabotage target", () => {
+    expect(isDraftAllPendingEligible({ state: "pending", skipped: true })).toBe(false);
+    expect(isDraftAllPendingEligible({ state: "failed", skipped: true })).toBe(false);
+  });
+});
+
+describe("isRedraftAllEligible (D9)", () => {
+  it("eligible: any state, not skipped", () => {
+    expect(isRedraftAllEligible({})).toBe(true);
+    expect(isRedraftAllEligible({ skipped: false })).toBe(true);
+  });
+
+  it("NOT eligible: skipped - sabotage target", () => {
+    expect(isRedraftAllEligible({ skipped: true })).toBe(false);
+  });
+});
 
 describe("DiscussionRepliesPanel.tsx - status filter stays out of both arming signatures (D3/F0-2/F11)", () => {
   const src = fs.readFileSync(path.resolve(process.cwd(), "src/app/components/recording/DiscussionRepliesPanel.tsx"), "utf-8");

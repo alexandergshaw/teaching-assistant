@@ -24,7 +24,13 @@
 // itself rather than only its re-exported surface.
 
 import { describe, it, expect } from "vitest";
-import { DISCUSSION_TABLE_VERSION, serializeReplyTable, deserializeReplyTable, type ReplyRow } from "./discussion-serialization";
+import {
+  DISCUSSION_TABLE_VERSION,
+  serializeReplyTable,
+  deserializeReplyTable,
+  mergeLegacyReplyFlags,
+  type ReplyRow,
+} from "./discussion-serialization";
 
 function makeRow(overrides: Partial<ReplyRow>): ReplyRow {
   return {
@@ -120,6 +126,86 @@ describe("serializeReplyTable / deserializeReplyTable (AC22)", () => {
     // (or that skips the typeof/Array.isArray guards) would throw on.
     // Verified by sabotage - see the extraction report.
     expect(deserializeReplyTable("{ this is not valid json")).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D1/D9: handledAt/skipped - promoted from a side-channel localStorage map
+// (discussion-reply-flags.ts, deleted) onto real ReplyRow fields.
+// ---------------------------------------------------------------------------
+
+describe("handledAt/skipped (D1/D9)", () => {
+  it("round-trips handledAt and skipped when present", () => {
+    const rows = [makeRow({ id: "a", handledAt: 5000, skipped: true })];
+    const restored = deserializeReplyTable(serializeReplyTable(rows));
+    expect(restored[0].handledAt).toBe(5000);
+    expect(restored[0].skipped).toBe(true);
+  });
+
+  it("a row that never had handledAt/skipped round-trips with both still absent (absent-stays-absent)", () => {
+    const rows = [makeRow({ id: "a" })];
+    const restored = deserializeReplyTable(serializeReplyTable(rows));
+    expect(restored[0].handledAt).toBeUndefined();
+    expect(restored[0].skipped).toBeUndefined();
+    // JSON.stringify drops the undefined-valued keys entirely, mirroring
+    // resources/resourceState's own "absent stays absent" treatment.
+    expect(JSON.parse(serializeReplyTable(rows)).rows[0]).not.toHaveProperty("handledAt");
+    expect(JSON.parse(serializeReplyTable(rows)).rows[0]).not.toHaveProperty("skipped");
+  });
+
+  it("drops a non-finite persisted handledAt and a non-true persisted skipped, falling back to absent rather than a default", () => {
+    const raw = JSON.stringify({
+      v: DISCUSSION_TABLE_VERSION,
+      rows: [{ id: "a", author: "Maria", post: "hello", handledAt: "not a number", skipped: "yes" }],
+    });
+    const restored = deserializeReplyTable(raw);
+    expect(restored[0].handledAt).toBeUndefined();
+    expect(restored[0].skipped).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mergeLegacyReplyFlags (D1/D9 migration): folding the retired side-channel
+// onto the promoted fields, once, on load.
+// ---------------------------------------------------------------------------
+
+describe("mergeLegacyReplyFlags (D1/D9 migration)", () => {
+  it("merges matching legacy handledAt/skipped entries onto rows by id - sabotage target", () => {
+    const rows = [makeRow({ id: "a" }), makeRow({ id: "b" })];
+    const legacy = JSON.stringify({ handledAt: { a: 1234 }, skipped: { b: true } });
+    const merged = mergeLegacyReplyFlags(rows, legacy);
+    expect(merged.find((r) => r.id === "a")?.handledAt).toBe(1234);
+    expect(merged.find((r) => r.id === "b")?.skipped).toBe(true);
+  });
+
+  it("drops a legacy flag whose row no longer exists", () => {
+    const rows = [makeRow({ id: "a" })];
+    const legacy = JSON.stringify({ handledAt: { "gone-row": 999 }, skipped: { "another-gone-row": true } });
+    const merged = mergeLegacyReplyFlags(rows, legacy);
+    expect(merged).toEqual(rows);
+  });
+
+  it("returns the SAME array reference when there is nothing to merge", () => {
+    const rows = [makeRow({ id: "a" })];
+    expect(mergeLegacyReplyFlags(rows, null)).toBe(rows);
+    expect(mergeLegacyReplyFlags(rows, "{}")).toBe(rows);
+    expect(mergeLegacyReplyFlags(rows, JSON.stringify({ handledAt: {}, skipped: {} }))).toBe(rows);
+  });
+
+  it("never throws on malformed legacy JSON, and returns the input unchanged", () => {
+    const rows = [makeRow({ id: "a" })];
+    expect(() => mergeLegacyReplyFlags(rows, "{not json")).not.toThrow();
+    expect(mergeLegacyReplyFlags(rows, "{not json")).toBe(rows);
+    expect(mergeLegacyReplyFlags(rows, '"a string"')).toBe(rows);
+    expect(mergeLegacyReplyFlags(rows, "42")).toBe(rows);
+  });
+
+  it("does not overwrite a row that already has handledAt/skipped set", () => {
+    const rows = [makeRow({ id: "a", handledAt: 1, skipped: true })];
+    const legacy = JSON.stringify({ handledAt: { a: 999 }, skipped: { a: false } });
+    const merged = mergeLegacyReplyFlags(rows, legacy);
+    expect(merged[0].handledAt).toBe(1);
+    expect(merged[0].skipped).toBe(true);
   });
 });
 

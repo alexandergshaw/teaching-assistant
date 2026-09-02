@@ -191,6 +191,15 @@ export interface UseDiscussionRepliesReturn {
   moveRow: (id: string, dir: "up" | "down") => void;
   editReply: (id: string, text: string) => void;
   removeRow: (id: string) => void;
+
+  /** D1/D9 (aesthetics-pass redesign, docs/aesthetics-pass-acceptance-
+   *  criteria.md section 4b): handledAt/skipped are now REAL ReplyRow fields
+   *  (discussion-serialization.ts), not the side-channel localStorage map
+   *  (discussion-reply-flags.ts, deleted) an earlier wave was forced into by
+   *  not owning this file. Forwarded straight from C2's useReplyRows the
+   *  same way editReply/removeRow above already are. */
+  setHandledAt: (id: string, at: number | null) => void;
+  setSkipped: (id: string, skipped: boolean) => void;
   retryRow: (id: string) => void;
   draftAllPending: () => void;
   redraftAll: () => void;

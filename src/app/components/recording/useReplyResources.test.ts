@@ -65,7 +65,7 @@ describe("isResourceLaneBusy (R0-4)", () => {
 // R11: isFindMissingEligible - the bulk "Find resources" sweep's row filter.
 // ---------------------------------------------------------------------------
 
-function makeRow(overrides: Partial<Pick<ReplyRow, "resourceState" | "reply">>) {
+function makeRow(overrides: Partial<Pick<ReplyRow, "resourceState" | "reply" | "skipped">>) {
   return { reply: "A drafted reply.", ...overrides };
 }
 
@@ -99,6 +99,11 @@ describe("isFindMissingEligible (R11)", () => {
     // and eligibility collapses to "has a reply" - which would re-search
     // every already-searched row on every click.
     expect(isFindMissingEligible(makeRow({ resourceState: "done", reply: "Already has resources." }))).toBe(false);
+  });
+
+  it("NOT eligible: skipped, even though otherwise eligible (D9) - sabotage target", () => {
+    expect(isFindMissingEligible(makeRow({ resourceState: undefined, skipped: true }))).toBe(false);
+    expect(isFindMissingEligible(makeRow({ resourceState: "idle", skipped: true }))).toBe(false);
   });
 });
 

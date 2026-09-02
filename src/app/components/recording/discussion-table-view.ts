@@ -260,15 +260,15 @@ export function copyAllButtonLabel(count: number, filterActive: boolean): string
 // panel applies it AFTER filterRowsByQuery/sortReplyRowsForTable), never a
 // second reimplementation of either.
 //
-// "uncopied" reads a `handledAt` map rather than a boolean on the row itself
-// - see discussion-reply-flags.ts's own header for why `handledAt` and
-// `skipped` are NOT ReplyRow fields in this build: the mutators that would
-// set them have no path back through useDiscussionReplies.ts's pinned return
-// shape (a different, concurrent file set's file), so both live in a small
-// side table instead, keyed by row id. Passing plain Readonly<Record<...>>
-// data in (rather than a callback predicate) keeps this function pure and
-// keeps a memoized row's props to plain values - see the flags file's own
-// header for the full reasoning.
+// "uncopied" reads a `handledAt` map rather than `row.handledAt` directly -
+// `handledAt`/`skipped` are real ReplyRow fields (discussion-serialization.ts,
+// promoted from a side-channel localStorage map, discussion-reply-flags.ts,
+// since deleted), but this function keeps the Readonly<Record<...>> shape
+// anyway: it is generic over `ReplyStatusFilterRow`, a narrower structural
+// slice than the full row, and passing plain per-id data in (rather than
+// requiring the caller's row shape to carry the fields itself) keeps a
+// memoized row's props to plain values - see useDiscussionReplyFiltering.ts's
+// own header for how the two maps are now derived directly from `rawRows`.
 // ---------------------------------------------------------------------------
 
 export type ReplyStatusFilter = "all" | "needs-draft" | "failed" | "edited" | "uncopied";
@@ -399,6 +399,32 @@ export interface StoppedSessionSummaryResult {
  * delta and was always exact; `drafted`/`failed` are now exact too, because
  * `rawRows` is unaffected by whatever the filter is doing at either end of
  * the session. */
+// ---------------------------------------------------------------------------
+// D9's exclusion list: the three whole-table dispatches a skipped row must
+// never re-enter (docs/aesthetics-pass-acceptance-criteria.md section 4b).
+// Pulled out as pure, exported predicates - useDiscussionReplies.ts and
+// discussion-draft-loop.ts are hooks/loops this repo's vitest never renders
+// (this file's own header), so the actual bulk-selection logic needs a leaf
+// like this one to have a test surface at all. `isFindMissingEligible`
+// (useReplyResources.ts) carries the same D9 exclusion for the third
+// dispatch (`findMissing`) directly inside its own predicate instead, since
+// that one already lived there before this migration.
+// ---------------------------------------------------------------------------
+
+/** `draftAllPending`'s (useDiscussionReplies.ts) bulk eligibility: a pending
+ * or failed row, but never a skipped one. */
+export function isDraftAllPendingEligible(row: { state: string; skipped?: boolean }): boolean {
+  return (row.state === "pending" || row.state === "failed") && row.skipped !== true;
+}
+
+/** `redraftAll`'s (useDiscussionReplies.ts) bulk eligibility: every row
+ * EXCEPT a skipped one - unlike `isDraftAllPendingEligible`, this ignores
+ * `state` entirely, matching redraftAll's existing "every row in the table"
+ * scope. */
+export function isRedraftAllEligible(row: { skipped?: boolean }): boolean {
+  return row.skipped !== true;
+}
+
 export function computeStoppedSessionSummary(input: StoppedSessionSummaryInput): StoppedSessionSummaryResult {
   const sessionRows = input.rawRows.filter((r) => !input.sessionStartIds.has(r.id));
   return {

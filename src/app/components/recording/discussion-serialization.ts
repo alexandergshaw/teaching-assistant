@@ -79,6 +79,19 @@ export interface ReplyRow {
   // neither field set, same as postedAt's own absent-stays-absent treatment.
   threadPosition?: "root" | "reply" | "unknown";
   replyingToAuthor?: string; // only when the LMS printed a name, exactly as shown
+  // D1/D9 (docs/aesthetics-pass-acceptance-criteria.md section 4b): PERSISTED,
+  // absent-stays-absent exactly like postedAt/threadPosition above. These used
+  // to live in a side-channel localStorage map (discussion-reply-flags.ts,
+  // since deleted) because the mutator that would set them here had no path
+  // back through useDiscussionReplies.ts's pinned UseDiscussionRepliesReturn
+  // at the time that file was written - that blocker is gone, and the fields
+  // are promoted here following this file's own five-optional-field idiom
+  // (resources/resourceState/resourceError/threadPosition/replyingToAuthor
+  // above). See useReplyRows.ts's own migration effect for how a returning
+  // user's side-channel marks are folded onto these fields exactly once, and
+  // mergeLegacyReplyFlags below for the pure merge rule it uses.
+  handledAt?: number; // ms epoch of the last successful "Copy reply" (or a manual mark) - D1
+  skipped?: boolean; // "no reply needed" - D9. Reversible; never implies removeRow.
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +208,16 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
       }
       const replyingToAuthor = typeof r.replyingToAuthor === "string" && r.replyingToAuthor ? r.replyingToAuthor : undefined;
 
+      // D1/D9: same absent-stays-absent discipline as threadPosition above -
+      // a key ABSENT from the raw JSON (a row from before this feature)
+      // stays undefined, never coerced to a default. A key PRESENT but
+      // invalid (a non-finite handledAt, a skipped value other than the
+      // literal `true`) also falls back to undefined rather than a sentinel -
+      // there is no meaningful "unset but touched" state for either field,
+      // unlike resourceState's "idle" fallback.
+      const handledAt = typeof r.handledAt === "number" && Number.isFinite(r.handledAt) ? r.handledAt : undefined;
+      const skipped = r.skipped === true ? true : undefined;
+
       rows.push({
         id,
         author,
@@ -211,6 +234,8 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
         resourceError,
         threadPosition,
         replyingToAuthor,
+        handledAt,
+        skipped,
       });
     });
 
@@ -242,4 +267,68 @@ function coerceReplyResources(raw: unknown): ReplyResource[] | undefined {
     out.push(note !== undefined ? { title, url, kind, note } : { title, url, kind });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// D1/D9 migration: fold the retired side-channel (discussion-reply-flags.ts's
+// own `ta-rec-disc-flags` localStorage key, deleted) onto the newly-promoted
+// ReplyRow fields above. Pure and never throws - the same discipline
+// deserializeReplyTable applies to the table's own persisted JSON - so
+// useReplyRows.ts's one-time migration effect can call it directly against
+// whatever `window.localStorage.getItem("ta-rec-disc-flags")` returns without
+// its own try/catch.
+// ---------------------------------------------------------------------------
+
+/**
+ * Merges a legacy `{ handledAt: Record<id, number>, skipped: Record<id, true> }`
+ * blob (the exact shape discussion-reply-flags.ts's own `ReplyFlagsState`
+ * used to serialize) onto `rows` by id. A legacy entry whose id has no
+ * matching row is silently dropped - the side channel's own pruning already
+ * discarded those on read, so this preserves that behaviour rather than
+ * resurrecting a flag for a row that no longer exists. A row that ALREADY
+ * carries `handledAt`/`skipped` (should never happen in practice - this
+ * migration is meant to run exactly once, before either field could have
+ * been set any other way - but defended against anyway) is left alone rather
+ * than overwritten, so a second, stray invocation can never clobber a value
+ * the user set through the real UI in between.
+ *
+ * Returns the SAME array reference when nothing was actually merged (`raw`
+ * is null, unparsable, structurally empty, or every id it names is already
+ * either absent from `rows` or already set) - useReplyRows.ts's migration
+ * effect uses that to decide whether the table even needs re-persisting.
+ */
+export function mergeLegacyReplyFlags(rows: ReadonlyArray<ReplyRow>, raw: string | null): ReplyRow[] {
+  if (!raw) return rows as ReplyRow[];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return rows as ReplyRow[];
+  }
+  if (!parsed || typeof parsed !== "object") return rows as ReplyRow[];
+  const obj = parsed as Record<string, unknown>;
+  const legacyHandledAt = obj.handledAt && typeof obj.handledAt === "object" ? (obj.handledAt as Record<string, unknown>) : {};
+  const legacySkipped = obj.skipped && typeof obj.skipped === "object" ? (obj.skipped as Record<string, unknown>) : {};
+
+  let changed = false;
+  const next = rows.map((r) => {
+    let row = r;
+    if (row.handledAt === undefined) {
+      const v = legacyHandledAt[r.id];
+      if (typeof v === "number" && Number.isFinite(v)) {
+        row = { ...row, handledAt: v };
+        changed = true;
+      }
+    }
+    if (row.skipped === undefined) {
+      const v = legacySkipped[r.id];
+      if (v === true) {
+        row = { ...row, skipped: true };
+        changed = true;
+      }
+    }
+    return row;
+  });
+
+  return changed ? next : (rows as ReplyRow[]);
 }

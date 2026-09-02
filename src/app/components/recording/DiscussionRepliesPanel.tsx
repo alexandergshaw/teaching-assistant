@@ -16,7 +16,7 @@ import panelStyles from "./DiscussionRepliesPanel.module.css";
 import { fmt } from "./types";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 import { tableClipboardText, draftingArmSignature } from "./discussion-capture";
-import { copyAllButtonLabel, computeStoppedSessionSummary, REPLY_STATUS_FILTER_LABELS } from "./discussion-table-view";
+import { copyAllButtonLabel, REPLY_STATUS_FILTER_LABELS } from "./discussion-table-view";
 import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } from "./useReplyResources";
 import { useDiscussionReplies } from "./useDiscussionReplies";
 import CarriedKnowledgePages from "./CarriedKnowledgePages"; // AC3 - shared with GradingRecordingPanel.tsx
@@ -30,6 +30,12 @@ import AddKnowledgePages from "./AddKnowledgePages";
 // pressure and how handledAt/skipped (real ReplyRow fields as of this
 // migration) are wired here.
 import { useDiscussionReplyFiltering } from "./useDiscussionReplyFiltering";
+// AC7b's post-stop summary bookkeeping (session start snapshot, the
+// stopped-summary diff, and the four totalCount/stoppedSummary-driven empty
+// states) - extracted into its own hook once this panel was again pressing
+// on its own 1000-line ceiling. See that file's own header for the full
+// reasoning this comment used to carry inline.
+import { useDiscussionSessionSummary, stoppedSummarySentence } from "./useDiscussionSessionSummary";
 // D3 (status filter chips) + D4 (sticky review bar): landed in a new sibling
 // file - see that file's own header for why (this panel's own line ceiling).
 import DiscussionReplyToolbar from "./DiscussionReplyToolbar";
@@ -111,19 +117,6 @@ function composeLiveSentence(args: {
   return parts.join(" ");
 }
 
-interface StoppedSummary {
-  elapsedAtStop: number;
-  found: number;
-  drafted: number;
-  failed: number;
-}
-
-function stoppedSummarySentence(s: StoppedSummary): string {
-  const base = `Capture stopped after ${fmt(s.elapsedAtStop)}. Found ${s.found} post${s.found === 1 ? "" : "s"}, drafted ${s.drafted} repl${s.drafted === 1 ? "y" : "ies"}.`;
-  if (s.failed === 0) return base;
-  return `${base} ${s.failed} repl${s.failed === 1 ? "y" : "ies"} failed - use Retry on that row.`;
-}
-
 export default function DiscussionRepliesPanel({ active }: { active: boolean }) {
   const {
     audience,
@@ -199,8 +192,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     rows,
     // Fixer pass (sort-filter review, S2/root cause): the true UNFILTERED
     // row objects, forwarded now that useDiscussionReplies.ts exposes it -
-    // see this panel's own `sessionStartIds`/`sessionRows` computation
-    // below for the one place this file needs it.
+    // see useDiscussionSessionSummary.ts's own `sessionStartIds` computation
+    // (called just below) for the one place this file needs it.
     rawRows,
     filterText,
     setFilterText,
@@ -271,50 +264,13 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   // than threaded through useDiscussionReplies.ts's return shape.
   const [llmProvider] = useLlmProvider();
 
-  // ---- Session bookkeeping for AC7b's post-stop summary. ----
-  // The pinned UseDiscussionRepliesReturn (section 12) exposes only the
-  // whole persisted `rows` array, not a session-scoped tally - AC24 says the
-  // table is not owned by a session at all. So THIS panel snapshots which
-  // row ids existed the moment `start()` was pressed and, on stop, diffs
-  // `rows` against that snapshot to get "found/drafted/failed this
-  // session". Every setState below follows the "adjust state during
-  // rendering" pattern (compare current vs previous, setState in the same
-  // render) rather than a useEffect that calls setState synchronously,
-  // which this repo's eslint config rejects (TaskAttachmentsDialog.tsx's
-  // own note on the same rule).
-  const [prevCapturing, setPrevCapturing] = useState(capturing);
-  const [sessionStartIds, setSessionStartIds] = useState<ReadonlySet<string>>(() => new Set());
-  // F11: `totalCount` is snapshotted alongside `sessionStartIds` so `found`
-  // below can be computed as a pure count delta - correct regardless of
-  // whatever the filter is doing, since it never touches the (now filtered)
-  // `rows` array at all. See the `found` computation below for why the same
-  // trick does not extend to `drafted`/`failed`.
-  const [sessionStartTotalCount, setSessionStartTotalCount] = useState(0);
-  const [stoppedSummary, setStoppedSummary] = useState<StoppedSummary | null>(null);
-  if (capturing !== prevCapturing) {
-    setPrevCapturing(capturing);
-    if (capturing) {
-      // S2 fix (sort-filter review): `rawRows`, not `rows`. Building the
-      // start-of-session snapshot from the FILTERED array was the root of
-      // BOTH directions of the bug - it could undercount (a row outside the
-      // filter at Stop looked like it was never in the session) and OVERcount
-      // (a filter matching nothing at Start produced an empty snapshot, so
-      // every persisted row looked "new" once the filter was cleared before
-      // Stop). `rawRows` is exact under any filter change during the session.
-      setSessionStartIds(new Set(rawRows.map((r) => r.id)));
-      setSessionStartTotalCount(totalCount);
-      setStoppedSummary(null);
-    } else {
-      // S2 fix (sort-filter review): `rawRows`, not `rows` - same reasoning
-      // as the snapshot above. `drafted`/`failed` are no longer best-effort;
-      // both are exact regardless of what the filter is doing at Stop time.
-      setStoppedSummary({
-        elapsedAtStop: elapsedSec,
-        ...computeStoppedSessionSummary({ rawRows, sessionStartIds, totalCount, sessionStartTotalCount }),
-      });
-    }
-  }
-  const everStarted = capturing || stoppedSummary !== null;
+  // AC7b's post-stop summary bookkeeping, and the four totalCount/
+  // stoppedSummary-driven empty states below (showNeverOpened et al) -
+  // see useDiscussionSessionSummary.ts's own header for the full reasoning
+  // (AC7b/F11/S2) this used to carry inline as a standalone useState/if
+  // cluster.
+  const { stoppedSummary, showNeverOpened, showPersistedBanner, showCapturingEmpty, showStoppedEmpty } =
+    useDiscussionSessionSummary({ capturing, elapsedSec, rawRows, totalCount });
 
   // AC14: "Custom order." on the mode change, and AC38's newest-notice
   // announcement, both routed into one ad hoc polite region (kept separate
@@ -583,22 +539,6 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     }
     void start();
   };
-
-  // F11/AC59: all four of this panel's original empty states read
-  // `totalCount`, never the filtered `rows.length` - a stale filter that
-  // happens to match nothing must never make a table WITH persisted rows
-  // look like a table that was never opened.
-  const showNeverOpened = !everStarted && totalCount === 0;
-  const showPersistedBanner = !everStarted && totalCount > 0;
-  const showCapturingEmpty = capturing && totalCount === 0;
-  // S2: keyed off `stoppedSummary.found === 0`, not `totalCount === 0`. A
-  // session that adds no NEW rows to an already non-empty (persisted) table
-  // used to satisfy neither this condition nor the `found > 0` summary
-  // gate above, so the panel went completely silent on Stop - the exact
-  // "did it work?" moment AC7b exists for, and the likeliest way a
-  // returning user meets a real failure (shared the wrong window with
-  // yesterday's rows still on screen).
-  const showStoppedEmpty = !capturing && stoppedSummary !== null && stoppedSummary.found === 0;
 
   return (
     <div className={styles.adaptPanel}>

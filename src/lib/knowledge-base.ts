@@ -28,6 +28,22 @@ export interface InstitutionPageNode extends InstitutionPage {
   children: InstitutionPageNode[];
 }
 
+/**
+ * The fields a page picker needs to render a title tree, and nothing else -
+ * deliberately NOT a subset of InstitutionPage's fields chosen for
+ * convenience, but exactly what buildPageTree above (and pageBreadcrumb's
+ * chain-walk, and the sibling-sort in buildPageTree's sortSiblings) actually
+ * read: id and parentId to nest, position and title to order siblings, title
+ * again to render. No `body` - that is the entire point of this type existing
+ * alongside InstitutionPage (see listInstitutionPageSummaries below).
+ */
+export interface InstitutionPageSummary {
+  id: string;
+  parentId: string | null;
+  title: string;
+  position: number;
+}
+
 export interface PageSearchHit {
   page: InstitutionPage;
   snippet: string;
@@ -386,6 +402,59 @@ export async function listInstitutionPages(
   return (rows || []).map(mapInstitutionPage);
 }
 
+// Row shape for listInstitutionPageSummaries' narrowed select - derived from
+// the real generated Row type (via Pick) rather than hand-typed, so a schema
+// change to any of these four columns still shows up here as a type error.
+type InstitutionPageSummaryRow = Pick<
+  Database["public"]["Tables"]["institution_pages"]["Row"],
+  "id" | "parent_id" | "title" | "position"
+>;
+
+// Exported so the row -> summary mapping is unit-testable without a live
+// Supabase client, same reason mapInstitutionPage is exported above.
+export function mapInstitutionPageSummary(row: InstitutionPageSummaryRow): InstitutionPageSummary {
+  return {
+    id: row.id,
+    parentId: row.parent_id,
+    title: row.title,
+    position: row.position,
+  };
+}
+
+/**
+ * List every page recorded for one institution, WITHOUT bodies - powers a
+ * page picker that only needs to render a title tree (a Recording-tab
+ * knowledge picker adds pages to a run's context; see this file's module
+ * comment for the audit that found listInstitutionPages' full-row
+ * `select("*")` was the only page-listing path, which would mean pulling
+ * every page's body just to populate a picker). listInstitutionPages above
+ * is unchanged and still owns the Knowledge tab's own full-row read - this
+ * is a narrower query alongside it, not a replacement.
+ *
+ * The Supabase client's generated relation types resolve a column-narrowed
+ * `.select()` to `never` on this table (the same problem src/lib/google-credentials.ts's
+ * `table()` comment documents) - worked around here with a targeted `any`
+ * cast at the `.from()` call, with the real row shape restored immediately
+ * through mapInstitutionPageSummary's parameter type (InstitutionPageSummaryRow,
+ * itself derived from the generated Row type) rather than trusting inference.
+ */
+export async function listInstitutionPageSummaries(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  institution: string
+): Promise<InstitutionPageSummary[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rows, error } = await (supabase as any)
+    .from("institution_pages")
+    .select("id, parent_id, title, position")
+    .eq("user_id", userId)
+    .eq("institution", normalizeInstitution(institution))
+    .order("position", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return ((rows || []) as InstitutionPageSummaryRow[]).map(mapInstitutionPageSummary);
+}
+
 /**
  * Count how many pages are filed under an institution, without fetching the
  * rows themselves - used by the institution-removal confirmation (AC1 of the
@@ -423,6 +492,46 @@ export async function getInstitutionPage(
   if (error) throw new Error(error.message);
   if (!row) return null;
   return mapInstitutionPage(row);
+}
+
+/**
+ * Every page whose id is in `ids`, owner-scoped, WITH bodies - the on-demand
+ * counterpart to listInstitutionPageSummaries: a picker lists titles cheaply
+ * via that function, then calls this only for the page(s) an instructor
+ * actually adds to a run's context.
+ *
+ * Takes a batch rather than a single id, even though the picker adds pages
+ * one at a time, because a multi-select "add" can name several pages in one
+ * user action - a batch call lets that case fetch every body in one round
+ * trip instead of the caller looping N calls. The single-add case is simply
+ * a one-element array, so one function serves both without a second,
+ * near-duplicate function to keep in sync.
+ *
+ * Mirrors listInstitutionPageAttachmentsForPages's empty-input guard (see
+ * src/lib/institution-page-attachments.ts): an empty `.in()` filter is either
+ * a PostgREST error or a vacuous no-match depending on client version, so
+ * this short-circuits to [] without a query rather than relying on that.
+ *
+ * A missing or foreign id is simply absent from the result rather than an
+ * error - the same "vanish rather than throw" contract that batch read uses -
+ * so a caller passing an id for a page deleted between the picker's load and
+ * the add gets back a partial-but-valid result instead of a rejected promise.
+ */
+export async function getInstitutionPagesByIds(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  ids: string[]
+): Promise<InstitutionPage[]> {
+  if (ids.length === 0) return [];
+
+  const { data: rows, error } = await supabase
+    .from("institution_pages")
+    .select("*")
+    .eq("user_id", userId)
+    .in("id", ids);
+
+  if (error) throw new Error(error.message);
+  return (rows || []).map(mapInstitutionPage);
 }
 
 export interface CreateInstitutionPageInput {

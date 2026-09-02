@@ -8,9 +8,13 @@ import {
   wouldCreateCycle,
   collectSubtreePageIds,
   mapInstitutionPage,
+  mapInstitutionPageSummary,
+  listInstitutionPageSummaries,
+  getInstitutionPagesByIds,
   renderInstitutionPolicyText,
   type InstitutionPage,
 } from "./knowledge-base";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
 
 function page(overrides: Partial<InstitutionPage> = {}): InstitutionPage {
@@ -418,5 +422,221 @@ describe("renderInstitutionPolicyText", () => {
     expect(result.includedCount).toBe(0);
     expect(result.omittedCount).toBe(1);
     expect(result.text).toBe("[1 more policy page omitted to stay within the context budget]");
+  });
+});
+
+describe("mapInstitutionPageSummary", () => {
+  type Row = Database["public"]["Tables"]["institution_pages"]["Row"];
+
+  function row(overrides: Partial<Row> = {}): Row {
+    return {
+      id: "p1",
+      user_id: "u1",
+      institution: "MCC",
+      parent_id: null,
+      title: "Policy",
+      body: "Body text that must never reach the summary shape.",
+      tags: ["policy"],
+      position: 2,
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-02T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("maps only id, parentId, title and position - never body, tags, institution, or timestamps", () => {
+    const mapped = mapInstitutionPageSummary(row());
+    expect(mapped).toEqual({
+      id: "p1",
+      parentId: null,
+      title: "Policy",
+      position: 2,
+    });
+    // Belt-and-suspenders on top of toEqual: fail loudly (rather than via a
+    // silently-passing extra-key diff) if a future edit starts copying body
+    // through - this is the one property this type must never carry.
+    expect(mapped).not.toHaveProperty("body");
+  });
+
+  it("preserves a non-null parent_id as parentId", () => {
+    expect(mapInstitutionPageSummary(row({ parent_id: "parent-1" })).parentId).toBe("parent-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Data access - hand-rolled fake Supabase client, mirroring the same
+// inline-fake approach as src/lib/institution-page-attachments.test.ts: each
+// test builds exactly the chain the function under test calls and records
+// every call so assertions can check what was sent (including user_id
+// scoping) without a live Supabase client.
+// ---------------------------------------------------------------------------
+
+interface RecordedCall {
+  method: string;
+  args: unknown[];
+}
+
+type FakeTableResponse = { data: unknown; error: unknown };
+
+function makeQueryBuilder(response: FakeTableResponse, calls: RecordedCall[]) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const builder: any = {
+    select: (...args: unknown[]) => {
+      calls.push({ method: "select", args });
+      return builder;
+    },
+    eq: (...args: unknown[]) => {
+      calls.push({ method: "eq", args });
+      return builder;
+    },
+    in: (...args: unknown[]) => {
+      calls.push({ method: "in", args });
+      return builder;
+    },
+    order: (...args: unknown[]) => {
+      calls.push({ method: "order", args });
+      return builder;
+    },
+    then: (resolve: (value: FakeTableResponse) => unknown, reject: (reason: unknown) => unknown) =>
+      Promise.resolve(response).then(resolve, reject),
+  };
+  return builder;
+}
+
+function makeSupabase(tableResponses: Record<string, FakeTableResponse[]> = {}) {
+  const calls: RecordedCall[] = [];
+  const queues = new Map<string, FakeTableResponse[]>(
+    Object.entries(tableResponses).map(([table, responses]) => [table, [...responses]])
+  );
+
+  const client = {
+    from: (tableName: string) => {
+      calls.push({ method: "from", args: [tableName] });
+      const queue = queues.get(tableName);
+      const response = queue && queue.length > 0 ? queue.shift()! : { data: null, error: null };
+      return makeQueryBuilder(response, calls);
+    },
+  };
+
+  return { client: client as unknown as SupabaseClient<Database>, calls };
+}
+
+function eqCalls(calls: RecordedCall[]) {
+  return calls.filter((c) => c.method === "eq").map((c) => c.args);
+}
+
+function pageRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "p1",
+    user_id: "user-1",
+    institution: "MCC",
+    parent_id: null,
+    title: "Policy",
+    body: "Full body text.",
+    tags: [],
+    position: 0,
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("listInstitutionPageSummaries", () => {
+  it("scopes the query to both user_id and institution (normalized)", async () => {
+    const { client, calls } = makeSupabase({ institution_pages: [{ data: [], error: null }] });
+    await listInstitutionPageSummaries(client, "user-1", "  mcc ");
+    const eq = eqCalls(calls);
+    expect(eq).toContainEqual(["user_id", "user-1"]);
+    expect(eq).toContainEqual(["institution", "MCC"]);
+  });
+
+  it("never returns body, even if the underlying row carries one - the whole point of this path", async () => {
+    // Simulates a row shaped like a full institution_pages row (as if the
+    // query had drifted back to select("*")) reaching the mapper: the
+    // returned summary must still carry no body field.
+    const { client } = makeSupabase({
+      institution_pages: [{ data: [pageRow({ id: "p1", body: "Should never surface here." })], error: null }],
+    });
+    const summaries = await listInstitutionPageSummaries(client, "user-1", "MCC");
+    expect(summaries).toEqual([{ id: "p1", parentId: null, title: "Policy", position: 0 }]);
+    expect(summaries[0]).not.toHaveProperty("body");
+  });
+
+  it("maps every returned row through mapInstitutionPageSummary, ordered as returned", async () => {
+    const { client } = makeSupabase({
+      institution_pages: [
+        {
+          data: [
+            pageRow({ id: "a", title: "A", position: 0 }),
+            pageRow({ id: "b", title: "B", parent_id: "a", position: 1 }),
+          ],
+          error: null,
+        },
+      ],
+    });
+    const summaries = await listInstitutionPageSummaries(client, "user-1", "MCC");
+    expect(summaries).toEqual([
+      { id: "a", parentId: null, title: "A", position: 0 },
+      { id: "b", parentId: "a", title: "B", position: 1 },
+    ]);
+  });
+
+  it("throws when the query reports an error", async () => {
+    const { client } = makeSupabase({
+      institution_pages: [{ data: null, error: { message: "boom" } }],
+    });
+    await expect(listInstitutionPageSummaries(client, "user-1", "MCC")).rejects.toThrow("boom");
+  });
+});
+
+describe("getInstitutionPagesByIds", () => {
+  it("short-circuits to [] without querying when ids is empty", async () => {
+    const { client, calls } = makeSupabase();
+    const pages = await getInstitutionPagesByIds(client, "user-1", []);
+    expect(pages).toEqual([]);
+    expect(calls.some((c) => c.method === "from")).toBe(false);
+  });
+
+  it("queries with a single .in('id', ids) call, scoped to user_id", async () => {
+    const { client, calls } = makeSupabase({ institution_pages: [{ data: [], error: null }] });
+    await getInstitutionPagesByIds(client, "user-1", ["p1", "p2"]);
+    expect(calls.filter((c) => c.method === "from")).toHaveLength(1);
+    const inCall = calls.find((c) => c.method === "in");
+    expect(inCall!.args).toEqual(["id", ["p1", "p2"]]);
+    expect(eqCalls(calls)).toContainEqual(["user_id", "user-1"]);
+  });
+
+  it("returns full pages (bodies included) for every matching id", async () => {
+    const { client } = makeSupabase({
+      institution_pages: [
+        { data: [pageRow({ id: "p1", body: "Body one." }), pageRow({ id: "p2", body: "Body two." })], error: null },
+      ],
+    });
+    const pages = await getInstitutionPagesByIds(client, "user-1", ["p1", "p2"]);
+    expect(pages.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(pages.map((p) => p.body)).toEqual(["Body one.", "Body two."]);
+  });
+
+  it("silently omits a missing id rather than erroring - a stale id just yields fewer rows", async () => {
+    const { client } = makeSupabase({
+      institution_pages: [{ data: [pageRow({ id: "p1" })], error: null }],
+    });
+    const pages = await getInstitutionPagesByIds(client, "user-1", ["p1", "does-not-exist"]);
+    expect(pages.map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("handles a mix of valid and invalid ids, returning only the valid ones", async () => {
+    const { client } = makeSupabase({
+      institution_pages: [{ data: [pageRow({ id: "p1" }), pageRow({ id: "p3" })], error: null }],
+    });
+    const pages = await getInstitutionPagesByIds(client, "user-1", ["p1", "not-real", "p3", "also-not-real"]);
+    expect(pages.map((p) => p.id).sort()).toEqual(["p1", "p3"]);
+  });
+
+  it("throws when the query reports an error", async () => {
+    const { client } = makeSupabase({
+      institution_pages: [{ data: null, error: { message: "boom" } }],
+    });
+    await expect(getInstitutionPagesByIds(client, "user-1", ["p1"])).rejects.toThrow("boom");
   });
 });

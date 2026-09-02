@@ -11,12 +11,15 @@ import { requireOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import {
   listInstitutionPages,
+  listInstitutionPageSummaries,
   getInstitutionPage,
+  getInstitutionPagesByIds,
   createInstitutionPage,
   updateInstitutionPage,
   moveInstitutionPage,
   normalizeInstitution,
   type InstitutionPage,
+  type InstitutionPageSummary,
 } from "@/lib/knowledge-base";
 import { deleteInstitutionPageAndAttachments } from "@/lib/institution-page-attachments";
 
@@ -31,6 +34,49 @@ export async function listInstitutionPagesAction(
     return { pages };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not list pages." };
+  }
+}
+
+/**
+ * List every page recorded for one institution, WITHOUT bodies - owner-
+ * scoped. Powers the Recording tab's knowledge picker (a title tree only),
+ * so it never pulls a page body the picker will not render. See
+ * listInstitutionPageSummaries in src/lib/knowledge-base.ts for the exact
+ * field list and why it exists alongside listInstitutionPagesAction rather
+ * than replacing it - that action keeps serving the Knowledge tab's own
+ * full-row read unchanged.
+ */
+export async function listInstitutionPageSummariesAction(
+  institution: string
+): Promise<{ pages: InstitutionPageSummary[] } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const pages = await listInstitutionPageSummaries(supabase, user.id, normalizeInstitution(institution));
+    return { pages };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not list pages." };
+  }
+}
+
+/**
+ * Fetch the full bodies for a set of page ids, owner-scoped - the on-demand
+ * counterpart to listInstitutionPageSummariesAction: the picker adds a page
+ * (or several, via multi-select) by id, and only then needs its body pulled
+ * into the run's context. A missing or foreign id is silently absent from
+ * the result rather than an error - see getInstitutionPagesByIds's docstring
+ * in src/lib/knowledge-base.ts.
+ */
+export async function getInstitutionPagesByIdsAction(
+  ids: string[]
+): Promise<{ pages: InstitutionPage[] } | { error: string }> {
+  try {
+    const user = await requireOwner();
+    const supabase = createServiceClient();
+    const pages = await getInstitutionPagesByIds(supabase, user.id, ids);
+    return { pages };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not fetch pages." };
   }
 }
 

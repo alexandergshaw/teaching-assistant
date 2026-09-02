@@ -20,7 +20,9 @@ vi.mock("@/lib/knowledge-base", async () => {
   return {
     ...actual,
     listInstitutionPages: vi.fn(),
+    listInstitutionPageSummaries: vi.fn(),
     getInstitutionPage: vi.fn(),
+    getInstitutionPagesByIds: vi.fn(),
     createInstitutionPage: vi.fn(),
     updateInstitutionPage: vi.fn(),
     moveInstitutionPage: vi.fn(),
@@ -39,15 +41,20 @@ vi.mock("@/lib/institution-page-attachments", () => ({
 import { requireOwner } from "@/lib/supabase/auth";
 import {
   listInstitutionPages,
+  listInstitutionPageSummaries,
   getInstitutionPage,
+  getInstitutionPagesByIds,
   createInstitutionPage,
   updateInstitutionPage,
   moveInstitutionPage,
   type InstitutionPage,
+  type InstitutionPageSummary,
 } from "@/lib/knowledge-base";
 import { deleteInstitutionPageAndAttachments } from "@/lib/institution-page-attachments";
 import {
   listInstitutionPagesAction,
+  listInstitutionPageSummariesAction,
+  getInstitutionPagesByIdsAction,
   createInstitutionPageAction,
   updateInstitutionPageAction,
   moveInstitutionPageAction,
@@ -67,6 +74,16 @@ function page(overrides: Partial<InstitutionPage> = {}): InstitutionPage {
     position: 0,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function summary(overrides: Partial<InstitutionPageSummary> = {}): InstitutionPageSummary {
+  return {
+    id: "page-1",
+    parentId: null,
+    title: "Attendance Policy",
+    position: 0,
     ...overrides,
   };
 }
@@ -108,6 +125,88 @@ describe("listInstitutionPagesAction", () => {
     vi.mocked(listInstitutionPages).mockRejectedValueOnce(new Error("db unreachable"));
 
     const result = await listInstitutionPagesAction("MCC");
+
+    expect(result).toEqual({ error: "db unreachable" });
+  });
+});
+
+describe("listInstitutionPageSummariesAction", () => {
+  it("returns an error rather than throwing when requireOwner rejects", async () => {
+    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
+
+    const result = await listInstitutionPageSummariesAction("mcc");
+
+    expect(result).toEqual({ error: "Not authorized. Sign in with an approved account." });
+    expect(listInstitutionPageSummaries).not.toHaveBeenCalled();
+  });
+
+  it("normalizes institution casing before listing", async () => {
+    vi.mocked(listInstitutionPageSummaries).mockResolvedValueOnce([summary()]);
+
+    await listInstitutionPageSummariesAction("  mcc ");
+
+    expect(listInstitutionPageSummaries).toHaveBeenCalledWith(expect.anything(), OWNER.id, "MCC");
+  });
+
+  it("returns the owner's page summaries on success, without a body field", async () => {
+    vi.mocked(listInstitutionPageSummaries).mockResolvedValueOnce([summary(), summary({ id: "page-2" })]);
+
+    const result = await listInstitutionPageSummariesAction("MCC");
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.pages).toHaveLength(2);
+    expect(result.pages[0]).not.toHaveProperty("body");
+  });
+
+  it("maps a thrown data-layer error to {error} instead of throwing", async () => {
+    vi.mocked(listInstitutionPageSummaries).mockRejectedValueOnce(new Error("db unreachable"));
+
+    const result = await listInstitutionPageSummariesAction("MCC");
+
+    expect(result).toEqual({ error: "db unreachable" });
+  });
+});
+
+describe("getInstitutionPagesByIdsAction", () => {
+  it("returns an error rather than throwing when requireOwner rejects", async () => {
+    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized."));
+
+    const result = await getInstitutionPagesByIdsAction(["page-1"]);
+
+    expect(result).toEqual({ error: "Not authorized." });
+    expect(getInstitutionPagesByIds).not.toHaveBeenCalled();
+  });
+
+  it("passes an empty id list straight through to the data layer", async () => {
+    vi.mocked(getInstitutionPagesByIds).mockResolvedValueOnce([]);
+
+    const result = await getInstitutionPagesByIdsAction([]);
+
+    expect(getInstitutionPagesByIds).toHaveBeenCalledWith(expect.anything(), OWNER.id, []);
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.pages).toEqual([]);
+  });
+
+  it("returns the pages the data layer found for a mix of valid and invalid ids", async () => {
+    vi.mocked(getInstitutionPagesByIds).mockResolvedValueOnce([page({ id: "page-1" })]);
+
+    const result = await getInstitutionPagesByIdsAction(["page-1", "does-not-exist"]);
+
+    expect(getInstitutionPagesByIds).toHaveBeenCalledWith(expect.anything(), OWNER.id, [
+      "page-1",
+      "does-not-exist",
+    ]);
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.pages.map((p) => p.id)).toEqual(["page-1"]);
+  });
+
+  it("maps a thrown data-layer error to {error} instead of throwing", async () => {
+    vi.mocked(getInstitutionPagesByIds).mockRejectedValueOnce(new Error("db unreachable"));
+
+    const result = await getInstitutionPagesByIdsAction(["page-1"]);
 
     expect(result).toEqual({ error: "db unreachable" });
   });

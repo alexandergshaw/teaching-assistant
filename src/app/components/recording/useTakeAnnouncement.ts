@@ -23,26 +23,17 @@
 // transcript is ready. AnnouncementStage and decideRealTimeGuard are
 // re-exported below so no existing importer's path changes.
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   draftAnnouncementAction,
   saveMessageDraftAction,
   createAnnouncementAction,
   listCourseHubAction,
 } from "../../actions";
-// Imported directly by module path, not through the "../../actions" barrel
-// above - this action lives in this wave's own file set
-// (src/app/actions/announcement-image.ts) while the barrel (src/app/actions.ts)
-// does not, and a direct "@/app/actions/<file>" import is an already-
-// established pattern in this repo (e.g. src/app/api/visualizer/create/route.ts
-// imports createVisualizerConceptAction the same way) - so this stays out of
-// a file two sibling agents' waves might also be touching.
-import { generateAnnouncementImageAction } from "@/app/actions/announcement-image";
 import type { MessageDraftPayload } from "@/lib/message-drafts";
 import type { TranscriptChunkPlan } from "@/lib/take-transcript";
 import {
   buildTakeAnnouncementInstruction,
-  buildAnnouncementImagePrompt,
   buildAnnouncementImageAltText,
   DEFAULT_ANNOUNCEMENT_COMPOSITION,
   type AnnouncementCompositionSettings,
@@ -52,13 +43,20 @@ import { announcementImageFileName } from "./announcement-image-filename";
 import { getStoredProvider } from "@/lib/llm-provider";
 import { useInstitutionSelection } from "@/lib/institutions";
 import { isConfirmArmed, mayPostCommit } from "../content-tab/modules/postConfirmArming";
-// The image's only real destination this wave ships (see this file's own
-// note above imageState in UseTakeAnnouncementReturn): triggerFileDownload is
-// the repo's one anchor/click/revoke idiom, not a hand-rolled sixth copy of
-// it - see RepoGradesLogPanel.tsx's own comment on why (REGRESSION entry 267
-// check 4 already refused one).
-import { triggerFileDownload } from "../course-planning/utils";
 import { takePostArmSignature } from "./takeAnnouncementArming";
+import { useAnnouncementBusy, setAnnouncementBusy } from "./announcementBusyStore";
+// The image companion (see this file's own note above imageState in
+// UseTakeAnnouncementReturn) was split out into announcementImagePipeline.ts
+// to stay under recording-split.structure.test.ts's 1000-line ceiling on this
+// directory - see that file's own header. This hook still owns every piece
+// of state the pipeline touches; imageDeps() below hands it down explicitly.
+import {
+  generateImage as runGenerateImage,
+  regenerateImage as runRegenerateImage,
+  discardImage as runDiscardImage,
+  downloadImage as runDownloadImage,
+  type AnnouncementImageDeps,
+} from "./announcementImagePipeline";
 // docs/DEV_LOOP.md's "every feature needs a downloadable log" rule -
 // collection (the refs + push calls below) lives here since only this hook
 // sees every stage transition; assembly/formatting is entirely
@@ -268,48 +266,16 @@ export interface UseTakeAnnouncementReturn {
   getAnnouncementLog: () => AnnouncementRunLog;
 }
 
-// GAP 3 (cross-surface busy gating, AC15b): TakeAnnouncementPanel.tsx computes
-// its own local `busy` from `stage.phase` but has never exposed it, so
-// TakesPanel's per-row gating only ever saw the walkthrough's and audio-
-// extraction's busy states. TakeAnnouncementPanel.tsx owns the only call site
-// of this hook and is out of this wave's allow-list (a sibling agent's file),
-// so the busy fact cannot be threaded up through a new prop the panel would
-// have to forward. A module-level external store sidesteps that: this hook
-// writes to it below, and RecordingTab.tsx reads it via useAnnouncementBusy()
-// with no participation required from the panel in between. A plain
-// singleton is also the semantically correct shape here - only one
-// TakeAnnouncementPanel is ever mounted at a time (RecordingTab keeps a
-// single `announcementTake`), mirroring the "the transcription queue is a
-// singleton" reasoning AC15b itself gives.
-type AnnouncementBusyListener = () => void;
-let currentAnnouncementBusy = false;
-const announcementBusyListeners = new Set<AnnouncementBusyListener>();
-
-function setAnnouncementBusy(busy: boolean): void {
-  if (busy === currentAnnouncementBusy) return;
-  currentAnnouncementBusy = busy;
-  announcementBusyListeners.forEach((listener) => listener());
-}
-
-function subscribeAnnouncementBusy(listener: AnnouncementBusyListener): () => void {
-  announcementBusyListeners.add(listener);
-  return () => {
-    announcementBusyListeners.delete(listener);
-  };
-}
-
-function getAnnouncementBusySnapshot(): boolean {
-  return currentAnnouncementBusy;
-}
-
-/** True while THIS hook's pipeline is preparing audio, transcribing, or
- * drafting for whichever take its single mounted instance is open on - the
- * smallest fact that answers "is the announcement pipeline in flight". Not
- * "posting": posting is a Canvas write, not a use of the recorder or the
- * transcription queue, so it does not need to block another take's actions. */
-export function useAnnouncementBusy(): boolean {
-  return useSyncExternalStore(subscribeAnnouncementBusy, getAnnouncementBusySnapshot, () => false);
-}
+// GAP 3 (cross-surface busy gating, AC15b): the module-level busy singleton
+// this hook publishes to (so RecordingTab.tsx can gate TakesPanel's per-row
+// actions with no participation from TakeAnnouncementPanel.tsx in between)
+// was split out into announcementBusyStore.ts to stay under
+// recording-split.structure.test.ts's 1000-line ceiling on this directory -
+// see that file's own header for the full reasoning and announcementBusyStore.ts's
+// own header for the store itself. Re-exported here so RecordingTab.tsx's
+// existing `import { useAnnouncementBusy } from "./useTakeAnnouncement"` keeps
+// resolving.
+export { useAnnouncementBusy };
 
 export function useTakeAnnouncement({
   take,
@@ -494,9 +460,10 @@ export function useTakeAnnouncement({
     };
   }, []);
 
-  // GAP 3: publish "a long-running pipeline is in flight" to the module-level
-  // store above, matching TakeAnnouncementPanel's own local `busy` derivation
-  // exactly (preparing/transcribing/drafting - not posting, not review/idle/
+  // GAP 3: publish "a long-running pipeline is in flight" to
+  // announcementBusyStore.ts's module-level store, matching
+  // TakeAnnouncementPanel's own local `busy` derivation exactly
+  // (preparing/transcribing/drafting - not posting, not review/idle/
   // failed/noSpeech). The cleanup also fires on unmount, so closing the panel
   // mid-pipeline (its "Back to takes" button is never disabled) cannot leave
   // every other take's actions stuck disabled.
@@ -586,73 +553,43 @@ export function useTakeAnnouncement({
     announce("Draft ready to review.");
   }
 
-  /**
-   * Calls generateAnnouncementImageAction with a prompt built from the
-   * CURRENT subject/body (buildAnnouncementImagePrompt,
-   * src/lib/take-announcement.ts) - always the announcement actually on
-   * screen, whether that came from the auto-drafted text, a regenerate, or
-   * the instructor's own edits to the Subject/Message fields. Never throws
-   * (announcement-image.ts's own discipline); every failure lands in
-   * imageError with a specific message, and the drafted announcement text
-   * itself is completely untouched either way.
-   */
-  async function generateImage() {
-    setImageState("generating");
-    setImageError(null);
-    const prompt = buildAnnouncementImagePrompt(subject, body);
-    const result = await generateAnnouncementImageAction(prompt);
-    if ("error" in result) {
-      setLogImageAttempts((prev) => [...prev, { at: new Date().toISOString(), outcome: "failed", error: result.error }]);
-      setImageState("failed");
-      setImageError(result.error);
-      setImageBase64(null);
-      setImageMimeType(null);
-      return;
-    }
-    setLogImageAttempts((prev) => [...prev, { at: new Date().toISOString(), outcome: "generated", error: "" }]);
-    setImageState("ready");
-    setImageBase64(result.base64);
-    setImageMimeType(result.mimeType);
+  // Every function below is a thin wrapper that builds a fresh
+  // AnnouncementImageDeps snapshot from this render's current state and hands
+  // it to announcementImagePipeline.ts's own exported function of the same
+  // name - see that file's header for the full reasoning and each function's
+  // own doc comment for what it actually does. Kept as same-named local
+  // functions (not just re-exported directly) so every call site below and
+  // in UseTakeAnnouncementReturn keeps reading exactly as it did before this
+  // split - only imageDeps() is new.
+  function imageDeps(): AnnouncementImageDeps {
+    return {
+      subject,
+      body,
+      imageBase64,
+      imageMimeType,
+      setImageState,
+      setImageBase64,
+      setImageMimeType,
+      setImageError,
+      setLogImageAttempts,
+      autoImageAttemptedRef,
+    };
   }
 
-  /** Explicit "Regenerate image" control (TakeAnnouncementPanel.tsx) -
-   * replaces whatever image is currently shown (ready, failed, or none) with
-   * a fresh attempt against the CURRENT subject/body. Marks the auto-attempt
-   * ref used so the review-stage effect below never fires a second,
-   * redundant attempt on top of this explicit one. */
+  function generateImage() {
+    return runGenerateImage(imageDeps());
+  }
+
   function regenerateImage() {
-    autoImageAttemptedRef.current = true;
-    void generateImage();
+    runRegenerateImage(imageDeps());
   }
 
-  /** Explicit "Remove image" control - clears the image companion without
-   * touching subject/body or re-attempting generation. The instructor can
-   * still post (or save to drafts) with no image at all; this is the control
-   * that makes that a real choice rather than only a byproduct of a failure. */
   function discardImage() {
-    autoImageAttemptedRef.current = true;
-    setLogImageAttempts((prev) => [...prev, { at: new Date().toISOString(), outcome: "discarded", error: "" }]);
-    setImageState("idle");
-    setImageBase64(null);
-    setImageMimeType(null);
-    setImageError(null);
+    runDiscardImage(imageDeps());
   }
 
-  /** "Download image" control (TakeAnnouncementPanel.tsx) - the image's only
-   * real destination this wave ships (see the IMPORTANT note on imageState
-   * above): posting to Canvas never carries it, so the instructor downloads
-   * it here and attaches it themselves wherever they are posting. Decodes
-   * the base64 the same way this repo's other client-side downloads already
-   * do (Uint8Array.from(atob(...), c => c.charCodeAt(0)) - see e.g.
-   * FinalizedSyllabusLibrary.tsx's downloadDocx) into a Blob, names it via
-   * announcementImageFileName (a pure leaf, unit-tested with frozen
-   * literals), and hands both to triggerFileDownload - never a hand-rolled
-   * createObjectURL/anchor/click/revoke dance. */
   function downloadImage() {
-    if (!imageBase64 || !imageMimeType) return;
-    const bytes = Uint8Array.from(atob(imageBase64), (c) => c.charCodeAt(0));
-    const blob = new Blob([bytes], { type: imageMimeType });
-    triggerFileDownload(blob, announcementImageFileName(subject, imageMimeType));
+    runDownloadImage(imageDeps());
   }
 
   // Auto-generate the image companion the first time a drafted announcement

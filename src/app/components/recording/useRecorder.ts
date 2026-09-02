@@ -5,6 +5,14 @@ import type { Take } from "./types";
 import type { UseRecordingSettingsReturn } from "./useRecordingSettings";
 import { mixAudioTracks, type MixedAudio } from "./audio-mix";
 import { startAudioSidecar, type AudioSidecar } from "./audio-sidecar";
+// The level-meter analyser (AudioContext/AnalyserNode/rAF loop) was pulled
+// out to src/lib/audio-level-meter.ts to stay under
+// recording-split.structure.test.ts's 1000-line ceiling on this directory -
+// it has no recording-specific dependency (no Take, no MediaRecorder, no
+// recording settings), and useCameraPreview.ts already carried a byte-for-
+// byte duplicate of the same logic, so it belongs next to the technique, not
+// duplicated per caller. See that file's own header for the full account.
+import { startAudioLevelMeter, type AudioLevelMeter } from "@/lib/audio-level-meter";
 import {
   SCREEN_AUDIO_NOT_GRANTED_NOTICE,
   browserMayOfferDisplayAudio,
@@ -124,10 +132,10 @@ export function useRecorder({
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const levelRef = useRef(0);
+  // Owns the level-meter's live AudioContext/AnalyserNode/rAF handle (see
+  // src/lib/audio-level-meter.ts) - replaced wholesale on every startMeter()
+  // call, torn down by stopMeter().
+  const meterRef = useRef<AudioLevelMeter | null>(null);
   const elapsedRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Config the current stream was opened with (see the restart effect).
@@ -214,63 +222,13 @@ export function useRecorder({
   };
 
   const stopMeter = () => {
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
-      audioCtxRef.current.close();
-      audioCtxRef.current = null;
-    }
-    analyserRef.current = null;
+    meterRef.current?.stop();
+    meterRef.current = null;
   };
 
   const startMeter = useCallback((stream: MediaStream) => {
     stopMeter();
-    const audioTracks = stream.getAudioTracks();
-    if (audioTracks.length === 0) return;
-
-    try {
-      const audioCtx =
-        typeof window !== "undefined" && window.AudioContext
-          ? new window.AudioContext()
-          : typeof window !== "undefined" && (window as unknown as Record<string, unknown>).webkitAudioContext
-            ? new ((window as unknown as Record<string, unknown>).webkitAudioContext as typeof AudioContext)()
-            : null;
-
-      if (!audioCtx) {
-        console.warn("AudioContext not supported");
-        return;
-      }
-
-      audioCtxRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const loop = () => {
-        analyser.getByteTimeDomainData(data);
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) sum += (data[i] - 128) * (data[i] - 128);
-        const rms = Math.sqrt(sum / data.length) / 128;
-        // Raw RMS of speech is tiny; amplify so normal talking visibly moves
-        // the bar. Quantize and only set state on change - updating at 60fps
-        // re-rendered the whole tab every frame, which broke the device
-        // dropdowns (MUI menus re-render out from under the click).
-        const q = Math.round(Math.min(rms * 4, 1) * 20) / 20;
-        if (q !== levelRef.current) {
-          levelRef.current = q;
-          setLevel(q);
-        }
-        rafRef.current = requestAnimationFrame(loop);
-      };
-      rafRef.current = requestAnimationFrame(loop);
-    } catch (err) {
-      console.error("Failed to start level meter:", err);
-    }
+    meterRef.current = startAudioLevelMeter(stream, setLevel);
   }, []);
 
   const stopEverything = useCallback(async () => {
@@ -596,6 +554,31 @@ export function useRecorder({
     return "";
   };
 
+  // The title card (started in startRecording, below) and the closing card
+  // (started in stopRecording) each decrement cardNotice.secondsLeft once a
+  // second in exactly the same way, stopping only on their own `kind` (so a
+  // stray tick from a card that already finished never touches the other
+  // card's notice) - this is that identical ticking pulled out once rather
+  // than duplicated per card. What happens once the countdown reaches zero
+  // (re-enabling the mic, actually stopping the recorder, etc.) differs per
+  // card and stays in its own window.setTimeout at each call site; this
+  // function only ticks the shared visual countdown.
+  const tickCardCountdown = (kind: "title" | "closing") => {
+    cardNoticeTimerRef.current = setInterval(() => {
+      setCardNotice((prev) => {
+        if (!prev || prev.kind !== kind) return prev;
+        if (prev.secondsLeft <= 1) {
+          if (cardNoticeTimerRef.current) {
+            clearInterval(cardNoticeTimerRef.current);
+            cardNoticeTimerRef.current = null;
+          }
+          return null;
+        }
+        return { kind, secondsLeft: prev.secondsLeft - 1 };
+      });
+    }, 1000);
+  };
+
   const beginRecording = () => {
     // Feature 3: Guard against starting while finishing
     if (finishing) return;
@@ -788,19 +771,7 @@ export function useRecorder({
         setMicCaptureEnabled(false);
         const cardDuration = Number(cardSecondsRef.current);
         setCardNotice({ kind: "title", secondsLeft: cardDuration });
-        cardNoticeTimerRef.current = setInterval(() => {
-          setCardNotice((prev) => {
-            if (!prev || prev.kind !== "title") return prev;
-            if (prev.secondsLeft <= 1) {
-              if (cardNoticeTimerRef.current) {
-                clearInterval(cardNoticeTimerRef.current);
-                cardNoticeTimerRef.current = null;
-              }
-              return null;
-            }
-            return { kind: "title", secondsLeft: prev.secondsLeft - 1 };
-          });
-        }, 1000);
+        tickCardCountdown("title");
         window.setTimeout(() => {
           if (cardPhaseRef.current !== "title") return;
           cardPhaseRef.current = null;
@@ -872,19 +843,7 @@ export function useRecorder({
       setMicCaptureEnabled(false);
       const cardDuration = Number(cardSecondsRef.current);
       setCardNotice({ kind: "closing", secondsLeft: cardDuration });
-      cardNoticeTimerRef.current = setInterval(() => {
-        setCardNotice((prev) => {
-          if (!prev || prev.kind !== "closing") return prev;
-          if (prev.secondsLeft <= 1) {
-            if (cardNoticeTimerRef.current) {
-              clearInterval(cardNoticeTimerRef.current);
-              cardNoticeTimerRef.current = null;
-            }
-            return null;
-          }
-          return { kind: "closing", secondsLeft: prev.secondsLeft - 1 };
-        });
-      }, 1000);
+      tickCardCountdown("closing");
       window.setTimeout(() => {
         cardPhaseRef.current = null;
         setCardNotice(null);

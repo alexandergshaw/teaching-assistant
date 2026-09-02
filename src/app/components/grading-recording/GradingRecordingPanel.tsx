@@ -60,7 +60,14 @@ import {
   type RecordingKnowledgeContext,
 } from "@/lib/recording-launch";
 import { returnToKnowledge } from "@/lib/knowledge-return";
-import { formatContextPagesList, returnTargetPageId } from "./grading-context-display";
+import { returnTargetPageId } from "./grading-context-display";
+// AC3 (docs/knowledge-recording-handoff-acceptance-criteria.md section 4):
+// shared with DiscussionRepliesPanel.tsx - supersedes this panel's own former
+// static formatContextPagesList line with an interactive, removable list.
+// That formatter was deleted rather than left exported once this replaced its
+// only caller; see grading-context-display.ts's header for why a tested
+// export with no consumer is worse than no export at all.
+import CarriedKnowledgePages from "../recording/CarriedKnowledgePages";
 import { extractGradingSubmissionsAction } from "@/app/actions/grading-submission-extract";
 // The sibling GRADING action - coded against the exact signature this task's
 // brief pinned, before this file's own path (src/app/actions/grading-
@@ -547,17 +554,17 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           This course has no roster on file - names will show as &quot;No roster to check&quot; until one is added to its course tile.
         </p>
       )}
-      {/* AC2/AC4 of docs/knowledge-recording-handoff-acceptance-criteria.md:
+      {/* AC2/AC3/AC4 of docs/knowledge-recording-handoff-acceptance-criteria.md:
           extends this existing notice (already the reference implementation
           the sibling "discussions" destination is matched against) with the
-          carried pages, capped, and a way back to where they were selected -
-          without touching the label sentence or its placement. `pages` is
-          ALREADY filtered to only what the budget included (AC1 -
-          KnowledgeTab.tsx's includedContextPages, before this ever launches),
-          so formatContextPagesList just formats whatever survived; nothing
-          here re-checks inclusion because there is nothing left here to
-          re-check it against. Renders nothing when knowledgeContext is null
-          (AC2's "carrying nothing renders nothing") - unchanged. */}
+          carried pages, individually removable, and a way back to where they
+          were selected - without touching the label sentence or its
+          placement. `pages` is ALREADY filtered to only what the budget
+          included (AC1 - KnowledgeTab.tsx's includedContextPages, before this
+          ever launches); CarriedKnowledgePages.tsx re-derives inclusion fresh
+          on every removal (never assumes the original filter still holds -
+          see that file's own header). Renders nothing when knowledgeContext
+          is null (AC2's "carrying nothing renders nothing") - unchanged. */}
       {knowledgeContext && (
         <div className={styles.field} style={{ gap: "var(--space-1)" }}>
           <p className={styles.fieldHint} style={{ margin: 0 }}>
@@ -570,11 +577,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
               Back to Knowledge
             </button>
           </p>
-          {formatContextPagesList(knowledgeContext.pages) && (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
-              {formatContextPagesList(knowledgeContext.pages)}
-            </p>
-          )}
+          <CarriedKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
         </div>
       )}
 

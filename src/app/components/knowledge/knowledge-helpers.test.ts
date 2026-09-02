@@ -643,10 +643,10 @@ describe("kbBulkBarStatusText (aesthetics/UX pass - the bulk bar's ONE bar-level
 });
 
 describe("includedContextPages (AC1 of docs/knowledge-recording-handoff-acceptance-criteria.md - never name a page the model did not read)", () => {
-  it("keeps every page when nothing was omitted (small selection, well under budget)", () => {
+  it("keeps every page (with body) when nothing was omitted (small selection, well under budget)", () => {
     const selectedPages = [
-      { id: "p1", title: "Grading rubric" },
-      { id: "p2", title: "Late policy" },
+      { id: "p1", title: "Grading rubric", body: "Short body." },
+      { id: "p2", title: "Late policy", body: "Also short." },
     ];
     const block = buildKnowledgeContextBlock({
       pages: [
@@ -668,15 +668,14 @@ describe("includedContextPages (AC1 of docs/knowledge-recording-handoff-acceptan
       // `break`) would keep "Intro" and "Huge policy" and drop "Tiny note",
       // exactly backwards from what actually got sent to the model.
       const selectedPages = [
-        { id: "p1", title: "Intro" },
-        { id: "p2", title: "Huge policy" },
-        { id: "p3", title: "Tiny note" },
+        { id: "p1", title: "Intro", body: "Short intro." },
+        { id: "p2", title: "Huge policy", body: "x".repeat(20000) },
+        { id: "p3", title: "Tiny note", body: "n" },
       ];
-      const HUGE = "x".repeat(20000);
       const block = buildKnowledgeContextBlock({
         pages: [
           { title: "Intro", body: "Short intro." },
-          { title: "Huge policy", body: HUGE },
+          { title: "Huge policy", body: "x".repeat(20000) },
           { title: "Tiny note", body: "n" },
         ],
         attachments: [],
@@ -696,8 +695,8 @@ describe("includedContextPages (AC1 of docs/knowledge-recording-handoff-acceptan
 
   it("returns an EMPTY list, never a guess, when selectedPages/pageResults lengths diverge", () => {
     const selectedPages = [
-      { id: "p1", title: "A" },
-      { id: "p2", title: "B" },
+      { id: "p1", title: "A", body: "a" },
+      { id: "p2", title: "B", body: "b" },
     ];
     const pageResults = [{ title: "A", included: true }]; // one short - a caller bug
     expect(includedContextPages(selectedPages, pageResults)).toEqual([]);
@@ -707,11 +706,11 @@ describe("includedContextPages (AC1 of docs/knowledge-recording-handoff-acceptan
     expect(includedContextPages([], [])).toEqual([]);
   });
 
-  it("preserves input order in the result", () => {
+  it("preserves input order in the result, carrying body through untouched", () => {
     const selectedPages = [
-      { id: "a", title: "A" },
-      { id: "b", title: "B" },
-      { id: "c", title: "C" },
+      { id: "a", title: "A", body: "body a" },
+      { id: "b", title: "B", body: "body b" },
+      { id: "c", title: "C", body: "body c" },
     ];
     const pageResults = [
       { title: "A", included: true },
@@ -719,8 +718,8 @@ describe("includedContextPages (AC1 of docs/knowledge-recording-handoff-acceptan
       { title: "C", included: true },
     ];
     expect(includedContextPages(selectedPages, pageResults)).toEqual([
-      { id: "a", title: "A" },
-      { id: "c", title: "C" },
+      { id: "a", title: "A", body: "body a" },
+      { id: "c", title: "C", body: "body c" },
     ]);
   });
 });

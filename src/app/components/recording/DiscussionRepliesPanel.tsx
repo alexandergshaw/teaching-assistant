@@ -19,6 +19,7 @@ import { tableClipboardText, draftingArmSignature } from "./discussion-capture";
 import { copyAllButtonLabel, computeStoppedSessionSummary, REPLY_STATUS_FILTER_LABELS } from "./discussion-table-view";
 import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } from "./useReplyResources";
 import { useDiscussionReplies } from "./useDiscussionReplies";
+import CarriedKnowledgePages from "./CarriedKnowledgePages"; // AC3 - shared with GradingRecordingPanel.tsx
 // D1/D3/D7/D9 (docs/aesthetics-pass-acceptance-criteria.md section 4b): see
 // that file's own header for the full account of this panel's own hook-count
 // pressure and how handledAt/skipped (real ReplyRow fields as of this
@@ -149,6 +150,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     // the instructor's selected Knowledge Base pages as context - see the
     // standing hint rendered just above DiscussionReplyControls below.
     knowledgeContextLabel,
+    knowledgeContext, // AC3: threaded into CarriedKnowledgePages.tsx below
+    setKnowledgeContext,
     recordingUrl,
     recordingBytes,
     capturing,
@@ -741,6 +744,10 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
       {knowledgeContextLabel && (
         <p className={styles.fieldHint}>{`Drafting with Knowledge Base context: ${knowledgeContextLabel}.`}</p>
       )}
+      {/* AC3: remove/undo a carried page without leaving this panel - see
+          CarriedKnowledgePages.tsx's own header. Renders nothing on its own
+          when there is nothing to show. */}
+      <CarriedKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
       <DiscussionReplyControls composition={composition} onChange={setComposition} />
       {/* Resource-controls feature: eligible resource kinds and preferred
           video length - placed right after the composition cluster, same

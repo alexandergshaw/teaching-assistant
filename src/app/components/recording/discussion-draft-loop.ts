@@ -157,6 +157,29 @@ export interface UseDiscussionRepliesReturn {
    */
   knowledgeContextLabel: string | null;
 
+  /** AC3 of docs/knowledge-recording-handoff-acceptance-criteria.md, section
+   *  4 ("adjust from the recording side"): the full carried context, not
+   *  just its label - null under the same conditions `knowledgeContextLabel`
+   *  is null. DiscussionRepliesPanel.tsx threads this into
+   *  CarriedKnowledgePages.tsx (a NEW component, shared with
+   *  GradingRecordingPanel.tsx) so the pages themselves - not only the
+   *  summary sentence - can be shown and individually removed. */
+  knowledgeContext: RecordingKnowledgeContext | null;
+  /** Replace the carried context wholesale (a client-side removal/undo
+   *  recompute - see CarriedKnowledgePages.tsx's recomputeCarriedKnowledgeContext).
+   *  Also rewrites the persisted "ta-rec-disc-kb-context-label" key whenever
+   *  a label has already been written once this table's life (Start clicked
+   *  at least once) - see useDiscussionReplies.ts's own comment on why an
+   *  edit before the FIRST Start must not write a label for a session that
+   *  has not captured anything yet (the same gate `start()`'s own label
+   *  write already follows for the take-vs-write distinction). This is the
+   *  fix for THE CORRECTNESS TRAP: the draft loop reads knowledgeContextRef
+   *  fresh per batch dispatch, so an edit mid-run takes effect on the very
+   *  next batch, but the persisted label was previously only ever written
+   *  once, in `start()` - leaving it to lie about what later batches
+   *  actually used after any edit. */
+  setKnowledgeContext: (next: RecordingKnowledgeContext | null) => void;
+
   capturing: boolean;
   elapsedSec: number;
   pendingFrames: number;

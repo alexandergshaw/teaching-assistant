@@ -88,10 +88,11 @@ describe("recording-launch", () => {
       ).toEqual({ view: "record", knowledgeContext: { text: "keep me" } });
     });
 
-    // `pages` (structural-fix pass): optional, advisory, NOT populated by any
-    // real launch site yet - these tests only prove the parser's own
-    // contract for the field a later chunk will start sending.
-    it("accepts a knowledgeContext carrying a usable pages array alongside text/label", () => {
+    // `pages` (structural-fix pass; widened for AC3's removal control -
+    // docs/knowledge-recording-handoff-acceptance-criteria.md section 4a):
+    // each entry now carries `body` too, so a removal control can recompute
+    // buildKnowledgeContextBlock client-side over whatever pages remain.
+    it("accepts a knowledgeContext carrying a usable pages array (with body) alongside text/label", () => {
       expect(
         parseRecordingLaunch({
           view: "discussions",
@@ -99,8 +100,8 @@ describe("recording-launch", () => {
             text: "hello",
             label: "2 pages",
             pages: [
-              { id: "p1", title: "Grading rubric" },
-              { id: "p2", title: "Late policy" },
+              { id: "p1", title: "Grading rubric", body: "Give full credit." },
+              { id: "p2", title: "Late policy", body: "Lose 10% per day." },
             ],
           },
         })
@@ -110,11 +111,30 @@ describe("recording-launch", () => {
           text: "hello",
           label: "2 pages",
           pages: [
-            { id: "p1", title: "Grading rubric" },
-            { id: "p2", title: "Late policy" },
+            { id: "p1", title: "Grading rubric", body: "Give full credit." },
+            { id: "p2", title: "Late policy", body: "Lose 10% per day." },
           ],
         },
       });
+    });
+
+    it("degrades a page's `body` on its own (non-string/missing) without dropping the whole entry - unlike id/title, body is not atomic", () => {
+      const result = parseRecordingLaunch({
+        view: "discussions",
+        knowledgeContext: {
+          text: "hello",
+          pages: [
+            { id: "p1", title: "No body field" },
+            { id: "p2", title: "Non-string body", body: 12345 },
+            { id: "p3", title: "Has a body", body: "Real text." },
+          ],
+        },
+      });
+      expect(result?.knowledgeContext?.pages).toEqual([
+        { id: "p1", title: "No body field", body: "" },
+        { id: "p2", title: "Non-string body", body: "" },
+        { id: "p3", title: "Has a body", body: "Real text." },
+      ]);
     });
 
     it("drops a malformed pages field (not an array) without invalidating text/label", () => {
@@ -130,11 +150,11 @@ describe("recording-launch", () => {
           knowledgeContext: {
             text: "hello",
             pages: [
-              { id: "p1", title: "Grading rubric" },
-              { id: "p2" }, // no title - dropped
-              { title: "no id" }, // no id - dropped
+              { id: "p1", title: "Grading rubric", body: "Body 1." },
+              { id: "p2", body: "Body 2." }, // no title - dropped
+              { title: "no id", body: "Body 3." }, // no id - dropped
               "not-an-object", // dropped
-              { id: "p3", title: "Late policy" },
+              { id: "p3", title: "Late policy", body: "Body 4." },
             ],
           },
         })
@@ -143,8 +163,8 @@ describe("recording-launch", () => {
         knowledgeContext: {
           text: "hello",
           pages: [
-            { id: "p1", title: "Grading rubric" },
-            { id: "p3", title: "Late policy" },
+            { id: "p1", title: "Grading rubric", body: "Body 1." },
+            { id: "p3", title: "Late policy", body: "Body 4." },
           ],
         },
       });

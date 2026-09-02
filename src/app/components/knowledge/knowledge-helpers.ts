@@ -548,11 +548,16 @@ export function describeKnowledgeContextLabel(totalSelected: number, includedPag
 // startGradingWithSelection).
 // ---------------------------------------------------------------------------
 
-/** A selected page's identity, as already held client-side by KnowledgeTab.tsx
- *  before any launch (no fetch needed - see that file's own comment on why). */
+/** A selected page's identity AND body, as already held client-side by
+ *  KnowledgeTab.tsx before any launch (no fetch needed - see that file's own
+ *  comment on why). `body` (docs/knowledge-recording-handoff-acceptance-
+ *  criteria.md section 4a) rides along so a recording-side removal control
+ *  (CarriedKnowledgePages.tsx) can recompute buildKnowledgeContextBlock over
+ *  whatever pages remain after a removal, client-side, with no fetch. */
 export interface SelectedContextPage {
   id: string;
   title: string;
+  body: string;
 }
 
 /**
@@ -586,7 +591,7 @@ export function includedContextPages(
   const result: SelectedContextPage[] = [];
   for (let i = 0; i < selectedPages.length; i++) {
     if (pageResults[i].included) {
-      result.push({ id: selectedPages[i].id, title: selectedPages[i].title });
+      result.push({ id: selectedPages[i].id, title: selectedPages[i].title, body: selectedPages[i].body });
     }
   }
   return result;

@@ -76,21 +76,28 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
  * this field entirely rather than pass `text: ""` (mirrors
  * OpenChatSelectionContext's own contract in open-chat.ts).
  *
- * `pages`: which Knowledge Base pages `text` was built from - added so a
- * later feature can SHOW the carried pages (a list, a picker, a back-to-
- * Knowledge link) rather than only the generic `label` summary sentence.
- * Optional and purely ADVISORY, same relationship `label` already has to
- * `text`: nothing here validates it against `text`, and a consumer that
- * cannot render it (or gets none) must fall back to `label`, never treat a
- * missing/empty `pages` as an error. NOT populated by this pass - the launch
- * sites that would fill it in (KnowledgeTab.tsx's "Start recording" and
- * "Grade via recording" bulk-bar actions) are a sibling's file for this
- * task; this field only makes room for that follow-up so it does not need a
- * second change to this shared type. */
+ * `pages`: which Knowledge Base pages `text` was built from - lets a
+ * consumer SHOW the carried pages (a list, a picker, a back-to-Knowledge
+ * link) rather than only the generic `label` summary sentence. Optional and
+ * purely ADVISORY, same relationship `label` already has to `text`: nothing
+ * here validates it against `text`, and a consumer that cannot render it (or
+ * gets none) must fall back to `label`, never treat a missing/empty `pages`
+ * as an error.
+ *
+ * `body` (docs/knowledge-recording-handoff-acceptance-criteria.md section
+ * 4a): each page's full body, not just its identity - added so a removal
+ * control (CarriedKnowledgePages.tsx) can recompute `text` client-side over
+ * whatever pages remain after an instructor removes one, via the same
+ * buildKnowledgeContextBlock renderer the launch site used, with no fetch
+ * and no server action. Costs nothing extra to populate: KnowledgeTab.tsx
+ * already holds every selected page's full body before it ever builds
+ * `text` in the first place (see that file's own comment on why). Still
+ * advisory like `id`/`title` - a consumer with no use for bodies (today:
+ * only the removal control reads it) simply never looks at the field. */
 export interface RecordingKnowledgeContext {
   text: string;
   label?: string;
-  pages?: { id: string; title: string }[];
+  pages?: { id: string; title: string; body: string }[];
 }
 
 export interface RecordingLaunch {
@@ -161,18 +168,27 @@ function isValidView(v: unknown): v is RecordingLaunchView {
   return typeof v === "string" && (RECORDING_LAUNCH_VIEWS as readonly string[]).includes(v);
 }
 
-/** Defensive parse of a candidate `pages` entry: both `id` and `title` must
+/** Defensive parse of a candidate `pages` entry: `id` and `title` must both
  * be non-blank strings, or the WHOLE entry is dropped (unlike
  * sanitizeCapturePrefill's independent per-field degradation - a page with a
  * title but no id, or vice versa, is not a usable page reference at all, so
- * there is no "degrade the optional part" available here; the entry itself
- * is the atomic unit). */
-function sanitizePage(raw: unknown): { id: string; title: string } | undefined {
+ * there is no "degrade the optional part" available for those two; the
+ * entry itself is the atomic unit for them).
+ *
+ * `body` is different: it degrades on its own, same rule `label` gets on
+ * the parent object - a non-string/missing `body` falls back to `""` rather
+ * than dropping the whole entry, since `id`/`title` alone are still a usable
+ * page REFERENCE (a display list, a "back to Knowledge" target) even when
+ * there is nothing to recompute a context from. A malformed `body` on an
+ * otherwise-valid entry therefore only costs that page its removal-recompute
+ * capability, never its place in the list. */
+function sanitizePage(raw: unknown): { id: string; title: string; body: string } | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const r = raw as Record<string, unknown>;
   if (typeof r.id !== "string" || r.id.trim().length === 0) return undefined;
   if (typeof r.title !== "string" || r.title.trim().length === 0) return undefined;
-  return { id: r.id, title: r.title };
+  const body = typeof r.body === "string" ? r.body : "";
+  return { id: r.id, title: r.title, body };
 }
 
 /** Defensive parse of a candidate `pages` array: not an array at all, or an
@@ -185,7 +201,9 @@ function sanitizePage(raw: unknown): { id: string; title: string } | undefined {
  * whole field. */
 function sanitizePages(raw: unknown): RecordingKnowledgeContext["pages"] {
   if (!Array.isArray(raw)) return undefined;
-  const pages = raw.map(sanitizePage).filter((p): p is { id: string; title: string } => p !== undefined);
+  const pages = raw
+    .map(sanitizePage)
+    .filter((p): p is { id: string; title: string; body: string } => p !== undefined);
   return pages.length > 0 ? pages : undefined;
 }
 

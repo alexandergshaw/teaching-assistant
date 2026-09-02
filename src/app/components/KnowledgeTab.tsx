@@ -406,7 +406,7 @@ export default function KnowledgeTab({
     // block.includedPages/omittedPages alone - see that function's own doc
     // for why (inclusion is not a prefix).
     const contextPages = includedContextPages(
-      selectedPages.map((p) => ({ id: p.id, title: p.title })),
+      selectedPages.map((p) => ({ id: p.id, title: p.title, body: p.body })),
       block.pageResults
     );
     openRecordingTool({
@@ -458,7 +458,7 @@ export default function KnowledgeTab({
     // writes feedback a student reads), so naming a page the model never
     // actually read here is the worse of the two instances of the same risk.
     const contextPages = includedContextPages(
-      selectedPages.map((p) => ({ id: p.id, title: p.title })),
+      selectedPages.map((p) => ({ id: p.id, title: p.title, body: p.body })),
       block.pageResults
     );
     openRecordingTool({

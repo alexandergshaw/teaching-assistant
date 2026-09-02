@@ -1,45 +1,20 @@
-// Pure formatting for the Knowledge Base context notice a "Grade via
-// recording" launch may carry (AC2 of docs/knowledge-recording-handoff-
-// acceptance-criteria.md) - GradingRecordingPanel.tsx owns the actual
-// rendering; this module only turns the carried `pages` array into a
-// capped, legible line, so a long selection never blows out the panel.
+// Pure helpers for the Knowledge Base context a "Grade via recording" launch
+// may carry (docs/knowledge-recording-handoff-acceptance-criteria.md).
 //
-// AC1's own rule ("never name a page the model did not read") is already
-// enforced upstream, at the launch site - KnowledgeTab.tsx's
-// includedContextPages (knowledge-helpers.ts) filters RecordingKnowledgeContext.pages
-// down to only the pages the budget actually included BEFORE the launch
-// ever fires. This module has no way to re-check that (it never sees
-// pageResults, only the already-filtered `pages` array recording-launch.ts's
-// sanitizer hands back), so it must never be handed anything else - it just
-// trusts, and formats, whatever the launch site already made honest.
+// This module once also held formatContextPagesList, which rendered the
+// carried pages as a capped, comma-joined line. CarriedKnowledgePages.tsx
+// replaced that static line with an interactive, removable list on the same
+// day it was written, leaving the formatter exported and covered by eight
+// tests but called by nothing. A tested export with no consumer reads as
+// maintained code, which is the same false signal that once left a live
+// control rendering unstyled while its CSS sat in the stylesheet looking
+// current - so it was deleted rather than kept "in case". Its behaviour lives
+// on inside CarriedKnowledgePages.tsx, which is where the capping decision
+// now belongs.
 
 export interface KnowledgeContextPageRef {
   id: string;
   title: string;
-}
-
-/** How many page titles to show before folding the rest into "+N more" -
- *  matches knowledge-helpers.ts's describeSelectedPages default (8), give or
- *  take: this surface is a passive notice, not a bulk-selection editor, so a
- *  slightly tighter cap keeps the panel calm even for a large selection. */
-export const MAX_SHOWN_CONTEXT_PAGES = 5;
-
-/**
- * Render up to `maxShown` page titles as a comma-joined line, folding
- * anything beyond that into a stated "+N more" - never a silent cutoff, and
- * never nothing at all when there IS something to show. Returns "" for an
- * empty/undefined list, so the caller can skip rendering entirely rather
- * than showing an empty line (AC2: "carrying nothing renders nothing").
- */
-export function formatContextPagesList(
-  pages: KnowledgeContextPageRef[] | undefined,
-  maxShown: number = MAX_SHOWN_CONTEXT_PAGES
-): string {
-  if (!pages || pages.length === 0) return "";
-  const titles = pages.map((p) => p.title.trim() || "Untitled page");
-  const shown = titles.slice(0, maxShown);
-  const overflow = titles.length - shown.length;
-  return overflow > 0 ? `${shown.join(", ")} +${overflow} more` : shown.join(", ");
 }
 
 /**

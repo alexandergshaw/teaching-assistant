@@ -151,6 +151,10 @@ import { useDiscussionCourses } from "./useDiscussionCourses";
 // the ref mirror, the reload-visibility notice) - see that file's own
 // header for why the one-shot TAKE itself stays in this file's `start()`.
 import { useDiscussionKnowledgeContext } from "./useDiscussionKnowledgeContext";
+// AC3 (docs/knowledge-recording-handoff-acceptance-criteria.md section 4):
+// only a type import - the widened return now exposes the full context, not
+// just its label, for CarriedKnowledgePages.tsx to render/edit.
+import type { RecordingKnowledgeContext } from "@/lib/recording-launch";
 // The wake-ticker mechanism, split into two hooks - see
 // useDiscussionLoopWake.ts's own header for why creating the latches/
 // resolvers (this one) and starting/pausing the actual ticker
@@ -276,10 +280,55 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   // useDiscussionKnowledgeContext.ts's own header for the full account,
   // including why the one-shot TAKE stays in `start()` below rather than
   // moving into that hook. ---
-  const { setKnowledgeContext, knowledgeContextRef, knowledgeContextLabel } = useDiscussionKnowledgeContext({
+  const {
+    knowledgeContext,
+    setKnowledgeContext: setKnowledgeContextState,
+    knowledgeContextRef,
+    knowledgeContextLabel,
+  } = useDiscussionKnowledgeContext({
     rawRowsLength: rowsApi.rawRows.length,
     pushNotice,
   });
+
+  // AC3/4d (docs/knowledge-recording-handoff-acceptance-criteria.md section
+  // 4): whether the persisted "ta-rec-disc-kb-context-label" key has ever
+  // been written for THIS table's life - i.e. whether `start()` below has
+  // run at least once with a context actually held. `setKnowledgeContext`
+  // just below only rewrites that key when this is true: an edit made
+  // BEFORE the first Start must not leave a label behind for a session that
+  // has not captured anything yet - the identical correctness reason
+  // start()'s own write is gated on `knowledgeContextRef.current` rather
+  // than firing at launch/take time (see start()'s own comment). Reset to
+  // false by clearTable() below, alongside that function's own reset of the
+  // persisted key itself - a fresh table's life has no label to rewrite yet.
+  const hasWrittenKbLabelRef = useRef(false);
+
+  // THE CORRECTNESS TRAP (this feature's own highest-value fix): the draft
+  // loop reads `knowledgeContextRef` fresh per BATCH DISPATCH (runDraftLoop,
+  // discussion-draft-loop.ts), so an edit made mid-run - via
+  // CarriedKnowledgePages.tsx's removal/undo control - takes effect on the
+  // very next batch. But the persisted label was, before this fix, only ever
+  // written once, inside `start()`. Left alone, a removal would silently
+  // change what later batches actually draft with while the label an
+  // instructor returns to (after a reload, via the reload-visibility notice)
+  // kept describing the ORIGINAL, pre-edit selection - lying about the exact
+  // thing that label exists to answer. This wrapper is the single write path
+  // CarriedKnowledgePages.tsx's `onChange` reaches (via the widened
+  // UseDiscussionRepliesReturn.setKnowledgeContext below), so every edit
+  // rewrites the label the same way `start()` already does, gated on the ref
+  // above.
+  const setKnowledgeContext = useCallback(
+    (next: RecordingKnowledgeContext | null) => {
+      setKnowledgeContextState(next);
+      if (hasWrittenKbLabelRef.current) {
+        writeLocalStorage(
+          "ta-rec-disc-kb-context-label",
+          next ? knowledgeContextLabelFor(next) ?? "Knowledge Base pages" : ""
+        );
+      }
+    },
+    [setKnowledgeContextState]
+  );
 
   // --- The wake-ticker mechanism's latches/resolvers - see
   // useDiscussionLoopWake.ts's own header for the full account. ---
@@ -510,6 +559,10 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
         "ta-rec-disc-kb-context-label",
         knowledgeContextLabelFor(knowledgeContextRef.current) ?? "Knowledge Base pages"
       );
+      // AC3/4d: from this point on, an edit (CarriedKnowledgePages.tsx's
+      // removal/undo, via the wrapped setKnowledgeContext above) must
+      // rewrite this same key - see that wrapper's own comment.
+      hasWrittenKbLabelRef.current = true;
     }
     try {
       await captureRef.current.start({ saveVideo: saveVideoRef.current });
@@ -650,10 +703,17 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // "Activate this recording from the Knowledge base": deleting the table
     // ends that table's "life" (useDiscussionKnowledgeContext.ts's own
     // header) - a brand new table started after this must not silently
-    // inherit a stale context from the one just deleted.
-    setKnowledgeContext(null);
+    // inherit a stale context from the one just deleted. Calls the RAW
+    // setter (setKnowledgeContextState), not the wrapped setKnowledgeContext
+    // above - this line already writes the persisted label itself, so
+    // routing through the wrapper too would just write the same "" twice.
+    // AC3/4d: hasWrittenKbLabelRef resets alongside it - a brand new table's
+    // life has no label to rewrite yet, exactly like a table that never had
+    // Start clicked at all.
+    setKnowledgeContextState(null);
     writeLocalStorage("ta-rec-disc-kb-context-label", "");
-  }, [setKnowledgeContext]);
+    hasWrittenKbLabelRef.current = false;
+  }, [setKnowledgeContextState]);
 
   // --- docs/DEV_LOOP.md's downloadable-log rule: assembly is entirely
   // useDiscussionRepliesRunLog.ts's own memo - this file only gathers the
@@ -699,6 +759,8 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     setVideoLengthPreference,
 
     knowledgeContextLabel,
+    knowledgeContext,
+    setKnowledgeContext,
 
     capturing: capture.capturing,
     elapsedSec: capture.elapsedSec,

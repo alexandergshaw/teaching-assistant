@@ -393,3 +393,76 @@ describe("DiscussionRepliesPanel.tsx renders the carried-context line only when 
     expect(src).toMatch(/\{knowledgeContextLabel\s*&&\s*\(/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC3/4d (docs/knowledge-recording-handoff-acceptance-criteria.md section
+// 4d - "THE CORRECTNESS TRAP"): the draft loop reads knowledgeContextRef
+// fresh per BATCH DISPATCH, so a page removed/restored mid-run
+// (CarriedKnowledgePages.tsx) takes effect on the very next batch - but the
+// persisted "ta-rec-disc-kb-context-label" key used to be written only once,
+// inside start(). Left alone, a removal would change what later batches
+// actually draft with while the label a returning instructor sees (via the
+// reload-visibility notice) kept describing the ORIGINAL, pre-edit
+// selection. Source-text guards, same class as the take-location guards
+// above, since a hook's runtime behaviour is not reachable from this repo's
+// node-env vitest (no component/hook is ever rendered).
+// ---------------------------------------------------------------------------
+
+describe("AC3/4d: the persisted label is rewritten on every knowledgeContext edit, not only at start()", () => {
+  const readSource = (relPath: string): string => fs.readFileSync(path.resolve(process.cwd(), relPath), "utf-8");
+  const REPLIES_PATH = "src/app/components/recording/useDiscussionReplies.ts";
+  const START_BODY_PATTERN = /const start = useCallback\(async \(\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/;
+
+  function startBody(src: string): string {
+    const match = src.match(START_BODY_PATTERN);
+    expect(match, "expected to find start()'s own useCallback body").toBeTruthy();
+    return match![1];
+  }
+
+  it("defines a setKnowledgeContext wrapper, distinct from start(), whose body rewrites the persisted label gated on hasWrittenKbLabelRef.current", () => {
+    const src = readSource(REPLIES_PATH);
+    const match = src.match(/const setKnowledgeContext = useCallback\(\s*\(next: RecordingKnowledgeContext \| null\) => \{([\s\S]*?)\n {4}\},/);
+    expect(match, "expected to find the setKnowledgeContext wrapper").toBeTruthy();
+    const body = match![1];
+    expect(body).toMatch(/if \(hasWrittenKbLabelRef\.current\)/);
+    expect(body).toMatch(/writeLocalStorage\(\s*\n?\s*"ta-rec-disc-kb-context-label"/);
+    // Not inside start()'s own body - a second, independent write site.
+    expect(startBody(src)).not.toMatch(/setKnowledgeContextState|hasWrittenKbLabelRef\.current = false/);
+  });
+
+  it("start() sets hasWrittenKbLabelRef.current = true only inside the same guard as its own label write", () => {
+    const body = startBody(readSource(REPLIES_PATH));
+    const guardMatch = body.match(/if \(knowledgeContextRef\.current\) \{([\s\S]*?)\n {4}\}/);
+    expect(guardMatch, "expected to find start()'s knowledgeContextRef.current guard").toBeTruthy();
+    expect(guardMatch![1]).toMatch(/writeLocalStorage/);
+    expect(guardMatch![1]).toMatch(/hasWrittenKbLabelRef\.current = true/);
+  });
+
+  it("clearTable() resets hasWrittenKbLabelRef.current = false alongside clearing the persisted label - a fresh table's life has no label to rewrite yet", () => {
+    const src = readSource(REPLIES_PATH);
+    const match = src.match(/const clearTable = useCallback\(\(\) => \{([\s\S]*?)\n {2}\}, \[[^\]]*\]\);/);
+    expect(match, "expected to find clearTable's own useCallback body").toBeTruthy();
+    expect(match![1]).toMatch(/writeLocalStorage\(\s*"ta-rec-disc-kb-context-label",\s*""\s*\)/);
+    expect(match![1]).toMatch(/hasWrittenKbLabelRef\.current = false/);
+  });
+
+  it("the hook returns the WRAPPED setKnowledgeContext (the label-aware one), not the raw sub-hook setter, so CarriedKnowledgePages.tsx's edits actually reach the rewrite", () => {
+    const src = readSource(REPLIES_PATH);
+    expect(src).toMatch(/\n {4}knowledgeContext,\n {4}setKnowledgeContext,\n/);
+  });
+
+  it("SABOTAGE CHECK: fails if the label-rewrite gate is removed from setKnowledgeContext (always rewriting, even before the first Start)", () => {
+    // Verified by sabotage: temporarily removed the
+    // `if (hasWrittenKbLabelRef.current)` guard from the setKnowledgeContext
+    // wrapper (leaving the writeLocalStorage call unconditional), ran
+    // `npx vitest run discussion-knowledge-context.test.ts` - the "defines a
+    // setKnowledgeContext wrapper... gated on hasWrittenKbLabelRef.current"
+    // test above went RED while every take-location/label-in-start() test
+    // above (which don't inspect this wrapper at all) stayed green. Reverted,
+    // re-ran green. See this task's own report for the confirmation.
+    const src = readSource(REPLIES_PATH);
+    const match = src.match(/const setKnowledgeContext = useCallback\(\s*\(next: RecordingKnowledgeContext \| null\) => \{([\s\S]*?)\n {4}\},/);
+    expect(match).toBeTruthy();
+    expect(match![1]).toMatch(/if \(hasWrittenKbLabelRef\.current\)/);
+  });
+});

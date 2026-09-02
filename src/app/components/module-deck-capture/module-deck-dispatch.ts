@@ -25,38 +25,19 @@ import { resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
 // 1. AM-G: a monotone dropped-frames accumulator across Start/Stop cycles.
 // ---------------------------------------------------------------------------
 
-/**
- * `useDiscussionCapture.start()` zeroes its own `droppedFrames` counter on
- * every capture start (recording/useDiscussionCapture.ts:404-405: `
- * droppedFramesRef.current = 0; setDroppedFrames(droppedFramesRef.current);`).
- * That means a session made of two or more Start/Stop cycles cannot read a
- * monotone session total straight off the hook's live value - each new cycle
- * silently starts counting from zero again.
- *
- * The SHIPPED grading panel gets this wrong today:
- * `grading-recording/GradingRecordingPanel.tsx:464` builds its downloadable
- * run log from the hook's live `droppedFrames` value at download time, so a
- * grading-recording session with two Start/Stop cycles under-reports every
- * frame the FIRST cycle dropped - the log only ever reflects whichever cycle
- * is most recent. That defect is real, pre-existing, and out of scope for
- * this feature (AM-G explicitly defers fixing it to a follow-up); it is
- * recorded here as the reason this module owns its own accumulator rather
- * than reusing the grading panel's pattern.
- *
- * Call once per observation of the hook's live counter, threading the result
- * back in as `runningTotal` on the next call:
- *
- *   sessionTotal = accumulateDroppedFrames(prevLive, nextLive, sessionTotal)
- *
- * A DECREASE (`nextLive < prevLive`) is the only signal that a new capture
- * session started (the hook reset its own counter to 0 in `start()`); the
- * new session's live count is added on top of the running total as-is.
- * Anything else - including no change at all - is a delta on the CURRENT
- * session and is added on top of the running total, never used to replace it.
- */
-export function accumulateDroppedFrames(prevLive: number, nextLive: number, runningTotal: number): number {
-  return nextLive < prevLive ? runningTotal + nextLive : runningTotal + (nextLive - prevLive);
-}
+// This used to be its own copy of the fold, written independently of (and
+// identically to) the one recording/discussion-capture.ts added for
+// REGRESSION 383. Two features guarding the exact same
+// `useDiscussionCapture.start()` reset behaviour is exactly the "tested copy
+// nothing runs" shape this repo's REGRESSION log warns about, so the
+// implementation and its frozen-literal oracle now live in one place -
+// `@/lib/dropped-frame-accumulator` (dependency-free, so it is safe to import
+// from either feature's client bundle) - and both feature files re-export it
+// rather than restate it, so neither existing importer's path changes. See
+// that module's own header for the full account, including the SHIPPED
+// grading-panel defect (`grading-recording/GradingRecordingPanel.tsx`) this
+// fold exists to prevent.
+export { accumulateDroppedFrames } from "@/lib/dropped-frame-accumulator";
 
 // ---------------------------------------------------------------------------
 // 2. AC10: the distinct, fix-naming refusals that gate a deck generation call.

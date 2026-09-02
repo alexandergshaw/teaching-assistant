@@ -197,46 +197,19 @@ export function packFrameBatch<T extends { base64: string }>(frames: ReadonlyArr
 }
 
 // ---------------------------------------------------------------------------
-// REGRESSION 383's Limits, verified real: a monotone dropped-frames
-// accumulator across Start/Stop cycles.
-//
-// useDiscussionCapture.ts's `start()` zeroes its own `droppedFrames` counter
-// on every capture start (see that file's `droppedFramesRef.current = 0;
-// setDroppedFrames(droppedFramesRef.current);`), while `teardown()`
-// deliberately leaves it untouched ("the session summary reads it after
-// stop"). That is correct for a SINGLE Start/Stop cycle, but a downstream
-// consumer that reads the hook's live `droppedFrames` straight into a
-// downloadable run log or a post-stop notice - built from a `logStartedAt`
-// that spans the WHOLE page-load session, not just the latest cycle, exactly
-// like `logFramesCaptured`'s own running total - under-reports every cycle
-// before the most recent one: a second Start silently zeroes out whatever
-// the first cycle had already dropped, and the log only ever reflects
-// whichever cycle is most recent. Confirmed shipped, unfixed, in both
-// GradingRecordingPanel.tsx (grading-via-recording) and
-// useDiscussionReplies.ts (discussion reply capture) - each now folds the
-// hook's live value through this function instead of reading it directly.
-//
-// A dropped frame is screen content the model never saw - under-counting it
-// tells an instructor their capture was cleaner than it actually was, so the
-// number this function produces is deliberately "drops across the whole run
-// log's session" (what the log exists to report), not "drops since the hook
-// last mounted" and not "drops in the most recent cycle alone".
-//
-// Call once per observation of the hook's live counter, threading the result
-// back in as `runningTotal` on the next call:
-//
-//   sessionTotal = accumulateDroppedFrames(prevLive, nextLive, sessionTotal)
-//
-// A DECREASE (`nextLive < prevLive`) is the only signal that a new capture
-// cycle started (the hook reset its own counter to 0 in `start()`); the new
-// cycle's live count is added on top of the running total as-is. Anything
-// else - including no change at all - is a delta on the CURRENT cycle and is
-// added on top of the running total, never used to replace it.
+// REGRESSION 383's Limits: a monotone dropped-frames accumulator across
+// Start/Stop cycles. Re-exported from `@/lib/dropped-frame-accumulator`
+// rather than implemented here - module-deck-capture's own panel (AM-G)
+// guards the exact same `useDiscussionCapture.start()` reset behaviour and
+// had grown an independent, identical copy of this fold; the implementation
+// and its frozen-literal oracle now live in that one dependency-free shared
+// home, and this file re-exports it so neither existing importer
+// (GradingRecordingPanel.tsx, useDiscussionReplies.ts) has to change its
+// import path. See that module's own header for the full account, including
+// the SHIPPED GradingRecordingPanel.tsx defect this fold exists to prevent.
 // ---------------------------------------------------------------------------
 
-export function accumulateDroppedFrames(prevLive: number, nextLive: number, runningTotal: number): number {
-  return nextLive < prevLive ? runningTotal + nextLive : runningTotal + (nextLive - prevLive);
-}
+export { accumulateDroppedFrames } from "@/lib/dropped-frame-accumulator";
 
 // ---------------------------------------------------------------------------
 // AC11 / AC11a / AC11b: identity by comparison, not by a derived key.

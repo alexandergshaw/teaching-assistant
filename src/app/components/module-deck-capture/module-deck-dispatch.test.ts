@@ -8,16 +8,15 @@ import {
   TWENTY_MINUTES_MS,
 } from "./module-deck-dispatch";
 
-describe("accumulateDroppedFrames", () => {
-  it("adds a same-session delta on top of the running total", () => {
-    // Live counter climbs 0 -> 3 -> 7 within one session; total tracks it 1:1.
-    let total = 0;
-    total = accumulateDroppedFrames(0, 3, total);
-    expect(total).toBe(3);
-    total = accumulateDroppedFrames(3, 7, total);
-    expect(total).toBe(7);
-  });
-
+// accumulateDroppedFrames's full frozen-literal oracle now lives in
+// src/lib/dropped-frame-accumulator.test.ts - the implementation moved there
+// (see module-deck-dispatch.ts's own header) because recording/
+// discussion-capture.ts had grown an independent, identical copy of the same
+// fold. Kept here: one AM-G-specific regression scenario, re-exercised
+// through THIS module's own re-export, so a break in the re-export path
+// itself (not just the shared implementation) still fails a test in this
+// file rather than only in the shared lib's.
+describe("accumulateDroppedFrames (re-exported from @/lib/dropped-frame-accumulator)", () => {
   it("preserves the first session's drops across a Start/Stop restart (AM-G)", () => {
     // This is the exact case the shipped GradingRecordingPanel gets wrong:
     // session 1 drops 5, then Start() resets the hook's live counter to 0,
@@ -31,22 +30,6 @@ describe("accumulateDroppedFrames", () => {
     expect(total).toBe(5); // nothing lost across the reset
     total = accumulateDroppedFrames(0, 2, total); // session 2 climbs to 2
     expect(total).toBe(7); // NOT 2 - the shipped panel's bug this guards against
-  });
-
-  it("handles three or more restarts, each contributing its own live delta", () => {
-    let total = 0;
-    total = accumulateDroppedFrames(0, 4, total); // session 1: 4
-    total = accumulateDroppedFrames(4, 0, total); // restart
-    total = accumulateDroppedFrames(0, 1, total); // session 2: 1
-    total = accumulateDroppedFrames(1, 0, total); // restart
-    total = accumulateDroppedFrames(0, 6, total); // session 3: 6
-    expect(total).toBe(11);
-  });
-
-  it("treats no change as a zero delta, not a new session", () => {
-    let total = 3;
-    total = accumulateDroppedFrames(2, 2, total);
-    expect(total).toBe(3);
   });
 });
 

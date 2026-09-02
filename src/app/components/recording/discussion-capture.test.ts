@@ -378,16 +378,17 @@ describe("draftDispatchForce (S1)", () => {
 // GradingRecordingPanel.tsx and useDiscussionReplies.ts thread the hook's
 // live droppedFrames value through this function instead of reading it
 // directly - see either call site's own comment for the full account.
+//
+// The implementation and its full frozen-literal oracle now live in
+// src/lib/dropped-frame-accumulator.test.ts (see discussion-capture.ts's own
+// header for why: module-deck-capture had grown an independent, identical
+// copy of this same fold). Kept here: the one named regression scenario, and
+// the sabotage-comparison test below, both re-exercised through THIS module's
+// own re-export so a break in the re-export path itself still fails a test
+// in this file rather than only in the shared lib's.
 // ---------------------------------------------------------------------------
 
-describe("accumulateDroppedFrames (REGRESSION 383)", () => {
-  it("sums drops within a single cycle as the live value climbs", () => {
-    let total = 0;
-    total = accumulateDroppedFrames(0, 3, total);
-    total = accumulateDroppedFrames(3, 7, total);
-    expect(total).toBe(7);
-  });
-
+describe("accumulateDroppedFrames (re-exported from @/lib/dropped-frame-accumulator)", () => {
   it("THE regression test: two Start/Stop cycles, with drops in the first, report the TOTAL across both - not just the most recent cycle", () => {
     let total = 0;
     total = accumulateDroppedFrames(0, 6, total); // cycle 1 climbs to 6 live drops
@@ -397,23 +398,6 @@ describe("accumulateDroppedFrames (REGRESSION 383)", () => {
     // 6 drops silently vanished the moment cycle 2 started. The correct
     // session total is 9.
     expect(total).toBe(9);
-  });
-
-  it("handles three cycles, each contributing its own drops", () => {
-    let total = 0;
-    total = accumulateDroppedFrames(0, 4, total); // cycle 1: 4
-    total = accumulateDroppedFrames(4, 0, total); // restart
-    total = accumulateDroppedFrames(0, 1, total); // cycle 2: 1
-    total = accumulateDroppedFrames(1, 0, total); // restart
-    total = accumulateDroppedFrames(0, 6, total); // cycle 3: 6
-    expect(total).toBe(11);
-  });
-
-  it("a repeated observation of the same live value (no new drop) is a no-op", () => {
-    let total = 0;
-    total = accumulateDroppedFrames(0, 5, total);
-    total = accumulateDroppedFrames(5, 5, total);
-    expect(total).toBe(5);
   });
 
   it("SABOTAGE-relevant: reading the live value straight through (no accumulator) reproduces the exact under-report this function exists to prevent", () => {

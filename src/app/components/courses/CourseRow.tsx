@@ -212,17 +212,98 @@ export default function CourseRow({
             menu={cellMenuFor("modality")}
           />
     ),
+    // F5: "From LMS"/"From import" are the same two-button idiom already used
+    // by SyllabusCell/ScheduleCell/FilesCell (this.canLms/canImport/busy),
+    // just rendered through EditableCell's `actions` slot (the same slot the
+    // textbook/description cells already use for their own single action
+    // button) rather than a bespoke cell component - startDate and weeks
+    // have no other custom UI, so a dedicated cell would only duplicate
+    // EditableCell. Both buttons share one busy key per field (`startDate`,
+    // `weeks` - set in useCourseImportActions.ts), identical to how the CSV/
+    // rubric/syllabus cells already share one busy key across their own LMS/
+    // import pair - so both read/disable together exactly like those do.
     startDate: (
   <EditableCell
             kind="date"
             rawValue={course.startDate ?? ""}
             display={course.startDate ? <span className={styles.courseResourceValue}>{new Date(`${course.startDate}T00:00:00`).toLocaleDateString()}</span> : undefined}
             onSave={save("startDate")}
+            actions={
+              (lms || importable) ? (
+                <span className={styles.courseResourceActions}>
+                  {lms && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={busy("startDate")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void imports.handleLmsStartDate(course);
+                      }}
+                    >
+                      {busy("startDate") ? "Loading…" : "From LMS"}
+                    </button>
+                  )}
+                  {importable && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      disabled={busy("startDate")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void imports.handleImportStartDate(course);
+                      }}
+                    >
+                      {busy("startDate") ? "Loading…" : "From import"}
+                    </button>
+                  )}
+                </span>
+              ) : undefined
+            }
             menu={cellMenuFor("startDate")}
           />
     ),
     dayTime: <EditableCell kind="text" rawValue={course.dayTime ?? ""} placeholder="MW 10:00-11:15" onSave={save("dayTime")} menu={cellMenuFor("dayTime")} />,
-    weeks: <EditableCell kind="number" rawValue={course.weeks !== null ? String(course.weeks) : ""} onSave={save("weeks")} menu={cellMenuFor("weeks")} />,
+    weeks: (
+      <EditableCell
+        kind="number"
+        rawValue={course.weeks !== null ? String(course.weeks) : ""}
+        onSave={save("weeks")}
+        actions={
+          (lms || importable) ? (
+            <span className={styles.courseResourceActions}>
+              {lms && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  disabled={busy("weeks")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void imports.handleLmsWeeks(course);
+                  }}
+                >
+                  {busy("weeks") ? "Loading…" : "From LMS"}
+                </button>
+              )}
+              {importable && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  disabled={busy("weeks")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void imports.handleImportWeeks(course);
+                  }}
+                >
+                  {busy("weeks") ? "Loading…" : "From import"}
+                </button>
+              )}
+            </span>
+          ) : undefined
+        }
+        menu={cellMenuFor("weeks")}
+      />
+    ),
     tests: <EditableCell kind="number" rawValue={course.tests !== null ? String(course.tests) : ""} onSave={save("tests")} menu={cellMenuFor("tests")} />,
     lms: (
       <LmsCell

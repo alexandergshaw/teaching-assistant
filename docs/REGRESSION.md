@@ -37844,3 +37844,197 @@ conditional gating); all three were fixed and re-verified.
 - The deck is saved as an artifact version with no in-panel preview. The `.pptx`
   download is gated on the parsed structured slides being non-empty, not on the
   artifact kind.
+## 385. Four LMS capabilities that were built, exported, and wired to nothing
+
+`handleLmsStartDate`, `handleLmsWeeks`, `handleImportStartDate` and
+`handleImportWeeks` were complete - permission checks, busy keys, error
+handling, `onCourseUpdated` - declared on the hook's return type, returned from
+the hook, and called by nothing anywhere in the tree.
+
+Entry 383 had recorded this as an unfinished limit rather than a decision,
+which is what made it safe to close: the distinction between "not built yet"
+and "deliberately not wired" is the only thing standing between closing a gap
+and overriding an owner's choice. The agent checked that before building.
+
+Start date and Weeks rendered as plain `EditableCell`s while every sibling
+resource - syllabus, schedule CSV, rubric - already carried the From-LMS /
+From-import pair. They now use `EditableCell`'s existing `actions` slot, the
+same one already carrying the single-button affordances on textbook and
+description. No new cell component, no new CSS, and `useCourseImportActions.ts`
+itself unchanged: the handlers were always correct, only unreachable.
+
+Both start-date handlers share a busy key, as do both weeks handlers. That is
+the convention every pair in the file already uses, so both buttons disable
+together under one shared loading state rather than either claiming a source.
+
+### Tests
+
+A sabotage caught a real bug in the first test draft: a `[^}]*`-bounded regex
+could not cross the `disabled={...}` attribute's own closing brace, so the
+gating assertion silently checked nothing and stayed green with the gate
+hardcoded to `false`. Rewritten as a fixed-window check and re-verified. This is
+the second time this session a source-text matcher passed by matching nothing.
+
+### Gates
+
+`tsc` 0 errors. `eslint` clean. `vitest` 827 files / 16768 tests. Five sabotage
+checks, each confirmed red with the mutation verified present in the file, then
+restored green.
+
+## 386. The discussions panel took its context at Start, so it could not say what it was carrying
+
+Selecting Knowledge pages and launching the Recording tab left the discussions
+panel silent about what it held until drafting had already begun, because the
+take happened inside `start()`. Grading already did the right thing - it takes
+the context in its live launch listener and renders it before any capture - so
+discussions now matches it, guarded on the launch's own view so neither flow
+can steal the other's.
+
+`DiscussionRepliesPanel.tsx` needed no change at all. Its markup already
+rendered the label gated correctly; only the timing of when that state
+populated was wrong. The fix was entirely upstream of the thing that looked
+broken.
+
+### The guards forbade the fix
+
+Three assertions required the take to sit inside `start()`'s own callback and
+inside no effect at all. They were written to prevent a mount-only read - a
+real bug, since the Recording tab never unmounts and would only ever observe
+the session's first launch - but over-specified into banning the live-listener
+shape grading already used. This is the repo's recorded "source-text tests
+over-specify" failure mode, now recorded a second time.
+
+Replaced with guards that pin behaviour rather than spelling: exactly one take
+across both files with none inside `start()`, a second take returning null
+while a third dispatch still delivers fresh, and a narrowed negative guard
+rejecting a take in an empty-dep effect only when that effect is not a listener
+registration. The original sabotage is still caught.
+
+### The label write deliberately did not move
+
+Moving `ta-rec-disc-kb-context-label` to launch time would let a launch that
+never captured anything write a label, and a later reload with a table restored
+from an earlier session would then claim those replies used context they never
+saw. It stays in `start()`. A dedicated guard and sabotage now pin that.
+
+### Inclusion is not a prefix
+
+`buildKnowledgeContextBlock` reported only counts. Its budget loop uses
+`continue`, not `break`, so a long page is skipped while a later short one is
+kept. Naming carried pages from the launch payload would therefore have printed
+pages the model never read - worse than naming none, because it invites trust
+in grounding that does not exist. It now reports which pages survived, captured
+inside the loop and positional, so duplicate titles cannot collide.
+
+### Gates
+
+`tsc` 0 errors. `eslint` clean. `vitest` 827 files / 16768 tests. Sabotage
+checks throughout, including one that exposed a lazy regex merging two adjacent
+effects into a single false match.
+
+## 387. A bulk bar that covered the rows it acted on, and a handoff that finally names its pages
+
+The knowledge bulk bar rested at roughly 300-400px of absolutely-positioned
+card sitting on top of the page tree - at a normal window it covered almost
+every row it was meant to act on. The owner's words: "i can hardly see the
+options for pages because it covers almost all of them."
+
+That overlay was not a mistake. It was a deliberate fix for a real bug - ticking
+the first checkbox used to jump every row under the cursor - and the trade was
+recorded in a code comment at the time. Which means the fix had to keep that
+property rather than trade it back.
+
+It does, structurally. The bar now rests as one control-height row in normal
+flow, with the named selection list, both recording actions, the model-context
+disclosure and delete behind an overflow menu reusing the existing MUI-menu
+idiom. The slot reserves its height whether or not anything is selected, so the
+first tick inserts no new flow height, and the one variable-width element
+truncates rather than wrapping. Neither invariant depends on a browser
+heuristic.
+
+### The destination now names what it carries
+
+Recording destinations list the Knowledge pages a run is carrying, before the
+run. A page the budget dropped is **absent** from that list rather than shown,
+because the carried type has no included flag and absence is the only honest
+representation available. Ids are zipped positionally against the budget's own
+per-page results, never derived from titles or from the included/omitted counts.
+
+### The mount assumption was backwards
+
+The brief for this work asserted that `KnowledgeTab` stays mounted for the
+session. It does not - `page.tsx` renders it as `{activeTab === "knowledge" &&
+...}`, so it fully unmounts on every tab switch, unlike `RecordingTab`. A
+listener registered inside it could never observe an event dispatched from
+another tab.
+
+So the split is the inverse of the recording launch's: the bare event reaches
+`page.tsx`'s permanent listener - the sole owner of `setActiveTab` - and the
+target page id rides a one-shot slot that `KnowledgeTab` drains on mount once
+its pages have loaded. Tree expansion and bulk selection already survived this
+round trip via an existing session cache built for exactly this scenario; that
+was verified rather than rebuilt.
+
+This forced an edit to `page.tsx`, outside the assigned file set. The agent made
+the change and disclosed it rather than either skipping it or doing it quietly -
+without it the feature ships dead, which is the recorded "assignment must
+include the wiring file" failure mode.
+
+### Gates
+
+`tsc` 0 errors. `eslint` clean. `vitest` **829 files / 16794 tests**, run
+directly rather than taken on report. Sabotage checks throughout, including one
+that went redder than expected and exposed module-singleton state leaking
+between assertions.
+
+## 388. A page list that does not drag every body with it
+
+Every read in the knowledge data layer was `select("*")`, so listing an
+institution's pages meant pulling all of them with full bodies, and
+`getInstitutionPage` had no server action wrapping it at all. Fine for the
+Knowledge tab, which wants the bodies; useless for a picker elsewhere that only
+needs to render a tree.
+
+Adds `listInstitutionPageSummaries` - a narrowed select of id, parent_id, title
+and position, which is exactly what `buildPageTree` consumes and no more - and
+`getInstitutionPagesByIds`, a batch fetch for the pages actually chosen. Batch
+rather than single because a multi-select can name several at once and a single
+add is a one-element array. Missing or foreign ids are absent from the result
+rather than an error, matching the existing attachments-batch convention.
+
+The narrowed select hits the known trap where a partial Supabase row collapses
+to `never`. This reuses the workaround already established in two other files -
+cast at `.from()`, restore the real type through an explicit mapper - rather
+than inventing a third shape.
+
+`next build` compiles clean, which is the only gate that catches an illegal type
+re-export from a `"use server"` file.
+
+### Gates
+
+`tsc` 0 errors. `eslint` clean. `vitest` **829 files / 16814 tests** run
+directly. `next build` compile line clean. Three sabotage checks - leaking body
+through the mapper, dropping owner scoping, removing the empty-ids
+short-circuit - each confirmed red with the mutation verified present, then
+restored green.
+
+### Limits carried forward
+
+- `buildPageTree` is deliberately not genericized to accept the summary shape,
+  to keep the blast radius out of `useKbPageTree.ts`. A picker must either build
+  its own small tree or ask for that generalization later.
+- **Removing a carried page from the recording side is not the cheap half it
+  appeared to be.** The carried text is an already-flattened prompt string and
+  the carried pages have no body, so a remove control on today's shape could
+  only hide a title while the model still read the page. It becomes cheap only
+  once the body rides along, which costs no fetch because it is already resident
+  at the launch site.
+- **Adding a page from the recording side still needs institution scope wired
+  into the Recording tree.** `RecordingTab`'s `active` prop is a visibility
+  boolean unrelated to institution, and no institution value reaches it or
+  either destination panel. Built without that, a picker shows the wrong
+  institution's pages or none.
+- The persisted `ta-rec-disc-kb-context-label` is written only in `start()`,
+  while the draft loop re-reads context per batch. The moment a picker can
+  change the selection mid-run, that label lies unless it is rewritten on every
+  change.

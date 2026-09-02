@@ -50,6 +50,19 @@ export interface KnowledgeContextBlockResult {
   omittedPages: number;
   includedAttachments: number;
   omittedAttachments: number;
+  /** Per-page identity, in the same order as `args.pages`, captured INSIDE
+   * the budget loop rather than reconstructed afterward from the counts
+   * above. This is required because the budget loop uses `continue`, not
+   * `break` (see this function's own doc): a large page can be skipped
+   * while a later, smaller page is still included, so "the first N pages
+   * made it" is false and `includedPages`/`omittedPages` alone cannot say
+   * WHICH pages survived. A consumer that needs to say "these are the
+   * pages this run is carrying" must use this field, never derive it from
+   * the counts - doing so would name a page the model never actually read,
+   * which is worse than naming none. Duplicate titles are preserved
+   * positionally (one entry per input page, not de-duplicated or keyed by
+   * title), so duplicates never collide or overwrite one another. */
+  pageResults: { title: string; included: boolean }[];
 }
 
 /**
@@ -166,7 +179,14 @@ export function buildKnowledgeContextBlock(
   ];
 
   if (chunks.length === 0) {
-    return { text: "", includedPages: 0, omittedPages: 0, includedAttachments: 0, omittedAttachments: 0 };
+    return {
+      text: "",
+      includedPages: 0,
+      omittedPages: 0,
+      includedAttachments: 0,
+      omittedAttachments: 0,
+      pageResults: [],
+    };
   }
 
   const full = [FRAMING_HEADER, ...chunks.map((c) => c.text)].join(SEP);
@@ -177,6 +197,7 @@ export function buildKnowledgeContextBlock(
       omittedPages: 0,
       includedAttachments: args.attachments.length,
       omittedAttachments: 0,
+      pageResults: args.pages.map((page) => ({ title: page.title, included: true })),
     };
   }
 
@@ -190,10 +211,21 @@ export function buildKnowledgeContextBlock(
   const included: string[] = [FRAMING_HEADER];
   let includedPages = 0;
   let includedAttachments = 0;
+  // Captured INSIDE this loop, in input order - never reconstructed
+  // afterward from the counts. The loop below uses `continue`, not `break`,
+  // so a page's included/omitted fate must be recorded at the moment it is
+  // decided; there is no way to recover it later from includedPages alone.
+  let pageIndex = 0;
+  const pageResults: { title: string; included: boolean }[] = [];
 
   for (const chunk of chunks) {
     const cost = chunk.text.length + SEP.length;
-    if (used + cost > budget) continue; // page/attachment boundary, never mid-sentence
+    const fits = used + cost <= budget; // page/attachment boundary, never mid-sentence
+    if (chunk.kind === "page") {
+      pageResults.push({ title: args.pages[pageIndex].title, included: fits });
+      pageIndex += 1;
+    }
+    if (!fits) continue;
     included.push(chunk.text);
     used += cost;
     if (chunk.kind === "page") includedPages += 1;
@@ -210,5 +242,5 @@ export function buildKnowledgeContextBlock(
   // the contract is "never", not "usually".
   if (text.length > maxChars) text = text.slice(0, maxChars);
 
-  return { text, includedPages, omittedPages, includedAttachments, omittedAttachments };
+  return { text, includedPages, omittedPages, includedAttachments, omittedAttachments, pageResults };
 }

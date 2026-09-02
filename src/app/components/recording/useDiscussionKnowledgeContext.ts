@@ -8,22 +8,41 @@
 // src/app/components/recording/ (non-recursive) - see that file's own
 // header for the full account of what stayed and why.
 //
-// This hook owns only the STATE and its reload-visibility notice, never the
-// one-shot TAKE itself: takeRecordingKnowledgeContext() (src/lib/recording-
-// launch.ts) is called exactly once per run, inside useDiscussionReplies.ts's
-// own `start()` - discussion-knowledge-context.test.ts's source guard scans
-// useDiscussionReplies.ts's literal text for that exact call and for
-// `resolveStartKnowledgeContext(knowledgeContextRef.current, taken)`, so
-// `start()` (and those two lines specifically) MUST stay in that file. This
-// hook exposes `setKnowledgeContext` and `knowledgeContextRef` precisely so
-// `start()` can keep making that call and writing the result here.
+// STRUCTURAL FIX (owner ask: show the carried Knowledge Base context BEFORE
+// a run, matching GradingRecordingPanel.tsx's own launch-listener shape,
+// :247-259): this hook now owns the one-shot TAKE too, not just the state.
+// Previously the take (takeRecordingKnowledgeContext(), src/lib/recording-
+// launch.ts) happened inside useDiscussionReplies.ts's `start()` - correct
+// per-run semantics, but it meant the label/context could only ever appear
+// AFTER the instructor clicked Start, never before. GradingRecordingPanel
+// already takes its context live, at LAUNCH ARRIVAL, in a
+// `window.addEventListener(RECORDING_LAUNCH_EVENT, ...)` registered once for
+// the component's whole mount lifetime - the effect below is that same
+// shape, guarded on `detail.view === "discussions"` (this feature's one
+// intended consumer) exactly like grading guards on `detail.view ===
+// "grading"`. RecordingTab keeps every inner panel mounted for the whole
+// session (CSS `display:none` toggling, never conditional JSX unmount - see
+// RecordingTab.tsx's own comments beside <DiscussionRepliesPanel>), so this
+// effect's `[]`-dep registration is live for every launch, first through
+// twentieth, the same guarantee recording-launch.ts's own header describes.
+//
+// `start()` (useDiscussionReplies.ts) no longer calls
+// takeRecordingKnowledgeContext() or resolveStartKnowledgeContext() at all -
+// discussion-knowledge-context.test.ts's source guard now scans THIS file
+// for the take (exactly one call site) and separately proves `start()`
+// contains none. What `start()` keeps is ONLY the persisted-label WRITE (see
+// that function's own comment for why that specific line cannot move here).
 //
 // Held as REACT STATE (never mutated as a bare ref from a callback -
 // `react-hooks/immutability` forbids that once a ref is also read inside an
 // effect, which the reload-visibility effect below does), mirrored into a
 // ref for runDraftLoop the same way useDiscussionReplies.ts mirrors every
-// other dispatch-time value. PER-RUN, not per-batch - taken exactly ONCE by
-// `start()`, a one-shot slot that clears itself on read.
+// other dispatch-time value. PER-RUN, not per-batch - taken exactly ONCE per
+// real launch (a one-shot slot that clears itself on read), and left
+// UNTOUCHED (never re-taken, never cleared) by every Start/Stop that follows
+// with no new launch in between - resolveStartKnowledgeContext's own header
+// (discussion-knowledge-context.ts) covers why that persistence-across-runs
+// is deliberate, not an oversight.
 //
 // Persistence: deliberately NOT persisted across a reload, the same rule
 // recording-launch.ts's own module state already follows - persisting the
@@ -34,7 +53,9 @@
 // instructor their table's earlier drafts used context this fresh page load
 // does not hold, never enough to reconstruct it. The write itself (on
 // `start()`, and the clear on `clearTable()`) stays in useDiscussionReplies.ts
-// since both already touch other state at the same moment.
+// since both already touch other state at the same moment - see that
+// function's own comment for the correctness reason the write specifically
+// (not the take) must stay gated on an actual Start click.
 //
 // Reload-visibility case: `knowledgeContext` never survives a reload by
 // design, but this table's OWN rows (restored from "ta-rec-disc-table" by
@@ -49,8 +70,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { readLocalStorage } from "./discussion-draft-loop";
-import type { RecordingKnowledgeContext } from "@/lib/recording-launch";
-import { knowledgeContextLabelFor } from "./discussion-knowledge-context";
+import {
+  RECORDING_LAUNCH_EVENT,
+  parseRecordingLaunch,
+  takeRecordingKnowledgeContext,
+  type RecordingKnowledgeContext,
+} from "@/lib/recording-launch";
+import { knowledgeContextLabelFor, resolveStartKnowledgeContext } from "./discussion-knowledge-context";
 
 export interface UseDiscussionKnowledgeContextArgs {
   /** F0-2/F11: the UNFILTERED row count - a search-box keystroke must never
@@ -80,6 +106,35 @@ export function useDiscussionKnowledgeContext(
     knowledgeContextRef.current = knowledgeContext;
   }, [knowledgeContext]);
   const knowledgeContextLabel = knowledgeContextLabelFor(knowledgeContext);
+
+  // "Activate this recording from the Knowledge base" - the ONE-SHOT TAKE,
+  // live, at launch arrival. Mirrors GradingRecordingPanel.tsx's own launch
+  // listener (:247-259 there) exactly: registered ONCE ([] deps) for this
+  // hook's whole mount lifetime, guarded on `detail.view === "discussions"`
+  // so a launch meant for another view (grading, moduledeck, a plain fab
+  // visit with no knowledgeContext) is never misread as this one's. Only
+  // takes when `detail.knowledgeContext` is actually present - a bare-view
+  // "discussions" launch (the FAB's navigateToRecordingTool, or a launch
+  // with unusable/blank page text) must not steal a take that was never
+  // offered, and must not touch this table's existing context either
+  // (resolveStartKnowledgeContext below only ever runs inside this `if`, so
+  // "nothing new arrived" always leaves `current` alone by simply not
+  // calling setKnowledgeContext at all).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
+      if (!detail || detail.view !== "discussions") return;
+      if (detail.knowledgeContext) {
+        const taken = takeRecordingKnowledgeContext();
+        if (taken) {
+          setKnowledgeContext((current) => resolveStartKnowledgeContext(current, taken));
+        }
+      }
+    };
+    window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
+    return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
+  }, []);
+
   const kbContextReloadNoticeShownRef = useRef(false);
 
   useEffect(() => {

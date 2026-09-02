@@ -22,6 +22,7 @@ describe("buildKnowledgeContextBlock - empty input", () => {
       omittedPages: 0,
       includedAttachments: 0,
       omittedAttachments: 0,
+      pageResults: [],
     });
   });
 });
@@ -41,6 +42,14 @@ describe("buildKnowledgeContextBlock - everything fits", () => {
     expect(result.text).toContain("Late work loses ten percent per day.");
     expect(result.text).toContain("Office Hours");
     expect(result.text).toContain("Two hours per week are required.");
+  });
+
+  it("marks every page included in pageResults, in input order, when everything fits", () => {
+    const result = buildKnowledgeContextBlock({ pages, attachments: [] });
+    expect(result.pageResults).toEqual([
+      { title: "Late Work Policy", included: true },
+      { title: "Office Hours", included: true },
+    ]);
   });
 
   it("includes every attachment's text when under budget", () => {
@@ -246,5 +255,111 @@ describe("buildKnowledgeContextBlock - truncation boundaries", () => {
     const pages = bigPages(20);
     const result = buildKnowledgeContextBlock({ pages, attachments: [] });
     expect(result.text.length).toBeLessThanOrEqual(DEFAULT_KNOWLEDGE_CONTEXT_MAX_CHARS);
+  });
+});
+
+describe("buildKnowledgeContextBlock - pageResults per-page identity", () => {
+  function bigPages(count: number): KnowledgeContextPage[] {
+    return Array.from({ length: count }, (_, i) =>
+      page(`Page ${i}`, `${"filler text ".repeat(15)}END_OF_PAGE_${i}`)
+    );
+  }
+
+  function bigAttachments(count: number): KnowledgeContextAttachment[] {
+    return Array.from({ length: count }, (_, i) =>
+      attachment(`Owner ${i}`, `file-${i}.txt`, `${"filler text ".repeat(15)}END_OF_ATTACHMENT_${i}`)
+    );
+  }
+
+  // The required case: inclusion is NOT a prefix. The budget loop uses
+  // `continue`, not `break`, so a page in the MIDDLE can be omitted while a
+  // LATER page is still included (a huge page followed by a small one that
+  // still fits). A test that only exercises trailing overflow would pass
+  // against a prefix-assuming implementation (e.g. one that just marks the
+  // first N pages as included) and would prove nothing about this file's
+  // real behaviour.
+  it("marks a middle page omitted while a later, smaller page is included - proves inclusion is not a prefix", () => {
+    const first = page("First", "tiny body one");
+    const huge = page("Huge Middle", "x".repeat(20_000));
+    const last = page("Last", "tiny body two");
+    const result = buildKnowledgeContextBlock({
+      pages: [first, huge, last],
+      attachments: [],
+      maxChars: 500,
+    });
+
+    expect(result.pageResults).toEqual([
+      { title: "First", included: true },
+      { title: "Huge Middle", included: false },
+      { title: "Last", included: true },
+    ]);
+    // Sanity on the fixture: the omitted middle page's body must genuinely
+    // be absent from the rendered text, and the surviving pages' bodies
+    // genuinely present - otherwise pageResults could be right by luck.
+    expect(result.text).toContain("tiny body one");
+    expect(result.text).toContain("tiny body two");
+    expect(result.text).not.toContain("x".repeat(20_000));
+  });
+
+  it("keeps pageResults in input order with correct included/omitted for every page, not just the boundary ones", () => {
+    const pages = bigPages(10);
+    const result = buildKnowledgeContextBlock({ pages, attachments: [], maxChars: 1500 });
+    expect(result.pageResults).toHaveLength(pages.length);
+    result.pageResults.forEach((entry, i) => {
+      expect(entry.title).toBe(`Page ${i}`);
+      const actuallyPresent = result.text.includes(pages[i].body);
+      expect(entry.included).toBe(actuallyPresent);
+    });
+  });
+
+  it("handles duplicate titles without collapsing or mis-mapping entries - one pageResults entry per input page, positionally", () => {
+    const dup1 = page("Duplicate Title", "first body unique marker A");
+    const dup2 = page("Duplicate Title", "x".repeat(20_000)); // will be omitted
+    const dup3 = page("Duplicate Title", "third body unique marker B");
+    const result = buildKnowledgeContextBlock({
+      pages: [dup1, dup2, dup3],
+      attachments: [],
+      maxChars: 900,
+    });
+
+    expect(result.pageResults).toHaveLength(3);
+    expect(result.pageResults.every((r) => r.title === "Duplicate Title")).toBe(true);
+    expect(result.pageResults).toEqual([
+      { title: "Duplicate Title", included: true },
+      { title: "Duplicate Title", included: false },
+      { title: "Duplicate Title", included: true },
+    ]);
+    expect(result.text).toContain("first body unique marker A");
+    expect(result.text).toContain("third body unique marker B");
+    expect(result.text).not.toContain("x".repeat(20_000));
+  });
+
+  it("marks every page included, in order, with no duplicate collapsing when everything fits (empty-fits shortcut path)", () => {
+    const dup = page("Same Title", "body one");
+    const dup2 = page("Same Title", "body two");
+    const result = buildKnowledgeContextBlock({ pages: [dup, dup2], attachments: [] });
+    expect(result.pageResults).toEqual([
+      { title: "Same Title", included: true },
+      { title: "Same Title", included: true },
+    ]);
+  });
+
+  it("returns an empty pageResults array for no pages and no attachments", () => {
+    const result = buildKnowledgeContextBlock({ pages: [], attachments: [] });
+    expect(result.pageResults).toEqual([]);
+  });
+
+  it("never reports a page as included in pageResults unless its body actually appears in the text - and vice versa", () => {
+    // A stronger cross-check against the counts-derived-mapping failure
+    // mode: for every page, pageResults' verdict must match physical
+    // presence in the rendered text, across a page/attachment mix.
+    const pages = bigPages(8);
+    const attachments = bigAttachments(4);
+    const result = buildKnowledgeContextBlock({ pages, attachments, maxChars: 1200 });
+    result.pageResults.forEach((entry, i) => {
+      const present = result.text.includes(pages[i].body);
+      expect(entry.included).toBe(present);
+    });
+    expect(result.pageResults.filter((r) => r.included).length).toBe(result.includedPages);
   });
 });

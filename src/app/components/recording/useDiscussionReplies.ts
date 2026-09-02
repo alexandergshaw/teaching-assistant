@@ -35,12 +35,20 @@
 // draftAllPending, redraftAll) that the next feature (resource controls:
 // one-click insert, eligible resource kinds, a video-length preference, and
 // a per-row resource search) will edit - those all stay here. `start()` also
-// stays here in full, never split: discussion-knowledge-context.test.ts's
-// source guard scans this file's literal text for `start()`'s own
-// takeRecordingKnowledgeContext() assignment (exactly one call site) and its
-// resolveStartKnowledgeContext(...) call - see that function's own body
-// below, not reproduced here, so this header comment cannot itself become a
-// second match for the guard's "exactly one call site" regex.
+// stays here in full, never split.
+//
+// STRUCTURAL FIX (owner ask: show a carried Knowledge Base context BEFORE a
+// run): `start()` used to call takeRecordingKnowledgeContext() and
+// resolveStartKnowledgeContext() itself - moved to
+// useDiscussionKnowledgeContext.ts's own live launch listener (see that
+// file's header) so the context (and its label) are already held by the
+// time the instructor reaches this pane, not only after they click Start.
+// `start()` keeps ONLY the persisted-label WRITE below, gated on an actual
+// Start click - see that write's own inline comment for why moving the
+// WRITE (as opposed to the take) would be wrong. discussion-knowledge-
+// context.test.ts's source guard now scans useDiscussionKnowledgeContext.ts
+// for the take (exactly one call site) and separately proves this file's
+// `start()` contains none.
 //
 // CONTRACT NOTES BEYOND WHAT SECTION 12 PINS:
 //
@@ -89,16 +97,12 @@ import {
   draftDiscussionRepliesAction,
 } from "@/app/actions/discussion-replies";
 import { getStoredProvider } from "@/lib/llm-provider";
-// "Activate this recording from the Knowledge base" - the launch seam's
-// one-shot pickup. See useDiscussionKnowledgeContext.ts's own doc comment
-// for why the TAKE stays here, in `start()`, rather than moving into that
-// hook alongside the STATE it manages.
-import { takeRecordingKnowledgeContext } from "@/lib/recording-launch";
-// GAP 2 fix: the DECISION half of the same feature - what context THIS run
-// ends up using, given the one-shot take's result - pulled into a pure,
-// unit-tested leaf. See that file's own header for why (the untested hop a
-// sibling wave sabotaged with zero test failures).
-import { resolveStartKnowledgeContext, knowledgeContextLabelFor } from "./discussion-knowledge-context";
+// "Activate this recording from the Knowledge base" - only the persisted-
+// label wording helper is needed here now; the one-shot TAKE and the
+// taken-vs-current DECISION (resolveStartKnowledgeContext) both moved into
+// useDiscussionKnowledgeContext.ts's own live launch listener - see that
+// file's header for why.
+import { knowledgeContextLabelFor } from "./discussion-knowledge-context";
 import { EXTRACT_BATCH_SIZE } from "@/lib/discussion-reply-prompt";
 // Contract/documentation block (UseDiscussionRepliesReturn, DraftQueueItem,
 // LOOP_IDLE_POLL_MS, the two localStorage helpers) and the drafting queue's
@@ -477,19 +481,35 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     // time from an earlier Stop.
     setLogStartedAt((prev) => prev || new Date().toISOString());
     setLogEndedAt("");
-    // "Activate this recording from the Knowledge base" - take the pending
-    // context exactly ONCE here (a one-shot: drains on read). The merge/label
-    // DECISION is resolveStartKnowledgeContext / knowledgeContextLabelFor
-    // (discussion-knowledge-context.ts) - see that file's header for the full
-    // account of what a null vs. non-null `taken` means. Only the LABEL is
-    // persisted (never the page text) - see useDiscussionKnowledgeContext.ts's
-    // own header. `if (taken)` guards the write itself: a null take must
-    // never re-fire it, since nothing changed.
-    const taken = takeRecordingKnowledgeContext();
-    if (taken) {
-      const resolved = resolveStartKnowledgeContext(knowledgeContextRef.current, taken);
-      setKnowledgeContext(resolved);
-      writeLocalStorage("ta-rec-disc-kb-context-label", knowledgeContextLabelFor(resolved) ?? "Knowledge Base pages");
+    // "Activate this recording from the Knowledge base" - the one-shot TAKE
+    // and the taken-vs-current DECISION both already happened, live, in
+    // useDiscussionKnowledgeContext.ts's own launch listener (see that
+    // file's header) - by the time Start is clicked, `knowledgeContextRef`
+    // already holds whatever this run should use (or null, if nothing was
+    // ever launched, or the ordinary case of a Start with no new launch
+    // since the last one).
+    //
+    // What MUST stay here is only the persisted-LABEL write (never the page
+    // text - see useDiscussionKnowledgeContext.ts's own header on why only
+    // a label is persisted at all). This is a correctness boundary, not a
+    // style choice: writing the label at launch time instead - i.e. the
+    // moment a "Start recording" button is clicked in the Knowledge base,
+    // before this Start is ever pressed - would let a launch that is never
+    // followed by a real capture still leave a label behind. A later reload
+    // with this table's rows restored from that same (never-captured)
+    // session would then wrongly tell the instructor "earlier replies here
+    // used Knowledge Base context", when no reply was ever drafted under it.
+    // Gating the write on THIS click, reading whatever context is currently
+    // held, keeps the label meaning what it says: replies drafted from this
+    // point on use this context. `if (knowledgeContextRef.current)` mirrors
+    // the old `if (taken)` guard's intent - nothing to persist when there is
+    // nothing held - it is simply evaluated at Start time now rather than at
+    // take time, since the take itself no longer happens here.
+    if (knowledgeContextRef.current) {
+      writeLocalStorage(
+        "ta-rec-disc-kb-context-label",
+        knowledgeContextLabelFor(knowledgeContextRef.current) ?? "Knowledge Base pages"
+      );
     }
     try {
       await captureRef.current.start({ saveVideo: saveVideoRef.current });
@@ -499,7 +519,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       // only real capture-start failures.
       pushNotice(`Could not start the screen capture: ${err instanceof Error ? err.message : "unknown error"}`);
     }
-  }, [pushNotice, setKnowledgeContext, knowledgeContextRef]);
+  }, [pushNotice, knowledgeContextRef]);
 
   const stop = useCallback(() => {
     setLogEndedAt(new Date().toISOString());

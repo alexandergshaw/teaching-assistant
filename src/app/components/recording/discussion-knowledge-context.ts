@@ -2,18 +2,28 @@
 // closes: replies drafted with the instructor's selected standards pages as
 // context) - the ONE hop in that feature with no test surface at all.
 //
-// useDiscussionReplies.ts's start() calls takeRecordingKnowledgeContext()
-// (src/lib/recording-launch.ts) exactly once per run - a real, one-shot,
-// module-level side effect that drains on read (already fully covered by
-// recording-launch.test.ts's own "write-then-consume" suite). What was NOT
-// covered - and what a sibling wave sabotaged (replaced that call with a
-// hardcoded `null`) with zero test failures and a clean tsc - is everything
-// AFTER the call returns: which context THIS run ends up using. vitest here
-// is node-env and renders no hook, so that decision has to live in a plain
-// function to be testable at all (mirrors useReplyResources.ts's
-// isResourceLaneBusy/partitionResourceOutcome and discussion-capture.ts's
-// shouldLoopContinue - the same "pull the decision out of the hook" move,
-// applied to this feature's own untested hop).
+// useDiscussionKnowledgeContext.ts's own live launch listener calls
+// takeRecordingKnowledgeContext() (src/lib/recording-launch.ts) exactly once
+// per real launch - a real, one-shot, module-level side effect that drains
+// on read (already fully covered by recording-launch.test.ts's own
+// "write-then-consume" suite, and its simulated-listener extension). What
+// was NOT covered when this file was first written - and what a sibling
+// wave sabotaged (replaced that call with a hardcoded `null`) with zero test
+// failures and a clean tsc - is everything AFTER the call returns: which
+// context THIS run ends up using. vitest here is node-env and renders no
+// hook, so that decision has to live in a plain function to be testable at
+// all (mirrors useReplyResources.ts's isResourceLaneBusy/
+// partitionResourceOutcome and discussion-capture.ts's shouldLoopContinue -
+// the same "pull the decision out of the hook" move, applied to this
+// feature's own untested hop).
+//
+// STRUCTURAL FIX (owner ask: show the carried context BEFORE a run): the
+// take, and this function's call, moved from useDiscussionReplies.ts's
+// `start()` into useDiscussionKnowledgeContext.ts's own live launch
+// listener (mirroring GradingRecordingPanel.tsx's shape) - see that file's
+// own header for the full account. This function's own contract (below) is
+// UNCHANGED by that move: it never cared where its caller lived, only what
+// `current`/`taken` mean.
 //
 // resolveStartKnowledgeContext owns exactly this rule:
 //
@@ -33,10 +43,13 @@
 //    context, and must be PRESERVED, not cleared) resolve identically - both
 //    are just "nothing new arrived this time".
 //
-// The caller (start()) still owns the actual one-shot call and its one
-// side-effecting write (setKnowledgeContext + the persisted label) - this
-// function only decides what value that write should use, so it is pure and
-// needs no ref, no React import, and no browser global.
+// The caller - useDiscussionKnowledgeContext.ts's own live launch listener,
+// as of the structural fix above - owns the actual one-shot call and the
+// `setKnowledgeContext` write; useDiscussionReplies.ts's `start()` owns only
+// the separate persisted-label write (see that function's own comment for
+// why that one specific write cannot move alongside the take). Either way,
+// this function only decides what value a caller's write should use, so it
+// stays pure and needs no ref, no React import, and no browser global.
 export function resolveStartKnowledgeContext<T>(current: T | null, taken: T | null): T | null {
   return taken ?? current;
 }

@@ -71,6 +71,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Button, Checkbox } from "@mui/material";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
 import kbStyles from "../KnowledgeTab.module.css";
 import { listInstitutionPageSummariesAction, getInstitutionPagesByIdsAction } from "@/app/actions/knowledge-base";
 import { readKbInstitution, type SelectedContextPage } from "../knowledge/knowledge-helpers";
@@ -331,16 +332,21 @@ export default function AddKnowledgePages({ context, onChange }: AddKnowledgePag
   const tree = summaries ? buildPageTree(summaries) : [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+    // Fixer pass finding 1: controls.section is the fieldset reset (it also
+    // carries the `.section + .section` hairline rule); this is a plain
+    // grouping div rendered inside the discussions Context section beside
+    // CarriedKnowledgePages - controls.stack instead, so no stray hairline
+    // and 16px gap appear between the carried chips and this "Add" link.
+    <div className={controls.stack}>
       {hasOpaqueContext ? (
-        <p className={styles.fieldHint} style={{ margin: 0 }}>
+        <p className={styles.fieldHint}>
           This run&apos;s carried context has no per-page detail to add to - make a new selection from the Knowledge
           Base tab instead.
         </p>
       ) : (
         <div>
           <button type="button" className={styles.linkButton} onClick={open ? handleClose : handleOpen}>
-            {open ? "Cancel" : "+ Add Knowledge Base pages"}
+            {open ? "Cancel" : "Add Knowledge Base pages"}
           </button>
         </div>
       )}
@@ -357,19 +363,24 @@ export default function AddKnowledgePages({ context, onChange }: AddKnowledgePag
           }}
         >
           {!institution && (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
+            <p className={styles.fieldHint}>
               No institution is selected in the Knowledge Base tab. Open Knowledge Base and choose an institution
               before adding pages here.
             </p>
           )}
-          {institution && loading && <p className={styles.fieldHint} style={{ margin: 0 }}>Loading pages…</p>}
-          {institution && loadError && (
-            <p className={styles.error} style={{ margin: 0 }}>
-              {loadError}
+          {institution && loading && (
+            <p role="status" aria-live="polite" className={controls.loadingLine}>
+              <span className={styles.spinner} aria-hidden="true" />
+              Loading pages…
             </p>
           )}
+          {institution && loadError && (
+            <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
+              {loadError}
+            </div>
+          )}
           {institution && summaries && summaries.length === 0 && (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
+            <p className={styles.fieldHint}>
               No pages yet in this institution&apos;s Knowledge Base.
             </p>
           )}
@@ -385,15 +396,17 @@ export default function AddKnowledgePages({ context, onChange }: AddKnowledgePag
                 onToggleChecked={toggleChecked}
               />
               {addError && (
-                <p className={styles.error} style={{ margin: 0 }}>
+                <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
                   {addError}
-                </p>
+                </div>
               )}
-              <div>
+              <div className={styles.ghActions}>
                 <Button
                   size="small"
-                  variant="contained"
-                  disabled={pendingCount === 0 || adding}
+                  variant="outlined"
+                  loading={adding}
+                  loadingPosition="start"
+                  disabled={pendingCount === 0}
                   onClick={() => void handleAdd()}
                 >
                   {adding ? "Adding…" : pendingCount > 0 ? `Add ${pendingCount} page${pendingCount === 1 ? "" : "s"}` : "Add"}
@@ -405,7 +418,7 @@ export default function AddKnowledgePages({ context, onChange }: AddKnowledgePag
       )}
 
       {lastOutcome && (lastOutcome.addedTitles.length > 0 || lastOutcome.pushedOutTitles.length > 0) && (
-        <p className={styles.fieldHint} style={{ margin: 0 }}>
+        <p className={styles.fieldHint}>
           {lastOutcome.addedTitles.length > 0 && `Added ${lastOutcome.addedTitles.join(", ")}. `}
           {lastOutcome.pushedOutTitles.length > 0 &&
             `To stay within the context budget, ${lastOutcome.pushedOutTitles.join(", ")} ${

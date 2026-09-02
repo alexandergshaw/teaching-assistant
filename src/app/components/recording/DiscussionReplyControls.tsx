@@ -22,6 +22,8 @@
 import { useState } from "react";
 import { Checkbox, FormControlLabel, MenuItem, Slider, TextField } from "@mui/material";
 import styles from "../../page.module.css";
+import panelStyles from "./DiscussionRepliesPanel.module.css";
+import controls from "./RecordingControls.module.css";
 import {
   REPLY_FORMALITY_LABELS,
   REPLY_FORMALITY_STOPS,
@@ -79,14 +81,19 @@ export default function DiscussionReplyControls({
   }
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", alignItems: "flex-start" }}>
+    // Fixer pass finding 4: this row pairs a 37.7px select with a taller
+    // composite block (the checkbox + its hint paragraph) - `.rowTop`
+    // (DiscussionRepliesPanel.module.css) overrides `.adaptRow`'s own
+    // bottom-align so the select's top lines up with the block's, instead of
+    // sinking ~30px below it.
+    <div className={`${styles.adaptRow} ${panelStyles.rowTop}`}>
       <TextField
         select
         label="Each reply should include"
         size="small"
         value={composition.ingredients}
         // Wraps like the Course select above it in the panel (a bounded
-        // minWidth flex item, not a full-bleed field) - deliberately no
+        // field-width class, not a full-bleed field) - deliberately no
         // `fullWidth` here, to match that idiom exactly.
         slotProps={{
           select: {
@@ -106,7 +113,7 @@ export default function DiscussionReplyControls({
           const ingredients = REPLY_INGREDIENTS.filter((id) => raw.includes(id));
           onChange({ ...composition, ingredients });
         }}
-        sx={{ minWidth: 260 }}
+        className={controls.fieldLg}
       >
         {REPLY_INGREDIENTS.map((id) => (
           <MenuItem key={id} value={id}>
@@ -136,17 +143,21 @@ export default function DiscussionReplyControls({
           // this control's uses. "the person's" is true in both registers.
           label="Open each reply with the person's first name"
         />
-        <p id={ADDRESS_BY_NAME_HINT_ID} className={styles.fieldHint} style={{ margin: 0 }}>
+        <p id={ADDRESS_BY_NAME_HINT_ID} className={styles.fieldHint}>
           Uses the name as captured off the screen; skips the greeting for a post where a clean first name can&apos;t
           be read.
         </p>
       </div>
 
-      <div style={{ width: 220, paddingInline: "var(--space-6)" }}>
+      {/* Fixer pass finding 5: `controls.sliderBox` (RecordingControls.module
+          .css, group P) replaces this file's own `panelStyles.formalitySlider`
+          copy - that class is deleted from DiscussionRepliesPanel.module.css
+          in the same pass. */}
+      <div className={controls.sliderBox}>
         {/* Same small-label idiom as the "Replying to:" span above this
             cluster (styles.ghMeta) - visible, not a floating MUI label,
             since the Slider itself has no label slot of its own. */}
-        <p id={FORMALITY_LABEL_ID} className={styles.ghMeta} style={{ marginBottom: "var(--space-2)" }}>
+        <p id={FORMALITY_LABEL_ID} className={`${styles.ghMeta} ${panelStyles.formalityLabel}`}>
           Formality
         </p>
         <Slider

@@ -12,9 +12,14 @@
 // any comment, including this one, if that ever changes again - this repo
 // has been bitten by a stale reachability claim before.
 //
-// RubricInputModal.tsx next door is DIFFERENT: it stays staged and
-// unreachable, on its own terms (see its own header) - do not infer
-// anything about its wiring from this file having been wired.
+// RubricInputModal.tsx next door is ALSO reachable, on its own terms (see
+// its own header): GradingRecordingPanel.tsx renders it behind an "Add
+// rubric"/"Edit rubric" button, and opens it automatically from the
+// Knowledge base's "Grade via recording" handoff. Do not infer either
+// modal's wiring from the other having been wired, or from this comment,
+// without re-grepping first - this repo has been bitten by a stale
+// reachability claim before, which is exactly how this paragraph itself
+// went stale (fixer pass finding 5).
 //
 // WHAT THIS IS: an instrument, not a feature. It captures a screen, sends a
 // small batch of frames to the vision model with a prompt that asks ONLY for
@@ -65,6 +70,24 @@ import { EXTRACT_BATCH_WIRE_BUDGET, type CapturedFrame } from "../recording/disc
 import { ModalShell } from "../ui/ModalShell";
 import styles from "../../page.module.css";
 import modalStyles from "./LegibilityProbeModal.module.css";
+// docs/recording-controls-ux-acceptance-criteria.md: CC13's shared
+// controls vocabulary (.notice/.previewVideo/.statusRow/.statusText/
+// .runRow) and CC1's variantFor - this modal is the documented "capture
+// beats everything" exception, but still spells its primary the one legal
+// way.
+import controls from "../recording/RecordingControls.module.css";
+import { variantFor } from "../ui/buttonVariant";
+// CC8: the shared run-log row.
+import RunLogRow from "../recording/RunLogRow";
+// CC12: keeps its OWN sentence (unchanged, CC16) but adopts the shared
+// throttling hook and visually-hidden style.
+import { useThrottledLiveSentence } from "../recording/captureLiveRegion";
+import { visuallyHidden } from "../ui/visuallyHidden";
+// CC15: this modal's plain body/drop-zone/disabled-textarea classes live in
+// the sibling table stylesheet (neither grading modal owns its own CSS
+// module beyond this file's LegibilityProbeModal.module.css, which CC13
+// slims to the probe-specific pieces only).
+import sharedStyles from "./GradingTable.module.css";
 import {
   PROBE_MAX_FRAMES,
   canRunProbe,
@@ -200,6 +223,21 @@ export function LegibilityProbeModal({
 
   const canRun = canRunProbe(pendingFrames, busy);
 
+  // CC12: this modal's OWN sentence - the same facts the visible status
+  // column already shows, composed into one string for a throttled, visually
+  // hidden live region. Only the hook and the style are adopted from the
+  // shared module; the sentence itself stays local.
+  //
+  // Fixer pass finding 5: fmt(elapsedSec) used to be part of this sentence,
+  // which changes every second - at useThrottledLiveSentence's measured
+  // ceiling (12 announcements/minute regardless of input rate) a
+  // continuously-changing input floods the region with a new announcement on
+  // every throttle window, drowning out the fact that actually needs
+  // announcing (frames queued). The elapsed time stays visible on screen
+  // (statusText below); it is simply not part of what gets read aloud.
+  const captureLiveSentence = capturing ? `${pendingFrames} frame${pendingFrames === 1 ? "" : "s"} queued.` : "";
+  const throttledLiveSentence = useThrottledLiveSentence(captureLiveSentence);
+
   // docs/DEV_LOOP.md's downloadable-log rule: rebuilt on every render (cheap
   // - the ref only grows on a real "Run legibility probe" completion) so the
   // on-screen summary and a download click always agree.
@@ -236,28 +274,51 @@ export function LegibilityProbeModal({
         </button>
       </div>
 
-      <div className={styles.previewContent}>
+      {/* CC15: a plain body container, not the pre-wrap .previewContent
+          preview box - this modal's content is live capture controls and
+          notices, not extracted/preview text (the transcript below keeps its
+          own pre-wrap box). */}
+      <div className={sharedStyles.modalBody}>
         {/* docs/DEV_LOOP.md: "a downloadable log ... displayed in a
             prominent location". Placed first inside the content area, before
             every capture control - never gated on a run having happened
             (canRun/busy/transcript), since a probe that never returned a
             usable answer is exactly when this needs to be reachable without
             hunting - mirrors GradingRecordingPanel.tsx/
-            DiscussionRepliesPanel.tsx's own identical placement. */}
-        <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-          <span>{legibilityProbeLogSummaryLine(summarizeLegibilityProbeRunLog(currentProbeLog))}</span>
-          <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
-            Download run log (CSV)
-          </Button>
-          <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
-            Download run log (JSON)
-          </Button>
-        </div>
-        <div className={styles.ghActions}>
-          <Button variant="contained" size="small" onClick={handleStartStop}>
+            DiscussionRepliesPanel.tsx's own identical placement. CC8: the
+            byte-identical row this file used to inline is now the shared
+            RunLogRow component. */}
+        <RunLogRow
+          summary={legibilityProbeLogSummaryLine(summarizeLegibilityProbeRunLog(currentProbeLog))}
+          onDownload={handleDownloadLog}
+        />
+        {/* CC1/CC2: the documented "capture beats everything" exception -
+            this modal's own hint tells the instructor to run the probe WHILE
+            capturing, and canRun gates on pendingFrames, so the primary is
+            Run legibility probe whenever canRun, else Start capture; Stop
+            capture stays outlined here. This is the run row, first because
+            the modal has no settings above it.
+
+            Fixer pass finding 5: canRun alone used to decide both buttons,
+            so the instant "Run legibility probe" is clicked, canRun flips
+            false (busy becomes true, pendingFrames is spent) and Stop
+            capture flipped to contained mid-spin while the still-busy Run
+            button went outlined - two visible swaps for one click, and the
+            button the instructor is watching lost its fill while it was
+            doing the thing they asked for. `canRun || busy` keeps Run
+            legibility probe the primary for the whole in-flight request. */}
+        <div className={`${styles.ghActions} ${controls.runRow}`}>
+          <Button variant={variantFor(!(canRun || busy))} size="small" onClick={handleStartStop}>
             {capturing ? "Stop capture" : "Start capture"}
           </Button>
-          <Button variant="outlined" size="small" onClick={() => void handleRunProbe()} disabled={!canRun}>
+          <Button
+            variant={variantFor(canRun || busy)}
+            size="small"
+            loading={busy}
+            loadingPosition="start"
+            onClick={() => void handleRunProbe()}
+            disabled={!canRun}
+          >
             {busy ? "Reading…" : "Run legibility probe"}
           </Button>
         </div>
@@ -266,7 +327,11 @@ export function LegibilityProbeModal({
           once it is on screen. You can also stop from your browser&apos;s sharing bar.
         </p>
 
-        <div className={modalStyles.statusRow} aria-hidden="true">
+        {/* CC12: only the <video> stays aria-hidden - the timer/queued-frame
+            status column now renders in the open, and a throttled, visually
+            hidden live region (this modal's own sentence, CC16) announces
+            the same facts for assistive tech. */}
+        <div className={controls.statusRow}>
           {/* Rendered unconditionally, never `{capturing && <video ...>}`, for
               the same reason DiscussionRepliesPanel.tsx does this (see its
               own comment): useDiscussionCapture's start() assigns
@@ -276,21 +341,24 @@ export function LegibilityProbeModal({
               skipped. */}
           <video
             ref={previewRef}
-            className={modalStyles.previewVideo}
-            style={{ display: capturing ? undefined : "none" }}
+            className={`${controls.previewVideo} ${capturing ? "" : controls.previewVideoHidden}`}
+            aria-hidden="true"
             autoPlay
             muted
             playsInline
           />
           {capturing && (
-            <div className={modalStyles.statusText}>
+            <div className={controls.statusText}>
               <span>{fmt(elapsedSec)}</span>
               <span>{pendingFrames} frame{pendingFrames === 1 ? "" : "s"} queued</span>
             </div>
           )}
         </div>
+        <span role="status" aria-live="polite" style={visuallyHidden}>
+          {throttledLiveSentence}
+        </span>
         {stalled && (
-          <p className={styles.error}>
+          <p className={`${controls.notice} ${controls.noticeWarning}`} role="status">
             Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second
             window while you scroll.
           </p>
@@ -301,9 +369,10 @@ export function LegibilityProbeModal({
           // exactly like a hard error (role="alert") - it must never read as
           // the same quiet confirmation a real transcription gets. A
           // near-empty one gets the same danger styling, politely announced,
-          // since the call did technically complete.
+          // since the call did technically complete. Role/aria-live logic is
+          // unchanged (CC16); only the visual shape moves to CC13's notice.
           <p
-            className={notice.kind === "success" ? styles.fieldHint : styles.error}
+            className={notice.kind === "success" ? styles.fieldHint : `${controls.notice} ${controls.noticeDanger}`}
             role={notice.kind === "success" ? "status" : "alert"}
             aria-live={notice.kind === "success" ? "polite" : "assertive"}
           >
@@ -333,7 +402,13 @@ export function LegibilityProbeModal({
 
         {transcript !== null && (
           <div className={styles.field}>
-            <label>What the model read back</label>
+            {/* Fixer pass finding 5: this labelled no control - the div
+                below is a read-only display, not a form field, so a
+                `<label>` had no `for`/wrapped input to associate with and
+                announced as an orphaned label. A `<p>` reads identically to
+                a sighted user and correctly as a plain heading line to
+                assistive tech. */}
+            <p className={styles.fieldHint}>What the model read back</p>
             <div className={modalStyles.transcript}>{transcript || "(nothing)"}</div>
           </div>
         )}

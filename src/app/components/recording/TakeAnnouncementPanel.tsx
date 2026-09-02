@@ -18,10 +18,13 @@
 // pipeline progress) resets cleanly when a different take is opened,
 // instead of this component trying to detect and reset that itself.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
 import LinearProgress from "@mui/material/LinearProgress";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
+import ConfirmArmButtons from "../ui/ConfirmArmButtons";
+import RunLogRow from "./RunLogRow";
 import {
   useTakeAnnouncement,
   type AnnouncementRecordingContext,
@@ -43,6 +46,14 @@ import {
 import { triggerFileDownload } from "../course-planning/utils";
 
 const POST_CONFIRM_CONSEQUENCE_ID = "take-announcement-post-confirm-consequence";
+// CC5: Regenerate announcement is an arm/confirm ONLY once the instructor has
+// hand-edited Subject/Message (fieldsTouched, set by those two fields' own
+// onChange below, cleared whenever a regeneration - armed or not - actually
+// runs). Its own consequence line, separate from the Post one above.
+const REGEN_CONFIRM_CONSEQUENCE_ID = "take-announcement-regen-confirm-consequence";
+// CC15: the pipeline LinearProgress has no accessible name of its own -
+// points at the descriptive <p> already rendered beside it.
+const PROGRESS_LABEL_ID = "take-announcement-progress-label";
 
 export interface TakeAnnouncementPanelProps {
   /** The take being drafted for. Pass a fresh `take` object each time the
@@ -164,6 +175,49 @@ export default function TakeAnnouncementPanel({
     headingRef.current?.focus();
   }, []);
 
+  // Fixer pass finding 5: a successful post swaps this component from the
+  // in-progress view to the posted view (the early return below) without a
+  // remount, so the mount-only effect above never refires and focus is left
+  // on whatever the pipeline last focused (or drops to <body> if that
+  // element already unmounted). Refocus the heading whenever `posted`
+  // transitions to truthy - harmless on the already-posted-on-open path too,
+  // since it just repeats what the mount effect already did.
+  useEffect(() => {
+    if (posted) headingRef.current?.focus();
+  }, [posted]);
+
+  // docs/recording-controls-ux-acceptance-criteria.md CC5: Regenerate
+  // announcement only arms once the instructor has edited Subject/Message -
+  // a fresh, un-edited draft is a one-click regenerate with nothing to lose.
+  const [fieldsTouched, setFieldsTouched] = useState(false);
+  const [regenArmed, setRegenArmed] = useState(false);
+  function handleRegenerateConfirm() {
+    retryDraft();
+    setFieldsTouched(false);
+    setRegenArmed(false);
+  }
+
+  // Fixer pass finding 4: a new draft can also land via the failed-branch
+  // recovery actions below (Start over, Try again on a draft failure) - not
+  // just through Regenerate. Route those through this same fieldsTouched
+  // reset so the next Regenerate does not arm over a draft the instructor
+  // never actually edited.
+  function handleStartOver() {
+    startOver();
+    setFieldsTouched(false);
+  }
+  function handleRetryDraft() {
+    retryDraft();
+    setFieldsTouched(false);
+  }
+  // Same reason as the two helpers above: a fresh draft lands from the
+  // audio-retry path too, so the touched flag must clear or the next
+  // Regenerate arms over a draft the instructor never edited.
+  function handleRetryAudio() {
+    retryAudio();
+    setFieldsTouched(false);
+  }
+
   function handleCourseChange(id: string) {
     setCourseId(id);
     onCourseIdChange?.(id);
@@ -187,15 +241,10 @@ export default function TakeAnnouncementPanel({
     triggerFileDownload(new Blob([text], { type: mimeType }), filename);
   };
   const downloadLogRow = (
-    <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-      <span>{announcementLogSummaryLine(summarizeAnnouncementRunLog(currentAnnouncementLog))}</span>
-      <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
-        Download run log (CSV)
-      </Button>
-      <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
-        Download run log (JSON)
-      </Button>
-    </div>
+    <RunLogRow
+      summary={announcementLogSummaryLine(summarizeAnnouncementRunLog(currentAnnouncementLog))}
+      onDownload={handleDownloadLog}
+    />
   );
 
   if (posted) {
@@ -216,7 +265,7 @@ export default function TakeAnnouncementPanel({
         <p className={styles.previewMeta}>Subject: {posted.subject}</p>
         <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Announcement posted</span>
         <div>
-          <Button size="small" variant="outlined" onClick={onClose}>
+          <Button size="small" variant="text" onClick={onClose}>
             Back to takes
           </Button>
         </div>
@@ -270,8 +319,9 @@ export default function TakeAnnouncementPanel({
             aria-valuemax={progress.max}
             aria-valuenow={progress.value ?? undefined}
             aria-valuetext={progress.valueText}
+            aria-labelledby={PROGRESS_LABEL_ID}
           />
-          <p className={styles.fieldHint}>
+          <p id={PROGRESS_LABEL_ID} className={styles.fieldHint}>
             {stage.phase === "transcribing"
               ? progressLabel(stage.phase, stage.chunk, stage.of)
               : progressLabel(stage.phase)}
@@ -288,9 +338,9 @@ export default function TakeAnnouncementPanel({
       )}
 
       {needsRealTimeConfirm && (
-        <div style={{ padding: "var(--space-3) var(--space-4)", border: "1px solid var(--field-border)", background: "var(--warning-surface)" }}>
-          <p style={{ margin: "0 0 var(--space-2) 0" }}>{realTimeConfirmMessage}</p>
-          <div style={{ display: "flex", gap: "var(--space-3)" }}>
+        <div role="status" className={`${controls.notice} ${controls.noticeWarning}`}>
+          <p>{realTimeConfirmMessage}</p>
+          <div className={styles.ghActions}>
             <Button size="small" variant="contained" onClick={confirmRealTimeExtraction}>
               Play it back
             </Button>
@@ -302,31 +352,31 @@ export default function TakeAnnouncementPanel({
       )}
 
       {stage.phase === "failed" && (
-        <div role="alert">
+        <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
           <p>{stage.message}</p>
-          <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
+          <div className={styles.ghActions}>
             {stage.stage === "audio" && (
-              <Button size="small" variant="outlined" onClick={retryAudio}>
+              <Button size="small" variant="contained" onClick={handleRetryAudio}>
                 Try again
               </Button>
             )}
             {stage.stage === "transcribe" && (
               <>
-                <Button size="small" variant="outlined" onClick={retryFromFailedChunk}>
+                <Button size="small" variant="contained" onClick={retryFromFailedChunk}>
                   Retry from chunk {failedChunkNumber}
                 </Button>
-                <Button size="small" variant="text" onClick={startOver}>
+                <Button size="small" variant="text" onClick={handleStartOver}>
                   Start over
                 </Button>
               </>
             )}
             {stage.stage === "draft" && (
-              <Button size="small" variant="outlined" onClick={retryDraft}>
+              <Button size="small" variant="contained" onClick={handleRetryDraft}>
                 Try again
               </Button>
             )}
             {stage.stage === "post" && (
-              <Button size="small" variant="outlined" onClick={backToReviewAfterPostFailure}>
+              <Button size="small" variant="contained" onClick={backToReviewAfterPostFailure}>
                 Back to review
               </Button>
             )}
@@ -337,7 +387,7 @@ export default function TakeAnnouncementPanel({
       {stage.phase === "noSpeech" && (
         <div>
           <p className={styles.fieldHint}>No speech was found in this recording.</p>
-          <Button size="small" variant="outlined" onClick={retryAudio}>
+          <Button size="small" variant="contained" onClick={handleRetryAudio}>
             Try again
           </Button>
         </div>
@@ -345,55 +395,97 @@ export default function TakeAnnouncementPanel({
 
       {(stage.phase === "review" || stage.phase === "posting") && (
         <>
-          <TextField
-            select
-            size="small"
-            label="Course"
-            value={courseId}
-            onChange={(e) => handleCourseChange(e.target.value)}
-            disabled={busy || posting}
-            sx={{ minWidth: 240 }}
-          >
-            {(courses ?? []).map((c) => (
-              <MenuItem key={c.id} value={c.id}>
-                {c.name}
-              </MenuItem>
-            ))}
-          </TextField>
-          <p className={styles.fieldHint}>Only courses linked to Canvas can be posted to.</p>
-          {coursesError && (
-            <p role="alert" className={styles.fieldHint}>
-              {coursesError}
-            </p>
-          )}
+          {/* Fixer pass finding 1: "Post to" and "Announcement style" are
+              SIBLING sections, not nested - the course picker is a
+              destination, not composition, and nesting rendered the child
+              legend at the same weight as its parent with no hierarchy.
+              docs/recording-controls-ux-acceptance-criteria.md CC2's order:
+              Post to / Announcement style / Subject-Message (unchanged) /
+              Image. The Subject/Message review fields below are NOT settings
+              and keep their existing shape (CC2's own table entry for this
+              surface). */}
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Post to</legend>
+            <div className={styles.adaptRow}>
+              <TextField
+                select
+                size="small"
+                label="Course"
+                className={controls.fieldMd}
+                value={courseId}
+                onChange={(e) => handleCourseChange(e.target.value)}
+                disabled={busy || posting}
+              >
+                {(courses ?? []).map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </div>
+            <p className={styles.fieldHint}>Only courses linked to Canvas can be posted to.</p>
+            {coursesError && (
+              <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
+                {coursesError}
+              </div>
+            )}
+          </fieldset>
 
           {/* docs/reply-composition-controls-acceptance-criteria.md C0-1
               (this group): the announcement composition controls, reused
-              from the discussion side's vocabulary. Placed after the course
-              picker and before subject/body, alongside the one control that
-              actually re-runs drafting with the new settings - changing a
-              control here never re-drafts by itself (see useTakeAnnouncement
-              .ts's own note on this surface having no per-row arming to
-              join), so a visible, explicit "Regenerate" action is what makes
-              the controls reachable rather than dead. */}
-          <div>
-            <p className={styles.ghMeta} style={{ marginBottom: "var(--space-2)" }}>
-              Announcement style
-            </p>
+              from the discussion side's vocabulary. Placed alongside the one
+              control that actually re-runs drafting with the new settings -
+              changing a control here never re-drafts by itself (see
+              useTakeAnnouncement.ts's own note on this surface having no
+              per-row arming to join), so a visible, explicit "Regenerate"
+              action is what makes the controls reachable rather than dead. */}
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Announcement style</legend>
             <AnnouncementCompositionControls composition={composition} onChange={setComposition} disabled={busy || posting} />
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginTop: "var(--space-2)", flexWrap: "wrap" }}>
-              <Button size="small" variant="outlined" onClick={retryDraft} disabled={busy || posting}>
-                Regenerate announcement
-              </Button>
-              <span className={styles.fieldHint}>Replaces the subject and body currently shown below.</span>
+            <div className={styles.ghActions}>
+              {/* Fixer pass finding 4: ConfirmArmButtons stays mounted for
+                  both the untouched and the touched case - swapping it for
+                  a plain Button when fieldsTouched flips (which
+                  handleRegenerateConfirm's own setFieldsTouched(false)
+                  triggers on confirm) unmounted the button under focus and
+                  dropped focus to <body>. When fields are untouched, arming
+                  performs the regeneration directly instead of showing a
+                  confirm step (armed stays false) - a fresh, un-edited
+                  draft has nothing to lose. */}
+              <ConfirmArmButtons
+                armed={fieldsTouched && regenArmed}
+                idleLabel="Regenerate announcement"
+                confirmLabel="Confirm regenerate"
+                tone="warning"
+                idleVariant="outlined"
+                disabled={busy || posting}
+                onArm={() => {
+                  if (fieldsTouched) setRegenArmed(true);
+                  else handleRegenerateConfirm();
+                }}
+                onConfirm={handleRegenerateConfirm}
+                onCancel={() => setRegenArmed(false)}
+                consequenceId={REGEN_CONFIRM_CONSEQUENCE_ID}
+              />
+              {!regenArmed && (
+                <span className={styles.fieldHint}>Replaces the subject and message currently shown below.</span>
+              )}
             </div>
-          </div>
+            {regenArmed && (
+              <p id={REGEN_CONFIRM_CONSEQUENCE_ID} role="status" aria-live="polite" className={controls.consequence}>
+                This replaces your edited subject and message.
+              </p>
+            )}
+          </fieldset>
 
           <TextField
             size="small"
             label="Subject"
             value={subject}
-            onChange={(e) => setSubject(e.target.value)}
+            onChange={(e) => {
+              setSubject(e.target.value);
+              setFieldsTouched(true);
+            }}
             disabled={busy || posting}
             fullWidth
           />
@@ -401,7 +493,10 @@ export default function TakeAnnouncementPanel({
             size="small"
             label="Message"
             value={body}
-            onChange={(e) => setBody(e.target.value)}
+            onChange={(e) => {
+              setBody(e.target.value);
+              setFieldsTouched(true);
+            }}
             disabled={busy || posting}
             multiline
             minRows={4}
@@ -430,11 +525,9 @@ export default function TakeAnnouncementPanel({
               silently did or didn't make it in. Download remains available
               regardless - useful on its own, and the fallback when the
               upload fails. */}
-          <div>
-            <p className={styles.ghMeta} style={{ marginBottom: "var(--space-2)" }}>
-              Image
-            </p>
-            <p className={styles.fieldHint} style={{ marginBottom: "var(--space-2)" }}>
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Image</legend>
+            <p className={styles.fieldHint}>
               A ready image posts with the announcement automatically (with
               alt text for screen readers) - the Subject and Message fields
               above stay plain text either way. If the upload to Canvas
@@ -455,60 +548,61 @@ export default function TakeAnnouncementPanel({
                   alt=""
                   style={{ display: "block", maxWidth: "320px", width: "100%", borderRadius: "var(--radius-xs)", marginBottom: "var(--space-2)" }}
                 />
-                <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
+                <div className={styles.ghActions}>
                   <Button size="small" variant="outlined" onClick={downloadImage}>
                     Download image
                   </Button>
                   <Button size="small" variant="outlined" onClick={regenerateImage} disabled={busy || posting}>
                     Regenerate image
                   </Button>
-                  <Button size="small" variant="text" onClick={discardImage} disabled={busy || posting}>
+                  <Button size="small" variant="text" color="error" onClick={discardImage} disabled={busy || posting}>
                     Remove image
                   </Button>
                 </div>
               </div>
             )}
             {imageState === "failed" && (
-              <div>
-                <p role="alert" className={styles.fieldHint}>
+              <div className={controls.stack}>
+                <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
                   {imageError}
-                </p>
-                <Button size="small" variant="outlined" onClick={regenerateImage} disabled={busy || posting}>
-                  Try again
-                </Button>
+                </div>
+                <div className={styles.ghActions}>
+                  <Button size="small" variant="outlined" onClick={regenerateImage} disabled={busy || posting}>
+                    Try again
+                  </Button>
+                </div>
               </div>
             )}
             {imageState === "idle" && (
-              <div>
+              <div className={controls.stack}>
                 <span className={styles.fieldHint}>No image yet.</span>
-                <div style={{ marginTop: "var(--space-2)" }}>
+                <div className={styles.ghActions}>
                   <Button size="small" variant="outlined" onClick={regenerateImage} disabled={busy || posting}>
                     Generate image
                   </Button>
                 </div>
               </div>
             )}
-          </div>
+          </fieldset>
 
           {fieldError && (
-            <p role="alert" className={styles.fieldHint}>
+            <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
               {fieldError}
-            </p>
+            </div>
           )}
 
           {armed && (
-            <div style={{ padding: "var(--space-3) var(--space-4)", borderTop: "1px solid var(--field-border)", background: "var(--warning-surface)" }}>
-              <p id={POST_CONFIRM_CONSEQUENCE_ID} role="status" aria-live="polite" style={{ margin: "0 0 var(--space-2) 0", fontSize: "var(--font-size-md)" }}>
+            <div className={`${controls.notice} ${controls.noticeWarning}`}>
+              <p id={POST_CONFIRM_CONSEQUENCE_ID} role="status" aria-live="polite">
                 Posting publishes this announcement to every student in {courses?.find((c) => c.id === courseId)?.name ?? "the course"} immediately - Canvas has no unpublished state for an announcement - and this app cannot recall or delete it afterward.
               </p>
-              <p className={styles.previewMeta} style={{ margin: "0 0 var(--space-1) 0" }}>
-                Subject that will be sent:
-              </p>
+              <p className={styles.previewMeta}>Subject that will be sent:</p>
               <code style={{ display: "block", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "var(--font-size-md)" }}>{subject}</code>
-              <p className={styles.previewMeta} style={{ margin: "var(--space-2) 0 var(--space-1) 0" }}>
-                Body that will be sent:
-              </p>
+              <p className={styles.previewMeta}>Body that will be sent:</p>
               <code
+                tabIndex={0}
+                role="group"
+                aria-label="Announcement preview"
                 style={{
                   display: "block",
                   whiteSpace: "pre-wrap",
@@ -524,31 +618,29 @@ export default function TakeAnnouncementPanel({
           )}
 
           {postError && (
-            <p role="alert" className={styles.fieldHint}>
+            <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
               {postError}
-            </p>
+            </div>
           )}
 
-          <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
-            {armed && (
-              <Button size="small" variant="text" onClick={cancelPostConfirm} disabled={posting}>
-                Cancel
-              </Button>
-            )}
-            <Button
-              size="small"
-              variant="contained"
-              color="primary"
-              disabled={posting || busy || Boolean(postUnavailableReason)}
-              onClick={handlePostButtonClick}
-              aria-describedby={armed ? POST_CONFIRM_CONSEQUENCE_ID : undefined}
-            >
-              {posting ? "Posting…" : armed ? "Confirm post" : "Post to Canvas"}
-            </Button>
-            <Button size="small" variant="outlined" onClick={saveDraft} disabled={busy || posting || savingDraft}>
+          <div className={`${styles.ghActions} ${controls.runRow}`}>
+            <ConfirmArmButtons
+              armed={armed}
+              idleLabel="Post to Canvas"
+              confirmLabel="Confirm post"
+              tone="primary"
+              idleVariant="contained"
+              loading={posting}
+              loadingLabel="Posting…"
+              disabled={busy || Boolean(postUnavailableReason)}
+              onArm={handlePostButtonClick}
+              onConfirm={handlePostButtonClick}
+              onCancel={cancelPostConfirm}
+              consequenceId={POST_CONFIRM_CONSEQUENCE_ID}
+            />
+            <Button size="small" variant="outlined" loading={savingDraft} loadingPosition="start" onClick={saveDraft} disabled={busy || posting}>
               {savingDraft ? "Saving…" : "Save to drafts"}
             </Button>
-            {postUnavailableReason && <span className={styles.previewMeta}>{postUnavailableReason}</span>}
             {draftSaved && <span className={styles.previewMeta}>Saved to drafts.</span>}
             {draftError && (
               <span role="alert" className={styles.previewMeta}>
@@ -556,6 +648,7 @@ export default function TakeAnnouncementPanel({
               </span>
             )}
           </div>
+          {postUnavailableReason && <p className={styles.fieldHint}>{postUnavailableReason}</p>}
         </>
       )}
     </div>

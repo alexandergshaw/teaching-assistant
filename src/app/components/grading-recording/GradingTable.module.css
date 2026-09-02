@@ -1,3 +1,16 @@
+/* Fixer pass finding 4: GradingTable used to return a bare Fragment, so its
+   own top-level pieces (search row, toolbar, table) were direct children of
+   the panel's `.adaptPanel` and picked up ITS flex `gap: var(--space-4)` for
+   free. Giving the table a persistent wrapper (the focus-after-remove
+   fallback target - see the component's own comment) took them out of that
+   flex context, so this class restates the same gap locally rather than
+   letting them collapse together with no space between. */
+.tableContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
 /* Grading from a screen recording - the table's own row styles.
    docs/grading-via-recording-acceptance-criteria.md section 4.
 
@@ -80,8 +93,34 @@ tr.bodyRow td {
 }
 
 .rosterCandidates {
+  margin-top: var(--space-1);
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
+}
+
+/* CC3: the small left offset a badge takes when it follows another badge or
+   label inline, moved out of an inline style object. */
+.badgeGap {
+  margin-left: var(--space-1);
+}
+
+/* CC14: right-dock the Actions cell's control cluster under the
+   controls.rowActionsHeader header, matching recording/
+   DiscussionRepliesPanel.module.css's own .rowActions exactly. Layered ON
+   TOP of styles.ghActions (page.module.css) rather than replacing it, so the
+   app's button-row vocabulary is reused and only the alignment is new. */
+.rowActions {
+  justify-content: flex-end;
+}
+
+/* CC11: a per-row failure message stays a field-level line, not a full
+   .notice card - mirrors recording/DiscussionRepliesPanel.module.css's
+   .replyErrorText exactly (several rows can fail at once; a card per row
+   would be the loudest thing on the table). */
+.rowErrorText {
+  margin-top: var(--space-1);
+  color: var(--danger);
+  font-size: var(--font-size-md);
 }
 
 .tableCaption {
@@ -107,4 +146,60 @@ tr.bodyRow td {
      column in proportional digits is the most obvious amateur tell on a
      grading surface. */
   font-variant-numeric: tabular-nums;
+}
+
+/* CC3: the sort-direction glyph's small offset from the "Name" label, moved
+   out of an inline style object. */
+.sortGlyph {
+  margin-left: var(--space-1);
+}
+
+/* Fixer pass finding 8/CC14: dims the glyph on an inactive sortable column -
+   matches recording/DiscussionRepliesPanel.module.css's own rule for the
+   sibling table's SortGlyph. */
+.sortGlyphInactive {
+  color: var(--text-muted);
+}
+
+/* CC15: RubricInputModal's and LegibilityProbeModal's plain body container
+   for live form controls. styles.previewContent (page.module.css) is a
+   pre-wrap PREVIEW box - white-space: pre-wrap, a tinted background, a
+   scroll cap - meant for read-only extracted text, not a home for buttons,
+   textareas and notices. */
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* CC3/CC15: RubricInputModal's paste-or-drop zone, moved out of an inline
+   style object whose border colour depended on drag-over state - handled
+   here with a modifier class instead. */
+.dropZone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  border: 1px dashed var(--field-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.dropZoneActive {
+  border-color: var(--accent);
+}
+
+/* CC6: RubricInputModal's disabled textarea - opacity plus cursor, never a
+   colour swap (AM11's disabled recipe, applied to a plain HTML control this
+   app's `.field textarea` rule does not itself grey out). */
+.rubricTextarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.rubricTextarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

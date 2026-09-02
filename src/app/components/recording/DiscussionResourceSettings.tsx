@@ -16,6 +16,8 @@
 
 import { TextField, MenuItem } from "@mui/material";
 import styles from "../../page.module.css";
+import panelStyles from "./DiscussionRepliesPanel.module.css";
+import controls from "./RecordingControls.module.css";
 import { RESOURCE_KINDS, RESOURCE_KIND_LABELS, type ResourceKind } from "@/lib/resource-kind";
 import {
   resourceKindsRenderValue,
@@ -43,14 +45,17 @@ export default function DiscussionResourceSettings({
   // message here rather than silently swapped or blocked at the keystroke.
   const rangeInverted = videoLengthRangeIsInverted(videoLengthMinMinutes, videoLengthMaxMinutes);
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", alignItems: "flex-start" }}>
+    // Fixer pass finding 4: pairs a 37.7px select with the min/max-length
+    // group (a taller composite block) - `.rowTop` keeps their top edges
+    // aligned instead of bottom-aligning to the taller block.
+    <div className={`${styles.adaptRow} ${panelStyles.rowTop}`}>
       <TextField
         select
         label="Eligible resource kinds"
         size="small"
         value={resourceKinds}
         // Deliberately no `fullWidth` - matches the composition cluster's
-        // own bounded minWidth flex-item idiom (DiscussionReplyControls.tsx).
+        // own bounded field-width idiom (DiscussionReplyControls.tsx).
         slotProps={{
           select: {
             multiple: true,
@@ -65,7 +70,7 @@ export default function DiscussionResourceSettings({
           const next = RESOURCE_KINDS.filter((id) => raw.includes(id));
           onChangeResourceKinds(next);
         }}
-        sx={{ minWidth: 260 }}
+        className={controls.fieldLg}
       >
         {RESOURCE_KINDS.map((id) => (
           <MenuItem key={id} value={id}>
@@ -74,8 +79,13 @@ export default function DiscussionResourceSettings({
         ))}
       </TextField>
 
-      <div style={{ minWidth: 260 }}>
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+      {/* Fixer pass finding 5: this is a plain layout wrapper, not a
+          TextField - it was borrowing `controls.fieldLg` (a field-width
+          class) and widening it inline from 260px to 320px. Its own class,
+          at the 260px value it actually used before that reuse widened
+          it. */}
+      <div className={panelStyles.videoLengthGroup}>
+        <div className={styles.adaptRow}>
           <TextField
             type="number"
             label="Min video length (min)"
@@ -86,7 +96,7 @@ export default function DiscussionResourceSettings({
             }
             error={rangeInverted}
             slotProps={{ htmlInput: { min: 0, "aria-describedby": VIDEO_LENGTH_HINT_ID } }}
-            sx={{ width: 120 }}
+            className={controls.fieldSm}
           />
           <TextField
             type="number"
@@ -98,7 +108,7 @@ export default function DiscussionResourceSettings({
             }
             error={rangeInverted}
             slotProps={{ htmlInput: { min: 0, "aria-describedby": VIDEO_LENGTH_HINT_ID } }}
-            sx={{ width: 120 }}
+            className={controls.fieldSm}
           />
         </div>
         {/* FIX 3: shown INSTEAD of the ordinary hint, never alongside it -
@@ -109,7 +119,7 @@ export default function DiscussionResourceSettings({
             doc comment for why the instructor sees this instead of a quiet
             swap. */}
         {rangeInverted ? (
-          <p id={VIDEO_LENGTH_HINT_ID} className={styles.error} style={{ margin: "var(--space-1) 0 0", fontSize: "var(--font-size-md)" }}>
+          <p id={VIDEO_LENGTH_HINT_ID} className={panelStyles.videoLengthError}>
             Min video length is greater than max - swap them or clear one, or this preference will be dropped when
             searching for resources.
           </p>
@@ -118,7 +128,7 @@ export default function DiscussionResourceSettings({
              comments: the resource search has no way to confirm a video's
              actual runtime, so this is labelled and described as a
              preference throughout - never as a guarantee. */
-          <p id={VIDEO_LENGTH_HINT_ID} className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
+          <p id={VIDEO_LENGTH_HINT_ID} className={panelStyles.videoLengthHint}>
             Preferred video length, not a guarantee - search results do not always confirm how long a video actually
             runs.
           </p>

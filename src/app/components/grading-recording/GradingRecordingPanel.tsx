@@ -50,9 +50,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
+import controls from "../recording/RecordingControls.module.css";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useDiscussionCapture } from "../recording/useDiscussionCapture";
 import { EXTRACT_BATCH_WIRE_BUDGET, accumulateDroppedFrames } from "../recording/discussion-capture";
+// docs/recording-controls-ux-acceptance-criteria.md CC1: the one legal
+// spelling of a state-dependent primary.
+import { variantFor } from "../ui/buttonVariant";
+// CC8: the run-log row, re-homed - this panel's own copy is deleted below.
+import RunLogRow from "../recording/RunLogRow";
+// CC12: the status column moves out of aria-hidden; a throttled, visually
+// hidden live region replaces it for assistive tech, using the same
+// parameterised sentence/hook DiscussionRepliesPanel.tsx's own file-local
+// versions were extracted from.
+import { composeCaptureLiveSentence, useThrottledLiveSentence } from "../recording/captureLiveRegion";
+import { visuallyHidden } from "../ui/visuallyHidden";
 import {
   RECORDING_LAUNCH_EVENT,
   parseRecordingLaunch,
@@ -266,6 +278,14 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   const dismissNotice = useCallback((id: string) => {
     setNotices((prev) => prev.filter((n) => n.id !== id));
   }, []);
+  // CC14: a per-row "Copy feedback" clipboard failure surfaces through this
+  // same notice channel - the "error" kind already renders as a danger
+  // notice below, the same urgency DiscussionReplyRow.tsx's own onCopyError
+  // gives a failed Copy reply.
+  const handleCopyFeedbackError = useCallback(
+    (message: string) => pushNotices([{ kind: "error", text: message }]),
+    [pushNotices]
+  );
 
   const extractedRef = useRef<ExtractedSubmission[]>([]);
   const [extracting, setExtracting] = useState(false);
@@ -524,6 +544,21 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     triggerFileDownload(new Blob([text], { type: mimeType }), filename);
   };
 
+  // CC1: the visible reason a disabled Grade submissions primary carries.
+  const canGrade = rubricText.trim() !== "";
+
+  // CC12: composeCaptureLiveSentence/useThrottledLiveSentence, adopted
+  // whole - Grading's own noun is "submission"/"submissions".
+  const captureLiveSentence = composeCaptureLiveSentence({
+    count: gradingRows.totalCount,
+    noun: { one: "submission", many: "submissions" },
+    extracting,
+    pendingFrames,
+    stalled,
+    capturing,
+  });
+  const throttledLiveSentence = useThrottledLiveSentence(captureLiveSentence);
+
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
@@ -543,95 +578,197 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           refused for a missing rubric) is exactly when this needs to be
           reachable without hunting - mirrors
           recording/DiscussionRepliesPanel.tsx's own identical placement and
-          reasoning. */}
-      <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-        <span>{gradingRecordingLogSummaryLine(summarizeGradingRecordingRunLog(currentGradingLog))}</span>
-        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
-          Download run log (CSV)
-        </Button>
-        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
-          Download run log (JSON)
-        </Button>
-      </div>
+          reasoning. CC8: the byte-identical row this file used to inline is
+          now the shared RunLogRow component. */}
+      <RunLogRow
+        summary={gradingRecordingLogSummaryLine(summarizeGradingRecordingRunLog(currentGradingLog))}
+        onDownload={handleDownloadLog}
+      />
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)", alignItems: "flex-start" }}>
-        <TextField
-          select
-          label="Course (for roster matching)"
-          size="small"
-          value={courseId}
-          onChange={(e) => setCourseId(e.target.value)}
-          disabled={coursesLoading}
-          sx={{ minWidth: 240 }}
-        >
-          <MenuItem value="">No course selected</MenuItem>
-          {(courses ?? []).map((c) => (
-            <MenuItem key={c.id} value={c.id}>
-              {c.name}
-            </MenuItem>
+      {/* Fixer pass finding 7: this used to render at the bottom of the
+          panel, below the table, where a notice about a failed extraction
+          could scroll out of view before the instructor ever saw it - moved
+          here, directly under the header/run-log row, so it is the first
+          thing on screen regardless of how far down the table has grown.
+          CC11: ONE wrapper carries role="status"/aria-live - no role on the
+          individual notices. This replaces the per-notice role="alert" this
+          file used to give every danger-kind notice: the 9b finding is that
+          several extraction outcomes can arrive close together, and N
+          simultaneous role="alert" elements each queue their own
+          interruption instead of being read as one update - which is worse,
+          not better, for an instructor already mid-task. One status region
+          announcing the latest change is the same shape
+          DiscussionRepliesPanel.tsx's own notice list uses.
+          CC11 fixer pass: the dropped-frames notice, the frame-encode notice
+          and a failed-grade error used to render as three separate standalone
+          `role="alert"` paragraphs further down the panel - folded in here so
+          every notice on this surface lives in the one place an instructor
+          already knows to look, matching module deck's own consolidated
+          wrapper. `{droppedFramesTotal > 0 &&` stays the exact gate
+          GradingRecordingPanel.wiring.test.ts:55 pins; only its render
+          location moved. A non-danger extraction outcome ("confirmed-empty",
+          "added") now renders as a neutral `controls.notice` box rather than
+          a bare `.fieldHint` line, matching module deck's own notice
+          treatment. */}
+      {(droppedFramesTotal > 0 || frameEncodeNotice || gradeError || notices.length > 0) && (
+        <div role="status" aria-live="polite" className={styles.field}>
+          {droppedFramesTotal > 0 && (
+            <p className={`${controls.notice} ${controls.noticeDanger}`}>
+              Some of the screen scrolled past faster than it could be read. Scroll back over that section to catch
+              it.
+            </p>
+          )}
+          {frameEncodeNotice && <p className={`${controls.notice} ${controls.noticeDanger}`}>{frameEncodeNotice}</p>}
+          {gradeError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{gradeError}</p>}
+          {notices.map((n) => (
+            <p key={n.id} className={isDangerNotice(n.kind) ? `${controls.notice} ${controls.noticeDanger}` : controls.notice}>
+              {n.text}{" "}
+              <button type="button" className={styles.linkButton} onClick={() => dismissNotice(n.id)}>
+                Dismiss
+              </button>
+            </p>
           ))}
-        </TextField>
-        <div>
-          <Button variant="outlined" size="small" ref={rubricButtonRef} onClick={() => setRubricModalOpen(true)}>
+        </div>
+      )}
+
+      {/* CC2: settings grouped under named sections, run row last. */}
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Capture</legend>
+        {/* Fixer pass finding 2: the select used to UNMOUNT while courses
+            were loading (a ternary swapping the field for the loading line
+            entirely) - kept mounted and disabled instead, matching
+            DiscussionCaptureSettings.tsx/ModuleDeckSettings.tsx's own shape,
+            so the field's position on screen never jumps and a keyboard user
+            tabbing toward it does not land somewhere else mid-load. */}
+        <div className={styles.adaptRow}>
+          <TextField
+            select
+            label="Course (for roster matching)"
+            size="small"
+            value={courseId}
+            onChange={(e) => setCourseId(e.target.value)}
+            className={controls.fieldMd}
+            disabled={coursesLoading}
+          >
+            <MenuItem value="">No course selected</MenuItem>
+            {(courses ?? []).map((c) => (
+              <MenuItem key={c.id} value={c.id}>
+                {c.name}
+              </MenuItem>
+            ))}
+          </TextField>
+        </div>
+        {coursesLoading && (
+          <p role="status" aria-live="polite" className={controls.loadingLine}>
+            <span className={styles.spinner} aria-hidden="true" /> Loading your courses…
+          </p>
+        )}
+        {coursesError && (
+          <p className={styles.fieldHint}>Could not load your courses - roster matching is unavailable, capture still works.</p>
+        )}
+        {courseId && !selectedRosterText && (
+          <p className={styles.fieldHint}>
+            This course has no roster on file - names will show as &quot;No roster to check&quot; until one is added to its course tile.
+          </p>
+        )}
+      </fieldset>
+
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Grading</legend>
+        <div className={styles.ghActions}>
+          {/* Fixer pass finding 1: with rows captured and no rubric yet,
+              "Add rubric" is the real next step - it now takes the fill
+              instead of leaving a disabled "Grade submissions" as the only
+              contained button on screen. Guarded on !capturing so "Stop
+              capture" stays the sole primary while a capture is live (CC1's
+              "a live capture beats everything"). */}
+          <Button
+            variant={variantFor(!capturing && gradingRows.totalCount > 0 && !canGrade)}
+            size="small"
+            ref={rubricButtonRef}
+            onClick={() => setRubricModalOpen(true)}
+          >
             {rubricText ? "Edit rubric" : "Add rubric"}
           </Button>
-          <p className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
-            {rubricText
-              ? `Rubric set (${rubricText.trim().length} characters).`
-              : "No rubric yet - you can capture submissions first and add one when you are ready to grade."}
-          </p>
         </div>
-      </div>
-      {coursesError && (
-        <p className={styles.fieldHint}>Could not load your courses - roster matching is unavailable, capture still works.</p>
-      )}
-      {courseId && !selectedRosterText && (
         <p className={styles.fieldHint}>
-          This course has no roster on file - names will show as &quot;No roster to check&quot; until one is added to its course tile.
+          {rubricText
+            ? `Rubric set (${rubricText.trim().length} characters).`
+            : "No rubric yet - you can capture submissions first and add one when you are ready to grade."}
         </p>
-      )}
-      {/* AC2/AC3/AC4 of docs/knowledge-recording-handoff-acceptance-criteria.md:
-          extends this existing notice (already the reference implementation
-          the sibling "discussions" destination is matched against) with the
-          carried pages, individually removable, and a way back to where they
-          were selected - without touching the label sentence or its
-          placement. `pages` is ALREADY filtered to only what the budget
-          included (AC1 - KnowledgeTab.tsx's includedContextPages, before this
-          ever launches); CarriedKnowledgePages.tsx re-derives inclusion fresh
-          on every removal (never assumes the original filter still holds -
-          see that file's own header). Renders nothing when knowledgeContext
-          is null (AC2's "carrying nothing renders nothing") - unchanged. */}
-      {knowledgeContext && (
-        <div className={styles.field} style={{ gap: "var(--space-1)" }}>
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            {`Grading with Knowledge Base context: ${knowledgeContext.label ?? "selected pages"}.`}{" "}
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() => returnToKnowledge(returnTargetPageId(knowledgeContext.pages))}
-            >
-              Back to Knowledge
-            </button>
-          </p>
-          <CarriedKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
-        </div>
-      )}
-      {/* AC3/4b: rendered OUTSIDE the `knowledgeContext &&` gate above -
-          unlike the label/CarriedKnowledgePages block, this must still offer
-          something when nothing is carried yet at all. */}
-      <AddKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
+      </fieldset>
 
-      <div className={styles.ghActions}>
-        <Button variant="contained" size="small" onClick={handleStartStop}>
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Context</legend>
+        {/* AC2/AC3/AC4 of docs/knowledge-recording-handoff-acceptance-criteria.md:
+            extends this existing notice (already the reference implementation
+            the sibling "discussions" destination is matched against) with the
+            carried pages, individually removable, and a way back to where they
+            were selected - without touching the label sentence or its
+            placement. `pages` is ALREADY filtered to only what the budget
+            included (AC1 - KnowledgeTab.tsx's includedContextPages, before this
+            ever launches); CarriedKnowledgePages.tsx re-derives inclusion fresh
+            on every removal (never assumes the original filter still holds -
+            see that file's own header). Renders nothing when knowledgeContext
+            is null (AC2's "carrying nothing renders nothing") - unchanged. */}
+        {knowledgeContext && (
+          <div className={styles.field}>
+            <p className={styles.fieldHint}>
+              {`Grading with Knowledge Base context: ${knowledgeContext.label ?? "selected pages"}.`}{" "}
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => returnToKnowledge(returnTargetPageId(knowledgeContext.pages))}
+              >
+                Back to Knowledge
+              </button>
+            </p>
+            <CarriedKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
+          </div>
+        )}
+        {/* AC3/4b: rendered OUTSIDE the `knowledgeContext &&` gate above -
+            unlike the label/CarriedKnowledgePages block, this must still offer
+            something when nothing is carried yet at all. */}
+        <AddKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
+      </fieldset>
+
+      {/* CC1: the run row - the primary is the next step, and a live capture
+          beats everything (Stop capture is primary while capturing). Grading
+          rows exist -> Grade submissions is primary; otherwise Start
+          capture. Grade submissions with no rubric is disabled with a
+          visible reason instead of today's post-click-only refusal - the
+          refusal path in handleGradeAll (checkGradingReadiness) still runs
+          and still covers the "no submissions" case. */}
+      <div className={`${styles.ghActions} ${controls.runRow}`}>
+        <Button
+          variant={variantFor(capturing || gradingRows.totalCount === 0)}
+          color="primary"
+          size="small"
+          onClick={handleStartStop}
+        >
           {capturing ? "Stop capture" : "Start capture"}
         </Button>
-        <Button variant="outlined" size="small" disabled={gradingBusy} onClick={() => void handleGradeAll()}>
+        <Button
+          variant={variantFor(!capturing && gradingRows.totalCount > 0 && canGrade)}
+          size="small"
+          loading={gradingBusy}
+          loadingPosition="start"
+          disabled={!canGrade}
+          onClick={() => void handleGradeAll()}
+        >
           {gradingBusy ? "Grading…" : "Grade submissions"}
         </Button>
       </div>
+      {!capturing && gradingRows.totalCount > 0 && !canGrade && (
+        <p className={styles.fieldHint}>Add a rubric to grade.</p>
+      )}
       <p className={styles.fieldHint}>You can also stop from your browser&apos;s sharing bar.</p>
 
-      <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-3)", flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
+      {/* CC12: only the <video> stays aria-hidden - the status column (timer,
+          submission count, extracting/catching-up lines) now renders in the
+          open, and a throttled, visually hidden live region announces the
+          same facts for assistive tech. */}
+      <div className={controls.statusRow}>
         {/* Rendered unconditionally, never `{capturing && <video ...>}` - same
             reasoning as DiscussionRepliesPanel.tsx/LegibilityProbeModal.tsx's
             own identical comment: useDiscussionCapture's start() assigns
@@ -640,27 +777,14 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
             null at that exact moment. */}
         <video
           ref={previewRef}
-          style={{
-            width: 240,
-            aspectRatio: "16 / 9",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--card-border)",
-            // No token resolves to black - nothing renders as text over this
-            // surface, it is only the camera's "no frame yet" backdrop, and
-            // it deliberately mirrors DiscussionRepliesPanel.module.css's and
-            // LegibilityProbeModal.module.css's identical .previewVideo
-            // idiom rather than diverging from it. See this file's
-            // aesthetics-pass report for the same note.
-            background: "#000",
-            objectFit: "cover",
-            display: capturing ? undefined : "none",
-          }}
+          className={`${controls.previewVideo} ${capturing ? "" : controls.previewVideoHidden}`}
+          aria-hidden="true"
           autoPlay
           muted
           playsInline
         />
         {capturing && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
+          <div className={controls.statusText}>
             <span>{fmt(elapsedSec)}</span>
             <span>
               {gradingRows.totalCount === 0
@@ -672,25 +796,12 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           </div>
         )}
       </div>
+      <span role="status" aria-live="polite" style={visuallyHidden}>
+        {throttledLiveSentence}
+      </span>
       {stalled && (
-        <p className={styles.error}>
+        <p className={`${controls.notice} ${controls.noticeWarning}`} role="status">
           Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second window while you scroll.
-        </p>
-      )}
-      {/* BLOCKER 4 / R1a: surfaced with the SAME danger urgency as the
-          skipped-unnamed notice below (isDangerNotice's own rule) - a
-          dropped frame silently takes its submission with it, which is
-          exactly the "unreadable or incomplete run must never look like a
-          complete one" failure mode this whole feature is gated on
-          measuring. Wording for the dropped-frame sentence is reused
-          verbatim from the shipped precedent - recording/
-          DiscussionRepliesPanel.tsx's own AC63 drop notice - rather than
-          inventing a second string for the same fact. Shown for the whole
-          session (not gated on capturing/stopped) - the loss is permanent
-          the moment it happens. */}
-      {droppedFramesTotal > 0 && (
-        <p className={styles.error} role="alert">
-          Some of the screen scrolled past faster than it could be read. Scroll back over that section to catch it.
         </p>
       )}
       {/* FIX 1: ordinary information, not danger (styles.fieldHint, no
@@ -706,35 +817,6 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           submission{gradingRows.totalCount === 1 ? "" : "s"} so far.
         </p>
       )}
-      {frameEncodeNotice && (
-        <p className={styles.error} role="alert">
-          {frameEncodeNotice}
-        </p>
-      )}
-
-      {notices.length > 0 && (
-        <div className={styles.field}>
-          {notices.map((n) => (
-            <p
-              key={n.id}
-              className={isDangerNotice(n.kind) ? styles.error : styles.fieldHint}
-              role={isDangerNotice(n.kind) ? "alert" : "status"}
-            >
-              {n.text}{" "}
-              <button type="button" className={styles.linkButton} onClick={() => dismissNotice(n.id)}>
-                Dismiss
-              </button>
-            </p>
-          ))}
-        </div>
-      )}
-
-      {gradeError && (
-        <p className={styles.error} role="alert">
-          {gradeError}
-        </p>
-      )}
-
       <GradingTable
         rows={gradingRows.rows}
         totalCount={gradingRows.totalCount}
@@ -745,6 +827,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         onEditField={gradingRows.editField}
         onRemoveRow={gradingRows.removeRow}
         onClearTable={gradingRows.clearTable}
+        onCopyError={handleCopyFeedbackError}
       />
 
       {rubricModalOpen && (

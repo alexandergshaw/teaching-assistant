@@ -402,10 +402,12 @@ export function isDispatchableDraftItem(item: { force: boolean }, row: { userEdi
 // that needs it.
 // ---------------------------------------------------------------------------
 
-export type DraftDispatchSource = "auto" | "retry" | "draftMissing" | "redraftAll";
+export type DraftDispatchSource = "auto" | "retry" | "draftMissing" | "redraftAll" | "redraftRow";
 
 export function draftDispatchForce(source: DraftDispatchSource): boolean {
-  return source === "retry" || source === "redraftAll";
+  // CC19: "redraftRow" (the per-row "Redraft" control) forces for the same
+  // reason "retry" does - single-row, explicit, targeted.
+  return source === "retry" || source === "redraftAll" || source === "redraftRow";
 }
 
 // ---------------------------------------------------------------------------

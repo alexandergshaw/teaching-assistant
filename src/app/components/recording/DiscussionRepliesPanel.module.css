@@ -12,31 +12,26 @@
    useReplyRows.ts into a fragment the scan itself harvested as a key
    nothing writes. */
 
-.previewVideo {
-  width: 200px;
-  aspect-ratio: 16 / 9;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--field-border);
-  /* A video letterbox is not a themed surface - fixed dark-neutral (the
-     brand navy) regardless of theme, per the aesthetics pass's capture-stage
-     rule, rather than the raw #000 this carried before. */
-  background: var(--navy);
-  object-fit: cover;
-}
+/* docs/recording-controls-ux-acceptance-criteria.md CC13: .previewVideo,
+   .statusRow and .statusText moved to RecordingControls.module.css
+   (imported as `controls`) - this file's own copies are deleted rather than
+   left as dead duplicates. Fixer pass finding 4: this file's own
+   `.hiddenVideo` (the CC3 conditional-display class for the capture preview
+   video) is deleted too - DiscussionRepliesPanel.tsx now composes
+   `controls.previewVideoHidden` on `controls.previewVideo` instead. */
 
-.statusRow {
-  display: flex;
+/* Fixer pass finding 4: three settings rows in this panel's Capture/Replies/
+   Resources sections pair a 37.7px MUI TextField (size="small") with a
+   taller composite block on the same `.adaptRow` - a checkbox plus its hint
+   paragraph (DiscussionCaptureSettings.tsx "Also save the screen
+   recording"), a min/max pair plus its hint (DiscussionResourceSettings.tsx),
+   or a label plus a Slider (DiscussionReplyControls.tsx). `.adaptRow`'s own
+   `align-items: flex-end` (page.module.css) bottom-aligns every child to the
+   TALLEST one, which sinks the short field about 30px below the composite
+   block's own top edge. Composed alongside `.adaptRow` (never replacing it -
+   the gap/wrap/margin declarations stay shared) on exactly those three rows. */
+.rowTop {
   align-items: flex-start;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.statusText {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-size: var(--font-size-md);
-  color: var(--text-secondary);
 }
 
 /* Reply width UX pass (scratchpad note "reply-width-ux.md" section 2b/2c):
@@ -203,10 +198,47 @@ tr.bodyRow td {
   align-items: center;
 }
 
-.consequence {
-  margin: 0 0 var(--space-2) 0;
+/* docs/recording-controls-ux-acceptance-criteria.md CC13: .consequence moved
+   to RecordingControls.module.css (imported as `controls`) - the copy here
+   is deleted, not kept as a dead duplicate. */
+
+/* Fixer pass finding 5: this file's own `.formalitySlider` (the formality
+   slider's fixed-width box, DiscussionReplyControls.tsx) is deleted -
+   `controls.sliderBox` (RecordingControls.module.css, group P) is the same
+   box (width 220px, `padding-inline: var(--space-6)`) and is now shared
+   rather than duplicated per surface. */
+
+/* CC3: the formality label's own margin-bottom (DiscussionReplyControls.tsx) -
+   composed with styles.ghMeta, which sets no margin property, so there is no
+   overlapping-property tie (AM25). */
+.formalityLabel {
+  margin-bottom: var(--space-2);
+}
+
+/* CC3: the video-length range hint/error (DiscussionResourceSettings.tsx) -
+   a full standalone declaration (not composed with styles.error/.fieldHint)
+   so there is no same-property override tie between two CSS-module classes
+   of equal specificity (AM25's coin-flip risk). */
+/* Fixer pass finding 5: DiscussionResourceSettings.tsx's min/max-length group
+   wrapper was borrowing `controls.fieldLg` (a TextField width class meant for
+   a single field) and widened it inline from 260px to 320px - a plain layout
+   wrapper reusing (and silently changing) a field-width class is exactly the
+   per-file authority collision CC3/AM25 forbid. Its own class, at the value
+   it was actually using before that reuse widened it. */
+.videoLengthGroup {
+  min-width: 260px;
+}
+
+.videoLengthHint {
+  margin: var(--space-1) 0 0;
   font-size: var(--font-size-md);
   color: var(--text-secondary);
+}
+
+.videoLengthError {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-md);
+  color: var(--danger);
 }
 
 /* AC36: the table's own <caption> - shown (not visually hidden, unlike the
@@ -350,6 +382,44 @@ td:hover .hoverReveal,
    own "Reply width UX pass" comment above .rowBody). */
 .rowSkipped {
   opacity: 0.65;
+}
+
+/* Fixer pass finding 7: classes consumed by group D2 (DiscussionReplyRow.tsx/
+   DiscussionReplyTable.tsx), which cannot edit this file itself - added here
+   under the exact names D2 codes against. The page-module-css-classes guard
+   and the orphan ratchet run after the whole wave, once D2's own references
+   land, so these read as (temporarily) unconsumed within this fixer's own
+   gate run. */
+.metaTop {
+  margin-top: var(--space-1);
+}
+
+.metaTight {
+  margin: 0;
+}
+
+/* Matched to the three inline widths DiscussionReplyRow.tsx:840-842 uses
+   today (92%/78%/55%), not the round numbers a first guess would reach for -
+   these replace an inline `style={{ width }}` per line, so the visible
+   skeleton must not shift. */
+.skeletonLineLong {
+  width: 92%;
+}
+
+.skeletonLineMid {
+  width: 78%;
+}
+
+.skeletonLineShort {
+  width: 55%;
+}
+
+.sortGlyph {
+  margin-left: var(--space-1);
+}
+
+.sortGlyphInactive {
+  color: var(--text-muted);
 }
 
 /* D11 (AM25, "one styling authority per element"): DiscussionReplyRow.tsx

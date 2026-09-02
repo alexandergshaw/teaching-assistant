@@ -3,6 +3,9 @@
 import React from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
 import styles from "@/app/page.module.css";
+import controls from "../recording/RecordingControls.module.css";
+import { variantFor } from "../ui/buttonVariant";
+import { removeSegmentAudio } from "./videoModeAudioFold";
 import type { UseVideoModeReturn } from "./useVideoMode";
 
 interface VideoModeSectionProps extends Omit<UseVideoModeReturn, "voiceReady" | "supabase" | "user"> {
@@ -32,20 +35,35 @@ export function VideoModeSection({
   handleSynthesizeOne,
   handleGenerateAllVoices,
   handleApplyNarration,
+  setSegAudio,
   setApplyMode,
   setResultName,
   setVideoContext,
   voiceReady,
 }: VideoModeSectionProps) {
+  // CC1: Choose video is the primary until a video is loaded. Generate
+  // narration is the primary until segments exist; once they do, Apply
+  // narration to video takes over.
+  const hasVideo = Boolean(vidUrl);
+  const hasSegments = Boolean(segments);
+
   return (
     <>
-      {applyError && <p className={styles.error}>{applyError}</p>}
-      {genErrorV && <p className={styles.error}>{genErrorV}</p>}
+      {applyError && (
+        <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+          {applyError}
+        </p>
+      )}
+      {genErrorV && (
+        <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+          {genErrorV}
+        </p>
+      )}
 
-      <div className={styles.field} style={{ marginTop: "var(--space-4)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
+      <div className={controls.stack}>
+        <div className={styles.ghActions}>
           <Button
-            variant="outlined"
+            variant={variantFor(!hasVideo)}
             size="small"
             onClick={() => document.getElementById("video-input")?.click()}
           >
@@ -66,17 +84,12 @@ export function VideoModeSection({
       </div>
 
       {vidUrl && (
-        <div className={styles.field}>
-          <video
-            controls
-            playsInline
-            src={vidUrl}
-            style={{ width: "100%", maxHeight: 320, borderRadius: "var(--radius-md)", background: "var(--navy)" }}
-          />
+        <div className={controls.stack}>
+          <video controls playsInline src={vidUrl} className={controls.playerVideo} />
         </div>
       )}
 
-      <div className={styles.field}>
+      <div className={controls.stack}>
         <TextField
           label="Context (optional)"
           value={videoContext}
@@ -86,24 +99,26 @@ export function VideoModeSection({
           multiline
           minRows={2}
         />
-        <div style={{ marginTop: "var(--space-2)" }}>
-          <Button
-            variant="contained"
-            size="small"
-            disabled={!vidUrl || genBusyV}
-            onClick={() => void handleGenerateNarration()}
-          >
-            {genBusyV ? "Generating narration…" : "Generate narration"}
-          </Button>
-        </div>
+      </div>
+      <div className={styles.ghActions}>
+        <Button
+          variant={variantFor(!hasSegments)}
+          size="small"
+          disabled={!vidUrl || genBusyV}
+          loading={genBusyV}
+          loadingPosition="start"
+          onClick={() => void handleGenerateNarration()}
+        >
+          {genBusyV ? "Generating narration…" : "Generate narration"}
+        </Button>
       </div>
 
       {segments && (
         <>
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+          <div className={controls.stack}>
             {segments.map((seg, i) => (
-              <div key={i} style={{ padding: "var(--space-3)", border: "1px solid var(--field-border)", borderRadius: "var(--radius-sm)" }}>
-                <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: "var(--space-2)" }}>
+              <div key={i} className={controls.itemCard}>
+                <div className={styles.adaptRow}>
                   <TextField
                     label="Start (s)"
                     type="number"
@@ -111,7 +126,7 @@ export function VideoModeSection({
                     onChange={(e) => handleSegmentChange(i, "start", parseFloat(e.target.value) || 0)}
                     size="small"
                     slotProps={{ inputLabel: { shrink: true } }}
-                    sx={{ width: 100 }}
+                    className={controls.fieldSm}
                   />
                   <TextField
                     label="End (s)"
@@ -120,7 +135,7 @@ export function VideoModeSection({
                     onChange={(e) => handleSegmentChange(i, "end", parseFloat(e.target.value) || 0)}
                     size="small"
                     slotProps={{ inputLabel: { shrink: true } }}
-                    sx={{ width: 100 }}
+                    className={controls.fieldSm}
                   />
                 </div>
                 <TextField
@@ -130,16 +145,12 @@ export function VideoModeSection({
                   minRows={2}
                   value={seg.text}
                   onChange={(e) => handleSegmentChange(i, "text", e.target.value)}
-                  style={{ marginBottom: "var(--space-2)" }}
+                  slotProps={{ htmlInput: { "aria-label": `Narration for segment ${i + 1}` } }}
                 />
                 {segAudio[i] && (
-                  <audio
-                    controls
-                    src={segAudio[i].url}
-                    style={{ width: "100%", height: 36, marginBottom: "var(--space-2)" }}
-                  />
+                  <audio controls src={segAudio[i].url} className={controls.playerAudio} />
                 )}
-                <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                <div className={styles.ghActions}>
                   <Button
                     variant="text"
                     size="small"
@@ -153,11 +164,9 @@ export function VideoModeSection({
                       variant="text"
                       size="small"
                       onClick={() => {
-                        const newAudio = { ...segAudio };
-                        if (newAudio[i]) {
-                          URL.revokeObjectURL(newAudio[i].url);
-                          delete newAudio[i];
-                        }
+                        const removed = segAudio[i];
+                        setSegAudio(removeSegmentAudio(segAudio, i));
+                        if (removed) URL.revokeObjectURL(removed.url);
                       }}
                     >
                       Remove audio
@@ -168,71 +177,76 @@ export function VideoModeSection({
             ))}
           </div>
 
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={voBusyV !== null || !segments.some((s) => s.text.trim())}
+            loading={voBusyV === "all"}
+            loadingPosition="start"
+            onClick={() => void handleGenerateAllVoices()}
+          >
+            {voBusyV === "all" ? "Generating voices…" : "Generate all voices"}
+          </Button>
           {!voiceReady && (
             <p className={styles.fieldHint}>
               Requires ELEVENLABS_API_KEY.
             </p>
           )}
-
-          <Button
-            variant="outlined"
-            size="small"
-            disabled={voBusyV !== null || !segments.some((s) => s.text.trim())}
-            onClick={() => void handleGenerateAllVoices()}
-          >
-            {voBusyV === "all" ? "Generating voices…" : "Generate all voices"}
-          </Button>
         </>
       )}
 
       {segments && (
-        <div className={styles.field}>
-          <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", marginBottom: "var(--space-2)" }}>
+        <>
+          <div className={styles.adaptRow}>
             <TextField
               select
               label="Audio mode"
               value={applyMode}
               onChange={(e) => setApplyMode(e.target.value as "replace" | "mix")}
               size="small"
-              sx={{ minWidth: 180 }}
+              className={controls.fieldMd}
             >
               <MenuItem value="replace">Replace original audio</MenuItem>
               <MenuItem value="mix">Mix with original audio</MenuItem>
             </TextField>
+          </div>
+          <div className={styles.ghActions}>
             <Button
-              variant="contained"
+              variant={variantFor(hasSegments)}
               size="small"
               disabled={!segments || !Object.keys(segAudio).length || applyBusy}
+              loading={applyBusy}
+              loadingPosition="start"
               onClick={() => void handleApplyNarration()}
             >
               {applyBusy ? `Applying… ${applyPct}%` : "Apply narration to video"}
             </Button>
           </div>
-        </div>
+        </>
       )}
 
       {result && (
-        <div className={styles.field}>
-          <video
-            controls
-            src={result.url}
-            style={{ width: "100%", maxHeight: 360, borderRadius: "var(--radius-md)", background: "var(--navy)" }}
-          />
-          <div className={styles.ghActions} style={{ alignItems: "center", flexWrap: "wrap", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
+        <div className={controls.stack}>
+          <video controls src={result.url} className={controls.playerVideo} />
+          <div className={styles.adaptRow}>
             <TextField
               label="Video name"
               size="small"
               value={resultName}
               onChange={(e) => setResultName(e.target.value)}
-              sx={{ minWidth: 200 }}
+              className={controls.fieldGrow}
             />
-            <a
-              className={styles.linkButton}
+          </div>
+          <div className={styles.ghActions}>
+            <Button
+              component="a"
               href={result.url}
               download={`${(resultName.trim() || "narrated-video")}.webm`}
+              variant="outlined"
+              size="small"
             >
               Download video
-            </a>
+            </Button>
             <span className={styles.ghMeta}>
               {resultSave === "saving" && "Saving to library…"}
               {resultSave === "done" && "In library - see the Files tab"}

@@ -701,6 +701,26 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     [enqueueDrafts]
   );
 
+  // CC19: the per-row "Redraft" control (group D2, wave 1) dispatches
+  // through this. Deliberately a near-duplicate of retryRow, not a call
+  // INTO retryRow: they log identically (the "===Retries===" section and
+  // the per-row "retried" column have no separate concept of "redrafted",
+  // so this reuses the exact same event shape) and force past AC52's
+  // userEdited guard for the same reason S1 documents on retryRow - a
+  // targeted, single-row, explicit user action, not a bulk dispatch.
+  // What it deliberately does NOT do: bump `rowsApiRef.current.tableEpochRef`
+  // the way redraftAll does. redraftAll's epoch bump is a whole-table
+  // structural signal (AC45); this touches exactly one row and bumping the
+  // shared epoch would discard any in-flight extraction merge for every
+  // OTHER row (see redraftAll's own comment just below, `:426,456`).
+  const redraftRow = useCallback(
+    (id: string) => {
+      setLogRetries((prev) => [...prev, { at: new Date().toISOString(), rowId: id }]);
+      enqueueDrafts([id], draftDispatchForce("redraftRow"));
+    },
+    [enqueueDrafts]
+  );
+
   const draftAllPending = useCallback(() => {
     // B2 fix: `rawRows`, not `rows` - F12's whole-table list, and unlike
     // Copy/Find resources this button carries no count that could disclose
@@ -832,6 +852,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     setHandledAt,
     setSkipped,
     retryRow,
+    redraftRow,
     draftAllPending,
     redraftAll,
     clearTable,

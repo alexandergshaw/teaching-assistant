@@ -10,15 +10,23 @@
 // section 12.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
+import { Button } from "@mui/material";
 import styles from "../../page.module.css";
-import panelStyles from "./DiscussionRepliesPanel.module.css";
+import controls from "./RecordingControls.module.css";
 import { fmt } from "./types";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 import { tableClipboardText, draftingArmSignature } from "./discussion-capture";
-import { copyAllButtonLabel, REPLY_STATUS_FILTER_LABELS } from "./discussion-table-view";
+import { copyAllButtonLabel, isDraftAllPendingEligible, REPLY_STATUS_FILTER_LABELS } from "./discussion-table-view";
 import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } from "./useReplyResources";
 import { useDiscussionReplies } from "./useDiscussionReplies";
+import { variantFor } from "../ui/buttonVariant";
+import { visuallyHidden } from "../ui/visuallyHidden";
+// CC14: the shared clipboard guard - this was the last of the three
+// discussion sites still inlining `!navigator.clipboard || !window.
+// isSecureContext` independently (DiscussionReplyRow.tsx's two copies are
+// group D2's, outside this file set).
+import { writeClipboardText } from "../ui/clipboard";
+import RunLogRow from "./RunLogRow";
 import CarriedKnowledgePages from "./CarriedKnowledgePages"; // AC3 - shared with GradingRecordingPanel.tsx
 // AC3/4b (docs/knowledge-recording-handoff-acceptance-criteria.md section 4):
 // "add" - shared with GradingRecordingPanel.tsx the same way CarriedKnowledgePages
@@ -62,15 +70,17 @@ import { triggerFileDownload } from "../course-planning/utils";
 // for exactly which subtree moved and why the `totalCount > 0` gate below
 // stayed here rather than moving with it.
 import DiscussionReplyTable from "./DiscussionReplyTable";
-// docs/reply-composition-controls-acceptance-criteria.md JOB 1: the reply
-// composition cluster (ingredients / address-by-name / formality),
-// extracted into its own file rather than grown inline here - see that
-// file's own header for why.
-import DiscussionReplyControls from "./DiscussionReplyControls";
-// Resource-controls feature: "eligible resource kinds" and "preferred video
-// length" - extracted into its own file for the same reason
-// DiscussionReplyControls was (this panel's own 1000-line ceiling).
-import DiscussionResourceSettings from "./DiscussionResourceSettings";
+// docs/recording-controls-ux-acceptance-criteria.md CC17: the Capture/
+// Replies/Context/Resources settings block, extracted into its own file -
+// see that file's own header for the exact prop list and why the Context
+// section's own markup (the Knowledge-context block below) stays here rather
+// than moving with it.
+import DiscussionCaptureSettings from "./DiscussionCaptureSettings";
+// CC12: the file-local composeLiveSentence/visuallyHidden pair (and the
+// throttling effect) were parameterised and lifted to group P's shared
+// primitives - see captureLiveRegion.ts and ui/visuallyHidden.ts's own
+// headers.
+import { composeCaptureLiveSentence, useThrottledLiveSentence } from "./captureLiveRegion";
 // F8/F9 fixes: neither needs a new field on UseDiscussionRepliesReturn (out
 // of this fixer pass's file set) - useLlmProvider is a standalone reactive
 // store read (docs/discussion-reply-resources-acceptance-criteria.md R4e),
@@ -82,40 +92,13 @@ import { useLlmProvider } from "@/lib/llm-provider";
 const DELETE_CONSEQUENCE_ID = "discussion-delete-table-consequence";
 const REDRAFT_CONSEQUENCE_ID = "discussion-redraft-consequence";
 
-// AC7a: the visible status row is aria-hidden (the elapsed timer ticking
-// every second would otherwise announce ~240 times per capture and defeat
-// this same throttle). There is no .srOnly class in this repo - the inline
-// clip-rect object is the idiom (StagePanel.tsx:539-562).
-const visuallyHidden: React.CSSProperties = {
-  position: "absolute",
-  width: 1,
-  height: 1,
-  padding: 0,
-  margin: -1,
-  overflow: "hidden",
-  clip: "rect(0,0,0,0)",
-  whiteSpace: "nowrap",
-  border: 0,
-};
-
-function composeLiveSentence(args: {
-  count: number;
-  extracting: boolean;
-  pendingFrames: number;
-  stalled: boolean;
-  capturing: boolean;
-}): string {
-  const { count, extracting, pendingFrames, stalled, capturing } = args;
-  if (stalled) {
-    return "Nothing new has been read off the screen for 30 seconds. Keep this app's tab visible in a second window while you scroll.";
-  }
-  if (!capturing) return "";
-  const parts: string[] = [];
-  parts.push(count === 0 ? "Capturing - 0 posts so far." : `${count} post${count === 1 ? "" : "s"} found.`);
-  if (extracting) parts.push("Reading the screen…");
-  if (pendingFrames > 0) parts.push("Catching up - scroll a little slower.");
-  return parts.join(" ");
-}
+// AC7a: the visible status text is NOT inside a live region (the elapsed
+// timer ticking every second would otherwise announce ~240 times per
+// capture and defeat this same throttle); since CC12 only the <video> is
+// aria-hidden, so a screen reader can still read the timer on demand. CC12: the noun is "post"/"posts" - discussion replies
+// are the one caller keeping the exact wording composeCaptureLiveSentence
+// was extracted from.
+const REPLY_NOUN = { one: "post", many: "posts" };
 
 export default function DiscussionRepliesPanel({ active }: { active: boolean }) {
   const {
@@ -205,7 +188,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     removeRow,
     setHandledAt,
     setSkipped,
-    retryRow,
+    redraftRow,
     draftAllPending,
     redraftAll,
     clearTable,
@@ -348,8 +331,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     const text = tableClipboardText(visibleRows.filter((r) => !skippedById[r.id]));
     if (!text) return;
     try {
-      if (!navigator.clipboard || !window.isSecureContext) throw new Error("clipboard unavailable");
-      await navigator.clipboard.writeText(text);
+      await writeClipboardText(text);
       if (allCopyTimerRef.current) clearTimeout(allCopyTimerRef.current);
       setAllCopied(true);
       allCopyTimerRef.current = setTimeout(() => setAllCopied(false), 1500);
@@ -377,28 +359,21 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
   const eligibleForResources = rows.filter(isFindMissingEligible);
 
   // AC7a/AC47: one computed sentence, recomputed at most every 5 wall-clock
-  // seconds. setState only happens after an await (a real gate, even a
-  // zero-length one) - this repo's eslint forbids reaching setState
-  // synchronously from inside a useEffect body.
-  const [liveSentence, setLiveSentence] = useState("");
-  const lastAnnouncedAtRef = useRef(0);
-  useEffect(() => {
-    let cancelled = false;
-    // F11: AC7's "N posts found" reads `totalCount`, never `rows.length` -
-    // rows is the FILTERED display array now, and this sentence must not
-    // shrink just because the user is mid-search while a capture is live.
-    const sentence = composeLiveSentence({ count: totalCount, extracting, pendingFrames, stalled, capturing });
-    void (async () => {
-      const sinceLast = Date.now() - lastAnnouncedAtRef.current;
-      if (sinceLast < 5000) await new Promise((r) => setTimeout(r, 5000 - sinceLast));
-      if (cancelled) return;
-      lastAnnouncedAtRef.current = Date.now();
-      setLiveSentence(sentence);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [totalCount, extracting, pendingFrames, stalled, capturing]);
+  // seconds. CC12: composeCaptureLiveSentence/useThrottledLiveSentence
+  // (captureLiveRegion.ts) reproduce this file's own former composeLiveSentence
+  // + throttling effect exactly, parameterised over the noun being counted.
+  // F11: AC7's "N posts found" reads `totalCount`, never `rows.length` - rows
+  // is the FILTERED display array now, and this sentence must not shrink
+  // just because the user is mid-search while a capture is live.
+  const captureSentence = composeCaptureLiveSentence({
+    count: totalCount,
+    noun: REPLY_NOUN,
+    extracting,
+    pendingFrames,
+    stalled,
+    capturing,
+  });
+  const liveSentence = useThrottledLiveSentence(captureSentence);
 
   // ---- AC19/AC19a: signature-based arming, no timer. isConfirmArmed
   // compares the armed-for signature against the CURRENT one - re-arming
@@ -540,6 +515,35 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     void start();
   };
 
+  // docs/recording-controls-ux-acceptance-criteria.md CC1: pendingEligible
+  // reads `rawRows` (the true unfiltered table, F11's own discipline) through
+  // the same predicate `draftAllPending` itself dispatches with
+  // (isDraftAllPendingEligible, discussion-table-view.ts) - never a raw
+  // state count, which would light a "Draft the missing replies" primary
+  // that draftAllPending then refuses to act on. `primaryAction` is null
+  // while capturing (a live capture beats everything - CC1) or once nothing
+  // is left to draft. Fixer pass finding 1: `drafting ||` is deliberately
+  // NOT part of this OR any more - a single-row Redraft (section 10) also
+  // flips `drafting` true, and isDraftAllPendingEligible's own state check
+  // excludes "drafting" rows (discussion-table-view.test.ts:733), so once
+  // every eligible row has actually been dispatched into the drain
+  // `pendingEligible` correctly reaches 0 and the primary reverts to null
+  // instead of staying the contained, spinning "Draft the missing replies"
+  // for the remainder of a redraft that started from a single row.
+  const pendingEligible = rawRows.filter(isDraftAllPendingEligible).length;
+  const primaryAction: "draft" | null = capturing ? null : pendingEligible > 0 ? "draft" : null;
+  // The toolbar's "Drafting N remaining" reason line, by contrast, DOES need
+  // to count in-flight rows - `pendingEligible` above excludes "drafting" by
+  // design (it only lights the primary/gates draftAllPending's own refusal),
+  // so reading it here would print "Drafting 0 remaining" for every row that
+  // is actually mid-dispatch. This is a separate rawRows scan (F11's
+  // discipline: the unfiltered table, never `rows.length`) counting the same
+  // three in-flight states a single-row Redraft or the bulk drain can leave a
+  // row in.
+  const draftingRemaining = rawRows.filter(
+    (r) => (r.state === "pending" || r.state === "failed" || r.state === "drafting") && r.skipped !== true
+  ).length;
+
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
@@ -555,16 +559,23 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           after the status row, the post-stop summary and the drop sentence.
           Relocated here, immediately after the header - the download-log row
           included, since a notice a failed or empty run produced is exactly
-          the kind of thing that needs to be seen without scrolling. */}
+          the kind of thing that needs to be seen without scrolling.
+          CC11: ONE wrapper carries role="status"/aria-live - no role on the
+          individual notices - and each notice renders in the shared
+          .notice/.noticeDanger shape (RecordingControls.module.css). */}
       {notices.length > 0 && (
-        <div className={styles.field}>
+        // Fixer pass finding 3: two simultaneous notices used to butt with 0
+        // gap between them - `.field` (page.module.css) is a flex column
+        // with `gap`, which is all this wrapper needs (it carries no label,
+        // so none of `.field`'s other declarations apply to it).
+        <div role="status" aria-live="polite" className={styles.field}>
           {notices.map((n) => (
-            <p key={n.id} className={styles.error}>
-              {n.text}{" "}
+            <div key={n.id} className={`${controls.notice} ${controls.noticeDanger}`}>
+              <span>{n.text}</span>
               <button type="button" className={styles.linkButton} onClick={() => dismissNotice(n.id)}>
                 Dismiss
               </button>
-            </p>
+            </div>
           ))}
         </div>
       )}
@@ -574,175 +585,145 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           control - never gated on `totalCount > 0` or on a capture having
           run, since a failed or empty run (a capture that never found
           anything, a start() that threw before anything was captured) is
-          exactly when this needs to be reachable without hunting. */}
-      <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-        <span>{discussionRepliesLogSummaryLine(summarizeDiscussionRepliesRunLog(runLog))}</span>
-        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
-          Download run log (CSV)
-        </Button>
-        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
-          Download run log (JSON)
-        </Button>
-      </div>
+          exactly when this needs to be reachable without hunting.
+          CC8: the byte-identical run-log row (also duplicated in four sibling
+          panels) is now the shared <RunLogRow>. */}
+      <RunLogRow
+        summary={discussionRepliesLogSummaryLine(summarizeDiscussionRepliesRunLog(runLog))}
+        onDownload={handleDownloadLog}
+      />
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)", alignItems: "flex-end" }}>
-        <TextField
-          select
-          label="Course"
-          size="small"
-          value={courseId}
-          onChange={(e) => setCourseId(e.target.value)}
-          disabled={coursesLoading}
-          sx={{ minWidth: 220 }}
-        >
-          <MenuItem value="">No course selected</MenuItem>
-          {(courses ?? []).map((c) => (
-            <MenuItem key={c.id} value={c.id}>
-              {c.name}
-            </MenuItem>
-          ))}
-        </TextField>
-        <div>
-          <FormControlLabel
-            control={<Checkbox size="small" checked={saveVideo} onChange={(e) => setSaveVideo(e.target.checked)} />}
-            label="Also save the screen recording"
-          />
-          {/* N5: attached to the control it actually describes - as a bare
-              paragraph below the whole row it read as if it applied to the
-              Course select above it instead. */}
-          <p className={styles.fieldHint} style={{ margin: 0 }}>Applies to the next capture.</p>
-        </div>
-      </div>
-      {coursesError && <p className={styles.fieldHint}>Could not load your courses - drafting still works without one.</p>}
-
-      <div className={styles.ghActions}>
-        <span className={styles.ghMeta}>Replying to:</span>
-        {/* docs/reply-composition-controls-acceptance-criteria.md C6d: this
-            segmented toggle had no aria-pressed anywhere in the recording/
-            directory's one existing precedent (SpeedPanel.tsx) - fixed here
-            rather than propagated to a second control. */}
-        <Button
-          variant={audience === "students" ? "contained" : "outlined"}
-          size="small"
-          aria-pressed={audience === "students"}
-          onClick={() => setAudience("students")}
-        >
-          My students
-        </Button>
-        <Button
-          variant={audience === "peers" ? "contained" : "outlined"}
-          size="small"
-          aria-pressed={audience === "peers"}
-          onClick={() => setAudience("peers")}
-        >
-          Fellow educators
-        </Button>
-        {/* AC61: the slot keeps its layout box even while hidden (visibility,
-            not conditional rendering) so this row does not shift sideways
-            the moment the first post lands. F11: gated on `totalCount`, not
-            the filtered `rows.length` - Redraft is a whole-table action
-            (F12) and must stay available (and visible) even while the
-            current filter happens to show nothing. */}
-        <div className={panelStyles.reservedSlot} style={{ visibility: totalCount > 0 ? "visible" : "hidden" }} aria-hidden={totalCount === 0}>
-          {redraftArmed ? (
-            <>
-              <Button size="small" color="warning" onClick={() => { redraftAll(); setRedraftArmedFor(null); }} aria-describedby={REDRAFT_CONSEQUENCE_ID}>
-                Confirm redraft
-              </Button>
-              <Button size="small" onClick={() => setRedraftArmedFor(null)} style={{ marginLeft: "var(--space-1)" }}>
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <Button size="small" variant="text" onClick={() => setRedraftArmedFor(redraftSignature)}>
-              Redraft every reply
-            </Button>
-          )}
-        </div>
-      </div>
-      {redraftArmed && (
-        <p id={REDRAFT_CONSEQUENCE_ID} role="status" aria-live="polite" className={panelStyles.consequence}>
-          This overwrites every reply in the table, including ones you edited by hand.
-        </p>
-      )}
-
-      {/* docs/reply-composition-controls-acceptance-criteria.md C0-0: this
-          cluster goes HERE - inline, after the audience row, before "Start
-          capture" - and never behind a disclosure. useDiscussionReplies.ts
-          auto-enqueues drafting as posts merge DURING capture, so a control
-          discovered below the capture button (or behind a click) is
-          discovered only after the first replies were already drafted
-          under whatever it defaulted to. That is also why there is no
-          disclosure here at all: it would hide the address-by-name toggle,
-          which is ON by default, i.e. the one control that silently changes
-          output. */}
-      {/* GAP 1 fix: the instructor could not tell a Knowledge-base-launched
-          run apart from an ordinary one - this is the one visible signal,
-          placed with the other controls that govern drafting (immediately
-          above them, same as the composition cluster's own placement
-          rationale just above). Only rendered while `knowledgeContextLabel`
-          is non-null - useDiscussionReplies.ts derives that from LIVE state
-          only, never the persisted label, so this line is silent in the
-          restored-after-reload case (see the reload notice pushed by that
-          hook, which is this feature's only voice for that case - this line
-          deliberately does not duplicate or contradict it). */}
-      {knowledgeContextLabel && (
-        <p className={styles.fieldHint}>{`Drafting with Knowledge Base context: ${knowledgeContextLabel}.`}</p>
-      )}
-      {/* AC3: remove/undo a carried page without leaving this panel - see
-          CarriedKnowledgePages.tsx's own header. Renders nothing on its own
-          when there is nothing to show. */}
-      <CarriedKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
-      {/* AC3/4b: add a page to this run's context without leaving this panel -
-          see AddKnowledgePages.tsx's own header. Unconditional, unlike the
-          label/CarriedKnowledgePages above - this must still offer something
-          when knowledgeContext is null. */}
-      <AddKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
-      <DiscussionReplyControls composition={composition} onChange={setComposition} />
-      {/* Resource-controls feature: eligible resource kinds and preferred
-          video length - placed right after the composition cluster, same
-          "inline, before Start capture, no disclosure" reasoning as that
-          cluster's own C0-0 placement note above: both govern what the
-          resource pass does the moment a reply lands, so a control
-          discovered later (or behind a click) would be discovered only
-          after the first search already ran under whatever it defaulted
-          to. */}
-      <DiscussionResourceSettings
+      {/* CC17: the Capture/Replies/Context/Resources settings block -
+          DiscussionCaptureSettings.tsx. The Context section's own markup (the
+          Knowledge-context block below) stays HERE and is passed as
+          `children` - AddKnowledgePages.test.ts:261-273 and
+          discussion-knowledge-context.test.ts:376-394 both pin its JSX to
+          this file by path. */}
+      <DiscussionCaptureSettings
+        courseId={courseId}
+        setCourseId={setCourseId}
+        courses={courses}
+        coursesLoading={coursesLoading}
+        coursesError={coursesError}
+        saveVideo={saveVideo}
+        setSaveVideo={setSaveVideo}
+        audience={audience}
+        setAudience={setAudience}
+        totalCount={totalCount}
+        redraftArmed={redraftArmed}
+        onArmRedraft={() => setRedraftArmedFor(redraftSignature)}
+        onConfirmRedraft={() => {
+          redraftAll();
+          setRedraftArmedFor(null);
+        }}
+        onCancelRedraft={() => setRedraftArmedFor(null)}
+        redraftConsequenceId={REDRAFT_CONSEQUENCE_ID}
+        composition={composition}
+        onChangeComposition={setComposition}
         resourceKinds={resourceKinds}
         onChangeResourceKinds={setResourceKinds}
         videoLengthMinMinutes={videoLengthMinMinutes}
         videoLengthMaxMinutes={videoLengthMaxMinutes}
         onChangeVideoLength={setVideoLengthPreference}
-      />
+      >
+        {/* docs/reply-composition-controls-acceptance-criteria.md C0-0: this
+            cluster goes HERE - inline, after the audience row, before "Start
+            capture" - and never behind a disclosure. useDiscussionReplies.ts
+            auto-enqueues drafting as posts merge DURING capture, so a control
+            discovered below the capture button (or behind a click) is
+            discovered only after the first replies were already drafted
+            under whatever it defaulted to. That is also why there is no
+            disclosure here at all: it would hide the address-by-name toggle,
+            which is ON by default, i.e. the one control that silently changes
+            output. */}
+        {/* GAP 1 fix: the instructor could not tell a Knowledge-base-launched
+            run apart from an ordinary one - this is the one visible signal,
+            placed with the other controls that govern drafting (immediately
+            above them, same as the composition cluster's own placement
+            rationale just above). Only rendered while `knowledgeContextLabel`
+            is non-null - useDiscussionReplies.ts derives that from LIVE state
+            only, never the persisted label, so this line is silent in the
+            restored-after-reload case (see the reload notice pushed by that
+            hook, which is this feature's only voice for that case - this line
+            deliberately does not duplicate or contradict it). */}
+        {knowledgeContextLabel && (
+          <p className={styles.fieldHint}>{`Drafting with Knowledge Base context: ${knowledgeContextLabel}.`}</p>
+        )}
+        {/* AC3: remove/undo a carried page without leaving this panel - see
+            CarriedKnowledgePages.tsx's own header. Renders nothing on its own
+            when there is nothing to show. */}
+        <CarriedKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
+        {/* AC3/4b: add a page to this run's context without leaving this panel -
+            see AddKnowledgePages.tsx's own header. Unconditional, unlike the
+            label/CarriedKnowledgePages above - this must still offer something
+            when knowledgeContext is null. */}
+        <AddKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
+      </DiscussionCaptureSettings>
 
-      <div className={styles.ghActions}>
-        <Button variant="contained" size="small" onClick={handleStartStop}>
+      {/* CC2: the run row is the last thing in the settings block, holding
+          the primary action (CC1) and nothing else.
+          Fixer pass finding 2: `primaryAction === null && !drafting`, not
+          bare `primaryAction === null` - during a bulk drain every eligible
+          row is "drafting", `pendingEligible` correctly reaches 0 (finding
+          1's own fix), and `primaryAction` goes null while the drain is
+          still running. A bare `primaryAction === null` check would then
+          make THIS button the screen's one contained primary for the rest
+          of the drain, which is wrong (the drain's primary is "Draft the
+          missing replies", still `loading` in the toolbar below). Gating
+          the fallback on `!drafting` too means Start/Stop capture has NO
+          contained primary while a drain runs, and only reverts to the
+          contained idle "Start capture" once drafting is fully done and
+          nothing is left eligible. */}
+      <div className={`${styles.ghActions} ${controls.runRow}`}>
+        <Button
+          variant={variantFor(capturing || (primaryAction === null && !drafting))}
+          color="primary"
+          size="small"
+          onClick={handleStartStop}
+        >
           {capturing ? "Stop capture" : "Start capture"}
         </Button>
       </div>
       <p className={styles.fieldHint}>You can also stop from your browser&apos;s sharing bar.</p>
 
-      {/* AC7/AC7a: the whole status row is aria-hidden - a separate polite
-          region (below) carries the one sentence a screen reader hears,
-          throttled to at most once per 5 seconds. */}
-      <div className={panelStyles.statusRow} aria-hidden="true">
+      {/* Fixer pass finding 3 (CC12): only the <video> stays aria-hidden - the
+          status column (timer, "N posts found", "Reading the screen…",
+          "Catching up") now renders in the open, exactly as the three
+          siblings (GradingRecordingPanel, ModuleDeckCapturePanel,
+          LegibilityProbeModal) do. A screen-reader user was previously
+          hearing this panel's own capture count only through the throttled
+          live region below - a sighted user got it immediately, but nothing
+          stopped a screen-reader user from tabbing a screen to the left
+          (Grading) before this panel's own facts were ever announced. The
+          throttled live region (AC7a/AC7a's 5-second throttle) stays -
+          moving the visible text out of aria-hidden does not change how
+          often assistive tech is interrupted, since role="status" here is
+          still nothing without the separate region below driving it. */}
+      <div className={controls.statusRow}>
         {/* BL2: rendered UNCONDITIONALLY, never `{capturing && <video ...>}`.
             useDiscussionCapture's start() assigns `previewRef.current.srcObject`
             synchronously, BEFORE it sets `capturing` true - so a conditionally-
             mounted video is still null at that exact moment (this element does
             not exist in the DOM yet) and the assignment is silently skipped
             with nothing left to reassign it later. The element must already be
-            mounted before start() runs; only its visibility is conditional. */}
+            mounted before start() runs; only its visibility is conditional.
+            CC3: a conditional CSS class, not an inline `style={{ display }}`
+            object. Fixer pass finding 4: the class composed while not
+            capturing is now `controls.previewVideoHidden` (RecordingControls
+            .module.css, group P) - this file's own `panelStyles.hiddenVideo`
+            copy is deleted. The video itself carries `aria-hidden="true"`
+            directly (finding 3) - it is the only piece of this row a screen
+            reader must never be told about. */}
         <video
           ref={previewRef}
-          className={panelStyles.previewVideo}
-          style={{ display: capturing ? undefined : "none" }}
+          className={`${controls.previewVideo}${capturing ? "" : ` ${controls.previewVideoHidden}`}`}
+          aria-hidden="true"
           autoPlay
           muted
           playsInline
         />
         {capturing && (
-          <div className={panelStyles.statusText}>
+          <div className={controls.statusText}>
             <span>{fmt(elapsedSec)}</span>
             {/* F11: AC7's "N posts found" reads `totalCount`. */}
             <span>{totalCount === 0 ? "Capturing - 0 posts so far." : `${totalCount} post${totalCount === 1 ? "" : "s"} found`}</span>
@@ -752,7 +733,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
         )}
       </div>
       {stalled && (
-        <p className={styles.error}>
+        <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
           Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second window while you scroll.
         </p>
       )}
@@ -798,12 +779,12 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           region alone is invisible to a sighted user, and this is the one
           panel-level error line the copy button has any reach to. */}
       {copyError && (
-        <p className={styles.error}>
-          {copyError}{" "}
+        <div className={`${controls.notice} ${controls.noticeDanger}`}>
+          <span>{copyError}</span>
           <button type="button" className={styles.linkButton} onClick={() => setCopyError(null)}>
             Dismiss
           </button>
-        </p>
+        </div>
       )}
 
       {/* S4: rendered UNCONDITIONALLY (only the toolbar inside is gated on
@@ -837,6 +818,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
             copyAllDisabled={copyableRows.length === 0}
             drafting={drafting}
             onDraftMissing={draftAllPending}
+            primaryAction={primaryAction}
+            draftingRemaining={draftingRemaining}
             findResourcesCount={eligibleForResources.length}
             onFindMissing={() => findMissing()}
             deleteArmed={deleteArmed}
@@ -854,7 +837,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           confirmation must always name the same count that a confirm click
           actually deletes (F12: Delete table acts on the whole table, always). */}
       {totalCount > 0 && deleteArmed && (
-        <p id={DELETE_CONSEQUENCE_ID} role="status" aria-live="polite" className={panelStyles.consequence}>
+        <p id={DELETE_CONSEQUENCE_ID} role="status" aria-live="polite" className={controls.consequence}>
           {`This permanently deletes all ${totalCount} row${totalCount === 1 ? "" : "s"}${recordingUrl ? " and the saved recording" : ""}. This cannot be undone.`}
         </p>
       )}
@@ -900,7 +883,7 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           editReply={handleEditReply}
           moveRow={moveRow}
           onRemove={handleRemove}
-          retryRow={retryRow}
+          redraftRow={redraftRow}
           retryResources={retryResources}
           removeResource={removeResource}
           insertResource={handleInsertResourceForRow}

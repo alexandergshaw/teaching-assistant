@@ -14,6 +14,8 @@ import { VideoSource } from "./VideoSource";
 import { CaptionsList } from "./CaptionsList";
 import { PreviewExport } from "./PreviewExport";
 import { useSupabase } from "@/context/SupabaseProvider";
+import { variantFor } from "../ui/buttonVariant";
+import controls from "../recording/RecordingControls.module.css";
 
 export default function CaptionStudio({ takes = [], backupDir = null }: { takes?: Take[]; backupDir?: DirHandle | null }) {
   const { supabase, user } = useSupabase();
@@ -106,6 +108,18 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
 
   useEffect(() => () => teardownRef.current(), []);
 
+  // docs/recording-controls-ux-acceptance-criteria.md CC1: the same basis
+  // CaptionsList uses for its own "Download .vtt" primary, so the two files
+  // never disagree about which button on screen is the primary for this
+  // state - the .vtt file is the accessible deliverable an instructor
+  // uploads to Canvas, so once it exists Generate/Regenerate captions steps
+  // back to outlined and Download .vtt becomes the primary.
+  const hasCaptions = captionGen.captions !== null && captionGen.captions.length > 0;
+  // CC6 gap (VideoSource.tsx): gate "Choose video" the same way SpeedPanel
+  // gates its own picker, so a source cannot be swapped out from under an
+  // in-flight generation or export.
+  const videoSourceBusy = captionGen.busy !== "idle" || burnCaptions.burning;
+
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
@@ -115,7 +129,11 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
         </p>
       </div>
 
-      {captionGen.error && <p className={styles.error}>{captionGen.error}</p>}
+      {captionGen.error && (
+        <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
+          {captionGen.error}
+        </p>
+      )}
 
       <VideoSource
         fileName={videoImport.fileName}
@@ -135,6 +153,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
         onLoadLibrary={videoImport.loadLibrary}
         onImportLibraryVideo={videoImport.handleImportLibraryVideo}
         importingKey={videoImport.importingKey}
+        busy={videoSourceBusy}
       />
 
       {videoImport.videoUrl && (
@@ -147,7 +166,7 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               playsInline
               preload="auto"
               src={videoImport.videoUrl}
-              style={{ maxWidth: "100%", maxHeight: 320, borderRadius: "var(--radius-md)", background: "var(--navy)", display: "block" }}
+              className={controls.playerVideo}
               onError={() => captionGen.setError("The browser could not decode this video. Try re-importing it, or convert it to MP4/WebM.")}
               onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)}
               onSeeked={(e) => setPlayhead(e.currentTarget.currentTime)}
@@ -196,11 +215,9 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
         </div>
       )}
 
-      <div className={styles.field}>
-        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
-          2. Captions
-        </p>
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-start", flexWrap: "wrap", marginBottom: "var(--space-4)" }}>
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Captions</legend>
+        <div className={styles.adaptRow}>
           <TextField
             label="Context (optional)"
             placeholder="e.g. Demonstrating how to submit an assignment in Canvas"
@@ -213,33 +230,44 @@ export default function CaptionStudio({ takes = [], backupDir = null }: { takes?
               }
             }}
             size="small"
-            sx={{ flex: "1 1 300px" }}
+            className={controls.fieldGrow}
           />
-          <Button
-            variant="contained"
-            size="small"
-            disabled={!videoImport.videoUrl || captionGen.busy !== "idle"}
-            onClick={() => void captionGen.handleGenerate(recordingContext.context, recordingContext.usePageContext)}
-          >
-            {captionGen.busy === "sampling"
-              ? "Reading video…"
-              : captionGen.busy === "describing"
-                ? "Writing captions…"
-                : captionGen.captions
-                  ? "Regenerate captions"
-                  : "Generate captions"}
-          </Button>
         </div>
         <FormControlLabel
           control={<Checkbox size="small" checked={recordingContext.usePageContext} onChange={(e) => recordingContext.setUsePageContext(e.target.checked)} />}
           label={<span style={{ fontSize: "var(--font-size-md)" }}>Use context from this Recording page</span>}
         />
         {recordingContext.usePageContext && (
-          <p className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0 0" }}>
+          <p className={styles.fieldHint}>
             {recordingContext.pageContextSummary ? `Found: ${recordingContext.pageContextSummary}.` : "No page context found yet - set a lecture script or title cards on the Record view and it will be used automatically."}
           </p>
         )}
+      </fieldset>
+
+      {/* docs/recording-controls-ux-acceptance-criteria.md CC2: the run row
+          is this surface's ONE .runRow - it sits outside the Captions
+          fieldset (a run row is never swallowed inside the settings
+          fieldset it belongs to), and the disabled-primary reason renders
+          directly under it (CC1). */}
+      <div className={`${styles.ghActions} ${controls.runRow}`}>
+        <Button
+          variant={variantFor(!hasCaptions)}
+          size="small"
+          disabled={!videoImport.videoUrl}
+          loading={captionGen.busy !== "idle"}
+          loadingPosition="start"
+          onClick={() => void captionGen.handleGenerate(recordingContext.context, recordingContext.usePageContext)}
+        >
+          {captionGen.busy === "sampling"
+            ? "Reading video…"
+            : captionGen.busy === "describing"
+              ? "Writing captions…"
+              : hasCaptions
+                ? "Regenerate captions"
+                : "Generate captions"}
+        </Button>
       </div>
+      {!videoImport.videoUrl && <p className={styles.fieldHint}>Choose a video first.</p>}
 
       {captionGen.captions && (
         <CaptionsList

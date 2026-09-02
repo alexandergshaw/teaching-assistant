@@ -224,6 +224,18 @@ export interface UseDiscussionRepliesReturn {
   setHandledAt: (id: string, at: number | null) => void;
   setSkipped: (id: string, skipped: boolean) => void;
   retryRow: (id: string) => void;
+  /** CC19: the per-row "Redraft" control's dispatch (group D2's row action,
+   *  `discussion-capture.ts`'s `"redraftRow"` `DraftDispatchSource`). Logs a
+   *  retry event for this row (the same shape `retryRow` appends, so the
+   *  "===Retries===" log section and the per-row "retried" column cover it
+   *  with zero log-module change) and forces the row past AC52's userEdited
+   *  guard, on the same "targeted, single-row, explicit user action"
+   *  rationale as `retryRow` (see `draftDispatchForce`). Deliberately does
+   *  NOT bump `tableEpochRef` the way `redraftAll` does - that is a
+   *  whole-table structural signal reserved for a bulk rewrite, and bumping
+   *  it here would discard any in-flight extraction merge for every other
+   *  row in the table over a control that only ever touches one row. */
+  redraftRow: (id: string) => void;
   draftAllPending: () => void;
   redraftAll: () => void;
   clearTable: () => void;

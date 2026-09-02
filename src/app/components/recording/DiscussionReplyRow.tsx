@@ -11,7 +11,7 @@
 // splits") - a controlled multiline TextField per row, with every row
 // re-rendering on every keystroke because `rows` is one array in one hook,
 // is visibly laggy past ~25 rows. For the memo to actually skip a
-// re-render, the parent's row updaters (moveRow/editReply/removeRow/retryRow
+// re-render, the parent's row updaters (moveRow/editReply/removeRow/onRedraft
 // /onRetryResources/onRemoveResource) must be stable useCallbacks and must
 // return the identical object reference for every OTHER row - that
 // discipline lives in C2 (useReplyRows.ts) and R-D (useReplyResources.ts),
@@ -27,12 +27,19 @@
 // stronger than a column header because it names the subject too.
 
 import { memo, useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
-import { Button, IconButton, Menu, MenuItem, TextField } from "@mui/material";
+import { Button, IconButton, ListItemText, Menu, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
-import { CopyIcon, CheckIcon, ArrowUpIcon, ArrowDownIcon, CloseIcon, MoreIcon } from "./discussion-icons";
+import controls from "./RecordingControls.module.css";
+import { CopyIcon, CheckIcon, ArrowUpIcon, ArrowDownIcon, MoreIcon } from "./discussion-icons";
 import { replyClipboardText, type ReplyRow, type ReplyRowState, type ReplyResource } from "./discussion-capture";
-import { RESOURCE_KIND_LABELS } from "@/lib/resource-kind";
+import DiscussionReplyResources from "./DiscussionReplyResources";
+// CC5/CC20: the row's own arm/confirm control for Redraft.
+import ConfirmArmButtons from "../ui/ConfirmArmButtons";
+// CC14: the shared clipboard guard (was three inline copies).
+import { writeClipboardText } from "../ui/clipboard";
+// CC12: the shared clip-rect idiom (was a local copy below).
+import { visuallyHidden } from "../ui/visuallyHidden";
 // F1a/F2/F3 (docs/discussion-reply-sort-filter-acceptance-criteria.md section
 // 3): the dependency-free name-split leaf. Read `person-name.ts`'s own header
 // for why this lives outside the recording folder rather than in
@@ -54,50 +61,16 @@ const UNKNOWN_LAST_NAME_MARK = "—";
 
 // S2 fix (sort-filter review S3): `aria-describedby` must resolve to an
 // element carrying the actual `correctionHint` text, not the "(derived)"
-// marker's own visible text - a screen reader was announcing "derived",
-// never the hint `person-name.ts` computes for every derived row (a
-// capability that reached nobody). This is a fresh, tiny local copy of
-// DiscussionRepliesPanel.tsx's `visuallyHidden` idiom rather than an
-// import of it - that file already imports THIS one (DiscussionReplyRow),
-// so importing back would be a module cycle; same "read, not imported"
-// discipline this file already applies to UNKNOWN_LAST_NAME_MARK above.
-//
-// Sort-filter closure re-review SHOULD-2: the hint span this style is
-// applied to sits INSIDE the `<td>` it describes (see the render below).
-// `aria-describedby` only needs the target element to EXIST and be
-// REFERENCEABLE by id - not to be visible - but a plain clip-hidden span
-// left as ordinary cell content is still part of the cell's normal
-// reading order: a screen reader walking through the row (not just the
-// one moment it resolves the description) hits this ~35-word sentence as
-// if it were regular text of the Last cell, on nearly every derived row.
-// The render below therefore also sets `aria-hidden="true"` on the span
-// itself: that pulls it out of the accessibility tree for ordinary
-// browsing, while the accessible name/description computation algorithm
-// (used to resolve `aria-describedby`) explicitly still reads the text of
-// a DIRECTLY id-referenced node even when that node carries
-// `aria-hidden="true"` - so the hint keeps reaching the sighted-mouse
-// `title` and the description, and stops being narrated as if it were the
-// cell's own content.
-//
-// `display: none` is NOT an alternative to the clip idiom below (there is
-// no `.srOnly` class in this repo - see StagePanel.tsx's own clipped
-// `role="status"` span for the precedent this copies): unlike
-// `aria-hidden`, a `display: none` element is dropped from the
-// accessibility tree outright in most browser/AT combinations, with no
-// carve-out for a direct id reference, so `aria-describedby` would simply
-// stop resolving and this whole fix would silently undo itself - the next
-// person to "simplify" this to `display: none` would ship exactly that.
-const visuallyHiddenHint: React.CSSProperties = {
-  position: "absolute",
-  width: 1,
-  height: 1,
-  padding: 0,
-  margin: -1,
-  overflow: "hidden",
-  clip: "rect(0,0,0,0)",
-  whiteSpace: "nowrap",
-  border: 0,
-};
+// marker's own visible text. The clip object is CC12's shared
+// `ui/visuallyHidden.ts` import now (this file used to carry its own copy -
+// see that module's own doc comment for why it's a plain inline clip-rect
+// object rather than a `.srOnly` class, which does not exist in this repo).
+// SHOULD-2: the hint span also carries `aria-hidden="true"` so it is not
+// narrated as ordinary cell content on every pass through the row, while
+// still being readable via the DIRECT id reference `aria-describedby` uses -
+// `display: none` would break that direct-reference carve-out entirely, so
+// it is not an alternative to the clip idiom (see StagePanel.tsx's own
+// clipped `role="status"` span for the same precedent).
 
 /** First, Last, Captured, Status, Actions - kept as a constant so the header
  * bar's cell count and the continuation row's colSpan can never drift apart.
@@ -157,7 +130,15 @@ export interface DiscussionReplyRowProps {
    *  via elapsedSec). */
   onMove: (id: string, dir: "up" | "down") => void;
   onRemove: (id: string) => void;
-  onRetry: (id: string) => void;
+  /** CC19/CC20: the per-row "Redraft" control (group D2, wave 1) dispatches
+   *  through this - `useDiscussionReplies.ts`'s `redraftRow`, forwarded
+   *  unwrapped through `DiscussionReplyTable.tsx`. Declared here in wave 0
+   *  (group H's type-only thread) so `tsc` is clean with the type flowing
+   *  panel -> table -> row before the control that reads it exists;
+   *  deliberately NOT destructured below until D2 adds the button that
+   *  calls it, since an unused destructured variable is a lint error where
+   *  an unused property on a type is not. */
+  onRedraft: (id: string) => void;
   /** docs/discussion-reply-resources-acceptance-criteria.md R9/R11: per-row
    *  retry after a failed resource search. */
   onRetryResources: (id: string) => void;
@@ -222,7 +203,7 @@ function DiscussionReplyRowImpl({
   onEditReply,
   onMove,
   onRemove,
-  onRetry,
+  onRedraft,
   onRetryResources,
   onRemoveResource,
   onInsertResource,
@@ -255,6 +236,11 @@ function DiscussionReplyRowImpl({
   // ("re-scrolling costs nothing") is withdrawn as false at 30 posts on a
   // board that may no longer be open.
   const [removeArmed, setRemoveArmed] = useState(false);
+  // CC20: the row-local Redraft arm/confirm state, reset by the SAME
+  // "adjust state during rendering" effect as removeArmed just below - a
+  // fresh reply invalidates a pending redraft confirmation the same way it
+  // invalidates a pending remove.
+  const [redraftArmed, setRedraftArmed] = useState(false);
   // Editing (or a fresh draft landing) invalidates a pending remove
   // confirmation - the thing it was armed to protect has changed under it.
   // "Adjust state during rendering" (React's own docs pattern, and this
@@ -265,6 +251,7 @@ function DiscussionReplyRowImpl({
   if (row.reply !== lastReplyForArm) {
     setLastReplyForArm(row.reply);
     if (removeArmed) setRemoveArmed(false);
+    if (redraftArmed) setRedraftArmed(false);
   }
 
   // D5: the per-row overflow menu (Remove, plus D1's manual handled toggle
@@ -315,29 +302,39 @@ function DiscussionReplyRowImpl({
     else replyInputRef.current?.focus();
   });
 
-  const handleRemoveResource = (url: string) => {
-    const list = row.resources ?? [];
-    const idx = list.findIndex((r) => r.url === url);
-    const fallback = list[idx + 1] ?? list[idx - 1] ?? null;
-    if (fallback) {
-      pendingResourceFocusUrlRef.current = fallback.url;
-    } else {
-      // No neighbouring resource - the whole <ul> unmounts. Fall back to the
-      // reply textarea rather than dropping focus to <body>.
-      pendingResourceFocusFallbackRef.current = true;
-    }
-    onRemoveResource(row.id, url);
-  };
+  // CC17: extracted into DiscussionReplyResources.tsx - wrapped in
+  // useCallback so that component's own React.memo actually bites.
+  const handleRemoveResource = useCallback(
+    (url: string) => {
+      const list = row.resources ?? [];
+      const idx = list.findIndex((r) => r.url === url);
+      const fallback = list[idx + 1] ?? list[idx - 1] ?? null;
+      if (fallback) {
+        pendingResourceFocusUrlRef.current = fallback.url;
+      } else {
+        // No neighbouring resource - the whole <ul> unmounts. Fall back to
+        // the reply textarea rather than dropping focus to <body>.
+        pendingResourceFocusFallbackRef.current = true;
+      }
+      onRemoveResource(row.id, url);
+    },
+    [row.resources, row.id, onRemoveResource]
+  );
 
   // Resource-controls feature: one-click insert. Always falls back to the
   // reply textarea for focus afterward (never the next resource's own
   // Remove button, unlike handleRemoveResource above) - after inserting a
   // link into the reply, the natural next place for focus is the box that
   // just changed, not a sibling resource's own remove control.
-  const handleInsertResource = (resource: ReplyResource) => {
-    pendingResourceFocusFallbackRef.current = true;
-    onInsertResource(row.id, resource);
-  };
+  const handleInsertResource = useCallback(
+    (resource: ReplyResource) => {
+      pendingResourceFocusFallbackRef.current = true;
+      onInsertResource(row.id, resource);
+    },
+    [row.id, onInsertResource]
+  );
+
+  const handleRetryResources = useCallback(() => onRetryResources(row.id), [onRetryResources, row.id]);
 
   const handleCopy = async () => {
     // R9a: a row whose draft failed but whose resources landed still has
@@ -345,8 +342,7 @@ function DiscussionReplyRowImpl({
     const text = replyClipboardText(row);
     if (!text) return;
     try {
-      if (!navigator.clipboard || !window.isSecureContext) throw new Error("clipboard unavailable");
-      await navigator.clipboard.writeText(text);
+      await writeClipboardText(text);
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
       setCopied(true);
       // AC16: the repo's stale-timer guard, adapted to this row's own local
@@ -375,8 +371,7 @@ function DiscussionReplyRowImpl({
   const handleCopyPost = async () => {
     if (!row.post) return;
     try {
-      if (!navigator.clipboard || !window.isSecureContext) throw new Error("clipboard unavailable");
-      await navigator.clipboard.writeText(row.post);
+      await writeClipboardText(row.post);
       if (postCopyTimerRef.current) clearTimeout(postCopyTimerRef.current);
       setPostCopied(true);
       postCopyTimerRef.current = setTimeout(() => setPostCopied(false), COPY_RESET_MS);
@@ -416,6 +411,12 @@ function DiscussionReplyRowImpl({
     onMove(row.id, "down");
   };
 
+  // CC5: Remove keeps its MenuItem label swap but gains a "Cancel" MenuItem
+  // while armed, plus a consequence sentence announced through `announce`
+  // and rendered below with an id this Menu's aria-describedby resolves.
+  const removeConsequenceId = `disc-remove-consequence-${row.id}`;
+  const removeConsequenceText = `Removing the reply to ${row.author} cannot be undone.`;
+
   // D5: arms for EVERY row now (see the `removeArmed` doc comment above) and
   // lives behind the overflow menu - the first click swaps this MenuItem's
   // own label to "Confirm removal" and deliberately does NOT close the menu,
@@ -425,12 +426,18 @@ function DiscussionReplyRowImpl({
   const handleRemoveFromMenu = () => {
     if (!removeArmed) {
       setRemoveArmed(true);
-      announce(`Removing the reply to ${row.author} cannot be undone. Choose "Confirm removal" to proceed.`);
+      announce(`${removeConsequenceText} Choose "Confirm removal" to proceed.`);
       return;
     }
     setRemoveArmed(false);
     closeMenu();
     onRemove(row.id);
+  };
+
+  // CC5: the new Cancel MenuItem - disarms without removing or closing the
+  // menu, so Skip/Mark as handled stay reachable in the same open menu.
+  const handleCancelRemoveFromMenu = () => {
+    setRemoveArmed(false);
   };
 
   // D1: the overflow menu's manual set/clear - for an instructor who pasted
@@ -452,6 +459,33 @@ function DiscussionReplyRowImpl({
   const badge = STATE_BADGE[row.state];
   const replyLabel = `Reply to ${row.author}`;
   const canCopyReply = !!row.reply || !!row.resources?.length;
+
+  // CC20 fixer pass finding 1: Redraft replaces "Retry draft" and renders
+  // for every row that is not skipped. While drafting it stays MOUNTED with
+  // `loading` (CC6 - a busy button is never removed). The two-branch version
+  // that used to live here (a plain Button when `!redraftNeedsConfirm`,
+  // ConfirmArmButtons otherwise) swapped component TYPE the moment
+  // `applyReply` reset `row.userEdited` as the new draft landed - that
+  // unmounted whichever button held focus and dropped it to <body>, exactly
+  // the failure mode modal-focus-restoration AC2 warns against. ONE
+  // `ConfirmArmButtons` is rendered below instead, always the same element:
+  // its `armed` prop folds `redraftNeedsConfirm` in, so an unarmed row or a
+  // row that needs no confirmation renders the idle "Redraft" face and
+  // `onArm` performs the redraft directly rather than arming, with no
+  // remount either way - the same fix TakeAnnouncementPanel.tsx's own
+  // Regenerate control applies (its fixer pass finding 4).
+  const redraftDrafting = row.state === "drafting";
+  const redraftNeedsConfirm = row.userEdited || handledAt !== undefined;
+  const redraftLabel = "Redraft";
+  const redraftAriaLabel = `Redraft the reply to ${row.author}`;
+  const redraftConsequenceId = `disc-redraft-consequence-${row.id}`;
+  // Same check order as the arming condition: an edited-and-copied row shows
+  // the edit warning, the more specific loss of the two.
+  const redraftConsequenceText = row.userEdited ? "This replaces the reply you edited." : "This replaces a reply you already copied.";
+  const handleConfirmRedraft = () => {
+    setRedraftArmed(false);
+    onRedraft(row.id);
+  };
 
   // F3/F4: computed for DISPLAY (and, separately, for the sort key -
   // discussion-table-view.ts) from the raw `row.author` string every render -
@@ -504,7 +538,7 @@ function DiscussionReplyRowImpl({
                 {" "}
                 (no greeting)
               </span>
-              <span id={greetingHintId} aria-hidden="true" style={visuallyHiddenHint}>
+              <span id={greetingHintId} aria-hidden="true" style={visuallyHidden}>
                 Address by name is on, but no readable greeting name was found for the author of this post
                 (&quot;{row.author}&quot;) - this reply will open with no greeting.
               </span>
@@ -526,17 +560,17 @@ function DiscussionReplyRowImpl({
               </span>
               {/* S2 fix: the id `aria-describedby` points at now carries the
                   actual hint text, not the marker's own "(derived)" label -
-                  see visuallyHiddenHint's own comment above. The visible
+                  see the ui/visuallyHidden.ts import's own comment. The visible
                   marker keeps its pointer-hover `title` for a sighted mouse
                   user and no longer needs an id of its own.
                   SHOULD-2 fix: `aria-hidden="true"` keeps this span out of
                   the cell's ordinary reading order (it must not be narrated
                   as if it were the Last cell's own content) while the
                   sibling `<td>`'s `aria-describedby` above still resolves
-                  its text - see visuallyHiddenHint's comment for why that
+                  its text - see ui/visuallyHidden.ts's comment for why that
                   is true for `aria-hidden` but would NOT be true for
                   `display: none`. */}
-              <span id={nameHintId} aria-hidden="true" style={visuallyHiddenHint}>
+              <span id={nameHintId} aria-hidden="true" style={visuallyHidden}>
                 {nameParts.correctionHint}
               </span>
             </>
@@ -544,42 +578,34 @@ function DiscussionReplyRowImpl({
         </td>
         <td>{formatCapturedTime(row.firstSeenAt)}</td>
         <td>
-          <span className={`${styles.ghBadge} ${styles[badge.variant]}`}>{badge.label}</span>
-          {/* D2: green now means "the instructor has actually copied this
-              reply out" - the highest-trust state, not the model's own
-              untouched draft. Checked FIRST: a row can be both userEdited
-              and handledAt-set (edited, then copied), and "copied" is the
-              more complete fact of the two. */}
-          {handledAt !== undefined ? (
-            <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`} style={{ marginLeft: "var(--space-1)" }}>
-              {`Copied ${formatCapturedTime(handledAt)}`}
-            </span>
-          ) : (
-            row.userEdited && (
-              <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`} style={{ marginLeft: "var(--space-1)" }}>
-                Edited by you
-              </span>
-            )
-          )}
-          {/* D9: a post the instructor marked "no reply needed" - reversible
-              via the overflow menu below. */}
-          {skipped && (
-            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: "var(--space-1)" }}>
-              Skipped
-            </span>
-          )}
-          {/* docs/discussion-thread-structure-acceptance-criteria.md T5/T1a:
-              a badge beside the state badge ONLY when the position is the
-              definite "reply" - ghBadgeNeutral, deliberately not
-              ghBadgeSuccess (green would read as a judgement on the post,
-              not a description of its place in the thread). "unknown" and
-              absent BOTH render nothing here - never as if the post were
-              known to be top-level. */}
-          {row.threadPosition === "reply" && (
-            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`} style={{ marginLeft: "var(--space-1)" }}>
-              Reply
-            </span>
-          )}
+          {/* CC3/CC14: the four per-badge `marginLeft` literals collapse into
+              one spacing authority - page.module.css's own `.ghBadges`
+              (display flex, gap var(--space-1)) rather than a per-badge
+              margin. */}
+          <span className={styles.ghBadges}>
+            <span className={`${styles.ghBadge} ${styles[badge.variant]}`}>{badge.label}</span>
+            {/* D2: green now means "the instructor has actually copied this
+                reply out" - the highest-trust state, not the model's own
+                untouched draft. Checked FIRST: a row can be both userEdited
+                and handledAt-set (edited, then copied), and "copied" is the
+                more complete fact of the two. */}
+            {handledAt !== undefined ? (
+              <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>{`Copied ${formatCapturedTime(handledAt)}`}</span>
+            ) : (
+              row.userEdited && <span className={`${styles.ghBadge} ${styles.ghBadgeAccent}`}>Edited by you</span>
+            )}
+            {/* D9: a post the instructor marked "no reply needed" - reversible
+                via the overflow menu below. */}
+            {skipped && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Skipped</span>}
+            {/* docs/discussion-thread-structure-acceptance-criteria.md T5/T1a:
+                a badge beside the state badge ONLY when the position is the
+                definite "reply" - ghBadgeNeutral, deliberately not
+                ghBadgeSuccess (green would read as a judgement on the post,
+                not a description of its place in the thread). "unknown" and
+                absent BOTH render nothing here - never as if the post were
+                known to be top-level. */}
+            {row.threadPosition === "reply" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Reply</span>}
+          </span>
           {/* T5: a "Replying to X" line, ONLY when the LMS actually printed
               the name - never derived. Gated on `replyingToAuthor` ALONE,
               deliberately NOT also on `threadPosition === "reply"` like the
@@ -595,9 +621,7 @@ function DiscussionReplyRowImpl({
               with no Reply badge in that case - not an oversight, so do not
               "fix" it by adding a threadPosition check here. */}
           {row.replyingToAuthor && (
-            <p className={styles.ghMeta} style={{ marginTop: "var(--space-1)" }}>
-              Replying to {row.replyingToAuthor}
-            </p>
+            <p className={`${styles.ghMeta} ${panelStyles.metaTop}`}>Replying to {row.replyingToAuthor}</p>
           )}
           {/* D8: the real failure reason moved OUT of this cell - see the
               reply block below. This narrow column was rendering it at
@@ -628,14 +652,34 @@ function DiscussionReplyRowImpl({
             >
               Copy reply
             </Button>
-            {row.state === "failed" && (
-              // AC17/AC63 amendment: renamed from "Retry" to "Retry draft"
-              // to disambiguate from the resources group's "Retry links"
-              // below - two controls in one row must not share a visible
-              // label.
-              <Button size="small" onClick={() => onRetry(row.id)}>
-                Retry draft
-              </Button>
+            {/* CC19/CC20 fixer pass finding 1: replaces "Retry draft" -
+                renders for every row that is not skipped, stays mounted with
+                `loading` while drafting (CC6), never disabled for a live
+                capture. ONE ConfirmArmButtons always - see the doc comment
+                above `redraftDrafting` for why the prior two-branch version
+                dropped focus at draft landing. `armed` folds
+                `redraftNeedsConfirm` in; `onArm` performs the redraft
+                directly when no confirmation is needed, matching
+                TakeAnnouncementPanel's own Regenerate `onArm`. */}
+            {!skipped && (
+              <ConfirmArmButtons
+                armed={redraftNeedsConfirm && redraftArmed}
+                idleLabel={redraftLabel}
+                confirmLabel="Confirm redraft"
+                tone="warning"
+                idleVariant="outlined"
+                onArm={() => {
+                  if (redraftNeedsConfirm) setRedraftArmed(true);
+                  else onRedraft(row.id);
+                }}
+                onConfirm={handleConfirmRedraft}
+                onCancel={() => setRedraftArmed(false)}
+                consequenceId={redraftConsequenceId}
+                loading={redraftDrafting}
+                loadingLabel={redraftLabel}
+                idleAriaLabel={redraftAriaLabel}
+                confirmAriaLabel={`Confirm redraft for the reply to ${row.author}`}
+              />
             )}
             {/* D5: Move up/down decongest into a hover/focus-reveal cluster
                 (.hoverReveal, DiscussionRepliesPanel.module.css - the same
@@ -651,7 +695,7 @@ function DiscussionReplyRowImpl({
                 onClick={handleMoveUp}
                 title="Move up"
                 aria-label={`Move the reply to ${row.author} up`}
-                sx={isFirst || reorderDisabled ? { opacity: 0.5 } : undefined}
+                sx={isFirst || reorderDisabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
               >
                 <ArrowUpIcon />
               </IconButton>
@@ -661,7 +705,7 @@ function DiscussionReplyRowImpl({
                 onClick={handleMoveDown}
                 title="Move down"
                 aria-label={`Move the reply to ${row.author} down`}
-                sx={isLast || reorderDisabled ? { opacity: 0.5 } : undefined}
+                sx={isLast || reorderDisabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
               >
                 <ArrowDownIcon />
               </IconButton>
@@ -678,6 +722,7 @@ function DiscussionReplyRowImpl({
             <IconButton
               size="small"
               ref={(el) => registerRemoveRef(row.id, el)}
+              title="More actions"
               aria-label={`More actions for the reply to ${row.author}`}
               aria-haspopup="menu"
               aria-expanded={menuAnchor !== null}
@@ -700,11 +745,38 @@ function DiscussionReplyRowImpl({
             >
               <MenuItem onClick={handleToggleSkipFromMenu}>{skipped ? "Unskip this post" : "Skip - no reply needed"}</MenuItem>
               <MenuItem onClick={handleToggleHandledFromMenu}>{handledAt !== undefined ? "Clear handled" : "Mark as handled"}</MenuItem>
-              <MenuItem onClick={handleRemoveFromMenu} sx={{ color: "var(--danger)" }}>
-                {removeArmed ? "Confirm removal" : "Remove"}
+              {/* MUI's Menu is a Modal and aria-hides its siblings (the app
+                  root included), so an aria-describedby pointing OUTSIDE the
+                  Menu's own portal - and a consequence <p> rendered there -
+                  is never reachable by assistive tech while the menu is
+                  open. The describedby target and the consequence text both
+                  move inside this MenuItem now: aria-describedby resolves to
+                  the id on the ListItemText `secondary` node this same
+                  MenuItem renders (the TakesPanel.tsx overflow-menu idiom).
+                  Still one MenuItem, label-swapped (CC5) - not a remount. */}
+              <MenuItem onClick={handleRemoveFromMenu} sx={{ color: "var(--danger)" }} aria-describedby={removeArmed ? removeConsequenceId : undefined}>
+                {removeArmed ? (
+                  <ListItemText primary="Confirm removal" secondary={<span id={removeConsequenceId}>{removeConsequenceText}</span>} />
+                ) : (
+                  "Remove"
+                )}
               </MenuItem>
+              {/* CC5: a Cancel MenuItem while armed - the second control this
+                  criterion requires beside the label swap. Disarms only; the
+                  menu stays open so Skip/Mark as handled stay reachable. */}
+              {removeArmed && <MenuItem onClick={handleCancelRemoveFromMenu}>Cancel</MenuItem>}
             </Menu>
           </div>
+          {/* CC5/CC20: Redraft's own consequence sentence - gated on the
+              same `!skipped` and `redraftNeedsConfirm` conditions as the
+              button's own `armed` prop above, so a stale `redraftArmed` left
+              over from before the row was skipped never renders text for a
+              control that is no longer on the page. */}
+          {!skipped && redraftNeedsConfirm && redraftArmed && (
+            <p id={redraftConsequenceId} role="status" aria-live="polite" className={controls.consequence}>
+              {redraftConsequenceText}
+            </p>
+          )}
         </td>
       </tr>
 
@@ -755,9 +827,7 @@ function DiscussionReplyRowImpl({
                   keeps row-local (React.memo). The button's own text never
                   swaps (AC16); only this line and the icon do. */}
               {copied && (
-                <p className={styles.ghMeta} style={{ margin: 0 }}>
-                  {`Copied the reply to ${row.author}.`}
-                </p>
+                <p className={`${styles.ghMeta} ${panelStyles.metaTight}`}>{`Copied the reply to ${row.author}.`}</p>
               )}
               {/* D8: "Drafting" used to render an empty box - the placeholder
                   below is gated on state === "pending", so a drafting row
@@ -766,11 +836,14 @@ function DiscussionReplyRowImpl({
               {row.state === "drafting" && (
                 <>
                   <div aria-hidden="true">
-                    <span className={panelStyles.skeletonLine} style={{ width: "92%" }} />
-                    <span className={panelStyles.skeletonLine} style={{ width: "78%" }} />
-                    <span className={panelStyles.skeletonLine} style={{ width: "55%" }} />
+                    <span className={`${panelStyles.skeletonLine} ${panelStyles.skeletonLineLong}`} />
+                    <span className={`${panelStyles.skeletonLine} ${panelStyles.skeletonLineMid}`} />
+                    <span className={`${panelStyles.skeletonLine} ${panelStyles.skeletonLineShort}`} />
                   </div>
-                  <p className={styles.fieldHint} style={{ margin: 0 }}>{`Drafting a reply to ${row.author}…`}</p>
+                  {/* CC3: `.fieldHint` already sets `margin: 0` - the old
+                      inline object was a redundant restatement, not a second
+                      authority, so it is simply gone rather than converted. */}
+                  <p className={styles.fieldHint}>{`Drafting a reply to ${row.author}…`}</p>
                 </>
               )}
               {/* D8: the real provider failure reason, relocated here from
@@ -804,108 +877,39 @@ function DiscussionReplyRowImpl({
                 inputRef={replyInputRef}
               />
 
-              {/* Resource-controls feature: per-row targeted search - "each
-                  reply should also have a button to search for resources
-                  specific to that reply and its original message". Shares
-                  this row's own `resourceState` rendering below for its
-                  pending/failed feedback (searching.../Retry links) rather
-                  than a separate UI state - useReplyResources.ts's own
-                  `searchRow` doc comment has the full account of why that is
-                  safe (it uses the same
-                  markResourceSearching/applyResources/markResourceFailed
-                  mutators the bulk pass already does). Disabled while
-                  ALREADY searching (bulk or per-row - both set the same
-                  resourceState) to avoid a redundant concurrent dispatch. */}
-              <Button
-                size="small"
-                variant="text"
-                style={{ minWidth: 0, alignSelf: "flex-start" }}
-                disabled={row.resourceState === "searching"}
-                aria-label={`Search for resources for the reply to ${row.author}`}
-                onClick={() => onSearchRow(row.id)}
-              >
-                Search for resources
-              </Button>
+              {/* Resource-controls feature: per-row targeted search, sharing
+                  DiscussionReplyResources's own resourceState rendering for
+                  its pending/failed feedback - see useReplyResources.ts's
+                  `searchRow` doc comment. Disabled while already searching.
+                  CC3: the wrapping `.ghActions` div is the "flex: none"
+                  authority that replaces the old inline `alignSelf:
+                  "flex-start"` on the button itself. */}
+              <div className={styles.ghActions}>
+                <Button
+                  size="small"
+                  variant="text"
+                  style={{ minWidth: 0 }}
+                  disabled={row.resourceState === "searching"}
+                  aria-label={`Search for resources for the reply to ${row.author}`}
+                  onClick={() => onSearchRow(row.id)}
+                >
+                  Search for resources
+                </Button>
+              </div>
 
-              {/* docs/discussion-reply-resources-acceptance-criteria.md R10:
-                  resources render beneath the reply, never inside the
-                  textbox. */}
-              {row.resourceState === "searching" && <p className={styles.fieldHint}>Finding resources…</p>}
-              {row.resourceState === "failed" && (
-                <p className={styles.error}>
-                  {row.resourceError}{" "}
-                  <button type="button" className={styles.linkButton} onClick={() => onRetryResources(row.id)}>
-                    Retry links
-                  </button>
-                </p>
-              )}
-              {!!row.resources?.length && (
-                <ul className={panelStyles.resourceList}>
-                  {row.resources.map((r) => (
-                    // D11 (AM25, "one styling authority per element"): this
-                    // used to be .resourceItem PLUS an inline style
-                    // overriding that same class's flex-direction/align-items
-                    // - two authorities on one element, on the grounds (a
-                    // module out of a since-closed fixer pass's file set)
-                    // that no longer apply now that this file owns
-                    // DiscussionRepliesPanel.module.css directly.
-                    // .resourceItemStacked composes with .resourceItem
-                    // instead (F4's stacked layout - badge/link/remove on one
-                    // line, the note beneath).
-                    <li key={r.url} className={`${panelStyles.resourceItem} ${panelStyles.resourceItemStacked}`}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", minWidth: 0 }}>
-                        <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>{RESOURCE_KIND_LABELS[r.kind]}</span>
-                        <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ minWidth: 0 }}>
-                          {r.title}
-                        </a>
-                        {/* Resource-controls feature: one-click insert. A
-                            MOVE (see onInsertResource's own doc comment) -
-                            this button and its resource both disappear from
-                            this list the moment it is clicked, which is what
-                            makes a second click on the SAME resource
-                            structurally impossible rather than merely
-                            discouraged. Text label, not icon-only: "Insert"
-                            has no standard, instantly-recognizable glyph in
-                            this app's existing icon set. */}
-                        <Button
-                          size="small"
-                          variant="text"
-                          style={{ minWidth: 0 }}
-                          aria-label={`Insert the link ${r.title} into the reply to ${row.author}`}
-                          onClick={() => handleInsertResource(r)}
-                        >
-                          Insert
-                        </Button>
-                        {/* F6: keyed by url, mirroring registerRemoveRef's
-                            row-scoped pattern above - the focus target after
-                            THIS button unmounts. */}
-                        <IconButton
-                          size="small"
-                          ref={(el) => registerResourceRemoveRef(r.url, el)}
-                          aria-label={`Remove the link ${r.title} from the reply to ${row.author}`}
-                          onClick={() => handleRemoveResource(r.url)}
-                        >
-                          <CloseIcon />
-                        </IconButton>
-                      </div>
-                      {/* F4 fix: `note` is the one piece of evidence the
-                          gathering pass produced for why this resource fits
-                          THIS post (R3/AC R0-5) - it was gathered, persisted
-                          and unit-tested but never rendered, leaving the
-                          instructor's remove decision (R10) a coin flip on
-                          the title alone. Reuses the existing fieldHint
-                          style (already imported as `styles`) rather than
-                          adding a class. Never copied to the clipboard -
-                          replyClipboardText deliberately excludes it (R9b). */}
-                      {r.note && (
-                        <p className={styles.fieldHint} style={{ margin: 0 }}>
-                          {r.note}
-                        </p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {/* CC17: the resource <ul>, per-resource Insert/Remove, and the
+                  retry-links error live in DiscussionReplyResources.tsx now.
+                  Every callback below is a stable useCallback from this row. */}
+              <DiscussionReplyResources
+                authorName={row.author}
+                resourceState={row.resourceState}
+                resourceError={row.resourceError}
+                resources={row.resources}
+                onRetryResources={handleRetryResources}
+                onInsertResource={handleInsertResource}
+                onRemoveResource={handleRemoveResource}
+                registerResourceRemoveRef={registerResourceRemoveRef}
+              />
             </div>
           </div>
         </td>

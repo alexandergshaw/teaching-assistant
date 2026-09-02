@@ -30,6 +30,9 @@ import styles from "../../page.module.css";
 // used instead).
 import tableStyles from "../workflows/AutomationsTable.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
+// docs/recording-controls-ux-acceptance-criteria.md CC13/CC14: the shared
+// controls vocabulary for the nine Recording sub-tabs (group P).
+import controls from "./RecordingControls.module.css";
 import { type ReplyRow, type ReplyResource, type ReplySort } from "./discussion-capture";
 import DiscussionReplyRow, { DISCUSSION_TABLE_COLUMN_COUNT } from "./DiscussionReplyRow";
 import type { LlmProvider } from "@/lib/llm";
@@ -46,10 +49,20 @@ function toggleColumnSort(current: ReplySort, ascKey: ReplySort, descKey: ReplyS
   return current === ascKey ? descKey : ascKey;
 }
 
-function SortGlyph({ asc }: { asc: boolean }) {
+// CC14: renders on every sortable header, not only the active one, dimmed to
+// a muted colour token when the column is not the active sort - so
+// sortability itself is visible, not just which column is currently sorted.
+function SortGlyph({ asc, active }: { asc: boolean; active: boolean }) {
   const points = asc ? "10,4 16,15 4,15" : "10,16 16,5 4,5";
   return (
-    <svg width={10} height={10} viewBox="0 0 20 20" aria-hidden="true" focusable="false" style={{ marginLeft: "var(--space-1)" }}>
+    <svg
+      width={10}
+      height={10}
+      viewBox="0 0 20 20"
+      aria-hidden="true"
+      focusable="false"
+      className={active ? panelStyles.sortGlyph : `${panelStyles.sortGlyph} ${panelStyles.sortGlyphInactive}`}
+    >
       <polygon points={points} fill="currentColor" />
     </svg>
   );
@@ -92,7 +105,10 @@ export interface DiscussionReplyTableProps {
    *  than "All" is active - see DiscussionReplyRow.tsx's handleMoveUp/Down. */
   reorderDisabled: boolean;
   onRemove: (id: string) => void;
-  retryRow: (id: string) => void;
+  /** CC19 (group H, wave 0 - type-only thread; the row control itself is
+   *  group D2's, wave 1). Forwarded straight through, unwrapped, to every
+   *  DiscussionReplyRow as `onRedraft`. */
+  redraftRow: (id: string) => void;
   retryResources: (id: string) => void;
   removeResource: (id: string, url: string) => void;
   /** Resource-controls feature: one-click insert (MOVE, not copy - see
@@ -134,7 +150,7 @@ export default function DiscussionReplyTable({
   moveRow,
   reorderDisabled,
   onRemove,
-  retryRow,
+  redraftRow,
   retryResources,
   removeResource,
   insertResource,
@@ -198,19 +214,19 @@ export default function DiscussionReplyTable({
               <th scope="col" aria-sort={sortAriaValue(sort === "first-asc" || sort === "first-desc", sort === "first-asc")}>
                 <button type="button" className={styles.linkButton} onClick={() => setSort(toggleColumnSort(sort, "first-asc", "first-desc"))}>
                   First
-                  {(sort === "first-asc" || sort === "first-desc") && <SortGlyph asc={sort === "first-asc"} />}
+                  <SortGlyph asc={sort !== "first-desc"} active={sort === "first-asc" || sort === "first-desc"} />
                 </button>
               </th>
               <th scope="col" aria-sort={sortAriaValue(sort === "last-asc" || sort === "last-desc", sort === "last-asc")}>
                 <button type="button" className={styles.linkButton} onClick={() => setSort(toggleColumnSort(sort, "last-asc", "last-desc"))}>
                   Last
-                  {(sort === "last-asc" || sort === "last-desc") && <SortGlyph asc={sort === "last-asc"} />}
+                  <SortGlyph asc={sort !== "last-desc"} active={sort === "last-asc" || sort === "last-desc"} />
                 </button>
               </th>
               <th scope="col" aria-sort={sortAriaValue(sort === "captured-asc" || sort === "captured-desc", sort === "captured-asc")}>
                 <button type="button" className={styles.linkButton} onClick={() => setSort(toggleColumnSort(sort, "captured-asc", "captured-desc"))}>
                   Captured
-                  {(sort === "captured-asc" || sort === "captured-desc") && <SortGlyph asc={sort === "captured-asc"} />}
+                  <SortGlyph asc={sort !== "captured-desc"} active={sort === "captured-asc" || sort === "captured-desc"} />
                 </button>
               </th>
               {/* AC15 amendment (reply-width UX pass): Post/Reply column
@@ -220,7 +236,11 @@ export default function DiscussionReplyTable({
                   name (`Post by X`, `Reply to X`) than a shared column
                   header ever gave them. */}
               <th scope="col">Status</th>
-              <th scope="col">Actions</th>
+              {/* CC14: right-aligns to match .rowActions - RecordingControls.
+                  module.css (group P) owns the shared class now. */}
+              <th scope="col" className={controls.rowActionsHeader}>
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -272,7 +292,7 @@ export default function DiscussionReplyTable({
                   onEditReply={editReply}
                   onMove={moveRow}
                   onRemove={onRemove}
-                  onRetry={retryRow}
+                  onRedraft={redraftRow}
                   onRetryResources={retryResources}
                   onRemoveResource={removeResource}
                   onInsertResource={insertResource}

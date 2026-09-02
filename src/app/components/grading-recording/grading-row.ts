@@ -107,3 +107,19 @@ export const GRADING_ROW_HAYSTACK = (row: GradingRow): readonly string[] => [
   row.studentName,
   row.submissionText,
 ];
+
+/**
+ * docs/recording-controls-ux-acceptance-criteria.md CC14: "Copy feedback"
+ * (GradingTableRow.tsx) copies exactly the three FEEDBACK fields - strengths,
+ * improvements, overallComment - joined by a blank line, in that order.
+ * `totalScore` is deliberately excluded: it is a grade, not feedback, and
+ * pasting it into a Canvas comment box alongside prose would read as this
+ * app asserting a score it never posts anywhere (see this file's own header
+ * on why a GradingRow can never carry a postable identity). A field left
+ * blank is omitted entirely rather than leaving a bare blank line in its
+ * place - a row with only an overall comment copies as one paragraph, not
+ * two blank lines followed by one.
+ */
+export function joinFeedback(row: GradingRow): string {
+  return [row.strengths, row.improvements, row.overallComment].filter((field) => field.trim() !== "").join("\n\n");
+}

@@ -6,6 +6,7 @@ import TabShell from "./TabShell";
 import CaptionStudio from "./CaptionStudio";
 import SlideStudio from "./SlideStudio";
 import styles from "../page.module.css";
+import controls from "./recording/RecordingControls.module.css";
 import { useSupabase } from "@/context/SupabaseProvider";
 import { useRecordingSettings } from "./recording/useRecordingSettings";
 import { useDevices } from "./recording/useDevices";
@@ -572,15 +573,20 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           inner-view-strip structure test's own single-line regex
           (recording-split.structure.test.ts) would otherwise be a second
           place to keep in sync with the literal below.
-          NOT done here, and out of this scope by the brief's own
-          restriction ("touch nothing else in that file"): id/aria-controls
-          on these buttons and role="tabpanel"/aria-labelledby on the eight
-          content divs scattered through the rest of this 800+ line file -
-          a real fix needs both sides wired together, and only one side is
-          in this agent's file set. */}
+          CC9 (docs/recording-controls-ux-acceptance-criteria.md): the strip
+          is now fully wired - each tab button below carries its own id and a
+          pointer to the content div it exposes, and each content div further
+          down carries a matching tabpanel role, id and a pointer back to the
+          tab(s) that name it, via the "rec-tab-<key>" / "rec-panel-<key>"
+          pair. The record/announcement pair shares ONE content wrapper (the
+          block immediately below this strip), so the announcement tab
+          points at the record panel's id rather than a non-existent
+          announcement-only one. */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
         {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["grading", "Grading (from a recording)"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
+            id={`rec-tab-${key}`}
+            aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}
             tabIndex={recView === key ? 0 : -1}
             onKeyDown={(e) => {
               const tabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
@@ -616,8 +622,13 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           one from the library or the session's own takes list, exactly like
           Record; an instructor who opens the panel from a take's row while
           already on Record keeps that exact route too, unchanged. */}
-      <div style={{ display: recView === "record" || recView === "announcement" ? undefined : "none" }}>
-        {error && <p role="alert" className={styles.error}>{error}</p>}
+      <div
+        role="tabpanel"
+        id="rec-panel-record"
+        aria-labelledby={recView === "announcement" ? "rec-tab-announcement" : "rec-tab-record"}
+        style={{ display: recView === "record" || recView === "announcement" ? undefined : "none" }}
+      >
+        {error && <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{error}</p>}
 
         {recView === "announcement" && !walkthroughTake && !announcementTake && (
           <p className={styles.fieldHint}>
@@ -734,20 +745,22 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                 Pick anything already in your recording library - including a captioned or narrated file - to talk over it or draft an announcement from it.
               </p>
             </div>
-            {libraryError && <p role="alert" className={styles.error}>{libraryError}</p>}
+            {libraryError && <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{libraryError}</p>}
             {libraryBusy && libraryFiles === null ? (
-              <p className={styles.fieldHint} role="status" aria-live="polite">Loading your recording library…</p>
+              <p role="status" aria-live="polite" className={controls.loadingLine}>
+                <span className={styles.spinner} aria-hidden="true" /> Loading your recording library…
+              </p>
             ) : libraryFiles && libraryFiles.length === 0 ? (
               <p className={styles.fieldHint}>Nothing in your recording library yet.</p>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
+              <div className={styles.adaptRow}>
                 <TextField
                   select
                   label="Library recording"
                   size="small"
+                  className={controls.fieldMd}
                   value={effectiveLibraryFileId}
                   onChange={(e) => setSelectedLibraryFileId(e.target.value)}
-                  sx={{ minWidth: 260 }}
                 >
                   {(libraryFiles ?? []).map((f) => (
                     <MenuItem key={f.id} value={f.id}>
@@ -759,6 +772,9 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                   <Button
                     size="small"
                     variant="outlined"
+                    className={controls.fieldRowButton}
+                    loading={libraryActionBusy === "walkthrough"}
+                    loadingPosition="start"
                     disabled={crossTakeBusy || libraryActionBusy !== null}
                     onClick={(e) => void handleLibraryTalkThrough(selectedLibraryFile, e.currentTarget)}
                   >
@@ -769,6 +785,9 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
                   <Button
                     size="small"
                     variant="outlined"
+                    className={controls.fieldRowButton}
+                    loading={libraryActionBusy === "announcement"}
+                    loadingPosition="start"
                     disabled={crossTakeBusy || libraryActionBusy !== null}
                     onClick={(e) => void handleLibraryDraftAnnouncement(selectedLibraryFile, e.currentTarget)}
                   >
@@ -807,14 +826,14 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           a speed re-encode can run five to eighty minutes, and RecordingTab
           is the always-mounted surface; FilesTab unmounts on a tab switch and
           would silently kill the job mid-encode. */}
-      <div style={{ display: recView === "speed" ? undefined : "none" }}>
+      <div role="tabpanel" id="rec-panel-speed" aria-labelledby="rec-tab-speed" style={{ display: recView === "speed" ? undefined : "none" }}>
         <SpeedPanel takes={takes.takes} backupDir={takes.backupDir} />
       </div>
 
       {/* Same always-mounted stack, for the same reason: a capture session,
           its pending frame queue and its in-flight extraction must survive the
           user switching to another inner view. */}
-      <div style={{ display: recView === "discussions" ? undefined : "none" }}>
+      <div role="tabpanel" id="rec-panel-discussions" aria-labelledby="rec-tab-discussions" style={{ display: recView === "discussions" ? undefined : "none" }}>
         {/* NEW-4: AND with the tab-level `active` prop, matching
             `recordSurfaceActive`'s own idiom above - without it, a user whose
             persisted `ta-rec-view` is "discussions" fires this panel's lazy
@@ -828,7 +847,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           inner view - grading-via-recording's own capture loop (see
           GradingRecordingPanel.tsx) needs exactly the guarantee
           "discussions" needs above. */}
-      <div style={{ display: recView === "grading" ? undefined : "none" }}>
+      <div role="tabpanel" id="rec-panel-grading" aria-labelledby="rec-tab-grading" style={{ display: recView === "grading" ? undefined : "none" }}>
         <GradingRecordingPanel active={active && recView === "grading"} />
       </div>
 
@@ -838,19 +857,19 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           module-walkthrough-deck feature's own capture loop needs exactly the
           guarantee "discussions" and "grading" need above (docs/module-
           walkthrough-deck-acceptance-criteria.md AC1). */}
-      <div style={{ display: recView === "moduledeck" ? undefined : "none" }}>
+      <div role="tabpanel" id="rec-panel-moduledeck" aria-labelledby="rec-tab-moduledeck" style={{ display: recView === "moduledeck" ? undefined : "none" }}>
         <ModuleDeckCapturePanel active={active && recView === "moduledeck"} />
       </div>
 
-      <div style={{ display: recView === "captions" ? undefined : "none" }}>
+      <div role="tabpanel" id="rec-panel-captions" aria-labelledby="rec-tab-captions" style={{ display: recView === "captions" ? undefined : "none" }}>
         <CaptionStudio takes={takes.takes} backupDir={takes.backupDir} />
       </div>
 
-      <div style={{ display: recView === "slides" ? undefined : "none" }}>
+      <div role="tabpanel" id="rec-panel-slides" aria-labelledby="rec-tab-slides" style={{ display: recView === "slides" ? undefined : "none" }}>
         <SlideStudio />
       </div>
 
-      <div style={{ display: recView === "avatar" ? undefined : "none" }}>
+      <div role="tabpanel" id="rec-panel-avatar" aria-labelledby="rec-tab-avatar" style={{ display: recView === "avatar" ? undefined : "none" }}>
         <AvatarStudioPanel
           devices={dev.devices}
           requestAccess={dev.requestAccess}

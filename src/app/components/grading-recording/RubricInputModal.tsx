@@ -92,6 +92,13 @@ import { validateFileUpload } from "@/lib/syllabus-upload-validation";
 import { SYLLABUS_UPLOAD_BUCKET, syllabusUploadStoragePath } from "@/lib/syllabus-upload-source";
 import { ModalShell } from "../ui/ModalShell";
 import styles from "../../page.module.css";
+// docs/recording-controls-ux-acceptance-criteria.md CC15: the shared
+// upload-label class (the `:has(:focus-visible)` ring) and, per CC13, this
+// file's own plain body/drop-zone/disabled-textarea classes live in the
+// sibling table stylesheet - this modal has no CSS module of its own.
+import controls from "../recording/RecordingControls.module.css";
+import sharedStyles from "./GradingTable.module.css";
+import { visuallyHidden } from "../ui/visuallyHidden";
 import {
   canSubmitRubric,
   describeRubricSourceLabel,
@@ -261,23 +268,42 @@ export function RubricInputModal({
         </button>
       </div>
 
-      <div className={styles.previewContent}>
+      {/* CC15: a plain body container, not the pre-wrap .previewContent
+          preview box - this is live form controls, not extracted text. */}
+      <div className={sharedStyles.modalBody}>
         <div
+          className={`${sharedStyles.dropZone} ${dragOver ? sharedStyles.dropZoneActive : ""}`}
           onDragOver={(event) => {
             event.preventDefault();
             setDragOver(true);
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          style={{
-            border: `1px dashed ${dragOver ? "var(--accent)" : "var(--field-border)"}`,
-            borderRadius: "var(--radius-sm)",
-            padding: "var(--space-3)",
-            textAlign: "center",
-            marginBottom: "var(--space-4)",
-          }}
         >
-          <label className={styles.downloadButton} style={{ cursor: busy ? "not-allowed" : "pointer" }}>
+          {/* CC15: MUI's own `component="label"` recipe - the <input> keeps
+              its natural tab stop (visually hidden, never display:none), so
+              the control is reachable and operable by keyboard alone
+              instead of only through the pointer-only drop zone.
+
+              Fixer pass finding 6: with a string `component`, ButtonBase
+              still defaults its own `role="button"` unless told otherwise -
+              a NESTED duplicate control, since the real, natively-focusable
+              control here is the wrapped <input type="file">, not this
+              <label>. `role={undefined}` removes ButtonBase's role so a
+              screen reader announces the actual file input once, not a
+              "button" wrapping an unlabelled "choose file" input. `loading`
+              mirrors the label swap this button already had while the
+              upload/extraction round trip is in flight. */}
+          <Button
+            component="label"
+            role={undefined}
+            tabIndex={-1}
+            className={controls.uploadLabel}
+            variant="outlined"
+            size="small"
+            loading={busy}
+            loadingPosition="start"
+          >
             {busy ? "Reading file…" : "Choose a file"}
             <input
               ref={fileInputRef}
@@ -285,30 +311,39 @@ export function RubricInputModal({
               accept={ACCEPTED_EXTENSIONS}
               onChange={handleFileInputChange}
               disabled={busy}
-              style={{ display: "none" }}
+              style={visuallyHidden}
               aria-describedby={`${textareaId}-file-hint`}
             />
-          </label>
-          <span id={`${textareaId}-file-hint`} className={styles.fieldHint} style={{ marginLeft: "var(--space-2)" }}>
+          </Button>
+          <span id={`${textareaId}-file-hint`} className={styles.fieldHint}>
             or drop it here - .docx, .pdf, .txt or .md, up to 25 MB
           </span>
         </div>
 
         {notice && (
-          // "warning" (a suspiciously-short extraction, R1a/R2b) gets the
-          // SAME danger styling as a hard "error" - it must visually read
-          // as "look at this before trusting it", never as the same quiet
-          // confirmation a clean extraction gets. Only its urgency differs:
-          // an error is announced immediately (role="alert"), a warning
-          // politely (role="status"), since the extraction did technically
-          // complete and the instructor is not blocked from continuing.
-          <p
-            className={notice.kind === "success" ? styles.fieldHint : styles.error}
-            role={notice.kind === "error" ? "alert" : "status"}
-            aria-live={notice.kind === "error" ? "assertive" : "polite"}
-          >
-            {notice.text}
-          </p>
+          // CC11: "warning" (a suspiciously-short extraction, R1a/R2b) gets
+          // the noticeWarning notice shape, not the noticeDanger a hard
+          // "error" gets - it must still visually read as "look at this
+          // before trusting it", never as the same quiet confirmation a
+          // clean extraction gets, but it is not styled identically to an
+          // error. Its urgency differs the same way its shape does: an error
+          // is announced immediately (role="alert"), a warning politely
+          // (role="status"), since the extraction did technically complete
+          // and the instructor is not blocked from continuing. "success" is
+          // ordinary information, not a notice.
+          notice.kind === "success" ? (
+            <p className={styles.fieldHint} role="status" aria-live="polite">
+              {notice.text}
+            </p>
+          ) : (
+            <p
+              className={`${controls.notice} ${notice.kind === "error" ? controls.noticeDanger : controls.noticeWarning}`}
+              role={notice.kind === "error" ? "alert" : "status"}
+              aria-live={notice.kind === "error" ? "assertive" : "polite"}
+            >
+              {notice.text}
+            </p>
+          )
         )}
 
         <div className={styles.field}>
@@ -322,7 +357,7 @@ export function RubricInputModal({
             disabled={busy}
             rows={14}
             placeholder="Paste the grading rubric here, or use the upload above."
-            style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+            className={sharedStyles.rubricTextarea}
           />
         </div>
       </div>

@@ -3711,6 +3711,10 @@ a.instFieldValue:hover {
 
 .lessonInnerTabs {
   display: flex;
+  /* docs/recording-controls-ux-acceptance-criteria.md CC9: the Recording
+     tab's strip carries nine tabs; with `width: fit-content` and no wrap
+     it overflowed its column instead of folding to a second row. */
+  flex-wrap: wrap;
   gap: var(--space-1);
   padding: var(--space-1);
   border-radius: var(--radius-sm);

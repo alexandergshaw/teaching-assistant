@@ -337,9 +337,10 @@ describe("shouldTickerRun (NEW-2)", () => {
 // ---------------------------------------------------------------------------
 
 describe("draftDispatchForce (S1)", () => {
-  it("forces for retry and redraftAll; not for auto or the bulk draftMissing action", () => {
+  it("forces for retry, redraftAll and redraftRow; not for auto or the bulk draftMissing action", () => {
     expect(draftDispatchForce("retry")).toBe(true);
     expect(draftDispatchForce("redraftAll")).toBe(true); // AC29: explicitly armed overwrite
+    expect(draftDispatchForce("redraftRow")).toBe(true); // CC19: single-row, explicit, same rationale as retry
     expect(draftDispatchForce("auto")).toBe(false);
     expect(draftDispatchForce("draftMissing")).toBe(false); // AC52 stays for an un-targeted click
   });

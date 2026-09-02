@@ -42,8 +42,14 @@
 //     `capturing`.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, MenuItem, TextField } from "@mui/material";
+import { Button } from "@mui/material";
 import styles from "../../page.module.css";
+import controls from "../recording/RecordingControls.module.css";
+import { variantFor } from "../ui/buttonVariant";
+import { visuallyHidden } from "../ui/visuallyHidden";
+import RunLogRow from "../recording/RunLogRow";
+import { useThrottledLiveSentence } from "../recording/captureLiveRegion";
+import ModuleDeckSettings from "./ModuleDeckSettings";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useDiscussionCapture } from "../recording/useDiscussionCapture";
 import { EXTRACT_BATCH_WIRE_BUDGET, type CapturedFrame } from "../recording/discussion-capture";
@@ -639,6 +645,31 @@ export default function ModuleDeckCapturePanel({ active }: { active: boolean }) 
 
   const pptxAvailable = savedArtifact ? artifactDownloadFormats(savedArtifact).includes("pptx") : false;
 
+  // CC1: "extracted material exists" for this surface means at least one
+  // legible block has been read off the screen - the same condition
+  // canGenerateDeck itself gates decision 6 on (blockCount > 0 &&
+  // legibleBlockCount === 0 is still a refusal), so hasMaterial and the
+  // gate agree on what "material" means.
+  const hasMaterial = legibleBlockCount > 0;
+
+  // CC12: the panel keeps its own status-sentence copy (CC16 - unchanged
+  // wording, unchanged conditions) and only adopts the shared throttle hook
+  // and the shared visually-hidden style, mirroring the visible status text
+  // rendered below so a screen-reader user hears the same information a
+  // sighted user sees, without a live region firing on every frame.
+  const captureStatusSentence = capturing
+    ? [
+        legibleBlockCount === 0
+          ? "Capturing - nothing read yet."
+          : `${legibleBlockCount} block${legibleBlockCount === 1 ? "" : "s"} read so far.`,
+        extracting ? "Reading the screen…" : null,
+        pendingFrames > 0 ? "Catching up - scroll a little slower." : null,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(" ")
+    : "";
+  const throttledCaptureStatus = useThrottledLiveSentence(captureStatusSentence);
+
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
@@ -650,166 +681,31 @@ export default function ModuleDeckCapturePanel({ active }: { active: boolean }) 
         </p>
       </div>
 
-      {/* AC9/point 8: placed immediately under the header, before every other
-          control, never gated on a run having happened - mirrors
-          GradingRecordingPanel.tsx:493-510's identical placement/reasoning. */}
-      <div className={styles.fieldHint} style={{ margin: "0 0 var(--space-1)", display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-        <span>{moduleDeckCaptureLogSummaryLine(summarizeModuleDeckCaptureRunLog(currentLog))}</span>
-        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("csv")}>
-          Download run log (CSV)
-        </Button>
-        <Button size="small" variant="text" style={{ minWidth: 0 }} onClick={() => handleDownloadLog("json")}>
-          Download run log (JSON)
-        </Button>
-      </div>
-
-      {/* AC1/AC2/AC3: course, module, template and context - all reachable
-          BEFORE the record button, all persisted, all always offered
-          regardless of a bulk-bar prefill (AC1's "the destination owns its
-          context obligation"). */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)", alignItems: "flex-start" }}>
-        <TextField
-          select
-          label="Course (where the deck is saved)"
-          size="small"
-          value={courseId}
-          onChange={(e) => setCourseId(e.target.value)}
-          disabled={coursesLoading}
-          sx={{ minWidth: 220 }}
-        >
-          <MenuItem value="">No course selected</MenuItem>
-          {(courses ?? []).map((c) => (
-            <MenuItem key={c.id} value={c.id}>
-              {c.name}
-            </MenuItem>
-          ))}
-        </TextField>
-        <TextField
-          label="Module name (optional)"
-          size="small"
-          value={moduleLabel}
-          onChange={(e) => setModuleLabel(e.target.value)}
-          sx={{ minWidth: 200 }}
-        />
-        <div>
-          <TextField
-            select
-            label="Deck template"
-            size="small"
-            value={templateId}
-            onChange={(e) => setTemplateId(e.target.value)}
-            sx={{ minWidth: 200 }}
-          >
-            {templates.map((t) => (
-              <MenuItem key={t.id} value={t.id}>
-                {t.name}
-              </MenuItem>
-            ))}
-          </TextField>
-          {/* AM-C: shown unconditionally, next to the picker, before any
-              capture starts. */}
-          <p className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
-            This template always produces {resolvedSlideCount} slide{resolvedSlideCount === 1 ? "" : "s"}, regardless
-            of how long you record.
-          </p>
-        </div>
-      </div>
-      {coursesError && <p className={styles.fieldHint}>Could not load your courses - pick one once your connection recovers.</p>}
-      {templatesError && <p className={styles.fieldHint}>Could not load your saved templates - the built-in presets above still work.</p>}
-
-      <div className={styles.field}>
-        <TextField
-          label="Context for this walkthrough (optional)"
-          size="small"
-          multiline
-          minRows={2}
-          maxRows={6}
-          value={contextText}
-          onChange={(e) => setContextText(e.target.value)}
-          helperText={`${contextText.length} / ${MAX_CONTEXT_CHARS} characters - reaches the model reading your screen, and describes what you are covering (it does not filter what gets read).`}
-          fullWidth
-        />
-        {contextPersistError && <p className={styles.fieldHint}>{contextPersistError}</p>}
-      </div>
-
-      {/* AM-L: nothing about a capture survives a reload - stated plainly,
-          before the record button. */}
-      <p className={styles.fieldHint}>
-        A capture in progress does not survive a reload or a closed tab: anything not yet read off the screen, and any
-        vision call already in flight, is lost.
-      </p>
-      <p className={styles.fieldHint}>{scrollSafety.message}</p>
-
-      <div className={styles.ghActions}>
-        <Button variant="contained" size="small" onClick={handleStartStop}>
-          {capturing ? "Stop capture" : "Start capture"}
-        </Button>
-        <Button variant="outlined" size="small" ref={probeButtonRef} disabled={capturing} onClick={() => setProbeOpen(true)}>
-          Run legibility probe
-        </Button>
-      </div>
-      <p className={styles.fieldHint}>
-        You can also stop from your browser&apos;s sharing bar. Run the legibility probe first if you are unsure your
-        text will be readable - a failed probe means the deck would be built from unreadable frames.
-      </p>
-      {startError && (
-        <p className={styles.error} role="alert">
-          {startError}
-        </p>
-      )}
-
-      <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-3)", flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
-        <video
-          ref={previewRef}
-          style={{
-            width: 240,
-            aspectRatio: "16 / 9",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--card-border)",
-            background: "#000",
-            objectFit: "cover",
-            display: capturing ? undefined : "none",
-          }}
-          autoPlay
-          muted
-          playsInline
-        />
-        {capturing && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
-            <span>{fmt(elapsedSec)}</span>
-            <span>{legibleBlockCount === 0 ? "Capturing - nothing read yet." : `${legibleBlockCount} block${legibleBlockCount === 1 ? "" : "s"} read so far.`}</span>
-            {extracting && <span>Reading the screen…</span>}
-            {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
-          </div>
-        )}
-      </div>
-      {logStartedAt && (
-        // AC5/AM-K: frames and calls only - never a token count, never a
-        // currency figure.
-        <p className={styles.fieldHint}>{runCost.message}</p>
-      )}
-      {stalled && (
-        <p className={styles.error}>
-          Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second window
-          while you scroll.
-        </p>
-      )}
-      {droppedFramesTotal > 0 && (
-        <p className={styles.error} role="alert">
-          {droppedFramesTotal} frame{droppedFramesTotal === 1 ? "" : "s"} scrolled past faster than they could be read
-          and were dropped. Scroll back over that section to catch it.
-        </p>
-      )}
-      {frameEncodeNotice && (
-        <p className={styles.error} role="alert">
-          {frameEncodeNotice}
-        </p>
-      )}
-
-      {notices.length > 0 && (
-        <div className={styles.field}>
+      {/* CC11: one consolidated notices slot, the first child after the
+          header - the five paragraphs that used to be scattered through the
+          rest of this file (start failure, stalled, dropped frames, an encode
+          notice, per-batch notices).
+          Fixer pass finding 2 (9b): CC11's original text let danger kinds
+          keep their own per-notice role="alert" here; a bad run showed that
+          was wrong for THIS surface - several of these can fire at once
+          (a start failure, a stalled warning and a dropped-frames notice all
+          together), and N simultaneous role="alert" regions queue and
+          interrupt each other instead of being read in order. ONE wrapper
+          now carries role="status"/aria-live="polite" and no role on the
+          individual notices, mirroring DiscussionRepliesPanel.tsx's own
+          CC11 wrapper. */}
+      {(startError || droppedFramesTotal > 0 || frameEncodeNotice || notices.length > 0) && (
+        <div role="status" aria-live="polite" className={styles.field}>
+          {startError && <p className={`${controls.notice} ${controls.noticeDanger}`}>{startError}</p>}
+          {droppedFramesTotal > 0 && (
+            <p className={`${controls.notice} ${controls.noticeDanger}`}>
+              {droppedFramesTotal} frame{droppedFramesTotal === 1 ? "" : "s"} scrolled past faster than they could be
+              read and were dropped. Scroll back over that section to catch it.
+            </p>
+          )}
+          {frameEncodeNotice && <p className={`${controls.notice} ${controls.noticeDanger}`}>{frameEncodeNotice}</p>}
           {notices.map((n) => (
-            <p key={n.id} className={n.kind === "danger" ? styles.error : styles.fieldHint} role={n.kind === "danger" ? "alert" : "status"}>
+            <p key={n.id} className={n.kind === "danger" ? `${controls.notice} ${controls.noticeDanger}` : controls.notice}>
               {n.text}{" "}
               <button type="button" className={styles.linkButton} onClick={() => dismissNotice(n.id)}>
                 Dismiss
@@ -819,29 +715,141 @@ export default function ModuleDeckCapturePanel({ active }: { active: boolean }) 
         </div>
       )}
 
-      <div className={styles.ghActions}>
-        <Button variant="contained" size="small" disabled={!generateGate.ok} onClick={() => void handleGenerate()}>
+      {/* CC8: directly under the header (notices above are the only thing
+          that can precede it, and are absent on the common path). */}
+      <RunLogRow
+        summary={moduleDeckCaptureLogSummaryLine(summarizeModuleDeckCaptureRunLog(currentLog))}
+        onDownload={handleDownloadLog}
+      />
+
+      {/* CC2/CC17: course, module, template and context - extracted to
+          ModuleDeckSettings. All reachable BEFORE the record button, all
+          persisted, all always offered regardless of a bulk-bar prefill
+          (AC1's "the destination owns its context obligation"). */}
+      <ModuleDeckSettings
+        courseId={courseId}
+        setCourseId={setCourseId}
+        courses={courses}
+        coursesLoading={coursesLoading}
+        coursesError={coursesError}
+        moduleLabel={moduleLabel}
+        setModuleLabel={setModuleLabel}
+        templateId={templateId}
+        setTemplateId={setTemplateId}
+        templates={templates}
+        templatesError={templatesError}
+        contextText={contextText}
+        setContextText={setContextText}
+        maxContextChars={MAX_CONTEXT_CHARS}
+        contextPersistError={contextPersistError}
+        // AM-C/Fixer pass finding 1: the literal stays here (the wiring test
+        // requires it precede the run row's own capture toggle and not be
+        // gated on `capturing`) but is now passed down so it renders
+        // directly under the template picker's own row, inside the Deck
+        // fieldset, instead of under the Context textarea.
+        templateHint={
+          <p className={styles.fieldHint}>
+            This template always produces {resolvedSlideCount} slide{resolvedSlideCount === 1 ? "" : "s"}, regardless
+            of how long you record.
+          </p>
+        }
+      />
+
+      {/* AM-L: nothing about a capture survives a reload - stated plainly,
+          before the record button. */}
+      <p className={styles.fieldHint}>
+        A capture in progress does not survive a reload or a closed tab: anything not yet read off the screen, and any
+        vision call already in flight, is lost.
+      </p>
+      <p className={styles.fieldHint}>{scrollSafety.message}</p>
+
+      {/* CC1: the run row - the last thing in the settings block, immediately
+          followed by the status area. Exactly one of these three is
+          `contained` on any given render: Start/Stop while capturing or with
+          no material yet, Generate deck once material exists and capture has
+          stopped. The probe button below is always outlined - it is never
+          the screen's primary. */}
+      <div className={`${styles.ghActions} ${controls.runRow}`}>
+        <Button variant={variantFor(capturing || !hasMaterial)} color="primary" size="small" onClick={handleStartStop}>
+          {capturing ? "Stop capture" : "Start capture"}
+        </Button>
+        <Button variant="outlined" size="small" ref={probeButtonRef} disabled={capturing} onClick={() => setProbeOpen(true)}>
+          Run legibility probe
+        </Button>
+        <Button
+          variant={variantFor(!capturing && hasMaterial)}
+          color="primary"
+          size="small"
+          loading={generating}
+          loadingPosition="start"
+          disabled={!generateGate.ok}
+          onClick={() => void handleGenerate()}
+        >
           {generating ? "Generating…" : "Generate deck"}
         </Button>
       </div>
       {!generateGate.ok && <p className={styles.fieldHint}>{generateGate.reason}</p>}
+      <p className={styles.fieldHint}>
+        You can also stop from your browser&apos;s sharing bar. Run the legibility probe first if you are unsure your
+        text will be readable - a failed probe means the deck would be built from unreadable frames.
+      </p>
+
+      {/* CC12/CC13: only the <video> stays hidden from assistive tech - the
+          status column next to it is real content and must reach it. The
+          visible sentence is unchanged (CC16); the throttled hidden region
+          beside it announces the same information at most once every 5s. */}
+      <div className={controls.statusRow}>
+        <video
+          ref={previewRef}
+          className={capturing ? controls.previewVideo : `${controls.previewVideo} ${controls.previewVideoHidden}`}
+          aria-hidden="true"
+          autoPlay
+          muted
+          playsInline
+        />
+        {capturing && (
+          <div className={controls.statusText}>
+            <span>{fmt(elapsedSec)}</span>
+            <span>{legibleBlockCount === 0 ? "Capturing - nothing read yet." : `${legibleBlockCount} block${legibleBlockCount === 1 ? "" : "s"} read so far.`}</span>
+            {extracting && <span>Reading the screen…</span>}
+            {pendingFrames > 0 && <span>Catching up - scroll a little slower.</span>}
+          </div>
+        )}
+      </div>
+      {stalled && (
+        <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
+          Nothing new has been read off the screen for 30 seconds. Keep this app&apos;s tab visible in a second
+          window while you scroll.
+        </p>
+      )}
+      <span role="status" aria-live="polite" style={visuallyHidden}>
+        {throttledCaptureStatus}
+      </span>
+
+      {logStartedAt && (
+        // AC5/AM-K: frames and calls only - never a token count, never a
+        // currency figure.
+        <p className={styles.fieldHint}>{runCost.message}</p>
+      )}
       {generateError && (
-        <p className={styles.error} role="alert">
+        <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
           {generateError}
         </p>
       )}
       {savedArtifact && (
-        <div className={styles.field}>
+        <>
           <p className={styles.fieldHint} role="status">
             Saved as version {savedArtifact.version} to {selectedCourse?.name ?? "the course"}&apos;s generated
             content. There is no preview on this panel - open it from the Modules tab, or download it below.
           </p>
           {pptxAvailable && (
-            <Button variant="outlined" size="small" onClick={() => void handleDownloadDeck()}>
-              Download .pptx
-            </Button>
+            <div className={styles.ghActions}>
+              <Button variant="outlined" size="small" onClick={() => void handleDownloadDeck()}>
+                Download .pptx
+              </Button>
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {probeOpen && <LegibilityProbeModal onClose={() => setProbeOpen(false)} restoreFocusRef={probeButtonRef} />}

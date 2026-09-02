@@ -10,6 +10,7 @@
 import { useEffect, useRef } from "react";
 import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
 import { fmt } from "./types";
 import type { Take } from "./types";
 import type { UseWalkthroughReturn } from "./useWalkthrough";
@@ -92,7 +93,9 @@ export default function WalkthroughPanel({
       </div>
 
       {notice && <p className={styles.fieldHint}>{notice}</p>}
-      {errorText && <p role="alert" className={styles.error}>{errorText}</p>}
+      {errorText && (
+        <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{errorText}</p>
+      )}
 
       {/* AC28/AC3b: any focusable control on this dark #0f172a stage would need
           --focus-ring-color: var(--focus-ring-on-navy) (the default ring fails
@@ -125,10 +128,10 @@ export default function WalkthroughPanel({
       </div>
 
       {bubbleDescription && (
-        <p className={styles.fieldHint} style={{ margin: 0 }}>{bubbleDescription}</p>
+        <p className={styles.fieldHint}>{bubbleDescription}</p>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
+      <div className={styles.ghActions}>
         <div role="status" aria-live="polite" style={{ fontWeight: 600, color: "var(--text-primary)" }}>
           {stageStatusText(stage, savedTakeName)}
         </div>
@@ -177,6 +180,7 @@ export default function WalkthroughPanel({
           <FormControlLabel
             control={
               <Checkbox
+                size="small"
                 checked={keepSourceAudio}
                 disabled={controlsLocked}
                 onChange={(e) => setKeepSourceAudio(e.target.checked)}
@@ -184,45 +188,62 @@ export default function WalkthroughPanel({
             }
             label="Keep the original recording's audio"
           />
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
+          <p className={styles.fieldHint}>
             Off by default - the original usually already has your voice in it.
           </p>
         </div>
       </div>
 
       <div className={styles.ghActions}>
+        {/* CC1: Start walkthrough / Resume / Stop and keep (while running,
+            color="primary" - stopping is not destructive) are state-
+            dependent primaries; each `stage === "X"` branch fully narrows
+            `stage` to one literal, so every branch's primary-ness resolves
+            to a compile-time constant and is spelled as the literal
+            "contained"/"outlined" rather than variantFor(true) (which tsc
+            would reject here as a provably-constant comparison once stage is
+            narrowed). CC6: the "Loading…"/"Finishing…" button becomes the
+            primary with loading rather than a separate disabled
+            placeholder. */}
         {stage === "ready" && (
-          <Button variant="contained" onClick={start}>
+          <Button variant="contained" size="small" onClick={start}>
             Start walkthrough
           </Button>
         )}
         {stage === "recording" && (
           <>
-            <Button variant="outlined" onClick={pause}>
+            <Button variant="outlined" size="small" onClick={pause}>
               Pause
             </Button>
-            <Button variant="contained" color="error" onClick={stopAndKeep}>
+            <Button variant="contained" size="small" color="primary" onClick={stopAndKeep}>
               Stop and keep
             </Button>
           </>
         )}
         {stage === "paused" && (
           <>
-            <Button variant="contained" onClick={resume}>
+            <Button variant="contained" size="small" onClick={resume}>
               Resume
             </Button>
-            <Button variant="contained" color="error" onClick={stopAndKeep}>
+            {/* Stop and keep stays outlined while paused - Resume above is
+                the forward action, mirroring Pause staying outlined while
+                Stop is primary in the "recording" branch. stage is narrowed
+                to "paused" in this branch, so a variantFor(stage ===
+                "recording") comparison is provably false and tsc rejects it
+                as a literal-type mismatch. */}
+            <Button variant="outlined" size="small" color="primary" onClick={stopAndKeep}>
               Stop and keep
             </Button>
           </>
         )}
         {(stage === "loading" || stage === "finishing") && (
-          <Button variant="contained" disabled>
+          <Button variant="contained" size="small" loading loadingPosition="start">
             {stage === "loading" ? "Loading…" : "Finishing…"}
           </Button>
         )}
         <Button
           variant="text"
+          size="small"
           onClick={onClose}
           disabled={!canLeave}
           title={canLeave ? undefined : "Stop and keep the walkthrough before leaving this pane."}
@@ -231,7 +252,7 @@ export default function WalkthroughPanel({
         </Button>
       </div>
       {!canLeave && (
-        <p className={styles.fieldHint} style={{ margin: 0 }}>
+        <p className={styles.fieldHint}>
           {busy
             ? "Back to takes is unavailable while the walkthrough finishes saving."
             : "Stop and keep to finish the walkthrough before going back to takes."}

@@ -150,4 +150,16 @@ describe("directory-wide ta- key ordinal canary (DE17/G7 - this directory has no
   it("finds exactly four distinct ta- keys across every non-test file in this directory today (ta-rec-mod-course, ta-rec-mod-module, ta-rec-mod-template, ta-rec-mod-context)", () => {
     expect(distinctKeys.size).toBe(4);
   });
+
+  // docs/recording-controls-ux-acceptance-criteria.md CC2/CC17 (group M): the
+  // scan above is directory-wide and picks up any non-test file automatically
+  // - this assertion is the explicit proof that ModuleDeckSettings.tsx (the
+  // CC17 extraction) is actually IN that scan, so a future reader does not
+  // have to re-derive that from the glob alone, and so a regression that
+  // silently excluded it (a filter typo, a rename) would be caught here even
+  // though the file carries no ta- key of its own and the count above would
+  // stay 4 either way.
+  it("the scan's non-test file list includes the CC17 extraction, ModuleDeckSettings.tsx", () => {
+    expect(nonTestFiles).toContain("ModuleDeckSettings.tsx");
+  });
 });

@@ -792,6 +792,103 @@ Canvas course while writing it, and that limit is the point of recording it.
    (`postConfirmArming.ts`, `generatedPreviewDrafts.ts`) ARE tested, and they
    are the only part of the confirm story a green suite says anything about.
 
+### 2026-09-02 - Recording sub-tab controls (all nine inner views), before the controls UX pass
+
+Baseline for `docs/recording-controls-ux-acceptance-criteria.md`, taken from
+five read-only surveys at commit 9037486 (every claim cited to file:line in
+that document's section 0). What the surfaces ARE, which conventions apply
+where, and what is not tested - so the later regression pass can tell a
+change from a coincidence.
+
+1. **The surface is one always-mounted tab with nine inner views**, chosen by
+   a literal nine-entry array in `RecordingTab.tsx:582` (`role="tab"` buttons
+   with roving tabindex and arrow keys, no `id`/`aria-controls`, no
+   `role="tabpanel"` on the nine `display:none` content divs) and persisted
+   under `ta-rec-view`. There is no registry: the strip, the restore guard
+   and the content divs are three hand-kept lists, and
+   `recording-split.structure.test.ts:106-162` pins the first two by count and
+   by value. Every inner view stays mounted; only visibility changes.
+2. **Two button vocabularies coexist and must not be mixed.** MUI `Button`
+   (theme: no uppercase, radius 8, weight 600, no elevation) is the vocabulary
+   on every one of the nine views; `.linkButton` (page.module.css:800) is the
+   inline text-button idiom used for Dismiss/Clear/sort headers; the legacy
+   pill `.submitButton`/`.downloadButton`/`.previewCloseButton` appear only
+   inside the two grading modals' preview chrome. `size="small"` everywhere
+   except `SpeedPanel.tsx:274-286` and most of `AvatarStudioPanel.tsx`, which
+   use MUI's default (medium) size.
+3. **Primary buttons today** (all `variant="contained"`): discussions "Start/
+   Stop capture" (`DiscussionRepliesPanel.tsx:719`); grading "Start capture"
+   (`GradingRecordingPanel.tsx:625`) with "Grade submissions" outlined beside
+   it; module deck BOTH "Start capture" (`:744`) and "Generate deck" (`:823`);
+   record "Start preview"/"Record"/"Resume"/"Done" and the active annotation
+   tool and "Generate script"; announcement "Post to Canvas" (`:538`) and
+   "Play it back" (`:294`); speed "Save at N x" (`:286`) plus the selected
+   rate chip; captions five filled buttons (`CaptionStudio.tsx:218`,
+   `CaptionsList.tsx:238`, `PreviewExport.tsx:104/112/183`); narrate "Draft
+   narration", "Generate audio", the mode switch, "Use this voice", "Start
+   recording", "Create voice clone"; avatar one per panel (`:382/:436/:573`).
+4. **Segmented toggles** are MUI Buttons swapping contained/outlined:
+   with `aria-pressed` and `role="group"` at `DiscussionRepliesPanel.tsx:
+   624-639`, `DiscussionReplyToolbar.tsx:120-132`, `SpeedPanel.tsx:222-224`;
+   without either at `SlideStudio.tsx:28-37`; variant-only at
+   `StagePanel.tsx:464-478`, `LectureScriptPanel.tsx:96`; variant+colour at
+   `StagePanel.tsx:598` (Mute).
+5. **Arm/confirm** is signature-based (`content-tab/modules/confirmArming.ts`)
+   for Delete table and Redraft (discussions) and for Clear table (grading);
+   a plain boolean for the row Remove in the discussions More menu
+   (`DiscussionReplyRow.tsx:425-434`, MenuItem label swap, no Cancel) and for
+   the grading row Remove (`GradingTableRow.tsx:148-161`, which DISARMS on
+   `onBlur`); Post to Canvas arms and confirms on the same button
+   (`TakeAnnouncementPanel.tsx:532-548`). No confirm exists on: Delete take
+   (`TakesPanel.tsx:85`), Delete likeness (`AvatarStudioPanel.tsx:471`),
+   Discard and retake (`:351`), Remove cue (`CaptionsList.tsx:220`), Discard
+   sample (`VoiceRecordingSection.tsx:118`), Stop using clone
+   (`VoiceCloneSection.tsx:37`), Regenerate announcement (`:385`), Regenerate
+   image (`:462`).
+6. **Busy state** is `disabled` plus a label swap to a progressive verb
+   ("Drafting…", "Grading…", "Generating…", "Saving…", "Posting…") on every
+   surface; no `CircularProgress`, no `loading` prop and no `.spinner` is used
+   anywhere in the nine views. Two sites REMOVE buttons while busy
+   (`TakesPanel.tsx:152-154`, `StagePanel.tsx:428-430`); one uses a
+   permanently disabled button as a status label (`SpeedPanel.tsx:278`).
+   Bare "Loading…" text: `RecordingTab.tsx:739/765/775`, `WalkthroughPanel.
+   tsx:221`, `AddKnowledgePages.tsx:365`, `SlideStudio.tsx:60`, `SpeedPanel.
+   tsx:112`, `VideoSource.tsx:84`, `AvatarStudioPanel.tsx:454`.
+7. **The run-log row** (summary + "Download run log (CSV)" + "(JSON)" text
+   buttons with `style={{ minWidth: 0 }}` inside a `.fieldHint` div carrying
+   an inline flex style) is byte-identical in `DiscussionRepliesPanel.tsx:
+   578-586`, `GradingRecordingPanel.tsx:547-554`, `LegibilityProbeModal.tsx:
+   247-255`, `ModuleDeckCapturePanel.tsx:656-664`, `TakeAnnouncementPanel.
+   tsx:190-197`, and sits directly under each panel header, ungated.
+8. **Layout** of control rows is an inline `style` object (`display:flex,
+   gap, flexWrap, alignItems`) at roughly forty sites across the nine views;
+   `.adaptRow` (page.module.css:890) and `.ghActions` (:1574) exist and are
+   used at some of them. Field widths are per-file `sx={{ minWidth: N }}` /
+   `style={{ width: N }}` at 80/100/120/170/180/200/220/240/260/320.
+9. **Persisted keys** in force (all `ta-`-prefixed, inventoried by
+   `recording-split.structure.test.ts` for `recording/*` + `RecordingTab.tsx`,
+   by `module-deck-capture.structure.test.ts` for that directory, and by
+   `caption-studio-wiring.structure.test.ts` for captions): see those tests.
+   NOT persisted: the "Recording options" and "Lecture script" disclosures'
+   open state; SpeedPanel and AvatarStudioPanel persist nothing.
+10. **Assistive tech**: the discussions capture status row is `aria-hidden`
+    with a throttled polite live region beside it (`DiscussionRepliesPanel.
+    tsx:383-401`, `:920`); the grading, module-deck and legibility-probe
+    copies kept the `aria-hidden` and dropped the region. Icon-only buttons
+    missing `title`: `DiscussionReplyRow.tsx:678/882`, `GradingTable.tsx:115`.
+    Keyboard-unreachable: rubric upload (`RubricInputModal.tsx:280-282`,
+    `display:none` input), announcement confirm preview scroller
+    (`TakeAnnouncementPanel.tsx:511`), grading row confirm (`onBlur` disarm).
+11. **What is NOT tested.** No test renders any of these components. The
+    structure tests pin counts and literals (nine tabs, key inventories, the
+    run-log wording in some wiring tests, "Start capture" text); nothing
+    checks variant, size, height alignment, wrap, focus reveal, or the
+    uppercase leak from `.field label` (page.module.css:154) onto MUI
+    checkbox labels nested in `.field` (`SourceDevicesPanel.tsx:240/296/391/
+    446`) - that leak is reasoned from source and has never been observed.
+    `VideoModeSection.tsx:152` "Remove audio" never calls a setter and no
+    test notices.
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -38195,3 +38292,152 @@ one restore verified byte-for-byte rather than by re-reading.
 - Removal recovery is an inline undo plus relaunching from Knowledge; there is
   no persisted history of what was removed, so a removal lost to a reload is
   not recoverable from the panel.
+## 390. Nine sub-tabs, one control vocabulary - and the hydration gap, the 1.1:1 button and the mojibake that seventeen green gates let through
+
+Request: "do an aesthetics/ux pass over the controls on the discussion
+replies sub tab" and "same with all its siblings", plus mid-session "i need
+a button for each reply that manually regenerates it". Five read-only
+surveys, an AC through two adversarial checks and four pre-code passes, two
+implementer waves on ten disjoint file sets, three Opus verifiers, four
+follow-up passes, an accessibility pass, two fix waves, a whole-diff review,
+a researcher, a group-scale aesthetics review, a re-read of the fix diff and
+a regression pass. 49 files changed, 23 new, +4270/-2305.
+
+### What shipped
+
+Every control on the Recording tab's nine inner views now draws from one
+vocabulary (`docs/recording-controls-ux-acceptance-criteria.md`, revision
+4 plus section 11): exactly one filled button per screen state, chosen by a
+state predicate through `variantFor`; settings grouped under real
+`<fieldset>`/`<legend>` sections with a hairline run row last; one
+segmented-toggle component rendered as the app's own track-and-raised-
+segment idiom with a roving tabindex; one arm/confirm component that
+escalates to a filled tone, keeps focus on cancel and closes on Escape;
+busy through MUI's `loading` prop; one run-log row; notices as tokenised
+surfaces under one polite live region; capture status text reaching
+assistive technology on all four capture surfaces; the tab strip fully
+wired with `aria-controls` and eight tab panels. Eight destructive actions
+that had no confirmation gained one. The Discussion replies rows gained a
+per-row **Redraft** button that arms only when the reply was edited or
+already copied, and grading rows gained **Copy feedback**. Shared classes
+live in `recording/RecordingControls.module.css`; shared components in
+`ui/SegmentedToggle.tsx`, `ui/ConfirmArmButtons.tsx`, `ui/buttonVariant.ts`,
+`ui/clipboard.ts`, `ui/visuallyHidden.ts`, `recording/RunLogRow.tsx`,
+`recording/captureLiveRegion.ts`. Two disclosures persist their open state
+(`ta-rec-options-open`, `ta-rec-script-open`; the inventory is 62).
+
+### The defects no gate saw
+
+- **A persisted `<details open>` never opened on reload.** The value came
+  from localStorage in the `useState` initializer; the server rendered it
+  closed and React 19 only WARNS on a boolean-attribute hydration mismatch,
+  never patches it. Found by the step-10 researcher reading
+  `react-dom-client`. Both disclosures now read in a mount effect. The same
+  initializer idiom exists in three other components and may hide the same
+  gap for attribute-driven state.
+- **Disabled text buttons on the navy bar at ~1.1:1.** `.Mui-disabled`
+  outranks an `sx` colour, painting `rgba(0,0,0,.26)` on `#1a2744`. Fixed
+  with an `&.Mui-disabled` colour; no test can see contrast.
+- **A whole-file Write added a UTF-8 BOM and turned three ellipses into
+  "â€¦"** in `RecordingTab.tsx`. tsc, eslint and 16,900 tests were green.
+  Caught by two of three verifiers reading bytes. Every wave gate now scans
+  touched files for a BOM and the mojibake sequence.
+- **The warning palette did not exist.** MUI's default `#ed6c02` is 3.1:1
+  in both directions, so every `color="warning"` button - including the
+  pre-existing "Confirm redraft" - was below AA. `theme.ts` now defines
+  `#92400e` light and `#fbbf24` dark.
+- **A regression the first fix wave introduced:** gating the Record stage's
+  primary on `tool === "off"` left no filled button after "Stop preview"
+  while a drawing tool was active, because `tool` is never reset when the
+  stream ends. Caught by the whole-diff reviewer, fixed with `|| !hasStream`.
+- **A small TextField is 37.7px here, not 40.** `theme.ts` sets the outlined
+  input to 0.9rem. The AC's `height: 40px` button rule would have stood 2.3px
+  proud; it became `align-self: stretch`.
+
+### What the agents refused, and were right to
+
+Eight tab panels, not nine (record and announcement share a wrapper). The
+key inventory measured 60, not the brief's 59. No spinner on a button that
+is blocked by ANOTHER take's job. Mixed-purpose overlay style objects left
+inline where no class could express them. The captions primary is Download
+.vtt, not the burned-in export, because a closed-caption file is the
+accessible deliverable. "Copy all replies" never became a primary: Canvas has
+no bulk reply, so the job is thirty per-row copies. The avatar deck link is
+labelled "Open video" because a `download` attribute is ignored
+cross-origin. Grading's Add rubric becomes the primary when rows exist and
+no rubric does, which the AC had not foreseen.
+
+### Decisions worth re-reading
+
+- A pressed toggle (Mute, Teleprompter) uses AM11's selected treatment
+  (`--accent-soft` fill, inset ring), never the primary fill: three navy
+  buttons in one row was what the follow-up UX pass screenshotted.
+- During a bulk drain the Discussion replies surface has NO filled button:
+  the Draft button is outlined and spinning rather than a lit Start capture.
+- Per-notice `role="alert"` is gone from grading and module deck: a bad run
+  queued N assertive interruptions. One polite wrapper everywhere.
+- `.section` is the fieldset reset and appears only on fieldsets; `.stack`
+  is the vertical utility; the hairline rule is scoped to
+  `fieldset.section + fieldset.section` after two agents misused the reset
+  on divs and drew dividers inside a group.
+- `ConfirmArmButtons` forwards a `buttonRef`; callers keep focus maps
+  without querying the DOM.
+- The index stores LF. A normalisation to CRLF reddened two source-text
+  tests and was reverted; a PowerShell-piped `git cat-file` fakes CRLF.
+
+### Tests
+
+Frozen canaries added by the orchestrator after wave 1
+(`ui/buttonVariant.test.ts`): the literal `? "contained" : "outlined"` lives
+in `buttonVariant.ts` and nowhere else in section 4's file lists; a
+per-file inventory of primary spellings (static contained, `variantFor(`,
+`idleVariant="contained"`, brace-aware tag scan) that a second filled button
+moves. `recording/runLogRow.test.ts` counts exactly one `<RunLogRow` in each
+of the five named panels. New pure/source tests for SegmentedToggle's walk,
+ConfirmArmButtons, clipboard, the live-region helper, `joinFeedback`, the
+Remove-audio fold, and the redraft thread. Sabotage checks reported by six
+agents, each with the mutation confirmed present. Widened, never weakened:
+the module-deck wiring anchors (with an old-literal canary), the
+recording key inventory (60 to 62 with `isWired` read+write), the tabpanel
+count, the aria-labelledby expression.
+
+### Gates
+
+`tsc --noEmit` 0 errors. `eslint` over every touched directory: 0 errors,
+1 warning, pre-existing at `RecordingTab.tsx:341` (`git log -L` puts it in
+f3c44b6). `vitest` **844 files / 16962 tests**, all passing, including the
+orphan-class ratchet at exactly 137 and both frozen canaries. `next build`
+compiled successfully; the prerender tail fails on missing local Supabase
+keys as documented. No emojis (committed test). No new dependency. No
+`role="dialog"`/`ModalShell` (canaries 50/35 untouched). Line ceiling: every
+touched file under 940 (`DiscussionReplyRow.tsx` 921,
+`DiscussionRepliesPanel.tsx` 912, `RecordingTab.tsx` 881). No BOM, no
+mojibake, LF everywhere except this file.
+
+### Limits - what was never observed
+
+- **No component was rendered and no pixel was measured.** Every height
+  (30.75 / 28 / 37.7 / 38px), every contrast ratio, the segmented track's
+  focus ring at -2px, the `:has(:focus-visible)` ring on the upload label,
+  the MUI loading indicator, `align-self: stretch` centring a label, and a
+  flex `<fieldset>` excluding its legend from `gap` are arithmetic or spec
+  knowledge over source text.
+- The hydration fix is reasoned from `react-dom-client` source; no browser
+  reload was performed to watch a disclosure open.
+- MUI's `loading` sets `disabled`, so a focused primary that turns busy
+  loses focus to `<body>`; `focusableWhenDisabled` exists but is private and
+  untyped. Recorded, not fixed - app-wide follow-up.
+- The knowledge bulk bar pins 34px control heights via `sx` while the panels
+  it launches are 30.75px; `.ccBarLabel`'s 0.75 opacity; `.lessonInnerTabs`
+  now wraps on twelve other strips - all outside this group.
+- `theme.ts:93`'s 0.9rem input size is off the type scale (AC1) and is why
+  the small TextField is 37.7px; MUI's disabled grey swap breaches AM11's
+  opacity rule app-wide; both follow-ups.
+- `retryRow` and the `"retry"` dispatch source are exported with no UI
+  consumer; deletable with the wiring-test anchors re-pinned.
+- The two X glyph sizes (20px in the discussion toolbar's adornment vs the
+  probe/grading search) were unified to the 20px discussion icon; AM23's
+  exception now covers both search boxes by adoption, not by rule.
+- Section 7's follow-ups stand: SpeedPanel's duplicated picker, a persisted
+  copied state for grading rows, copy-then-advance, a two-click Record, undo
+  instead of confirm.

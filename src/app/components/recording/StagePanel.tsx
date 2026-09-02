@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
+import SegmentedToggle from "../ui/SegmentedToggle";
+import { variantFor } from "../ui/buttonVariant";
+import { visuallyHidden } from "../ui/visuallyHidden";
 import { fmt } from "./types";
 import type { Take } from "./types";
 import type { UseAnnotationsReturn } from "./useAnnotations";
@@ -425,113 +429,121 @@ export default function StagePanel({
             <span style={{ color: "var(--on-navy)", fontWeight: 600, fontSize: "var(--font-size-lg)" }}>
               {`${latestTake.name} saved -`}
             </span>
-            {latestTakeBusyReason ? (
+            {/* CC6: a button is never REMOVED while busy - these two stay
+                mounted and become a disabled control with the reason
+                attached (title), the same "state why, do not just grey out"
+                precedent this file already uses for latestTakeBusyReason
+                (GeneratedPostSection AC 12b), rather than swapping the whole
+                cluster out for a bare text line. */}
+            {!latestTake.mimeType.startsWith("audio/") && (
+              <Button
+                variant="text"
+                size="small"
+                sx={{ color: "var(--on-navy)", "&.Mui-disabled": { color: "var(--on-navy-muted)" } }}
+                disabled={Boolean(latestTakeBusyReason)}
+                title={latestTakeBusyReason ?? undefined}
+                onClick={(e) => onTalkThrough(latestTake, e.currentTarget)}
+              >
+                Talk through this
+              </Button>
+            )}
+            <Button
+              variant="text"
+              size="small"
+              sx={{ color: "var(--on-navy)", "&.Mui-disabled": { color: "var(--on-navy-muted)" } }}
+              disabled={Boolean(latestTakeBusyReason)}
+              title={latestTakeBusyReason ?? undefined}
+              onClick={(e) => onDraftAnnouncement(latestTake, e.currentTarget)}
+            >
+              Draft announcement
+            </Button>
+            {latestTakeBusyReason && (
               <span style={{ color: "var(--on-navy)", fontSize: "var(--font-size-md)" }}>{latestTakeBusyReason}</span>
-            ) : (
-              <>
-                {!latestTake.mimeType.startsWith("audio/") && (
-                  <Button
-                    variant="text"
-                    size="small"
-                    sx={{ color: "var(--on-navy)" }}
-                    onClick={(e) => onTalkThrough(latestTake, e.currentTarget)}
-                  >
-                    Talk through this
-                  </Button>
-                )}
-                <Button
-                  variant="text"
-                  size="small"
-                  sx={{ color: "var(--on-navy)" }}
-                  onClick={(e) => onDraftAnnouncement(latestTake, e.currentTarget)}
-                >
-                  Draft announcement
-                </Button>
-              </>
             )}
           </div>
         )}
       </div>
 
       {source === "screen" && pipEnabled && (
-        <p className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
+        <p className={styles.fieldHint}>
           {`Bubble: ${BUBBLE_SHAPE_LABEL[bubbleShape]}, ${BUBBLE_SIZE_LABEL[bubbleSize]}, ${BUBBLE_CORNER_LABEL[pipCorner]}. The preview shows exactly what is recorded.`}
         </p>
       )}
 
       {hasStream && tool !== "off" && (
-        <div className={styles.ghActions} style={{ marginBottom: "var(--space-4)" }}>
-          <Button
-            variant={tool === "pen" ? "contained" : "outlined"}
-            size="small"
-            onClick={() => setTool("pen")}
-          >
-            Draw
-          </Button>
-          <Button
-            variant={tool === "highlighter" ? "contained" : "outlined"}
-            size="small"
-            onClick={() => setTool("highlighter")}
-          >
-            Highlight
-          </Button>
-          <Button
-            variant={tool === "eraser" ? "contained" : "outlined"}
-            size="small"
-            onClick={() => setTool("eraser")}
-          >
-            Erase
-          </Button>
-          <Button
-            variant="contained"
-            size="small"
-            onClick={() => setTool("off")}
-          >
-            Done
-          </Button>
-          <input
-            type="color"
-            value={penColor}
-            onChange={(e) => setPenColor(e.target.value)}
-            style={{
-              width: 32,
-              height: 28,
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-            }}
-            aria-label="Annotation color"
-          />
-          <TextField
-            select
-            value={penSize}
-            onChange={(e) => setPenSize(Number(e.target.value))}
-            size="small"
-            sx={{ minWidth: 90 }}
-          >
-            <MenuItem value={2}>Thin</MenuItem>
-            <MenuItem value={4}>Medium</MenuItem>
-            <MenuItem value={8}>Thick</MenuItem>
-          </TextField>
-          <Button
-            variant="text"
-            size="small"
-            onClick={handleUndo}
-          >
-            Undo
-          </Button>
-          <Button
-            variant="text"
-            size="small"
-            onClick={handleClear}
-          >
-            Clear
-          </Button>
-        </div>
+        <>
+          <div className={styles.ghActions}>
+            {/* CC1/CC4: while a tool is active, Done is the screen's primary
+                and the tool choice is a track, not three primaries fighting
+                for the same weight. */}
+            <SegmentedToggle
+              label="Annotation tool"
+              value={tool as Exclude<typeof tool, "off">}
+              onChange={(next) => setTool(next)}
+              options={[
+                { value: "pen", label: "Draw" },
+                { value: "highlighter", label: "Highlight" },
+                { value: "eraser", label: "Erase" },
+              ]}
+            />
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => setTool("off")}
+            >
+              Done
+            </Button>
+            <Button
+              variant="text"
+              size="small"
+              onClick={handleUndo}
+            >
+              Undo
+            </Button>
+            <Button
+              variant="text"
+              size="small"
+              onClick={handleClear}
+            >
+              Clear
+            </Button>
+          </div>
+          {/* CC3: a row holds fields OR buttons, never both - the colour
+              input and pen-size select are fields and get their own
+              .adaptRow under the tool/Done/Undo/Clear button row. */}
+          <div className={styles.adaptRow}>
+            <input
+              type="color"
+              value={penColor}
+              onChange={(e) => setPenColor(e.target.value)}
+              style={{
+                width: 32,
+                height: 28,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+              }}
+              aria-label="Annotation color"
+              title="Annotation color"
+            />
+            <TextField
+              select
+              label="Pen size"
+              value={penSize}
+              onChange={(e) => setPenSize(Number(e.target.value))}
+              size="small"
+              className={controls.fieldXs}
+            >
+              <MenuItem value={2}>Thin</MenuItem>
+              <MenuItem value={4}>Medium</MenuItem>
+              <MenuItem value={8}>Thick</MenuItem>
+            </TextField>
+          </div>
+        </>
       )}
 
       {hasStream && tool === "off" && (
-        <div className={styles.ghActions} style={{ marginBottom: "var(--space-4)" }}>
+        <div className={styles.ghActions}>
           <Button
             variant="outlined"
             size="small"
@@ -563,16 +575,28 @@ export default function StagePanel({
       <span
         role="status"
         aria-live="polite"
-        style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0 }}
+        style={visuallyHidden}
       >
         {stageAnnouncement}
       </span>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+      <div className={styles.ghActions}>
+        <div className={styles.ghActions}>
           {recState !== "idle" && (
             <>
-              <span className={styles.navBadge} aria-hidden="true">{recState === "recording" ? "REC" : "PAUSED"}</span>
+              {/* CC7: REC/PAUSED stop borrowing .navBadge and use the shared
+                  .recIndicator/.recIndicatorPaused idiom, spelled as words
+                  rather than an abbreviation. Still aria-hidden - the
+                  visually-hidden role="status" region above is the one copy
+                  a screen reader hears, on transition only.
+                  .recIndicatorPaused is a MODIFIER on top of .recIndicator,
+                  not a replacement class. */}
+              <span
+                className={`${controls.recIndicator}${recState === "paused" ? ` ${controls.recIndicatorPaused}` : ""}`}
+                aria-hidden="true"
+              >
+                {recState === "recording" ? "Recording" : "Paused"}
+              </span>
               {/* AM11/brief: an elapsed-time readout in tabular figures so the
                   digits do not jitter as they change - font-variant-numeric
                   was missing before. fontWeight 700 is reserved for h1/h2 and
@@ -595,8 +619,20 @@ export default function StagePanel({
         </div>
 
         {hasStream && hasAudio && (
-          <Button variant={muted ? "contained" : "outlined"} size="small" color={muted ? "error" : "primary"} onClick={toggleMute}>
-            {muted ? "Unmute" : "Mute"}
+          // CC1: Mute is one Button with a stable label, never "Unmute" -
+          // aria-pressed carries the state, and it is never color="error"
+          // (muting your own mic is not destructive). A pressed toggle does
+          // not wear the primary fill (AM11's selected treatment): outlined
+          // always, with controls.pressed carrying the selected look.
+          <Button
+            variant="outlined"
+            size="small"
+            color="primary"
+            aria-pressed={muted}
+            className={muted ? controls.pressed : undefined}
+            onClick={toggleMute}
+          >
+            Mute
           </Button>
         )}
         <span className={styles.ghMeta}>Mic level</span>
@@ -621,66 +657,117 @@ export default function StagePanel({
           />
         </div>
         {hasStream && !hasAudio && (
-          <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>No mic on this stream</span>
+          <span className={styles.ghMeta} style={{ color: "var(--warning-ink)" }}>No mic on this stream</span>
         )}
         {!hasStream && <span className={styles.ghMeta}>Start the preview to test your mic</span>}
         {source === "screen" && screenAudioNotice && (
-          <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>
-            {screenAudioNotice}
+          <>
+            <span className={styles.ghMeta} style={{ color: "var(--warning-ink)" }}>
+              {screenAudioNotice}
+            </span>
             {/* F2/N7: "Share again" re-runs getDisplayMedia via startPreview,
                 whose first act is stopEverything() - reachable here whenever
                 the notice matched, including mid-recording, where it silently
                 finishes and saves the take instead of the one-click re-share
                 AC5 promises. Hidden while a take is in progress; the notice
-                text itself still explains the situation. */}
+                text itself still explains the situation. A sibling flex item
+                of the notice text (not nested inside its span) so the
+                surrounding .ghActions gap supplies the space between them -
+                no per-button margin. */}
             {screenAudioNotice === SCREEN_AUDIO_NOT_GRANTED_NOTICE && recState === "idle" && (
-              <Button variant="text" size="small" onClick={onShareAgain} sx={{ ml: 1 }}>
+              <Button variant="text" size="small" onClick={onShareAgain}>
                 Share again
               </Button>
             )}
-          </span>
+          </>
         )}
         {/* FIX 3 (AC1b): the mix's AudioContext never reached "running" after
             resume() - the take being recorded (or just recorded) may carry no
             audio at all, silently. Rendered as its own status, not folded
             into screenAudioNotice, since the two conditions are independent
-            and can both be true at once. */}
+            and can both be true at once. This is actionable (the instructor
+            needs to notice and may need to re-record), so it renders as the
+            shared notice card rather than plain warning-toned prose. */}
         {audioMixNotice && (
-          <span role="status" aria-live="polite" className={styles.ghMeta} style={{ color: "var(--warning)" }}>
+          <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
             {audioMixNotice}
-          </span>
+          </p>
         )}
       </div>
 
       <div className={styles.ghActions}>
+        {/* CC1: Start preview before a stream, Record once there is one,
+            Stop while recording (primary, never color="error" - stopping is
+            not destructive), Resume while paused - the one legal spelling of
+            a state-dependent primary is variantFor. While the annotation
+            tools are open (tool !== "off") Done (above) is the primary
+            instead, so every branch here also gates on tool === "off" to
+            avoid two contained buttons rendering at once.
+            REGRESSION FIX (group R): `tool` is set only by setTool (
+            useAnnotations.ts) and is never reset when the stream ends, so a
+            stale "pen"/"highlighter"/"eraser" value survived a "Stop
+            preview" click (stopEverything, which drops hasStream but does
+            not touch tool). With hasStream false the annotation cluster
+            unmounts entirely, so `tool === "off"` alone left every branch
+            here evaluating to "outlined" and no contained button existed
+            anywhere on the stage. `|| !hasStream` restores the invariant:
+            whenever there is no live stream, tool's stale value cannot
+            matter because the tool cluster that would otherwise contend for
+            the primary fill is not rendered - Start preview is unconditionally
+            primary in that state, exactly as it is with hasStream true and a
+            fresh (never-drawn) tool of "off". The other three branches are
+            each already unreachable unless hasStream is true, so `||
+            !hasStream` is a no-op there and is added only so the same
+            predicate reads correctly in isolation if a branch's guard ever
+            changes. */}
         {!hasStream ? (
-          <Button variant="contained" onClick={() => { userPickedRef.current = true; void startPreview(); }}>
+          <Button variant={variantFor(tool === "off" || !hasStream)} size="small" onClick={() => { userPickedRef.current = true; void startPreview(); }}>
             Start preview
           </Button>
         ) : recState === "idle" ? (
           <>
-            <Button variant="contained" onClick={beginRecording} disabled={countdown !== null}>
+            <Button variant={variantFor(tool === "off" || !hasStream)} size="small" onClick={beginRecording} disabled={countdown !== null}>
               Record
             </Button>
-            <Button variant="text" onClick={stopEverything}>
+            <Button variant="text" size="small" onClick={stopEverything}>
               Stop preview
             </Button>
           </>
         ) : recState === "recording" ? (
           <>
-            <Button variant="outlined" onClick={pauseRecording} disabled={finishing}>
+            <Button variant="outlined" size="small" onClick={pauseRecording} disabled={finishing}>
               Pause
             </Button>
-            <Button variant="contained" color="error" onClick={stopRecording} disabled={finishing}>
+            <Button
+              variant={variantFor(tool === "off" || !hasStream)}
+              size="small"
+              color="primary"
+              loading={finishing}
+              loadingPosition="start"
+              onClick={stopRecording}
+            >
               {finishing ? "Finishing…" : "Stop"}
             </Button>
           </>
         ) : (
           <>
-            <Button variant="contained" onClick={resumeRecording} disabled={finishing}>
+            <Button variant={variantFor(tool === "off" || !hasStream)} size="small" onClick={resumeRecording} disabled={finishing}>
               Resume
             </Button>
-            <Button variant="contained" color="error" onClick={stopRecording} disabled={finishing}>
+            {/* Stop stays outlined while paused - Resume above is the
+                forward action here, mirroring Pause staying outlined while
+                Stop is primary in the "recording" branch. recState is
+                narrowed to "paused" in this branch, so this is a static
+                "outlined", not a variantFor(recState === "recording")
+                comparison (which tsc rejects as provably false). */}
+            <Button
+              variant="outlined"
+              size="small"
+              color="primary"
+              loading={finishing}
+              loadingPosition="start"
+              onClick={stopRecording}
+            >
               {finishing ? "Finishing…" : "Stop"}
             </Button>
           </>

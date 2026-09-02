@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Button, TextField, MenuItem, FormControlLabel, Checkbox } from "@mui/material";
 import { backupSupported, clearBackupDir, pickBackupDir } from "@/lib/backup-dir";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
 import type { UseDevicesReturn } from "./useDevices";
 import type { UseRecordingSettingsReturn } from "./useRecordingSettings";
 import type { UseBackgroundEffectReturn } from "./useBackgroundEffect";
@@ -42,6 +44,26 @@ interface SourceDevicesPanelProps {
   // the real notice down and rendering it verbatim removes the second,
   // possibly-contradictory copy of the string.
   screenAudioNotice?: string | null;
+}
+
+// docs/recording-controls-ux-acceptance-criteria.md CC10: the "Recording
+// options" <details> open state persists under this exact key. Read in a
+// MOUNT EFFECT (setState after an await), never in the useState initializer:
+// the server renders the <details> closed and React only warns on a boolean
+// attribute mismatch at hydration, so an initializer-seeded `open` never
+// showed on reload (section 11 of that document). The read is guarded by
+// typeof window and try/catch (a blocked-storage throw here white-screens
+// the app per REGRESSION 382); written with localStorage.setItem on the
+// <details> onToggle event only.
+const OPTIONS_OPEN_KEY = "ta-rec-options-open";
+
+function readOptionsOpen(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(OPTIONS_OPEN_KEY) === "true";
+  } catch {
+    return false;
+  }
 }
 
 export default function SourceDevicesPanel({
@@ -114,130 +136,163 @@ export default function SourceDevicesPanel({
 
   const screenAudioDisabled = hasDisplayAudioTrack === false;
 
+  // REGRESSION FIX (group R, hydration): reading localStorage inside the
+  // useState initializer made the server (and the client's FIRST render,
+  // before hydration) always compute `false`, while a returning instructor's
+  // client had "true" persisted. React's hydrateBooleanAttribute only WARNS
+  // on that <details open> mismatch - it does not correct the DOM attribute
+  // to match the client value - so the persisted-open state silently failed
+  // to show until the instructor toggled the disclosure once by hand.
+  // Initialising to `false` on both server and client keeps the first paint
+  // identical, then a mount effect reads the real value using this repo's
+  // setState-in-effect idiom (async IIFE + cancelled flag, setState only
+  // after an await) so eslint's setState-in-effect rule passes. The write
+  // moves onto the <details> onToggle handler itself (below) instead of a
+  // separate effect keyed on optionsOpen - an effect there would also fire
+  // for this mount-triggered read and briefly overwrite the persisted
+  // "true" with "false" before the read's setState lands.
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      setOptionsOpen(readOptionsOpen());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className={styles.adaptPanel}>
       <div className={styles.adaptPanelHeader}>
-        <h2 className={styles.adaptPanelTitle}>Source &amp; devices</h2>
+        <h2 className={styles.adaptPanelTitle}>Source and devices</h2>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
-        <TextField
-          select
-          label="Source"
-          value={source}
-          onChange={(e) => { userPickedRef.current = true; setSource(e.target.value as "camera" | "screen" | "audio"); }}
-          size="small"
-          sx={{ minWidth: 160 }}
-        >
-          <MenuItem value="camera">Camera</MenuItem>
-          <MenuItem value="screen">Screen</MenuItem>
-          <MenuItem value="audio">Audio only (microphone)</MenuItem>
-        </TextField>
 
-        <TextField
-          select
-          label="Camera"
-          value={cameraId}
-          onChange={(e) => { userPickedRef.current = true; setCameraId(e.target.value); }}
-          size="small"
-          sx={{ minWidth: 160 }}
-          disabled={source !== "camera"}
-        >
-          {devices.cameras.length === 0 && <MenuItem value="">No cameras found</MenuItem>}
-          {devices.cameras.length > 0 &&
-            cameraId &&
-            !devices.cameras.some((d: { deviceId: string; label: string }) => d.deviceId === cameraId) && (
-              <MenuItem value={cameraId}>(Disconnected)</MenuItem>
-            )}
-          {devices.cameras.map((cam: { deviceId: string; label: string }) => (
-            <MenuItem key={cam.deviceId} value={cam.deviceId}>
-              {cam.label}
-            </MenuItem>
-          ))}
-        </TextField>
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Source</legend>
+        <div className={styles.adaptRow}>
+          <TextField
+            select
+            label="Source"
+            value={source}
+            onChange={(e) => { userPickedRef.current = true; setSource(e.target.value as "camera" | "screen" | "audio"); }}
+            size="small"
+            className={controls.fieldMd}
+          >
+            <MenuItem value="camera">Camera</MenuItem>
+            <MenuItem value="screen">Screen</MenuItem>
+            <MenuItem value="audio">Audio only (microphone)</MenuItem>
+          </TextField>
 
-        <TextField
-          select
-          label="Microphone"
-          value={micId}
-          onChange={(e) => { userPickedRef.current = true; setMicId(e.target.value); }}
-          size="small"
-          sx={{ minWidth: 160 }}
-        >
-          <MenuItem value="">System default</MenuItem>
-          <MenuItem value="off">No microphone (mute)</MenuItem>
-          {devices.mics.map((mic: { deviceId: string; label: string }) => (
-            <MenuItem key={mic.deviceId} value={mic.deviceId}>
-              {mic.label}
-            </MenuItem>
-          ))}
-        </TextField>
+          <TextField
+            select
+            label="Camera"
+            value={cameraId}
+            onChange={(e) => { userPickedRef.current = true; setCameraId(e.target.value); }}
+            size="small"
+            className={controls.fieldMd}
+            disabled={source !== "camera"}
+          >
+            {devices.cameras.length === 0 && <MenuItem value="">No cameras found</MenuItem>}
+            {devices.cameras.length > 0 &&
+              cameraId &&
+              !devices.cameras.some((d: { deviceId: string; label: string }) => d.deviceId === cameraId) && (
+                <MenuItem value={cameraId}>(Disconnected)</MenuItem>
+              )}
+            {devices.cameras.map((cam: { deviceId: string; label: string }) => (
+              <MenuItem key={cam.deviceId} value={cam.deviceId}>
+                {cam.label}
+              </MenuItem>
+            ))}
+          </TextField>
 
-        {/* AC27: a source decision, not an option - shown in the main row so
-            it is seen before Share, not buried in the collapsed disclosure. */}
-        {source === "screen" && (
-          <FormControlLabel
-            control={
-              <Checkbox
-                size="small"
-                checked={screenAudioDisabled ? false : shareSystemAudio}
-                onChange={(e) => setShareSystemAudio(e.target.checked)}
-                disabled={screenAudioDisabled}
-                aria-describedby={screenAudioDisabled ? "screen-audio-disabled-hint" : undefined}
-              />
-            }
-            label="Share system audio"
-          />
-        )}
+          <TextField
+            select
+            label="Microphone"
+            value={micId}
+            onChange={(e) => { userPickedRef.current = true; setMicId(e.target.value); }}
+            size="small"
+            className={controls.fieldMd}
+          >
+            <MenuItem value="">System default</MenuItem>
+            <MenuItem value="off">No microphone (mute)</MenuItem>
+            {devices.mics.map((mic: { deviceId: string; label: string }) => (
+              <MenuItem key={mic.deviceId} value={mic.deviceId}>
+                {mic.label}
+              </MenuItem>
+            ))}
+          </TextField>
 
-        <TextField
-          select
-          label="Resolution"
-          value={resolution}
-          onChange={(e) => { userPickedRef.current = true; setResolution(e.target.value as "720" | "1080"); }}
-          size="small"
-          sx={{ minWidth: 160 }}
-          disabled={source !== "camera"}
-        >
-          <MenuItem value="720">720p</MenuItem>
-          <MenuItem value="1080">1080p</MenuItem>
-        </TextField>
-      </div>
-      {source === "screen" && screenAudioDisabled && (
-        <p id="screen-audio-disabled-hint" className={styles.fieldHint} style={{ margin: "var(--space-1) 0 0" }}>
-          {/* S1 fix: render the real reason useRecorder.ts computed
-              (screenAudioNotice), rather than restating a hard-coded string
-              that only ever matches AC5's THIRD row. That fixed string was
-              wrong whenever the true reason was the SECOND row ("offered,
-              none granted" - e.g. Chrome/Windows sharing a window), which
-              produced two contradictory system-audio messages on screen at
-              once. Falls back to the same third-row copy only if the caller
-              has not wired screenAudioNotice through yet. */}
-          {screenAudioNotice ?? "This browser does not share system audio. Your microphone is still being recorded."}
-        </p>
-      )}
-      {devices.cameras.length > 0 && (
-        <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0" }}>
-          {devices.cameras.length} camera{devices.cameras.length === 1 ? "" : "s"}, {devices.mics.length} mic{devices.mics.length === 1 ? "" : "s"} detected
-          {cameraId
-            ? ` - using: ${devices.cameras.find((d) => d.deviceId === cameraId)?.label ?? "previous camera (reselect)"}`
-            : " - no camera selected yet"}
-        </p>
-      )}
-      {(devices.cameras.length === 0 || devices.mics.length === 0) && (
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            Cameras and microphones appear here after the browser grants access.
-          </p>
-          <Button variant="outlined" size="small" onClick={() => void requestAccess()}>
-            Grant access
-          </Button>
+          {/* AC27: a source decision, not an option - shown in the main row so
+              it is seen before Share, not buried in the collapsed disclosure. */}
+          {source === "screen" && (
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={screenAudioDisabled ? false : shareSystemAudio}
+                  onChange={(e) => setShareSystemAudio(e.target.checked)}
+                  disabled={screenAudioDisabled}
+                  aria-describedby={screenAudioDisabled ? "screen-audio-disabled-hint" : undefined}
+                />
+              }
+              label="Share system audio"
+            />
+          )}
+
+          <TextField
+            select
+            label="Resolution"
+            value={resolution}
+            onChange={(e) => { userPickedRef.current = true; setResolution(e.target.value as "720" | "1080"); }}
+            size="small"
+            className={controls.fieldMd}
+            disabled={source !== "camera"}
+          >
+            <MenuItem value="720">720p</MenuItem>
+            <MenuItem value="1080">1080p</MenuItem>
+          </TextField>
         </div>
-      )}
+        {source === "screen" && screenAudioDisabled && (
+          <p id="screen-audio-disabled-hint" className={styles.fieldHint}>
+            {/* S1 fix: render the real reason useRecorder.ts computed
+                (screenAudioNotice), rather than restating a hard-coded string
+                that only ever matches AC5's THIRD row. That fixed string was
+                wrong whenever the true reason was the SECOND row ("offered,
+                none granted" - e.g. Chrome/Windows sharing a window), which
+                produced two contradictory system-audio messages on screen at
+                once. Falls back to the same third-row copy only if the caller
+                has not wired screenAudioNotice through yet. */}
+            {screenAudioNotice ?? "This browser does not share system audio. Your microphone is still being recorded."}
+          </p>
+        )}
+        {devices.cameras.length > 0 && (
+          <p className={styles.fieldHint}>
+            {devices.cameras.length} camera{devices.cameras.length === 1 ? "" : "s"}, {devices.mics.length} mic{devices.mics.length === 1 ? "" : "s"} detected
+            {cameraId
+              ? ` - using: ${devices.cameras.find((d) => d.deviceId === cameraId)?.label ?? "previous camera (reselect)"}`
+              : " - no camera selected yet"}
+          </p>
+        )}
+        {(devices.cameras.length === 0 || devices.mics.length === 0) && (
+          <div className={styles.ghActions}>
+            <p className={styles.fieldHint}>
+              Cameras and microphones appear here after the browser grants access.
+            </p>
+            <Button variant="outlined" size="small" onClick={() => void requestAccess()}>
+              Grant access
+            </Button>
+          </div>
+        )}
+      </fieldset>
 
       {/* AC27: the headline feature gets its own always-visible group, not
           hidden behind a disclosure the user has to know to open. */}
       {source === "screen" && (
-        <div role="group" aria-label="Webcam bubble" className={styles.field} style={{ marginTop: "var(--space-3)" }}>
+        <fieldset className={controls.section}>
+          <legend className={controls.sectionLegend}>Webcam bubble</legend>
           <FormControlLabel
             control={
               <Checkbox
@@ -249,14 +304,14 @@ export default function SourceDevicesPanel({
             label="Webcam bubble"
           />
           {pipEnabled && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+            <div className={styles.adaptRow}>
               <TextField
                 select
                 label="Bubble shape"
                 value={bubbleShape}
                 onChange={(e) => setBubbleShape(e.target.value as "circle" | "rounded")}
                 size="small"
-                sx={{ minWidth: 150 }}
+                className={controls.fieldSm}
               >
                 <MenuItem value="circle">Circle</MenuItem>
                 <MenuItem value="rounded">Rounded square</MenuItem>
@@ -267,7 +322,7 @@ export default function SourceDevicesPanel({
                 value={bubbleSize}
                 onChange={(e) => setBubbleSize(e.target.value as "sm" | "md" | "lg")}
                 size="small"
-                sx={{ minWidth: 130 }}
+                className={controls.fieldSm}
               >
                 <MenuItem value="sm">Small</MenuItem>
                 <MenuItem value="md">Medium</MenuItem>
@@ -279,7 +334,7 @@ export default function SourceDevicesPanel({
                 value={pipCorner}
                 onChange={(e) => setPipCorner(e.target.value as "br" | "bl" | "tr" | "tl")}
                 size="small"
-                sx={{ minWidth: 130 }}
+                className={controls.fieldSm}
               >
                 <MenuItem value="br">Bottom right</MenuItem>
                 <MenuItem value="bl">Bottom left</MenuItem>
@@ -288,114 +343,134 @@ export default function SourceDevicesPanel({
               </TextField>
             </div>
           )}
-        </div>
+        </fieldset>
       )}
 
-      <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-1)" }}>
+      <details
+        className={styles.adaptDisclosure}
+        open={optionsOpen}
+        onToggle={(e) => {
+          const next = (e.currentTarget as HTMLDetailsElement).open;
+          setOptionsOpen(next);
+          try {
+            localStorage.setItem(OPTIONS_OPEN_KEY, String(next));
+          } catch {
+            // Blocked storage (private mode, quota) - the open state simply
+            // does not persist this session; never throw through the render
+            // path.
+          }
+        }}
+      >
         <summary>Recording options</summary>
-        <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
-          <label className={styles.adaptPanelSubtitle} style={{ display: "block" }}>Audio processing</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
-            <FormControlLabel
-              control={<Checkbox size="small" checked={noiseSuppression} onChange={(e) => { userPickedRef.current = true; setNoiseSuppression(e.target.checked); }} />}
-              label="Noise suppression"
-            />
-            <FormControlLabel
-              control={<Checkbox size="small" checked={echoCancellation} onChange={(e) => { userPickedRef.current = true; setEchoCancellation(e.target.checked); }} />}
-              label="Echo cancellation"
-            />
-            <FormControlLabel
-              control={<Checkbox size="small" checked={autoGain} onChange={(e) => { userPickedRef.current = true; setAutoGain(e.target.checked); }} />}
-              label="Auto gain"
-            />
-          </div>
+        <div className={styles.adaptDisclosureBody}>
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Audio processing</legend>
+            <div className={styles.adaptRow}>
+              <FormControlLabel
+                control={<Checkbox size="small" checked={noiseSuppression} onChange={(e) => { userPickedRef.current = true; setNoiseSuppression(e.target.checked); }} />}
+                label="Noise suppression"
+              />
+              <FormControlLabel
+                control={<Checkbox size="small" checked={echoCancellation} onChange={(e) => { userPickedRef.current = true; setEchoCancellation(e.target.checked); }} />}
+                label="Echo cancellation"
+              />
+              <FormControlLabel
+                control={<Checkbox size="small" checked={autoGain} onChange={(e) => { userPickedRef.current = true; setAutoGain(e.target.checked); }} />}
+                label="Auto gain"
+              />
+            </div>
+          </fieldset>
 
-          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginTop: "var(--space-4)" }}>Timing</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={useCountdown}
-                  onChange={(e) => setUseCountdown(e.target.checked)}
-                  size="small"
-                />
-              }
-              label="3-2-1 countdown"
-            />
-            <TextField
-              select
-              size="small"
-              label="Auto-stop"
-              value={autoStopMin}
-              onChange={(e) => setAutoStopMin(e.target.value as "0" | "5" | "10" | "15" | "30")}
-              sx={{ minWidth: 110 }}
-            >
-              <MenuItem value="0">Off</MenuItem>
-              <MenuItem value="5">5 min</MenuItem>
-              <MenuItem value="10">10 min</MenuItem>
-              <MenuItem value="15">15 min</MenuItem>
-              <MenuItem value="30">30 min</MenuItem>
-            </TextField>
-          </div>
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Timing</legend>
+            <div className={styles.adaptRow}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={useCountdown}
+                    onChange={(e) => setUseCountdown(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label="3-2-1 countdown"
+              />
+              <TextField
+                select
+                size="small"
+                label="Auto-stop"
+                value={autoStopMin}
+                onChange={(e) => setAutoStopMin(e.target.value as "0" | "5" | "10" | "15" | "30")}
+                className={controls.fieldXs}
+              >
+                <MenuItem value="0">Off</MenuItem>
+                <MenuItem value="5">5 min</MenuItem>
+                <MenuItem value="10">10 min</MenuItem>
+                <MenuItem value="15">15 min</MenuItem>
+                <MenuItem value="30">30 min</MenuItem>
+              </TextField>
+            </div>
+          </fieldset>
 
-          <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginTop: "var(--space-4)" }}>Appearance</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={mirror}
-                  onChange={(e) => setMirror(e.target.checked)}
-                  disabled={source !== "camera"}
-                  size="small"
-                />
-              }
-              label="Mirror preview"
-            />
-            <TextField
-              select
-              size="small"
-              label="Background"
-              value={bgMode}
-              onChange={(e) => setBgMode(e.target.value as "none" | "blur" | "image")}
-              sx={{ minWidth: 140 }}
-              disabled={source !== "camera" || bgStatus === "failed"}
-            >
-              <MenuItem value="none">None</MenuItem>
-              <MenuItem value="blur">Blur</MenuItem>
-              <MenuItem value="image">Image</MenuItem>
-            </TextField>
-            {bgMode === "image" && (
-              <Button variant="outlined" size="small" onClick={() => bgFileRef.current?.click()}>
-                Choose image
-              </Button>
-            )}
-            <input
-              ref={bgFileRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                const img = new Image();
-                img.onload = () => { bgImageRef.current = img; };
-                img.src = URL.createObjectURL(f);
-                e.target.value = "";
-              }}
-            />
-          </div>
-          {bgStatus === "loading" && <span className={styles.ghMeta} role="status" aria-live="polite">Loading background model…</span>}
-          {bgStatus === "failed" && <span className={styles.ghMeta} style={{ color: "var(--warning)" }}>Background effects unavailable (model failed to load)</span>}
-          {bgMode !== "none" && bgStatus === "ready" && <span className={styles.ghMeta}>Effect is applied to the recording; the preview stays raw.</span>}
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Appearance</legend>
+            <div className={styles.adaptRow}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={mirror}
+                    onChange={(e) => setMirror(e.target.checked)}
+                    disabled={source !== "camera"}
+                    size="small"
+                  />
+                }
+                label="Mirror preview"
+              />
+              <TextField
+                select
+                size="small"
+                label="Background"
+                value={bgMode}
+                onChange={(e) => setBgMode(e.target.value as "none" | "blur" | "image")}
+                className={controls.fieldSm}
+                disabled={source !== "camera" || bgStatus === "failed"}
+              >
+                <MenuItem value="none">None</MenuItem>
+                <MenuItem value="blur">Blur</MenuItem>
+                <MenuItem value="image">Image</MenuItem>
+              </TextField>
+              {bgMode === "image" && (
+                <Button variant="outlined" size="small" className={controls.fieldRowButton} onClick={() => bgFileRef.current?.click()}>
+                  Choose image
+                </Button>
+              )}
+              <input
+                ref={bgFileRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const img = new Image();
+                  img.onload = () => { bgImageRef.current = img; };
+                  img.src = URL.createObjectURL(f);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {bgStatus === "loading" && <span className={styles.ghMeta} role="status" aria-live="polite">Loading background model…</span>}
+            {bgStatus === "failed" && <span className={styles.ghMeta} style={{ color: "var(--warning-ink)" }}>Background effects unavailable (model failed to load)</span>}
+            {bgMode !== "none" && bgStatus === "ready" && <span className={styles.ghMeta}>Effect is applied to the recording; the preview stays raw.</span>}
+          </fieldset>
 
-          <div className={styles.field} style={{ marginTop: "var(--space-4)" }}>
-            <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: "var(--space-2)" }}>Backup</label>
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Backup</legend>
             {!backupSupported() ? (
               <p className={styles.fieldHint}>Automatic backup needs Chrome or Edge (File System Access API). Takes can still be downloaded manually.</p>
             ) : backupDir ? (
               <>
                 <span className={styles.ghMeta}>Backing up to: <strong>{backupDir.name}</strong></span>
-                <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+                <div className={styles.ghActions}>
                   <Button
                     variant="outlined"
                     size="small"
@@ -438,40 +513,40 @@ export default function SourceDevicesPanel({
                 >
                   Choose backup folder
                 </Button>
-                <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>Every finished recording is automatically saved there.</p>
+                <p className={styles.fieldHint}>Every finished recording is automatically saved there.</p>
               </>
             )}
-          </div>
+          </fieldset>
 
-          <div className={styles.field} style={{ marginTop: "var(--space-4)" }}>
-            <label className={styles.adaptPanelSubtitle} style={{ display: "block", marginBottom: "var(--space-2)" }}>Cards</label>
+          <fieldset className={controls.section}>
+            <legend className={controls.sectionLegend}>Cards</legend>
             <FormControlLabel
               control={<Checkbox checked={cardsOn} onChange={(e) => setCardsOn(e.target.checked)} size="small" disabled={source === "audio"} />}
               label="Add title and closing cards"
             />
             {cardsOn && (
               <>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+                <div className={styles.adaptRow}>
                   <TextField
                     label="Title"
                     value={cardTitle}
                     onChange={(e) => setCardTitle(e.target.value)}
                     size="small"
-                    sx={{ flex: "1 1 200px" }}
+                    className={controls.fieldGrow}
                   />
                   <TextField
                     label="Subtitle"
                     value={cardSubtitle}
                     onChange={(e) => setCardSubtitle(e.target.value)}
                     size="small"
-                    sx={{ flex: "1 1 200px" }}
+                    className={controls.fieldGrow}
                   />
                   <TextField
                     label="Closing line"
                     value={cardClosing}
                     onChange={(e) => setCardClosing(e.target.value)}
                     size="small"
-                    sx={{ flex: "1 1 200px" }}
+                    className={controls.fieldGrow}
                   />
                   <TextField
                     select
@@ -479,37 +554,37 @@ export default function SourceDevicesPanel({
                     value={cardSeconds}
                     onChange={(e) => setCardSeconds(e.target.value as "2" | "3" | "5")}
                     size="small"
-                    sx={{ minWidth: 110 }}
+                    className={controls.fieldXs}
                   >
                     <MenuItem value="2">2 s</MenuItem>
                     <MenuItem value="3">3 s</MenuItem>
                     <MenuItem value="5">5 s</MenuItem>
                   </TextField>
-                  <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
+                  <label className={styles.ghMeta}>
                     Background
                     <input
                       type="color"
                       value={cardBg}
                       onChange={(e) => setCardBg(e.target.value)}
-                      style={{ width: 32, height: 28, border: "none", background: "transparent", cursor: "pointer" }}
+                      style={{ width: 32, height: 28, marginLeft: "var(--space-1)", border: "none", background: "transparent", cursor: "pointer" }}
                       aria-label="Card background color"
                     />
                   </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-md)", color: "var(--text-secondary)" }}>
+                  <label className={styles.ghMeta}>
                     Text
                     <input
                       type="color"
                       value={cardText}
                       onChange={(e) => setCardText(e.target.value)}
-                      style={{ width: 32, height: 28, border: "none", background: "transparent", cursor: "pointer" }}
+                      style={{ width: 32, height: 28, marginLeft: "var(--space-1)", border: "none", background: "transparent", cursor: "pointer" }}
                       aria-label="Card text color"
                     />
                   </label>
                 </div>
-                <p className={styles.fieldHint} style={{ marginTop: "var(--space-2)" }}>Cards are added around your video: the title card records first (mic muted) and a notice on the preview counts down until your video starts; the closing card is appended after you press Stop.</p>
+                <p className={styles.fieldHint}>Cards are added around your video: the title card records first (mic muted) and a notice on the preview counts down until your video starts; the closing card is appended after you press Stop.</p>
               </>
             )}
-          </div>
+          </fieldset>
         </div>
       </details>
     </div>

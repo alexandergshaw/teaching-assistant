@@ -216,11 +216,45 @@ describe("resolved slide count is shown before capture (AM-C)", () => {
 // ---------------------------------------------------------------------------
 
 describe("run log control placement (AC9)", () => {
-  it("the run log download controls appear before the course/template controls and before Start capture", () => {
-    const logIdx = source.indexOf("Download run log (CSV)");
-    const courseIdx = source.indexOf("Course (where the deck is saved)");
+  // docs/recording-controls-ux-acceptance-criteria.md CC8/CC2 (group M):
+  // widened for the CC17 extraction - the run-log literal now lives inside
+  // <RunLogRow> (recording/RunLogRow.tsx) and the course-picker literal now
+  // lives inside <ModuleDeckSettings> (./ModuleDeckSettings.tsx), so neither
+  // string appears in this panel's own source any more. This helper accepts
+  // EITHER the original literal text (if a future edit ever inlines it back
+  // into the panel) OR the component tag that now stands in for it, always
+  // preferring the literal when both are present - never weaker than the
+  // original check, only wider.
+  function findRunLogPlacementMarker(text: string, literal: string, tag: string): number {
+    const literalIdx = text.indexOf(literal);
+    if (literalIdx !== -1) return literalIdx;
+    return text.indexOf(tag);
+  }
+
+  it("the run log control appears before the course/template controls and before Start capture", () => {
+    const logIdx = findRunLogPlacementMarker(source, "Download run log (CSV)", "<RunLogRow");
+    const courseIdx = findRunLogPlacementMarker(source, "Course (where the deck is saved)", "<ModuleDeckSettings");
     const startIdx = source.indexOf("Start capture");
+    expect(logIdx, "expected either the run-log literal or <RunLogRow").toBeGreaterThan(-1);
+    expect(courseIdx, "expected either the course literal or <ModuleDeckSettings").toBeGreaterThan(-1);
+    expect(logIdx).toBeLessThan(courseIdx);
+    expect(logIdx).toBeLessThan(startIdx);
+  });
+
+  it("canary: the widened matcher still accepts the OLD literal-only shape (proves this is a widening, not a replacement)", () => {
+    const oldShapeFixture = [
+      "<div>",
+      '  <span>run log summary</span>',
+      '  <Button>Download run log (CSV)</Button>',
+      "</div>",
+      '<TextField label="Course (where the deck is saved)" />',
+      "<Button>Start capture</Button>",
+    ].join("\n");
+    const logIdx = findRunLogPlacementMarker(oldShapeFixture, "Download run log (CSV)", "<RunLogRow");
+    const courseIdx = findRunLogPlacementMarker(oldShapeFixture, "Course (where the deck is saved)", "<ModuleDeckSettings");
+    const startIdx = oldShapeFixture.indexOf("Start capture");
     expect(logIdx).toBeGreaterThan(-1);
+    expect(courseIdx).toBeGreaterThan(-1);
     expect(logIdx).toBeLessThan(courseIdx);
     expect(logIdx).toBeLessThan(startIdx);
   });

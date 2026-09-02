@@ -6,6 +6,7 @@ import { extForMime, renameRecordingFile } from "@/lib/recording-files";
 import type { RecordingFile } from "@/lib/recording-files";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import styles from "../../page.module.css";
+import controls from "../recording/RecordingControls.module.css";
 
 import type { EditableCaption } from "./utils/captions";
 
@@ -65,15 +66,16 @@ export function PreviewExport({
   if (!captions) return null;
 
   return (
-    <div className={styles.field}>
-      <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
-        3. Preview & export
-      </p>
-      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
+    <fieldset className={controls.section}>
+      <legend className={controls.sectionLegend}>Preview and export</legend>
+      <div className={styles.adaptRow}>
         <Button
           variant="outlined"
           size="small"
+          className={controls.fieldRowButton}
           disabled={!voiceReady || voBusy !== null || captions.length === 0}
+          loading={voBusy === "all"}
+          loadingPosition="start"
           onClick={() => void onGenerateAllVoices()}
         >
           {voBusy === "all" ? "Voicing cue…" : "Generate all voices"}
@@ -82,27 +84,31 @@ export function PreviewExport({
           select
           size="small"
           label="Export audio"
+          className={controls.fieldMd}
           value={voMode}
           onChange={(e) => setVoMode(e.target.value as "original" | "voiceover" | "mix" | "none")}
-          sx={{ minWidth: 170 }}
         >
           <MenuItem value="original">Original audio</MenuItem>
           <MenuItem value="voiceover">AI voiceover only</MenuItem>
           <MenuItem value="mix">Original + voiceover</MenuItem>
           <MenuItem value="none">No audio (strip)</MenuItem>
         </TextField>
-        {!voiceReady && (
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
-            AI voice is not configured (set ELEVENLABS_API_KEY, and clone your voice on the Narrate a deck tab).
-          </p>
-        )}
       </div>
+      {!voiceReady && (
+        <p className={styles.fieldHint}>
+          AI voice is not configured (set ELEVENLABS_API_KEY, and clone your voice on the Narrate a deck tab).
+        </p>
+      )}
 
-      {voError && <p className={styles.error}>{voError}</p>}
+      {voError && (
+        <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
+          {voError}
+        </p>
+      )}
 
-      <div className={styles.ghActions} style={{ marginTop: "var(--space-3)", alignItems: "center", flexWrap: "wrap", gap: "var(--space-3)" }}>
+      <div className={styles.ghActions}>
         <Button
-          variant="contained"
+          variant="outlined"
           size="small"
           disabled={!videoUrl || captions.length === 0 || burning}
           onClick={() => (previewing ? onEndPreview() : onStartPreview())}
@@ -110,9 +116,11 @@ export function PreviewExport({
           {previewing ? "Stop preview" : "Preview"}
         </Button>
         <Button
-          variant="contained"
+          variant="outlined"
           size="small"
           disabled={!videoUrl || captions.length === 0 || burning}
+          loading={burning}
+          loadingPosition="start"
           onClick={() => void onBurnCaptions()}
         >
           {burning ? `Exporting… ${burnProgress}%` : "Export video with captions"}
@@ -125,63 +133,74 @@ export function PreviewExport({
       </div>
 
       {previewing && (
-        <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 0" }}>
+        <p className={styles.fieldHint}>
           Previewing with {voMode === "original" ? "the original audio" : voMode === "voiceover" ? "AI voiceover only" : voMode === "mix" ? "original audio plus voiceover" : "no audio"}.
           {(voMode === "voiceover" || voMode === "mix") && Object.keys(cueAudio).length === 0 && " No generated voices yet - captions will be silent. Use Generate all voices."}
         </p>
       )}
 
       {burning && (
-        <p className={styles.fieldHint} style={{ margin: "var(--space-2) 0 0 0" }}>
+        <p className={styles.fieldHint}>
           The video plays through once (silently) while the captions are rendered in.
         </p>
       )}
 
-      {burnError && <p className={styles.error}>{burnError}</p>}
+      {burnError && (
+        <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
+          {burnError}
+        </p>
+      )}
 
       {burned && (
-        <div className={styles.field} style={{ marginTop: "var(--space-3)" }}>
+        <div className={controls.itemCard}>
           <video
             key={burned.url}
             controls
             playsInline
             src={burned.url}
-            style={{ maxWidth: "100%", maxHeight: 320, borderRadius: "var(--radius-md)", background: "var(--navy)" }}
+            className={controls.playerVideo}
           />
           {burnedRow && (
-            <div style={{ marginTop: "var(--space-2)" }}>
-              <TextField
-                size="small"
-                label="Name"
-                value={burned.name}
-                onChange={(e) => {
-                  setBurned({ ...burned, name: e.target.value });
-                  setRenameNote(null);
-                }}
-                onBlur={async (e) => {
-                  const newName = e.currentTarget.value.trim();
-                  if (newName && newName !== burned.name && supabase) {
-                    try {
-                      await renameRecordingFile(supabase, burnedRow.id, newName);
-                      setRenameNote("Renamed in library.");
-                      setBurned({ ...burned, name: newName });
-                    } catch (err) {
-                      setRenameNote(err instanceof Error ? err.message : "Rename failed");
+            <div>
+              <div className={styles.adaptRow}>
+                <TextField
+                  size="small"
+                  label="Name"
+                  className={controls.fieldLg}
+                  value={burned.name}
+                  onChange={(e) => {
+                    setBurned({ ...burned, name: e.target.value });
+                    setRenameNote(null);
+                  }}
+                  onKeyDown={(e) => {
+                    // TakesPanel.tsx:132's idiom: Enter blurs the field,
+                    // which runs the same commit path as tabbing away - the
+                    // rename no longer requires finding something else to
+                    // click on first
+                    // (docs/recording-controls-ux-acceptance-criteria.md
+                    // section 7).
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  }}
+                  onBlur={async (e) => {
+                    const newName = e.currentTarget.value.trim();
+                    if (newName && newName !== burned.name && supabase) {
+                      try {
+                        await renameRecordingFile(supabase, burnedRow.id, newName);
+                        setRenameNote("Renamed in library.");
+                        setBurned({ ...burned, name: newName });
+                      } catch (err) {
+                        setRenameNote(err instanceof Error ? err.message : "Rename failed");
+                      }
                     }
-                  }
-                }}
-                style={{ marginRight: "var(--space-2)" }}
-              />
-              {renameNote && (
-                <p className={styles.fieldHint} style={{ margin: 0, marginTop: "var(--space-1)" }}>
-                  {renameNote}
-                </p>
-              )}
+                  }}
+                />
+              </div>
+              {renameNote && <p className={styles.fieldHint}>{renameNote}</p>}
             </div>
           )}
-          <div className={styles.ghActions} style={{ marginTop: "var(--space-2)" }}>
+          <div className={styles.ghActions}>
             <Button
-              variant="contained"
+              variant="outlined"
               size="small"
               onClick={() => {
                 const a = document.createElement("a");
@@ -206,6 +225,6 @@ export function PreviewExport({
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 }

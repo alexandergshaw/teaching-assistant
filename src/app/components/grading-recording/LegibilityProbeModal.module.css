@@ -1,44 +1,16 @@
-/* Colocated styles for LegibilityProbeModal. Mirrors
-   DiscussionRepliesPanel.module.css's .previewVideo/.statusRow/.statusText
-   trio (same capture-preview idiom, reused here rather than reinvented) and
-   adds only what this modal needs beyond that: a thumbnail strip for
-   requirement 5 ("show the frames alongside the transcription"). This file
-   is invisible to recording-split.structure.test.ts's key-canary scan (it
-   filters src/app/components/recording/**) and to the ta-rec-* key canary,
-   which only reads the hooks - no persisted storage key is ever named here
-   because this modal persists nothing (see LegibilityProbeModal.tsx's own
-   header comment for why). */
-
-.previewVideo {
-  width: 240px;
-  aspect-ratio: 16 / 9;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--card-border);
-  /* No token resolves to black (nothing on this surface reads text over it -
-     it is a camera "no frame yet" placeholder, covered by the live video once
-     a frame arrives) - see this file's aesthetics-pass report for why this is
-     a gap, not a miss, and why it deliberately mirrors
-     DiscussionRepliesPanel.module.css's identical .previewVideo idiom rather
-     than diverging from it. */
-  background: #000;
-  object-fit: cover;
-}
-
-.statusRow {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-2);
-}
-
-.statusText {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-size: var(--font-size-md);
-  color: var(--text-secondary);
-}
+/* Colocated styles for LegibilityProbeModal. docs/recording-controls-ux-
+   acceptance-criteria.md CC13: the .previewVideo/.statusRow/.statusText trio
+   this file used to carry its own raw-#000 copy of is DELETED here - both
+   this modal and GradingRecordingPanel.tsx now render the ONE tokenised
+   copy from recording/RecordingControls.module.css (imported as `controls`)
+   instead. What remains here is what this modal alone needs: the
+   capture-parameters line and a thumbnail strip for requirement 5 ("show
+   the frames alongside the transcription"), plus the transcript box. This
+   file is invisible to recording-split.structure.test.ts's key-canary scan
+   (it filters src/app/components/recording/**) and to the ta-rec-* key
+   canary, which only reads the hooks - no persisted storage key is ever
+   named here because this modal persists nothing (see
+   LegibilityProbeModal.tsx's own header comment for why). */
 
 .paramsLine {
   font-size: var(--font-size-sm);

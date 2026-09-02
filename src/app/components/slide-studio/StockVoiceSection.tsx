@@ -3,6 +3,7 @@
 import React from "react";
 import { Button, TextField, MenuItem } from "@mui/material";
 import styles from "@/app/page.module.css";
+import controls from "../recording/RecordingControls.module.css";
 import type { UseVoiceCloningReturn } from "./useVoiceCloning";
 
 interface StockVoiceSectionProps {
@@ -26,13 +27,31 @@ export function StockVoiceSection({
   } = voiceCloning;
 
   return (
-    <details className={styles.adaptDisclosure} style={{ marginTop: "var(--space-4)" }}>
+    <details className={styles.adaptDisclosure}>
       <summary>Use a ready-made voice</summary>
-      <div className={`${styles.adaptDisclosureBody} ${styles.field}`}>
+      <div className={`${styles.adaptDisclosureBody} ${controls.stack}`}>
         <p className={styles.fieldHint}>
           No cloning on your plan? Pick a ready-made ElevenLabs voice - captions, video narration, and deck narration all work with it.
         </p>
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
+        {/* CC1: reordered load -> pick -> use (Browse voices, then Voice, then
+            Use this voice). Each is its own row: CC3 forbids mixing a field
+            and a button in one row, and this isn't one of the three named
+            fieldRowButton sites. */}
+        {!stockVoices && (
+          <div className={styles.ghActions}>
+            <Button
+              variant="text"
+              size="small"
+              disabled={stockLoading || !voiceReady}
+              loading={stockLoading}
+              loadingPosition="start"
+              onClick={() => void handleLoadStockVoices()}
+            >
+              Browse voices
+            </Button>
+          </div>
+        )}
+        <div className={styles.adaptRow}>
           <TextField
             select
             label="Voice"
@@ -40,7 +59,7 @@ export function StockVoiceSection({
             onChange={(e) => setStockSel(e.target.value)}
             size="small"
             disabled={stockLoading || !voiceReady}
-            sx={{ minWidth: 220 }}
+            className={controls.fieldMd}
           >
             {stockVoices && stockVoices.map((v) => (
               <MenuItem key={v.voiceId} value={v.voiceId}>
@@ -49,22 +68,28 @@ export function StockVoiceSection({
               </MenuItem>
             ))}
           </TextField>
+        </div>
+        <div className={styles.ghActions}>
           <Button
-            variant="contained"
+            variant="outlined"
             size="small"
             disabled={!stockSel || stockLoading || cloneBusy || !voiceReady}
+            loading={cloneBusy}
+            loadingPosition="start"
             onClick={() => void handleUseStockVoice()}
           >
             Use this voice
           </Button>
-          {!stockVoices && (
-            <Button variant="text" size="small" disabled={stockLoading || !voiceReady} onClick={() => void handleLoadStockVoices()}>
-              Browse voices
-            </Button>
-          )}
         </div>
-        {!voiceReady && <p className={styles.fieldHint} style={{ margin: 0 }}>Requires ELEVENLABS_API_KEY.</p>}
-        {cloneError && <p className={styles.error}>{cloneError}</p>}
+        {!stockVoices && voiceReady && (
+          <p className={styles.fieldHint}>Browse voices first - Use this voice stays off until a voice is loaded.</p>
+        )}
+        {!voiceReady && <p className={styles.fieldHint}>Requires ELEVENLABS_API_KEY.</p>}
+        {cloneError && (
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+            {cloneError}
+          </p>
+        )}
       </div>
     </details>
   );

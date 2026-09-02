@@ -14,8 +14,8 @@
 //
 // Combines, in ONE sticky container (D4): the whole-table action bar (moved
 // from the panel), the search box + "Showing N of M" (moved from
-// DiscussionReplyTable.tsx), and the new status filter chips (D3). The sticky
-// recipe is copied VERBATIM from
+// DiscussionReplyTable.tsx), and the status filter chips (D3, now a
+// SegmentedToggle per CC4). The sticky recipe is copied VERBATIM from
 // src/app/components/courses/CoursesTable.module.css:70-76 (.actionBar) -
 // see .stickyToolbar in DiscussionRepliesPanel.module.css for the five
 // carried-over declarations and what was added on top.
@@ -34,13 +34,25 @@
 // React.memo boundary itself, but the panel's own re-render cost while
 // capturing - elapsedSec ticks once a second - is exactly why that discipline
 // exists at all).
+//
+// docs/recording-controls-ux-acceptance-criteria.md CC1/CC4/CC5: the status
+// chips are now a SegmentedToggle (a track with a raised segment, not a row
+// of contained/outlined primaries - a selected chip rendered as the screen's
+// primary fill would breach CC1's one-filled-button rule), "Draft the
+// missing replies" takes the new `primaryAction` prop through `variantFor`,
+// and Delete table is a ConfirmArmButtons pushed to the far edge of the
+// cluster.
 
 import type { RefObject } from "react";
 import { Button, IconButton, InputAdornment, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
+import controls from "./RecordingControls.module.css";
 import { CopyIcon, CheckIcon, CloseIcon } from "./discussion-icons";
 import { REPLY_STATUS_FILTERS, REPLY_STATUS_FILTER_LABELS, type ReplyStatusFilter } from "./discussion-table-view";
+import SegmentedToggle from "../ui/SegmentedToggle";
+import ConfirmArmButtons from "../ui/ConfirmArmButtons";
+import { variantFor } from "../ui/buttonVariant";
 
 export interface DiscussionReplyToolbarProps {
   /** F0-2/F11: the UNFILTERED row count - never the display array's length. */
@@ -64,6 +76,24 @@ export interface DiscussionReplyToolbarProps {
 
   drafting: boolean;
   onDraftMissing: () => void;
+  /** CC1: capturing ? null : pendingEligible > 0 ? "draft" : null - the
+   *  panel's own derivation; this component only reads it. Fixer pass
+   *  finding 1: NOT `drafting || pendingEligible > 0` any more - a
+   *  single-row Redraft also flips `drafting` true, and pendingEligible
+   *  excludes rows already in flight, so that OR kept this the contained,
+   *  spinning primary for the whole drain even after the last eligible row
+   *  had been dispatched. */
+  primaryAction: "draft" | null;
+  /** CC1's "Drafting N remaining" reason line, shown under the toolbar while
+   *  `drafting` is true AND this count is positive. Deliberately NOT the same
+   *  `pendingEligible` count `primaryAction` reads - this one also counts
+   *  rows already in state "drafting" (in flight), so it does not read
+   *  "Drafting 0 remaining" for the stretch of a redraft where every
+   *  remaining row has already been dispatched into the loop but has not
+   *  resolved yet. Fixer pass finding 1: renamed from `pendingEligibleCount`
+   *  - the old name claimed this was the same count that gates the primary
+   *  (`pendingEligible`), which it never was (see the note above). */
+  draftingRemaining: number;
 
   findResourcesCount: number;
   onFindMissing: () => void;
@@ -93,6 +123,8 @@ export default function DiscussionReplyToolbar({
   copyAllDisabled,
   drafting,
   onDraftMissing,
+  primaryAction,
+  draftingRemaining,
   findResourcesCount,
   onFindMissing,
   deleteArmed,
@@ -112,26 +144,22 @@ export default function DiscussionReplyToolbar({
     searchInputRef.current?.focus();
   };
 
+  const statusOptions = REPLY_STATUS_FILTERS.map((key) => ({
+    value: key,
+    label: REPLY_STATUS_FILTER_LABELS[key],
+    count: statusCounts[key],
+  }));
+
   return (
     <div className={panelStyles.stickyToolbar}>
-      {/* D3: same segmented-toggle idiom as the audience row above
-          (DiscussionRepliesPanel.tsx) - MUI Button, variant contained/
-          outlined, size small, aria-pressed. Not a new chip component. */}
-      <div className={styles.ghActions} role="group" aria-label="Filter replies by status">
-        {REPLY_STATUS_FILTERS.map((key) => (
-          <Button
-            key={key}
-            size="small"
-            variant={statusFilter === key ? "contained" : "outlined"}
-            aria-pressed={statusFilter === key}
-            onClick={() => setStatusFilter(key)}
-          >
-            {`${REPLY_STATUS_FILTER_LABELS[key]} (${statusCounts[key]})`}
-          </Button>
-        ))}
-      </div>
+      <SegmentedToggle
+        label="Filter replies by status"
+        options={statusOptions}
+        value={statusFilter}
+        onChange={setStatusFilter}
+      />
 
-      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
+      <div className={styles.adaptRow}>
         <TextField
           type="search"
           size="small"
@@ -140,7 +168,7 @@ export default function DiscussionReplyToolbar({
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
           inputRef={searchInputRef}
-          sx={{ minWidth: 220, maxWidth: 320 }}
+          className={controls.fieldMd}
           slotProps={{
             input: {
               endAdornment: filterText ? (
@@ -148,6 +176,7 @@ export default function DiscussionReplyToolbar({
                   <IconButton
                     size="small"
                     aria-label="Clear search"
+                    title="Clear search"
                     onClick={() => {
                       setFilterText("");
                       searchInputRef.current?.focus();
@@ -163,7 +192,7 @@ export default function DiscussionReplyToolbar({
         {/* F14, extended for the status chip: shown whenever EITHER filter is
             active, denominator always totalCount (F11). */}
         {filterActive && (
-          <span className={styles.fieldHint} style={{ margin: 0 }}>
+          <span className={styles.fieldHint}>
             {`Showing ${visibleCount} of ${totalCount} repl${totalCount === 1 ? "y" : "ies"}.`}{" "}
             <button type="button" className={styles.linkButton} onClick={handleClearFilters}>
               Clear
@@ -178,32 +207,44 @@ export default function DiscussionReplyToolbar({
           variant="outlined"
           startIcon={allCopied ? <CheckIcon /> : <CopyIcon />}
           disabled={copyAllDisabled}
-          title={allCopied ? "Copied" : copyAllLabel}
+          title={copyAllDisabled ? "Nothing eligible to copy" : allCopied ? "Copied" : copyAllLabel}
           onClick={onCopyAll}
         >
           {copyAllLabel}
         </Button>
-        <Button size="small" variant="outlined" disabled={drafting} onClick={onDraftMissing}>
+        <Button
+          size="small"
+          variant={variantFor(primaryAction === "draft")}
+          loading={drafting}
+          loadingPosition="start"
+          onClick={onDraftMissing}
+        >
           Draft the missing replies
         </Button>
-        <Button size="small" variant="outlined" disabled={findResourcesCount === 0} onClick={onFindMissing}>
+        <Button
+          size="small"
+          variant="outlined"
+          disabled={findResourcesCount === 0}
+          title={findResourcesCount === 0 ? "No rows need resources" : undefined}
+          onClick={onFindMissing}
+        >
           {`Find resources (${findResourcesCount})`}
         </Button>
-        {deleteArmed ? (
-          <>
-            <Button size="small" color="error" onClick={onConfirmDelete} aria-describedby={deleteConsequenceId}>
-              Confirm delete
-            </Button>
-            <Button size="small" onClick={onCancelDelete}>
-              Cancel
-            </Button>
-          </>
-        ) : (
-          <Button size="small" color="error" variant="outlined" onClick={onArmDelete}>
-            Delete table
-          </Button>
-        )}
+        <span className={controls.pushEnd}>
+          <ConfirmArmButtons
+            armed={deleteArmed}
+            idleLabel="Delete table"
+            confirmLabel="Confirm delete"
+            tone="danger"
+            idleVariant="outlined"
+            onArm={onArmDelete}
+            onConfirm={onConfirmDelete}
+            onCancel={onCancelDelete}
+            consequenceId={deleteConsequenceId}
+          />
+        </span>
       </div>
+      {drafting && draftingRemaining > 0 && <p className={styles.fieldHint}>{`Drafting ${draftingRemaining} remaining`}</p>}
     </div>
   );
 }

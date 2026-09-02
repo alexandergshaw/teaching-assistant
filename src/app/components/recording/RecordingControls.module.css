@@ -1,0 +1,370 @@
+/* docs/recording-controls-ux-acceptance-criteria.md CC13. Shared controls
+   vocabulary for the nine Recording sub-tabs, imported everywhere as
+   `controls`. Holds EXACTLY the classes in the CC13 table and nothing else -
+   the orphan-class ratchet (courses/page-module-css-orphan-classes.test.ts)
+   is EXPECTED to read above its pinned 137 after this file lands, because in
+   this wave most of these classes have no consumer yet (wave 1 wires them).
+   No descendant `legend` or `fieldset` selector anywhere in this file - MUI's
+   OutlinedInput renders its own <fieldset><legend> (NotchedOutline.js) and a
+   descendant selector here would reach into it by accident. */
+
+/* The fieldset reset. `gap` is --space-2, not --space-3, because
+   `.adaptRow + .adaptRow { margin-top: var(--space-2) }`
+   (page.module.css:897) ADDS to it from the outside and cannot be
+   neutralised from this module, giving 16px between rows total. The
+   rendered <legend> is not a flex item, so its own margin is the only
+   spacing under it. */
+.section {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Scoped to fieldset.section specifically (not the bare class) so a plain
+   .stack div can never pick up the hairline meant for the fieldset reset
+   above - several agents were using .section as a generic vertical-grouping
+   utility and getting a stray border-top inside a single group. */
+fieldset.section + fieldset.section {
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-4);
+}
+
+/* A plain vertical grouping utility - unlike .section this carries no
+   fieldset reset and draws no hairline against a sibling, so it is safe to
+   use for a div that just needs its children stacked with a gap. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Matches the app's one existing fieldset idiom (WorkflowPanel.module.css:
+   54-62): the legend reset, plus all five declarations of `.field label`
+   (page.module.css:154-160) so a fieldset legend reads identically to every
+   other micro-label in the app. */
+.sectionLegend {
+  padding: 0;
+  float: none;
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* Composed with .ghActions on the consumer's element:
+   `${styles.ghActions} ${controls.runRow}`. */
+.runRow {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+
+.fieldXs {
+  min-width: 80px;
+}
+
+.fieldSm {
+  min-width: 120px;
+}
+
+.fieldMd {
+  min-width: 220px;
+}
+
+.fieldLg {
+  min-width: 320px;
+}
+
+.fieldGrow {
+  flex: 1 1 300px;
+}
+
+/* The formality slider wrapper - MUI Slider thumbs overhang ~10px each
+   side, so the inline padding keeps them clear of neighboring content. */
+.sliderBox {
+  width: 220px;
+  padding-inline: var(--space-6);
+}
+
+/* The three places a button sits beside a field inside an .adaptRow: stretch
+   to the field's rendered height (37.7px for a small TextField in this
+   theme) without a literal, tracking any future font change. */
+.fieldRowButton {
+  align-self: stretch;
+}
+
+.pushEnd {
+  margin-left: auto;
+}
+
+/* A list-item card (caption cues, narration segments): .ghPanel is a panel
+   (16px radius) and using it for e.g. 30 rendered cues drew 30 panels. */
+.itemCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  background: var(--card-background);
+}
+
+/* AM11's selected treatment for a single pressed toggle button (Mute,
+   Teleprompter) - so a pressed state is never the primary fill. An outlined
+   MUI Button already draws a 1px accent border, so the inset ring alone made
+   a 3px rim; the border is cleared to transparent to reclaim it. */
+.pressed {
+  background: var(--accent-soft);
+  border-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Copied byte-for-byte from .lessonInnerTabs/.lessonInnerTab/
+   .lessonInnerTabActive (page.module.css:3712-3742) - the app already
+   renders a segmented track twenty pixels above these panels, in the
+   sub-tab strip, and CC4 reuses that exact idiom rather than inventing a
+   second one. The only change from the source is the transition values,
+   routed through the shared token instead of a bare duration/easing pair
+   (page.module.css is frozen this group, so this is a copy, not an
+   import - see docs/recording-controls-ux-acceptance-criteria.md section 2
+   "Not reusable, and why"). */
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--field-border) 40%, transparent 60%);
+  width: fit-content;
+}
+
+.segment {
+  padding: var(--space-1) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.segmentSelected {
+  background: var(--field-background);
+  color: var(--text-primary);
+  /* AC4 exemption, recorded: this IS the raised-segment idiom the sub-tab
+     strip already ships on a non-floating element, and the two must stay
+     identical. */
+  box-shadow: var(--shadow-sm);
+}
+
+.segment:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Negative offset for the same clipping reason theme.ts's MuiTab override
+   records: a segment sits inside a track with no room outside its own
+   border box for a ring to draw into. */
+.segment:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+/* `sm`, because the two text buttons beside it are 13px. */
+.runLogRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.loadingLine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+/* Cancels .spinner's own margin-top (page.module.css:128). */
+.loadingLine > :first-child {
+  margin-top: 0;
+}
+
+/* Lifted verbatim from DiscussionRepliesPanel.module.css:206-210 - that
+   file deletes its own copy in the same wave. */
+.consequence {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+/* Copied from .kbWarnBanner's recipe (page.module.css:6682-6693) so the two
+   read identically, with a neutral base surface - .noticeDanger and
+   .noticeWarning below carry the status colour, never red/amber prose on a
+   plain surface. */
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+}
+
+.noticeDanger {
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
+}
+
+.noticeWarning {
+  border-color: var(--warning-border);
+  background: var(--warning-surface);
+}
+
+.recIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--danger-ink);
+}
+
+.recIndicator::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-round);
+  background: var(--danger);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .recIndicator::before {
+    animation: recPulse 1.4s ease-in-out infinite;
+  }
+}
+
+/* Same-file keyframes (AM10): an animation-name reference is scoped by
+   Lightning CSS the same way a class is, so a name imported from another
+   module compiles to a hash that matches nothing and the dot renders
+   motionless. */
+@keyframes recPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Placed after .recIndicator's rules (including the media-query block
+   above) so equal-specificity source order lets these win regardless of
+   the reduced-motion media query's result. */
+.recIndicatorPaused {
+  color: var(--text-secondary);
+}
+
+.recIndicatorPaused::before {
+  background: var(--text-muted);
+  animation: none;
+}
+
+/* Lifted from DiscussionRepliesPanel.module.css:15-40 (the tokenised copy)
+   with width raised to 240px; that file and LegibilityProbeModal.module.css
+   (which carried a second, raw-#000 copy) both delete their own versions in
+   the same wave. */
+.previewVideo {
+  width: 240px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--field-border);
+  background: var(--navy);
+  object-fit: cover;
+}
+
+/* Composed with .previewVideo while no capture is live (four panels toggled
+   this inline before). */
+.previewVideoHidden {
+  display: none;
+}
+
+/* One size per media element across the studios. */
+.playerAudio {
+  width: 100%;
+  height: 36px;
+}
+
+.playerVideo {
+  width: 100%;
+  max-height: 360px;
+  border-radius: var(--radius-md);
+  background: var(--navy);
+}
+
+.statusRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.statusText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+/* CC14: the <th>Actions header right-aligns to match .rowActions. */
+.rowActionsHeader {
+  text-align: right;
+}
+
+/* CC15: RubricInputModal's file input keeps its natural tab stop instead of
+   `display: none`; this paints the ring on its wrapping label when the
+   input itself is focus-visible. */
+.uploadLabel:has(:focus-visible) {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+/* Shared row/meta/sub-label idiom for the two video-library lists (Speed,
+   Captions) that still spelled padding/flex/font-weight inline. */
+.listRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+}
+
+.growMeta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.subLabel {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}

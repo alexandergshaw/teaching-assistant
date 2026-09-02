@@ -1,4 +1,4 @@
-﻿import { createTheme } from "@mui/material/styles";
+import { createTheme } from "@mui/material/styles";
 
 declare module "@mui/material/styles" {
   interface CssThemeVariables {
@@ -20,6 +20,13 @@ const theme = createTheme({
         text: { primary: "#0f172a", secondary: "#475569" },
         divider: "#cbd5e1",
         error: { main: "#dc2626" },
+        // docs/recording-controls-ux-acceptance-criteria.md section 4: MUI's
+        // default warning (#ed6c02) is 3.1:1 against white in BOTH directions,
+        // so every `color="warning"` button - the armed "Confirm redraft" was
+        // already one - shipped below AA at 13px/600. #92400e is the app's
+        // own --warning-ink (globals.css), 7.1:1 with white text and on a
+        // white surface.
+        warning: { main: "#92400e" },
       },
     },
     dark: {
@@ -29,6 +36,9 @@ const theme = createTheme({
         text: { primary: "#e2e8f0", secondary: "#94a3b8" },
         divider: "rgba(148, 163, 184, 0.25)",
         error: { main: "#f87171" },
+        // Same reasoning as the light scheme; matches the dark --warning
+        // token. MUI derives the dark contrast text for this value itself.
+        warning: { main: "#fbbf24" },
       },
     },
   },

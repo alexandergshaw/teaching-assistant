@@ -11,6 +11,16 @@
 // Caption-Studio-shaped and not reusable as a component here). All of the
 // speed-specific state (rate, render/save state machine, progress, errors)
 // lives in useVideoSpeed.ts.
+//
+// docs/recording-controls-ux-acceptance-criteria.md (group S): the rate
+// chips are a SegmentedToggle (CC4), "Save at N x" is the screen's only
+// contained button (CC1, static - not a variantFor site), busy labels pair
+// with MUI's `loading` prop (CC6), and the "1. Video source" subtitle -
+// though not literally named alongside "2. Playback speed" in the group's
+// file list - is converted to the same fieldset/legend shape as its sibling
+// VideoSource.tsx: left as a bare `.field` wrapper it would keep violating
+// CC3's "no MUI control is ever placed inside a .field container" (the
+// TextField's InputLabel would still be reachable by `.field label`).
 
 import { useCallback, useEffect, useRef } from "react";
 import { Button, TextField } from "@mui/material";
@@ -20,7 +30,10 @@ import { useVideoImport } from "../caption-studio/hooks/useVideoImport";
 import { useVideoSpeed, KEEP_OPEN_WARNING, PITCH_FALLBACK_MESSAGE } from "./useVideoSpeed";
 import { fmt, type Take } from "./types";
 import { getDisplayKind } from "../files/helpers";
+import SegmentedToggle from "../ui/SegmentedToggle";
+import { visuallyHidden } from "../ui/visuallyHidden";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
 
 // There is deliberately no `active` prop. An earlier draft of the AC had this
 // view move focus to its heading when switched to, "matching the other inner
@@ -70,12 +83,16 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
         </h2>
       </div>
 
-      <div className={styles.field}>
-        <p className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
-          1. Video source
-        </p>
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-          <Button variant="outlined" size="small" disabled={speed.busy} onClick={() => fileInputRef.current?.click()}>
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Video</legend>
+        <div className={styles.adaptRow}>
+          <Button
+            variant="outlined"
+            size="small"
+            className={controls.fieldRowButton}
+            disabled={speed.busy}
+            onClick={() => fileInputRef.current?.click()}
+          >
             Choose video
           </Button>
           <input
@@ -89,39 +106,51 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
             <TextField
               size="small"
               label="Video name"
+              className={controls.fieldLg}
               value={videoImport.fileName}
               disabled={speed.busy}
               onChange={(e) => videoImport.setFileName(e.target.value)}
-              sx={{ width: 200 }}
             />
           )}
         </div>
 
-        {videoImport.importError && <p className={styles.error}>{videoImport.importError}</p>}
+        {videoImport.importError && (
+          <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
+            {videoImport.importError}
+          </p>
+        )}
 
-        <div style={{ marginTop: "var(--space-4)" }}>
-          <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0" }}>
-            Or import a saved video:
+        <div className={controls.stack}>
+          <p className={styles.fieldHint}>
+            Or import a saved video
           </p>
 
-          <div style={{ marginTop: "var(--space-2)" }}>
-            <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
+          <div className={controls.stack}>
+            <p className={controls.subLabel}>
               From the Files tab
             </p>
             {videoImport.libraryBusy && !videoImport.libraryVideos && (
-              <p className={styles.fieldHint} role="status" aria-live="polite" style={{ margin: 0 }}>Loading your library…</p>
+              <p role="status" aria-live="polite" className={controls.loadingLine}>
+                <span className={styles.spinner} aria-hidden="true" /> Loading your library…
+              </p>
             )}
             {videoImport.libraryVideos && videoImport.libraryVideos.length === 0 && (
-              <p className={styles.fieldHint} style={{ margin: 0 }}>
+              <p className={styles.fieldHint}>
                 No saved videos yet - record one on the Recording tab or upload on the Files tab.
               </p>
             )}
-            <Button variant="text" size="small" disabled={videoImport.libraryBusy} onClick={() => void videoImport.loadLibrary()}>
+            <Button
+              variant="text"
+              size="small"
+              loading={videoImport.libraryBusy}
+              loadingPosition="start"
+              onClick={() => void videoImport.loadLibrary()}
+            >
               {videoImport.libraryBusy ? "Loading…" : "Refresh"}
             </Button>
             {videoImport.libraryVideos && videoImport.libraryVideos.map((v) => (
-              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
-                <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
+              <div key={v.id} className={controls.listRow}>
+                <span className={`${styles.ghMeta} ${controls.growMeta}`}>
                   {v.name} - {getDisplayKind(v).label}
                   {v.durationSec !== null && ` - ${fmt(Math.round(v.durationSec))}`}
                   {" "}
@@ -131,6 +160,8 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
                   variant="outlined"
                   size="small"
                   disabled={speed.busy || videoImport.importingKey !== null}
+                  loading={videoImport.importingKey === "lib:" + v.id}
+                  loadingPosition="start"
                   onClick={() => void videoImport.handleImportLibraryVideo(v)}
                 >
                   {videoImport.importingKey === "lib:" + v.id ? "Importing…" : "Import"}
@@ -140,19 +171,21 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
           </div>
 
           {takes.length > 0 && (
-            <div style={{ marginTop: "var(--space-2)" }}>
-              <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
+            <div className={controls.stack}>
+              <p className={controls.subLabel}>
                 From current session
               </p>
               {takes.map((take) => (
-                <div key={take.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
-                  <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0 }}>
+                <div key={take.id} className={controls.listRow}>
+                  <span className={`${styles.ghMeta} ${controls.growMeta}`}>
                     {take.name} - {(take.sizeBytes / 1048576).toFixed(1)} MB
                   </span>
                   <Button
                     variant="outlined"
                     size="small"
                     disabled={speed.busy || videoImport.importingKey !== null}
+                    loading={videoImport.importingKey === "take:" + take.id}
+                    loadingPosition="start"
                     onClick={() => void videoImport.handleImportTake(take)}
                   >
                     {videoImport.importingKey === "take:" + take.id ? "Importing…" : "Import"}
@@ -163,30 +196,33 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
           )}
 
           {backupDir && (
-            <div style={{ marginTop: "var(--space-2)" }}>
-              <p className={styles.fieldHint} style={{ margin: "0 0 var(--space-2) 0", fontWeight: 600 }}>
+            <div className={controls.stack}>
+              <p className={controls.subLabel}>
                 From backup folder ({backupDir.name})
               </p>
               <Button
                 variant="text"
                 size="small"
-                disabled={videoImport.folderBusy}
+                loading={videoImport.folderBusy}
+                loadingPosition="start"
                 onClick={() => void videoImport.handleBrowseFolder(backupDir)}
               >
                 {videoImport.folderBusy ? "Reading folder…" : videoImport.folderVideos ? "Refresh" : "Browse"}
               </Button>
               {videoImport.folderVideos && videoImport.folderVideos.length === 0 && (
-                <p className={styles.fieldHint} style={{ margin: 0 }}>No videos found.</p>
+                <p className={styles.fieldHint}>No videos found.</p>
               )}
               {videoImport.folderVideos && videoImport.folderVideos.map((v) => (
-                <div key={v.name} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-1) 0" }}>
-                  <span className={styles.ghMeta} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div key={v.name} className={controls.listRow}>
+                  <span className={`${styles.ghMeta} ${controls.growMeta}`} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {v.name} - {(v.sizeBytes / 1048576).toFixed(1)} MB
                   </span>
                   <Button
                     variant="outlined"
                     size="small"
                     disabled={speed.busy || videoImport.importingKey !== null}
+                    loading={videoImport.importingKey === "file:" + v.name}
+                    loadingPosition="start"
                     onClick={() => void videoImport.handleImportFolderVideo(backupDir, v.name)}
                   >
                     {videoImport.importingKey === "file:" + v.name ? "Importing…" : "Import"}
@@ -196,51 +232,67 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
             </div>
           )}
         </div>
-      </div>
+      </fieldset>
 
       {/* AC9 item 2: the "watch it back" half of the request - playbackRate
-          set on this same element previews the chosen speed live. */}
-      <div style={{ borderRadius: "var(--radius-md)", overflow: "hidden", background: "var(--navy)" }}>
+          set on this same element previews the chosen speed live. Border and
+          padding come from .ghPanel (the app's own bordered-card idiom)
+          rather than a bespoke inline object; the navy background and the
+          corner clipping are functional, not layout, so they stay inline. */}
+      <div className={styles.ghPanel} style={{ overflow: "hidden", background: "var(--navy)" }}>
         <video
           ref={previewRef}
           controls
           src={videoImport.videoUrl ?? undefined}
           onLoadedMetadata={applyPreviewRate}
-          style={{ width: "100%", maxHeight: "48vh", display: hasSource ? "block" : "none", background: "var(--navy)" }}
+          className={hasSource ? controls.playerVideo : `${controls.playerVideo} ${controls.previewVideoHidden}`}
         />
         {!hasSource && (
-          <p className={styles.fieldHint} style={{ margin: 0, padding: "var(--space-4)" }}>
+          <p className={styles.fieldHint}>
             Pick a video above to watch it back here.
           </p>
         )}
       </div>
 
-      <div className={styles.field}>
-        <p id="speed-rate-heading" className={styles.adaptPanelSubtitle} style={{ marginBottom: "var(--space-2)" }}>
-          2. Playback speed
-        </p>
-        <div role="group" aria-labelledby="speed-rate-heading" className={styles.ghActions}>
-          {SPEED_RATES.map((r) => (
-            <Button
-              key={r}
-              size="small"
-              variant={r === speed.rate ? "contained" : "outlined"}
-              aria-pressed={r === speed.rate}
-              disabled={speed.busy}
-              onClick={() => speed.setRate(r)}
-            >
-              {formatSpeedLabel(r)}
-            </Button>
-          ))}
-        </div>
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Playback speed</legend>
+        <SegmentedToggle
+          label="Playback speed"
+          options={SPEED_RATES.map((r) => ({ value: r, label: formatSpeedLabel(r) }))}
+          value={speed.rate}
+          onChange={speed.setRate}
+          disabled={speed.busy}
+        />
         <p className={styles.fieldHint}>{speed.costLine}</p>
         {hasSource && <p className={styles.fieldHint}>{KEEP_OPEN_WARNING}</p>}
-      </div>
+      </fieldset>
 
-      {/* AC12/AC16 item 3: the visible progress line and its aria-valuetext
-          carry the percentage and countdown; the live region below never
-          does, so a screen reader is not flooded with per-tick updates. */}
-      {speed.busy ? (
+      {/* CC6: the run row stays mounted while busy instead of being replaced
+          by a progress block - a button is never removed while busy. Save
+          takes loading={speed.busy} with its label swapped to the
+          progressive verb; Cancel sits beside it, and is only rendered once
+          the job is actually cancellable (during "rendering"). The progress
+          bar and status lines render below the row, and keep the visible
+          percentage/countdown out of the aria-live region below (AC12/AC16
+          item 3) so a screen reader is not flooded with per-tick updates. */}
+      <div className={`${styles.ghActions} ${controls.runRow}`}>
+        <Button
+          variant="contained"
+          size="small"
+          disabled={speed.blockedReason !== null}
+          loading={speed.busy}
+          loadingPosition="start"
+          onClick={speed.start}
+        >
+          {speed.busy ? "Re-encoding…" : `Save at ${formatSpeedLabel(speed.rate)}`}
+        </Button>
+        {speed.busy && speed.stage === "rendering" && (
+          <Button variant="outlined" size="small" onClick={speed.cancel}>
+            Cancel
+          </Button>
+        )}
+      </div>
+      {speed.busy && (
         <div className={styles.field}>
           <div
             role="progressbar"
@@ -269,26 +321,17 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
           <p className={styles.fieldHint} aria-hidden="true">
             {speed.progressLine ?? `Re-encoding at ${formatSpeedLabel(speed.rate)}…`}
           </p>
-          <div className={styles.ghActions}>
-            {speed.stage === "rendering" ? (
-              <Button variant="outlined" onClick={speed.cancel}>
-                Cancel
-              </Button>
-            ) : (
-              <Button variant="outlined" disabled>
-                {speed.stage === "reading" ? "Reading the video…" : "Saving…"}
-              </Button>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className={styles.ghActions}>
-          <Button variant="contained" disabled={speed.blockedReason !== null} onClick={speed.start}>
-            {`Save at ${formatSpeedLabel(speed.rate)}`}
-          </Button>
-          {speed.blockedReason && <span className={styles.ghMeta}>{speed.blockedReason}</span>}
+          {/* CC6: a permanently-disabled status Button used as a label is not
+              a button - it becomes a plain status line beside the progress
+              bar. */}
+          {speed.stage !== "rendering" && (
+            <p className={styles.fieldHint}>
+              {speed.stage === "reading" ? "Reading the video…" : "Saving…"}
+            </p>
+          )}
         </div>
       )}
+      {!speed.busy && speed.blockedReason && <p className={styles.fieldHint}>{speed.blockedReason}</p>}
 
       {/* AMENDED AC12: stage transitions plus roughly every 25 percent
           (see crossedAnnounceThreshold in useVideoSpeed.ts) - not stage
@@ -297,11 +340,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
           per-tick percentage and countdown still never land here - those
           stay in the aria-hidden line and the progressbar's aria-valuetext
           above. */}
-      <span
-        role="status"
-        aria-live="polite"
-        style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0 }}
-      >
+      <span role="status" aria-live="polite" style={visuallyHidden}>
         {speed.statusMessage}
       </span>
 
@@ -309,7 +348,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
 
       {speed.errorText && (
         <div>
-          <p role="alert" className={styles.error}>{speed.errorText}</p>
+          <p role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>{speed.errorText}</p>
           {speed.canRetrySave && (
             <Button variant="outlined" size="small" onClick={speed.retrySave}>
               Retry save
@@ -321,7 +360,7 @@ export default function SpeedPanel({ takes, backupDir }: SpeedPanelProps) {
       {!speed.busy && speed.pitchWarning && <p className={styles.fieldHint}>{PITCH_FALLBACK_MESSAGE}</p>}
 
       {speed.successText && (
-        <p className={styles.fieldHint} style={{ fontWeight: 600 }}>
+        <p className={controls.subLabel}>
           {speed.successText}
         </p>
       )}

@@ -1,7 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { Button, Checkbox, FormControlLabel, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
+import { variantFor } from "../ui/buttonVariant";
+import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import { fmt } from "./types";
 import {
   AVATAR_CONSENT_ACKNOWLEDGEMENT,
@@ -53,6 +57,45 @@ function likenessStatusText(l: AvatarLikeness): string {
     default:
       return l.status;
   }
+}
+
+// CC1: "the first stage whose gate is open is contained; every later stage
+// is outlined" (capture -> save -> train -> script -> render). Each gate
+// below is the literal condition under which that stage's own button is the
+// next thing to click - checked independently, not as a blanket "not the
+// next state" elimination, so a return visit (captureState always resets to
+// "idle" on reload) does not drag the primary back to the capture stage when
+// a sample, likeness, or script already exists further down the flow:
+//   capture - a take is actively being recorded (previewing/recording), or
+//             nothing has been captured and saved yet (fresh idle state).
+//             "reviewing" is deliberately excluded - a finished take under
+//             review is the SAVE stage's gate, not capture's, otherwise the
+//             Save button would never light up during review (zero primary
+//             on screen, since none of the idle/previewing/recording buttons
+//             render while reviewing).
+//   save    - a take was recorded and is in review, but not saved yet
+//             (mirrors the exact guard the Save to library button uses).
+//   train   - no likeness is ready to render with, and nothing is training
+//             right now (mirrors the Start training button's own guard -
+//             while a training run IS in flight there is no button here to
+//             be primary, so the gate is closed and the stage falls through).
+//   script  - no script has been generated yet.
+//   render  - a script exists, so rendering is the last remaining step.
+type AvatarStage = "capture" | "save" | "train" | "script" | "render";
+
+function currentAvatarStage(state: {
+  captureState: string;
+  savedSample: unknown;
+  defaultReadyLikeness: unknown;
+  activeTraining: unknown;
+  script: string;
+}): AvatarStage {
+  if (state.captureState === "previewing" || state.captureState === "recording") return "capture";
+  if (state.captureState === "idle" && !state.savedSample) return "capture";
+  if (state.captureState === "reviewing" && !state.savedSample) return "save";
+  if (!state.defaultReadyLikeness && !state.activeTraining) return "train";
+  if (!state.script) return "script";
+  return "render";
 }
 
 export default function AvatarStudioPanel({
@@ -131,15 +174,25 @@ export default function AvatarStudioPanel({
   const canRecordMore = captureState === "recording" && !isLastStage;
   const disableDeviceSelects = captureState !== "idle";
 
+  const avatarStage = currentAvatarStage({ captureState, savedSample, defaultReadyLikeness, activeTraining, script });
+
+  // CC5: Discard and retake (one take, so a plain boolean arming flag is
+  // enough - there is nothing to key it against).
+  const [discardTakeArmed, setDiscardTakeArmed] = useState(false);
+  const discardTakeConsequenceId = "avatar-discard-take-consequence";
+
+  // CC5: Delete likeness - N rows, so the arming state is keyed by id.
+  const [deleteArmedId, setDeleteArmedId] = useState<string | null>(null);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+    <div className={controls.stack}>
       {configured === false && (
         <div className={styles.adaptPanel}>
-          <p className={styles.error} style={{ margin: 0 }}>
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
             Avatar Studio is not configured. Set the <code>TAVUS_API_KEY</code> environment variable on the server to enable
             it.
           </p>
-          <p className={styles.fieldHint} style={{ margin: 0 }}>
+          <p className={styles.fieldHint}>
             Training a custom face also requires a paid Tavus plan - the free tier cannot train likenesses, so a
             401 or 403 here does not mean the integration is broken.
           </p>
@@ -156,16 +209,20 @@ export default function AvatarStudioPanel({
           </p>
         </div>
 
-        {captureError && <p className={styles.error}>{captureError}</p>}
+        {captureError && (
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+            {captureError}
+          </p>
+        )}
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+        <div className={styles.adaptRow}>
           <TextField
             select
             label="Camera"
             value={cameraId}
             onChange={(e) => setCameraId(e.target.value)}
             size="small"
-            sx={{ minWidth: 200 }}
+            className={controls.fieldMd}
             disabled={disableDeviceSelects}
           >
             {devices.cameras.length === 0 && <MenuItem value="">No cameras found</MenuItem>}
@@ -184,7 +241,7 @@ export default function AvatarStudioPanel({
             value={micId}
             onChange={(e) => setMicId(e.target.value)}
             size="small"
-            sx={{ minWidth: 200 }}
+            className={controls.fieldMd}
             disabled={disableDeviceSelects}
           >
             <MenuItem value="">System default</MenuItem>
@@ -197,12 +254,14 @@ export default function AvatarStudioPanel({
               </MenuItem>
             ))}
           </TextField>
-          {devices.cameras.length === 0 && (
+        </div>
+        {devices.cameras.length === 0 && (
+          <div className={styles.ghActions}>
             <Button variant="outlined" size="small" onClick={() => void requestAccess()}>
               Grant camera and microphone access
             </Button>
-          )}
-        </div>
+          </div>
+        )}
 
         <div style={{ position: "relative", borderRadius: "var(--radius-md)", overflow: "hidden", background: "var(--navy)" }}>
           <video
@@ -210,24 +269,18 @@ export default function AvatarStudioPanel({
             autoPlay
             muted
             playsInline
+            className={controls.playerVideo}
             style={{
               display: captureState === "idle" || captureState === "reviewing" ? "none" : "block",
-              width: "100%",
-              maxHeight: "48vh",
               objectFit: "contain",
-              background: "var(--navy)",
             }}
           />
           {captureState === "reviewing" && reviewUrl && (
-            <video
-              controls
-              src={reviewUrl}
-              style={{ width: "100%", maxHeight: "48vh", background: "var(--navy)", display: "block" }}
-            />
+            <video controls src={reviewUrl} className={controls.playerVideo} />
           )}
         </div>
 
-        <p className={styles.fieldHint} style={{ margin: 0, fontWeight: 600, color: "var(--text-primary)" }}>
+        <p className={styles.fieldHint} style={{ fontWeight: 600, color: "var(--text-primary)" }}>
           Status:{" "}
           {captureState === "idle" && "Camera off."}
           {captureState === "previewing" && "Preview running - not recording."}
@@ -236,7 +289,7 @@ export default function AvatarStudioPanel({
         </p>
 
         {(captureState === "recording") && (
-          <div role="group" aria-labelledby="avatar-stage-heading" className={styles.field} style={{ gap: "var(--space-2)" }}>
+          <div role="group" aria-labelledby="avatar-stage-heading" className={styles.field}>
             <div aria-live="polite">
               <h3 id="avatar-stage-heading" style={{ margin: 0, fontSize: "var(--font-size-lg)" }}>
                 {`Stage ${stageIndex + 1} of ${AVATAR_SCRIPT_STAGES.length}: ${stage.label}`}
@@ -272,41 +325,45 @@ export default function AvatarStudioPanel({
             own existing precedent for the stage heading above. */}
         <div aria-live="polite">
           {(captureState === "previewing" || captureState === "recording") && !frameRateAssessment && (
-            <p className={styles.fieldHint} style={{ margin: 0 }}>
+            <p className={styles.fieldHint}>
               Checking the camera&apos;s frame rate…
             </p>
           )}
           {(captureState === "previewing" || captureState === "recording") &&
             frameRateAssessment?.status === "ok" && (
-              <p className={styles.fieldHint} style={{ margin: 0 }}>
+              <p className={styles.fieldHint}>
                 Frame rate looks good - {frameRateAssessment.source === "measured" ? "measured" : "reported"} at
                 about {frameRateAssessment.rate}fps, above the {AVATAR_MIN_FRAME_RATE}fps minimum Tavus requires.
               </p>
             )}
           {(captureState === "previewing" || captureState === "recording") &&
             frameRateAssessment?.status === "warn" && (
-              <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
+              <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
                 {frameRateAssessment.reason}
               </p>
             )}
           {(captureState === "previewing" || captureState === "recording") &&
             frameRateAssessment?.status === "unknown" && (
-              <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
+              <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
                 {frameRateAssessment.reason}
               </p>
             )}
           {(captureState === "previewing" || captureState === "recording") &&
-            frameRateAssessment?.status === "block" && <p className={styles.error}>{frameRateAssessment.reason}</p>}
+            frameRateAssessment?.status === "block" && (
+              <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+                {frameRateAssessment.reason}
+              </p>
+            )}
         </div>
 
         {(captureState === "previewing" || captureState === "recording") && resolutionWarning && (
-          <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
+          <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
             {resolutionWarning}
           </p>
         )}
 
         {mimeChoice?.isRiskyCodec && captureState !== "idle" && (
-          <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
+          <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
             This browser could only offer a VP8/VP9 webm recording. Tavus documents an H.264 requirement, so
             training may reject this file after the multi-hour wait - a recent Chrome or Edge is more likely to
             offer H.264 directly.
@@ -316,29 +373,32 @@ export default function AvatarStudioPanel({
         <div className={styles.ghActions}>
           {captureState === "idle" && (
             <Button
-              variant="contained"
+              variant={variantFor(avatarStage === "capture")}
+              size="small"
               disabled={capturePreviewStarting}
+              loading={capturePreviewStarting}
+              loadingPosition="start"
               onClick={() => void startCapturePreview()}
             >
               {capturePreviewStarting ? "Starting…" : "Start camera"}
             </Button>
           )}
           {captureState === "previewing" && (
-            <Button variant="contained" onClick={startCaptureRecording}>
+            <Button variant={variantFor(avatarStage === "capture")} size="small" onClick={startCaptureRecording}>
               Start recording
             </Button>
           )}
           {captureState === "recording" && (
             <>
               {canRecordMore && (
-                <Button variant="contained" onClick={advanceStage}>
+                <Button variant={variantFor(avatarStage === "capture")} size="small" onClick={advanceStage}>
                   Next: {AVATAR_SCRIPT_STAGES[stageIndex + 1]?.label}
                 </Button>
               )}
               {!canRecordMore && (
                 <span className={styles.ghMeta}>Recording stops on its own once this stage reaches its target.</span>
               )}
-              <Button variant="text" color="error" onClick={cancelRecording}>
+              <Button variant="text" color="error" size="small" onClick={cancelRecording}>
                 Cancel take
               </Button>
             </>
@@ -348,12 +408,28 @@ export default function AvatarStudioPanel({
               <span className={styles.ghMeta}>
                 {fmt(reviewDurationSec)} recorded · {mb(reviewSizeBytes)}
               </span>
-              <Button variant="text" onClick={discardTake}>
-                Discard and retake
-              </Button>
+              <ConfirmArmButtons
+                armed={discardTakeArmed}
+                idleLabel="Discard and retake"
+                confirmLabel="Confirm discard"
+                tone="danger"
+                idleVariant="text"
+                onArm={() => setDiscardTakeArmed(true)}
+                onConfirm={() => {
+                  discardTake();
+                  setDiscardTakeArmed(false);
+                }}
+                onCancel={() => setDiscardTakeArmed(false)}
+                consequenceId={discardTakeConsequenceId}
+              />
             </>
           )}
         </div>
+        {captureState === "reviewing" && discardTakeArmed && (
+          <p id={discardTakeConsequenceId} role="status" aria-live="polite" className={controls.consequence}>
+            This discards the take; you will record it again.
+          </p>
+        )}
 
         {captureState === "recording" && (
           <p className={styles.ghMeta}>
@@ -362,38 +438,47 @@ export default function AvatarStudioPanel({
         )}
 
         {captureState === "reviewing" && !meetsMinDuration && (
-          <p className={styles.error}>
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
             This take is shorter than the required {fmt(totalTargetSeconds)} (speaking and stillness together) - it
             cannot be used for training. Discard it and record a full take.
           </p>
         )}
         {captureState === "reviewing" && !withinSizeCap && (
-          <p className={styles.error}>
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
             This take is larger than the {Math.round(AVATAR_SAMPLE_MAX_BYTES / (1024 * 1024))} MB limit Tavus allows
             for training footage. Discard it and record a shorter take.
           </p>
         )}
         {captureState === "reviewing" && frameRateAssessment?.status === "block" && (
-          <p className={styles.error}>{frameRateAssessment.reason}</p>
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+            {frameRateAssessment.reason}
+          </p>
         )}
 
         {captureState === "reviewing" && !savedSample && (
           <div className={styles.ghActions}>
             <Button
-              variant="contained"
+              variant={variantFor(avatarStage === "save")}
+              size="small"
               disabled={
                 saveState === "saving" ||
                 !meetsMinDuration ||
                 !withinSizeCap ||
                 frameRateAssessment?.status === "block"
               }
+              loading={saveState === "saving"}
+              loadingPosition="start"
               onClick={() => void saveTake()}
             >
               {saveState === "saving" ? "Saving…" : "Save to library"}
             </Button>
           </div>
         )}
-        {saveState === "failed" && saveError && <p className={styles.error}>{saveError}</p>}
+        {saveState === "failed" && saveError && (
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+            {saveError}
+          </p>
+        )}
         {savedSample && <p className={styles.fieldHint}>Saved to the Files tab as &quot;{savedSample.name}&quot;.</p>}
       </div>
 
@@ -408,7 +493,7 @@ export default function AvatarStudioPanel({
           </div>
 
           {mimeChoice?.isRiskyCodec && (
-            <p className={styles.fieldHint} style={{ color: "var(--warning)", margin: 0 }}>
+            <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
               This sample was recorded as VP8/VP9 webm, which Tavus may reject after the multi-hour wait. Consider
               retaking it in a browser that offers H.264 before spending a training slot on it.
             </p>
@@ -426,64 +511,102 @@ export default function AvatarStudioPanel({
                 size="small"
                 value={likenessName}
                 onChange={(e) => setLikenessName(e.target.value)}
-                sx={{ maxWidth: 320 }}
+                className={controls.fieldLg}
               />
               <FormControlLabel
-                control={<Checkbox checked={consentChecked} onChange={(e) => setConsentChecked(e.target.checked)} />}
+                control={<Checkbox size="small" checked={consentChecked} onChange={(e) => setConsentChecked(e.target.checked)} />}
                 label={AVATAR_CONSENT_ACKNOWLEDGEMENT}
               />
               <div className={styles.ghActions}>
                 <Button
-                  variant="contained"
+                  variant={variantFor(avatarStage === "train")}
+                  size="small"
                   disabled={trainBusy || !consentChecked || configured === false}
+                  loading={trainBusy}
+                  loadingPosition="start"
                   onClick={() => void startTraining()}
                 >
                   {trainBusy ? "Starting…" : "Start training"}
                 </Button>
               </div>
-              {trainError && <p className={styles.error}>{trainError}</p>}
+              {trainError && (
+                <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+                  {trainError}
+                </p>
+              )}
             </>
           )}
         </div>
       )}
 
-      <div className={styles.ghPanel}>
-        <h2 className={styles.adaptPanelTitle}>Your likenesses</h2>
-        {likenessesError && <p className={styles.error}>{likenessesError}</p>}
+      <div className={styles.adaptPanel}>
+        <div className={styles.adaptPanelHeader}>
+          <h2 className={styles.adaptPanelTitle}>Your likenesses</h2>
+        </div>
+        {likenessesError && (
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+            {likenessesError}
+          </p>
+        )}
         {!likenessesLoaded && !likenessesError && (
-          <p className={styles.fieldHint} role="status" aria-live="polite">Loading your likenesses…</p>
+          <p role="status" aria-live="polite" className={controls.loadingLine}>
+            <span className={styles.spinner} aria-hidden="true" />
+            Loading your likenesses…
+          </p>
         )}
         {likenessesLoaded && likenesses.length === 0 && !likenessesError && (
           <p className={styles.fieldHint}>No likenesses yet - record and save a sample above to train one.</p>
         )}
-        {likenesses.map((l) => (
-          <div key={l.id} className={styles.ghRow}>
-            <div className={styles.ghRowTop}>
-              <div className={styles.ghRowTitle}>
-                <span className={styles.ghRowName}>{l.name}</span>
+        {likenesses.map((l) => {
+          const deleteConsequenceId = `avatar-delete-consequence-${l.id}`;
+          const deleteArmed = deleteArmedId === l.id;
+          return (
+            <div key={l.id} className={styles.ghRow}>
+              <div className={styles.ghRowTop}>
+                <div className={styles.ghRowTitle}>
+                  <span className={styles.ghRowName}>{l.name}</span>
+                </div>
+                <div className={styles.ghActions}>
+                  {l.status === "ready" && !l.isDefault && (
+                    <Button size="small" variant="outlined" onClick={() => void setDefaultLikeness(l.id)}>
+                      Make default
+                    </Button>
+                  )}
+                  <ConfirmArmButtons
+                    armed={deleteArmed}
+                    idleLabel="Delete"
+                    confirmLabel="Confirm delete"
+                    tone="danger"
+                    idleVariant="outlined"
+                    onArm={() => setDeleteArmedId(l.id)}
+                    onConfirm={() => {
+                      void deleteLikeness(l.id);
+                      setDeleteArmedId(null);
+                    }}
+                    onCancel={() => setDeleteArmedId(null)}
+                    consequenceId={deleteConsequenceId}
+                    idleAriaLabel={`Delete ${l.name}`}
+                    confirmAriaLabel={`Confirm delete ${l.name}`}
+                  />
+                </div>
               </div>
+              {deleteArmed && (
+                <p id={deleteConsequenceId} role="status" aria-live="polite" className={controls.consequence}>
+                  {l.status === "ready" ? "Training took hours; this cannot be undone." : "This removes the likeness."}
+                </p>
+              )}
               <div className={styles.ghActions}>
-                {l.status === "ready" && !l.isDefault && (
-                  <Button size="small" variant="outlined" onClick={() => void setDefaultLikeness(l.id)}>
-                    Make default
-                  </Button>
-                )}
-                <Button size="small" variant="outlined" color="error" onClick={() => void deleteLikeness(l.id)}>
-                  Delete
-                </Button>
+                <span className={styles.ghMeta}>{likenessStatusText(l)}</span>
+                {l.isDefault && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Default</span>}
+                {l.status === "ready" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Ready</span>}
+                {l.status === "training" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Training</span>}
+                {l.status === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Pending</span>}
+                {l.status === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Failed</span>}
+                {l.status === "superseded" && <span className={styles.ghBadge}>Superseded</span>}
               </div>
             </div>
-            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
-              <span className={styles.ghMeta}>{likenessStatusText(l)}</span>
-              {l.isDefault && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Default</span>}
-              {l.status === "ready" && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Ready</span>}
-              {l.status === "training" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Training</span>}
-              {l.status === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Pending</span>}
-              {l.status === "failed" && <span className={`${styles.ghBadge} ${styles.ghBadgeDanger}`}>Failed</span>}
-              {l.status === "superseded" && <span className={styles.ghBadge}>Superseded</span>}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className={styles.adaptPanel}>
@@ -494,20 +617,14 @@ export default function AvatarStudioPanel({
           </p>
         </div>
 
-        {!defaultReadyLikeness && (
-          <p className={styles.fieldHint}>
-            No likeness is ready yet - train one above and mark it as default before generating a video.
-          </p>
-        )}
-
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+        <div className={styles.adaptRow}>
           <TextField
             select
             label="Course"
             value={courseId}
             onChange={(e) => setCourseId(e.target.value)}
             size="small"
-            sx={{ minWidth: 220 }}
+            className={controls.fieldMd}
           >
             <MenuItem value="">No course</MenuItem>
             {courses.map((c) => (
@@ -522,7 +639,7 @@ export default function AvatarStudioPanel({
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
             size="small"
-            sx={{ minWidth: 220 }}
+            className={controls.fieldMd}
           >
             <MenuItem value="">No specific purpose</MenuItem>
             {AVATAR_VIDEO_PURPOSES.map((p) => (
@@ -532,7 +649,11 @@ export default function AvatarStudioPanel({
             ))}
           </TextField>
         </div>
-        {coursesError && <p className={styles.error}>{coursesError}</p>}
+        {coursesError && (
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+            {coursesError}
+          </p>
+        )}
 
         <TextField
           label="Prompt"
@@ -545,19 +666,26 @@ export default function AvatarStudioPanel({
         />
         <div className={styles.ghActions}>
           <Button
-            variant="contained"
+            variant={variantFor(avatarStage === "script")}
             size="small"
             disabled={scriptBusy || !prompt.trim() || configured === false}
+            loading={scriptBusy}
+            loadingPosition="start"
             onClick={() => void generateScript()}
           >
             {scriptBusy ? "Writing…" : script ? "Regenerate script" : "Generate script"}
           </Button>
         </div>
-        {scriptError && <p className={styles.error}>{scriptError}</p>}
+        {scriptError && (
+          <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+            {scriptError}
+          </p>
+        )}
 
         {script && (
           <>
             <TextField
+              label="Script"
               multiline
               minRows={4}
               fullWidth
@@ -571,7 +699,8 @@ export default function AvatarStudioPanel({
             </span>
             <div className={styles.ghActions}>
               <Button
-                variant="contained"
+                variant={variantFor(avatarStage === "render")}
+                size="small"
                 disabled={
                   videoBusy ||
                   !script.trim() ||
@@ -579,13 +708,24 @@ export default function AvatarStudioPanel({
                   !defaultReadyLikeness ||
                   configured === false
                 }
+                loading={videoBusy}
+                loadingPosition="start"
                 onClick={() => void startVideo()}
               >
                 {videoBusy ? "Rendering…" : "Render video"}
               </Button>
             </div>
+            {!defaultReadyLikeness && (
+              <p className={styles.fieldHint}>
+                No likeness is ready yet - train one above and mark it as default before generating a video.
+              </p>
+            )}
             {videoBusy && videoStatus && <p className={styles.ghMeta}>Provider status: {videoStatus}</p>}
-            {videoError && <p className={styles.error}>{videoError}</p>}
+            {videoError && (
+              <p className={`${controls.notice} ${controls.noticeDanger}`} role="alert">
+                {videoError}
+              </p>
+            )}
             {videoFileId && <p className={styles.fieldHint}>Saved to the Files tab - it is playable there like any other recording.</p>}
           </>
         )}

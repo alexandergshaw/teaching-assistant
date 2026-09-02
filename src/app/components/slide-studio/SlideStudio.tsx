@@ -1,7 +1,8 @@
 "use client";
 
-import { Button } from "@mui/material";
 import styles from "@/app/page.module.css";
+import controls from "../recording/RecordingControls.module.css";
+import SegmentedToggle from "../ui/SegmentedToggle";
 import { useDeckMode } from "./useDeckMode";
 import { useVideoMode } from "./useVideoMode";
 import { useVoiceCloning } from "./useVoiceCloning";
@@ -25,23 +26,23 @@ export default function SlideStudio() {
         <p className={styles.adaptPanelSubtitle}>
           Upload a deck, let AI draft what you would say on each slide, then generate audio - or audio and video - of the walkthrough.
         </p>
-        <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
-          <Button
-            variant={mode === "deck" ? "contained" : "outlined"}
-            size="small"
-            onClick={() => setMode("deck")}
-          >
-            Narrate a deck
-          </Button>
-          <Button
-            variant={mode === "video" ? "contained" : "outlined"}
-            size="small"
-            onClick={() => setMode("video")}
-          >
-            Narrate a video
-          </Button>
-        </div>
+        <SegmentedToggle
+          label="Narration mode"
+          options={[
+            { value: "deck", label: "Narrate a deck" },
+            { value: "video", label: "Narrate a video" },
+          ]}
+          value={mode}
+          onChange={setMode}
+        />
       </div>
+
+      {busy === "extracting" && (
+        <p role="status" aria-live="polite" className={controls.loadingLine}>
+          <span className={styles.spinner} aria-hidden="true" />
+          Reading deck…
+        </p>
+      )}
 
       {mode === "deck" && (
         <DeckModeSection {...deckMode} />
@@ -56,8 +57,6 @@ export default function SlideStudio() {
       <VoiceCloneSection voiceCloning={voiceCloning} voiceReady={deckMode.voiceReady} />
 
       <StockVoiceSection voiceCloning={voiceCloning} voiceReady={deckMode.voiceReady} />
-
-      {busy === "extracting" && <p className={styles.ghMeta}>Reading deck…</p>}
     </div>
   );
 }

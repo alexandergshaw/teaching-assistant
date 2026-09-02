@@ -161,6 +161,88 @@ describe("recording-split structure", () => {
     });
   });
 
+  describe("sub-tab strip is fully wired to its content divs (CC9, section 6)", () => {
+    const recordingTabContent = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx"),
+      "utf-8"
+    );
+
+    // CC9's own text: "the record/announcement pair shares ONE wrapper", so
+    // nine tabs are served by EIGHT panel divs, not nine - the brief that
+    // commissioned this test named "nine" for both counts; reported as a
+    // deviation from that brief rather than encoded here as a wrong fact,
+    // since CC9's own worked example (record/announcement sharing a panel)
+    // proves eight is the only count consistent with the design it describes.
+    it("renders exactly eight tabpanel content divs (nine tabs, record/announcement sharing one)", () => {
+      const matches = recordingTabContent.match(/role="tabpanel"/g) ?? [];
+      expect(matches).toHaveLength(8);
+    });
+
+    // The nine tab buttons render from ONE array literal via a single
+    // .map() lambda (pinned one-line by the "inner-view strip" canary
+    // above), so the button JSX - including its aria-controls expression -
+    // appears exactly ONCE in source and is applied nine times at render. A
+    // literal per-tab occurrence count cannot see through a single JSX
+    // expression reused nine times; this instead pins that one expression's
+    // exact shape and proves, for every one of the nine keys in the strip,
+    // that the id it resolves to is one some tabpanel div actually declares.
+    it("gives every tab button an aria-controls expression that resolves to a real tabpanel id for all nine keys", () => {
+      expect(recordingTabContent).toContain(
+        'aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}'
+      );
+      const keys = [
+        "record",
+        "announcement",
+        "discussions",
+        "grading",
+        "moduledeck",
+        "speed",
+        "captions",
+        "slides",
+        "avatar",
+      ];
+      const panelTargets = new Set(
+        keys.map((key) => (key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`))
+      );
+      expect(panelTargets.size).toBe(8);
+      for (const target of panelTargets) {
+        expect(recordingTabContent, `expected a tabpanel div with id="${target}"`).toContain(`id="${target}"`);
+      }
+    });
+
+    it("gives every tab button its own id expression, and every panel div an aria-labelledby naming the tab(s) that control it", () => {
+      expect(recordingTabContent).toContain("id={`rec-tab-${key}`}");
+      // Widened (never weakened): the shared record/announcement panel used
+      // to name both tabs in one static string, always "rec-tab-record
+      // rec-tab-announcement" regardless of which of the two was selected,
+      // so the shared panel was permanently announced as "Record Record
+      // announcement" to assistive tech. It is now a dynamic expression that
+      // resolves to whichever single tab is actually showing the panel. This
+      // assertion accepts any expression shape (the literal string is no
+      // longer required) but keeps a canary that BOTH tab ids are still
+      // named somewhere in that expression, so a rewrite that drops one id
+      // (or reintroduces the old always-both string) still fails here.
+      const sharedLabelledByMatch = recordingTabContent.match(/id="rec-panel-record"[\s\S]*?aria-labelledby=\{[^}]*\}/);
+      expect(
+        sharedLabelledByMatch,
+        "expected a dynamic aria-labelledby expression on the shared record/announcement panel (id=\"rec-panel-record\")"
+      ).toBeTruthy();
+      const sharedLabelledBy = sharedLabelledByMatch![0];
+      expect(sharedLabelledBy, "expected the shared panel's aria-labelledby expression to name rec-tab-record").toContain(
+        "rec-tab-record"
+      );
+      expect(
+        sharedLabelledBy,
+        "expected the shared panel's aria-labelledby expression to name rec-tab-announcement"
+      ).toContain("rec-tab-announcement");
+      for (const key of ["discussions", "grading", "moduledeck", "speed", "captions", "slides", "avatar"]) {
+        expect(recordingTabContent, `expected aria-labelledby="rec-tab-${key}" on its panel`).toContain(
+          `aria-labelledby="rec-tab-${key}"`
+        );
+      }
+    });
+  });
+
   describe("localStorage key canary (cross-component API)", () => {
     const recordingDir = path.resolve(
       process.cwd(),
@@ -285,6 +367,7 @@ describe("recording-split structure", () => {
         "ta-rec-mic",
         "ta-rec-mirror",
         "ta-rec-noise",
+        "ta-rec-options-open",
         "ta-rec-pen-color",
         "ta-rec-pen-size",
         "ta-rec-pip",
@@ -298,6 +381,7 @@ describe("recording-split structure", () => {
         "ta-rec-script",
         "ta-rec-script-minutes",
         "ta-rec-script-objectives",
+        "ta-rec-script-open",
         "ta-rec-script-topic",
         "ta-rec-source",
         "ta-rec-speed-rate",
@@ -471,6 +555,23 @@ describe("recording-split structure", () => {
         expect(isWired(key, "read"), `expected a read call wired to "${key}"`).toBe(true);
         expect(isWired(key, "write"), `expected a write call wired to "${key}"`).toBe(true);
       });
+    });
+
+    // CC10 (docs/recording-controls-ux-acceptance-criteria.md): the two new
+    // persisted-disclosure keys - SourceDevicesPanel's "Recording options"
+    // <details> and LectureScriptPanel's own disclosure - are group R's to
+    // write (localStorage.getItem/setItem, guarded useState initializer +
+    // onToggle effect, per CC10's mechanics) concurrently with this group.
+    // Reuses the shared isWired() helper above rather than adding a second
+    // read/write regex, the same way the disc/ann blocks above do. Expected
+    // red until R's write calls land in SourceDevicesPanel.tsx/
+    // LectureScriptPanel.tsx - that is reported, not silenced, per this
+    // group's brief.
+    it("ta-rec-options-open and ta-rec-script-open are each wired to both a read and a write (CC10)", () => {
+      for (const key of ["ta-rec-options-open", "ta-rec-script-open"]) {
+        expect(isWired(key, "read"), `expected a read call wired to "${key}"`).toBe(true);
+        expect(isWired(key, "write"), `expected a write call wired to "${key}"`).toBe(true);
+      }
     });
   });
 });

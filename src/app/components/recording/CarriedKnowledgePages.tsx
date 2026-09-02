@@ -47,6 +47,7 @@
 
 import { useState } from "react";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
 import { buildKnowledgeContextBlock } from "@/lib/chat/knowledge-context";
 import {
   includedContextPages,
@@ -148,8 +149,22 @@ export default function CarriedKnowledgePages({ context, onChange }: CarriedKnow
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+    // Fixer pass finding 1: controls.section is the fieldset reset (it also
+    // carries the `.section + .section` hairline rule); this is a plain
+    // grouping div rendered inside the discussions Context section beside
+    // AddKnowledgePages - controls.stack instead, so no stray hairline and
+    // 16px gap appear between the carried chips and the Add link.
+    <div className={controls.stack}>
       {hasPages && (
+        // Fixer pass finding 6: styles.attachmentChips (page.module.css:4394)
+        // is the standalone attachment-tray idiom - it carries its OWN
+        // padding and a shaded background because elsewhere it renders as a
+        // self-contained tray. Here it sits inside a fieldset that already
+        // supplies its own spacing/hairline, so the padded, shaded tray
+        // look would double up against the surrounding section - the
+        // inline override is a deliberate second authority stripping that
+        // chrome back to bare chips for this context, not a redundant
+        // duplicate of what the class already provides. Kept.
         <div className={styles.attachmentChips} style={{ padding: 0, background: "none" }}>
           {pages!.map((p) => {
             const title = p.title.trim() || "Untitled page";
@@ -171,7 +186,7 @@ export default function CarriedKnowledgePages({ context, onChange }: CarriedKnow
         </div>
       )}
       {lastRemoved && (
-        <p className={styles.fieldHint} style={{ margin: 0 }}>
+        <p className={styles.fieldHint}>
           {`Removed "${lastRemoved.title.trim() || "Untitled page"}" from this run.`}{" "}
           <button type="button" className={styles.linkButton} onClick={handleUndo}>
             Undo

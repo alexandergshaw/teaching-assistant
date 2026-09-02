@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Button, IconButton, ListItemText, Menu, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
 import { fmt } from "./types";
 import type { Take } from "./types";
 import type { PostedAnnouncementInfo } from "./useTakeAnnouncement";
@@ -44,24 +45,43 @@ function TakeOverflowMenu({
   busyReason,
   handleExtractAudio,
   handleDelete,
+  registerMoreRef,
 }: {
   take: Take;
   hideAudioOnly: boolean;
   busyReason: string | null;
   handleExtractAudio: (take: Take) => Promise<void>;
   handleDelete: (id: string) => void;
+  registerMoreRef: (id: string, el: HTMLButtonElement | null) => void;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const close = () => setAnchorEl(null);
+  // docs/recording-controls-ux-acceptance-criteria.md CC5: a plain boolean
+  // arming state is correct here - the thing being confirmed (this take's
+  // deletion) cannot change while the menu is open.
+  const [armed, setArmed] = useState(false);
+  const close = () => {
+    setAnchorEl(null);
+    setArmed(false);
+  };
+
+  const consequenceId = `take-delete-consequence-${take.id}`;
+  // CC5: "This take is not saved anywhere else." only when neither backup
+  // nor the library save reached "done"; otherwise a copy survives the
+  // session and the softer line applies.
+  const notSavedElsewhere = take.backup !== "done" && take.dbSave !== "done";
+  const consequenceText = notSavedElsewhere
+    ? "This take is not saved anywhere else."
+    : "This removes the take from this session.";
 
   return (
     <>
       <IconButton
+        ref={(el) => registerMoreRef(take.id, el)}
         size="small"
         aria-label={`More actions for ${take.name}`}
         title="More actions"
         onClick={(e) => setAnchorEl(e.currentTarget)}
-        sx={{ padding: "var(--space-1)", color: "var(--text-secondary)" }}
+        sx={{ padding: "var(--space-1)" }}
       >
         <svg width="16" height="16" viewBox="0 0 14 14" aria-hidden="true">
           <circle cx="7" cy="3" r="1.2" fill="currentColor" />
@@ -69,6 +89,15 @@ function TakeOverflowMenu({
           <circle cx="7" cy="11" r="1.2" fill="currentColor" />
         </svg>
       </IconButton>
+      {/* REGRESSION FIX (group R): `disableRestoreFocus` was scoped to the
+          WHOLE Menu, so it also disabled MUI's own restore for Escape,
+          click-away, Audio only and the Cancel item - none of which unmount
+          the anchor, so focus fell through to <body> on every close path
+          except the one it was meant to cover. MUI's own restore is a no-op
+          on a detached anchor (the delete path), so dropping the prop here
+          costs nothing on that path and fixes every other one; the keyed-ref
+          layout-effect focus in TakesPanel already retargets focus after a
+          real delete. */}
       <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={close}>
         {!hideAudioOnly && (
           <MenuItem
@@ -82,15 +111,36 @@ function TakeOverflowMenu({
             <ListItemText primary="Audio only" secondary={busyReason ?? undefined} />
           </MenuItem>
         )}
-        <MenuItem
-          dense
-          onClick={() => {
-            close();
-            handleDelete(take.id);
-          }}
-        >
-          <ListItemText primary="Delete" />
-        </MenuItem>
+        {/* CC5: one MenuItem element whose label swaps "Delete" ->
+            "Confirm delete" in place (the GradingTableRow.tsx:143-147
+            trick), so the item that is keyboard-focused when Enter arms it
+            is the SAME item Enter then confirms on - two different
+            MenuItems here would unmount the focused element mid-keypress. */}
+        {!armed ? (
+          <MenuItem dense onClick={() => setArmed(true)}>
+            <ListItemText primary="Delete" />
+          </MenuItem>
+        ) : (
+          <MenuItem
+            dense
+            aria-describedby={consequenceId}
+            onClick={() => {
+              setAnchorEl(null);
+              setArmed(false);
+              handleDelete(take.id);
+            }}
+          >
+            <ListItemText
+              primary="Confirm delete"
+              secondary={<span id={consequenceId}>{consequenceText}</span>}
+            />
+          </MenuItem>
+        )}
+        {armed && (
+          <MenuItem dense onClick={() => setArmed(false)}>
+            <ListItemText primary="Cancel" />
+          </MenuItem>
+        )}
       </Menu>
     </>
   );
@@ -111,6 +161,44 @@ export default function TakesPanel({
   postedByTakeId,
   containerRef,
 }: TakesPanelProps) {
+  // CC5 focus-after-removal: the keyed-ref-map idiom from
+  // DiscussionRepliesPanel.tsx:476-503 - focus lands on the next take's More
+  // button, else this panel's own container (TakesPanel already has
+  // containerRef).
+  const moreButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const pendingFocusIdRef = useRef<string | null>(null);
+  const pendingFocusFallbackRef = useRef(false);
+
+  const registerMoreRef = useCallback((id: string, el: HTMLButtonElement | null) => {
+    if (el) moreButtonRefs.current.set(id, el);
+    else moreButtonRefs.current.delete(id);
+  }, []);
+
+  useLayoutEffect(() => {
+    const targetId = pendingFocusIdRef.current;
+    const wantsFallback = pendingFocusFallbackRef.current;
+    pendingFocusIdRef.current = null;
+    pendingFocusFallbackRef.current = false;
+    if (!targetId && !wantsFallback) return;
+    const next = targetId ? moreButtonRefs.current.get(targetId) : null;
+    if (next) next.focus();
+    else containerRef?.current?.focus();
+  });
+
+  const handleDeleteWithFocus = useCallback(
+    (id: string) => {
+      const idx = takes.findIndex((t) => t.id === id);
+      const fallback = takes[idx + 1] ?? takes[idx - 1] ?? null;
+      if (fallback) {
+        pendingFocusIdRef.current = fallback.id;
+      } else {
+        pendingFocusFallbackRef.current = true;
+      }
+      handleDelete(id);
+    },
+    [takes, handleDelete]
+  );
+
   return (
     <div className={styles.ghPanel} ref={containerRef} tabIndex={-1}>
       <h3 className={styles.adaptPanelTitle}>Takes</h3>
@@ -132,7 +220,7 @@ export default function TakesPanel({
                 <TextField
                   size="small"
                   type="text"
-                  className={styles.ccItemName}
+                  className={controls.fieldGrow}
                   title={take.name}
                   value={takeNameDrafts[take.id] ?? take.name}
                   onChange={(e) => setTakeNameDrafts((prev) => ({ ...prev, [take.id]: e.target.value }))}
@@ -143,34 +231,29 @@ export default function TakesPanel({
                 />
               </div>
               <div className={styles.ghActions}>
-                {/* AC15b/GeneratedPostSection AC 12b precedent: while another
-                    take's pipeline is running, these two actions are
-                    replaced by the reason - not just greyed out - since the
-                    recorder and the transcription queue are singletons and
-                    a control that reads "disabled" with no explanation looks
-                    broken rather than busy. */}
-                {busyReason ? (
-                  <span className={styles.ghMeta}>{busyReason}</span>
-                ) : (
-                  <>
-                    {!isAudio && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={(e) => onTalkThrough(take, e.currentTarget)}
-                      >
-                        Talk through this
-                      </Button>
-                    )}
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={(e) => onDraftAnnouncement(take, e.currentTarget)}
-                    >
-                      Draft announcement
-                    </Button>
-                  </>
+                {/* CC6: a button is never REMOVED while busy - these two stay
+                    mounted and become disabled with the reason attached
+                    (title), rather than swapped out for a bare text line. */}
+                {!isAudio && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={Boolean(busyReason)}
+                    title={busyReason ?? undefined}
+                    onClick={(e) => onTalkThrough(take, e.currentTarget)}
+                  >
+                    Talk through this
+                  </Button>
                 )}
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={Boolean(busyReason)}
+                  title={busyReason ?? undefined}
+                  onClick={(e) => onDraftAnnouncement(take, e.currentTarget)}
+                >
+                  Draft announcement
+                </Button>
                 <Button
                   size="small"
                   variant="outlined"
@@ -183,11 +266,19 @@ export default function TakesPanel({
                   hideAudioOnly={isAudio}
                   busyReason={busyReason}
                   handleExtractAudio={handleExtractAudio}
-                  handleDelete={handleDelete}
+                  handleDelete={handleDeleteWithFocus}
+                  registerMoreRef={registerMoreRef}
                 />
               </div>
             </div>
-            <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center", marginTop: "var(--space-2)" }}>
+            {/* CC3: a row holds fields OR buttons, never both - the busy
+                reason used to sit inline in the button row above; a
+                disabled button's title is unreachable by keyboard, so this
+                is a visible reason line of its own under the cluster,
+                outside .ghRowTop rather than squeezed into its title/actions
+                split. */}
+            {busyReason && <p className={styles.fieldHint}>{busyReason}</p>}
+            <div className={styles.ghActions}>
               <span className={styles.ghMeta}>
                 {fmt(take.durationSec)} · {(take.sizeBytes / 1048576).toFixed(1)} MB · {new Date(take.createdAt).toLocaleString()}
               </span>
@@ -205,35 +296,19 @@ export default function TakesPanel({
               {take.dbSave === "pending" && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>Saving to library…</span>}
               {posted && <span className={`${styles.ghBadge} ${styles.ghBadgeSuccess}`}>Announcement posted</span>}
             </div>
-            <details style={{ marginTop: "var(--space-2)" }}>
-              <summary style={{ cursor: "pointer", color: "var(--accent-ink)", fontWeight: 600 }}>
-                Play
-              </summary>
-              {isAudio ? (
-                <audio
-                  controls
-                  src={take.url}
-                  style={{
-                    width: "100%",
-                    marginTop: "var(--space-2)",
-                  }}
-                />
-              ) : (
-                <video
-                  controls
-                  src={take.url}
-                  style={{
-                    maxWidth: "100%",
-                    borderRadius: "var(--radius-sm)",
-                    marginTop: "var(--space-2)",
-                    // A video letterbox is not a themed surface - fixed
-                    // dark-neutral (the brand navy) regardless of theme, per
-                    // the aesthetics pass's capture-stage rule, rather than
-                    // the raw #0f172a this carried before.
-                    background: "var(--navy)",
-                  }}
-                />
-              )}
+            {/* REGRESSION FIX (group R): this was a bare <details> with an
+                inline-styled <summary>, the one disclosure on this surface
+                not using the shared idiom its two siblings (Recording
+                options, Lecture script) already use. */}
+            <details className={styles.adaptDisclosure}>
+              <summary>Play</summary>
+              <div className={styles.adaptDisclosureBody}>
+                {isAudio ? (
+                  <audio controls className={controls.playerAudio} src={take.url} />
+                ) : (
+                  <video controls className={controls.playerVideo} src={take.url} />
+                )}
+              </div>
             </details>
           </div>
         );

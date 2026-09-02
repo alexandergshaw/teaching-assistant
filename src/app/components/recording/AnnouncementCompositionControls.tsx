@@ -28,6 +28,7 @@
 import { useState } from "react";
 import { MenuItem, Slider, TextField } from "@mui/material";
 import styles from "../../page.module.css";
+import controls from "./RecordingControls.module.css";
 import { REPLY_FORMALITY_LABELS, REPLY_FORMALITY_STOPS } from "@/lib/discussion-reply-prompt";
 import {
   ANNOUNCEMENT_INGREDIENTS,
@@ -73,11 +74,12 @@ export default function AnnouncementCompositionControls({
   }
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", alignItems: "flex-start" }}>
+    <div className={styles.adaptRow}>
       <TextField
         select
         label="This announcement should include"
         size="small"
+        className={controls.fieldLg}
         value={composition.ingredients}
         disabled={disabled}
         slotProps={{
@@ -97,7 +99,6 @@ export default function AnnouncementCompositionControls({
           const ingredients = ANNOUNCEMENT_INGREDIENTS.filter((id) => raw.includes(id));
           onChange({ ...composition, ingredients });
         }}
-        sx={{ minWidth: 260 }}
       >
         {ANNOUNCEMENT_INGREDIENTS.map((id) => (
           <MenuItem key={id} value={id}>
@@ -106,8 +107,14 @@ export default function AnnouncementCompositionControls({
         ))}
       </TextField>
 
-      <div style={{ width: 220, paddingInline: "var(--space-6)" }}>
-        <p id={FORMALITY_LABEL_ID} className={styles.ghMeta} style={{ marginBottom: "var(--space-2)" }}>
+      {/* Fixer pass finding 3: RecordingControls.module.css now carries
+          `.sliderBox` (group P) - the same padding-inline-for-thumb-overhang
+          fix that used to live here as an inline style plus fieldMd/stack,
+          now a single shared class matching the sibling surface's
+          `.formalitySlider` idiom (DiscussionRepliesPanel.module.css:
+          216-219). */}
+      <div className={controls.sliderBox}>
+        <p id={FORMALITY_LABEL_ID} className={styles.ghMeta}>
           Formality
         </p>
         <Slider

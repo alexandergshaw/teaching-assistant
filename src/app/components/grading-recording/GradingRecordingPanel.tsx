@@ -68,6 +68,12 @@ import { returnTargetPageId } from "./grading-context-display";
 // only caller; see grading-context-display.ts's header for why a tested
 // export with no consumer is worse than no export at all.
 import CarriedKnowledgePages from "../recording/CarriedKnowledgePages";
+// AC3/4b (docs/knowledge-recording-handoff-acceptance-criteria.md section 4):
+// "add" - shared with DiscussionRepliesPanel.tsx. Rendered unconditionally,
+// unlike the label/CarriedKnowledgePages block below - an instructor
+// carrying nothing yet (no Knowledge-base launch at all) is this feature's
+// primary case, not an edge case of an already-launched run.
+import AddKnowledgePages from "../recording/AddKnowledgePages";
 import { extractGradingSubmissionsAction } from "@/app/actions/grading-submission-extract";
 // The sibling GRADING action - coded against the exact signature this task's
 // brief pinned, before this file's own path (src/app/actions/grading-
@@ -580,6 +586,10 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           <CarriedKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
         </div>
       )}
+      {/* AC3/4b: rendered OUTSIDE the `knowledgeContext &&` gate above -
+          unlike the label/CarriedKnowledgePages block, this must still offer
+          something when nothing is carried yet at all. */}
+      <AddKnowledgePages context={knowledgeContext} onChange={setKnowledgeContext} />
 
       <div className={styles.ghActions}>
         <Button variant="contained" size="small" onClick={handleStartStop}>

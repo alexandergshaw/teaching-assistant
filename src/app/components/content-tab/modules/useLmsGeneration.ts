@@ -106,11 +106,8 @@ import { expandModuleSelection, type SelectedMaterialItem } from "@/lib/lms-gene
 import type { ModuleTarget } from "@/lib/lms-generation/commit-plan";
 // See lmsGenerationDiscussion.ts's own header comment (Findings 1/2/4).
 import { discussionCheckpointsKey, resolveDiscussionDeadlinesForClientPost } from "./lmsGenerationDiscussion";
-import { resolveDeckTemplateId, resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
+import { resolveDeckTemplateSelection } from "@/lib/lms-generation/deck";
 import type { ArtifactDownloadFormat } from "@/lib/lms-generation/artifact-download";
-import { DECK_PRESETS } from "@/lib/decks/presets";
-import type { DeckTemplate } from "@/lib/decks/types";
-import { listDeckTemplatesAction } from "@/app/actions";
 import {
   generateFromSelectionAction,
   listGeneratedArtifactVersionsAction,
@@ -149,7 +146,6 @@ import {
   nextGenerationBusy,
   canStartGeneration,
   scriptMinutesKey,
-  deckTemplateKey,
   readStored,
   type GenerationKindDef,
   type GenerationBusy,
@@ -185,6 +181,11 @@ import {
 // of this file to stay under the repo's 1000-line ceiling. See that file's
 // own header comment for why this is a safe, behaviour-free extraction.
 import { useLmsGenerationDownload } from "./useLmsGenerationDownload";
+// The deck-template picker's own state - a STRUCTURAL split kept out of this
+// file to stay under the repo's 1000-line ceiling, same discipline as
+// useLmsGenerationDownload.ts immediately above. See that new file's own
+// header comment for why this is a safe, behaviour-free extraction.
+import { useLmsGenerationDeckTemplates } from "./useLmsGenerationDeckTemplates";
 // GenerationPreviewState and UseLmsGenerationReturn - this hook's two public
 // shape types - live in lmsGenerationTypes.ts (a STRUCTURAL split, same
 // reasoning as every other sibling import above: keep this file under the
@@ -373,28 +374,12 @@ export function useLmsGeneration(
   // own seed write (AC4); cleared by choosePostModule below the moment the
   // select's own onChange fires.
   const [postTargetFromSelection, setPostTargetFromSelection] = useState(false);
-  // Seeded synchronously with the built-in presets (DECK_PRESETS is a pure,
-  // zero-network const), so the deck template picker is never empty even
-  // before the effect below finishes loading this user's own saved
-  // deck_templates rows - see resolveDeckTemplateSelection's own doc comment
-  // (deck.ts) for the refusal path this feeds when nothing is selected.
-  const [templates, setTemplates] = useState<DeckTemplate[]>(DECK_PRESETS);
-  // Persisted per course, like scriptMinutes and useDiscussionCheckpoints
-  // below (AC9 gap closed 2026-08-23 - this select previously persisted
-  // nothing and recorded no reason). Seeded from the stored value WITHOUT
-  // validating it here on purpose: at this point only DECK_PRESETS are known,
-  // and a remembered id naming one of the instructor's own deck_templates
-  // rows would be wrongly discarded. Reconciliation against the real list
-  // happens once the templates load - see resolveDeckTemplateId in the effect
-  // below, and that function's own doc comment for the staleness it handles.
-  const [templateId, setTemplateId] = useState<string>(
-    () => (readStored(deckTemplateKey(courseUrl)) ?? "").trim() || (DECK_PRESETS[0]?.id ?? "")
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(deckTemplateKey(courseUrl), templateId);
-  }, [courseUrl, templateId]);
+  // The deck-template picker's own state (templates/templateId, its
+  // persistence, and the load-then-reconcile effect) - moved to
+  // ./useLmsGenerationDeckTemplates.ts to keep this file under the repo's
+  // 1000-line ceiling. See that file's own header for why this is a safe,
+  // self-contained extraction.
+  const { templates, templateId, setTemplateId } = useLmsGenerationDeckTemplates(courseUrl);
   // S13: scripts-only length select, persisted per course. Read through
   // resolveScriptMinutes so a stale/hand-edited/unoffered stored value falls
   // back to DEFAULT_SCRIPT_MINUTES instead of rendering an unselectable
@@ -418,27 +403,6 @@ export function useLmsGeneration(
     if (typeof window === "undefined") return;
     localStorage.setItem(discussionCheckpointsKey(courseUrl), String(useDiscussionCheckpoints));
   }, [courseUrl, useDiscussionCheckpoints]);
-
-  // setState-in-effect idiom (this repo's own convention): an inline async
-  // IIFE with a `cancelled` flag, setState only after the await - never a
-  // synchronous setState reached directly from the effect body.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const result = await listDeckTemplatesAction();
-      if (cancelled || "error" in result) return;
-      const loaded = [...DECK_PRESETS, ...result.templates];
-      setTemplates(loaded);
-      // Now - and only now - is the real offer list known, so a remembered
-      // template id can finally be checked against it. An updater keeps
-      // templateId out of this effect's deps, so persisting a new selection
-      // does not re-run the fetch.
-      setTemplateId((prev) => resolveDeckTemplateId(prev, loaded));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const kinds = offerableGenerationKinds(selectedMaterialItems().length, selectedModules.size);
 

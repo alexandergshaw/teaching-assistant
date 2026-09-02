@@ -767,15 +767,34 @@ describe("acronym reaches every by-URL resolve call the hook makes (M12 reachabi
 // rendered as an unselectable option. Kept in place rather than deleted so
 // the trail from "gap found" to "gap closed" survives - the original was a
 // red test naming a real defect, which is what it was supposed to be.
+// REPOINTED (pure refactor, useBulkItemActions/useLmsGeneration/
+// bulkBarGroupCatalog 1000-line-ceiling split): templateId's state, its
+// persistence, and the reconcile-after-load effect moved from
+// useLmsGeneration.ts to ./useLmsGenerationDeckTemplates.ts (a STRUCTURAL
+// split only, no behaviour change - see that file's own header comment).
+// HOOK_PATH below now points at the file the code actually lives in, per
+// this repo's own rule that a moved-code guard gets repointed, never
+// weakened or deleted. The first test's end anchor changed from
+// "const [scriptMinutes, setScriptMinutes] = useState" (which no longer
+// exists in this smaller, single-concern file) to "listDeckTemplatesAction()"
+// - already used as the SECOND test's own start anchor just below, and, since
+// the load effect that calls it is declared strictly after the persist
+// effect this first test is pinning, it bounds the same slice as before:
+// templateId's declaration plus its own persist effect, excluding the load
+// effect. SABOTAGE-CHECKED while repointing: deleting the
+// `localStorage.setItem(deckTemplateKey(...` line from
+// useLmsGenerationDeckTemplates.ts turns the first test red (the `block`
+// match fails); restoring it turns it green again - the guard still bites at
+// its new address.
 describe("templateId (deck template picker) persistence - AC9 gap, closed", () => {
-  const HOOK_PATH = join(process.cwd(), "src/app/components/content-tab/modules/useLmsGeneration.ts");
+  const HOOK_PATH = join(process.cwd(), "src/app/components/content-tab/modules/useLmsGenerationDeckTemplates.ts");
   const hookSource = readFileSync(HOOK_PATH, "utf8");
 
   it("persists per course under its own ta- key, seeded from the stored value, exactly like its two siblings", () => {
     const declStart = hookSource.indexOf("const [templateId, setTemplateId] = useState");
     expect(declStart, "templateId's useState declaration moved or was renamed").toBeGreaterThan(-1);
-    const nextDeclStart = hookSource.indexOf("const [scriptMinutes, setScriptMinutes] = useState", declStart);
-    expect(nextDeclStart, "scriptMinutes' declaration moved - update this test's anchor").toBeGreaterThan(declStart);
+    const nextDeclStart = hookSource.indexOf("listDeckTemplatesAction()", declStart);
+    expect(nextDeclStart, "listDeckTemplatesAction() call moved - update this test's anchor").toBeGreaterThan(declStart);
 
     // Seeded from storage, and written back on change. Pins the FACT (both
     // halves of the read/write pair are present) rather than the spelling of

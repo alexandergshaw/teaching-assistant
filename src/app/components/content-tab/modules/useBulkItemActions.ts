@@ -37,13 +37,19 @@ import {
 } from "./bulkRubricGenerateSummary";
 import { planModuleShiftMoves, planMoveToModulePositions } from "./bulkItemModulePlacementPlan";
 import { computeSelectedGradables, groupIdsByKind } from "./bulkItemSelectionQueries";
+import { createBulkOpRunners } from "./bulkOpRunners";
 import { classifyDescriptionShare, type DescSharedState } from "./descSharedState";
-import {
-  appendRubricRunLogEntries,
-  buildRubricRunLogEntries,
-  type RubricRunLogEntry,
-} from "@/lib/rubric-run-log";
-import { loadRubricRunLog, persistRubricRunLog } from "./rubricRunLogStore";
+import type { RubricRunLogEntry } from "@/lib/rubric-run-log";
+// The run-log concern (state, persistence, recordRubricRunLog/
+// clearRubricRunLog) moved to ./useRubricRunLog.ts to keep this file under
+// the repo's 1000-line ceiling - a STRUCTURAL split only, no behaviour
+// change. See that file's own header for why the run log is a real,
+// pre-existing boundary (its own acceptance-criteria document, its own
+// dedicated store module) rather than an arbitrary slice.
+// `bulkGenerateAndAssociateRubric` below - the pinned wiring
+// useBulkItemActions.test.ts scans by source text - stays here unmoved and
+// simply calls the returned `recordRubricRunLog` the same way it always did.
+import { useRubricRunLog } from "./useRubricRunLog";
 
 // docs/rubric-bulk-action-acceptance-criteria.md, chunk H, agent 2B's slice
 // (AC4/AC5): "Generate & associate rubric" is the grading group's own new
@@ -198,36 +204,14 @@ export function useBulkItemActions(
   // be mistaken for the current run's outcome.
   const [bulkRubricGenerateReport, setBulkRubricGenerateReport] = useState<BulkRubricGenerateReport | null>(null);
 
-  // docs/rubric-bulk-log-acceptance-criteria.md (B1/B2): unlike the report
-  // above, this DOES persist - it is the durable record of every run's
-  // per-target outcomes and orphan rubrics, which the report (and the note
-  // built from it) does not survive past the next run or a reload. Restored
-  // per COURSE, matching entry 333's RepoGradesLogPanel precedent
-  // (src/app/components/repo-grades/index.tsx): `rubricRunLogLoadedFor`
-  // records which course's slice is currently loaded into `rubricRunLog`,
-  // and the render-phase branch below keeps the two in lockstep whenever
-  // `courseUrl` changes - the same guard that file's own comment explains is
-  // required to stop the persist effect below from firing with the
-  // pre-restore `[]` and overwriting a course's real stored log before its
-  // restore has even run.
-  const [rubricRunLog, setRubricRunLog] = useState<RubricRunLogEntry[]>([]);
-  const [rubricRunLogLoadedFor, setRubricRunLogLoadedFor] = useState<string | null>(null);
-  if (courseUrl !== rubricRunLogLoadedFor) {
-    setRubricRunLogLoadedFor(courseUrl);
-    setRubricRunLog(loadRubricRunLog(courseUrl));
-  }
-
-  // Appending happens inside the setState updater (pure array math, safe to
-  // re-run) rather than at each call site, matching entry 333's own
-  // reasoning: two "Generate & associate rubric" runs could in principle
-  // overlap (a second click before the first's async work resolves), and
-  // each resolves holding a closure over whatever `rubricRunLog` was at ITS
-  // own render - computing `next` there and persisting that would let the
-  // slower run's persist clobber the faster run's already-appended entries.
-  useEffect(() => {
-    if (rubricRunLogLoadedFor !== courseUrl) return;
-    persistRubricRunLog(courseUrl, rubricRunLog);
-  }, [rubricRunLog, courseUrl, rubricRunLogLoadedFor]);
+  // docs/rubric-bulk-log-acceptance-criteria.md (B1/B2): the durable,
+  // per-course run-log state/persistence/mutators live in useRubricRunLog.ts
+  // now (see this file's own import comment above for why) - `rubricRunLog`/
+  // `clearRubricRunLog` are returned unchanged under the same names every
+  // existing caller (RubricRunLogPanel.tsx, via this hook's own return
+  // object below) already uses, and `recordRubricRunLog` is called by
+  // `bulkGenerateAndAssociateRubric` below exactly as it always was.
+  const { rubricRunLog, clearRubricRunLog, recordRubricRunLog } = useRubricRunLog(courseUrl);
 
   const [bulkSubType, setBulkSubType] = useState("");
   // Two-click "Confirm delete" arming for the item selection. `selected` is
@@ -335,48 +319,13 @@ export function useBulkItemActions(
   const idsByKind = (kinds: BulkKind[], usePageSlug = false): Record<string, string[]> =>
     groupIdsByKind(selectedItems(), kinds, usePageSlug);
 
-  // Run a bulk op that returns an {updated, failures} summary; report + refresh.
-  const runBulkSummary = async (
-    fn: () => Promise<{ updated: number; failures: unknown[] } | { error: string }>,
-    label: string
-  ) => {
-    setOpBusy(true);
-    setNote(null);
-    const result = await fn();
-    setOpBusy(false);
-    if ("error" in result) {
-      setNote({ kind: "error", text: result.error });
-      return;
-    }
-    setNote({
-      kind: result.failures.length ? "error" : "success",
-      text: `${label}: ${result.updated} done${result.failures.length ? `, ${result.failures.length} failed` : ""}.`,
-    });
-    reload();
-  };
-
-  // Run a per-item op (publish, remove) over the current selection.
-  const runPerItem = async (
-    items: Array<{ item: CanvasModuleItem; moduleId: number }>,
-    fn: (item: CanvasModuleItem, moduleId: number) => Promise<{ ok: true } | { error: string }>,
-    label: string
-  ) => {
-    setOpBusy(true);
-    setNote(null);
-    let updated = 0;
-    let failed = 0;
-    for (const { item, moduleId } of items) {
-      const result = await fn(item, moduleId);
-      if ("error" in result) failed += 1;
-      else updated += 1;
-    }
-    setOpBusy(false);
-    setNote({
-      kind: failed ? "error" : "success",
-      text: `${label}: ${updated} done${failed ? `, ${failed} failed` : ""}.`,
-    });
-    reload();
-  };
+  // The generic "run an op over the current selection, then report and
+  // refresh" plumbing every simple bulk action below delegates to - moved to
+  // ./bulkOpRunners.ts to keep this file under the repo's 1000-line ceiling
+  // (a STRUCTURAL split only, no behaviour change). See that file's own
+  // header for why this is a real boundary distinct from the specific action
+  // definitions that call it.
+  const { runBulkSummary, runPerItem } = createBulkOpRunners(setOpBusy, setNote, reload);
 
   const bulkPublish = (published: boolean) => {
     const items = selectedItems();
@@ -588,29 +537,6 @@ export function useBulkItemActions(
     }
     void runBulkSummary(() => bulkAssociateRubricAction(courseUrl, Number(bulkRubricId), ids, acronym), "Rubric associated");
   };
-
-  // docs/rubric-bulk-log-acceptance-criteria.md B1.2 - THE CORE INSTRUCTION:
-  // builds the log from the exact SAME `outcomes`/`orphans` arrays the
-  // caller already passed to `summarizeRubricGenerateOutcomes` (never a
-  // second classification of what happened), plus whatever run-level
-  // `actionError`/`generationFailedReason` that same call site is reporting.
-  // Appends inside the `setRubricRunLog` updater, matching the reasoning on
-  // the effect above.
-  const recordRubricRunLog = (
-    outcomes: RubricTargetOutcome[],
-    orphans: BulkRubricGenerateReport["orphans"],
-    runLevel: { actionError?: string; generationFailedReason?: string }
-  ) => {
-    const entries = buildRubricRunLogEntries(outcomes, orphans, runLevel, new Date().toISOString());
-    if (entries.length === 0) return;
-    setRubricRunLog((prev) => appendRubricRunLogEntries(prev, entries));
-  };
-
-  // docs/rubric-bulk-log-acceptance-criteria.md B3 item 8: clears this
-  // course's persisted run log. The confirm itself lives in
-  // RubricRunLogPanel.tsx, which calls this only after the user has already
-  // confirmed, naming the count - this function does not confirm again.
-  const clearRubricRunLog = () => setRubricRunLog([]);
 
   // docs/rubric-bulk-action-acceptance-criteria.md AC1/AC4/AC5: generate ONE
   // point-agnostic rubric spec and associate it to every ELIGIBLE selected

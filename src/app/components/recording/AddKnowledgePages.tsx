@@ -36,13 +36,23 @@
 // mount would be a second full institution-WITH-BODIES fetch. This file
 // fetches SUMMARIES only (listInstitutionPageSummariesAction - id/parentId/
 // title/position, no body - the entire reason that action exists alongside
-// listInstitutionPagesAction) and nests them with its own small
-// buildSummaryTree below, rather than widening buildPageTree
-// (src/lib/knowledge-base.ts) to accept a second shape - that file is
-// outside this feature's file set. Bodies are fetched only for the pages
-// actually being added (getInstitutionPagesByIdsAction, called with exactly
-// the newly checked ids via idsPendingAdd below) - never a full-bodied list
-// load.
+// listInstitutionPagesAction) and nests them with buildPageTree
+// (src/lib/knowledge-base.ts), which is generic over exactly that shape
+// (TreeSource: id/parentId/title/position) - InstitutionPageSummary satisfies
+// it without adding a field. A separate buildSummaryTree used to live in this
+// file: it predated buildPageTree's generic, back when generalizing that
+// function mid-flight would have widened a different feature's blast radius
+// while that feature was still in progress. Nothing holds that constraint
+// any more, so this file shares the Knowledge tab's one tree builder and its
+// one set of orphan/self-reference/cycle repair rules instead of maintaining
+// a second, independently-drifting implementation - see buildPageTree's own
+// docstring for the one behavioural difference that unification resolved
+// (a genuine multi-node parent cycle used to make both pages vanish from
+// this picker; it now roots the cycle's entry point and keeps every page
+// visible, same as the Knowledge tab always has). Bodies are fetched only
+// for the pages actually being added (getInstitutionPagesByIdsAction, called
+// with exactly the newly checked ids via idsPendingAdd below) - never a
+// full-bodied list load.
 //
 // AC1 (docs/knowledge-recording-handoff-acceptance-criteria.md section 2):
 // adding a page re-runs the whole character budget, and the budget loop uses
@@ -64,49 +74,14 @@ import styles from "../../page.module.css";
 import kbStyles from "../KnowledgeTab.module.css";
 import { listInstitutionPageSummariesAction, getInstitutionPagesByIdsAction } from "@/app/actions/knowledge-base";
 import { readKbInstitution, type SelectedContextPage } from "../knowledge/knowledge-helpers";
-import type { InstitutionPageSummary } from "@/lib/knowledge-base";
+import { buildPageTree, type InstitutionPageSummary, type TreeNode } from "@/lib/knowledge-base";
 import type { RecordingKnowledgeContext } from "@/lib/recording-launch";
 import { recomputeCarriedKnowledgeContext } from "./CarriedKnowledgePages";
 
-export interface SummaryTreeNode extends InstitutionPageSummary {
-  children: SummaryTreeNode[];
-}
-
-/**
- * Nest a flat InstitutionPageSummary[] into a tree, siblings ordered by
- * position then title - the same sibling order buildPageTree
- * (src/lib/knowledge-base.ts) uses, without reusing that function (see this
- * file's own header for why: it is typed against the full InstitutionPage
- * shape, and widening it is outside this feature's file set).
- *
- * A page whose parentId is missing, unknown, or points at itself is treated
- * as a root - this can never hang or drop a page even on corrupt data,
- * because every node is grouped under its own resolved parent id exactly
- * once, and `build` below only ever walks parent ids reachable from the root
- * down. A genuine multi-node cycle among non-root pages (which
- * moveInstitutionPage's own wouldCreateCycle guard should already prevent
- * from existing) is therefore simply unreachable from the root and omitted
- * from the picker rather than looped on - an acceptable degrade for a
- * read-only picker, unlike buildPageTree's own computeEffectiveParents
- * repair, which this deliberately does not reproduce.
- */
-export function buildSummaryTree(pages: InstitutionPageSummary[]): SummaryTreeNode[] {
-  const byId = new Map(pages.map((p) => [p.id, p]));
-  const byParent = new Map<string | null, InstitutionPageSummary[]>();
-  for (const page of pages) {
-    const parentId =
-      page.parentId && page.parentId !== page.id && byId.has(page.parentId) ? page.parentId : null;
-    const list = byParent.get(parentId);
-    if (list) list.push(page);
-    else byParent.set(parentId, [page]);
-  }
-  const sortSiblings = (list: InstitutionPageSummary[]): InstitutionPageSummary[] =>
-    [...list].sort((a, b) => a.position - b.position || a.title.localeCompare(b.title));
-  function build(parentId: string | null): SummaryTreeNode[] {
-    return sortSiblings(byParent.get(parentId) ?? []).map((page) => ({ ...page, children: build(page.id) }));
-  }
-  return build(null);
-}
+/** The InstitutionPageSummary instantiation of buildPageTree's generic
+ *  TreeNode - kept as a named alias (rather than writing TreeNode<InstitutionPageSummary>
+ *  at every use below) purely for readability at the call sites in this file. */
+export type SummaryTreeNode = TreeNode<InstitutionPageSummary>;
 
 /**
  * The ids a checkbox selection would actually add - excluding anything
@@ -353,7 +328,7 @@ export default function AddKnowledgePages({ context, onChange }: AddKnowledgePag
   }, [checked, existingIds, existingPages, onChange]);
 
   const pendingCount = idsPendingAdd(checked, existingIds).length;
-  const tree = summaries ? buildSummaryTree(summaries) : [];
+  const tree = summaries ? buildPageTree(summaries) : [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>

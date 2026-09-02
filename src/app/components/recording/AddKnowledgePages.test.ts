@@ -11,21 +11,26 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import {
-  buildSummaryTree,
-  idsPendingAdd,
-  computeContextAfterAddingPages,
-  type SummaryTreeNode,
-} from "./AddKnowledgePages";
+import { idsPendingAdd, computeContextAfterAddingPages, type SummaryTreeNode } from "./AddKnowledgePages";
 import { buildKnowledgeContextBlock, DEFAULT_KNOWLEDGE_CONTEXT_MAX_CHARS } from "@/lib/chat/knowledge-context";
-import type { InstitutionPageSummary } from "@/lib/knowledge-base";
+import { buildPageTree, type InstitutionPageSummary } from "@/lib/knowledge-base";
 import type { SelectedContextPage } from "../knowledge/knowledge-helpers";
 
 function summary(id: string, parentId: string | null, title: string, position: number): InstitutionPageSummary {
   return { id, parentId, title, position };
 }
 
-describe("buildSummaryTree", () => {
+// This file used to own a second, independent tree-nesting implementation
+// (buildSummaryTree) with its own describe block here. That function is gone
+// - AddKnowledgePages.tsx now calls buildPageTree (src/lib/knowledge-base.ts)
+// directly, which is generic over exactly the shape InstitutionPageSummary
+// already has (see that function's own docstring for why one builder now
+// serves both the Knowledge tab and this picker). These are frozen literal
+// oracles written from the documented semantics, not values pulled from
+// running either implementation - a test that merely asserted "this picker's
+// tree equals buildPageTree's tree" would pass trivially now that they are
+// the same call, which is exactly the tautology this avoids.
+describe("buildPageTree over InstitutionPageSummary (the recording-side picker's own shape)", () => {
   it("nests children under their parentId, siblings ordered by position", () => {
     const pages = [
       summary("root2", null, "Zebra root", 1),
@@ -33,7 +38,7 @@ describe("buildSummaryTree", () => {
       summary("child1", "root1", "Child one", 0),
       summary("child2", "root1", "Child two", 1),
     ];
-    const tree = buildSummaryTree(pages);
+    const tree = buildPageTree(pages);
     expect(tree.map((n) => n.id)).toEqual(["root1", "root2"]);
     expect(tree[0].children.map((c) => c.id)).toEqual(["child1", "child2"]);
     expect(tree[1].children).toEqual([]);
@@ -41,35 +46,37 @@ describe("buildSummaryTree", () => {
 
   it("orders same-position siblings by title", () => {
     const pages = [summary("b", null, "Banana", 0), summary("a", null, "Apple", 0)];
-    const tree = buildSummaryTree(pages);
+    const tree = buildPageTree(pages);
     expect(tree.map((n) => n.id)).toEqual(["a", "b"]);
   });
 
   it("treats a page whose parentId points at nothing as a root", () => {
     const pages = [summary("orphan", "does-not-exist", "Orphan", 0)];
-    const tree = buildSummaryTree(pages);
+    const tree = buildPageTree(pages);
     expect(tree.map((n) => n.id)).toEqual(["orphan"]);
   });
 
   it("treats a self-referencing parentId as a root, not an infinite loop", () => {
     const pages = [summary("self", "self", "Self-parented", 0)];
-    const tree = buildSummaryTree(pages);
+    const tree = buildPageTree(pages);
     expect(tree.map((n) => n.id)).toEqual(["self"]);
   });
 
-  it("never hangs on a two-node cycle (both are simply unreachable from the root)", () => {
+  it("SABOTAGE TARGET: a two-node cycle roots the cycle's entry point and keeps BOTH pages visible - this is the one behaviour this picker gained by unifying with buildPageTree; it used to make both pages vanish (see git history of buildSummaryTree)", () => {
     const pages = [summary("a", "b", "A", 0), summary("b", "a", "B", 0)];
-    const tree = buildSummaryTree(pages);
-    // Documents the deliberate degrade this file's own header states: a
-    // cycle among non-root pages is omitted, never looped on. The point of
-    // this test is that it COMPLETES at all (a wrong implementation would
-    // time out or stack-overflow here), and that it completes with an
-    // empty, not partial-and-wrong, result.
-    expect(tree).toEqual([]);
+    const tree = buildPageTree(pages);
+    // "a" is first in the input array, so its walk reaches "b" then loops
+    // back to "a" - "a" (not "b") is the cycle's entry point and is rooted;
+    // "b" keeps its real parentId ("a") and nests under it. See
+    // computeEffectiveParents in src/lib/knowledge-base.ts: walk order, never
+    // id or title, decides which cycle member is promoted.
+    expect(tree.map((n) => n.id)).toEqual(["a"]);
+    expect(tree[0].children.map((c) => c.id)).toEqual(["b"]);
+    expect(tree[0].children[0].children).toEqual([]);
   });
 
   it("returns an empty tree for an empty page list", () => {
-    expect(buildSummaryTree([])).toEqual([]);
+    expect(buildPageTree<InstitutionPageSummary>([])).toEqual([]);
   });
 });
 

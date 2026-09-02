@@ -85,6 +85,14 @@ describe("buildPageTree", () => {
     expect(ids).toEqual(["orphan", "real-root"]);
   });
 
+  it("treats a self-referencing parentId as a root, not an infinite loop", () => {
+    const pages = [page({ id: "self", title: "Self-parented", parentId: "self" })];
+
+    const tree = buildPageTree(pages);
+    expect(tree.map((n) => n.id)).toEqual(["self"]);
+    expect(tree[0].children).toEqual([]);
+  });
+
   it("does not hang on a two-node parent cycle, and keeps both pages in the tree", () => {
     const pages = [
       page({ id: "a", title: "A", parentId: "b" }),

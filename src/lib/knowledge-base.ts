@@ -36,6 +36,13 @@ export interface InstitutionPageNode extends InstitutionPage {
  * read: id and parentId to nest, position and title to order siblings, title
  * again to render. No `body` - that is the entire point of this type existing
  * alongside InstitutionPage (see listInstitutionPageSummaries below).
+ *
+ * This is also exactly the shape buildPageTree's generic bound (TreeSource
+ * below) requires - InstitutionPageSummary satisfies it without adding a
+ * single field, which is what lets AddKnowledgePages.tsx's recording-side
+ * picker call the SAME buildPageTree the Knowledge tab uses, over its own
+ * body-less summaries, rather than maintaining a second tree-nesting
+ * implementation. See buildPageTree's own docstring for the unification.
  */
 export interface InstitutionPageSummary {
   id: string;
@@ -43,6 +50,29 @@ export interface InstitutionPageSummary {
   title: string;
   position: number;
 }
+
+/**
+ * The minimum shape buildPageTree (and its ordering/repair helpers) needs to
+ * nest a flat list into a tree: enough to link a node to its parent (id,
+ * parentId) and to order siblings (position, title). Both InstitutionPage
+ * (full pages, with bodies - the Knowledge tab) and InstitutionPageSummary
+ * (id/parentId/title/position only - the recording-side page picker in
+ * AddKnowledgePages.tsx) satisfy this without widening either type, which is
+ * what lets one generic builder serve both callers.
+ */
+export interface TreeSource {
+  id: string;
+  parentId: string | null;
+  title: string;
+  position: number;
+}
+
+/** A TreeSource-shaped item nested into a tree: the same fields, plus its
+ *  already-nested children in sibling order. InstitutionPageNode above is
+ *  the concrete InstitutionPage instantiation of this, kept as its own named
+ *  interface (rather than a `TreeNode<InstitutionPage>` alias) only because
+ *  several existing files already import it by that name. */
+export type TreeNode<T extends TreeSource> = T & { children: TreeNode<T>[] };
 
 export interface PageSearchHit {
   page: InstitutionPage;
@@ -75,8 +105,18 @@ export function normalizeInstitution(value: string): string {
  *
  * Runs in O(n): each page is "finalized" (assigned an effective parent) at
  * most once across the whole pass, whichever page's walk reaches it first.
+ *
+ * A self-referencing parentId (a page naming itself as its own parent) is
+ * handled by this same walk, not a separate check: the walk visits the page
+ * once, follows parentId back to itself, and finds ITS OWN id already on the
+ * current path - the general cycle case with a one-node cycle. It is rooted
+ * exactly like any other cycle's entry point.
+ *
+ * Generic over TreeSource so the same repair logic (and the same "walk
+ * order, not id or title, decides which cycle member is promoted" tie-break)
+ * governs every caller - see buildPageTree's own docstring.
  */
-function computeEffectiveParents(pages: InstitutionPage[]): Map<string, string | null> {
+function computeEffectiveParents<T extends TreeSource>(pages: T[]): Map<string, string | null> {
   const byId = new Map(pages.map((p) => [p.id, p]));
   const resolved = new Map<string, string | null>();
   const finalized = new Set<string>();
@@ -130,14 +170,44 @@ function computeEffectiveParents(pages: InstitutionPage[]): Map<string, string |
 }
 
 /**
- * Nest pages into a tree. Siblings are ordered by position then title. See
- * computeEffectiveParents for how a missing parent or a parent cycle is
- * handled - both surface every page rather than dropping or hanging on it.
+ * Nest a flat list into a tree. Siblings are ordered by position then title.
+ * See computeEffectiveParents for how a missing parent, a self-referencing
+ * parentId, or a parent cycle is handled - all three surface every page
+ * (rooting it, or the cycle's entry point) rather than dropping or hanging
+ * on it.
+ *
+ * Generic over TreeSource (id, parentId, title, position) rather than tied to
+ * the full InstitutionPage shape: this single builder serves both the
+ * Knowledge tab's full-bodied InstitutionPage[] (via InstitutionPageNode, a
+ * named InstitutionPage instantiation of TreeNode - see that type) and
+ * AddKnowledgePages.tsx's recording-side picker, which only ever has
+ * body-less InstitutionPageSummary[] on hand. A second, independent
+ * tree-nesting implementation (buildSummaryTree) used to live in that
+ * component; it existed only because generalizing this function mid-flight
+ * would have widened a different feature's blast radius while that feature
+ * was still in progress. Now that nothing else depends on this function
+ * staying InstitutionPage-specific, both callers share this one
+ * implementation and its one set of repair rules - see this file's
+ * knowledge-base.test.ts for the frozen-oracle coverage of every rule below,
+ * and AddKnowledgePages.test.ts for the same rules exercised over an
+ * InstitutionPageSummary[] input.
+ *
+ * The one behavioural change this unification makes for the recording-side
+ * picker: buildSummaryTree used to leave a genuine multi-node parent cycle
+ * (A's parent is B, B's parent is A, neither self-referencing) entirely
+ * unreachable from the root - both pages would silently vanish from the
+ * picker rather than loop. This function instead roots the cycle's entry
+ * point (as it always has for the Knowledge tab), so every page stays
+ * visible. A parent cycle should never occur in practice - moveInstitutionPage
+ * calls wouldCreateCycle before writing specifically to prevent one - so this
+ * only matters for already-corrupted data reached by a race or a bad
+ * migration, and "still shown, rooted" is strictly safer there than
+ * "silently missing from the picker with no indication anything was wrong".
  */
-export function buildPageTree(pages: InstitutionPage[]): InstitutionPageNode[] {
+export function buildPageTree<T extends TreeSource>(pages: T[]): TreeNode<T>[] {
   const effectiveParent = computeEffectiveParents(pages);
 
-  const byParent = new Map<string | null, InstitutionPage[]>();
+  const byParent = new Map<string | null, T[]>();
   for (const page of pages) {
     const parentId = effectiveParent.get(page.id) ?? null;
     const list = byParent.get(parentId);
@@ -145,10 +215,10 @@ export function buildPageTree(pages: InstitutionPage[]): InstitutionPageNode[] {
     else byParent.set(parentId, [page]);
   }
 
-  const sortSiblings = (list: InstitutionPage[]): InstitutionPage[] =>
+  const sortSiblings = (list: T[]): T[] =>
     [...list].sort((a, b) => a.position - b.position || a.title.localeCompare(b.title));
 
-  function build(parentId: string | null): InstitutionPageNode[] {
+  function build(parentId: string | null): TreeNode<T>[] {
     return sortSiblings(byParent.get(parentId) ?? []).map((page) => ({
       ...page,
       children: build(page.id),

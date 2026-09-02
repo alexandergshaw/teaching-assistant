@@ -37741,3 +37741,106 @@ reason, the mutation confirmed present, restored, confirmed green.
 - 149 of 1033 CSS module classes still have no reference anywhere, so the
   definitions->references guard that would have caught `.selectionAiButton`
   needs a ratchet rather than a strict assertion. Measured, not built.
+## 384. A module walkthrough deck built from the screen, and the feature that passed every gate while being impossible to open
+
+The owner asked to screen-share a module's content and get a lecture slide deck
+out of it, and chose reading the deck off the screen over the API path, with the
+LLM dividing visible material into the app's existing slide templates.
+
+### The defect that mattered was reachability, not correctness
+
+`ModuleDeckCapturePanel.tsx` shipped complete at 850 lines: it imported the
+entire extraction stack, persisted four controls, handled every failure class
+separately, and was covered by 139 passing tests. **Nothing imported it.** No
+render site, no launcher, no route in. `tsc`, `eslint` and the full suite were
+all green on a feature that could not be opened from anywhere in the app.
+
+Found by grepping for importers, not by any gate. This is the third recorded
+instance of the same shape in this project, and the only reliable detector
+remains asking "what calls this?" rather than "does this work?".
+
+### Two places for one value
+
+`RecordingTab.tsx` stores the active inner view in a type union AND a separate
+`localStorage` restore guard that re-validates the string on load. Adding the
+new view to the union alone produces a tab that works perfectly until the first
+reload, then silently reverts to "record" with no error anywhere. The structure
+test now covers the two independently - deleting the view from only the guard
+reddens exactly one test while the union test stays green, which is what proves
+the isolation is real rather than incidental.
+
+### What measurement changed before any code was written
+
+A pre-code data pass corrected the design's own arithmetic in ways that changed
+the build. The frame keep interval is 1500ms, not 1200ms, because the ticker
+runs on a 500ms grid - 801 frames for a 20-minute run, not ~1000. The
+pause-per-page estimate of "~17 calls best case" was wrong by 6x: pause-driven
+capture averages 1.0 frames per call. Break-even against the API path is 9.0s,
+not 7.2s. Cost is derivable rather than unknowable, since a Gemini image is a
+flat 1,120 tokens: a 20-minute run is roughly 1.06M input tokens, about
+$0.13-$0.26.
+
+Three consequences were built rather than noted. Page furniture is suppressed
+before capping, because 182 chars per frame across 801 frames is 146,000 chars
+of headers and footers alone - seven times the materials cap. Short headings are
+never similarity-matched, because six of eight distinct module headings collapse
+into each other. And materials are capped at 120,000 chars by dropping whole
+blocks, never by tail-truncation.
+
+### The loss channel nobody had named
+
+Beyond dropped frames and backpressure, content that scrolls past between two
+kept frames is never photographed at all. At 1080p the safe scroll rate is about
+683 px/s against a normal skim of 500-800 px/s, so an ordinary scroll can
+silently outrun the capture. The panel surfaces this as its own limit rather
+than folding it into the dropped-frame count, because the two have different
+causes and different fixes.
+
+### A closed tab was a silent, billed loss
+
+Closing the tab mid-capture killed the stream, discarded the queue, discarded
+all extracted text (it lives in a ref), and left the in-flight vision call to
+complete and bill server-side, with nothing shown to the instructor. A
+`beforeunload` guard now fires while capturing or while frames are still queued.
+Half-persistence was explicitly rejected: the adjacent grading feature persists
+its rows but not its accumulator and positionally overwrites restored rows from
+index 0, which is the failure this avoided by persisting settings only.
+
+### Ordinal canaries are not inherited
+
+`recording-split.structure.test.ts` harvests only `recording/*` plus
+`RecordingTab.tsx`, so a new sibling directory gets no key coverage for free.
+The obligation fell between two agents - one scoped its canary to its own file
+and said so in a comment, the other was not asked for the directory-wide one.
+Caught by reading that comment, not by any gate. The new directory now carries
+its own ordinal canary over every non-test file in it.
+
+### Gates
+
+`tsc` 0 errors. `eslint` clean on every touched file, one pre-existing unrelated
+warning. `vitest` **827 files / 16768 tests**, all passing. Sabotage checks: 8 on
+the panel, 4 on the wiring - each broken, confirmed red for the right reason, the
+mutation confirmed present in the file, restored, confirmed green. Three of the
+panel's eight sabotages exposed real test-design bugs (assertions satisfied by a
+doc comment alone, and two that checked position or presence but not actual
+conditional gating); all three were fixed and re-verified.
+
+### Limits
+
+- **No component is rendered by any test here.** Every panel state, button gate
+  and layout claim is verified by reading source text. The pure folds
+  (`module-blocks`, `module-deck-dispatch`, `module-capture-log`) are genuinely
+  unit-tested; the JSX and hook glue is not.
+- Nothing in the capture survives a reload. The `beforeunload` guard warns, but
+  there is no resume path and no restore flow - by design, to avoid the
+  half-persistence trap above.
+- The slide count is fixed by the chosen template, so a 20-minute walkthrough
+  yields a 7-slide deck regardless of how much material was read. The panel
+  shows the resolved count before capture starts rather than surprising the
+  instructor after.
+- `capturePrefill` is advisory only. A live module selection carries a course
+  URL rather than a resolved hub id, since that id is not loaded in the launcher
+  file; every field degrades independently and the panel simply starts blank.
+- The deck is saved as an artifact version with no in-panel preview. The `.pptx`
+  download is gated on the parsed structured slides being non-empty, not on the
+  artifact kind.

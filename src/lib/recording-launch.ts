@@ -37,7 +37,14 @@
 /** The Recording tab's inner views - see RecordingTab.tsx's own `recView`
  * union, which this list is kept in sync with (not imported from there:
  * RecordingTab.tsx does not export it, and this module is a leaf that must
- * not pull in a client component). */
+ * not pull in a client component).
+ *
+ * "moduledeck" (docs/module-walkthrough-deck-acceptance-criteria.md AC1/
+ * AM-L): the module-walkthrough-capture panel's own inner view, reachable
+ * from (a) the Recording tab directly and (b) a Modules bulk-bar action that
+ * pre-fills which module to capture via `capturePrefill` below - see that
+ * field's own doc comment for why the prefill rides the event `detail`
+ * rather than a one-shot slot, and why it is advisory only. */
 export type RecordingLaunchView =
   | "record"
   | "announcement"
@@ -46,7 +53,8 @@ export type RecordingLaunchView =
   | "captions"
   | "slides"
   | "avatar"
-  | "grading";
+  | "grading"
+  | "moduledeck";
 
 const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "record",
@@ -57,6 +65,7 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "slides",
   "avatar",
   "grading",
+  "moduledeck",
 ];
 
 /** Already-framed, already-capped prompt text - built via
@@ -65,10 +74,23 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
  * second context format or a second anti-prompt-injection framing header.
  * Never empty when present - a caller with nothing usable to carry must omit
  * this field entirely rather than pass `text: ""` (mirrors
- * OpenChatSelectionContext's own contract in open-chat.ts). */
+ * OpenChatSelectionContext's own contract in open-chat.ts).
+ *
+ * `pages`: which Knowledge Base pages `text` was built from - added so a
+ * later feature can SHOW the carried pages (a list, a picker, a back-to-
+ * Knowledge link) rather than only the generic `label` summary sentence.
+ * Optional and purely ADVISORY, same relationship `label` already has to
+ * `text`: nothing here validates it against `text`, and a consumer that
+ * cannot render it (or gets none) must fall back to `label`, never treat a
+ * missing/empty `pages` as an error. NOT populated by this pass - the launch
+ * sites that would fill it in (KnowledgeTab.tsx's "Start recording" and
+ * "Grade via recording" bulk-bar actions) are a sibling's file for this
+ * task; this field only makes room for that follow-up so it does not need a
+ * second change to this shared type. */
 export interface RecordingKnowledgeContext {
   text: string;
   label?: string;
+  pages?: { id: string; title: string }[];
 }
 
 export interface RecordingLaunch {
@@ -92,6 +114,35 @@ export interface RecordingLaunch {
    * it rides the event `detail` like `view` does, not a slot a caller must
    * remember to drain. */
   openRubric?: boolean;
+
+  /** Module-walkthrough-capture prefill (docs/module-walkthrough-deck-
+   * acceptance-criteria.md AC1/AM-L): which course/module the Modules
+   * bulk-bar's capture action was launched against, when it was launched
+   * from there. Rides the event `detail` (like `view`, unlike
+   * `knowledgeContext`'s one-shot module slot): every listener that would
+   * ever read this (today: only the module-deck-capture panel reacting to
+   * its own view's launch event, exactly as GradingRecordingPanel.tsx
+   * already reacts to `openRubric` above) wants the SAME value from the SAME
+   * dispatch - there is no "hand to exactly one consumer, then forget"
+   * concern here, so a one-shot slot would be the wrong shape (see this
+   * module's own header comment for the general rule this follows).
+   *
+   * ADVISORY ONLY (AM-L: "the destination owns its context obligation,
+   * never the launcher"): the capture panel's own course/module controls are
+   * ALWAYS present and authoritative, whichever route reached the panel.
+   * This field only seeds their initial value - same relationship
+   * `knowledgeContext` has to the Discussion-replies drafting pipeline's own
+   * always-present context box, and the same relationship AC1 already states
+   * for this feature specifically. Every field is optional because a launch
+   * from the Recording tab directly (not the bulk bar) carries none of
+   * them - the panel's controls then simply start blank, exactly like any
+   * other visit. */
+  capturePrefill?: {
+    courseId?: string;
+    courseUrl?: string;
+    acronym?: string;
+    moduleLabel?: string;
+  };
 }
 
 /** The event name, so nobody re-types the string literal. Deliberately NOT
@@ -110,14 +161,64 @@ function isValidView(v: unknown): v is RecordingLaunchView {
   return typeof v === "string" && (RECORDING_LAUNCH_VIEWS as readonly string[]).includes(v);
 }
 
+/** Defensive parse of a candidate `pages` entry: both `id` and `title` must
+ * be non-blank strings, or the WHOLE entry is dropped (unlike
+ * sanitizeCapturePrefill's independent per-field degradation - a page with a
+ * title but no id, or vice versa, is not a usable page reference at all, so
+ * there is no "degrade the optional part" available here; the entry itself
+ * is the atomic unit). */
+function sanitizePage(raw: unknown): { id: string; title: string } | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || r.id.trim().length === 0) return undefined;
+  if (typeof r.title !== "string" || r.title.trim().length === 0) return undefined;
+  return { id: r.id, title: r.title };
+}
+
+/** Defensive parse of a candidate `pages` array: not an array at all, or an
+ * array that yields zero usable entries once each is sanitized, both drop
+ * the WHOLE field (mirrors `label`'s own "absent, not empty" contract -
+ * there is no meaningful difference between "no pages were carried" and "a
+ * pages array was sent but nothing in it was usable", so both collapse to
+ * `undefined` rather than an empty array a caller would need to special-case
+ * anyway). A malformed individual entry drops only that entry, never the
+ * whole field. */
+function sanitizePages(raw: unknown): RecordingKnowledgeContext["pages"] {
+  if (!Array.isArray(raw)) return undefined;
+  const pages = raw.map(sanitizePage).filter((p): p is { id: string; title: string } => p !== undefined);
+  return pages.length > 0 ? pages : undefined;
+}
+
 function sanitizeKnowledgeContext(raw: unknown): RecordingKnowledgeContext | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const r = raw as Record<string, unknown>;
   if (typeof r.text !== "string" || r.text.trim().length === 0) return undefined;
+  const pages = sanitizePages(r.pages);
   return {
     text: r.text,
     ...(typeof r.label === "string" ? { label: r.label } : {}),
+    ...(pages ? { pages } : {}),
   };
+}
+
+/** Defensive parse of a candidate `capturePrefill`, mirroring
+ * sanitizeKnowledgeContext's own "degrade the optional part, not the whole
+ * thing" rule: every field is independently optional and independently
+ * checked, so one malformed field (e.g. a non-string `moduleLabel`) drops
+ * only that field rather than the whole prefill or the whole launch. Unlike
+ * `knowledgeContext`, an object with every field absent/invalid is still
+ * VALID (empty object) rather than `undefined` - AM-L's "advisory only" rule
+ * means an empty prefill and a missing one both simply leave the panel's own
+ * controls blank, so there is no need to distinguish them here. */
+function sanitizeCapturePrefill(raw: unknown): RecordingLaunch["capturePrefill"] | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const prefill: NonNullable<RecordingLaunch["capturePrefill"]> = {};
+  if (typeof r.courseId === "string" && r.courseId.trim()) prefill.courseId = r.courseId;
+  if (typeof r.courseUrl === "string" && r.courseUrl.trim()) prefill.courseUrl = r.courseUrl;
+  if (typeof r.acronym === "string" && r.acronym.trim()) prefill.acronym = r.acronym;
+  if (typeof r.moduleLabel === "string" && r.moduleLabel.trim()) prefill.moduleLabel = r.moduleLabel;
+  return prefill;
 }
 
 /**
@@ -137,10 +238,12 @@ export function parseRecordingLaunch(detail: unknown): RecordingLaunch | null {
   const raw = detail as Record<string, unknown>;
   if (!isValidView(raw.view)) return null;
   const knowledgeContext = sanitizeKnowledgeContext(raw.knowledgeContext);
+  const capturePrefill = sanitizeCapturePrefill(raw.capturePrefill);
   return {
     view: raw.view,
     ...(knowledgeContext ? { knowledgeContext } : {}),
     ...(raw.openRubric === true ? { openRubric: true } : {}),
+    ...(capturePrefill ? { capturePrefill } : {}),
   };
 }
 

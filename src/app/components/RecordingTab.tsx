@@ -28,6 +28,7 @@ import AvatarStudioPanel from "./recording/AvatarStudioPanel";
 import DiscussionRepliesPanel from "./recording/DiscussionRepliesPanel";
 import GradingRecordingPanel from "./grading-recording/GradingRecordingPanel";
 import WalkthroughPanel from "./recording/WalkthroughPanel";
+import ModuleDeckCapturePanel from "./module-deck-capture/ModuleDeckCapturePanel";
 import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
 import { listRecordingFiles, downloadRecordingFile, type RecordingFile } from "@/lib/recording-files";
@@ -55,7 +56,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // navigateToRecordingTool("grading") entry, exactly the same two entry
   // points "discussions" already has.
   const [recView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading"
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading" | "moduledeck"
   >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
@@ -65,7 +66,8 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       v === "slides" ||
       v === "avatar" ||
       v === "announcement" ||
-      v === "grading"
+      v === "grading" ||
+      v === "moduledeck"
       ? v
       : "record";
   });
@@ -577,7 +579,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           a real fix needs both sides wired together, and only one side is
           in this agent's file set. */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["grading", "Grading (from a recording)"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["grading", "Grading (from a recording)"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             tabIndex={recView === key ? 0 : -1}
             onKeyDown={(e) => {
@@ -828,6 +830,16 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           "discussions" needs above. */}
       <div style={{ display: recView === "grading" ? undefined : "none" }}>
         <GradingRecordingPanel active={active && recView === "grading"} />
+      </div>
+
+      {/* Same always-mounted stack, same reason: an in-progress screen-share
+          capture, its frame queue and its in-flight vision extraction must
+          survive the user switching to another inner view - the
+          module-walkthrough-deck feature's own capture loop needs exactly the
+          guarantee "discussions" and "grading" need above (docs/module-
+          walkthrough-deck-acceptance-criteria.md AC1). */}
+      <div style={{ display: recView === "moduledeck" ? undefined : "none" }}>
+        <ModuleDeckCapturePanel active={active && recView === "moduledeck"} />
       </div>
 
       <div style={{ display: recView === "captions" ? undefined : "none" }}>

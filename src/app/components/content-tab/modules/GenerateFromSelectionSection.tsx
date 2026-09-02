@@ -132,6 +132,17 @@ export interface GenerateFromSelectionSectionProps {
   /** introDiscussion only - fires when the checkpoints checkbox changes.
    * Every other kind ignores this. */
   onUseDiscussionCheckpointsChange: (checked: boolean) => void;
+  /** Module-walkthrough-deck launcher (docs/module-walkthrough-deck-
+   * acceptance-criteria.md AC1): opens the Recording tab's own "Module
+   * walkthrough deck" inner view, pre-filled for the one selected module.
+   * Null whenever fewer or more than exactly one module is selected -
+   * ModulesView computes that gate and the label, and owns the
+   * openRecordingTool() call itself; this file only renders the control,
+   * matching every other kind button's own "the parent decides, this file
+   * dispatches" shape. This capture is not one of `kinds` (it never calls
+   * useLmsGeneration's `generate`/`onGenerate` - it navigates to a different
+   * tab entirely), so it is its own button rather than a fourth kind. */
+  moduleWalkthroughLaunch: { moduleLabel: string; onLaunch: () => void } | null;
 }
 
 export function GenerateFromSelectionSection({
@@ -151,6 +162,7 @@ export function GenerateFromSelectionSection({
   onScriptMinutesChange,
   useDiscussionCheckpoints,
   onUseDiscussionCheckpointsChange,
+  moduleWalkthroughLaunch,
 }: GenerateFromSelectionSectionProps) {
   const offersDeck = kinds.some((k) => k.id === "decks");
   const offersScript = kinds.some((k) => k.id === "scripts");
@@ -254,6 +266,17 @@ export function GenerateFromSelectionSection({
             {busy === k.id ? "Generating…" : k.label}
           </Button>
         ))}
+        {moduleWalkthroughLaunch && (
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={busy !== ""}
+            onClick={moduleWalkthroughLaunch.onLaunch}
+            title={`Open the Recording tab's Module walkthrough deck capture, pre-filled for "${moduleWalkthroughLaunch.moduleLabel}" - screen-share and scroll through the module, then generate a lecture deck from what was captured`}
+          >
+            Capture module walkthrough
+          </Button>
+        )}
         {hasDiagLog && (
           <Button
             variant="text"

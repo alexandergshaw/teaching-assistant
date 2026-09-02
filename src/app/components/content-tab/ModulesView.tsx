@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { useSupabase } from "@/context/SupabaseProvider";
 import type {
@@ -9,7 +9,9 @@ import type {
 } from "@/lib/canvas-modules";
 import type { CartridgeModule } from "@/lib/cartridge-import";
 import styles from "../../page.module.css";
+import { openRecordingTool } from "@/lib/recording-launch";
 import { LIVE_CONTENT_SOURCE, type ContentSourceContext } from "./contentSourceGating";
+import { parseModuleKey } from "./utils";
 import { ModuleCard } from "./modules/ModuleCard";
 import { buildBulkModulesSectionProps } from "./modules/buildBulkModulesSectionProps";
 import { AskAiSelectionSection } from "./modules/AskAiSelectionSection";
@@ -396,6 +398,55 @@ export function ModulesView({
     modulesListFallbackRef,
   } = dialogs;
 
+  // Module-walkthrough-deck launcher (docs/module-walkthrough-deck-
+  // acceptance-criteria.md AC1): "reachable from ... a Modules bulk-bar
+  // action on a module selection, which pre-fills the module but does NOT
+  // discharge the context obligation" - the panel's own controls stay
+  // authoritative regardless (see recording-launch.ts's own capturePrefill
+  // doc comment, "ADVISORY ONLY"). Gated on exactly one selected module: a
+  // launch can pre-fill ONE module, so a multi-module selection has nothing
+  // unambiguous to hand it and the button simply does not render (null),
+  // matching GenerateFromSelectionSection's own "kinds.length === 0 -> null"
+  // precedent rather than rendering a disabled control with no reason shown.
+  // Label resolution reads whichever tree the current source actually has
+  // loaded (`modules` for a live selection, `exportModules` for an export
+  // one) - a repo-sourced module (no name anywhere but its folder path) falls
+  // back to that path rather than hiding the button, since a rough label the
+  // instructor can retype is still strictly better than no launcher at all.
+  const moduleWalkthroughLaunch = useMemo(() => {
+    if (selection.selectedModules.size !== 1) return null;
+    const [onlyKey] = selection.selectedModules;
+    const parsed = parseModuleKey(onlyKey);
+    if (!parsed) return null;
+    const moduleLabel =
+      parsed.source === "live"
+        ? (modules.find((m) => m.id === Number(parsed.ref))?.name ?? "")
+        : parsed.source === "export"
+          ? (exportModules?.find((m) => m.identifier === parsed.ref)?.name ?? "")
+          : parsed.ref;
+    if (!moduleLabel) return null;
+    return {
+      moduleLabel,
+      onLaunch: () => {
+        openRecordingTool({
+          view: "moduledeck",
+          capturePrefill: {
+            moduleLabel,
+            // course_hub id is only ever resolved here for an export
+            // selection (`exportCourseId`) - a live selection has no
+            // course_hub row already loaded in this file, so `courseUrl`
+            // rides instead (harmless: capturePrefill is advisory-only and
+            // every field degrades independently - see
+            // sanitizeCapturePrefill in recording-launch.ts).
+            ...(ctx.source === "export" && exportCourseId ? { courseId: exportCourseId } : {}),
+            ...(ctx.source !== "export" && courseUrl ? { courseUrl } : {}),
+            ...(acronym ? { acronym } : {}),
+          },
+        });
+      },
+    };
+  }, [selection.selectedModules, modules, exportModules, ctx.source, exportCourseId, courseUrl, acronym]);
+
   // The BulkModulesSection prop object (everything except `facts`/
   // `groupsState`, which stay bare identifiers at the render site below -
   // see buildBulkModulesSectionProps.ts header comment for why a full spread
@@ -522,6 +573,7 @@ export function ModulesView({
                   onScriptMinutesChange={lmsGeneration.setScriptMinutes}
                   useDiscussionCheckpoints={lmsGeneration.useDiscussionCheckpoints}
                   onUseDiscussionCheckpointsChange={lmsGeneration.setUseDiscussionCheckpoints}
+                  moduleWalkthroughLaunch={moduleWalkthroughLaunch}
                   facts={bulkBarFacts}
                   groupsState={bulkBarGroupsApi}
                 />

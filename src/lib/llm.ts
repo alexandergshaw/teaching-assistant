@@ -156,13 +156,37 @@ export function parseGroundingSources(
 }
 
 /**
+ * Token counts Gemini already returns on every 200 response
+ * (`usageMetadata`), surfaced here so a caller can show real per-call cost
+ * instead of guessing. Added for module-walkthrough-deck AC5/DE6
+ * (docs/module-walkthrough-deck-acceptance-criteria.md section 7): AC5
+ * requires cost shown to the user BEFORE a run, which cannot be done
+ * honestly without reading what Gemini already sends. All fields optional
+ * and defensively parsed (see parseUsageMetadata) — a malformed or absent
+ * `usageMetadata` degrades to `undefined`, never a thrown error.
+ */
+export interface LlmUsage {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+}
+
+/**
  * Result of an LLM call. On a transport/HTTP failure, `ok` is false and the
  * caller can build its own error message from `status` and `body` (call sites
  * have differing, user-facing error copy, so we surface the raw details rather
  * than formatting here).
+ *
+ * `usage` and `elapsedMs` (DE6) are additive optional fields on the success
+ * branch only — every existing caller that destructures `{ ok, text }` or
+ * spreads this type keeps compiling untouched. `elapsedMs` wraps ONLY the
+ * network round trip inside callGemini (postGenerateContent), not any
+ * retry backoff sleep before it, so it reads as "how long the call that
+ * actually succeeded took," not "how long this invocation took including
+ * throttling."
  */
 export type LlmResult =
-  | { ok: true; text: string; sources?: Source[]; finishReason?: string }
+  | { ok: true; text: string; sources?: Source[]; finishReason?: string; usage?: LlmUsage; elapsedMs?: number }
   | { ok: false; status: number; body: string };
 
 /**
@@ -270,6 +294,44 @@ export function parseFinishReason(data: unknown): string | undefined {
     }
 
     return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Parse Gemini's `usageMetadata` block into LlmUsage. Defensive against
+ * malformed/absent input, mirroring parseGroundingSources/parseFinishReason
+ * above: a non-object, a missing `usageMetadata`, or non-numeric fields all
+ * degrade to `undefined` rather than throwing. Returns undefined (not an
+ * object of undefined fields) when nothing usable is present, so callers can
+ * `...(usage ? { usage } : {})` exactly like the sources/finishReason fields.
+ */
+export function parseUsageMetadata(data: unknown): LlmUsage | undefined {
+  try {
+    if (!data || typeof data !== "object") {
+      return undefined;
+    }
+
+    const obj = data as {
+      usageMetadata?: {
+        promptTokenCount?: unknown;
+        candidatesTokenCount?: unknown;
+        totalTokenCount?: unknown;
+      };
+    };
+
+    const raw = obj.usageMetadata;
+    if (!raw || typeof raw !== "object") {
+      return undefined;
+    }
+
+    const usage: LlmUsage = {};
+    if (typeof raw.promptTokenCount === "number") usage.promptTokenCount = raw.promptTokenCount;
+    if (typeof raw.candidatesTokenCount === "number") usage.candidatesTokenCount = raw.candidatesTokenCount;
+    if (typeof raw.totalTokenCount === "number") usage.totalTokenCount = raw.totalTokenCount;
+
+    return Object.keys(usage).length > 0 ? usage : undefined;
   } catch {
     return undefined;
   }
@@ -414,7 +476,14 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
       : {}),
   });
 
+  // DE6: timed around the fetch only (postGenerateContent's own retry
+  // backoff sleeps are outside this delta) so elapsedMs reads as "how long
+  // the call that actually succeeded took." Gemini returns usageMetadata on
+  // every 200 response already — nothing extra is requested here, and the
+  // measurement costs zero.
+  const startedAt = Date.now();
   const result = await postGenerateContent(model, body);
+  const elapsedMs = Date.now() - startedAt;
   if (!result.ok) {
     return result;
   }
@@ -428,6 +497,11 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
       finishReason?: string;
     }>;
     promptFeedback?: { blockReason?: string };
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      totalTokenCount?: number;
+    };
   };
 
   const text =
@@ -435,12 +509,15 @@ async function callGemini(req: LlmRequest): Promise<LlmResult> {
 
   const sources = parseGroundingSources(data);
   const finishReason = parseFinishReason(data);
+  const usage = parseUsageMetadata(data);
 
   return {
     ok: true,
     text,
     ...(sources ? { sources } : {}),
     ...(finishReason ? { finishReason } : {}),
+    ...(usage ? { usage } : {}),
+    elapsedMs,
   };
 }
 

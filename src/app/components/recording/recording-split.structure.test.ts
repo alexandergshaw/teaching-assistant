@@ -112,17 +112,20 @@ describe("recording-split structure", () => {
     // The strip is one inline array-of-tuples literal rendered via .map -
     // this pins the entry COUNT (a fresh entry silently dropped, or an old
     // one silently duplicated, both change this number without changing any
-    // other visible source text) at eight: the pre-existing six
+    // other visible source text) at nine: the pre-existing six
     // (record/discussions/speed/captions/slides/avatar), the dedicated
-    // Announcement front door added for recording FOR an announcement, and
-    // the dedicated Grading front door for grading-via-recording.
-    it("should render exactly eight inner-view tabs", () => {
+    // Announcement front door added for recording FOR an announcement, the
+    // dedicated Grading front door for grading-via-recording, and the
+    // dedicated Module walkthrough deck front door for the module-
+    // walkthrough-deck feature (docs/module-walkthrough-deck-acceptance-
+    // criteria.md AC1).
+    it("should render exactly nine inner-view tabs", () => {
       const stripLine = recordingTabContent
         .split("\n")
         .find((line: string) => line.includes('["record", "Record"]'));
       expect(stripLine, "expected to find the inner-view strip's array literal in RecordingTab.tsx").toBeTruthy();
       const entries = stripLine!.match(/\["[a-z]+",\s*"[^"]+"\]/g) ?? [];
-      expect(entries).toHaveLength(8);
+      expect(entries).toHaveLength(9);
     });
 
     it("should include a dedicated announcement entry in the strip, not only the pre-existing per-take route", () => {

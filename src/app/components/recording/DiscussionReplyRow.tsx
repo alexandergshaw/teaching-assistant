@@ -336,6 +336,12 @@ function DiscussionReplyRowImpl({
 
   const handleRetryResources = useCallback(() => onRetryResources(row.id), [onRetryResources, row.id]);
 
+  // RC6 (docs/reply-resource-concepts-acceptance-criteria.md): the per-row
+  // targeted search now dispatches from inside DiscussionReplyResources.tsx,
+  // beside the chips that show what the LAST search used - stable useCallback
+  // for the same memo reason as handleRetryResources above.
+  const handleSearchResources = useCallback(() => onSearchRow(row.id), [onSearchRow, row.id]);
+
   const handleCopy = async () => {
     // R9a: a row whose draft failed but whose resources landed still has
     // something to copy - the guard is "nothing to copy", not "no reply".
@@ -877,34 +883,20 @@ function DiscussionReplyRowImpl({
                 inputRef={replyInputRef}
               />
 
-              {/* Resource-controls feature: per-row targeted search, sharing
-                  DiscussionReplyResources's own resourceState rendering for
-                  its pending/failed feedback - see useReplyResources.ts's
-                  `searchRow` doc comment. Disabled while already searching.
-                  CC3: the wrapping `.ghActions` div is the "flex: none"
-                  authority that replaces the old inline `alignSelf:
-                  "flex-start"` on the button itself. */}
-              <div className={styles.ghActions}>
-                <Button
-                  size="small"
-                  variant="text"
-                  style={{ minWidth: 0 }}
-                  disabled={row.resourceState === "searching"}
-                  aria-label={`Search for resources for the reply to ${row.author}`}
-                  onClick={() => onSearchRow(row.id)}
-                >
-                  Search for resources
-                </Button>
-              </div>
-
-              {/* CC17: the resource <ul>, per-resource Insert/Remove, and the
-                  retry-links error live in DiscussionReplyResources.tsx now.
-                  Every callback below is a stable useCallback from this row. */}
+              {/* CC17/RC6: the search-terms chip row, the "Search for
+                  resources" button, the resource <ul>, per-resource
+                  Insert/Remove, and the retry-links error all live in
+                  DiscussionReplyResources.tsx now. Every callback below is a
+                  stable useCallback from this row. */}
               <DiscussionReplyResources
                 authorName={row.author}
                 resourceState={row.resourceState}
                 resourceError={row.resourceError}
                 resources={row.resources}
+                concepts={row.concepts}
+                resourceQuery={row.resourceQuery}
+                resourceQuerySource={row.resourceQuerySource}
+                onSearch={handleSearchResources}
                 onRetryResources={handleRetryResources}
                 onInsertResource={handleInsertResource}
                 onRemoveResource={handleRemoveResource}

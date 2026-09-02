@@ -520,4 +520,123 @@ describe("draftDiscussionRepliesAction", () => {
       expect(call[5]).toBe(short);
     });
   });
+
+  // docs/reply-resource-concepts-acceptance-criteria.md RC1/RC2/RC2b/RC2c:
+  // the model's optional per-reply "concepts" array is parsed
+  // (parseReplyConcepts), then any term that redacts to no letters under
+  // that post's OWN author is dropped, before the result is threaded onto
+  // the reply - `concepts` is emitted only when non-empty (absent stays
+  // absent, mirroring `postedAt` - see the two verbatim `toEqual` assertions
+  // at :253/:294 above, which are left untouched by this group precisely
+  // because they pin that absent-stays-absent shape).
+  describe("concepts (docs/reply-resource-concepts-acceptance-criteria.md RC1/RC2/RC2b/RC2c)", () => {
+    it("a reply with concepts round-trips them onto the returned reply", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([
+          { post: 1, reply: "Reply to Priya.", concepts: ["utilitarianism", "moral luck"] },
+        ]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([posts[0]], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect(result).toEqual({
+        replies: [{ id: "row-a", reply: "Reply to Priya.", concepts: ["utilitarianism", "moral luck"] }],
+      });
+    });
+
+    it("RC2c: a term equal to the post's own author name is dropped", async () => {
+      const post = { id: "row-x", author: "Isaac Newton", text: "A post about gravity." };
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ post: 1, reply: "A reply.", concepts: ["Isaac Newton", "gravity"] }]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([post], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect(result).toEqual({ replies: [{ id: "row-x", reply: "A reply.", concepts: ["gravity"] }] });
+    });
+
+    it("RC2c: a term containing only the author's name plus punctuation is dropped (no letters survive redaction)", async () => {
+      const post = { id: "row-x", author: "Isaac Newton", text: "A post about gravity." };
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ post: 1, reply: "A reply.", concepts: ["Isaac Newton.", "orbital mechanics"] }]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([post], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect(result).toEqual({ replies: [{ id: "row-x", reply: "A reply.", concepts: ["orbital mechanics"] }] });
+    });
+
+    it("RC2c: a mangled-but-lettered term is KEPT exactly as the model wrote it - redaction happens at search time, not here", async () => {
+      const post = { id: "row-x", author: "Isaac Newton", text: "A post about physics." };
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ post: 1, reply: "A reply.", concepts: ["Newton's laws"] }]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([post], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      // "Newton's laws" redacts to "'s laws" (still has letters), so this
+      // term survives the RC2c filter - but is stored UNREDACTED, as the
+      // model actually wrote it. The full-redaction pass over a SURVIVING
+      // term happens later, at search time (resourceQueryForRow, group B),
+      // never here.
+      expect(result).toEqual({ replies: [{ id: "row-x", reply: "A reply.", concepts: ["Newton's laws"] }] });
+    });
+
+    it("RC2/RC2c worked example: the cap applies AFTER the author-name drop, not before - [\"Isaac Newton\", \"a\", \"b\", \"c\"] yields [\"a\", \"b\", \"c\"]", async () => {
+      const post = { id: "row-x", author: "Isaac Newton", text: "A post about gravity." };
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ post: 1, reply: "A reply.", concepts: ["Isaac Newton", "a", "b", "c"] }]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([post], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      // If the cap were applied BEFORE the author-name drop (inside
+      // parseReplyConcepts's own default cap of 3), "c" would already be
+      // gone and this would come back ["a", "b"] instead.
+      expect(result).toEqual({ replies: [{ id: "row-x", reply: "A reply.", concepts: ["a", "b", "c"] }] });
+    });
+
+    it("emits no concepts key when every term is dropped (author-only concepts)", async () => {
+      const post = { id: "row-x", author: "Isaac Newton", text: "A post about gravity." };
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ post: 1, reply: "A reply.", concepts: ["Isaac Newton"] }]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([post], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect(result).toEqual({ replies: [{ id: "row-x", reply: "A reply." }] });
+      if ("replies" in result) {
+        expect("concepts" in result.replies[0]).toBe(false);
+      }
+    });
+
+    it("no concepts field at all from the model leaves the reply exactly as before (absent stays absent)", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ post: 1, reply: "A reply with no concepts." }]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([posts[0]], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect(result).toEqual({ replies: [{ id: "row-a", reply: "A reply with no concepts." }] });
+    });
+
+    it("also applies through the positional fallback path (no usable post index, right-length array)", async () => {
+      const post = { id: "row-x", author: "Isaac Newton", text: "A post about gravity." };
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ reply: "A reply.", concepts: ["Isaac Newton", "gravity"] }]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([post], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect(result).toEqual({ replies: [{ id: "row-x", reply: "A reply.", concepts: ["gravity"] }] });
+    });
+  });
 });

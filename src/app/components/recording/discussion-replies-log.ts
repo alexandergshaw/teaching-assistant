@@ -51,6 +51,10 @@
 
 import { resolveDraftParent, type ReplyRow, type ReplyRowState } from "./discussion-capture";
 import { escapeCsvValue } from "@/lib/course-tasks-view-csv";
+// F7 fix (fixer pass, RC4/RC7): the "; " concepts joiner is owned by
+// discussion-serialization.ts, not restated here - see that file's own
+// comment on `CONCEPT_JOINER`.
+import { CONCEPT_JOINER } from "./discussion-serialization";
 
 // ---------------------------------------------------------------------------
 // Event-stream records. Each carries the ISO 8601 timestamp of the event -
@@ -162,7 +166,13 @@ export interface DiscussionRepliesLogRetry {
  * instructor, so the log does not invent a distinction the UI does not
  * make). `parentResolved` is answered by `resolveDraftParent` - see this
  * file's header for why that is a call, never a re-derivation. `error` and
- * `resourceError` are the verbatim stored messages, `""` when unset. */
+ * `resourceError` are the verbatim stored messages, `""` when unset.
+ * `concepts`/`resourceQuery`/`resourceQuerySource`
+ * (docs/reply-resource-concepts-acceptance-criteria.md RC7) are the row's own
+ * search provenance - `[]`/`""`/`""` when absent, the same discipline every
+ * other optional field on this entry already follows, so the instructor can
+ * tell "terms were used and then cleared by an edit" from "no terms existed"
+ * by reading `resourceQuerySource` against an empty `concepts` column. */
 export interface DiscussionRepliesLogRowEntry {
   rowId: string;
   author: string;
@@ -175,6 +185,9 @@ export interface DiscussionRepliesLogRowEntry {
   error: string;
   resourceState: "idle" | "searching" | "done" | "failed" | "";
   resourceError: string;
+  concepts: string[];
+  resourceQuery: string;
+  resourceQuerySource: string;
 }
 
 /** What `useDiscussionReplies.ts` collects, before the `rows` snapshot is
@@ -232,6 +245,9 @@ export function buildDiscussionRepliesLogRowEntry(
     error: row.error ?? "",
     resourceState: row.resourceState ?? "",
     resourceError: row.resourceError ?? "",
+    concepts: row.concepts ?? [],
+    resourceQuery: row.resourceQuery ?? "",
+    resourceQuerySource: row.resourceQuerySource ?? "",
   };
 }
 
@@ -418,6 +434,9 @@ const ROW_CSV_HEADER = [
   "Error",
   "Resource state",
   "Resource error",
+  "Search terms",
+  "Resource search text",
+  "Resource search source",
 ];
 
 function csvRow(values: readonly string[]): string {
@@ -492,6 +511,9 @@ export function formatDiscussionRepliesLogCsv(log: DiscussionRepliesRunLog): str
         row.error,
         row.resourceState,
         row.resourceError,
+        row.concepts.join(CONCEPT_JOINER),
+        row.resourceQuery,
+        row.resourceQuerySource,
       ])
     );
   }

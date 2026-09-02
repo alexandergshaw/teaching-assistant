@@ -408,7 +408,7 @@ export type DraftDiscussionRepliesAction = (
   composition: ReplyCompositionSettings,
   provider: LlmProvider,
   knowledgeContext?: string
-) => Promise<{ replies: Array<{ id: string; reply: string }> } | { error: string }>;
+) => Promise<{ replies: Array<{ id: string; reply: string; concepts?: string[] }> } | { error: string }>;
 
 // T6a's budget figure (docs/discussion-thread-structure-acceptance-criteria.md
 // section 6): "worst case is 5 x 600 characters, about 3.5% input growth."
@@ -664,7 +664,13 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
       if (editedDuringDispatchSet.has(reply.id)) {
         resolveEditedDuringDispatch(reply.id);
       } else {
-        rowsApiRef.current.applyReply(reply.id, reply.reply);
+        // RC2b/RC3 (docs/reply-resource-concepts-acceptance-criteria.md):
+        // `reply.concepts ?? []` - `[]` when the model returned none this
+        // time means "clear", not "leave alone"; the re-apply call on the
+        // discard path above (`resolveEditedDuringDispatch`) stays
+        // three-argument, since it is re-applying the user's OWN text, not
+        // a model-authored reply with concepts of its own.
+        rowsApiRef.current.applyReply(reply.id, reply.reply, false, reply.concepts ?? []);
         // R6: the ONE trigger point - enqueue a resource search only
         // after a model-authored reply lands. Never on the discard path
         // above, which re-applies the user's own text and searched

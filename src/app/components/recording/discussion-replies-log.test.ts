@@ -68,6 +68,9 @@ describe("buildDiscussionRepliesLogRowEntry", () => {
       error: "",
       resourceState: "",
       resourceError: "",
+      concepts: [],
+      resourceQuery: "",
+      resourceQuerySource: "",
     });
   });
 
@@ -378,6 +381,16 @@ describe("formatDiscussionRepliesLogCsv", () => {
         threadPosition: "reply",
         replyingToAuthor: "Ana",
       }),
+      // RC7: the fallback signature - a search ran with NO terms (concepts
+      // absent) and the log shows the prose it fell back to instead, plus
+      // which base ("post") that prose came from.
+      row({
+        id: "r3",
+        author: "Cy",
+        state: "ready",
+        resourceQuery: "the original post text used as fallback",
+        resourceQuerySource: "post",
+      }),
     ];
     const log = buildDiscussionRepliesRunLog(
       emptyInput({
@@ -436,9 +449,10 @@ describe("formatDiscussionRepliesLogCsv", () => {
       "2026-08-31T09:03:00.000Z,r2",
       "",
       "=== Rows ===",
-      "Row ID,Author,Thread position,Replying to,Parent resolved,Draft state,User edited,Retried,Error,Resource state,Resource error",
-      "r1,Ana,root,,No,ready,No,No,,,",
-      'r2,"Bob, Jr.",reply,Ana,Yes,failed,No,Yes,"429 Too Many Requests, retry later",,',
+      "Row ID,Author,Thread position,Replying to,Parent resolved,Draft state,User edited,Retried,Error,Resource state,Resource error,Search terms,Resource search text,Resource search source",
+      "r1,Ana,root,,No,ready,No,No,,,,,,",
+      'r2,"Bob, Jr.",reply,Ana,Yes,failed,No,Yes,"429 Too Many Requests, retry later",,,,,',
+      "r3,Cy,,,No,ready,No,No,,,,,the original post text used as fallback,post",
     ].join("\r\n");
     expect(csv).toBe(expected);
   });

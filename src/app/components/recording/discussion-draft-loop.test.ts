@@ -589,6 +589,89 @@ describe("runDraftLoop / 'Activate this recording from the Knowledge base' wirin
   });
 });
 
+// ---------------------------------------------------------------------------
+// docs/reply-resource-concepts-acceptance-criteria.md RC2b: the reply item's
+// optional `concepts` field must reach `applyReply`'s fourth argument
+// exactly - `reply.concepts ?? []`, so a reply the model returned WITH terms
+// passes them through, and a reply returned WITHOUT any (concepts absent,
+// not merely empty) passes `[]` (RC3's own "the model returned none this
+// time, clear" reading, not "leave alone"). Uses a dedicated harness (rather
+// than the shared `dispatchOneBatch`) because the shared fake's `applyReply`
+// stub discards its arguments and its `draftAction` never varies `concepts`
+// per reply.
+// ---------------------------------------------------------------------------
+
+describe("runDraftLoop / RC2b - applyReply's fourth argument mirrors the reply's concepts", () => {
+  it("passes the model's concepts through for a reply that has them, and [] for a reply that has none", async () => {
+    const a = makeRow({ id: "a", author: "Jordan Lee", post: "Post A." });
+    const b = makeRow({ id: "b", author: "Priya Shah", post: "Post B." });
+
+    const applyReplyCalls: Array<[string, string, boolean | undefined, readonly string[] | undefined]> = [];
+
+    const loopsActiveRef = { current: true };
+    const loopEpochRef = { current: 0 };
+    const draftQueueRef = {
+      current: [
+        { id: "a", force: false },
+        { id: "b", force: false },
+      ],
+    };
+    const rowsApiFake = {
+      rawRows: [a, b],
+      rows: [a, b],
+      markDrafting: () => {},
+      snapshotEditSeq: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
+      isUnchangedSince: () => true,
+      applyReply: (id: string, reply: string, userEdited?: boolean, concepts?: readonly string[]) => {
+        applyReplyCalls.push([id, reply, userEdited, concepts]);
+      },
+      markFailed: () => {},
+    } as unknown as UseReplyRowsReturn;
+    const rowsApiRef = { current: rowsApiFake };
+    const resourcesApiRef = { current: { enqueueResources: () => {} } as unknown as UseReplyResourcesReturn };
+    const audienceRef = { current: "students" as const };
+    const courseNameRef = { current: "Intro to Testing" };
+    const compositionRef = { current: DEFAULT_REPLY_COMPOSITION };
+    const knowledgeContextRef = { current: null };
+
+    // "a" comes back with concepts; "b" comes back without the field at all
+    // - the exact shape a lenient parse degrading to absent produces (RC2).
+    const draftAction: DraftDiscussionRepliesAction = async (posts) => ({
+      replies: posts.map((p) => ({
+        id: p.id,
+        reply: "Drafted reply text.",
+        ...(p.id === "a" ? { concepts: ["a", "b"] } : {}),
+      })),
+    });
+
+    const deps: RunDraftLoopDeps = {
+      loopsActiveRef,
+      loopEpochRef,
+      draftQueueRef,
+      setDraftQueueSize: () => {},
+      setDrafting: () => {},
+      waitForWake: async () => {
+        loopsActiveRef.current = false;
+      },
+      rowsApiRef,
+      resourcesApiRef,
+      audienceRef,
+      courseNameRef,
+      compositionRef,
+      knowledgeContextRef,
+      pushNotice: () => {},
+      draftAction,
+    };
+
+    await runDraftLoop(0, deps);
+
+    const callA = applyReplyCalls.find((c) => c[0] === "a");
+    const callB = applyReplyCalls.find((c) => c[0] === "b");
+    expect(callA?.[3]).toEqual(["a", "b"]);
+    expect(callB?.[3]).toEqual([]);
+  });
+});
+
 describe("FIX 2 - mergeIncoming's declared contract matches what mergeCapturedPosts accepts", () => {
   it("a literal typed as mergeIncoming's own declared parameter may carry threadPosition and replyingToAuthor, and both land on the merged row", () => {
     const incoming: Parameters<UseReplyRowsReturn["mergeIncoming"]>[0] = [

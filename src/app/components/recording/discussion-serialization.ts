@@ -92,6 +92,43 @@ export interface ReplyRow {
   // mergeLegacyReplyFlags below for the pure merge rule it uses.
   handledAt?: number; // ms epoch of the last successful "Copy reply" (or a manual mark) - D1
   skipped?: boolean; // "no reply needed" - D9. Reversible; never implies removeRow.
+  // docs/reply-resource-concepts-acceptance-criteria.md RC3: PERSISTED,
+  // absent-stays-absent like every optional field above. `concepts` are the
+  // one-to-three noun phrases the drafting model named for THIS generated
+  // reply (set by applyReply, cleared by a hand edit); `resourceQuery` is the
+  // exact text the LAST resource search sent and `resourceQuerySource`
+  // which base it came from - the row must be able to say whether its
+  // links were found with the terms it is showing, and a log built from
+  // live rows can only report what the row carries.
+  concepts?: string[];
+  resourceQuery?: string;
+  resourceQuerySource?: "concepts" | "post" | "post-reply";
+}
+
+const VALID_RESOURCE_QUERY_SOURCES: ReadonlySet<string> = new Set(["concepts", "post", "post-reply"]);
+
+// F7 fix (fixer pass, docs/reply-resource-concepts-acceptance-criteria.md
+// RC4/RC7): the "; " joiner used to be a literal repeated in three places -
+// useReplyResources.ts's `resourceQueryForRow` (building the search text
+// FROM `row.concepts`), discussion-replies-log.ts's CSV row (rendering
+// `concepts.join(...)`) and DiscussionReplyResources.tsx's `showStaleQuery`
+// predicate (a COMPARISON against `resourceQuery`, not a rendering). Because
+// the third use is a comparison, not output, a silent drift between the
+// three literals would not fail loudly - it would just make the stale-query
+// line permanently true (the joined text would never equal `resourceQuery`
+// again) or permanently false. One export, one owner, imported everywhere it
+// is used - this file already owns `concepts`' own type and coercion, so it
+// owns the one string that joins them too.
+export const CONCEPT_JOINER = "; ";
+
+/** RC3: shape-only coercion for a persisted `concepts` value - an array's
+ *  non-empty strings are kept; anything else, and an empty result (including
+ *  a persisted `[]`), is `undefined`. RC2's length and count rules are
+ *  applied when the model's answer is parsed, never re-applied on read. */
+export function coerceConcepts(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const kept = raw.filter((c): c is string => typeof c === "string" && c.trim().length > 0).map((c) => c.trim());
+  return kept.length > 0 ? kept : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +255,16 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
       const handledAt = typeof r.handledAt === "number" && Number.isFinite(r.handledAt) ? r.handledAt : undefined;
       const skipped = r.skipped === true ? true : undefined;
 
+      // RC3: the three resource-search provenance fields, same
+      // absent-stays-absent discipline; a present-but-invalid value falls
+      // back to undefined rather than a sentinel.
+      const concepts = coerceConcepts(r.concepts);
+      const resourceQuery = typeof r.resourceQuery === "string" && r.resourceQuery ? r.resourceQuery : undefined;
+      const resourceQuerySource =
+        typeof r.resourceQuerySource === "string" && VALID_RESOURCE_QUERY_SOURCES.has(r.resourceQuerySource)
+          ? (r.resourceQuerySource as NonNullable<ReplyRow["resourceQuerySource"]>)
+          : undefined;
+
       rows.push({
         id,
         author,
@@ -236,6 +283,9 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
         replyingToAuthor,
         handledAt,
         skipped,
+        concepts,
+        resourceQuery,
+        resourceQuerySource,
       });
     });
 

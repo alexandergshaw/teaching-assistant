@@ -3,6 +3,7 @@ import {
   normalizeAudience,
   buildPostExtractionPrompt,
   buildReplyDraftingPrompt,
+  parseReplyConcepts,
   EXTRACT_BATCH_SIZE,
   DRAFT_BATCH_SIZE,
   MAX_POST_CHARS,
@@ -359,10 +360,10 @@ describe("buildReplyDraftingPrompt", () => {
   // assertions below (the exact OFF name-line bullet, and this whole
   // prompt minus only the C3-i line).
   const BASELINE_STUDENTS_PROMPT =
-    "You are the instructor, replying to a student's post on your course discussion board. Be warm, specific and encouraging. Open by naming something the student actually said - quote or paraphrase their own words, not a generic compliment. Add one substantive thing: an idea they did not raise, a correction if something is wrong, or a concrete example from the field. End with a question that invites them to take it further. Never grade the post, never give or imply a score or a mark, never say whether it meets a requirement, and never promise or hint at a deadline change.\n\nWrite one reply to each post below.\n\nEVERY REPLY, BOTH REGISTERS\n\n- Write in the first person, as yourself.\n\n- 3 to 6 sentences. Plain prose.\n\n- No markdown, no headings, no bullet lists, no bold.\n\n- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.\n\n- No emoji.\n\n- Never state a fact about the course - a date, a policy, a reading, an assignment, a grade - that is not written in the posts shown to you here. If you need one, write around it.\n\n- Reply only to what that post says. Do not refer to the other posts below.\n\nTHE POSTS\n\nPOST 1\nWritten by: Priya\nFirst post text.\n\n---\n\nPOST 2\nWritten by: Marcus\nSecond post text.\n\n---\n\nPOST 3\nWritten by: Devon\nThird post text.\n\nOUTPUT\n\nReturn ONLY a JSON array with exactly 3 elements, and nothing else.\n\nEach element is {\"post\": <the POST number>, \"reply\": \"...\"} - the number, not the name.\n\nInclude every post number from 1 to 3, in order.\n\nWrite the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line (\"\\n\\n\"). No backticks.\n\nNo prose before or after the array. No code fences.";
+    "You are the instructor, replying to a student's post on your course discussion board. Be warm, specific and encouraging. Open by naming something the student actually said - quote or paraphrase their own words, not a generic compliment. Add one substantive thing: an idea they did not raise, a correction if something is wrong, or a concrete example from the field. End with a question that invites them to take it further. Never grade the post, never give or imply a score or a mark, never say whether it meets a requirement, and never promise or hint at a deadline change.\n\nWrite one reply to each post below.\n\nEVERY REPLY, BOTH REGISTERS\n\n- Write in the first person, as yourself.\n\n- 3 to 6 sentences. Plain prose.\n\n- No markdown, no headings, no bullet lists, no bold.\n\n- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.\n\n- No emoji.\n\n- Never state a fact about the course - a date, a policy, a reading, an assignment, a grade - that is not written in the posts shown to you here. If you need one, write around it.\n\n- Reply only to what that post says. Do not refer to the other posts below.\n\nTHE POSTS\n\nPOST 1\nWritten by: Priya\nFirst post text.\n\n---\n\nPOST 2\nWritten by: Marcus\nSecond post text.\n\n---\n\nPOST 3\nWritten by: Devon\nThird post text.\n\nOUTPUT\n\nReturn ONLY a JSON array with exactly 3 elements, and nothing else.\n\nEach element is {\"post\": <the POST number>, \"reply\": \"...\", \"concepts\": [\"...\", \"...\"]} - the number, not the name.\n\nInclude every post number from 1 to 3, in order.\n\n\"concepts\" is one to three short noun phrases (2 to 5 words each) naming the ideas that reply discusses, copied from the reply's own wording. Never a person's name, never an idea the reply does not mention. It does not count toward the element count above.\n\nWrite the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line (\"\\n\\n\"). No backticks.\n\nNo prose before or after the array. No code fences.";
 
   const BASELINE_PEERS_PROMPT =
-    "You are replying to a fellow educator's post in a professional community of practice. Address them as an equal. They are not your student and you are not assessing them. Do not open with praise and do not explain the underlying concepts back to them - assume they know the field as well as you do. Engage with the substance directly: extend their argument, add your own experience of it, or put a concrete counterpoint to them. It is fine to disagree, and fine to say the thing you are unsure about.\n\nWrite one reply to each post below.\n\nEVERY REPLY, BOTH REGISTERS\n\n- Write in the first person, as yourself.\n\n- 3 to 6 sentences. Plain prose.\n\n- No markdown, no headings, no bullet lists, no bold.\n\n- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.\n\n- No emoji.\n\n- Never state a fact about the course - a date, a policy, a reading, an assignment, a grade - that is not written in the posts shown to you here. If you need one, write around it.\n\n- Reply only to what that post says. Do not refer to the other posts below.\n\nTHE POSTS\n\nPOST 1\nWritten by: Priya\nFirst post text.\n\n---\n\nPOST 2\nWritten by: Marcus\nSecond post text.\n\n---\n\nPOST 3\nWritten by: Devon\nThird post text.\n\nOUTPUT\n\nReturn ONLY a JSON array with exactly 3 elements, and nothing else.\n\nEach element is {\"post\": <the POST number>, \"reply\": \"...\"} - the number, not the name.\n\nInclude every post number from 1 to 3, in order.\n\nWrite the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line (\"\\n\\n\"). No backticks.\n\nNo prose before or after the array. No code fences.";
+    "You are replying to a fellow educator's post in a professional community of practice. Address them as an equal. They are not your student and you are not assessing them. Do not open with praise and do not explain the underlying concepts back to them - assume they know the field as well as you do. Engage with the substance directly: extend their argument, add your own experience of it, or put a concrete counterpoint to them. It is fine to disagree, and fine to say the thing you are unsure about.\n\nWrite one reply to each post below.\n\nEVERY REPLY, BOTH REGISTERS\n\n- Write in the first person, as yourself.\n\n- 3 to 6 sentences. Plain prose.\n\n- No markdown, no headings, no bullet lists, no bold.\n\n- No greeting line and no sign-off. Do not open with the person's name. The reply is pasted into a box that already shows who is speaking and who is being answered.\n\n- No emoji.\n\n- Never state a fact about the course - a date, a policy, a reading, an assignment, a grade - that is not written in the posts shown to you here. If you need one, write around it.\n\n- Reply only to what that post says. Do not refer to the other posts below.\n\nTHE POSTS\n\nPOST 1\nWritten by: Priya\nFirst post text.\n\n---\n\nPOST 2\nWritten by: Marcus\nSecond post text.\n\n---\n\nPOST 3\nWritten by: Devon\nThird post text.\n\nOUTPUT\n\nReturn ONLY a JSON array with exactly 3 elements, and nothing else.\n\nEach element is {\"post\": <the POST number>, \"reply\": \"...\", \"concepts\": [\"...\", \"...\"]} - the number, not the name.\n\nInclude every post number from 1 to 3, in order.\n\n\"concepts\" is one to three short noun phrases (2 to 5 words each) naming the ideas that reply discusses, copied from the reply's own wording. Never a person's name, never an idea the reply does not mention. It does not count toward the element count above.\n\nWrite the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line (\"\\n\\n\"). No backticks.\n\nNo prose before or after the array. No code fences.";
 
   // The exact OFF-branch name-line bullet, byte-for-byte, as it read before
   // this group (C1a "toggle OFF: today's line, byte-identical"). This is
@@ -385,6 +386,32 @@ describe("buildReplyDraftingPrompt", () => {
       const peers = buildReplyDraftingPrompt(posts, "peers", "", "", LEGACY_COMPOSITION);
       expect(students).toBe(BASELINE_STUDENTS_PROMPT);
       expect(peers).toBe(BASELINE_PEERS_PROMPT);
+    });
+
+    // docs/reply-resource-concepts-acceptance-criteria.md RC1, section 1b's
+    // first table row: pins the FACT and the ORDERING of the new "concepts"
+    // output-contract addition, independent of the frozen byte-for-byte
+    // baseline above - a sabotage that reorders these two lines, or that
+    // names "concepts" before "reply" on the element-shape line, is caught
+    // here even if a future baseline-wording tweak makes the toBe() above
+    // moot.
+    it("RC1: the element-shape line names \"concepts\" after \"reply\", and the concepts sentence immediately follows the post-number-range line", () => {
+      const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+      const elementShapeIdx = prompt.indexOf("Each element is");
+      const replyIdx = prompt.indexOf('"reply"', elementShapeIdx);
+      const conceptsInShapeIdx = prompt.indexOf('"concepts"', elementShapeIdx);
+      expect(elementShapeIdx).toBeGreaterThanOrEqual(0);
+      expect(replyIdx).toBeGreaterThan(elementShapeIdx);
+      expect(conceptsInShapeIdx).toBeGreaterThan(replyIdx);
+
+      const includeLineIdx = prompt.indexOf("Include every post number");
+      const conceptsSentenceIdx = prompt.indexOf('"concepts" is one to three', includeLineIdx);
+      expect(includeLineIdx).toBeGreaterThan(elementShapeIdx);
+      expect(conceptsSentenceIdx).toBeGreaterThan(includeLineIdx);
+      // "Immediately follows" - only a blank-line join sits between the two
+      // lines, no other sentence in between.
+      const between = prompt.slice(includeLineIdx, conceptsSentenceIdx);
+      expect(between.split("\n\n")).toHaveLength(2);
     });
 
     describe("C1a: address-by-name toggle", () => {
@@ -725,5 +752,91 @@ describe("buildReplyDraftingPrompt", () => {
       expect(prompt).toContain("CONTEXT ONLY - DO NOT REPLY TO THIS");
       expect(prompt).toContain("Selected page: Policy");
     });
+  });
+});
+
+// docs/reply-resource-concepts-acceptance-criteria.md RC2: parses whatever
+// shape the model returned for a reply's "concepts" field, lenient by
+// design, degrading to [] for anything unrecognised. Dependency-free (this
+// file's own :3-4 import rule).
+describe("parseReplyConcepts", () => {
+  it("accepts an array of strings", () => {
+    expect(parseReplyConcepts(["utilitarianism", "moral luck"])).toEqual(["utilitarianism", "moral luck"]);
+  });
+
+  it("accepts an array of { concept: string } objects", () => {
+    expect(parseReplyConcepts([{ concept: "utilitarianism" }, { concept: "moral luck" }])).toEqual([
+      "utilitarianism",
+      "moral luck",
+    ]);
+  });
+
+  it("accepts a single string split on ';' or ','", () => {
+    expect(parseReplyConcepts("utilitarianism; moral luck")).toEqual(["utilitarianism", "moral luck"]);
+    expect(parseReplyConcepts("utilitarianism, moral luck")).toEqual(["utilitarianism", "moral luck"]);
+  });
+
+  it("trims each term", () => {
+    expect(parseReplyConcepts(["  utilitarianism  ", " moral luck "])).toEqual(["utilitarianism", "moral luck"]);
+  });
+
+  // F3a (fixer pass): a term with a double space (or a stray newline/tab)
+  // must collapse to the SAME string deriveResourceConcept would produce for
+  // it, so resourceQueryForRow's `concepts.join("; ")` matches
+  // DiscussionReplyResources.tsx's third explanatory line's comparison for
+  // the CURRENT search, not just after a real edit.
+  it("collapses internal whitespace within a term, not only leading/trailing", () => {
+    expect(parseReplyConcepts(["moral  luck", "utilitarianism\tand\nconsequences"])).toEqual([
+      "moral luck",
+      "utilitarianism and consequences",
+    ]);
+  });
+
+  it("drops empty terms rather than keeping a blank entry", () => {
+    expect(parseReplyConcepts(["utilitarianism", "", "   ", "moral luck"])).toEqual(["utilitarianism", "moral luck"]);
+  });
+
+  it("drops (never truncates) a term over 60 characters", () => {
+    const tooLong = "a".repeat(61);
+    const ok = "a".repeat(60);
+    expect(parseReplyConcepts([tooLong, ok])).toEqual([ok]);
+    // Never truncated to a 60-char prefix of the dropped term.
+    expect(parseReplyConcepts([tooLong])).not.toContain(tooLong.slice(0, 60));
+  });
+
+  it("dedupes case-insensitively, keeping the FIRST spelling seen", () => {
+    expect(parseReplyConcepts(["Moral Luck", "moral luck", "MORAL LUCK"])).toEqual(["Moral Luck"]);
+  });
+
+  it("caps the result at 3 terms by default", () => {
+    expect(parseReplyConcepts(["a", "b", "c", "d"])).toEqual(["a", "b", "c"]);
+  });
+
+  it("caps at 3 AFTER deduping, not before (so a duplicate does not steal a cap slot)", () => {
+    expect(parseReplyConcepts(["a", "a", "b", "c", "d"])).toEqual(["a", "b", "c"]);
+  });
+
+  // The coordinator's resolution of the RC2/RC2c cap-ordering ambiguity:
+  // `max` is a parameter (default 3), not a baked-in constant, so a caller
+  // (discussion-replies.ts's withConcepts) can ask for a generous cushion
+  // and apply the real 3-cap itself AFTER its own further drop.
+  it("max is a parameter - passing 6 keeps up to 6 terms rather than the default 3", () => {
+    expect(parseReplyConcepts(["a", "b", "c", "d"], 6)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("returns [] for null, a number, a plain object, and a nested array", () => {
+    expect(parseReplyConcepts(null)).toEqual([]);
+    expect(parseReplyConcepts(42)).toEqual([]);
+    expect(parseReplyConcepts({})).toEqual([]);
+    expect(parseReplyConcepts([["nested"]])).toEqual([]);
+    expect(parseReplyConcepts(undefined)).toEqual([]);
+  });
+
+  it("the data pass's table: [1, null, [\"x\"], {}] - non-string, non-object-with-concept entries drop out, leaving only the one usable term", () => {
+    expect(parseReplyConcepts([1, null, ["x"], {}])).toEqual([]);
+  });
+
+  it("the data pass's table: [{ concept: 5 }, { name: \"x\" }] - a non-string concept field and a wrongly-named field both drop out", () => {
+    expect(parseReplyConcepts([{ concept: 5 }, { name: "x" }])).toEqual([]);
   });
 });

@@ -85,10 +85,18 @@ function authorTokens(author: string): string[] {
  *
  * Deliberately NOT grammar-preserving: this text is only ever a SEARCH
  * CONCEPT, immediately re-normalized (see `redactAuthorNameFromPost` below
- * and `deriveRowSearchConcept` in useReplyResources.ts), never shown to
- * anyone, so a leftover stray comma or double space where a name used to sit
- * is harmless - the one guarantee that matters is that no derived name form
- * survives, which is exactly what this function's own test pins.
+ * and `resourceQueryForRow` in useReplyResources.ts). F5 fix (fixer pass):
+ * despite the name, this is no longer true that the redacted text is never
+ * shown to anyone - docs/reply-resource-concepts-acceptance-criteria.md RC6's
+ * third explanatory line (DiscussionReplyResources.tsx, "Links below came
+ * from a search for: ...") and RC7's "Resource search text" CSV/JSON column
+ * (discussion-replies-log.ts) both display `resourceQuery`, which can be this
+ * function's own redacted, re-normalized output. A leftover stray comma or
+ * double space where a name used to sit is still harmless there - the one
+ * guarantee that matters is that no derived name form survives, which is
+ * exactly what this function's own test pins - but it is no longer
+ * invisible, so a leftover artifact is now a (harmless) thing an instructor
+ * can actually see.
  *
  * Pure; never throws; empty/whitespace author yields no names to strip and
  * returns `text` collapsed only by the trailing whitespace/punctuation
@@ -122,7 +130,7 @@ export function redactAuthorNameFromText(text: string, author: string): string {
 
 /**
  * BLOCKER 3: the bulk path's own redact-then-normalize step, mirroring
- * `deriveRowSearchConcept`'s shape (useReplyResources.ts) but for the
+ * `resourceQueryForRow`'s shape (useReplyResources.ts, RC4) but for the
  * bulk/automatic pass, which is handed only `{ id, text: r.post }` per row
  * (no reply half to combine - the bulk pass never drafts before searching).
  * `author` is optional because some callers historically had no author field

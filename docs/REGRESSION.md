@@ -889,6 +889,48 @@ change from a coincidence.
     `VideoModeSection.tsx:152` "Remove audio" never calls a setter and no
     test notices.
 
+### 2026-09-02 - Discussion reply resource search (query construction), before the concept-terms change
+
+Baseline for `docs/reply-resource-concepts-acceptance-criteria.md`, taken at
+ef73094 from a code-path survey and a measured data pass (numbers cited in
+that document's section 0).
+
+1. **Two entry points, two queries.** The automatic search after a draft
+   lands (`discussion-draft-loop.ts:667-682` -> `enqueueResources`) drains
+   rows five at a time and sends `text: r.post` - the student's POST only;
+   the generated reply is never read. The per-row "Search for resources"
+   button (`DiscussionReplyRow.tsx:887-898` -> `searchRow`) sends post +
+   " " + reply, redacted of the author's name and truncated at 400
+   characters on a word boundary. A six-sentence reply already overruns the
+   cap (measured 609 -> 396 chars).
+2. **The "concept" is prose.** The action (`actions/discussion-replies.ts:
+   484-517`) redacts each text and forwards it as ONE concept to
+   `findResourceLinksForConceptsAction`, which caps concepts per run at 6
+   and runs a grounded research call plus a structuring call per concept.
+   A 30-row table is 6 action calls and 30 + 30 model calls. Nothing
+   extracts terms; the drafting prompt's output contract is
+   `{"post", "reply"}` only.
+3. **The parser drops unknown keys at the rebuild, not at parse.**
+   `parseLenientJsonArray` preserves any key; `discussion-replies.ts:335`
+   and `:341-343` rebuild `{ id, reply }`.
+4. **Row shape.** `ReplyRow` has no concept or query field; the serializer
+   spreads the row, the deserializer builds an explicit object (so a new
+   field must be added there); `DISCUSSION_TABLE_VERSION = 1` is pinned by
+   three tests and a bump would discard every user's table.
+5. **Redaction on a term string** empties a term that IS the author's name
+   and mangles one that CONTAINS it ("free will" under Will Smith -> "free
+   "). Today an empty per-row query is a silent no-op in `searchRow`; an
+   empty drain entry is dropped server-side and returns as `done` with zero
+   links - two silent outcomes.
+6. **The run log** carries `resourceState`/`resourceError` per row and no
+   query text; it is built from live rows, so anything to be logged must be
+   on the row.
+7. **What is NOT tested.** No test renders the row. The five
+   `deriveRowSearchConcept` tests pin the manual-path join and redaction;
+   `discussion-replies-resources.test.ts` pins the action call shape with a
+   literal concept; the prompt test freezes the whole prompt byte-for-byte;
+   the log test freezes the CSV header and two rows; the serialization test
+   freezes one oracle with no new fields.
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -38441,3 +38483,120 @@ mojibake, LF everywhere except this file.
 - Section 7's follow-ups stand: SpeedPanel's duplicated picker, a persisted
   copied state for grading rows, copy-then-advance, a two-click Record, undo
   instead of confirm.
+## 391. The resource search never read the reply it was searching for, and the row now says what its links were found with
+
+Request: "the resources that are sought out for the replies should focus on
+one or more of the concept terms in the reply that was generated." One
+survey, an AC through two adversarial checks and four pre-code passes, one
+orchestrator type change, three implementers on disjoint file sets, an Opus
+verification folding steps 8/9b/10a/10bb, a regression pass, one fix wave.
+
+### The defect was upstream of the words
+
+The automatic search that runs after every draft lands sent the student's
+POST as the concept and never read the generated reply
+(`useReplyResources.ts` drain mapper, `text: r.post`). Only the per-row
+button searched post + reply, as prose, truncated at 400 characters - a
+six-sentence reply already lost its last third (measured 609 -> 396). So
+"focus on the concept terms in the reply" was not a tuning ask; the reply
+was not in the query at all.
+
+### What shipped
+
+The drafting prompt's output contract gains `"concepts": [...]` - one to
+three noun phrases copied from the reply's own wording, never a person's
+name, parsed leniently (`parseReplyConcepts(raw, max)`: arrays of strings,
+`{concept}` objects, or a single string split on `;`/`,`; whitespace
+collapsed, empties and over-60-character terms dropped, case-insensitive
+dedupe, cap applied LAST). The action parses with a cap of six, drops any
+term the author-name redaction would leave with no letters, then caps at
+three - the ordering that keeps a name term from consuming a slot. Concepts
+land on the row through `applyReply`'s fourth argument (`[]` clears,
+`undefined` leaves alone), a hand edit clears them, a Redraft refreshes
+them. ONE function, `resourceQueryForRow(row, mode)`, now decides both
+paths' query: the `"; "`-joined terms, redacted, or the mode's prose base
+when the terms redact to no letters; it returns the text AND its source
+(`concepts` / `post` / `post-reply`), which `markResourceSearching` writes
+onto the row so a log built from live rows can say what the last search
+used. The row shows a "Search terms:" chip row (neutral badges, hidden
+", " separators, a hidden hint sentence last in the reading flow) and one
+of three mutually exclusive explanatory lines: terms cleared by an edit; a
+search that drew no terms from the reply; links found with different text
+than the terms now shown. The run log gains "Search terms", "Resource
+search text" and "Resource search source". Call counts are unchanged: one
+grounded call per row, 30 per 30-row table; per-term fan-out was rejected
+because five rows times three terms exceeds the six-concept cap and the
+excess is sliced silently. Cost: ~55 input tokens per drafting call, under
+100 output tokens per five-row batch.
+
+### Found by reading, not by any gate
+
+- **The parser capped before the action could drop a name**, so a fourth
+  candidate was lost; group A flagged it rather than guessing, and the cap
+  became a parameter.
+- **A row could not say whether its last search used terms**: after a hand
+  edit, two explanatory lines would have fired together and one would have
+  been false. A third persisted field, the search's source, made the lines
+  exclusive by construction.
+- **The whole automatic path could be unwired with the suite green** (no
+  hook renders; the pure-function tests call `resourceQueryForRow`
+  directly). Source-reading guards now pin the drain's `"auto"` call, the
+  map into `markResourceSearching`, and `applyReply`'s concepts write.
+- Whitespace: the parser trimmed while the query normaliser collapsed
+  internal spaces, so a term with a double space would have lit the
+  "different search" line on the current search.
+- `useReplyRows.ts` was at 940 lines; the seven resource mutators, their
+  freshness check and the two debounce constants moved into
+  `useReplyRowResourceMutators.ts`, constants moving WITH the leaf (the
+  recorded cycle trap), `isResourceBatchFresh` re-exported so the existing
+  test import survives.
+
+### Decisions worth re-reading
+
+- Structured output from the existing drafting call, never a second LLM
+  call: the drafting lane is serialised and already starves frame
+  extraction.
+- A hand edit CLEARS the terms. The chips claim provenance from the drafted
+  reply; after an edit that reply no longer exists, and the fallback becomes
+  visible in the log instead of a chip lying.
+- Chips are read-only. The cheapest honest edit affordance, if asked, is a
+  per-row "Search terms" text field pre-filled from the concepts, not
+  editable chips.
+- A term that CONTAINS the author's name is shown as the model wrote it but
+  searched redacted (the row header already prints the author); a term that
+  IS the name never reaches the row. `discussion-reply-redact.ts`'s comment
+  now names the two surfaces that display the redacted text.
+- `CONCEPT_JOINER` is exported once; a comparison against a drifted joiner
+  literal would have turned the third line permanently on.
+
+### Gates
+
+`tsc --noEmit` 0 errors. `eslint` clean on every touched file. `vitest`
+**846 files / 17032 tests**, all passing;
+`DISCUSSION_TABLE_VERSION` still 1; the recording key inventory still 62;
+the frozen serialization oracle byte-identical; the resource-action,
+bulk-redaction and learning-resource-links tests untouched and green.
+`next build` compiled successfully (prerender tail fails locally as
+documented). Sabotage checks: the loop's fourth argument, the drain's mode,
+the redaction inside the query function, the action emitting `concepts: []`,
+the name drop, the drop-then-cap worked example, the cleared-by-edit gate -
+each red with the mutation present, restored green. Line counts:
+`DiscussionReplyRow.tsx` 913, `useReplyRows.ts` 878, new leaf 240.
+
+### Limits
+
+- No component renders: the chip row, the hidden separators, the three
+  lines and the moved button are verified by reading.
+- **Whether the model emits `concepts` at all was never observed.** RC2's
+  degradation reverts to the post-only search silently on screen; the
+  "Resource search source" column and the "no terms were drawn" line are
+  the only instruments, and neither has run against a real model here.
+- The research prompt still reads "studying one concept. CONCEPT: a; b"
+  for a joined string; the grounded model's handling of a compound topic
+  was not measured.
+- No live-region announcement when links land (pre-existing); threading
+  `announce` into the resources hook crosses `useDiscussionReplies.ts` and
+  is a follow-up, as is deduplicating identical concept strings within a
+  batch, and a blank manual query remaining a silent no-op.
+- A peer's name inside a term is not redacted (only the row's author is) -
+  unchanged from the prose path.

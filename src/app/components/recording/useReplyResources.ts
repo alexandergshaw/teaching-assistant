@@ -29,6 +29,10 @@
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { RESOURCE_BATCH_SIZE, type ReplyRow } from "./discussion-capture";
+// F7 fix (fixer pass): the "; " concepts joiner is owned by
+// discussion-serialization.ts (the leaf that owns `concepts`' own type), not
+// restated here - see that file's own comment on `CONCEPT_JOINER`.
+import { CONCEPT_JOINER } from "./discussion-serialization";
 import type { UseReplyRowsReturn } from "./useReplyRows";
 import { gatherReplyResourcesAction } from "@/app/actions/discussion-replies";
 import { getStoredProvider } from "@/lib/llm-provider";
@@ -133,26 +137,49 @@ export function resourceQueueProgressText(queueSize: number, laneBusy: boolean):
 // from this module keep working.
 export { redactAuthorNameFromText };
 
+// docs/reply-resource-concepts-acceptance-criteria.md RC4: whether a
+// redacted string has any letters left in it at all - the test a
+// concepts-derived query must pass before it is trusted over the prose
+// fallback. A term that IS the author's name (or that redacts down to pure
+// punctuation, e.g. "Newton's" -> "'s") must not be sent to the search as a
+// "concept" with nothing left to search for.
+function hasLetters(text: string): boolean {
+  return /\p{L}/u.test(text);
+}
+
 /**
- * The per-row targeted search's own concept, distinct from the bulk pass's
- * `{ id: r.id, text: r.post, author: r.author }` (post only, redacted
- * server-side since BLOCKER 3 - see discussion-reply-redact.ts) - the ask is
- * "search for resources specific to that reply and its original message", so
- * this combines BOTH, redacts the combined text HERE (client-side, before
- * the request is even sent - see redactAuthorNameFromText's own doc comment
- * for why the post half needs its own redaction pass independent of the
- * reply half), and only then hands the result to `deriveResourceConcept` for
- * the same normalize/truncate rule the bulk pass already applies - one
- * truncation rule, not two. "" (nothing to search for) when post and reply
- * are both empty/whitespace-only; a caller must treat "" as "do not dispatch
- * a search" the same way the bulk pass's own empty-concept entries are
- * dropped before ever reaching the network (gatherReplyResourcesAction's own
- * `entries.length === 0` branch).
+ * RC4: the ONE function that decides what text a resource search sends,
+ * used by both the automatic drain (mode "auto", after a draft lands) and
+ * the per-row targeted search (mode "manual", the "Search for resources"
+ * button) - previously these disagreed (the drain sent `post` only; the
+ * button sent `deriveRowSearchConcept`'s post+reply, now deleted). Prefers
+ * `row.concepts` (source "concepts") - the noun phrases the drafting model
+ * named for this reply - joined with "; ", redacted, then normalized the
+ * same way the bulk pass always has via `deriveResourceConcept`. When
+ * `concepts` is absent/empty, OR the concepts-derived text redacts to no
+ * letters at all (every term either the author's own name, or a mangled
+ * remnant of it), this falls back to the PROSE base for `mode`: the post
+ * alone for `"auto"` (source `"post"`, today's drain rule, unchanged) or
+ * post + " " + reply for `"manual"` (source `"post-reply"`, the rule
+ * `deriveRowSearchConcept` used to apply) - redacted and normalized the
+ * same way. `text` is `""` only when the prose fallback is itself blank
+ * (nothing anywhere to search for); a caller must treat `""` as "do not
+ * dispatch a search", mirroring the bulk pass's own empty-concept entries
+ * being dropped before ever reaching the network
+ * (gatherReplyResourcesAction's own `entries.length === 0` branch).
  */
-export function deriveRowSearchConcept(post: string, reply: string, author: string): string {
-  const combined = [post, reply].filter((t) => t.trim().length > 0).join(" ");
-  if (!combined.trim()) return "";
-  return deriveResourceConcept(redactAuthorNameFromText(combined, author));
+export function resourceQueryForRow(
+  row: Pick<ReplyRow, "post" | "reply" | "author" | "concepts">,
+  mode: "auto" | "manual"
+): { text: string; source: "concepts" | "post" | "post-reply" } {
+  if (row.concepts && row.concepts.length > 0) {
+    const conceptsText = deriveResourceConcept(redactAuthorNameFromText(row.concepts.join(CONCEPT_JOINER), row.author));
+    if (hasLetters(conceptsText)) return { text: conceptsText, source: "concepts" };
+  }
+  const proseBase =
+    mode === "manual" ? [row.post, row.reply].filter((t) => t.trim().length > 0).join(" ") : row.post;
+  const proseText = deriveResourceConcept(redactAuthorNameFromText(proseBase, row.author));
+  return { text: proseText, source: mode === "manual" ? "post-reply" : "post" };
 }
 
 /** F5: partitions a resource batch's ids by whether each is still unchanged
@@ -211,8 +238,9 @@ export interface UseReplyResourcesReturn {
    *  search for resources specific to that reply and its original
    *  message"). Deliberately NOT routed through `enqueueResources`/the
    *  bulk queue - it dispatches immediately, on its own, using
-   *  `deriveRowSearchConcept` (post + reply, redacted) rather than the
-   *  bulk pass's post-only concept, and touches only THIS row's own
+   *  `resourceQueryForRow(row, "manual")` (RC4: concepts preferred, else
+   *  post + reply, redacted) rather than the bulk pass's "auto" mode, and
+   *  touches only THIS row's own
    *  `resourceState`/`resources`/`resourceSeq` (the same mutators the bulk
    *  drain already uses - `markResourceSearching`/`applyResources`/
    *  `markResourceFailed`/`resourcesUnchangedSince`) - never
@@ -294,21 +322,33 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
         // us") was no longer true once a filter could hide an id without
         // removing it.
         const currentRows = rowsApi.rawRows;
-        const posts = ids
-          .map((id) => currentRows.find((r) => r.id === id))
-          .filter((r): r is ReplyRow => !!r)
-          // BLOCKER 3: `author` now travels alongside `text` so
-          // gatherReplyResourcesAction can redact the post BODY server-side
-          // (discussion-reply-redact.ts) before any concept derived from it
-          // reaches the web search - this is the automatic path (fires on
-          // every reply landing, R6) that a self-introducing first post
-          // ("Hi everyone, I'm Maria and...") most commonly hits.
-          .map((r) => ({ id: r.id, text: r.post, author: r.author }));
+        const candidateRows = ids.map((id) => currentRows.find((r) => r.id === id)).filter((r): r is ReplyRow => !!r);
 
-        if (posts.length === 0) continue; // every id was actually removed from the table (rawRows), not merely filtered out
+        if (candidateRows.length === 0) continue; // every id was actually removed from the table (rawRows), not merely filtered out
+
+        // RC4 (docs/reply-resource-concepts-acceptance-criteria.md): ONE
+        // function decides what each row searches for - `resourceQueryForRow`
+        // prefers the reply's own concept terms, redacted, and falls back to
+        // the post alone (mode "auto") when there are none or none survive
+        // redaction. `queryById` is what `markResourceSearching` below
+        // records onto each row (`resourceQuery`/`resourceQuerySource`) so
+        // the log and the chip-row explanatory lines can say which base the
+        // last search actually used.
+        const queryById = new Map<string, { text: string; source: "concepts" | "post" | "post-reply" }>();
+        // BLOCKER 3: `author` still travels alongside `text` so
+        // gatherReplyResourcesAction can idempotently redact server-side
+        // (discussion-reply-redact.ts) - the query text is already redacted
+        // client-side above, but this keeps the server's own redaction pass
+        // meaningful for the `author` field itself (discussion-replies-bulk-
+        // redaction.test.ts).
+        const posts = candidateRows.map((r) => {
+          const query = resourceQueryForRow(r, "auto");
+          queryById.set(r.id, query);
+          return { id: r.id, text: query.text, author: r.author };
+        });
 
         const postIds = posts.map((p) => p.id);
-        rowsApi.markResourceSearching(postIds);
+        rowsApi.markResourceSearching(postIds, queryById);
         setSearchingResources(true);
         const snapshot = rowsApi.snapshotResourceSeq(postIds);
         const provider = getStoredProvider();
@@ -432,55 +472,58 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
   // `rows`), mirroring every other whole-table/single-row lookup in this
   // codebase's own B3/B5 discipline - a row hidden by an active search-box
   // filter must still be reachable by its own button.
-  const dispatchRowSearch = useCallback(async (id: string, concept: string) => {
-    const rowsApi = argsRef.current.rowsApi;
-    rowsApi.markResourceSearching([id]);
-    const snapshot = rowsApi.snapshotResourceSeq([id]);
-    const provider = getStoredProvider();
-    const courseName = argsRef.current.courseNameRef.current;
-    const resourceKinds = argsRef.current.resourceKindsRef.current;
-    const videoLengthPreference = argsRef.current.videoLengthPreferenceRef.current;
+  const dispatchRowSearch = useCallback(
+    async (id: string, query: { text: string; source: "concepts" | "post" | "post-reply" }) => {
+      const rowsApi = argsRef.current.rowsApi;
+      rowsApi.markResourceSearching([id], new Map([[id, query]]));
+      const snapshot = rowsApi.snapshotResourceSeq([id]);
+      const provider = getStoredProvider();
+      const courseName = argsRef.current.courseNameRef.current;
+      const resourceKinds = argsRef.current.resourceKindsRef.current;
+      const videoLengthPreference = argsRef.current.videoLengthPreferenceRef.current;
 
-    let result: Awaited<ReturnType<typeof gatherReplyResourcesAction>>;
-    try {
-      result = await gatherReplyResourcesAction([{ id, text: concept }], courseName, provider, resourceKinds, videoLengthPreference);
-    } catch (err) {
-      result = { error: err instanceof Error ? err.message : "Could not find resources for this reply." };
-    }
-    if (!mountedRef.current) return;
+      let result: Awaited<ReturnType<typeof gatherReplyResourcesAction>>;
+      try {
+        result = await gatherReplyResourcesAction([{ id, text: query.text }], courseName, provider, resourceKinds, videoLengthPreference);
+      } catch (err) {
+        result = { error: err instanceof Error ? err.message : "Could not find resources for this reply." };
+      }
+      if (!mountedRef.current) return;
 
-    const freshRowsApi = argsRef.current.rowsApi;
-    const isUnchangedSince = () => freshRowsApi.resourcesUnchangedSince(id, snapshot);
+      const freshRowsApi = argsRef.current.rowsApi;
+      const isUnchangedSince = () => freshRowsApi.resourcesUnchangedSince(id, snapshot);
 
-    if ("error" in result) {
-      // Mirrors the bulk drain's own R7 partition, at single-row scale: an
-      // id changed mid-flight (the instructor removed a link while THIS
-      // search was running) resolves to "failed" with the discard message
-      // rather than staying wedged at "searching" forever.
-      freshRowsApi.markResourceFailed([id], isUnchangedSince() ? result.error : RESOURCE_DISCARDED_MESSAGE);
-      argsRef.current.pushNotice(result.error);
-      return;
-    }
+      if ("error" in result) {
+        // Mirrors the bulk drain's own R7 partition, at single-row scale: an
+        // id changed mid-flight (the instructor removed a link while THIS
+        // search was running) resolves to "failed" with the discard message
+        // rather than staying wedged at "searching" forever.
+        freshRowsApi.markResourceFailed([id], isUnchangedSince() ? result.error : RESOURCE_DISCARDED_MESSAGE);
+        argsRef.current.pushNotice(result.error);
+        return;
+      }
 
-    if (shouldPushDegradedNotice(result.degraded, provider)) {
-      argsRef.current.pushNotice(RESOURCE_DEGRADED_NOTICE);
-    }
+      if (shouldPushDegradedNotice(result.degraded, provider)) {
+        argsRef.current.pushNotice(RESOURCE_DEGRADED_NOTICE);
+      }
 
-    if (!isUnchangedSince()) {
-      freshRowsApi.markResourceFailed([id], RESOURCE_DISCARDED_MESSAGE);
-      return;
-    }
-    const found = result.resources.find((r) => r.id === id)?.resources;
-    if (found !== undefined) freshRowsApi.applyResources(id, found);
-  }, []);
+      if (!isUnchangedSince()) {
+        freshRowsApi.markResourceFailed([id], RESOURCE_DISCARDED_MESSAGE);
+        return;
+      }
+      const found = result.resources.find((r) => r.id === id)?.resources;
+      if (found !== undefined) freshRowsApi.applyResources(id, found);
+    },
+    []
+  );
 
   const searchRow = useCallback(
     (id: string) => {
       const row = argsRef.current.rowsApi.rawRows.find((r) => r.id === id);
       if (!row) return;
-      const concept = deriveRowSearchConcept(row.post, row.reply, row.author);
-      if (!concept) return;
-      void dispatchRowSearch(id, concept);
+      const query = resourceQueryForRow(row, "manual");
+      if (!query.text) return;
+      void dispatchRowSearch(id, query);
     },
     [dispatchRowSearch]
   );

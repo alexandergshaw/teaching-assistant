@@ -31,9 +31,9 @@ import { videoLengthPreferenceSentence } from "@/lib/video-length-preference";
 // EVERY reply that lands (R6), so it out-volumes the per-row path that was
 // already hardened. `redactAuthorNameFromPost` is the SAME leaf
 // (discussion-reply-redact.ts) the per-row targeted search
-// (useReplyResources.ts's `deriveRowSearchConcept`) already uses - one
+// (useReplyResources.ts's `resourceQueryForRow`, RC4) already uses - one
 // implementation, two callers, never a second copy of the redaction rule.
-import { redactAuthorNameFromPost } from "@/lib/discussion-reply-redact";
+import { redactAuthorNameFromPost, redactAuthorNameFromText } from "@/lib/discussion-reply-redact";
 import {
   EXTRACT_BATCH_SIZE,
   DRAFT_BATCH_SIZE,
@@ -44,6 +44,7 @@ import {
   DEFAULT_REPLY_COMPOSITION,
   buildPostExtractionPrompt,
   buildReplyDraftingPrompt,
+  parseReplyConcepts,
   type DiscussionAudience,
   type ThreadPosition,
   type ReplyIngredient,
@@ -275,7 +276,7 @@ export async function draftDiscussionRepliesAction(
   // coerced below the same way `composition` is - never trusted as-is, since
   // it arrives from the client over the Server Action wire.
   knowledgeContext?: string
-): Promise<{ replies: Array<{ id: string; reply: string }> } | { error: string }> {
+): Promise<{ replies: Array<{ id: string; reply: string; concepts?: string[] }> } | { error: string }> {
   try {
     const user = await requireOwner();
 
@@ -304,7 +305,9 @@ export async function draftDiscussionRepliesAction(
     if (!r.ok) return { error: describeLlmFailure(r, "Drafting replies failed") };
     if (!r.text.trim()) return { error: describeEmptyLlmText(r, "Drafting replies") };
 
-    const raw = parseLenientJsonArray(r.text) as Array<{ post?: unknown; reply?: unknown }> | null;
+    const raw = parseLenientJsonArray(r.text) as
+      | Array<{ post?: unknown; reply?: unknown; concepts?: unknown }>
+      | null;
     if (!raw) return { error: "Could not read the drafted replies from the model output." };
 
     // F2: a model can return the same positional index twice (e.g. two
@@ -314,7 +317,7 @@ export async function draftDiscussionRepliesAction(
     // construction, so only the FIRST occurrence of each index is kept.
     const seenPositions = new Set<number>();
     const byPosition = raw.filter(
-      (r2): r2 is { post: number; reply: string } => {
+      (r2): r2 is { post: number; reply: string; concepts?: unknown } => {
         if (
           !Number.isInteger(r2.post) ||
           (r2.post as number) < 1 ||
@@ -330,17 +333,55 @@ export async function draftDiscussionRepliesAction(
       }
     );
 
-    let replies: Array<{ id: string; reply: string }>;
+    // docs/reply-resource-concepts-acceptance-criteria.md RC2b/RC2c: parses
+    // whatever "concepts" the model returned (RC2, dependency-free and
+    // lenient), then drops any term that redacts to NO LETTERS at all under
+    // this post's own author - "Isaac Newton" under that author redacts to
+    // "", "Newton's" to "'s" (no letters survive either), so a chip never
+    // names a term the search will not actually send. A mangled-but-lettered
+    // term ("Newton's laws" under Isaac Newton, which still contains
+    // "laws") is KEPT here exactly as the model wrote it - full redaction of
+    // the SURVIVING term happens later, at search time
+    // (resourceQueryForRow, group B), not here. `concepts` is emitted only
+    // when non-empty; absent stays absent (mirrors postedAt above).
+    //
+    // parseReplyConcepts is called with `max: 6`, not its own default of 3 -
+    // the FINAL cap to 3 happens here, AFTER the author-name drop, so the
+    // worked example in the AC holds: under author Isaac Newton,
+    // ["Isaac Newton", "a", "b", "c"] must yield ["a", "b", "c"], which
+    // needs "c" to still be in the candidate list when the author-name term
+    // is dropped - capping to 3 before that drop would have silently
+    // discarded it. 6 is a generous cushion (twice the eventual cap) for a
+    // model that returns more than the requested 1-3 terms.
+    function withConcepts(
+      id: string,
+      reply: string,
+      rawConcepts: unknown,
+      author: string
+    ): { id: string; reply: string; concepts?: string[] } {
+      const concepts = parseReplyConcepts(rawConcepts, 6)
+        .filter((term) => /\p{L}/u.test(redactAuthorNameFromText(term, author)))
+        .slice(0, 3);
+      return concepts.length > 0 ? { id, reply, concepts } : { id, reply };
+    }
+
+    let replies: Array<{ id: string; reply: string; concepts?: string[] }>;
     if (byPosition.length > 0) {
-      replies = byPosition.map((r2) => ({ id: posts[r2.post - 1].id, reply: r2.reply.trim() }));
+      replies = byPosition.map((r2) =>
+        withConcepts(posts[r2.post - 1].id, r2.reply.trim(), r2.concepts, posts[r2.post - 1].author)
+      );
     } else if (raw.length === posts.length) {
       // Belt and braces: the array came back the right length but no element
       // carried a usable "post" index - fall back to positional order rather
       // than failing the whole batch (DRAFT_BATCH_SIZE is only 5, so this is
       // cheap and rescues the common near-miss).
       replies = raw
-        .map((r2, i) => (typeof r2.reply === "string" && r2.reply.trim() ? { id: posts[i].id, reply: r2.reply.trim() } : null))
-        .filter((r2): r2 is { id: string; reply: string } => r2 !== null);
+        .map((r2, i) =>
+          typeof r2.reply === "string" && r2.reply.trim()
+            ? withConcepts(posts[i].id, r2.reply.trim(), r2.concepts, posts[i].author)
+            : null
+        )
+        .filter((r2): r2 is { id: string; reply: string; concepts?: string[] } => r2 !== null);
     } else {
       replies = [];
     }
@@ -480,7 +521,7 @@ export async function gatherReplyResourcesAction(
     // BLOCKER 3: redact BEFORE deriving/truncating the concept, not after -
     // `redactAuthorNameFromPost` does both steps (redact, then
     // deriveResourceConcept) as one leaf call, mirroring
-    // `deriveRowSearchConcept`'s own ordering for the per-row path.
+    // `resourceQueryForRow`'s own ordering for the per-row path (RC4).
     const entries = posts
       .map((p) => ({ id: p.id, concept: redactAuthorNameFromPost(p.text, p.author) }))
       .filter((e) => e.concept.length > 0);

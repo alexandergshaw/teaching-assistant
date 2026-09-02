@@ -165,6 +165,65 @@ describe("handledAt/skipped (D1/D9)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// docs/reply-resource-concepts-acceptance-criteria.md RC3: concepts /
+// resourceQuery / resourceQuerySource - the same absent-stays-absent
+// discipline as handledAt/skipped above.
+// ---------------------------------------------------------------------------
+
+describe("concepts / resourceQuery / resourceQuerySource (RC3)", () => {
+  it("round-trips all three fields when present", () => {
+    const rows = [
+      makeRow({
+        id: "a",
+        concepts: ["utilitarianism", "moral luck"],
+        resourceQuery: "utilitarianism; moral luck",
+        resourceQuerySource: "concepts",
+      }),
+    ];
+    const restored = deserializeReplyTable(serializeReplyTable(rows));
+    expect(restored[0].concepts).toEqual(["utilitarianism", "moral luck"]);
+    expect(restored[0].resourceQuery).toBe("utilitarianism; moral luck");
+    expect(restored[0].resourceQuerySource).toBe("concepts");
+  });
+
+  it("a row that never had any of the three round-trips with all three still absent (absent-stays-absent)", () => {
+    const rows = [makeRow({ id: "a" })];
+    const restored = deserializeReplyTable(serializeReplyTable(rows));
+    expect(restored[0].concepts).toBeUndefined();
+    expect(restored[0].resourceQuery).toBeUndefined();
+    expect(restored[0].resourceQuerySource).toBeUndefined();
+    // JSON.stringify drops the undefined-valued keys entirely, mirroring
+    // handledAt/skipped's own "absent stays absent" treatment.
+    const written = JSON.parse(serializeReplyTable(rows)).rows[0];
+    expect(written).not.toHaveProperty("concepts");
+    expect(written).not.toHaveProperty("resourceQuery");
+    expect(written).not.toHaveProperty("resourceQuerySource");
+  });
+
+  it("a persisted empty concepts array, and an invalid resourceQuerySource, both coerce to absent rather than a default", () => {
+    const raw = JSON.stringify({
+      v: DISCUSSION_TABLE_VERSION,
+      rows: [
+        {
+          id: "a",
+          author: "Maria",
+          post: "hello",
+          concepts: [],
+          resourceQuery: "some query",
+          resourceQuerySource: "not-a-real-source",
+        },
+      ],
+    });
+    const restored = deserializeReplyTable(raw);
+    expect(restored[0].concepts).toBeUndefined();
+    expect(restored[0].resourceQuerySource).toBeUndefined();
+    // resourceQuery itself is a plain non-empty string, unaffected by the
+    // other two fields' validity - it stays.
+    expect(restored[0].resourceQuery).toBe("some query");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // mergeLegacyReplyFlags (D1/D9 migration): folding the retired side-channel
 // onto the promoted fields, once, on load.
 // ---------------------------------------------------------------------------

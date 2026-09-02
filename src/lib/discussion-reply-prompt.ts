@@ -64,6 +64,76 @@ export function deriveResourceConcept(text: string): string {
   return lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
 }
 
+// docs/reply-resource-concepts-acceptance-criteria.md RC1/RC2: the drafting
+// call now emits an optional "concepts" array alongside each reply (see the
+// OUTPUT section of buildReplyDraftingPrompt above). This parses whatever
+// shape the model actually returned - lenient by design, because the model
+// is not a validator and the caller's fallback (search the raw post/reply
+// text, RC4) is safe and silent. Pure and dependency-free, per this file's
+// own :3-4 import rule.
+//
+// Accepted shapes: an array of strings; an array of `{ concept: string }`
+// objects; a single string split on ";" or ",". Anything else - null, a
+// number, a plain object, a nested array - yields []. Each term is trimmed;
+// empty terms and terms over 60 characters are DROPPED (not truncated);
+// duplicates are removed case-insensitively, keeping the FIRST spelling
+// seen. The `max` cap is applied LAST, after every other drop.
+//
+// `max` (default 3) is a PARAMETER, not a baked-in constant, precisely
+// because the cap in the AC's own worked example must apply AFTER a
+// caller's own further drop (RC2c, discussion-replies.ts's `withConcepts`):
+// under author Isaac Newton, `["Isaac Newton", "a", "b", "c"]` must yield
+// `["a", "b", "c"]`, which requires the author-name term to survive THIS
+// function uncapped (called with a generous `max`) so the caller can drop
+// it and cap to 3 itself afterward - capping to 3 in here first would
+// silently discard "c" before the caller ever sees it. Called with no
+// second argument (the default, 3) this is a plain "parse and cap at 3"
+// function; `discussion-replies.ts` calls it with `max = 6` specifically so
+// its own author-name drop has a real cushion to work with.
+export function parseReplyConcepts(raw: unknown, max = 3): string[] {
+  let candidates: string[];
+
+  if (Array.isArray(raw)) {
+    candidates = raw.map((item) => {
+      if (typeof item === "string") return item;
+      if (
+        item !== null &&
+        typeof item === "object" &&
+        "concept" in item &&
+        typeof (item as { concept: unknown }).concept === "string"
+      ) {
+        return (item as { concept: string }).concept;
+      }
+      return "";
+    });
+  } else if (typeof raw === "string") {
+    candidates = raw.split(/[;,]/);
+  } else {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const candidate of candidates) {
+    // F3a fix (fixer pass, docs/reply-resource-concepts-acceptance-criteria.md
+    // RC2/RC4): collapse internal whitespace, not just leading/trailing - a
+    // term with a double space (or a stray newline/tab from the model)
+    // otherwise survives here unchanged, and resourceQueryForRow's own
+    // `deriveResourceConcept` collapses whitespace when it builds the search
+    // text, so the joined `concepts.join("; ")` compared against
+    // `resourceQuery` in DiscussionReplyResources.tsx's third explanatory
+    // line would never match the CURRENT search - it would show as stale
+    // every time, not only after a real edit.
+    const term = candidate.replace(/\s+/g, " ").trim();
+    if (!term || term.length > 60) continue;
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(term);
+  }
+  return result.slice(0, max);
+}
+
 // docs/discussion-thread-structure-acceptance-criteria.md T2: the three-
 // member set a captured post's thread position can hold. Lives HERE (not in
 // discussion-capture.ts or discussion-replies.ts) for the same reason
@@ -489,8 +559,9 @@ export function buildReplyDraftingPrompt(
 
     "OUTPUT",
     `Return ONLY a JSON array with exactly ${posts.length} elements, and nothing else.`,
-    'Each element is {"post": <the POST number>, "reply": "..."} - the number, not the name.',
+    'Each element is {"post": <the POST number>, "reply": "...", "concepts": ["...", "..."]} - the number, not the name.',
     `Include every post number from 1 to ${posts.length}, in order.`,
+    '"concepts" is one to three short noun phrases (2 to 5 words each) naming the ideas that reply discusses, copied from the reply\'s own wording. Never a person\'s name, never an idea the reply does not mention. It does not count toward the element count above.',
     // C3-i: this line CHANGED (not supplemented) - "if you need one" was a
     // suggestion; C3 requires a paragraph break, with a blank line, for a
     // reply over roughly 60 words.

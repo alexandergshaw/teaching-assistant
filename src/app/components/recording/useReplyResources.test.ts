@@ -19,14 +19,18 @@ import {
   shouldPushDegradedNotice,
   resourceQueueProgressText,
   redactAuthorNameFromText,
-  deriveRowSearchConcept,
+  resourceQueryForRow,
 } from "./useReplyResources";
-// F1 fix: isResourceBatchFresh moved to useReplyRows.ts, which owns
-// resourceSeqRef (the state the comparison actually reads) and is now the
-// ONLY caller in production (via resourcesUnchangedSince). Importing it from
-// there, rather than testing a re-export or a second copy, means this test
-// exercises the exact function `resourcesUnchangedSince` calls - the whole
-// point of the fix.
+// F1 fix, then RC10 (docs/reply-resource-concepts-acceptance-criteria.md):
+// isResourceBatchFresh moved to useReplyRows.ts first, then on to
+// useReplyRowResourceMutators.ts (the leaf useReplyRows.ts pulled its
+// resource mutators into to stay under the line cap) - useReplyRows.ts
+// re-exports it, and it is now the ONLY caller in production (via
+// resourcesUnchangedSince, itself defined in that same leaf). Importing it
+// through useReplyRows.ts's re-export, rather than the leaf directly or a
+// second copy, IS the point here: this import path is what
+// `resourcesUnchangedSince`'s own callers use, so this test exercises the
+// exact function that guard calls, not a parallel copy that could drift.
 import { isResourceBatchFresh } from "./useReplyRows";
 import type { ReplyRow } from "./discussion-capture";
 
@@ -284,35 +288,141 @@ describe("redactAuthorNameFromText (the privacy blocker)", () => {
   });
 });
 
-describe("deriveRowSearchConcept (post + reply, redacted, then normalized like the bulk pass)", () => {
-  it("combines post and reply text into one concept", () => {
-    const concept = deriveRowSearchConcept("A post about recursion in Python.", "Nice example of a base case.", "Sam Lee");
-    expect(concept).toContain("recursion");
-    expect(concept).toContain("base case");
-  });
+// ---------------------------------------------------------------------------
+// docs/reply-resource-concepts-acceptance-criteria.md RC4: resourceQueryForRow
+// - the one function that decides what a resource search sends, for both the
+// automatic drain (mode "auto") and the per-row targeted search (mode
+// "manual"). Supersedes `deriveRowSearchConcept` (deleted) - the five tests
+// immediately below are that function's own tests, moved verbatim onto
+// `resourceQueryForRow(..., "manual")` (its prose-fallback rule, post +
+// reply, is the same rule `deriveRowSearchConcept` used to apply
+// unconditionally). The describe block after it covers what is new: concepts
+// preferred over prose, the "; " joiner, the all-name fallback twin, a
+// mangled-but-lettered term sent as-is, and the source value per case.
+// ---------------------------------------------------------------------------
 
-  it("the combined concept contains no form of the author's name, even when both halves mention it", () => {
-    const concept = deriveRowSearchConcept(
-      "Sam Lee here, discussing merge sort complexity.",
-      "Sam, your analysis of merge sort was spot on.",
-      "Sam Lee"
+function makeQueryRow(overrides: Partial<Pick<ReplyRow, "post" | "reply" | "author" | "concepts">>) {
+  return { post: "", reply: "", author: "", concepts: undefined, ...overrides };
+}
+
+describe("resourceQueryForRow, mode 'manual' (moved verbatim from deriveRowSearchConcept)", () => {
+  it("combines post and reply text into one query", () => {
+    const result = resourceQueryForRow(
+      makeQueryRow({ post: "A post about recursion in Python.", reply: "Nice example of a base case.", author: "Sam Lee" }),
+      "manual"
     );
-    expect(concept.toLowerCase()).not.toContain("sam");
-    expect(concept.toLowerCase()).not.toContain("lee");
+    expect(result.text).toContain("recursion");
+    expect(result.text).toContain("base case");
   });
 
-  it("empty post and empty reply yields an empty concept - nothing to search for", () => {
-    expect(deriveRowSearchConcept("", "", "Sam Lee")).toBe("");
-    expect(deriveRowSearchConcept("   ", "  \n ", "Sam Lee")).toBe("");
+  it("the combined query contains no form of the author's name, even when both halves mention it", () => {
+    const result = resourceQueryForRow(
+      makeQueryRow({
+        post: "Sam Lee here, discussing merge sort complexity.",
+        reply: "Sam, your analysis of merge sort was spot on.",
+        author: "Sam Lee",
+      }),
+      "manual"
+    );
+    expect(result.text.toLowerCase()).not.toContain("sam");
+    expect(result.text.toLowerCase()).not.toContain("lee");
   });
 
-  it("a post with no reply yet still yields a searchable concept from the post alone", () => {
-    const concept = deriveRowSearchConcept("A detailed post about binary search trees.", "", "Sam Lee");
-    expect(concept).toContain("binary search trees");
+  it("empty post and empty reply yields an empty query - nothing to search for", () => {
+    expect(resourceQueryForRow(makeQueryRow({ post: "", reply: "", author: "Sam Lee" }), "manual").text).toBe("");
+    expect(resourceQueryForRow(makeQueryRow({ post: "   ", reply: "  \n ", author: "Sam Lee" }), "manual").text).toBe("");
+  });
+
+  it("a post with no reply yet still yields a searchable query from the post alone", () => {
+    const result = resourceQueryForRow(
+      makeQueryRow({ post: "A detailed post about binary search trees.", reply: "", author: "Sam Lee" }),
+      "manual"
+    );
+    expect(result.text).toContain("binary search trees");
   });
 
   it("SABOTAGE CHECK: dropping the redaction step would leak the name straight through - pinned against the exact function this hook calls, not a re-implementation", () => {
-    const concept = deriveRowSearchConcept("Post text.", "Maria, thanks for sharing.", "Maria Lopez");
-    expect(concept).not.toMatch(/\bmaria\b/i);
+    const result = resourceQueryForRow(makeQueryRow({ post: "Post text.", reply: "Maria, thanks for sharing.", author: "Maria Lopez" }), "manual");
+    expect(result.text).not.toMatch(/\bmaria\b/i);
+  });
+});
+
+describe("resourceQueryForRow: concepts vs. prose, the source it reports, and the fallback rule (RC4)", () => {
+  it("concepts win over prose in auto mode - source 'concepts'", () => {
+    const result = resourceQueryForRow(
+      makeQueryRow({ post: "A post about photosynthesis.", concepts: ["chlorophyll", "light reactions"] }),
+      "auto"
+    );
+    expect(result.text).toBe("chlorophyll; light reactions");
+    expect(result.source).toBe("concepts");
+  });
+
+  it("concepts win over prose in manual mode too - source 'concepts'", () => {
+    const result = resourceQueryForRow(
+      makeQueryRow({
+        post: "A post about photosynthesis.",
+        reply: "A reply about the Calvin cycle.",
+        concepts: ["chlorophyll", "light reactions"],
+      }),
+      "manual"
+    );
+    expect(result.text).toBe("chlorophyll; light reactions");
+    expect(result.source).toBe("concepts");
+  });
+
+  it("multiple concepts are joined with '; '", () => {
+    const result = resourceQueryForRow(makeQueryRow({ concepts: ["a", "b", "c"] }), "auto");
+    expect(result.text).toBe("a; b; c");
+  });
+
+  it("an empty concepts array is treated the same as absent - falls back to the prose base, source 'post'", () => {
+    const result = resourceQueryForRow(makeQueryRow({ post: "A post about graph theory.", concepts: [] }), "auto");
+    expect(result.source).toBe("post");
+    expect(result.text).toContain("graph theory");
+  });
+
+  it("no concepts at all falls back to the post alone in auto mode - source 'post'", () => {
+    const result = resourceQueryForRow(makeQueryRow({ post: "A post about entropy." }), "auto");
+    expect(result.source).toBe("post");
+    expect(result.text).toContain("entropy");
+  });
+
+  it("no concepts at all falls back to post + reply in manual mode - source 'post-reply'", () => {
+    const result = resourceQueryForRow(makeQueryRow({ post: "A post about entropy.", reply: "A reply about disorder." }), "manual");
+    expect(result.source).toBe("post-reply");
+    expect(result.text).toContain("entropy");
+    expect(result.text).toContain("disorder");
+  });
+
+  it("an all-name concept set falls back to the prose base - the :314 twin: no name survives in the fallback either", () => {
+    const result = resourceQueryForRow(
+      makeQueryRow({
+        post: "Maria Lopez here, discussing recursion in Python.",
+        author: "Maria Lopez",
+        concepts: ["Maria Lopez"],
+      }),
+      "auto"
+    );
+    expect(result.source).toBe("post");
+    expect(result.text.toLowerCase()).not.toContain("maria");
+    expect(result.text.toLowerCase()).not.toContain("lopez");
+    expect(result.text).toContain("recursion");
+  });
+
+  it("a mangled term (redaction leaves a fragment with letters still in it) is sent AS MANGLED, not dropped or re-derived", () => {
+    // The exact case the AC measures: "Newton's laws of motion" under author
+    // Isaac Newton redacts to "'s laws of motion" - "Newton" is gone but
+    // "laws of motion" still has letters, so this passes the hasLetters gate
+    // and is sent exactly as mangled (the log shows it, per RC7).
+    const result = resourceQueryForRow(makeQueryRow({ author: "Isaac Newton", concepts: ["Newton's laws of motion"] }), "auto");
+    expect(result.source).toBe("concepts");
+    expect(result.text).toContain("laws of motion");
+    expect(result.text.toLowerCase()).not.toContain("newton");
+  });
+
+  it("a concept that IS entirely the author's name redacts to no letters and falls back, source 'post'", () => {
+    const result = resourceQueryForRow(makeQueryRow({ post: "A post about ethics.", author: "Isaac Newton", concepts: ["Isaac Newton"] }), "auto");
+    expect(result.source).toBe("post");
+    expect(result.text).toContain("ethics");
   });
 });

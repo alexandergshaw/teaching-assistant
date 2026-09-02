@@ -20,9 +20,9 @@ consumer sees it, and the chain ends only on a clean check.
 
 **Every peer-level agent is an expert ed-tech contributor.** Not a generic
 software agent that happens to be working on a school app. The architect, the UX
-pass, the data engineer, the reviewer, the regression pass, the researcher and
-every adversarial checker are all people who have built and run educational
-technology: they know LMS behaviour (Canvas quirks, gradebook and submission
+pass, the data engineer, the aesthetics pass, the reviewer, the regression pass,
+the researcher and every adversarial checker are all people who have built and
+run educational technology: they know LMS behaviour (Canvas quirks, gradebook and submission
 semantics, roster and enrolment shape), instructional design and rubric
 practice, academic-integrity pressure, FERPA-shaped handling of student data,
 accessibility as a legal obligation rather than a nice-to-have, and what an
@@ -142,12 +142,12 @@ build on it wastes the whole wave.
 Fold what you learn back into the AC, then re-read it. Iterate until it stops
 changing.
 
-## 4. Three concurrent pre-code passes: architect, UX, data engineer
+## 4. Four concurrent pre-code passes: architect, UX, data engineer, aesthetics
 
-**Spawn all three in one message, on the highest model available, before any
+**Spawn all four in one message, on the highest model available, before any
 code.** They are independent, they read the same documents, and they find
 different classes of problem - running them in sequence wastes a round trip and
-lets the first one's framing contaminate the other two.
+lets the first one's framing contaminate the others.
 
 - **4a. The architect** - module and data-flow design, the disjoint file split,
   the order of work, and the trade-offs it rejects.
@@ -160,14 +160,41 @@ lets the first one's framing contaminate the other two.
   and the exact text of any prompt. **Measured, not estimated**, wherever
   measuring is possible.
 
-Reconcile all three into the AC before planning goes further. Where two of them
+- **4d. The aesthetics pass** - writes the REQUIREMENTS the surface must meet to
+  read as a modern, professional product, before anything is built. Not "make
+  it pretty afterwards": a named type scale, radius set, spacing rhythm and
+  elevation set; which existing idiom each new element reuses; the empty,
+  loading and error states; and the specific way this surface will otherwise
+  drift from the rest of the app. It writes against `docs/aesthetics-pass-
+  acceptance-criteria.md` section 4b (AM1-AM26), which is the standing design
+  contract - **it does not restate that contract, it says what this feature
+  adds to it and where this feature is likely to breach it.**
+
+  It names the reference products it is holding the work to, and it must be
+  specific about what those products do that this one does not. Its output is
+  as binding as the architect's: a requirement it writes is a line an
+  implementer is held to at 8b, not advice.
+
+Reconcile all four into the AC before planning goes further. Where two of them
 disagree, that disagreement is the finding.
 
-What these three have caught in this repo that nothing else did: a frame width
-that made body text unreadable on a 4K monitor (measured, not guessed); a dedupe
-key that false-split on 10 of 16 realistic inputs; a hook that would have
-breached the line ceiling by 200 lines; and a UI control that shipped working,
-correct and invisible.
+What these have caught in this repo that nothing else did: a frame width that
+made body text unreadable on a 4K monitor (measured, not guessed); a dedupe key
+that false-split on 10 of 16 realistic inputs; a hook that would have breached
+the line ceiling by 200 lines; and a UI control that shipped working, correct
+and invisible.
+
+**4d exists because of what happened when it did not.** The 2026-09-01
+aesthetics pass (REGRESSION 381) ran its requirements as an ad-hoc chunk rather
+than as a standing role, and its spec had to be corrected FIVE times mid-wave,
+with seventeen agents already building against it: a rule that banned raw hex
+while no token existed for a filled button's foreground; an amendment that
+deleted a focus indicator, because the ring was a `box-shadow` on a rule that
+also set `outline: none`; a global spinner that could not spin, because
+Lightning CSS scopes animation-name references inside a module; ties that
+rounded a 2px gap through zero and deleted it; and a cited class that lived in
+a different file. Every one of those is a requirement that should have been
+written and adversarially checked BEFORE dispatch. That is 4d's job.
 
 Hand everything produced so far - the AC, the reuse survey, the research - to a
 **fresh agent on the highest model available**, and have it do the architecting.
@@ -275,13 +302,38 @@ not get a follow-up ticket; the wave is not verified until it is split. Size an
 extraction against the feature's ADDITIONS, not against the headroom - the
 headroom is what a later group will need.
 
-## 8b. Follow-up architect, UX and data passes against the REAL diff
+## 8b. Follow-up architect, UX, data and aesthetics passes against the REAL diff
 
-The step 4 trio designed against documents. Run all three again, concurrently,
+The step 4 quartet designed against documents. Run all four again, concurrently,
 against what actually landed. This is not a repeat: a design is a prediction,
 and the diff is the outcome. The follow-up pass is where you learn that the
 split held but the props are unstable, that the flow is right but a control is
 unreachable, or that the measured payload is nothing like the estimate.
+
+**The aesthetics pass here is a CONFORMANCE check against the requirements it
+wrote at 4d**, and it is the same agent class, never the same context - an
+author is the worst available judge of whether its own requirement was met. It
+answers three questions and cites file:line for each:
+
+1. **Which of its own 4d requirements did the diff actually meet?** A
+   requirement not met is a finding, whether or not the result looks fine.
+2. **Where did the implementers diverge, and was the divergence RIGHT?** This
+   matters as much as the failures. Five agents in the 2026-09-01 pass refused
+   an instruction and were right every time - a row height numerically coupled
+   to JS scroll math, a wide matrix header kept in sentence case for word-shape
+   scanning, a brand mark exempted from the icon scale, a `--success` "text"
+   that was a `currentColor` dot, a described padding that did not exist. A
+   conformance pass that marks those as violations is worse than no pass.
+3. **What does the diff now look like NEXT TO its neighbours?** Seams between
+   agents are invisible from inside one file set: the same idiom at two sizes in
+   two surfaces reachable in four clicks, a spinner on one tab and a grey word
+   on the next, icons at 13px beside icons at 20px.
+
+It must also state plainly what it could NOT check. Nothing in this repo renders
+a component, so every aesthetic claim is a claim about source text. Contrast is
+arithmetic over hex values, not a measurement; clipping, reflow at 400% zoom,
+and real hit-target sizes cannot be seen at all. Say so rather than implying
+coverage that does not exist.
 
 Their findings go into step 10's merged list.
 
@@ -321,11 +373,11 @@ Test-writing rules earned the hard way:
   When both a total and a sub-count move by one, that agreement is itself the
   proof the new member landed in the right bucket.
 
-## 10. Review, research and repair - three agents, highest model
+## 10. Review, research, aesthetics and repair - four agents, highest model
 
-Before the regression pass the group's work goes through three **separate**
+Before the regression pass the group's work goes through four **separate**
 subagents, every one of them on the **highest model available** and pinned
-explicitly. Separate contexts, not one agent wearing three hats: an agent that
+explicitly. Separate contexts, not one agent wearing four hats: an agent that
 found a problem is a poor judge of whether its own fix is sufficient, and an
 agent that wrote a fix will not report that the fix was unnecessary.
 
@@ -377,8 +429,23 @@ Two limits, both learned:
 
 The researcher reports findings. It does not edit either.
 
-**10c. The fixer** receives both reports, merged and de-duplicated, and is the
-only one of the three that touches the working tree. It gets the same brief
+**10bb. The aesthetics reviewer** runs **concurrently with 10a and 10b**, on the
+whole group's diff, holding the requirements it wrote at 4d. This is the
+conformance half of that role and it is the same check 8b runs, at the group's
+scale rather than a wave's: what was required and not delivered, what diverged
+and was right to, and what the surface looks like beside its neighbours.
+
+Its distinct value at this scale is the **seam**, which no single-surface pass
+can see. The 2026-09-01 group shipped the same tracked-uppercase label at 11px
+and 12px in four surfaces four clicks apart, three icon construction styles in
+one seven-item column, and a loading state that was a spinner on one tab and an
+unstyled grey word on the next - every one of them invisible from inside the
+file set that produced it.
+
+It reports findings. It does not edit.
+
+**10c. The fixer** receives all three reports, merged and de-duplicated, and is
+the only one of the four that touches the working tree. It gets the same brief
 discipline as step 6: an explicit file list, and no `git stash`.
 
 It has no authority to dismiss a finding. If a finding looks wrong, it says so
@@ -388,7 +455,7 @@ turns a finding into a silence, and silence is indistinguishable from fixed.
 Its changes are code like any other: they re-run the gates and each one needs a
 test that can fail. Then the reviewer re-reads the fix diff and confirms each
 finding is actually closed. A fix that touched anything outside the reported
-findings goes round 10a and 10b again in full.
+findings goes round 10a, 10b and 10bb again in full.
 
 Findings are closed before the regression pass starts. Reviewing after
 regression would only prove the review was too late to matter.
@@ -475,10 +542,11 @@ coverage that does not exist.
   run; never instruct a manual apply.
 - `gh` is not installed. Verify Actions runs via the web UI or `curl`.
 
-**Model roles:** the step 4 architect and all three step 10 agents - reviewer,
-researcher, fixer - take the **highest** model available. Sonnet implements and
-Opus verifies, and those two pin the **lowest** available version. Every role
-pins a version explicitly - never a bare family alias.
+**Model roles:** every step 4 pass - architect, UX, data engineer, aesthetics -
+and all four step 10 agents - reviewer, researcher, aesthetics, fixer - take the
+**highest** model available. Sonnet implements and Opus verifies, and those two
+pin the **lowest** available version. Every role pins a version explicitly -
+never a bare family alias.
 
 ---
 

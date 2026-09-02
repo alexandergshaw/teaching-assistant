@@ -35,6 +35,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { startFrameTicker } from "@/lib/frame-ticker";
 import type { FrameTicker } from "@/lib/frame-ticker";
+import { startAudioLevelMeter } from "@/lib/audio-level-meter";
+import type { AudioLevelMeter } from "@/lib/audio-level-meter";
 import { useBackgroundEffect } from "./useBackgroundEffect";
 
 // Reused verbatim from useDevices.ts (useDevices.ts:25,58 - see the
@@ -100,9 +102,9 @@ export interface UseCameraPreviewReturn {
   // MediaPipe's segmenter model loads from a CDN and can fail - surfaced
   // here rather than swallowed, per T7.
   bgStatus: "idle" | "loading" | "ready" | "failed";
-  // Mic level meter, 0..1, using the same rms-quantized approach as
-  // useRecorder's startMeter (useRecorder.ts:123-169) so a caller can drive
-  // the same kind of level bar the Recording tab already has.
+  // Mic level meter, 0..1. Literally the same rms-quantized implementation
+  // useRecorder drives its level bar with - both call startAudioLevelMeter
+  // (src/lib/audio-level-meter.ts) rather than each keeping a copy.
   level: number;
   start: () => Promise<void>;
   stop: () => void;
@@ -121,10 +123,10 @@ export function useCameraPreview(cameraId: string, micId: string): UseCameraPrev
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const levelRef = useRef(0);
+  // One handle, not four refs. The AudioContext/AnalyserNode/rAF id and the
+  // last-reported level all now live inside startAudioLevelMeter
+  // (src/lib/audio-level-meter.ts); this hook only holds the stop handle.
+  const meterRef = useRef<AudioLevelMeter | null>(null);
 
   const tickerRef = useRef<FrameTicker | null>(null);
 
@@ -141,64 +143,24 @@ export function useCameraPreview(cameraId: string, micId: string): UseCameraPrev
   const { bgMode, setBgMode, bgStatus, applyBackgroundEffect } = useBackgroundEffect({ source: "camera" });
 
   const stopMeter = useCallback(() => {
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
-      audioCtxRef.current.close();
-      audioCtxRef.current = null;
-    }
-    analyserRef.current = null;
+    meterRef.current?.stop();
+    meterRef.current = null;
   }, []);
 
-  const startMeter = useCallback((stream: MediaStream) => {
-    stopMeter();
-    const audioTracks = stream.getAudioTracks();
-    if (audioTracks.length === 0) return;
-
-    try {
-      const audioCtx =
-        typeof window !== "undefined" && window.AudioContext
-          ? new window.AudioContext()
-          : typeof window !== "undefined" && (window as unknown as Record<string, unknown>).webkitAudioContext
-            ? new ((window as unknown as Record<string, unknown>).webkitAudioContext as typeof AudioContext)()
-            : null;
-
-      if (!audioCtx) {
-        console.warn("AudioContext not supported");
-        return;
-      }
-
-      audioCtxRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const loop = () => {
-        analyser.getByteTimeDomainData(data);
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) sum += (data[i] - 128) * (data[i] - 128);
-        const rms = Math.sqrt(sum / data.length) / 128;
-        // Same amplify-quantize-dedupe approach as useRecorder's meter
-        // (useRecorder.ts:154-158): raw RMS of speech is tiny, and setting
-        // state every frame at 60fps re-renders far more than a level bar
-        // needs.
-        const q = Math.round(Math.min(rms * 4, 1) * 20) / 20;
-        if (q !== levelRef.current) {
-          levelRef.current = q;
-          setLevel(q);
-        }
-        rafRef.current = requestAnimationFrame(loop);
-      };
-      rafRef.current = requestAnimationFrame(loop);
-    } catch (err) {
-      console.error("Failed to start camera preview level meter:", err);
-    }
-  }, [stopMeter]);
+  // Was a byte-for-byte copy of useRecorder.ts's meter, down to the comment
+  // above pointing at that file's line numbers. Both now call the one shared
+  // implementation. The amplify-quantize-dedupe arithmetic did not change -
+  // only who owns the AudioContext, the AnalyserNode and the rAF handle. The
+  // "only report an actual change" dedupe that kept a 60fps meter from
+  // re-rendering the whole tab every frame lives inside the shared module
+  // now, which is why this hook no longer needs a level ref of its own.
+  const startMeter = useCallback(
+    (stream: MediaStream) => {
+      stopMeter();
+      meterRef.current = startAudioLevelMeter(stream, setLevel, "camera preview level meter");
+    },
+    [stopMeter]
+  );
 
   const stopTicker = useCallback(() => {
     tickerRef.current?.stop();

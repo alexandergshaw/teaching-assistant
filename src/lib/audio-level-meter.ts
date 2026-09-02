@@ -20,11 +20,11 @@
 // unchanged; only the ownership of the AudioContext/AnalyserNode/rAF handle
 // moved, not the arithmetic.
 //
-// useRecorder.ts is the only caller pulled onto this shared version so far -
-// useCameraPreview.ts keeps its own pre-existing copy untouched, since this
-// split's job is bringing useRecorder.ts under
-// recording-split.structure.test.ts's 1000-line ceiling, not touching a file
-// outside that assignment's scope.
+// Both callers are now on this shared version. useRecorder.ts moved first,
+// as part of bringing that file under its 1000-line ceiling;
+// useCameraPreview.ts followed immediately after, since leaving one copy
+// behind would have recreated the exact condition this module exists to end -
+// two implementations that drift apart while each looks maintained.
 
 export interface AudioLevelMeter {
   stop: () => void;

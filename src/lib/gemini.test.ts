@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getGeminiMaxCharsPerSubmission } from "./gemini";
+import { getGeminiMaxCharsPerSubmission, getGeminiModel, getGeminiSearchModel } from "./gemini";
 
 // C1.2 / C1.3: the per-submission character cap must be raised against the
 // model's real context window (not the old 12,000), GRADE_MAX_CHARS_PER_SUBMISSION
@@ -48,5 +48,39 @@ describe("getGeminiMaxCharsPerSubmission", () => {
     expect(getGeminiMaxCharsPerSubmission()).toBe(400000);
     process.env.GRADE_MAX_CHARS_PER_SUBMISSION = "-5";
     expect(getGeminiMaxCharsPerSubmission()).toBe(400000);
+  });
+});
+
+// Y6 (docs/reply-resource-search-yield-acceptance-criteria.md): a
+// search-specific model override, falling back to getGeminiModel() - the
+// fallback is this function's own responsibility; llm.test.ts owns the
+// webSearch-conditional wiring in callGemini that actually calls it.
+describe("getGeminiSearchModel", () => {
+  const ORIGINAL_SEARCH_MODEL = process.env.GEMINI_SEARCH_MODEL;
+  const ORIGINAL_MODEL = process.env.GEMINI_MODEL;
+
+  afterEach(() => {
+    if (ORIGINAL_SEARCH_MODEL === undefined) delete process.env.GEMINI_SEARCH_MODEL;
+    else process.env.GEMINI_SEARCH_MODEL = ORIGINAL_SEARCH_MODEL;
+    if (ORIGINAL_MODEL === undefined) delete process.env.GEMINI_MODEL;
+    else process.env.GEMINI_MODEL = ORIGINAL_MODEL;
+  });
+
+  it("falls back to getGeminiModel() when GEMINI_SEARCH_MODEL is unset", () => {
+    delete process.env.GEMINI_SEARCH_MODEL;
+    delete process.env.GEMINI_MODEL;
+    expect(getGeminiSearchModel()).toBe(getGeminiModel());
+  });
+
+  it("falls back to a caller-set GEMINI_MODEL when GEMINI_SEARCH_MODEL is unset", () => {
+    delete process.env.GEMINI_SEARCH_MODEL;
+    process.env.GEMINI_MODEL = "gemini-3-pro-preview";
+    expect(getGeminiSearchModel()).toBe("gemini-3-pro-preview");
+  });
+
+  it("honors GEMINI_SEARCH_MODEL as an override, independent of GEMINI_MODEL", () => {
+    process.env.GEMINI_SEARCH_MODEL = "gemini-2.5-flash";
+    process.env.GEMINI_MODEL = "gemini-3.1-flash-lite";
+    expect(getGeminiSearchModel()).toBe("gemini-2.5-flash");
   });
 });

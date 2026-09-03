@@ -41,16 +41,63 @@ beforeEach(() => {
 });
 
 describe("gatherReplyResourcesAction", () => {
+  // Y5/Y8: `perConcept` is now a REQUIRED field on `FindResourceLinksSuccess`
+  // - gatherReplyResourcesAction's own Y8 code reads `result.perConcept`
+  // unconditionally, so every mock below must carry one or it crashes at
+  // runtime (`for...of undefined`), not merely fail a type check. Built from
+  // the ACTUAL concepts argument the call received (mockImplementationOnce,
+  // not a static mockResolvedValueOnce) so it stays realistic: one entry per
+  // concept actually queried, `sources: 0` when `degraded` (mirrors reality -
+  // a degraded run means no concept had a source), `candidates`/`kept`
+  // derived from how many of `links` carry that concept.
   function mockLinksOnce(links: Array<Record<string, unknown>>, degraded = false) {
-    vi.mocked(findResourceLinksForConceptsAction).mockResolvedValueOnce({
-      links,
-      degraded,
-      droppedUncorroborated: 0,
-      droppedPlaceholder: 0,
-      droppedUnreachable: 0,
-      notes: [],
-    } as never);
+    vi.mocked(findResourceLinksForConceptsAction).mockImplementationOnce(async (concepts) => {
+      const perConcept = (concepts as readonly string[]).map((concept) => {
+        const forConcept = links.filter((l) => l.concept === concept).length;
+        return {
+          concept,
+          sources: degraded ? 0 : 1,
+          resolvedSources: degraded ? 0 : 1,
+          candidates: forConcept,
+          droppedPlaceholder: 0,
+          droppedUncorroborated: 0,
+          droppedDuplicate: 0,
+          droppedUnreachable: 0,
+          kept: forConcept,
+          retried: false,
+        };
+      });
+      return {
+        links,
+        degraded,
+        droppedUncorroborated: 0,
+        droppedPlaceholder: 0,
+        droppedUnreachable: 0,
+        notes: [],
+        perConcept,
+      } as never;
+    });
   }
+
+  /** Y8: the "no entry" outcome every empty-concept post (or one whose
+   *  concept the reused action never returned a `perConcept` entry for) gets
+   *  - a frozen literal so a change to `resourceSearchOutcomeFor`'s "no
+   *  entry" branch is pinned exactly, not merely "some object". */
+  const NO_ENTRY_OUTCOME = {
+    kind: "unknown",
+    text: "No links came back for these terms.",
+    counts: {
+      sources: 0,
+      resolvedSources: 0,
+      candidates: 0,
+      droppedPlaceholder: 0,
+      droppedUncorroborated: 0,
+      droppedDuplicate: 0,
+      droppedUnreachable: 0,
+      kept: 0,
+      retried: false,
+    },
+  };
 
   it("requires ownership - a rejected requireOwner is caught and returned as { error }, never thrown", async () => {
     vi.mocked(requireOwner).mockRejectedValueOnce(new Error("Not authorized. Sign in with an approved account."));
@@ -86,7 +133,7 @@ describe("gatherReplyResourcesAction", () => {
     expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
   });
 
-  it("returns an entry for every id with no call at all when every post's concept is empty", async () => {
+  it("returns an entry for every id with no call at all when every post's concept is empty - fixer pass (finding 2): no outcome at all, nothing was ever searched", async () => {
     const result = await gatherReplyResourcesAction(
       [
         { id: "p1", text: "   " },
@@ -102,7 +149,73 @@ describe("gatherReplyResourcesAction", () => {
       ],
       degraded: false,
     });
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      expect("outcome" in result.resources[0]).toBe(false);
+      expect("outcome" in result.resources[1]).toBe(false);
+    }
     expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
+  });
+
+  it("fixer pass (finding 2): an empty-concept post gets no outcome while a sibling post with a real concept still gets one", async () => {
+    vi.mocked(findResourceLinksForConceptsAction).mockResolvedValueOnce({
+      links: [],
+      degraded: false,
+      droppedUncorroborated: 0,
+      droppedPlaceholder: 0,
+      droppedUnreachable: 0,
+      notes: [],
+      perConcept: [
+        {
+          concept: "Photosynthesis",
+          sources: 0,
+          resolvedSources: 0,
+          candidates: 0,
+          droppedPlaceholder: 0,
+          droppedUncorroborated: 0,
+          droppedDuplicate: 0,
+          droppedUnreachable: 0,
+          kept: 0,
+          retried: false,
+        },
+      ],
+    } as never);
+
+    const result = await gatherReplyResourcesAction(
+      [
+        { id: "p1", text: "   " }, // empty concept - dropped before the call
+        { id: "p2", text: "Photosynthesis" },
+      ],
+      "",
+      "gemini"
+    );
+
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      const p1 = result.resources.find((r) => r.id === "p1")!;
+      const p2 = result.resources.find((r) => r.id === "p2")!;
+      expect(p1).toEqual({ id: "p1", resources: [] });
+      expect("outcome" in p1).toBe(false);
+      expect(p2.outcome?.kind).toBe("no-sources");
+    }
+  });
+
+  it("fixer pass (finding 2): a REAL concept with no matching perConcept entry (dropped past MAX_CONCEPTS_PER_RUN) still gets the 'no entry' outcome - only an empty-concept post skips it", async () => {
+    vi.mocked(findResourceLinksForConceptsAction).mockResolvedValueOnce({
+      links: [],
+      degraded: false,
+      droppedUncorroborated: 0,
+      droppedPlaceholder: 0,
+      droppedUnreachable: 0,
+      notes: [],
+      perConcept: [], // the concept never made it into perConcept at all
+    } as never);
+
+    const result = await gatherReplyResourcesAction([{ id: "p1", text: "Some real concept" }], "", "gemini");
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      expect(result.resources[0]).toEqual({ id: "p1", resources: [], outcome: NO_ENTRY_OUTCOME });
+    }
   });
 
   it("R4b: keys results back by CONCEPT STRING, not array index - a dropped empty-concept entry must not shift the mapping", async () => {
@@ -158,6 +271,16 @@ describe("gatherReplyResourcesAction", () => {
       expect(p1).toEqual(p2);
       expect(p1?.map((r) => r.title).sort()).toEqual(["Doc B", "Video A"]);
     }
+
+    // Y8: the duplicate concept string is deduped to ONE entry before the
+    // call - the search pair fires once for "Recursion basics", not twice.
+    expect(findResourceLinksForConceptsAction).toHaveBeenCalledWith(
+      ["Recursion basics"],
+      "",
+      "gemini",
+      undefined,
+      expect.any(Object)
+    );
   });
 
   it("R4f: caps at 3 links per post even when the reused action returns more for that concept", async () => {
@@ -219,13 +342,33 @@ describe("gatherReplyResourcesAction", () => {
     expect(result).toEqual({ error: "Provide at least one concept to search for learning resources." });
   });
 
-  it("forwards degraded: true from the reused action", async () => {
+  it("forwards degraded: true from the reused action - Y8: the empty post gets the no-sources outcome", async () => {
     mockLinksOnce([], true);
     const result = await gatherReplyResourcesAction([{ id: "p1", text: "Something" }], "", "gemini");
     expect("resources" in result).toBe(true);
     if ("resources" in result) {
       expect(result.degraded).toBe(true);
-      expect(result.resources).toEqual([{ id: "p1", resources: [] }]);
+      expect(result.resources).toEqual([
+        {
+          id: "p1",
+          resources: [],
+          outcome: {
+            kind: "no-sources",
+            text: "No web pages came back this time. Search for resources again - it usually works.",
+            counts: {
+              sources: 0,
+              resolvedSources: 0,
+              candidates: 0,
+              droppedPlaceholder: 0,
+              droppedUncorroborated: 0,
+              droppedDuplicate: 0,
+              droppedUnreachable: 0,
+              kept: 0,
+              retried: false,
+            },
+          },
+        },
+      ]);
     }
   });
 
@@ -342,6 +485,315 @@ describe("gatherReplyResourcesAction", () => {
       const call = vi.mocked(findResourceLinksForConceptsAction).mock.calls[0];
       const profile = call[4] as { extraGuidance?: string };
       expect(profile.extraGuidance).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // docs/reply-resource-search-yield-acceptance-criteria.md Y8: the action
+  // explains an empty result. Each test below drives `perConcept` directly
+  // (not through `mockLinksOnce`'s auto-derivation) so every count is exact
+  // and every sentence is pinned as the literal contract text.
+  // -------------------------------------------------------------------
+
+  describe("Y8: resourceSearchOutcome", () => {
+    function mockOutcomeOnce(links: Array<Record<string, unknown>>, perConcept: Array<Record<string, unknown>>, degraded = false) {
+      vi.mocked(findResourceLinksForConceptsAction).mockResolvedValueOnce({
+        links,
+        degraded,
+        droppedUncorroborated: 0,
+        droppedPlaceholder: 0,
+        droppedUnreachable: 0,
+        notes: [],
+        perConcept,
+      } as never);
+    }
+
+    it("a post with links has NO outcome key at all", async () => {
+      mockLinksOnce([{ concept: "Something", title: "T1", url: "https://x/1", kind: "doc", whatYouGet: "" }]);
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Something" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0]).toEqual({
+          id: "p1",
+          resources: [{ title: "T1", url: "https://x/1", kind: "doc" }],
+        });
+        expect("outcome" in result.resources[0]).toBe(false);
+      }
+    });
+
+    it("kind 'no-sources': sources === 0", async () => {
+      mockOutcomeOnce(
+        [],
+        [
+          {
+            concept: "Photosynthesis",
+            sources: 0,
+            resolvedSources: 0,
+            candidates: 0,
+            droppedPlaceholder: 0,
+            droppedUncorroborated: 0,
+            droppedDuplicate: 0,
+            droppedUnreachable: 0,
+            kept: 0,
+            retried: false,
+          },
+        ]
+      );
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Photosynthesis" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].outcome?.kind).toBe("no-sources");
+        expect(result.resources[0].outcome?.text).toBe(
+          "No web pages came back this time. Search for resources again - it usually works."
+        );
+      }
+    });
+
+    it("kind 'no-candidates': sources > 0, candidates === 0", async () => {
+      mockOutcomeOnce(
+        [],
+        [
+          {
+            concept: "Mitosis",
+            sources: 2,
+            resolvedSources: 2,
+            candidates: 0,
+            droppedPlaceholder: 0,
+            droppedUncorroborated: 0,
+            droppedDuplicate: 0,
+            droppedUnreachable: 0,
+            kept: 0,
+            retried: false,
+          },
+        ]
+      );
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Mitosis" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].outcome?.kind).toBe("no-candidates");
+        expect(result.resources[0].outcome?.text).toBe(
+          "Pages were searched, but none matched these terms. Editing the reply changes the terms."
+        );
+      }
+    });
+
+    it("kind 'all-dropped', droppedUnreachable >= droppedUncorroborated: names the candidate count and says the pages did not open", async () => {
+      mockOutcomeOnce(
+        [],
+        [
+          {
+            concept: "Osmosis",
+            sources: 2,
+            resolvedSources: 2,
+            candidates: 3,
+            droppedPlaceholder: 0,
+            droppedUncorroborated: 1,
+            droppedDuplicate: 0,
+            droppedUnreachable: 2,
+            kept: 0,
+            retried: false,
+          },
+        ]
+      );
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Osmosis" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].outcome?.kind).toBe("all-dropped");
+        expect(result.resources[0].outcome?.text).toBe("Found 3 links, but the pages did not open. Search for resources again.");
+      }
+    });
+
+    it("kind 'all-dropped', otherwise: names the candidate count and says none traced back to a real site", async () => {
+      mockOutcomeOnce(
+        [],
+        [
+          {
+            concept: "Diffusion",
+            sources: 2,
+            resolvedSources: 2,
+            candidates: 3,
+            droppedPlaceholder: 0,
+            droppedUncorroborated: 2,
+            droppedDuplicate: 0,
+            droppedUnreachable: 1,
+            kept: 0,
+            retried: false,
+          },
+        ]
+      );
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Diffusion" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].outcome?.kind).toBe("all-dropped");
+        expect(result.resources[0].outcome?.text).toBe(
+          "Found 3 links, but none traced back to a real site. Editing the reply changes the terms."
+        );
+      }
+    });
+
+    it("fixer pass (finding 1): all-dropped with EVERY candidate a placeholder (droppedUnreachable and droppedUncorroborated both 0) says 'real site', not 'did not open'", async () => {
+      mockOutcomeOnce(
+        [],
+        [
+          {
+            concept: "Placeholder-only concept",
+            sources: 2,
+            resolvedSources: 2,
+            candidates: 3,
+            droppedPlaceholder: 3,
+            droppedUncorroborated: 0,
+            droppedDuplicate: 0,
+            droppedUnreachable: 0,
+            kept: 0,
+            retried: false,
+          },
+        ]
+      );
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Placeholder-only concept" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].outcome?.kind).toBe("all-dropped");
+        // 0 >= 0 used to be true (the bug), sending this down the "did not
+        // open" branch even though nothing was ever fetched. Nothing was
+        // ever fetched OR corroborated here - it must read as "none traced
+        // back to a real site".
+        expect(result.resources[0].outcome?.text).toBe(
+          "Found 3 links, but none traced back to a real site. Editing the reply changes the terms."
+        );
+      }
+    });
+
+    it("kind 'unknown', kept > 0: this action's own eligible-kinds filter dropped every kept link for this post - names Eligible resource kinds", async () => {
+      mockOutcomeOnce(
+        [{ concept: "Sorting", title: "A video", url: "https://x/1", kind: "video", whatYouGet: "" }],
+        [
+          {
+            concept: "Sorting",
+            sources: 2,
+            resolvedSources: 2,
+            candidates: 1,
+            droppedPlaceholder: 0,
+            droppedUncorroborated: 0,
+            droppedDuplicate: 0,
+            droppedUnreachable: 0,
+            kept: 1,
+            retried: false,
+          },
+        ]
+      );
+      // Only "doc" is eligible - the model's one kept link is a "video",
+      // dropped by gatherReplyResourcesAction's own result-side filter, even
+      // though Group A's own pipeline kept it (kept: 1).
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Sorting" }], "", "gemini", ["doc"]);
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].resources).toEqual([]);
+        expect(result.resources[0].outcome?.kind).toBe("unknown");
+        expect(result.resources[0].outcome?.text).toBe(
+          "Links were found, but not in the resource kinds you picked in Eligible resource kinds."
+        );
+      }
+    });
+
+    it("kind 'unknown', kept === 0 (no matching perConcept entry): stays the generic sentence, not the eligible-kinds one", async () => {
+      mockOutcomeOnce([], []); // the concept never made it into perConcept at all
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Some real concept" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].outcome?.kind).toBe("unknown");
+        expect(result.resources[0].outcome?.text).toBe("No links came back for these terms.");
+      }
+    });
+
+    it("kind 'failed': text is 'The search failed: {reason}', reason the first sentence of `failed`", async () => {
+      mockOutcomeOnce(
+        [],
+        [
+          {
+            concept: "Entropy",
+            sources: 0,
+            resolvedSources: 0,
+            candidates: 0,
+            droppedPlaceholder: 0,
+            droppedUncorroborated: 0,
+            droppedDuplicate: 0,
+            droppedUnreachable: 0,
+            kept: 0,
+            retried: false,
+            failed: "Network timeout while fetching the search page. Second sentence that must not appear.",
+          },
+        ]
+      );
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Entropy" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].outcome?.kind).toBe("failed");
+        expect(result.resources[0].outcome?.text).toBe("The search failed: Network timeout while fetching the search page.");
+        expect(result.resources[0].outcome?.text).not.toContain("Second sentence");
+      }
+    });
+
+    it("kind 'failed': a reason with no sentence break over 60 characters is clamped to 60 characters", async () => {
+      const longReason = "A".repeat(70) + ". trailing detail that must never appear";
+      mockOutcomeOnce(
+        [],
+        [
+          {
+            concept: "Entropy",
+            sources: 0,
+            resolvedSources: 0,
+            candidates: 0,
+            droppedPlaceholder: 0,
+            droppedUncorroborated: 0,
+            droppedDuplicate: 0,
+            droppedUnreachable: 0,
+            kept: 0,
+            retried: false,
+            failed: longReason,
+          },
+        ]
+      );
+      const result = await gatherReplyResourcesAction([{ id: "p1", text: "Entropy" }], "", "gemini");
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        expect(result.resources[0].outcome?.text).toBe(`The search failed: ${"A".repeat(60)}`);
+        expect(result.resources[0].outcome?.text.length).toBeLessThan(90);
+      }
+    });
+
+    it("duplicate concepts are sent once (dedupe) and both posts get the SAME outcome", async () => {
+      mockOutcomeOnce(
+        [],
+        [
+          {
+            concept: "Gravity",
+            sources: 0,
+            resolvedSources: 0,
+            candidates: 0,
+            droppedPlaceholder: 0,
+            droppedUncorroborated: 0,
+            droppedDuplicate: 0,
+            droppedUnreachable: 0,
+            kept: 0,
+            retried: false,
+          },
+        ]
+      );
+      const result = await gatherReplyResourcesAction(
+        [
+          { id: "p1", text: "Gravity" },
+          { id: "p2", text: "Gravity" },
+        ],
+        "",
+        "gemini"
+      );
+      expect(findResourceLinksForConceptsAction).toHaveBeenCalledWith(["Gravity"], "", "gemini", undefined, expect.any(Object));
+      expect("resources" in result).toBe(true);
+      if ("resources" in result) {
+        const byId = new Map(result.resources.map((r) => [r.id, r.outcome]));
+        expect(byId.get("p1")).toEqual(byId.get("p2"));
+        expect(byId.get("p1")?.kind).toBe("no-sources");
+      }
     });
   });
 });

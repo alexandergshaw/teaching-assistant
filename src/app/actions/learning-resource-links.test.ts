@@ -32,6 +32,7 @@ import { requireOwner } from "@/lib/supabase/auth";
 import { checkUrlsReachable } from "@/lib/url-reachability";
 import { tokenizeInline } from "@/lib/docx-blocks";
 import { RESOURCE_KINDS, type ResourceKind } from "@/lib/resource-kind";
+import { createGroundingResolver } from "@/lib/grounding-sources";
 import { findResourceLinksForConceptsAction } from "./learning-resource-links";
 
 // The grounded call (call 1) and the structuring call (call 2) - matches
@@ -160,12 +161,22 @@ describe("findResourceLinksForConceptsAction", () => {
       .mockResolvedValueOnce(groundedResponse("prose with no grounding"))
       .mockResolvedValueOnce(
         structureResponse([{ title: "unverifiable item", url: "https://some-real-site.test/page", kind: "doc" }])
+      )
+      // Y3: a sourceless first attempt now retries even though it produced
+      // items (sourceCount === 0, not just items.length === 0) - the retry's
+      // pair is ALSO sourceless, so the run stays degraded after it runs.
+      .mockResolvedValueOnce(groundedResponse("prose with no grounding, retry"))
+      .mockResolvedValueOnce(
+        structureResponse([{ title: "still unverifiable", url: "https://some-real-site.test/page-2", kind: "doc" }])
       );
 
     const result = await findResourceLinksForConceptsAction(["recursion"], "Computer Science", "gemini");
     expect("error" in result).toBe(false);
     if ("error" in result) return;
 
+    // 2 calls for the sourceless first pair + 2 for the sourceless retry
+    // pair = 4, never 2 (Y3's retry never fired) and never 6 (a second retry).
+    expect(vi.mocked(callLlm).mock.calls.length).toBe(4);
     expect(result.degraded).toBe(true);
     expect(result.links).toEqual([]);
     expect(result.notes.some((n) => /answered without searching/i.test(n))).toBe(true);
@@ -236,7 +247,21 @@ describe("findResourceLinksForConceptsAction", () => {
         ])
       );
 
-    const result = await findResourceLinksForConceptsAction(["python functions"], "Computer Science", "gemini");
+    // Y1: this test's source is on the redirect host, so the run's resolver
+    // would otherwise reach real `fetch`. A 403 here matches the AC's own
+    // vendor-uncertainty note (a non-3xx answer leaves every source
+    // unchanged) and keeps this test's assertions exactly as they were
+    // before Y1 existed - title-based corroboration, not resolution, is what
+    // this test pins.
+    const fetchImpl = vi.fn().mockResolvedValue({ status: 403, headers: { get: () => null } });
+    const resolver = createGroundingResolver({ fetchImpl });
+
+    const result = await findResourceLinksForConceptsAction(
+      ["python functions"],
+      "Computer Science",
+      "gemini",
+      { resolver }
+    );
     expect("error" in result).toBe(false);
     if ("error" in result) return;
 
@@ -299,6 +324,35 @@ describe("findResourceLinksForConceptsAction", () => {
     ]);
     expect(result.droppedUncorroborated).toBe(0);
     expect(result.droppedPlaceholder).toBe(0);
+    expect(result.droppedUnreachable).toBe(0);
+  });
+
+  it("Finding E / regression fix: a concept whose structuring call emits the same url twice yields one link, counted as droppedDuplicate - never droppedUnreachable", async () => {
+    vi.mocked(callLlm)
+      .mockResolvedValueOnce(
+        groundedResponse("prose", [{ title: "real-source.test", uri: "https://real-source.test/page" }])
+      )
+      .mockResolvedValueOnce(
+        structureResponse([
+          { title: "Great tutorial", url: "https://real-source.test/tutorial", kind: "video" },
+          { title: "Great tutorial (again)", url: "https://real-source.test/tutorial", kind: "video" },
+        ])
+      );
+
+    const result = await findResourceLinksForConceptsAction(["recursion"], "Computer Science", "gemini");
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+
+    // Only one link on the page for the repeated url - the reachability
+    // checker is deduped by url too, so it is only ever checked once.
+    expect(result.links).toHaveLength(1);
+    expect(result.links[0].url).toBe("https://real-source.test/tutorial");
+    expect(checkUrlsReachable).toHaveBeenCalledWith(["https://real-source.test/tutorial"]);
+
+    // The duplicate never reached the reachability check, so it must not be
+    // counted as unreachable - at either the per-concept or the top level.
+    expect(result.perConcept[0].droppedDuplicate).toBe(1);
+    expect(result.perConcept[0].droppedUnreachable).toBe(0);
     expect(result.droppedUnreachable).toBe(0);
   });
 
@@ -679,6 +733,77 @@ describe("findResourceLinksForConceptsAction", () => {
 
       expect(result.links).toHaveLength(1);
       expect(result.links[0].kind).toBe("doc");
+    });
+  });
+
+  describe("Finding E: dedupe survivors by (concept, url) before the reachability call", () => {
+    it("a model that tags every item with the same source index yields only ONE link, not one per item", async () => {
+      const resolvedUrl = "https://real-publisher.test/deep/page";
+      const fetchImpl = vi.fn().mockResolvedValue({
+        status: 302,
+        headers: { get: (name: string) => (name.toLowerCase() === "location" ? resolvedUrl : null) },
+      });
+      const resolver = createGroundingResolver({ fetchImpl });
+
+      // Every item tags "source": 0, so all four resolve to the SAME url -
+      // structureResponse's own ItemFixture type has no "source" field, so
+      // this response is built directly.
+      vi.mocked(callLlm)
+        .mockResolvedValueOnce(
+          groundedResponse("prose", [
+            { title: "vague title", uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/redir1" },
+          ])
+        )
+        .mockResolvedValueOnce({
+          ok: true as const,
+          text: JSON.stringify({
+            items: [
+              { title: "First mention", url: "x", kind: "doc", whatYouGet: "help", source: 0 },
+              { title: "Second mention", url: "x", kind: "doc", whatYouGet: "help", source: 0 },
+              { title: "Third mention", url: "x", kind: "doc", whatYouGet: "help", source: 0 },
+              { title: "Fourth mention", url: "x", kind: "doc", whatYouGet: "help", source: 0 },
+            ],
+          }),
+        });
+
+      const result = await findResourceLinksForConceptsAction(
+        ["recursion"],
+        "Computer Science",
+        "gemini",
+        { resolver }
+      );
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      // All four candidates resolve to the identical url - only one survives
+      // to the returned links, and the reachability checker was asked about
+      // it only once.
+      expect(result.links).toHaveLength(1);
+      expect(result.links[0].url).toBe(resolvedUrl);
+      expect(checkUrlsReachable).toHaveBeenCalledTimes(1);
+      expect(checkUrlsReachable).toHaveBeenCalledWith([resolvedUrl]);
+      expect(result.perConcept[0].kept).toBe(1);
+      expect(result.perConcept[0].candidates).toBe(4);
+    });
+
+    it("two DIFFERENT concepts that independently surface the same url are NOT deduped away (cross-concept sharing still yields two links)", async () => {
+      const sharedUrl = "https://real-source.test/shared-doc";
+      vi.mocked(callLlm).mockImplementation(async (req) => {
+        if (req.webSearch) {
+          return groundedResponse("prose", [{ title: "real-source.test", uri: "https://real-source.test/page" }]);
+        }
+        return structureResponse([{ title: "Shared doc", url: sharedUrl, kind: "doc" }]);
+      });
+
+      const result = await findResourceLinksForConceptsAction(
+        ["recursion", "iteration"],
+        "Computer Science",
+        "gemini"
+      );
+      expect("error" in result).toBe(false);
+      if ("error" in result) return;
+
+      expect(result.links).toHaveLength(2);
     });
   });
 });

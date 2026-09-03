@@ -71,6 +71,8 @@ describe("buildDiscussionRepliesLogRowEntry", () => {
       concepts: [],
       resourceQuery: "",
       resourceQuerySource: "",
+      resourceSearchOutcome: null,
+      resourceCount: 0,
     });
   });
 
@@ -110,6 +112,58 @@ describe("buildDiscussionRepliesLogRowEntry", () => {
     const r = row({ id: "r1", author: "Ana", threadPosition: "root" });
     const entry = buildDiscussionRepliesLogRowEntry(r, [other, r], new Set());
     expect(entry.parentResolved).toBe(false);
+  });
+
+  // docs/reply-resource-search-yield-acceptance-criteria.md Y12: the row's
+  // resourceSearchOutcome, verbatim - null (not undefined) when absent, so
+  // the exported JSON always carries the key.
+  it("Y12: carries the row's resourceSearchOutcome object verbatim when present", () => {
+    const outcome = {
+      kind: "no-candidates" as const,
+      text: "Pages were searched, but none matched these terms. Editing the reply changes the terms.",
+      counts: {
+        sources: 2,
+        resolvedSources: 2,
+        candidates: 0,
+        droppedPlaceholder: 0,
+        droppedUncorroborated: 0,
+        droppedDuplicate: 0,
+        droppedUnreachable: 0,
+        kept: 0,
+        retried: false,
+      },
+    };
+    const r = row({ id: "r1", author: "A", resourceState: "done", resourceSearchOutcome: outcome });
+    const entry = buildDiscussionRepliesLogRowEntry(r, [r], new Set());
+    expect(entry.resourceSearchOutcome).toEqual(outcome);
+  });
+
+  it("Y12: resourceSearchOutcome is null (not undefined) when the row never had one", () => {
+    const r = row({ id: "r1", author: "A" });
+    const entry = buildDiscussionRepliesLogRowEntry(r, [r], new Set());
+    expect(entry.resourceSearchOutcome).toBeNull();
+  });
+
+  // Fixer pass, verifier finding 3: resourceCount is row.resources?.length ??
+  // 0, JSON-only (no CSV column) - the direct fact rowsWithNoResources now
+  // counts against.
+  it("resourceCount is 0 when resources is absent", () => {
+    const r = row({ id: "r1", author: "A" });
+    const entry = buildDiscussionRepliesLogRowEntry(r, [r], new Set());
+    expect(entry.resourceCount).toBe(0);
+  });
+
+  it("resourceCount is row.resources.length when present", () => {
+    const r = row({
+      id: "r1",
+      author: "A",
+      resources: [
+        { title: "T1", url: "https://x/1", kind: "doc" },
+        { title: "T2", url: "https://x/2", kind: "video" },
+      ],
+    });
+    const entry = buildDiscussionRepliesLogRowEntry(r, [r], new Set());
+    expect(entry.resourceCount).toBe(2);
   });
 });
 
@@ -272,6 +326,7 @@ describe("summarizeDiscussionRepliesRunLog", () => {
       postsDiscardedTotal: 0,
       noticeCount: 0,
       droppedFrames: 0,
+      rowsWithNoResources: 0,
     });
   });
 
@@ -299,6 +354,52 @@ describe("summarizeDiscussionRepliesRunLog", () => {
     expect(summary.drafting).toBe(1);
     expect(summary.ready).toBe(1);
     expect(summary.failed).toBe(1);
+  });
+
+  // docs/reply-resource-search-yield-acceptance-criteria.md Y12, fixed by the
+  // fixer pass (verifier finding 3): rowsWithNoResources - rows searched
+  // (resourceState "done") that came back with no resources, derived from
+  // resourceCount === 0 DIRECTLY, not from resourceSearchOutcome's presence.
+  // The two are not equivalent: an instructor who hand-empties a row's
+  // resources (R11) leaves resourceSearchOutcome untouched (Y9 only sets/
+  // clears it on an applied search), so that row's own resourceCount is 0
+  // and it MUST count here even with no outcome attached.
+  it("Y12: rowsWithNoResources counts every 'done' row with resourceCount === 0, outcome or not", () => {
+    const outcome = {
+      kind: "no-sources" as const,
+      text: "No web pages were searched this time. Search for resources again - it usually works.",
+      counts: {
+        sources: 0,
+        resolvedSources: 0,
+        candidates: 0,
+        droppedPlaceholder: 0,
+        droppedUncorroborated: 0,
+        droppedDuplicate: 0,
+        droppedUnreachable: 0,
+        kept: 0,
+        retried: false,
+      },
+    };
+    const rows: ReplyRow[] = [
+      // done, no resources, an outcome - counts.
+      row({ id: "r1", author: "A", resourceState: "done", resourceSearchOutcome: outcome }),
+      // done, has resources (no outcome, per Y9) - does not count.
+      row({
+        id: "r2",
+        author: "B",
+        resourceState: "done",
+        resources: [{ title: "T", url: "https://x/1", kind: "doc" }],
+      }),
+      // done, no resources, and NO outcome (the instructor emptied it by
+      // hand - R11) - this is the case verifier finding 3 caught: it MUST
+      // still count, because it is a real "done and got nothing" row, even
+      // though the old resourceSearchOutcome-based count missed it.
+      row({ id: "r3", author: "C", resourceState: "done" }),
+      // never searched at all - does not count.
+      row({ id: "r4", author: "D" }),
+    ];
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(summary.rowsWithNoResources).toBe(2);
   });
 });
 
@@ -360,6 +461,66 @@ describe("discussionRepliesLogSummaryLine", () => {
     expect(discussionRepliesLogSummaryLine(summary)).toBe(
       "0 replies captured across 1 batch - 0 drafted, 0 failed, 0 never drafted, 0 retried, 0 notices." +
         " 4 extracted posts were discarded before reaching the table."
+    );
+  });
+
+  // docs/reply-resource-search-yield-acceptance-criteria.md Y12: the
+  // " {n} replies got no links." clause - singular at 1, nothing at 0, same
+  // conditional-clause idiom as the discarded-post clause above.
+  it("Y12: no clause at all when rowsWithNoResources is 0", () => {
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), []));
+    expect(summary.rowsWithNoResources).toBe(0);
+    expect(discussionRepliesLogSummaryLine(summary)).not.toContain("got no links");
+  });
+
+  it("Y12: singular 'reply' at exactly 1", () => {
+    const outcome = {
+      kind: "no-sources" as const,
+      text: "No web pages were searched this time. Search for resources again - it usually works.",
+      counts: {
+        sources: 0,
+        resolvedSources: 0,
+        candidates: 0,
+        droppedPlaceholder: 0,
+        droppedUncorroborated: 0,
+        droppedDuplicate: 0,
+        droppedUnreachable: 0,
+        kept: 0,
+        retried: false,
+      },
+    };
+    const rows = [row({ id: "r1", author: "A", state: "ready", resourceState: "done", resourceSearchOutcome: outcome })];
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(summary.rowsWithNoResources).toBe(1);
+    expect(discussionRepliesLogSummaryLine(summary)).toBe(
+      "1 reply captured across 0 batches - 1 drafted, 0 failed, 0 never drafted, 0 retried, 0 notices. 1 reply got no links."
+    );
+  });
+
+  it("Y12: plural 'replies' at 2", () => {
+    const outcome = {
+      kind: "no-sources" as const,
+      text: "No web pages were searched this time. Search for resources again - it usually works.",
+      counts: {
+        sources: 0,
+        resolvedSources: 0,
+        candidates: 0,
+        droppedPlaceholder: 0,
+        droppedUncorroborated: 0,
+        droppedDuplicate: 0,
+        droppedUnreachable: 0,
+        kept: 0,
+        retried: false,
+      },
+    };
+    const rows = [
+      row({ id: "r1", author: "A", state: "ready", resourceState: "done", resourceSearchOutcome: outcome }),
+      row({ id: "r2", author: "B", state: "ready", resourceState: "done", resourceSearchOutcome: outcome }),
+    ];
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(summary.rowsWithNoResources).toBe(2);
+    expect(discussionRepliesLogSummaryLine(summary)).toBe(
+      "2 replies captured across 0 batches - 2 drafted, 0 failed, 0 never drafted, 0 retried, 0 notices. 2 replies got no links."
     );
   });
 });
@@ -449,12 +610,61 @@ describe("formatDiscussionRepliesLogCsv", () => {
       "2026-08-31T09:03:00.000Z,r2",
       "",
       "=== Rows ===",
-      "Row ID,Author,Thread position,Replying to,Parent resolved,Draft state,User edited,Retried,Error,Resource state,Resource error,Search terms,Resource search text,Resource search source",
-      "r1,Ana,root,,No,ready,No,No,,,,,,",
-      'r2,"Bob, Jr.",reply,Ana,Yes,failed,No,Yes,"429 Too Many Requests, retry later",,,,,',
-      "r3,Cy,,,No,ready,No,No,,,,,the original post text used as fallback,post",
+      "Row ID,Author,Thread position,Replying to,Parent resolved,Draft state,User edited,Retried,Error,Resource state,Resource error,Search terms,Resource search text,Resource search source,Links,Resource search outcome",
+      "r1,Ana,root,,No,ready,No,No,,,,,,,0,",
+      'r2,"Bob, Jr.",reply,Ana,Yes,failed,No,Yes,"429 Too Many Requests, retry later",,,,,,0,',
+      "r3,Cy,,,No,ready,No,No,,,,,the original post text used as fallback,post,0,",
     ].join("\r\n");
     expect(csv).toBe(expected);
+  });
+
+  // docs/reply-resource-search-yield-acceptance-criteria.md Y12: two new
+  // columns, appended LAST - "Links" (the row's own resource count)
+  // immediately before "Resource search outcome" (the outcome's `text`,
+  // `?? ""`).
+  it("Y12: the header ends with 'Links,Resource search outcome', and a row carries its resource count and outcome text there", () => {
+    const r = row({
+      id: "r1",
+      author: "A",
+      resourceState: "done",
+      resourceSearchOutcome: {
+        kind: "no-sources",
+        text: "No web pages came back this time. Search for resources again - it usually works.",
+        counts: {
+          sources: 0,
+          resolvedSources: 0,
+          candidates: 0,
+          droppedPlaceholder: 0,
+          droppedUncorroborated: 0,
+          droppedDuplicate: 0,
+          droppedUnreachable: 0,
+          kept: 0,
+          retried: false,
+        },
+      },
+    });
+    const csv = formatDiscussionRepliesLogCsv(buildDiscussionRepliesRunLog(emptyInput(), [r]));
+    const lines = csv.split("\r\n");
+    const headerLine = lines.find((l) => l.startsWith("Row ID,"));
+    expect(headerLine?.endsWith(",Links,Resource search outcome")).toBe(true);
+    expect(csv).toContain("No web pages came back this time. Search for resources again - it usually works.");
+  });
+
+  it("Y12: the Links column carries row.resourceCount, immediately before the outcome text", () => {
+    const r = row({
+      id: "r1",
+      author: "A",
+      resources: [
+        { title: "T1", url: "https://x/1", kind: "doc" },
+        { title: "T2", url: "https://x/2", kind: "video" },
+      ],
+    });
+    const csv = formatDiscussionRepliesLogCsv(buildDiscussionRepliesRunLog(emptyInput(), [r]));
+    const lines = csv.split("\r\n");
+    const rowLine = lines.find((l) => l.startsWith("r1,"));
+    // The row has no outcome, so the last cell (Resource search outcome) is
+    // empty and the Links cell (row.resources.length, 2) sits right before it.
+    expect(rowLine?.endsWith(",2,")).toBe(true);
   });
 
   it("carries a verbatim error message through into the CSV text unmodified (never a generic placeholder)", () => {

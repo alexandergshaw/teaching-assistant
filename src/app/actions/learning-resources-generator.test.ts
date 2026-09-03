@@ -83,6 +83,13 @@ function linksOutcome(overrides: Partial<FindResourceLinksSuccess> = {}): FindRe
     droppedPlaceholder: 0,
     droppedUnreachable: 0,
     notes: [],
+    // Y5 (docs/reply-resource-search-yield-acceptance-criteria.md): a
+    // REQUIRED field on FindResourceLinksSuccess. This generator's own test
+    // only exercises the caller-facing links/degraded/dropped* fields (it
+    // mocks findResourceLinksForConceptsAction wholesale, so it proves
+    // nothing about per-concept accounting - that's learning-resource-links.
+    // test.ts's job), so every fixture here defaults to [].
+    perConcept: [],
     ...overrides,
   };
 }

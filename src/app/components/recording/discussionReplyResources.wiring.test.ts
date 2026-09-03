@@ -172,6 +172,106 @@ describe("RC6: the three explanatory lines are mutually exclusive on resourceQue
 // all three now import the shared `CONCEPT_JOINER` export
 // (discussion-serialization.ts) and none restates the literal next to a
 // `join(` call.
+// ---------------------------------------------------------------------------
+// docs/reply-resource-search-yield-acceptance-criteria.md Y10: the search-
+// outcome caption - rendered LAST in the hint block, after showStaleQuery,
+// mutually exclusive with it by construction on `hasResources`, no
+// `!searching` guard (the `done` predicate already excludes it), wired to
+// the "Search for resources" button via useId/aria-describedby.
+// ---------------------------------------------------------------------------
+
+describe("Y10: the resourceSearchOutcome caption", () => {
+  // Fixer pass (verifier finding 4): this used to pin the whole showOutcome
+  // assignment as ONE frozen-string regex, so a behaviour-preserving rewrite
+  // (conjuncts reordered, whitespace changed, an intermediate variable
+  // extracted) would fail it even though the feature itself was untouched.
+  // Pin the three FACTS the AC actually requires instead - each conjunct
+  // present somewhere in the showOutcome assignment, as its own independent
+  // `toMatch` - so removing any one of them (the actual regression this
+  // guards against) still fails a test, but a harmless rewrite does not.
+  it("DiscussionReplyResources.tsx defines a showOutcome assignment", () => {
+    expect(resourcesSource).toMatch(/const showOutcome = [^;]+;/);
+  });
+
+  it("showOutcome requires resourceState === \"done\"", () => {
+    expect(resourcesSource).toMatch(/const showOutcome = [^;]*resourceState === "done"[^;]*;/);
+  });
+
+  it("showOutcome requires !hasResources - mutually exclusive with showStaleQuery on hasResources vs !hasResources", () => {
+    expect(resourcesSource).toMatch(/const showOutcome = [^;]*!hasResources[^;]*;/);
+    // showStaleQuery (RC6, unchanged) requires hasResources; showOutcome
+    // (Y10) requires !hasResources - the same boolean cannot satisfy both,
+    // so the two captions are mutually exclusive by construction.
+    expect(resourcesSource).toMatch(/showStaleQuery = hasConcepts && hasResources/);
+  });
+
+  it("showOutcome requires resourceSearchOutcome to be present", () => {
+    expect(resourcesSource).toMatch(/const showOutcome = [^;]*resourceSearchOutcome[^;]*;/);
+  });
+
+  it("showOutcome requires !showClearedByEdit - the outcome caption must not render alongside the 'Search terms cleared' line", () => {
+    expect(resourcesSource).toMatch(/const showOutcome = [^;]*!showClearedByEdit[^;]*;/);
+    // Canary: a predicate missing this conjunct must NOT match the pattern
+    // above, proving it actually discriminates the fix from the regression
+    // it guards against (both captions rendering together after a hand edit
+    // that cleared concepts on a row whose last search still came back
+    // empty).
+    expect(
+      /const showOutcome = [^;]*!showClearedByEdit[^;]*;/.test(
+        'const showOutcome = resourceState === "done" && !hasResources && !!resourceSearchOutcome;'
+      )
+    ).toBe(false);
+  });
+
+  it("showClearedByEdit is computed BEFORE showOutcome - the conjunct above depends on it", () => {
+    const clearedIdx = resourcesSource.indexOf("const showClearedByEdit");
+    const outcomeIdx = resourcesSource.indexOf("const showOutcome");
+    expect(clearedIdx).toBeGreaterThan(-1);
+    expect(outcomeIdx).toBeGreaterThan(clearedIdx);
+  });
+
+  it("no `!searching` guard on the outcome caption - the `done` predicate baked into showOutcome already excludes it", () => {
+    expect(resourcesSource).not.toMatch(/!searching && showOutcome/);
+    // Canary: the sibling RC6 lines DO carry the guard, proving the absence
+    // above is deliberate, not a stripped-comment false negative.
+    expect(resourcesSource).toMatch(/!searching && showStaleQuery/);
+  });
+
+  it("renders LAST in the hint block - after the showStaleQuery <p>, before the resource <ul>", () => {
+    const staleQueryIdx = resourcesSource.indexOf("showStaleQuery && <p");
+    const outcomeIdx = resourcesSource.indexOf("{showOutcome && (");
+    const listIdx = resourcesSource.indexOf("resources?.length && (");
+    expect(staleQueryIdx).toBeGreaterThan(-1);
+    expect(outcomeIdx).toBeGreaterThan(staleQueryIdx);
+    expect(listIdx).toBeGreaterThan(outcomeIdx);
+  });
+
+  it("never renders inside .ghActions - the caption's own <p> comes after that div closes", () => {
+    const ghActionsCloseIdx = resourcesSource.indexOf("</div>", resourcesSource.indexOf('className={styles.ghActions}'));
+    const outcomeIdx = resourcesSource.indexOf("{showOutcome && (");
+    expect(ghActionsCloseIdx).toBeGreaterThan(-1);
+    expect(outcomeIdx).toBeGreaterThan(ghActionsCloseIdx);
+  });
+
+  it("the caption uses styles.fieldHint, the same class every sibling hint line uses - no new colour, no icon", () => {
+    const outcomeBlockStart = resourcesSource.indexOf("{showOutcome && (");
+    const outcomeBlockEnd = resourcesSource.indexOf(")}", outcomeBlockStart);
+    const outcomeBlock = resourcesSource.slice(outcomeBlockStart, outcomeBlockEnd);
+    expect(outcomeBlock).toMatch(/className=\{styles\.fieldHint\}/);
+  });
+
+  it("useId wires the caption's id to the Search-for-resources button's aria-describedby, only while the caption renders", () => {
+    expect(resourcesSource).toMatch(/import \{ Fragment, memo, useId \} from "react"/);
+    expect(resourcesSource).toMatch(/const outcomeId = useId\(\)/);
+    expect(resourcesSource).toMatch(/aria-describedby=\{showOutcome \? outcomeId : undefined\}/);
+    expect(resourcesSource).toMatch(/<p id=\{outcomeId\} className=\{styles\.fieldHint\}>/);
+  });
+
+  it("the row passes resourceSearchOutcome through to DiscussionReplyResources", () => {
+    expect(rowSource).toMatch(/resourceSearchOutcome=\{row\.resourceSearchOutcome\}/);
+  });
+});
+
 describe("F7: the concepts joiner is CONCEPT_JOINER everywhere, never a restated literal", () => {
   it("all three files import CONCEPT_JOINER from discussion-serialization", () => {
     expect(useReplyResourcesSource).toMatch(/import \{ CONCEPT_JOINER \} from "\.\/discussion-serialization"/);

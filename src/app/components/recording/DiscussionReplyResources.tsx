@@ -23,7 +23,7 @@
 // re-renders on every keystroke in its own reply textarea, and that must not
 // force this resource list to re-render too.
 
-import { Fragment, memo } from "react";
+import { Fragment, memo, useId } from "react";
 import { Button, IconButton } from "@mui/material";
 import styles from "../../page.module.css";
 import panelStyles from "./DiscussionRepliesPanel.module.css";
@@ -67,6 +67,12 @@ export interface DiscussionReplyResourcesProps {
    *  the three explanatory lines applies; the three are mutually exclusive
    *  by construction on this field. */
   resourceQuerySource: ReplyRow["resourceQuerySource"];
+  /** docs/reply-resource-search-yield-acceptance-criteria.md Y10: the LAST
+   *  search's "why empty" explanation (Y8/Y9) - rendered as the caption LAST
+   *  in the hint block, only when `resourceState === "done"`, `resources` is
+   *  empty and this is set (Y9 clears it the moment a search returns
+   *  resources, so it is never shown alongside a non-empty resource list). */
+  resourceSearchOutcome: ReplyRow["resourceSearchOutcome"];
   /** RC6: dispatches this row's targeted resource search - already bound to
    *  this row's id by the caller (`useCallback(() => onSearchRow(row.id),
    *  [onSearchRow, row.id])`, mirroring `onRetryResources` below). */
@@ -94,6 +100,7 @@ function DiscussionReplyResourcesImpl({
   concepts,
   resourceQuery,
   resourceQuerySource,
+  resourceSearchOutcome,
   onSearch,
   onRetryResources,
   onInsertResource,
@@ -103,11 +110,26 @@ function DiscussionReplyResourcesImpl({
   const searching = resourceState === "searching";
   const hasConcepts = !!concepts?.length;
   const hasResources = !!resources?.length;
+  // Y10: the id linking the caption below to the "Search for resources"
+  // button's `aria-describedby` - only actually wired up (see below) while
+  // the caption itself renders.
+  const outcomeId = useId();
   // RC6: the three explanatory lines, mutually exclusive by construction on
   // `resourceQuerySource` (a row's last search recorded exactly one source)
   // and never shown while a search is in flight - the "Finding resources…"
   // hint below already covers that case.
   const showClearedByEdit = !hasConcepts && resourceQuerySource === "concepts";
+  // Y10: `resourceState === "done"` already excludes "searching" (no
+  // `!searching` guard needed, unlike the three RC6 lines below - the `done`
+  // predicate alone is what makes this mutually exclusive with the
+  // "Finding resources..." hint). `showStaleQuery` REQUIRES `hasResources`
+  // (see its own definition below), so it and `showOutcome` are mutually
+  // exclusive by construction on `hasResources` alone. `!showClearedByEdit`
+  // keeps the outcome caption from rendering alongside the "Search terms
+  // cleared" line - a hand edit that cleared concepts already explains why
+  // the row has nothing, so the LAST search's own outcome text would be
+  // redundant (and describes terms the row no longer shows).
+  const showOutcome = resourceState === "done" && !hasResources && !!resourceSearchOutcome && !showClearedByEdit;
   // F2 fix (fixer pass): a prose-sourced search (`"post"`/`"post-reply"`)
   // used to only disclose itself when the row also had no concepts. That
   // left a silent gap: a row can carry concepts (the newest drafted reply)
@@ -159,6 +181,7 @@ function DiscussionReplyResourcesImpl({
           style={{ minWidth: 0 }}
           disabled={searching}
           aria-label={`Search for resources for the reply to ${authorName}`}
+          aria-describedby={showOutcome ? outcomeId : undefined}
           onClick={onSearch}
         >
           Search for resources
@@ -197,6 +220,14 @@ function DiscussionReplyResourcesImpl({
           ingredient off, or a mangled-term mismatch), not only a stale one,
           so "earlier" was no longer always true. */}
       {!searching && showStaleQuery && <p className={styles.fieldHint}>{`Links below came from a search for: ${resourceQuery}`}</p>}
+      {/* Y10: LAST in this hint block, after showStaleQuery (cause, then
+          effect) - never inside .ghActions. No `!searching` guard: the
+          `done` predicate baked into `showOutcome` already excludes it. */}
+      {showOutcome && (
+        <p id={outcomeId} className={styles.fieldHint}>
+          {resourceSearchOutcome?.text}
+        </p>
+      )}
       {!!resources?.length && (
         <ul className={panelStyles.resourceList}>
           {resources.map((r) => (

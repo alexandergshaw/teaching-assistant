@@ -27,6 +27,15 @@
 
 import { coerceResourceKind, type ResourceKind } from "@/lib/resource-kind";
 import { VALID_THREAD_POSITIONS } from "./discussion-thread";
+// docs/reply-resource-search-yield-acceptance-criteria.md Y5/Y8/Y9: the
+// outcome kind/counts/shape types are owned by the neutral, dependency-free
+// leaf src/lib/resource-search-outcome.ts - imported here and re-exported
+// unchanged so every existing importer of
+// ResourceSearchOutcomeKind/ResourceSearchCounts/ResourceSearchOutcome from
+// this file keeps working.
+import type { ResourceSearchOutcomeKind, ResourceSearchCounts, ResourceSearchOutcome } from "@/lib/resource-search-outcome";
+
+export type { ResourceSearchOutcomeKind, ResourceSearchCounts, ResourceSearchOutcome };
 
 // ---------------------------------------------------------------------------
 // AC4c: domain types. Moved here with the functions that most rigidly must
@@ -103,9 +112,71 @@ export interface ReplyRow {
   concepts?: string[];
   resourceQuery?: string;
   resourceQuerySource?: "concepts" | "post" | "post-reply";
+  // docs/reply-resource-search-yield-acceptance-criteria.md Y9: describes the
+  // LAST search, exactly like resourceQuery/resourceQuerySource above - set
+  // when that search's result had no resources, cleared the moment a search
+  // DOES return resources. PERSISTED, absent-stays-absent. A hand edit that
+  // clears `concepts` (editReply, useReplyRows.ts) does NOT touch this field.
+  resourceSearchOutcome?: ResourceSearchOutcome;
 }
 
 const VALID_RESOURCE_QUERY_SOURCES: ReadonlySet<string> = new Set(["concepts", "post", "post-reply"]);
+const VALID_RESOURCE_SEARCH_OUTCOME_KINDS: ReadonlySet<string> = new Set([
+  "failed",
+  "no-sources",
+  "no-candidates",
+  "all-dropped",
+  "unknown",
+]);
+const RESOURCE_SEARCH_COUNT_FIELDS = [
+  "sources",
+  "resolvedSources",
+  "candidates",
+  "droppedPlaceholder",
+  "droppedUncorroborated",
+  "droppedDuplicate",
+  "droppedUnreachable",
+  "kept",
+] as const;
+
+/** Y9: shape-only coercion of a persisted `resourceSearchOutcome.counts`
+ *  object - `retried` must be a boolean or the whole counts object (and
+ *  therefore the outcome) is dropped. A numeric field that IS present must be
+ *  a finite number, or the same drop applies - but a field that is ABSENT
+ *  entirely (a row persisted before that field existed - `droppedDuplicate`,
+ *  added after `droppedUnreachable` etc. were already shipping) coerces to 0
+ *  rather than dropping the outcome, so an old row keeps deserializing after
+ *  a new count field is added. Never throws. */
+function coerceResourceSearchCounts(raw: unknown): ResourceSearchCounts | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const c = raw as Record<string, unknown>;
+  const counts = {} as Record<(typeof RESOURCE_SEARCH_COUNT_FIELDS)[number], number>;
+  for (const field of RESOURCE_SEARCH_COUNT_FIELDS) {
+    const v = c[field];
+    if (v === undefined) {
+      counts[field] = 0;
+      continue;
+    }
+    if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+    counts[field] = v;
+  }
+  if (typeof c.retried !== "boolean") return undefined;
+  return { ...counts, retried: c.retried };
+}
+
+/** Y9: shape-only coercion of a persisted `resourceSearchOutcome` - a
+ *  malformed value (wrong kind, missing/empty text, malformed counts) is
+ *  dropped entirely (`undefined`), never thrown on, mirroring every other
+ *  optional-field coercion in this file. */
+function coerceResourceSearchOutcome(raw: unknown): ResourceSearchOutcome | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.kind !== "string" || !VALID_RESOURCE_SEARCH_OUTCOME_KINDS.has(o.kind)) return undefined;
+  if (typeof o.text !== "string" || !o.text) return undefined;
+  const counts = coerceResourceSearchCounts(o.counts);
+  if (!counts) return undefined;
+  return { kind: o.kind as ResourceSearchOutcomeKind, text: o.text, counts };
+}
 
 // F7 fix (fixer pass, docs/reply-resource-concepts-acceptance-criteria.md
 // RC4/RC7): the "; " joiner used to be a literal repeated in three places -
@@ -265,6 +336,11 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
           ? (r.resourceQuerySource as NonNullable<ReplyRow["resourceQuerySource"]>)
           : undefined;
 
+      // Y9: same absent-stays-absent discipline - a key ABSENT from the raw
+      // JSON stays undefined; a key PRESENT but malformed also falls back to
+      // undefined (dropped), never a sentinel or a throw.
+      const resourceSearchOutcome = coerceResourceSearchOutcome(r.resourceSearchOutcome);
+
       rows.push({
         id,
         author,
@@ -286,6 +362,7 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
         concepts,
         resourceQuery,
         resourceQuerySource,
+        resourceSearchOutcome,
       });
     });
 

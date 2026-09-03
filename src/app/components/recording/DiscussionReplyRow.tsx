@@ -896,6 +896,7 @@ function DiscussionReplyRowImpl({
                 concepts={row.concepts}
                 resourceQuery={row.resourceQuery}
                 resourceQuerySource={row.resourceQuerySource}
+                resourceSearchOutcome={row.resourceSearchOutcome}
                 onSearch={handleSearchResources}
                 onRetryResources={handleRetryResources}
                 onInsertResource={handleInsertResource}

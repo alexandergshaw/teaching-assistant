@@ -12,6 +12,8 @@
 // confirmed green. See the report handed back to the dispatcher for which.
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
 import {
   isResourceLaneBusy,
   isFindMissingEligible,
@@ -20,6 +22,7 @@ import {
   resourceQueueProgressText,
   redactAuthorNameFromText,
   resourceQueryForRow,
+  outcomeById,
 } from "./useReplyResources";
 // F1 fix, then RC10 (docs/reply-resource-concepts-acceptance-criteria.md):
 // isResourceBatchFresh moved to useReplyRows.ts first, then on to
@@ -69,9 +72,25 @@ describe("isResourceLaneBusy (R0-4)", () => {
 // R11: isFindMissingEligible - the bulk "Find resources" sweep's row filter.
 // ---------------------------------------------------------------------------
 
-function makeRow(overrides: Partial<Pick<ReplyRow, "resourceState" | "reply" | "skipped">>) {
+function makeRow(overrides: Partial<Pick<ReplyRow, "resourceState" | "reply" | "skipped" | "resources" | "resourceSearchOutcome">>) {
   return { reply: "A drafted reply.", ...overrides };
 }
+
+const AN_OUTCOME: NonNullable<ReplyRow["resourceSearchOutcome"]> = {
+  kind: "no-sources",
+  text: "No web pages were searched this time. Search for resources again - it usually works.",
+  counts: {
+    sources: 0,
+    resolvedSources: 0,
+    candidates: 0,
+    droppedPlaceholder: 0,
+    droppedUncorroborated: 0,
+    droppedDuplicate: 0,
+    droppedUnreachable: 0,
+    kept: 0,
+    retried: false,
+  },
+};
 
 describe("isFindMissingEligible (R11)", () => {
   it("eligible: resourceState undefined (never touched the feature) with a non-empty reply", () => {
@@ -108,6 +127,41 @@ describe("isFindMissingEligible (R11)", () => {
   it("NOT eligible: skipped, even though otherwise eligible (D9) - sabotage target", () => {
     expect(isFindMissingEligible(makeRow({ resourceState: undefined, skipped: true }))).toBe(false);
     expect(isFindMissingEligible(makeRow({ resourceState: "idle", skipped: true }))).toBe(false);
+  });
+
+  // -------------------------------------------------------------------
+  // docs/reply-resource-search-yield-acceptance-criteria.md Y13: a "done"
+  // row with no resources and an outcome (a real search ran and came back
+  // empty, Y8) is ALSO eligible - one click retries every such row.
+  // -------------------------------------------------------------------
+
+  it("Y13: eligible - done, no resources, an outcome set (a real search came back empty)", () => {
+    expect(isFindMissingEligible(makeRow({ resourceState: "done", resourceSearchOutcome: AN_OUTCOME }))).toBe(true);
+  });
+
+  it("Y13: NOT eligible - done, no resources, but no outcome (R11: the instructor emptied it by hand)", () => {
+    expect(isFindMissingEligible(makeRow({ resourceState: "done" }))).toBe(false);
+    expect(isFindMissingEligible(makeRow({ resourceState: "done", resources: [] }))).toBe(false);
+  });
+
+  it("Y13: NOT eligible - done, HAS resources, even with an outcome present (defensive - Y9 never actually produces this combination)", () => {
+    expect(
+      isFindMissingEligible(
+        makeRow({
+          resourceState: "done",
+          resources: [{ title: "T", url: "https://x/1", kind: "doc" }],
+          resourceSearchOutcome: AN_OUTCOME,
+        })
+      )
+    ).toBe(false);
+  });
+
+  it("Y13: still excluded when skipped, even with done+empty+outcome", () => {
+    expect(isFindMissingEligible(makeRow({ resourceState: "done", resourceSearchOutcome: AN_OUTCOME, skipped: true }))).toBe(false);
+  });
+
+  it("Y13: still excluded with no reply text, even with done+empty+outcome", () => {
+    expect(isFindMissingEligible(makeRow({ resourceState: "done", resourceSearchOutcome: AN_OUTCOME, reply: "" }))).toBe(false);
   });
 });
 
@@ -424,5 +478,107 @@ describe("resourceQueryForRow: concepts vs. prose, the source it reports, and th
     const result = resourceQueryForRow(makeQueryRow({ post: "A post about ethics.", author: "Isaac Newton", concepts: ["Isaac Newton"] }), "auto");
     expect(result.source).toBe("post");
     expect(result.text).toContain("ethics");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/reply-resource-search-yield-acceptance-criteria.md Y8/Y9: outcomeById
+// - the pure id -> outcome lookup the drain and dispatchRowSearch both build
+// from gatherReplyResourcesAction's own result and pass into applyResources.
+// ---------------------------------------------------------------------------
+
+describe("outcomeById (Y8/Y9)", () => {
+  it("maps each id to its own outcome", () => {
+    const map = outcomeById([
+      { id: "p1", outcome: AN_OUTCOME },
+      { id: "p2" },
+    ]);
+    expect(map.get("p1")).toEqual(AN_OUTCOME);
+    expect(map.get("p2")).toBeUndefined();
+  });
+
+  it("an id absent from the result maps to undefined via Map.get's own default, not a thrown lookup", () => {
+    const map = outcomeById([{ id: "p1", outcome: AN_OUTCOME }]);
+    expect(map.get("p2")).toBeUndefined();
+  });
+
+  it("empty input yields an empty map", () => {
+    expect(outcomeById([]).size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/reply-resource-search-yield-acceptance-criteria.md Y8/Y9/Y11: the
+// drain and dispatchRowSearch wiring, and the retired notice text. Nothing
+// in this repo's test suite ever exercises the bulk drain end to end (vitest
+// here is node-env and renders no hook - see this repo's own AGENTS.md), so
+// these are pinned by reading the source, the same idiom
+// resourceQuery.wiring.test.ts and discussionReplyResources.wiring.test.ts
+// already use for this exact class of gap. Comments stripped first, same
+// habit as those two files.
+// ---------------------------------------------------------------------------
+
+function readSource(relativeToThisFile: string): string {
+  return readFileSync(fileURLToPath(new URL(relativeToThisFile, import.meta.url)), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+}
+
+const resourcesHookSource = readSource("./useReplyResources.ts");
+
+describe("Y11: the batch notice text is retired and replaced", () => {
+  it("the old generic sentence is gone; the new, specific sentence is present", () => {
+    expect(resourcesHookSource).not.toContain(
+      "Some resource results could not be fully gathered for this batch and may be incomplete."
+    );
+    expect(resourcesHookSource).toContain(
+      "No web pages came back for this batch. Find resources retries every reply that came back empty."
+    );
+  });
+});
+
+// Fixer pass (verifier finding 4): the previous version of this block pinned
+// two exact call-site strings (`applyResources(id, found, outcomes.get(id))`
+// and a negative match on the old two-argument `applyResources(id, found);`)
+// as frozen literals, so a behaviour-preserving rewrite - renaming a local,
+// reformatting the call, reordering the map lookup - would fail even though
+// Y9's actual contract (every call site passes a third, outcome-derived
+// argument) was untouched. Pin the FACTS instead: every applyResources call
+// site in this hook takes three arguments, the drain's third argument reads
+// the `outcomes` map built just above it, and dispatchRowSearch's third
+// argument is the per-row entry's own outcome - not one frozen call string.
+describe("Y8/Y9: applyResources receives a third, outcome-derived argument at every call site", () => {
+  // Balanced-paren extraction (not a plain `[^)]*`): the drain's call site
+  // nests one level of parens (`outcomes.get(id)`), which a naive
+  // "stop at the first )" regex would truncate before the call's own closing
+  // paren.
+  function applyResourcesCalls(source: string): string[] {
+    const re = /applyResources\(((?:[^()]|\([^()]*\))*)\)/g;
+    return Array.from(source.matchAll(re), (m) => m[0]);
+  }
+
+  function args(call: string): string[] {
+    const inner = call.slice("applyResources(".length, -1);
+    return inner.split(",").map((a) => a.trim());
+  }
+
+  it("every applyResources call site in this hook passes exactly three arguments - none is a bare two-argument call missing the outcome", () => {
+    const calls = applyResourcesCalls(resourcesHookSource);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(args(call)).toHaveLength(3);
+    }
+  });
+
+  it("the drain builds an outcomes map from outcomeById(result.resources), and its applyResources call's third argument reads that map by id", () => {
+    expect(resourcesHookSource).toMatch(/const outcomes = outcomeById\(result\.resources\)/);
+    const drainCall = applyResourcesCalls(resourcesHookSource).find((c) => args(c)[2] === "outcomes.get(id)");
+    expect(drainCall).toBeDefined();
+  });
+
+  it("dispatchRowSearch (the per-row targeted search) passes the entry's own resources and outcome, not the drain's outcomes map", () => {
+    const entryCall = applyResourcesCalls(resourcesHookSource).find((c) => args(c)[2] === "entry.outcome");
+    expect(entryCall).toBeDefined();
+    expect(args(entryCall!)[1]).toBe("entry.resources");
   });
 });

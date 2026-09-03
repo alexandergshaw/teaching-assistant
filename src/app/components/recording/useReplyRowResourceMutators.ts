@@ -64,6 +64,62 @@ export function isResourceBatchFresh(currentSeq: number, dispatchSnapshotSeq: nu
   return currentSeq === dispatchSnapshotSeq;
 }
 
+// ---------------------------------------------------------------------------
+// docs/reply-resource-search-yield-acceptance-criteria.md Y9: pure row
+// transformations for the three mutators that touch `resourceSearchOutcome`,
+// pulled out for the same reason `isResourceBatchFresh` above was - a
+// comparison/transform buried inside a useCallback body has no test surface
+// of its own (vitest here is node-env and renders no hook). Each function
+// takes the CURRENT row and returns the NEXT one; the useCallback bodies
+// below apply it inside their own `.map()`, unchanged otherwise.
+// ---------------------------------------------------------------------------
+
+/** Y9: `resourceState` becomes "done" whether or not `resources` is
+ *  non-empty (R11 relies on "done" meaning "searched", not "found
+ *  something"). `resourceSearchOutcome` is stored only when `resources` came
+ *  back empty - a non-empty result CLEARS it, even if the caller passed an
+ *  `outcome` anyway (defensive: gatherReplyResourcesAction's own contract
+ *  never sets one for a non-empty result, but this function does not trust
+ *  that from the outside). */
+export function nextRowAfterApplyResources(
+  row: ReplyRow,
+  resources: ReplyResource[],
+  outcome: ReplyRow["resourceSearchOutcome"]
+): ReplyRow {
+  return {
+    ...row,
+    resources,
+    resourceState: "done",
+    resourceError: null,
+    resourceSearchOutcome: resources.length === 0 ? outcome : undefined,
+  };
+}
+
+/** Y9: flips to "searching", clearing any stale `resourceError` AND any
+ *  `resourceSearchOutcome` from a previous search - a search in flight has
+ *  no outcome yet to report. Mirrors `markDrafting` (useReplyRows.ts). RC4's
+ *  `queryById` entry, when present for this row, also sets
+ *  `resourceQuery`/`resourceQuerySource`. */
+export function nextRowAfterMarkResourceSearching(
+  row: ReplyRow,
+  query?: { text: string; source: "concepts" | "post" | "post-reply" }
+): ReplyRow {
+  return {
+    ...row,
+    resourceState: "searching",
+    resourceError: null,
+    resourceSearchOutcome: undefined,
+    ...(query ? { resourceQuery: query.text, resourceQuerySource: query.source } : {}),
+  };
+}
+
+/** Y9: mirrors `markFailed` for the resource state machine - also clears
+ *  `resourceSearchOutcome`, since a failed search has no "why empty" outcome
+ *  to show (the row's own `resourceError` already explains the failure). */
+export function nextRowAfterMarkResourceFailed(row: ReplyRow, error: string): ReplyRow {
+  return { ...row, resourceState: "failed", resourceError: error, resourceSearchOutcome: undefined };
+}
+
 export interface UseReplyRowResourceMutatorsDeps {
   rowsRef: MutableRefObject<ReplyRow[]>;
   resourceSeqRef: MutableRefObject<Map<string, number>>;
@@ -72,13 +128,15 @@ export interface UseReplyRowResourceMutatorsDeps {
 }
 
 export interface UseReplyRowResourceMutatorsReturn {
-  /** R3/R6. Applies a completed resource search: `resourceState` becomes
+  /** R3/R6/Y9. Applies a completed resource search: `resourceState` becomes
    *  "done" whether or not `resources` is non-empty (R11 relies on "done"
    *  meaning "searched", not "found something"). The caller MUST already
    *  have checked `resourcesUnchangedSince` for this id before calling -
    *  same division of responsibility as `applyReply`/`isUnchangedSince` in
-   *  useReplyRows.ts; this function does not re-check it. */
-  applyResources: (id: string, resources: ReplyResource[]) => void;
+   *  useReplyRows.ts; this function does not re-check it. Y9: `outcome` is
+   *  stored on the row only when `resources` is empty - see
+   *  `nextRowAfterApplyResources` above for the exact rule. */
+  applyResources: (id: string, resources: ReplyResource[], outcome?: ReplyRow["resourceSearchOutcome"]) => void;
 
   /** R10. One-click remove, matched by `url` within the row's own resource
    *  list. Bumps `resourceSeq` for this id BEFORE writing rows (mirrors
@@ -133,13 +191,11 @@ export function useReplyRowResourceMutators(deps: UseReplyRowResourceMutatorsDep
   const { rowsRef, resourceSeqRef, commitRows, scheduleSave } = deps;
 
   const applyResources = useCallback(
-    (id: string, resources: ReplyResource[]) => {
+    (id: string, resources: ReplyResource[], outcome?: ReplyRow["resourceSearchOutcome"]) => {
       const raw = rowsRef.current;
       const idx = raw.findIndex((r) => r.id === id);
       if (idx === -1) return; // row removed or table cleared under us
-      const next = raw.map((r, i) =>
-        i === idx ? { ...r, resources, resourceState: "done" as const, resourceError: null } : r
-      );
+      const next = raw.map((r, i) => (i === idx ? nextRowAfterApplyResources(r, resources, outcome) : r));
       commitRows(next);
       scheduleSave(STRUCTURAL_DEBOUNCE_MS);
     },
@@ -172,16 +228,12 @@ export function useReplyRowResourceMutators(deps: UseReplyRowResourceMutatorsDep
       const next = rowsRef.current.map((r) => {
         if (!idSet.has(r.id)) return r;
         changed = true;
-        const query = queryById?.get(r.id);
-        return {
-          ...r,
-          resourceState: "searching" as const,
-          resourceError: null,
-          // RC4: only overwritten when this dispatch actually supplied a
-          // query for this row - never cleared otherwise (they record the
-          // LAST search, including one that failed).
-          ...(query ? { resourceQuery: query.text, resourceQuerySource: query.source } : {}),
-        };
+        // RC4/Y9: `resourceQuery`/`resourceQuerySource` are only overwritten
+        // when this dispatch actually supplied a query for this row - never
+        // cleared otherwise (they record the LAST search, including one that
+        // failed). `resourceSearchOutcome` IS always cleared here (Y9) - see
+        // `nextRowAfterMarkResourceSearching`'s own doc comment.
+        return nextRowAfterMarkResourceSearching(r, queryById?.get(r.id));
       });
       if (!changed) return;
       commitRows(next);
@@ -198,7 +250,7 @@ export function useReplyRowResourceMutators(deps: UseReplyRowResourceMutatorsDep
       const next = rowsRef.current.map((r) => {
         if (!idSet.has(r.id)) return r;
         changed = true;
-        return { ...r, resourceState: "failed" as const, resourceError: error };
+        return nextRowAfterMarkResourceFailed(r, error);
       });
       if (!changed) return;
       commitRows(next);

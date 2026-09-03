@@ -55,6 +55,11 @@ import { escapeCsvValue } from "@/lib/course-tasks-view-csv";
 // discussion-serialization.ts, not restated here - see that file's own
 // comment on `CONCEPT_JOINER`.
 import { CONCEPT_JOINER } from "./discussion-serialization";
+// Y12: `ResourceSearchOutcome` (the row's Y9 field's type) is likewise owned
+// there, not restated - a separate import line so the CONCEPT_JOINER import
+// above stays byte-identical to what discussionReplyResources.wiring.test.ts's
+// F7 block pins across all three files.
+import type { ResourceSearchOutcome } from "./discussion-serialization";
 
 // ---------------------------------------------------------------------------
 // Event-stream records. Each carries the ISO 8601 timestamp of the event -
@@ -172,7 +177,15 @@ export interface DiscussionRepliesLogRetry {
  * search provenance - `[]`/`""`/`""` when absent, the same discipline every
  * other optional field on this entry already follows, so the instructor can
  * tell "terms were used and then cleared by an edit" from "no terms existed"
- * by reading `resourceQuerySource` against an empty `concepts` column. */
+ * by reading `resourceQuerySource` against an empty `concepts` column.
+ * `resourceSearchOutcome` (docs/reply-resource-search-yield-acceptance-
+ * criteria.md Y12) is the row's own Y9 field, verbatim - `null` when absent
+ * (not `undefined`), so the exported JSON always carries the key.
+ * `resourceCount` is `row.resources?.length ?? 0` - the direct fact
+ * `rowsWithNoResources` below counts against, rather than the outcome
+ * field's presence, which an instructor's own hand edit (clearing
+ * `resources` without leaving an outcome) does not set. It also backs the
+ * CSV's `Links` column (see `formatDiscussionRepliesLogCsv`'s own comment). */
 export interface DiscussionRepliesLogRowEntry {
   rowId: string;
   author: string;
@@ -188,6 +201,8 @@ export interface DiscussionRepliesLogRowEntry {
   concepts: string[];
   resourceQuery: string;
   resourceQuerySource: string;
+  resourceSearchOutcome: ResourceSearchOutcome | null;
+  resourceCount: number;
 }
 
 /** What `useDiscussionReplies.ts` collects, before the `rows` snapshot is
@@ -248,6 +263,8 @@ export function buildDiscussionRepliesLogRowEntry(
     concepts: row.concepts ?? [],
     resourceQuery: row.resourceQuery ?? "",
     resourceQuerySource: row.resourceQuerySource ?? "",
+    resourceSearchOutcome: row.resourceSearchOutcome ?? null,
+    resourceCount: row.resources?.length ?? 0,
   };
 }
 
@@ -302,6 +319,16 @@ export interface DiscussionRepliesLogSummary {
   postsDiscardedTotal: number;
   noticeCount: number;
   droppedFrames: number;
+  // Y12: rows that were actually searched (resourceState === "done") but
+  // came back with no resources - counted directly off `resourceCount ===
+  // 0`, NOT off `resourceSearchOutcome !== null`: an instructor who
+  // hand-clears a row's `resources` (a real "no links" state) leaves
+  // `resourceSearchOutcome` alone (Y9 only sets/clears it on an applied
+  // SEARCH, never on a hand edit), so the outcome-based count would miss
+  // that row. Counting the resource array's own length directly matches
+  // every done-with-nothing row, whether or not an outcome happens to be
+  // attached.
+  rowsWithNoResources: number;
 }
 
 export function summarizeDiscussionRepliesRunLog(log: DiscussionRepliesRunLog): DiscussionRepliesLogSummary {
@@ -310,7 +337,9 @@ export function summarizeDiscussionRepliesRunLog(log: DiscussionRepliesRunLog): 
   let ready = 0;
   let failed = 0;
   let retriedRows = 0;
+  let rowsWithNoResources = 0;
   for (const row of log.rows) {
+    if (row.resourceState === "done" && row.resourceCount === 0) rowsWithNoResources += 1;
     switch (row.draftState) {
       case "pending":
         neverDrafted += 1;
@@ -366,6 +395,7 @@ export function summarizeDiscussionRepliesRunLog(log: DiscussionRepliesRunLog): 
     postsDiscardedTotal,
     noticeCount: log.notices.length,
     droppedFrames: log.droppedFrames,
+    rowsWithNoResources,
   };
 }
 
@@ -392,10 +422,17 @@ export function discussionRepliesLogSummaryLine(summary: DiscussionRepliesLogSum
     summary.postsDiscardedTotal > 0
       ? ` ${summary.postsDiscardedTotal} extracted post${summary.postsDiscardedTotal === 1 ? " was" : "s were"} discarded before reaching the table.`
       : "";
+  // Y12: appended last, same conditional-clause idiom as `discarded` above -
+  // present only when there is at least one such row, singular "reply" at
+  // exactly 1, nothing at 0.
+  const noLinks =
+    summary.rowsWithNoResources > 0
+      ? ` ${summary.rowsWithNoResources} repl${summary.rowsWithNoResources === 1 ? "y" : "ies"} got no links.`
+      : "";
   return (
     `${summary.totalRows} ${replyWord} captured across ${summary.batchesSent} ${batchWord} - ` +
     `${summary.ready} drafted, ${summary.failed} failed, ${summary.neverDrafted} never drafted, ` +
-    `${summary.retriedRows} retried, ${summary.noticeCount} ${noticeWord}.${discarded}`
+    `${summary.retriedRows} retried, ${summary.noticeCount} ${noticeWord}.${discarded}${noLinks}`
   );
 }
 
@@ -437,6 +474,11 @@ const ROW_CSV_HEADER = [
   "Search terms",
   "Resource search text",
   "Resource search source",
+  // Y12: two columns, appended LAST, in this order - `Links` (the row's own
+  // resource count) immediately before `Resource search outcome` (the "why
+  // empty" text), cause read left of effect.
+  "Links",
+  "Resource search outcome",
 ];
 
 function csvRow(values: readonly string[]): string {
@@ -514,6 +556,11 @@ export function formatDiscussionRepliesLogCsv(log: DiscussionRepliesRunLog): str
         row.concepts.join(CONCEPT_JOINER),
         row.resourceQuery,
         row.resourceQuerySource,
+        // Y12: every CSV cell goes through escapeCsvValue (via csvRow).
+        // `Links` is the row's own resource count; `Resource search outcome`
+        // is the outcome text alone (`?? ""`), never the kind/counts.
+        String(row.resourceCount),
+        row.resourceSearchOutcome?.text ?? "",
       ])
     );
   }

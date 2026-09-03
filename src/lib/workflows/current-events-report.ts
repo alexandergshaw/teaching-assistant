@@ -11,6 +11,10 @@ import type { Source } from "@/lib/llm";
 // browser bundle and fail the production build at compile time (see
 // json-slice.ts's header comment for the exact error).
 import { jsonObjectSlice } from "@/lib/json-slice";
+// The redirect-host predicate and host normalization both live in
+// src/lib/grounding-sources.ts, shared between that module's own resolver
+// and this file's verifyItemUrls - see that module's header comment.
+import { isGroundingRedirectHost, normalizeHost } from "@/lib/grounding-sources";
 
 function clampInt(raw: unknown, def: number, min: number, max: number): number {
   const n = typeof raw === "number" ? raw : parseInt(String(raw ?? "").trim(), 10);
@@ -123,20 +127,9 @@ export function isPlaceholderUrl(url: string): boolean {
 // on Google's developer forum and googleapis/python-genai#1512). Treating it
 // as a corroborating host would let the model's own fabricated
 // "vertexaisearch.cloud.google.com/..." URL self-corroborate, so it is always
-// excluded from the corroboration set below.
-const GROUNDING_REDIRECT_HOST = "vertexaisearch.cloud.google.com";
-
-/** Lowercase a hostname, strip one leading "www.", and drop a trailing dot. */
-function normalizeHost(host: string): string {
-  let h = host.toLowerCase().trim();
-  if (h.endsWith(".")) h = h.slice(0, -1);
-  if (h.startsWith("www.")) h = h.slice(4);
-  return h;
-}
-
-function isGroundingRedirectHost(host: string): boolean {
-  return host === GROUNDING_REDIRECT_HOST || host.endsWith("." + GROUNDING_REDIRECT_HOST);
-}
+// excluded from the corroboration set below. GROUNDING_REDIRECT_HOST itself
+// and isGroundingRedirectHost live in src/lib/grounding-sources.ts (see this
+// file's import above).
 
 /**
  * The registrable "second-level" label of a normalized host: for
@@ -177,6 +170,17 @@ export function verifyItemUrls(items: ParsedTopicItem[], sources: Source[]): Par
       if (uriHost && !isGroundingRedirectHost(uriHost)) domainHosts.add(uriHost);
     } catch {
       // Skip an unparseable grounding source URI - it can't back anything.
+    }
+
+    // Y1a (docs/reply-resource-search-yield-acceptance-criteria.md):
+    // chunk.web.domain, when Gemini returns it, is a second, independent
+    // signal for the real publisher host - unlike title, it never needs the
+    // "does this look domain-shaped" heuristic below. Same redirect-host
+    // exclusion as every other host added to this set (D2/B5).
+    const rawDomain = (source.domain ?? "").trim();
+    if (rawDomain) {
+      const normalizedDomain = normalizeHost(rawDomain);
+      if (normalizedDomain && !isGroundingRedirectHost(normalizedDomain)) domainHosts.add(normalizedDomain);
     }
 
     // A title containing whitespace is a real sentence-like page title, not a

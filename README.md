@@ -24,6 +24,7 @@ Set these values in your local `.env.local` and in your deployment provider:
 
 - `GEMINI_API_KEY` (required)
 - `GEMINI_MODEL` (optional, default: `gemini-3.1-flash-lite`)
+- `GEMINI_SEARCH_MODEL` (optional, default: the `GEMINI_MODEL` value; used only for web-search-grounded calls; `gemini-2.5-flash` is the recommended value when the lite model keeps answering without searching)
 - `GEMINI_MAX_OUTPUT_TOKENS` (optional, default: `700`)
 - `GRADE_MAX_SUBMISSIONS` (optional, default: `5`)
 - `GRADE_MAX_CHARS_PER_SUBMISSION` (optional, default: `12000`)

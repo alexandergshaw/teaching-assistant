@@ -85,23 +85,39 @@ export function isResourceLaneBusy(args: {
   return args.capturing || args.pendingFrames > 0 || args.extracting;
 }
 
-/** R11: `Find resources`' bulk eligibility predicate. A row counts as
+/** R11/Y13: `Find resources`' bulk eligibility predicate. A row counts as
  * "never searched" whether `resourceState` was never set at all (a row
  * that never drafted, or that the user wrote by hand - R6's own
  * "reachable only through Find resources and per-row Retry" case) or was
  * persisted as the literal string `"idle"` (deserializeReplyTable's
  * defensive fallback for a present-but-unrecognised value, R3c) - R3c-i's
  * "absent is not invalid" distinction governs ROUND-TRIPPING, not this
- * eligibility question, so both count here. `"done"` (searched, whatever
- * the outcome - including a row the instructor emptied by hand, R11) and
- * `"searching"` are excluded; `"failed"` is reachable only through that
+ * eligibility question, so both count here. `"searching"` is excluded
+ * outright (already in flight); `"failed"` is reachable only through that
  * row's own Retry, mirroring AC28a's bulk-versus-targeted drafting policy.
- * D9 (aesthetics-pass redesign, docs/aesthetics-pass-acceptance-criteria.md
+ * `"done"` is excluded UNLESS Y13 applies: a `"done"` row with no resources
+ * and a `resourceSearchOutcome` (a real search ran and came back empty, Y8)
+ * is ALSO eligible - one click on "Find resources" retries every such row,
+ * rather than requiring a per-row Retry click for each. A `"done"` row the
+ * instructor emptied BY HAND (removeResource) stays excluded: Y9 clears
+ * `resourceSearchOutcome` the moment resources become non-empty and nothing
+ * sets it again on a manual removal, so that row has no outcome and fails
+ * this same check - R11's "instructor emptied it" case is preserved. D9
+ * (aesthetics-pass redesign, docs/aesthetics-pass-acceptance-criteria.md
  * section 4b): a skipped row is excluded outright, regardless of the above -
  * it opted out of the reply workflow this bulk sweep serves. */
-export function isFindMissingEligible(row: { resourceState?: ReplyRow["resourceState"]; reply: string; skipped?: boolean }): boolean {
+export function isFindMissingEligible(row: {
+  resourceState?: ReplyRow["resourceState"];
+  reply: string;
+  skipped?: boolean;
+  resources?: ReplyRow["resources"];
+  resourceSearchOutcome?: ReplyRow["resourceSearchOutcome"];
+}): boolean {
+  if (row.reply.length === 0 || row.skipped === true) return false;
   const neverSearched = row.resourceState === undefined || row.resourceState === "idle";
-  return neverSearched && row.reply.length > 0 && row.skipped !== true;
+  const noResources = !row.resources || row.resources.length === 0;
+  const searchedButEmpty = row.resourceState === "done" && noResources && row.resourceSearchOutcome !== undefined;
+  return neverSearched || searchedButEmpty;
 }
 
 /** F8/R4e: whether a degraded batch result should be surfaced through the
@@ -182,6 +198,20 @@ export function resourceQueryForRow(
   return { text: proseText, source: mode === "manual" ? "post-reply" : "post" };
 }
 
+/** Y8/Y9: the id -> outcome lookup the drain and `dispatchRowSearch` both
+ *  pass to `applyResources` - `gatherReplyResourcesAction`'s own per-post
+ *  `outcome` field, keyed by id. `undefined` for an id whose entry carried no
+ *  `outcome` (a non-empty result) or whose id is missing from the result
+ *  entirely - `applyResources` already treats a missing/undefined outcome as
+ *  "nothing to store" (Y9). Pure and exported for the same reason
+ *  `partitionResourceOutcome` above is - nothing inside a `drain`/
+ *  `dispatchRowSearch` closure has a test surface of its own. */
+export function outcomeById(
+  resources: ReadonlyArray<{ id: string; outcome?: ReplyRow["resourceSearchOutcome"] }>
+): Map<string, ReplyRow["resourceSearchOutcome"]> {
+  return new Map(resources.map((r) => [r.id, r.outcome]));
+}
+
 /** F5: partitions a resource batch's ids by whether each is still unchanged
  * since dispatch, using the caller-supplied `isUnchangedSince` predicate
  * (useReplyRows.ts's `resourceSeqRef`-backed check). Pure: takes the
@@ -225,8 +255,14 @@ const RESOURCE_DISCARDED_MESSAGE =
 // short-circuit (which also returns `degraded: true`) - the orchestrator's
 // own `pushNotice` already dedupes identical consecutive text, so a run of
 // embedded-provider batches collapses to showing this once.
+//
+// docs/reply-resource-search-yield-acceptance-criteria.md Y11: a
+// non-degraded batch pushes no notice at all (the rows explain themselves,
+// Y10, and the run summary counts them, Y12) - the one case this notice
+// covers (`degraded`: not a single concept in the whole batch returned a
+// source) is specific rather than generic.
 const RESOURCE_DEGRADED_NOTICE =
-  "Some resource results could not be fully gathered for this batch and may be incomplete.";
+  "No web pages came back for this batch. Find resources retries every reply that came back empty.";
 
 export interface UseReplyResourcesReturn {
   resourceQueueSize: number;
@@ -402,11 +438,14 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
         if (changedMidFlight.length > 0) freshRowsApi.markResourceFailed(changedMidFlight, RESOURCE_DISCARDED_MESSAGE);
 
         const byId = new Map(result.resources.map((r) => [r.id, r.resources]));
+        // Y8/Y9: the per-id outcome lookup, built alongside `byId` from the
+        // SAME `result.resources` array.
+        const outcomes = outcomeById(result.resources);
         for (const id of postIds) {
           if (changedMidFlight.includes(id)) continue; // already resolved above
           const found = byId.get(id);
           if (found === undefined) continue; // no entry for this id - leave its state alone rather than guessing
-          freshRowsApi.applyResources(id, found);
+          freshRowsApi.applyResources(id, found, outcomes.get(id));
         }
       }
     } finally {
@@ -511,8 +550,8 @@ export function useReplyResources(args: UseReplyResourcesArgs): UseReplyResource
         freshRowsApi.markResourceFailed([id], RESOURCE_DISCARDED_MESSAGE);
         return;
       }
-      const found = result.resources.find((r) => r.id === id)?.resources;
-      if (found !== undefined) freshRowsApi.applyResources(id, found);
+      const entry = result.resources.find((r) => r.id === id);
+      if (entry !== undefined) freshRowsApi.applyResources(id, entry.resources, entry.outcome);
     },
     []
   );

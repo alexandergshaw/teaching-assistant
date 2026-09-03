@@ -1,6 +1,7 @@
 import {
   getGeminiApiKey,
   getGeminiModel,
+  getGeminiSearchModel,
   getGeminiImageModel,
   getGeminiAllowLowTemperature,
   getGeminiThinkingLevel,
@@ -112,16 +113,25 @@ export function normalizeGenerationConfig(
 export interface Source {
   title: string;
   uri: string;
+  /** Y1a (docs/reply-resource-search-yield-acceptance-criteria.md): the bare
+   *  domain Gemini's grounding metadata also returns alongside `title`/`uri`
+   *  (`chunk.web.domain`), copied verbatim when present so verifyItemUrls
+   *  (src/lib/workflows/current-events-report.ts) can corroborate a
+   *  candidate on that host without relying on `title` happening to look
+   *  domain-shaped. Optional and additive - every existing consumer that
+   *  destructures `{ title, uri }` or spreads a Source is unaffected. */
+  domain?: string;
 }
 
 /**
  * Parse grounding metadata from an LLM response into an array of sources.
- * Extracts web.uri and web.title from groundingChunks, skipping chunks without
- * a uri. Returns undefined if metadata is missing or malformed.
+ * Extracts web.uri, web.title and web.domain (Y1a) from groundingChunks,
+ * skipping chunks without a uri. Returns undefined if metadata is missing or
+ * malformed.
  */
 export function parseGroundingSources(
   data: unknown
-): Array<{ title: string; uri: string }> | undefined {
+): Source[] | undefined {
   try {
     if (!data || typeof data !== "object") {
       return undefined;
@@ -130,7 +140,7 @@ export function parseGroundingSources(
     const obj = data as {
       candidates?: Array<{
         groundingMetadata?: {
-          groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
+          groundingChunks?: Array<{ web?: { uri?: string; title?: string; domain?: string } }>;
         };
       }>;
     };
@@ -145,7 +155,8 @@ export function parseGroundingSources(
       const uri = chunk.web?.uri;
       if (uri) {
         const title = chunk.web?.title || uri;
-        sources.push({ uri, title });
+        const domain = chunk.web?.domain;
+        sources.push({ uri, title, ...(domain ? { domain } : {}) });
       }
     }
 
@@ -445,7 +456,16 @@ async function postGenerateContent(
 }
 
 async function callGemini(req: LlmRequest): Promise<LlmResult> {
-  const model = getGeminiModel();
+  // Y6 (docs/reply-resource-search-yield-acceptance-criteria.md): a
+  // webSearch request may use a different model - the lite default is the
+  // most tool-shy tier for actually deciding to run Google Search (see
+  // learning-resource-links.ts's own module comment). This is the ONLY line
+  // that changes; `model` already flows into both normalizeGenerationConfig
+  // and postGenerateContent below, which is what keeps a 2.5 search model
+  // from receiving Gemini 3's thinkingConfig. With GEMINI_SEARCH_MODEL unset,
+  // getGeminiSearchModel() falls back to getGeminiModel(), so every request
+  // is byte-identical to before this existed.
+  const model = req.webSearch ? getGeminiSearchModel() : getGeminiModel();
 
   // Gemini 3 generation config normalization. Two vendor facts drive this:
   // (1) Google's Gemini 3 guide recommends leaving temperature at its 1.0

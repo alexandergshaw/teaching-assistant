@@ -37,6 +37,11 @@ beforeEach(() => {
   vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
 });
 
+// Y5/Y8 (docs/reply-resource-search-yield-acceptance-criteria.md): `perConcept`
+// is now a REQUIRED field on `FindResourceLinksSuccess` and
+// gatherReplyResourcesAction reads it unconditionally - an empty array is
+// enough here since none of this file's own assertions inspect the resulting
+// outcome, only the concepts array the mock was CALLED with.
 function mockLinksOnce(links: Array<Record<string, unknown>>, degraded = false) {
   vi.mocked(findResourceLinksForConceptsAction).mockResolvedValueOnce({
     links,
@@ -45,6 +50,7 @@ function mockLinksOnce(links: Array<Record<string, unknown>>, degraded = false) 
     droppedPlaceholder: 0,
     droppedUnreachable: 0,
     notes: [],
+    perConcept: [],
   } as never);
 }
 
@@ -110,7 +116,19 @@ describe("gatherReplyResourcesAction - BLOCKER 3, redaction at the bulk path's o
     // any other empty concept (gatherReplyResourcesAction's own
     // `entries.length === 0` branch), rather than leaking the bare name.
     const result = await gatherReplyResourcesAction([{ id: "p1", text: "Maria Lopez", author: "Maria Lopez" }], "", "gemini");
-    expect(result).toEqual({ resources: [{ id: "p1", resources: [] }], degraded: false });
+    // Y8: the entries.length === 0 branch (every post's concept is empty)
+    // sets NO outcome at all - nothing was ever searched, so there is
+    // nothing to explain (see discussion-replies.ts's own comment on that
+    // branch, and the AC's "neither does a post whose derived concept is
+    // EMPTY").
+    expect(result).toEqual({
+      resources: [{ id: "p1", resources: [] }],
+      degraded: false,
+    });
+    expect("resources" in result).toBe(true);
+    if ("resources" in result) {
+      expect("outcome" in result.resources[0]).toBe(false);
+    }
     expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
   });
 });

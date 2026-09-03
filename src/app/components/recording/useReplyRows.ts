@@ -316,13 +316,15 @@ export interface UseReplyRowsReturn {
   // are deliberately not applied to them (R7 in the AC).
   // -------------------------------------------------------------------
 
-  /** R3/R6. Applies a completed resource search: `resourceState` becomes
+  /** R3/R6/Y9. Applies a completed resource search: `resourceState` becomes
    *  "done" whether or not `resources` is non-empty (R11 relies on "done"
    *  meaning "searched", not "found something"). The caller MUST already
    *  have checked `resourcesUnchangedSince` for this id before calling -
    *  same division of responsibility as `applyReply`/`isUnchangedSince`
-   *  above; this function does not re-check it. */
-  applyResources: (id: string, resources: ReplyResource[]) => void;
+   *  above; this function does not re-check it. Y9: `outcome` is stored on
+   *  the row only when `resources` is empty, and cleared otherwise - see
+   *  useReplyRowResourceMutators.ts's `nextRowAfterApplyResources`. */
+  applyResources: (id: string, resources: ReplyResource[], outcome?: ReplyRow["resourceSearchOutcome"]) => void;
 
   /** R10. One-click remove, matched by `url` within the row's own resource
    *  list. Bumps `resourceSeq` for this id BEFORE writing rows (mirrors

@@ -931,6 +931,68 @@ that document's section 0).
    literal concept; the prompt test freezes the whole prompt byte-for-byte;
    the log test freezes the CSV header and two rows; the serialization test
    freezes one oracle with no new fields.
+
+### 2026-09-03 - Discussion reply resource search (yield), before the grounding-redirect change
+
+Baseline for `docs/reply-resource-search-yield-acceptance-criteria.md`, taken
+at b7c2fab from a code-path survey (no live probe - there is no local Gemini
+key) and the owner's run log of 2026-09-03 (two batches, both degraded).
+
+1. **Four gates, every one lossy.** `findResourceLinksForConceptsAction`
+   (`learning-resource-links.ts:471-654`) runs, per concept, a grounded call
+   (`researchConceptOnce`, prompt at `:372-382`, `webSearch: true`) and an
+   ungrounded structuring call (`structureProseIntoResourceItems`, prompt at
+   `:328-337`). A candidate then has to (a) not be a placeholder, (b) be
+   corroborated by `verifyItemUrls` (`current-events-report.ts:170-217`)
+   against THAT concept's sources, and (c) answer a HEAD/GET in
+   `checkUrlsReachable`. `verifyItemUrls` builds its host set from source
+   URIs that are not the grounding redirect host (every `web.uri` IS that
+   host, `:120-127`) plus domain-shaped `web.title` values; a page-shaped
+   title contributes nothing.
+2. **The redirect is never resolved.** Nothing in the repo follows a
+   `vertexaisearch.cloud.google.com/grounding-api-redirect/...` link to the
+   publisher URL. `checkUrlsReachable` uses `redirect: "follow"` but is only
+   ever handed the model-written candidate URLs, never a source URI.
+3. **Retry fires on empty items only.** `researchConceptWithRetry`
+   (`:418-435`) retries when `items.length === 0` or on a thrown transport
+   error. A first attempt that returned items but NO sources is final; every
+   one of its items is then dropped as uncorroborated.
+4. **`degraded` means zero sources across the whole run.** `:611-616`. The
+   discussion client renders it as one fixed sentence per batch
+   (`useReplyResources.ts:228-229`, "Some resource results could not be
+   fully gathered for this batch and may be incomplete."), excluded for the
+   embedded provider by `shouldPushDegradedNotice`.
+5. **The action discards its diagnostics.** `gatherReplyResourcesAction`
+   (`discussion-replies.ts:474-599`) reads `result.links` and
+   `result.degraded` only; `notes`, `droppedUncorroborated`,
+   `droppedPlaceholder`, `droppedUnreachable` never leave the server. A post
+   with no surviving link returns `{ id, resources: [] }` and the row lands
+   as `resourceState: "done"`, `resourceError: ""`, `resources` absent.
+6. **One model for everything.** `callLlm` ignores `provider` and calls
+   `callGemini` with `getGeminiModel()` (`GEMINI_MODEL` or
+   `gemini-3.1-flash-lite`) for grounded and ungrounded calls alike
+   (`llm.ts:340-351`, `:437`). There is no search-specific override.
+7. **Row and log shape.** `ReplyRow` (`discussion-serialization.ts:41-105`)
+   carries `resources`, `resourceState`, `resourceError`, `concepts`,
+   `resourceQuery`, `resourceQuerySource` and no explanation field; the
+   deserializer builds an explicit object (`:181-260`) so a new field must
+   be added there; `DISCUSSION_TABLE_VERSION` is pinned by tests. The log
+   row (`discussion-replies-log.ts:180-191`) ends at
+   `resourceQuerySource`; the CSV header is frozen by
+   `discussion-replies-log.test.ts` and every value goes through
+   `escapeCsvValue`.
+8. **The empty state on screen.** `DiscussionReplyResources.tsx` renders
+   the chip row, a "cleared by edit" line, stale-query lines, and the failed
+   message (`:174-180`); a `done` row with no resources shows only the
+   Search control - no sentence says why.
+9. **What is tested.** `learning-resource-links.test.ts` mocks `callLlm`,
+   `checkUrlsReachable` and `requireOwner`, asserts prompt CONTENT with
+   substring checks (no byte-frozen prompt), pins the 6-concept cap and the
+   12-call count for six concepts, and the retry-budget seam.
+   `learning-resources-generator.test.ts` pins the page's three-argument
+   call. `discussion-replies-resources.test.ts` pins the action's call shape
+   and the 3-per-post slice. No test renders a component.
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -38600,3 +38662,116 @@ each red with the mutation present, restored green. Line counts:
   batch, and a blank manual query remaining a silent no-op.
 - A peer's name inside a term is not redacted (only the row's author is) -
   unchanged from the prose path.
+
+## 392. The resource search came back empty most of the time - and the four gates that each ate a share of the yield
+
+Owner report 2026-09-03: "the resources search returns something the
+minority of the time, leading me to have to reprompt or manually search."
+The run log attached to the report showed two batches, both carrying the
+one generic notice the client had for a degraded batch, and a row that
+ended `done` with no links, no error and no explanation. AC:
+`docs/reply-resource-search-yield-acceptance-criteria.md` (revision 5).
+Baseline: "2026-09-03 - Discussion reply resource search (yield)" above.
+
+**Diagnosis (code-path survey; there is no local Gemini key).** Every link
+had to clear four lossy gates. (1) The model had to CHOOSE to search - the
+lite tier often answers from memory, and a memory answer has no grounding
+chunks, so every candidate is dropped as uncorroborated; the only retry
+fired on zero ITEMS, so the commonest failure got one attempt. (2) The
+link had to be a URL the model TYPED; the pages the search actually
+visited sit behind `vertexaisearch.cloud.google.com` redirect URIs that
+nothing resolved. (3) Corroboration was host-only, from redirect URIs
+(all excluded) and domain-shaped titles, and never read `web.domain`.
+(4) Reachability then dropped the fabricated path. And nothing reported
+any of it: the action discarded `notes` and the drop counts.
+
+**What shipped.**
+
+- `src/lib/grounding-sources.ts` (new): `createGroundingResolver` - one
+  resolver per run, a shared worker pool (6) and a shared 5 s budget, a
+  per-URI cache, manual-redirect fetches accepting only 301/302/303/307/
+  308 with a `Location`, relative `Location` resolved, the body aborted on
+  every path, a four-consecutive-failure circuit breaker, and every
+  failure leaving the source UNCHANGED (fail-safe: if the endpoint ever
+  stops answering with a 3xx, behaviour is exactly the old one). It also
+  owns `GROUNDING_REDIRECT_HOST`, `isGroundingRedirectHost`,
+  `normalizeHost` and `isRealHostSource`; `current-events-report.ts`
+  imports them.
+- `src/lib/resource-item-parsing.ts` (new): the structuring-call helpers
+  extracted from `learning-resource-links.ts` (which went 655 -> 913 ->
+  737) plus `boundVisitedSources` (at most 10 entries, no URI over 512
+  chars) and the `"source": <index>` rule in `parseResourceItems` - an
+  in-range integer index REPLACES the model's URL with the page the
+  search actually visited; `"0"`, `99`, `null`, missing keep the model's.
+- `learning-resource-links.ts`: `Source.domain` (from `web.domain`) joins
+  the corroboration host set; the retry fires on NO SOURCES as well as no
+  items, with one leading "Use the Google Search tool" line on the retry
+  only (first-attempt prompt byte-frozen by a literal oracle);
+  `RETRY_BUDGET_MS` 40 s -> 32 s; sources capped at 10 before resolution;
+  survivors deduped per (concept, url) with the repeat booked as
+  `droppedDuplicate`, never as unreachable; `perConcept: ConceptOutcome[]`
+  accounting whose sums equal the top-level counts.
+- `src/lib/resource-search-outcome.ts` (new neutral leaf): `ConceptOutcome`,
+  `ResourceSearchCounts`, `ResourceSearchOutcomeKind`,
+  `ResourceSearchOutcome`, frozen `ZERO_RESOURCE_SEARCH_COUNTS` - imported
+  by both "use server" actions and the client row leaf, so no type ever
+  crosses from a server module into the browser bundle.
+- `GEMINI_SEARCH_MODEL`: an optional env override used ONLY for grounded
+  calls (`callGemini` picks the model once and feeds the same string to
+  `normalizeGenerationConfig` and the URL); unset is byte-identical.
+  README documents `gemini-2.5-flash` as the recommended value when the
+  lite model keeps answering without searching. Not set anywhere by this
+  commit - the owner sets it in Vercel.
+- Discussion feature: `gatherReplyResourcesAction` dedupes concepts and
+  returns a per-post `outcome` (`failed` / `no-sources` / `no-candidates` /
+  `all-dropped` / `unknown`, with `all-dropped` only when `kept === 0`,
+  the "pages did not open" sentence only when something was actually
+  fetched and failed, and `unknown` + `kept > 0` naming the "Eligible
+  resource kinds" setting); no outcome for the embedded provider, an empty
+  kinds list, or an empty concept. The row persists
+  `resourceSearchOutcome` (cleared by a non-empty apply, by
+  `markResourceSearching` and by `markResourceFailed`; absent stays
+  absent; a missing numeric count coerces to 0), shows it as the LAST
+  `fieldHint` line with `aria-describedby` on the Search button, and never
+  alongside the "Search terms cleared" line. `Find resources (N)` now
+  also sweeps `done`-and-empty rows that carry an outcome (a row the
+  instructor emptied by hand has none and stays excluded). The batch
+  notice reads "No web pages came back for this batch. Find resources
+  retries every reply that came back empty." The log JSON row gains
+  `resourceCount` and `resourceSearchOutcome`; the CSV gains `Links` and
+  `Resource search outcome` as its last two columns; the summary line
+  gains " N replies got no links."
+
+**The loop.** AC -> architect/UX/data-engineer passes (concurrent) ->
+sabotage check (nine defects, including a `gemini.test.ts` test that could
+not fail because the URL is built in `llm.ts`, and a Y8 join key that did
+not exist) -> two Sonnet implementers on disjoint sets -> Opus verify
+(eight findings, none blocking: the all-placeholder tie-break lied, the
+summary undercounted hand-emptied rows, two over-specified source-text
+tests, an empty-concept row eligible forever, a concurrency test that
+never proved the bound was reached) -> follow-up architect + UX passes on
+the as-built diff (undrained bodies pinning sockets, an unbounded fetch
+count, the sources block appended AFTER the 6000-char cap, duplicate
+links, the type shape in three places, "searched" meaning two things on
+one row, the `unknown` sentence false in its only reachable case) ->
+regression pass, which caught the one real regression: the duplicate
+dedupe was booked as `droppedUnreachable`, which would have made the
+Learning Resources page summary say "unreachable: N" for duplicates.
+Gates at push: tsc clean, eslint clean, full vitest green, build
+compiled (the prerender tail fails locally on the missing Supabase env,
+as always).
+
+**Unverified vendor assumptions, recorded.** (a) The redirect endpoint
+answers a plain GET with a 3xx and `Location` - if it answers 200/403/429
+every source stays unchanged and the change is a no-op plus `web.domain`.
+(b) `web.domain` is present on this API version's grounding chunks. (c)
+`gemini-2.5-flash` invokes Google Search more readily than the lite tier.
+The per-row outcome counts (`sources`, `resolvedSources`) in the log JSON
+are what will tell the owner which assumption failed.
+
+**Follow-ups, none requested.** Splitting a row's concept terms into
+separate concepts; using `groundingSupports` to corroborate by paragraph;
+fetching page titles so an unmentioned source can become a candidate; a
+cap on how many times `Find resources` re-sweeps a row that keeps coming
+back `no-candidates`; a `groundingNow` seam for tests that need to drive
+both clocks.

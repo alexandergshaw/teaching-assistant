@@ -224,6 +224,113 @@ describe("concepts / resourceQuery / resourceQuerySource (RC3)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// docs/reply-resource-search-yield-acceptance-criteria.md Y9:
+// resourceSearchOutcome - same absent-stays-absent discipline as
+// concepts/resourceQuery/resourceQuerySource above.
+// ---------------------------------------------------------------------------
+
+describe("resourceSearchOutcome (Y9)", () => {
+  const OUTCOME: NonNullable<ReplyRow["resourceSearchOutcome"]> = {
+    kind: "no-sources",
+    text: "No web pages were searched this time. Search for resources again - it usually works.",
+    counts: {
+      sources: 0,
+      resolvedSources: 0,
+      candidates: 0,
+      droppedPlaceholder: 0,
+      droppedUncorroborated: 0,
+      droppedDuplicate: 0,
+      droppedUnreachable: 0,
+      kept: 0,
+      retried: false,
+    },
+  };
+
+  it("round-trips when present", () => {
+    const rows = [makeRow({ id: "a", resourceState: "done", resourceSearchOutcome: OUTCOME })];
+    const restored = deserializeReplyTable(serializeReplyTable(rows));
+    expect(restored[0].resourceSearchOutcome).toEqual(OUTCOME);
+  });
+
+  it("a row that never had it round-trips with it still absent (absent-stays-absent)", () => {
+    const rows = [makeRow({ id: "a" })];
+    const restored = deserializeReplyTable(serializeReplyTable(rows));
+    expect(restored[0].resourceSearchOutcome).toBeUndefined();
+    const written = JSON.parse(serializeReplyTable(rows)).rows[0];
+    expect(written).not.toHaveProperty("resourceSearchOutcome");
+  });
+
+  it("a malformed value (unrecognized kind) is dropped, never thrown on", () => {
+    const raw = JSON.stringify({
+      v: DISCUSSION_TABLE_VERSION,
+      rows: [
+        {
+          id: "a",
+          author: "Maria",
+          post: "hello",
+          resourceSearchOutcome: { kind: "not-a-real-kind", text: "some text", counts: OUTCOME.counts },
+        },
+      ],
+    });
+    expect(() => deserializeReplyTable(raw)).not.toThrow();
+    expect(deserializeReplyTable(raw)[0].resourceSearchOutcome).toBeUndefined();
+  });
+
+  it("a malformed value (empty text) is dropped", () => {
+    const raw = JSON.stringify({
+      v: DISCUSSION_TABLE_VERSION,
+      rows: [{ id: "a", author: "Maria", post: "hello", resourceSearchOutcome: { kind: "unknown", text: "", counts: OUTCOME.counts } }],
+    });
+    expect(deserializeReplyTable(raw)[0].resourceSearchOutcome).toBeUndefined();
+  });
+
+  it("a malformed value (a counts field missing/non-finite, or retried not a boolean) is dropped", () => {
+    const badCounts = { ...OUTCOME.counts, kept: "not-a-number" };
+    const raw1 = JSON.stringify({
+      v: DISCUSSION_TABLE_VERSION,
+      rows: [{ id: "a", author: "Maria", post: "hello", resourceSearchOutcome: { kind: "unknown", text: "x", counts: badCounts } }],
+    });
+    expect(deserializeReplyTable(raw1)[0].resourceSearchOutcome).toBeUndefined();
+
+    const missingRetried = { ...OUTCOME.counts } as Record<string, unknown>;
+    delete missingRetried.retried;
+    const raw2 = JSON.stringify({
+      v: DISCUSSION_TABLE_VERSION,
+      rows: [{ id: "a", author: "Maria", post: "hello", resourceSearchOutcome: { kind: "unknown", text: "x", counts: missingRetried } }],
+    });
+    expect(deserializeReplyTable(raw2)[0].resourceSearchOutcome).toBeUndefined();
+  });
+
+  it("a non-object value is dropped, never thrown on", () => {
+    const raw = JSON.stringify({
+      v: DISCUSSION_TABLE_VERSION,
+      rows: [{ id: "a", author: "Maria", post: "hello", resourceSearchOutcome: "not an object" }],
+    });
+    expect(() => deserializeReplyTable(raw)).not.toThrow();
+    expect(deserializeReplyTable(raw)[0].resourceSearchOutcome).toBeUndefined();
+  });
+
+  it("regression fix: a row persisted before droppedDuplicate existed (the key is entirely absent from counts) still deserializes, with droppedDuplicate coerced to 0 rather than the whole outcome dropped", () => {
+    const preDroppedDuplicateCounts = { ...OUTCOME.counts } as Record<string, unknown>;
+    delete preDroppedDuplicateCounts.droppedDuplicate;
+    const raw = JSON.stringify({
+      v: DISCUSSION_TABLE_VERSION,
+      rows: [
+        {
+          id: "a",
+          author: "Maria",
+          post: "hello",
+          resourceSearchOutcome: { kind: "no-sources", text: OUTCOME.text, counts: preDroppedDuplicateCounts },
+        },
+      ],
+    });
+    const restored = deserializeReplyTable(raw);
+    expect(restored[0].resourceSearchOutcome).toEqual(OUTCOME);
+    expect(restored[0].resourceSearchOutcome?.counts.droppedDuplicate).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // mergeLegacyReplyFlags (D1/D9 migration): folding the retired side-channel
 // onto the promoted fields, once, on load.
 // ---------------------------------------------------------------------------

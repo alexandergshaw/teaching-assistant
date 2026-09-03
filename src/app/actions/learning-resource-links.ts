@@ -70,14 +70,34 @@
 // testable with no real waiting.
 import { callLlm, type LlmProvider, type Source } from "@/lib/llm";
 import { requireOwner } from "@/lib/supabase/auth";
-import { jsonObjectSlice } from "@/lib/json-slice";
 import { verifyItemUrls, isPlaceholderUrl, type ParsedTopicItem } from "@/lib/workflows/current-events-report";
 import { checkUrlsReachable } from "@/lib/url-reachability";
-import { sanitizeResourceUrl } from "@/lib/urls";
-import { RESOURCE_KINDS, coerceResourceKind, type ResourceKind } from "@/lib/resource-kind";
+import { RESOURCE_KINDS, type ResourceKind } from "@/lib/resource-kind";
+// Y1/Y2 (docs/reply-resource-search-yield-acceptance-criteria.md): ONE
+// resolver per run (created below in findResourceLinksForConceptsAction,
+// shared by every concept) resolves each concept's grounding-redirect
+// sources to their real publisher pages before the structuring call ever
+// runs - see grounding-sources.ts's own module comment for why this exists.
+import { createGroundingResolver, isRealHostSource, type GroundingResolver } from "@/lib/grounding-sources";
+import {
+  kindSchemaAlternation,
+  kindProseList,
+  kindDescriptionList,
+  parseResourceItems,
+  sourcesVisitedBlock,
+  boundVisitedSources,
+  type CandidateResourceItem,
+} from "@/lib/resource-item-parsing";
+import type { ConceptOutcome } from "@/lib/resource-search-outcome";
 
 const MAX_CONCEPTS_PER_RUN = 6;
 const MAX_ITEMS_PER_CONCEPT = 4;
+// A concept's grounded call can return more sources than are worth spending
+// a redirect-resolution fetch on - bounds each concept's contribution to the
+// run's shared resolver budget/pool independent of how many sources one
+// grounded call happened to return. Sources past this cap pass through the
+// resolver call unchanged (never resolved, never dropped).
+const MAX_SOURCES_TO_RESOLVE = 10;
 // Call 1 (grounded prose search) per concept.
 const PER_CONCEPT_MAX_TOKENS = 2048;
 // Call 2 (ungrounded structuring of that prose into JSON) per concept.
@@ -92,7 +112,18 @@ const PER_CONCEPT_STRUCTURE_INPUT_CHAR_CAP = 6000;
 // src/lib/use-server-exports.test.ts); a test that needs a different budget
 // passes `options.retryBudgetMs` to the exported action instead of importing
 // this constant.
-const RETRY_BUDGET_MS = 40_000;
+//
+// Y3 (docs/reply-resource-search-yield-acceptance-criteria.md): dropped from
+// 40 000 to 32 000 - a retry that starts late, plus Y1's grounding-resolve
+// round (up to 5s, GROUNDING_RESOLVE_TOTAL_BUDGET_MS), plus
+// checkUrlsReachable's own 12s budget, must still fit under Vercel Hobby's
+// 60s ceiling.
+const RETRY_BUDGET_MS = 32_000;
+
+// Y3: prepended (with a blank line) to the research prompt on a retry only -
+// the FIRST attempt's prompt stays byte-identical to before this existed
+// (Section 4 / test 5(e)).
+const RETRY_NUDGE_LINE = "Use the Google Search tool for this request. Do not answer from memory.";
 
 export interface ResourceLink {
   concept: string;
@@ -119,15 +150,16 @@ export interface FindResourceLinksSuccess {
   droppedUnreachable: number;
   /** Surfaced verbatim, never dropped (C5). */
   notes: string[];
-}
-
-/** A candidate resource before its url has been corroborated or reachability-
- *  checked - never returned to the caller directly, only via ResourceLink. */
-interface CandidateResourceItem {
-  title: string;
-  url: string;
-  kind: ResourceLink["kind"];
-  whatYouGet: string;
+  /** Y5 (docs/reply-resource-search-yield-acceptance-criteria.md): per-concept
+   *  accounting, one entry per bounded concept in input order - see
+   *  ConceptOutcome (src/lib/resource-search-outcome.ts) for the field-by-field
+   *  arithmetic. Every field above (droppedUncorroborated/droppedPlaceholder/
+   *  droppedUnreachable, and links.length via `kept`) equals the sum of this
+   *  array's corresponding field. `droppedDuplicate` is the one ConceptOutcome
+   *  field with NO top-level counterpart here - a deduped repeat never reached
+   *  the reachability check, so it must never inflate this type's own
+   *  droppedUnreachable; it is visible only per concept, in `perConcept`. */
+  perConcept: ConceptOutcome[];
 }
 
 // coerceResourceKind used to be a private copy of this exact logic (three-
@@ -189,127 +221,6 @@ const DEFAULT_RESOURCE_PROFILE: ResourceProfile = {
   resourceTypeSentence: "official documentation, video tutorials, and written tutorials",
 };
 
-/** Oxford-comma join of already-formatted items - `a`, `a or b`,
- *  `a, b, or c` - the ONE joining rule shared by every prompt line in this
- *  file that must enumerate `profile.kinds`, so a future edit to the
- *  separator or the "or" placement cannot land in one line and miss the
- *  others. Every caller below supplies its own per-kind formatting first
- *  (quoted code, or natural-language description) and hands the result
- *  here to be joined. */
-function oxfordJoin(items: readonly string[]): string {
-  if (items.length === 1) return items[0];
-  if (items.length === 2) return `${items[0]} or ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, or ${items[items.length - 1]}`;
-}
-
-/** "doc|video|tutorial" - the structuring call's JSON-schema kind
- *  alternation (`:222`), built from `kinds` so it can never drift from
- *  what coerceResourceKind actually accepts. */
-function kindSchemaAlternation(kinds: readonly ResourceKind[]): string {
-  return kinds.join("|");
-}
-
-/** `"doc", "video", or "tutorial"` - the structuring call's prose
- *  enumeration of the same list (`:224`), same ordering, Oxford comma
- *  before the final "or", via the shared oxfordJoin above. */
-function kindProseList(kinds: readonly ResourceKind[]): string {
-  return oxfordJoin(kinds.map((k) => `"${k}"`));
-}
-
-/** A natural-language noun phrase per kind, for the prose call's
- *  description of what it is classifying - never a raw kind code, since
- *  this line reads as English, not JSON. Record<ResourceKind, string> so
- *  adding a sixth kind to the leaf without a phrase here is a compile
- *  error, not a silent gap. */
-const KIND_DESCRIPTION: Record<ResourceKind, string> = {
-  doc: "official documentation",
-  video: "a video tutorial",
-  tutorial: "a written tutorial",
-  news: "a news article",
-  paper: "a paper",
-};
-
-/** "official documentation, a video tutorial, or a written tutorial" - the
- *  research call's fourth mention of the allowed kinds (previously a bare
- *  literal a few lines below the resource-type sentence at `:257`; the AC's
- *  R2 named only three locations, but this fourth one tells the model the
- *  same closed set in different words and is exactly the same
- *  coercion-versus-prompt drift risk). Built from the SAME `oxfordJoin`
- *  used by kindProseList, so all four kind-list mentions in this file
- *  trace back to one joining rule and one source array (`profile.kinds`,
- *  itself derived from RESOURCE_KINDS) and cannot drift from each other. */
-function kindDescriptionList(kinds: readonly ResourceKind[]): string {
-  return oxfordJoin(kinds.map((k) => KIND_DESCRIPTION[k]));
-}
-
-// Finding 2: a gate-passing URL can still render as a dead anchor.
-// markdownLiteToHtml (src/lib/markdown-lite.ts) turns a survivor into
-// `[title](url)` and reuses tokenizeInline's INLINE_LINK_RE
-// (src/lib/docx-blocks.ts) to parse it back out. That regex's markdown-link
-// branch captures the url as `[^\s)]+` - it stops at the FIRST literal ")"
-// or whitespace character, greedy or not. A real, alive, corroborated url
-// containing a balanced paren (Wikipedia's own
-// ".../Critical_path_method_(project)" is a real page) or an internal space
-// (which a real fetch silently percent-encodes before the request, so the
-// reachability check sees a 200) truncates at that character, producing a
-// dead link plus stray text - exactly the "punctuation baked into the href"
-// failure mode src/lib/urls.ts:8-11 attributes 14 of the original 37 dead
-// links to. Percent-encoding those characters (and ONLY those - see below)
-// makes the emitted url safe inside "[text](url)" syntax while resolving to
-// the exact same resource (a server treats "%28"/"%29"/"%20" identically to
-// the literal characters they encode).
-const RENDER_UNSAFE_URL_CHARS_RE = /[()\s]/g;
-
-function encodeUrlForRenderSafety(url: string): string {
-  // Matches only a literal "(", ")", or whitespace character - never a "%",
-  // so an already-percent-encoded sequence (e.g. a url that already reads
-  // "%28") is never touched and never double-encoded.
-  return url.replace(RENDER_UNSAFE_URL_CHARS_RE, (ch) => {
-    if (ch === "(") return "%28";
-    if (ch === ")") return "%29";
-    return "%20";
-  });
-}
-
-/**
- * Parse the structuring call's {"items":[...]} JSON into candidate resource
- * items, capped at maxItems. Malformed or missing shape degrades to []
- * rather than throwing - a parse miss becomes an empty result the caller
- * treats as a failed attempt, mirroring parseTopicItems /
- * parseTextbookRecommendations.
- *
- * Every url is run through sanitizeResourceUrl (src/lib/urls.ts:224-237)
- * FIRST, on the raw model-supplied string, so its trailing-punctuation and
- * unmatched-bracket cleanup still sees the real trailing characters -
- * percent-encoding a trailing ")" before that check would hide it from the
- * exact heuristic designed to catch it. Only what survives is then
- * percent-encoded for render-safety (Finding 2, encodeUrlForRenderSafety
- * above). An item whose url does not survive sanitizeResourceUrl (empty,
- * not http(s)) is dropped outright, same as an item with no title.
- */
-function parseResourceItems(text: string, maxItems: number): CandidateResourceItem[] {
-  const jsonText = jsonObjectSlice(text);
-  if (!jsonText) return [];
-  try {
-    const parsed = JSON.parse(jsonText) as { items?: Array<Record<string, unknown>> };
-    if (!Array.isArray(parsed.items)) return [];
-    return parsed.items
-      .map((raw) => {
-        const sanitizedUrl = sanitizeResourceUrl(String(raw.url ?? ""));
-        return {
-          title: String(raw.title ?? "").trim(),
-          url: sanitizedUrl ? encodeUrlForRenderSafety(sanitizedUrl) : "",
-          kind: coerceResourceKind(raw.kind),
-          whatYouGet: String(raw.whatYouGet ?? "").trim(),
-        };
-      })
-      .filter((item) => item.title.length > 0 && item.url.length > 0)
-      .slice(0, maxItems);
-  } catch {
-    return [];
-  }
-}
-
 /**
  * Call 2 of the two-call shape: convert call 1's grounded prose into the
  * fixed {"items":[...]} JSON, with NO web search - see the module doc
@@ -317,21 +228,41 @@ function parseResourceItems(text: string, maxItems: number): CandidateResourceIt
  * webSearch: true. Throws on a call failure so researchConceptWithRetry can
  * catch it and retry the whole pair, mirroring
  * current-events.ts's structureProseIntoItems.
+ *
+ * Y2: `visitedSources` is this concept's grounding sources that the run's
+ * resolver actually turned into a real (non-redirect-host) page - see
+ * researchConceptOnce. `boundVisitedSources` (src/lib/resource-item-parsing.ts)
+ * is applied ONCE here and the SAME bounded array backs both the prompt
+ * (sourcesVisitedBlock) and the index lookup (parseResourceItems's own
+ * `sourceUrls`) - a model's "source": <n> and the lookup it drives always
+ * agree on what n means, and an oversized or excess source can never appear
+ * in the prompt OR be selected by index. When the bounded list is non-empty,
+ * the prompt also asks the model to tag each item with which (if any) of
+ * those pages it is, and parseResourceItems uses that tag to replace the
+ * item's url with the resolved page's url.
  */
 async function structureProseIntoResourceItems(
   prose: string,
   provider: LlmProvider,
-  profile: ResourceProfile
+  profile: ResourceProfile,
+  visitedSources: readonly Source[]
 ): Promise<CandidateResourceItem[]> {
   if (!prose.trim()) return [];
+
+  const boundedSources = boundVisitedSources(visitedSources);
+  const sourcesBlock = sourcesVisitedBlock(boundedSources);
+  // Section 4 / test 5(e): with zero visited sources this is "", so the
+  // whole prompt below collapses to exactly today's byte-identical text -
+  // the same `? ... : ""` pattern already used for extraGuidance.
+  const schemaSourceField = boundedSources.length > 0 ? `,"source":<number or null>` : "";
 
   const prompt = `Convert the following research notes into structured JSON. Use only information present in the notes below - do not add, invent, look up, or infer anything that isn't already stated there.
 
 RESEARCH NOTES:
-${prose.slice(0, PER_CONCEPT_STRUCTURE_INPUT_CHAR_CAP)}
+${prose.slice(0, PER_CONCEPT_STRUCTURE_INPUT_CHAR_CAP)}${sourcesBlock}
 
 Return ONLY valid JSON in this exact shape:
-{"items":[{"title":"...","url":"...","kind":"${kindSchemaAlternation(profile.kinds)}","whatYouGet":"..."}]}
+{"items":[{"title":"...","url":"...","kind":"${kindSchemaAlternation(profile.kinds)}","whatYouGet":"..."${schemaSourceField}}]}
 
 "kind" must be exactly one of ${kindProseList(profile.kinds)}. No markdown fences, no commentary. If the notes contain no items, return {"items":[]}.`;
 
@@ -347,7 +278,11 @@ Return ONLY valid JSON in this exact shape:
     throw new Error(`HTTP ${result.status}`);
   }
 
-  return parseResourceItems(result.text, MAX_ITEMS_PER_CONCEPT);
+  return parseResourceItems(
+    result.text,
+    MAX_ITEMS_PER_CONCEPT,
+    boundedSources.map((s) => s.uri)
+  );
 }
 
 /**
@@ -355,13 +290,33 @@ Return ONLY valid JSON in this exact shape:
  * for a browsable prose answer, never JSON - see the module doc comment for
  * why. Throws on a transport failure so researchConceptWithRetry can retry
  * the whole pair, mirroring current-events.ts's researchTopicOnce.
+ *
+ * Y1/Y2: `resolver` is the ONE resolver shared by the whole run (created once
+ * in findResourceLinksForConceptsAction). This concept's grounded sources are
+ * resolved BEFORE the structuring call - the returned `sources` are always
+ * the RESOLVED ones (Y4: verifyItemUrls sees real hosts, not the opaque
+ * redirect), and `resolvedCount` is how many of them the resolver actually
+ * turned from a redirect link into a real page (used for Y5's
+ * ConceptOutcome.resolvedSources and to build the structuring call's
+ * "SOURCES VISITED" list - see structureProseIntoResourceItems). A source
+ * that was already a direct, non-redirect uri does NOT count as "resolved"
+ * here and is never listed as visited - it cost the resolver no fetch (see
+ * grounding-sources.ts's resolveOne) and was already visible to the model in
+ * its own grounded prose, so Section 4's byte-identical-prompt guarantee for
+ * a fixture with no redirect-host sources holds.
+ *
+ * Y3: `isRetry` prepends RETRY_NUDGE_LINE (plus a blank line) to this
+ * prompt - the FIRST attempt never sets it, so its prompt stays byte-
+ * identical to before Y3 existed.
  */
 async function researchConceptOnce(
   concept: string,
   courseKind: string,
   provider: LlmProvider,
-  profile: ResourceProfile
-): Promise<{ items: CandidateResourceItem[]; sources: Source[] }> {
+  profile: ResourceProfile,
+  resolver: GroundingResolver,
+  isRetry: boolean
+): Promise<{ items: CandidateResourceItem[]; sources: Source[]; sourceCount: number; resolvedCount: number }> {
   const kindLabel = courseKind.trim() ? ` for a ${courseKind.trim()} course` : "";
   // Video-length-preference setting (discussion-reply resources feature):
   // appended verbatim, never reworded here - see ResourceProfile.extraGuidance's
@@ -369,7 +324,7 @@ async function researchConceptOnce(
   // common case - every existing caller) leaves the template literal below
   // byte-identical to before this field existed.
   const guidance = profile.extraGuidance ? `\n\n${profile.extraGuidance}` : "";
-  const prompt = `You are an expert educator finding learning resources${kindLabel} for a student studying one concept.
+  const basePrompt = `You are an expert educator finding learning resources${kindLabel} for a student studying one concept.
 
 CONCEPT: ${concept}
 
@@ -378,6 +333,7 @@ Search the web first, then report up to ${MAX_ITEMS_PER_CONCEPT} real resources 
 For each resource you find, write a short paragraph in plain prose giving: the resource's title, whether it is ${kindDescriptionList(profile.kinds)}, the exact URL of the page you visited to find it, and one sentence on what a student gets from it.${guidance}
 
 If a web search turns up nothing relevant for this concept, say so plainly instead of inventing a resource.`;
+  const prompt = isRetry ? `${RETRY_NUDGE_LINE}\n\n${basePrompt}` : basePrompt;
 
   const grounded = await callLlm(
     {
@@ -392,10 +348,23 @@ If a web search turns up nothing relevant for this concept, say so plainly inste
     throw new Error(`HTTP ${grounded.status}`);
   }
 
-  const sources = grounded.sources ?? [];
-  const items = await structureProseIntoResourceItems(grounded.text, provider, profile);
+  const rawSources = grounded.sources ?? [];
+  // MAX_SOURCES_TO_RESOLVE: only the first N sources ever reach the run's
+  // shared resolver - the rest pass through exactly as returned (never
+  // resolved, never dropped), same as any source the resolver itself leaves
+  // unchanged. Keeps one concept's oversized source list from spending the
+  // whole run's shared fetch budget/pool.
+  const sourcesToResolve = rawSources.slice(0, MAX_SOURCES_TO_RESOLVE);
+  const passthroughSources = rawSources.slice(MAX_SOURCES_TO_RESOLVE);
+  const resolvedHead = sourcesToResolve.length > 0 ? await resolver.resolve(sourcesToResolve) : [];
+  const resolvedSources = [...resolvedHead, ...passthroughSources];
+  const visitedSources = resolvedSources.filter(
+    (resolved, i) => resolved.uri !== rawSources[i].uri && isRealHostSource(resolved)
+  );
 
-  return { items, sources };
+  const items = await structureProseIntoResourceItems(grounded.text, provider, profile, visitedSources);
+
+  return { items, sources: resolvedSources, sourceCount: rawSources.length, resolvedCount: visitedSources.length };
 }
 
 /**
@@ -414,22 +383,37 @@ If a web search turns up nothing relevant for this concept, say so plainly inste
  * note. `retried` tells the caller whether a second attempt actually ran, so
  * its note wording ("even after one retry") is never said when the budget
  * caused the retry to be skipped.
+ *
+ * Y3: a first attempt that returned items but NO sources also retries now -
+ * a memory-answer (the model skipped Google Search entirely) used to get
+ * exactly one attempt because it "succeeded" by the old items-only check;
+ * see the module header's diagnosis (finding 1). Both branches share the
+ * SAME `resolver` across the first attempt and any retry (Y1/Y7 - one shared
+ * budget and pool for the whole run, not reset per attempt).
  */
 async function researchConceptWithRetry(
   concept: string,
   courseKind: string,
   provider: LlmProvider,
   hasRetryBudget: () => boolean,
-  profile: ResourceProfile
-): Promise<{ items: CandidateResourceItem[]; sources: Source[]; retried: boolean }> {
+  profile: ResourceProfile,
+  resolver: GroundingResolver
+): Promise<{
+  items: CandidateResourceItem[];
+  sources: Source[];
+  sourceCount: number;
+  resolvedCount: number;
+  retried: boolean;
+}> {
   try {
-    const first = await researchConceptOnce(concept, courseKind, provider, profile);
-    if (first.items.length > 0 || !hasRetryBudget()) return { ...first, retried: false };
-    const second = await researchConceptOnce(concept, courseKind, provider, profile);
+    const first = await researchConceptOnce(concept, courseKind, provider, profile, resolver, false);
+    const needsRetry = first.items.length === 0 || first.sourceCount === 0;
+    if (!needsRetry || !hasRetryBudget()) return { ...first, retried: false };
+    const second = await researchConceptOnce(concept, courseKind, provider, profile, resolver, true);
     return { ...second, retried: true };
   } catch (err) {
     if (!hasRetryBudget()) throw err;
-    const second = await researchConceptOnce(concept, courseKind, provider, profile);
+    const second = await researchConceptOnce(concept, courseKind, provider, profile, resolver, true);
     return { ...second, retried: true };
   }
 }
@@ -443,7 +427,7 @@ async function researchConceptWithRetry(
  *   1. It came from a grounded (webSearch: true) call's own prose, then was
  *      extracted by a second, ungrounded structuring call (D1).
  *   2. It is corroborated by that SAME concept's grounding sources
- *      (verifyItemUrls, current-events-report.ts:170-217) and is not a
+ *      (verifyItemUrls, current-events-report.ts) and is not a
  *      placeholder (isPlaceholderUrl). Either failure DROPS the item outright
  *      (B1/B3) rather than rendering it "unverified" - this page is a list of
  *      links, so a blanked link has nothing left to be.
@@ -452,8 +436,8 @@ async function researchConceptWithRetry(
  *
  * Placeholder and corroboration failures are counted SEPARATELY
  * (droppedPlaceholder vs droppedUncorroborated) even though verifyItemUrls
- * itself blanks both the same way (it calls isPlaceholderUrl internally -
- * current-events-report.ts:205) - if placeholder candidates were passed into
+ * itself blanks both the same way (it calls isPlaceholderUrl internally) -
+ * if placeholder candidates were passed into
  * verifyItemUrls, its output would make the two failure reasons
  * indistinguishable. So isPlaceholderUrl is checked FIRST, here, on the raw
  * candidate list; only genuine non-placeholder candidates are handed to
@@ -463,7 +447,7 @@ async function researchConceptWithRetry(
  *
  * D2/B5 (a Gemini grounding redirect host must never be the link on the
  * page): guaranteed structurally, not by a separate filter. verifyItemUrls's
- * own isCorroborated check (current-events-report.ts:196-202) always returns
+ * own isCorroborated check always returns
  * false for the grounding redirect host, so a candidate url on that host can
  * never survive the corroboration gate - it is always dropped as
  * uncorroborated, never rendered.
@@ -475,11 +459,16 @@ export async function findResourceLinksForConceptsAction(
   // Finding 3: test-only seam. `now` lets the retry-budget cutoff be driven
   // deterministically (no real waiting - precedented by url-reachability.ts's
   // own `now` option); `retryBudgetMs` lets a test use a budget far smaller
-  // than RETRY_BUDGET_MS without waiting for the real one to elapse. Neither
-  // field is meant to be passed by a real caller - both default to the real
-  // clock and the real budget - so every existing 3-argument call site (the
+  // than RETRY_BUDGET_MS without waiting for the real one to elapse.
+  // `resolver` lets a test inject a whole GroundingResolver (e.g. one built
+  // with createGroundingResolver({ fetchImpl }) over a mocked fetch) so a
+  // mocked redirect-host source never reaches real `fetch`, exactly like
+  // checkUrlsReachable's own injected-fetch tests never touch the network.
+  // None of these three fields is meant to be passed by a real caller - all
+  // default to the real clock, the real budget, and a resolver created below
+  // with the real clock - so every existing 3-argument call site (the
   // sibling generator's call in lms-generation.ts) is unaffected.
-  options?: { now?: () => number; retryBudgetMs?: number },
+  options?: { now?: () => number; retryBudgetMs?: number; resolver?: GroundingResolver },
   // R2: an optional resource-profile argument selecting (a) the prose
   // call's resource-type sentence and (b) the structuring call's allowed-
   // kind list. Defaults to DEFAULT_RESOURCE_PROFILE (today's exact
@@ -527,17 +516,30 @@ export async function findResourceLinksForConceptsAction(
     const hasRetryBudget = () => now() - startedAt < retryBudgetMs;
     const profile = resourceProfile ?? DEFAULT_RESOURCE_PROFILE;
 
+    // Y1/Y7: ONE resolver for the whole run, shared by every concept's
+    // researchConceptWithRetry call below (and, within that, by both its
+    // first attempt and any retry) - one worker pool, one wall-clock budget,
+    // one uri->Source cache. `options.resolver` lets a test inject its own
+    // (over a mocked fetch); a real caller never sets it, so this call site
+    // creates one here with the real clock.
+    const resolver = options?.resolver ?? createGroundingResolver();
+
     const notes: string[] = [];
     const settled = await Promise.allSettled(
       boundedConcepts.map((concept) =>
-        researchConceptWithRetry(concept, courseKind ?? "", provider, hasRetryBudget, profile)
+        researchConceptWithRetry(concept, courseKind ?? "", provider, hasRetryBudget, profile, resolver)
       )
     );
 
     let anySourcesAtAll = false;
     let droppedPlaceholder = 0;
     let droppedUncorroborated = 0;
-    const survivors: Array<{ concept: string; item: CandidateResourceItem }> = [];
+    // Y5: one entry per bounded concept, filled in below as each settles -
+    // an array indexed by position (not a Map keyed by concept text), since
+    // duplicate concept strings within one run must still get their own,
+    // separate ConceptOutcome entries.
+    const perConcept: ConceptOutcome[] = new Array(boundedConcepts.length);
+    const survivors: Array<{ index: number; concept: string; item: CandidateResourceItem }> = [];
 
     settled.forEach((outcome, i) => {
       const concept = boundedConcepts[i];
@@ -545,10 +547,23 @@ export async function findResourceLinksForConceptsAction(
       if (outcome.status === "rejected") {
         const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
         notes.push(`Concept "${concept}" failed: ${reason}`);
+        perConcept[i] = {
+          concept,
+          sources: 0,
+          resolvedSources: 0,
+          candidates: 0,
+          droppedPlaceholder: 0,
+          droppedUncorroborated: 0,
+          droppedDuplicate: 0,
+          droppedUnreachable: 0,
+          kept: 0,
+          retried: false,
+          failed: reason,
+        };
         return;
       }
 
-      const { items, sources, retried } = outcome.value;
+      const { items, sources, sourceCount, resolvedCount, retried } = outcome.value;
       if (sources.length > 0) anySourcesAtAll = true;
 
       if (items.length === 0) {
@@ -561,29 +576,60 @@ export async function findResourceLinksForConceptsAction(
             ? `Concept "${concept}" returned no candidate resources, even after one retry.`
             : `Concept "${concept}" returned no candidate resources.`
         );
+        perConcept[i] = {
+          concept,
+          sources: sourceCount,
+          resolvedSources: resolvedCount,
+          candidates: 0,
+          droppedPlaceholder: 0,
+          droppedUncorroborated: 0,
+          droppedDuplicate: 0,
+          droppedUnreachable: 0,
+          kept: 0,
+          retried,
+        };
         return;
       }
       if (sources.length === 0) {
         notes.push(`Concept "${concept}"'s search returned no sources, so its candidate resources cannot be corroborated.`);
       }
 
+      const candidates = items.length;
+
       // B3: reject placeholders before any corroboration or fetch is
       // attempted, and BEFORE verifyItemUrls (see this function's own doc
       // comment above for why the ordering matters for the drop counts).
       const nonPlaceholder: CandidateResourceItem[] = [];
+      let conceptDroppedPlaceholder = 0;
       for (const item of items) {
         if (isPlaceholderUrl(item.url)) {
-          droppedPlaceholder++;
+          conceptDroppedPlaceholder++;
         } else {
           nonPlaceholder.push(item);
         }
       }
-      if (nonPlaceholder.length === 0) return;
+      droppedPlaceholder += conceptDroppedPlaceholder;
+
+      if (nonPlaceholder.length === 0) {
+        perConcept[i] = {
+          concept,
+          sources: sourceCount,
+          resolvedSources: resolvedCount,
+          candidates,
+          droppedPlaceholder: conceptDroppedPlaceholder,
+          droppedUncorroborated: 0,
+          droppedDuplicate: 0,
+          droppedUnreachable: 0,
+          kept: 0,
+          retried,
+        };
+        return;
+      }
 
       // B1: adapter pattern (applyUrlCorroboration in
       // textbook-recommendations.ts:179-199 is the pattern to copy) - map
       // into ParsedTopicItem's shape, corroborate against THIS concept's own
-      // sources, then read back only .url/.unverified.
+      // (RESOLVED - Y4) sources, then read back only .url/.unverified.
       const asTopicItems: ParsedTopicItem[] = nonPlaceholder.map((item) => ({
         headline: item.title,
         date: "",
@@ -594,13 +640,31 @@ export async function findResourceLinksForConceptsAction(
       }));
       const verified = verifyItemUrls(asTopicItems, sources);
 
+      let conceptDroppedUncorroborated = 0;
       verified.forEach((v, idx) => {
         if (!v.url) {
-          droppedUncorroborated++;
+          conceptDroppedUncorroborated++;
           return;
         }
-        survivors.push({ concept, item: { ...nonPlaceholder[idx], url: v.url } });
+        survivors.push({ index: i, concept, item: { ...nonPlaceholder[idx], url: v.url } });
       });
+      droppedUncorroborated += conceptDroppedUncorroborated;
+
+      // droppedUnreachable/kept are filled in after the reachability check
+      // below - every survivor above carries `index` so its concept's entry
+      // here can be updated in place once that check resolves.
+      perConcept[i] = {
+        concept,
+        sources: sourceCount,
+        resolvedSources: resolvedCount,
+        candidates,
+        droppedPlaceholder: conceptDroppedPlaceholder,
+        droppedUncorroborated: conceptDroppedUncorroborated,
+        droppedDuplicate: 0,
+        droppedUnreachable: 0,
+        kept: 0,
+        retried,
+      };
     });
 
     // B2: mirrors current-events.ts:461-471's own check and note wording -
@@ -619,36 +683,65 @@ export async function findResourceLinksForConceptsAction(
     // degraded (no concept had any source) implies zero survivors - nothing
     // special-cased; the reachability check is simply never reached.
     if (survivors.length === 0) {
-      return { links: [], degraded, droppedUncorroborated, droppedPlaceholder, droppedUnreachable: 0, notes };
+      return { links: [], degraded, droppedUncorroborated, droppedPlaceholder, droppedUnreachable: 0, notes, perConcept };
     }
+
+    // Finding E: a model that tags more than one item with the identical
+    // source index (or independently writes the identical url twice) can
+    // otherwise surface the SAME (concept, url) pair more than once - drop
+    // every repeat within a concept BEFORE the reachability call, so a post
+    // never shows the same url twice. Keyed by `index` (the concept's
+    // position, not its text - two bounded concepts can share the same
+    // string) and `item.url`. A dropped repeat is counted separately, in
+    // droppedDuplicate (per concept only - see this field's own doc comment
+    // in resource-search-outcome.ts) - it was never actually checked for
+    // reachability, so it must never inflate droppedUnreachable (the
+    // instructor-facing "unreachable: N" count, learning-resources-generator.ts,
+    // and the all-dropped "the pages did not open" sentence,
+    // discussion-replies.ts, both read that field and would otherwise blame a
+    // duplicate on a dead link). Y5's arithmetic is now
+    // droppedDuplicate + droppedUnreachable + kept = corroborated survivors.
+    const seenByConcept = new Set<string>();
+    const dedupedSurvivors = survivors.filter(({ index, item }) => {
+      const key = `${index} ${item.url}`;
+      if (seenByConcept.has(key)) {
+        perConcept[index].droppedDuplicate++;
+        return false;
+      }
+      seenByConcept.add(key);
+      return true;
+    });
 
     // B4/Finding 7: the first code path in this repo that actually fetches a
     // candidate URL (Contract 1) - concurrent and bounded under its own
-    // total budget, never sequential. Deduped first: two different concepts
-    // can independently surface the same canonical url (a shared official
-    // doc, say), and survivors is per-(concept, item), not per-url - checking
-    // every survivor's url would spend the checker's fixed 12s budget
-    // rechecking a url it already has an answer for. aliveByUrl is keyed by
-    // url regardless, so every survivor - however many concepts share its
-    // url - reads back the SAME single check's outcome.
-    const uniqueUrls = Array.from(new Set(survivors.map((s) => s.item.url)));
+    // total budget, never sequential. Deduped first (the cross-concept case,
+    // on top of the per-concept dedupe above): two different concepts can
+    // independently surface the same canonical url (a shared official doc,
+    // say), and dedupedSurvivors is still per-(concept, item), not per-url -
+    // checking every survivor's url would spend the checker's fixed 12s
+    // budget rechecking a url it already has an answer for. aliveByUrl is
+    // keyed by url regardless, so every survivor - however many concepts
+    // share its url - reads back the SAME single check's outcome.
+    const uniqueUrls = Array.from(new Set(dedupedSurvivors.map((s) => s.item.url)));
     const reachability = await checkUrlsReachable(uniqueUrls);
     const aliveByUrl = new Map(reachability.map((r) => [r.url, r.alive]));
 
     let droppedUnreachable = 0;
     const links: ResourceLink[] = [];
-    for (const { concept, item } of survivors) {
+    for (const { index, concept, item } of dedupedSurvivors) {
       if (aliveByUrl.get(item.url) !== true) {
         droppedUnreachable++;
+        perConcept[index].droppedUnreachable++;
         continue;
       }
       // D2/B5: the link is always the structuring call's extracted
       // publisher url (item.url, already corroborated above) - source.uri
       // (the grounding redirect) is never read again past this point.
+      perConcept[index].kept++;
       links.push({ concept, title: item.title, url: item.url, kind: item.kind, whatYouGet: item.whatYouGet });
     }
 
-    return { links, degraded, droppedUncorroborated, droppedPlaceholder, droppedUnreachable, notes };
+    return { links, degraded, droppedUncorroborated, droppedPlaceholder, droppedUnreachable, notes, perConcept };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not find learning resources." };
   }

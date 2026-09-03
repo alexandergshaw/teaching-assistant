@@ -176,6 +176,69 @@ describe("parseGroundingSources", () => {
     expect(result).toBeUndefined();
   });
 
+  // Y1a (docs/reply-resource-search-yield-acceptance-criteria.md):
+  // groundingChunks[].web.domain is the field verifyItemUrls now also reads
+  // to corroborate a candidate, independent of whether `title` happens to
+  // look domain-shaped.
+  it("copies web.domain onto the parsed source when present", () => {
+    const data = {
+      candidates: [
+        {
+          groundingMetadata: {
+            groundingChunks: [
+              {
+                web: {
+                  uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc",
+                  title: "A sentence-like page title",
+                  domain: "trusted-docs.test",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const result = parseGroundingSources(data);
+    expect(result).toEqual([
+      {
+        uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc",
+        title: "A sentence-like page title",
+        domain: "trusted-docs.test",
+      },
+    ]);
+  });
+
+  it("omits domain when web.domain is absent", () => {
+    const data = {
+      candidates: [
+        {
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: "https://example-real.test/a", title: "T" } }],
+          },
+        },
+      ],
+    };
+
+    const [result] = parseGroundingSources(data)!;
+    expect(result).not.toHaveProperty("domain");
+  });
+
+  it("omits domain when web.domain is an empty string", () => {
+    const data = {
+      candidates: [
+        {
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: "https://example-real.test/a", title: "T", domain: "" } }],
+          },
+        },
+      ],
+    };
+
+    const [result] = parseGroundingSources(data)!;
+    expect(result).not.toHaveProperty("domain");
+  });
+
   it("handles malformed chunk objects gracefully", () => {
     const data = {
       candidates: [
@@ -397,11 +460,68 @@ describe("callLlm request shape", () => {
     else process.env[key] = value;
   };
 
+  const savedSearchModel = process.env.GEMINI_SEARCH_MODEL;
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     restoreEnv("GEMINI_API_KEY", savedApiKey);
     restoreEnv("GEMINI_MODEL", savedModel);
+    restoreEnv("GEMINI_SEARCH_MODEL", savedSearchModel);
+  });
+
+  function stubOkFetch() {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  // Y6 (docs/reply-resource-search-yield-acceptance-criteria.md).
+  it("with GEMINI_SEARCH_MODEL set, a webSearch request's fetched URL names it and a non-webSearch request's does not", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    process.env.GEMINI_MODEL = "gemini-3.1-flash-lite";
+    process.env.GEMINI_SEARCH_MODEL = "gemini-2.5-flash";
+
+    const searchFetchMock = stubOkFetch();
+    await callLlm({
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      webSearch: true,
+    });
+    const searchUrl = searchFetchMock.mock.calls[0][0] as string;
+    expect(searchUrl).toContain("models/gemini-2.5-flash:generateContent");
+    expect(searchUrl).not.toContain("gemini-3.1-flash-lite");
+
+    const plainFetchMock = stubOkFetch();
+    await callLlm({
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+    const plainUrl = plainFetchMock.mock.calls[0][0] as string;
+    expect(plainUrl).toContain("models/gemini-3.1-flash-lite:generateContent");
+    expect(plainUrl).not.toContain("gemini-2.5-flash");
+  });
+
+  it("with GEMINI_SEARCH_MODEL unset, both a webSearch and a non-webSearch request name getGeminiModel()", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    process.env.GEMINI_MODEL = "gemini-3.1-flash-lite";
+    delete process.env.GEMINI_SEARCH_MODEL;
+
+    const searchFetchMock = stubOkFetch();
+    await callLlm({
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      webSearch: true,
+    });
+    expect(searchFetchMock.mock.calls[0][0] as string).toContain("models/gemini-3.1-flash-lite:generateContent");
+
+    const plainFetchMock = stubOkFetch();
+    await callLlm({
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+    expect(plainFetchMock.mock.calls[0][0] as string).toContain("models/gemini-3.1-flash-lite:generateContent");
   });
 
   it("drops a low temperature and raises maxOutputTokens to the floor for the default Gemini 3 model", async () => {

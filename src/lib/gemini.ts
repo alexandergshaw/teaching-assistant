@@ -92,6 +92,20 @@ export function getGeminiModel() {
   return process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL;
 }
 
+/**
+ * Model override for web-search-grounded calls only (Y6,
+ * docs/reply-resource-search-yield-acceptance-criteria.md). GEMINI_MODEL's
+ * default, gemini-3.1-flash-lite, is the most tool-shy tier for deciding
+ * whether to actually run Google Search - see current-events.ts and
+ * learning-resource-links.ts's own module comments on that failure mode.
+ * Falls back to getGeminiModel() when unset, so a request that never sets
+ * webSearch is byte-identical to before this existed, and a caller that DOES
+ * set webSearch but leaves this unset also sees no change.
+ */
+export function getGeminiSearchModel() {
+  return process.env.GEMINI_SEARCH_MODEL ?? getGeminiModel();
+}
+
 /** Model used for image-generation calls. See DEFAULT_GEMINI_IMAGE_MODEL's
  * own comment above for why this is a separate knob from getGeminiModel(). */
 export function getGeminiImageModel() {

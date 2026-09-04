@@ -312,13 +312,20 @@ export async function createScheduledAnnouncementAction(
   }
 }
 
-/** List the account Inbox conversations for the selected institution (or default). */
+/**
+ * List the account Inbox conversations for the selected institution (or
+ * default). `opts` (docs/message-replies-acceptance-criteria.md M15) is
+ * additive and threaded straight through to listConversations - every
+ * existing caller that omits it keeps getting exactly today's byte-identical
+ * request and result.
+ */
 export async function listConversationsAction(
-  acronym?: string
+  acronym?: string,
+  opts?: { courseId?: string; scope?: "unread" | "archived"; perPage?: number }
 ): Promise<{ conversations: CanvasConversationSummary[] } | { error: string }> {
   try {
     await requireOwner();
-    return { conversations: await listConversations(acronym) };
+    return { conversations: await listConversations(acronym, opts) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not load the inbox." };
   }

@@ -36,6 +36,7 @@ import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
 import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
 import { KNOWLEDGE_RETURN_EVENT } from "@/lib/knowledge-return";
+import { MESSAGE_DRAFTS_NAV_EVENT } from "@/lib/drafts-nav";
 import { type ActiveTab } from "./url-state";
 
 const initialState: GradeActionState = { run: null, error: null };
@@ -146,6 +147,26 @@ export default function Home() {
     window.addEventListener(KNOWLEDGE_RETURN_EVENT, handler);
     return () => window.removeEventListener(KNOWLEDGE_RETURN_EVENT, handler);
   }, [setActiveTab]);
+
+  // "Jump to the Message Drafts tab" (docs/message-replies-acceptance-
+  // criteria.md M16): the Saved-to-drafts link on a message-replies row
+  // (MessageThreadRow.tsx) dispatches MESSAGE_DRAFTS_NAV_EVENT (src/lib/
+  // drafts-nav.ts) rather than reaching setActiveTab/setWorkflowsView/
+  // setDraftsView directly, for the identical reason RECORDING_LAUNCH_EVENT
+  // and KNOWLEDGE_RETURN_EVENT do above: this component is the sole owner of
+  // those setters. Registered once, live, the same "kept mounted" shape as
+  // the two listeners above. Carries no payload of its own - every dispatch
+  // wants the same three destination values, so this listener sets all
+  // three itself with nothing to drain from a one-shot slot.
+  useEffect(() => {
+    const handler = () => {
+      setWorkflowsView("drafts");
+      setDraftsView("messages");
+      setActiveTab("workflows");
+    };
+    window.addEventListener(MESSAGE_DRAFTS_NAV_EVENT, handler);
+    return () => window.removeEventListener(MESSAGE_DRAFTS_NAV_EVENT, handler);
+  }, [setActiveTab, setWorkflowsView, setDraftsView]);
 
   useEffect(() => {
     if (activeTab === "workflows" && workflowsView === "drafts") {

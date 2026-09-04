@@ -1,0 +1,13 @@
+/* Message replies (Manual > Recording > Message replies) - the one class
+   this feature's own layout needs that neither RecordingControls.module.css
+   nor DiscussionRepliesPanel.module.css already provides (both are reused
+   as-is for everything else - the shared table skin, the fixed-height
+   scroller, the header bar / continuation row pair, the hover-reveal move
+   cluster, the sticky toolbar, the skeleton lines).
+   docs/message-replies-acceptance-criteria.md M13: "Earlier bodies carry
+   .threadEarlier (color: var(--text-secondary), defined in a new
+   MessageReplies.module.css) ... only the latest incoming is at
+   --text-primary. No new colour, no icon." */
+.threadEarlier {
+  color: var(--text-secondary);
+}

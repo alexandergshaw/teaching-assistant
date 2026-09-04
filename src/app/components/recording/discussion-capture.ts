@@ -265,7 +265,7 @@ export function authorsMatch(a: string, b: string): boolean {
 }
 
 /** Token-level Levenshtein distance. */
-function tokenLevenshtein(a: string[], b: string[]): number {
+export function tokenLevenshtein(a: string[], b: string[]): number {
   const m = a.length;
   const n = b.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));

@@ -993,6 +993,76 @@ key) and the owner's run log of 2026-09-03 (two batches, both degraded).
    call. `discussion-replies-resources.test.ts` pins the action's call shape
    and the 3-per-post slice. No test renders a component.
 
+### 2026-09-03 - Recording sub-tab registry and canaries, before the Message replies tool
+
+Baseline for `docs/message-replies-acceptance-criteria.md`, taken at
+84027ca from a canary inventory (every number below was measured, not
+read from prose).
+
+1. **Nine sub-tabs, eight tabpanels.** `RecordingTab.tsx` (881 lines):
+   `recView` union at :59-60 (`record | discussions | speed | captions |
+   slides | avatar | announcement | grading | moduledeck`), restore guard
+   at :63-73 starting `return v === "discussions"`, the strip tuple on ONE
+   physical line at :586, eight `role="tabpanel"` divs each carrying
+   `style={{ display: recView === "<key>" ? undefined : "none" }}` (the
+   record/announcement pair shares `rec-panel-record`), panel mounts as
+   `<XPanel active={active && recView === "<key>"} />`.
+2. **`recording-split.structure.test.ts`** pins: strip entries
+   `toHaveLength(9)` (:128); `role="tabpanel"` `toHaveLength(8)` (:178);
+   `panelTargets.size` 8 with a nine-entry `keys` array (:193-207); the
+   `aria-labelledby` loop over seven keys (:238); the restore-guard value
+   list of seven (:158); the `ta-rec-*` inventory as an EXACT SET of 62
+   keys (:329-394) harvested from `recording/*` + `RecordingTab.tsx` only -
+   a sibling directory's keys are invisible to it; `discKeys` 15 (:503),
+   `annKeys` 3 (:551); 1000-line ceilings for `RecordingTab.tsx`,
+   `TabShell.tsx` and `recording/*` only.
+3. **`buttonVariant.test.ts`**: `SECTION_4_DIRS` has six directories
+   (:85-92); `FROZEN_PRIMARY_SITES` is an exact-equality
+   `Record<string, number>` of 17 entries (:151-182) over 43 `.tsx` files;
+   the discussion panel has 1 primary and its toolbar 1; zero
+   `? "contained" : "outlined"` literals outside `buttonVariant.ts`.
+4. **`runLogRow.test.ts`**: `RUN_BEARING_PANELS` has five entries (:12-18)
+   and the test title says "five"; each must contain exactly one
+   `<RunLogRow` with `summary=` and `onDownload=` and never the literal
+   "Download run log (CSV)".
+5. **`src/lib/recording-launch.ts`**: `RecordingLaunchView` nine members
+   (:48-57), `RECORDING_LAUNCH_VIEWS` nine (:59-69); `recording-launch.
+   test.ts` has NO count assertion, only per-view positive cases.
+6. **`module-deck-capture.structure.test.ts`** is the directory-local
+   canary template: mount reachability (import, `<ModuleDeckCapturePanel`,
+   the `active && recView === "moduledeck"` idiom), union membership found
+   by `line.includes('"record" | "discussions" | "speed"')` (:63 - an
+   anchor that breaks if a new member is inserted before `"speed"`), the
+   restore guard sliced separately (:68-82), the strip entry, and a
+   directory-wide `ta-` ORDINAL canary `distinctKeys.size` 4 (:151).
+7. **Canvas Inbox seam.** `src/lib/canvas/inbox.ts`: `listConversations
+   (code?)` fetches `/api/v1/conversations?per_page=50`, page 1 only, no
+   course filter, participants as names only; `getConversation` returns
+   `selfId`; `replyToConversation` returns void and the action re-fetches
+   (`canvas-inbox.ts:341-353`). `messaging.ts:217` `saveMessageDraftAction
+   (summary, payload, workflowId?, workflowName?)`; `:284` rejects a reply
+   draft whose `conversationId` fails `/^\d+$/`. Course-scoped inbox
+   filtering exists only at `grading-queue.ts:161-174`.
+8. **Discussion machinery that is row-free** (importable cross-directory,
+   proven by `grading-recording/`): `useDiscussionCapture`, the frame
+   constants and dedupe primitives in `discussion-capture.ts`, the
+   wake/loop-starter/notices hooks, `captureLiveRegion`, `RunLogRow`,
+   `compareNameKey`, `filterRowsByQuery`. Row-typed (copied by grading):
+   `ReplyRow` + serializers, `useReplyRows`, `runDraftLoop` (deps require
+   the resource hook), `useDiscussionReplies`, the run-log/filtering/
+   summary hooks, `mergeCapturedPosts`, the status-filter family
+   (`ReplyStatusFilter` is a closed five-member union), the four
+   `DiscussionReply*.tsx` components (`DiscussionReplyRow.tsx` 914 lines,
+   `DiscussionRepliesPanel.tsx` 913). `ReplyCompositionSettings.
+   ingredients` is a closed five-member union; `formalityClause` and
+   `ingredientClause` are module-private.
+9. **Repo-wide sweeps that auto-cover a new directory** (no count to bump):
+   `file-size-ceiling.structure.test.ts`, `no-emojis.test.ts`,
+   `use-server-exports.test.ts`, `confirmArmButtons.test.ts` (no `onBlur`
+   on an element with a consequence `aria-describedby`);
+   `modalAdoption.wiring.test.ts` counts 50/35 fire only if a modal is
+   added; `HEADLESS_SAFE_STEP_TYPES` is 154 and unrelated.
+
 ## Feature entries
 
 ### 2026-07-22 - Workflow components split under 1000 lines
@@ -38775,3 +38845,106 @@ fetching page titles so an unmentioned source can become a candidate; a
 cap on how many times `Find resources` re-sweeps a row that keeps coming
 back `no-candidates`; a `groundingNow` seam for tests that need to drive
 both clocks.
+
+## 393. Message replies: a tenth recording tool that reads a student inbox off the screen, drafts a reply per thread, and can send it through Canvas after a confirm
+
+Owner request 2026-09-03: "add another recording tool: this time for
+recording and replying to student messages." AC:
+`docs/message-replies-acceptance-criteria.md` (revision 5, as built).
+Baseline: "2026-09-03 - Recording sub-tab registry and canaries, before the
+Message replies tool" above.
+
+**What it is.** Sub-tab `messages` ("Message replies", after Discussion
+replies in the strip, appended after `moduledeck` in the union so the
+module-deck canary's anchor keeps matching). Record the screen while
+scrolling an inbox; frames go to `extractStudentMessagesAction`, whose
+prompt (`src/lib/message-reply-prompt.ts`) returns
+`{subject, sender, sentAt, text, pane}` - `pane` is `"list"` or
+`"thread"`, and there is NO `fromMe` on the wire: the inbox does not mark
+own messages, so direction is derived on the client from a persisted
+"Your name in Canvas" field (`authorsMatch`), and while that field is
+empty every message is incoming and a hint under the field says so.
+`message-thread.ts` threads messages by normalized subject + student (the
+`""`/`"(no subject)"` sentinel never merges two students), dedupes with a
+quoted-reply-stripping head-and-tail token distance where timestamps only
+ever VETO (5 minutes apart at minute precision), parses "Sep 3 at 2:14pm" /
+"Yesterday" / "Today" / bare times with a year rollback, keeps raw text for
+display and `ms` only as a sort key, and DROPS any instructor message it
+cannot attribute to exactly one thread (a real-subject match to two
+students used to mint an orphan row with an empty student - caught by a
+fixture written against the code, fixed before push). A thread known only
+from the list pane is `previewOnly` and never drafts.
+
+Drafting mirrors the discussion tool (`{"post": n, "reply"}` positional
+contract, batch 5, knowledge context, formality and greeting reused via
+EXPORTED `formalityClause`; message-specific ingredients acknowledge /
+answer / next-step / offer-help / deadline-reminder with a hint when
+"answer" is off), the writing-style block resolved SERVER-SIDE via
+`getWritingStyleBlock` after `requireOwner` (the first build had the client
+fetching the sample through an unrelated feature's action - my AC's
+signature was wrong, corrected), and the sign-off appended IN CODE
+(`applySignoff`) so Copy, Save as draft and Send are byte-identical. A
+thread whose every message is the instructor's own is `answered`: badge,
+never auto-drafted, never draft-all'd (the panel's count predicate and the
+hook's are pinned to agree - the first build fixed one of two copies).
+
+Outputs per row: Copy reply, Save as draft (`saveMessageDraftAction`, only
+on a MATCHED row - an unmatched reply draft can never be posted), Send
+(`ConfirmArmButtons`, danger tone, ONE armed slot shared with Redraft and
+Remove, `replyToConversationAction(Number(id), body, acronym)`), Check,
+Redraft; Skip / Mark handled / Remove in More. Match to Canvas runs
+automatically on capture stop and after merges (conversation list cached
+60 s; merges re-run only the pure predicate) with a manual `Match to Canvas
+(N)`; `listConversations` gained `courseId`/`scope`/pagination options with
+the no-options URL frozen by a literal oracle. Send state PERSISTS:
+`sendAttempt` before the fetch, `sendError` with the "may or may not have
+been sent" text on failure or when a reload finds an attempt with no
+`sent`, a `Sent <time>` badge, refusal to send twice. The "Not found in
+your Canvas inbox" / "More than one conversation matches" hints key on a
+persisted per-row `matchOutcome` and never show before a pass examined the
+row. Saved-to-drafts links through `src/lib/drafts-nav.ts` (a window
+event `page.tsx` listens for, like knowledge-return) - the first build used
+an `<a href="?tab=...">` that would have reloaded the app and killed the
+live capture.
+
+Persistence: fourteen `ta-rec-msg-*` keys, each read and written, pinned by
+the directory's own ordinal canary (the recording-split inventory cannot
+see a sibling directory and stays at 62). Table caps: 12 messages per
+thread, 800 chars per stored body except the latest incoming, 3.5 MB total
+trimmed in geometric batches by real byte count; `previewOnly` rows survive
+a reload with zero messages. Run log with a `discarded` lane that is
+actually reachable (the extraction loop snapshots the table epoch; the
+first build exposed the ref and never read it). Shared helpers lifted
+rather than copied a third time: `src/lib/log-file-name.ts` (`slugify`,
+`fileStamp`, `logFileName`) now serves the discussion, grading and message
+logs with every frozen filename oracle untouched; `csvRow`/`yesNo` live
+beside `escapeCsvValue`; `tokenLevenshtein` is exported from
+discussion-capture.ts.
+
+**Canaries moved.** Strip 9 -> 10, tabpanels 8 -> 9, `panelTargets` 8 -> 9,
+`aria-labelledby` loop 7 -> 8, restore guard +1; `SECTION_4_DIRS` +1;
+`FROZEN_PRIMARY_SITES` +6 by full path (toolbar 1 for Draft the missing
+replies, panel 1 for Start/Stop via `variantFor` per CC1 - my AC's "one
+primary" had been read as zero filled buttons while capturing, caught by
+both the verifier and the UX pass); `RUN_BEARING_PANELS` +1 (title "six");
+launch union +1 with positive tests. `HEADLESS_SAFE_STEP_TYPES` stays 154;
+no modal.
+
+**The loop.** AC -> architect/UX/data-engineer + canary-inventory passes ->
+two sabotage checks (21 defects between them: a closed ingredient union,
+private clause builders, a display:none idiom the AC omitted, a
+`filterRowsByStatus` generic over the row not the filter, canary keys by
+full path, a launch test with no count assertion, the acronym only
+reachable through `useInstitutionSelection`) -> L1/L2 leaves, then A/W/C1
+concurrent, then C2 components against C1's published hook contract ->
+Opus verify + follow-up architect + follow-up UX (concurrent) -> three
+fixers on disjoint sets -> re-verify (D1: the panel's copy of the draft-all
+predicate; D2: a test pinning a comment's wording) -> regression pass (no
+regressions; one transient failure traced to a test file rewritten mid-run).
+Gates at push: tsc clean, eslint clean, full vitest green, build compiled.
+
+**Follow-ups, none requested.** Draft-all over a full table is ~100
+sequential model calls with no count confirm and no Stop; `checkSent` has
+no failure text of its own; the 5-page Canvas cap is silent; a launcher
+button for `openRecordingTool({ view: "messages" })`; group conversations
+and attachments; Outlook as a send target; a `groundingNow` seam.

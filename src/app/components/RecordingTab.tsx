@@ -30,6 +30,7 @@ import DiscussionRepliesPanel from "./recording/DiscussionRepliesPanel";
 import GradingRecordingPanel from "./grading-recording/GradingRecordingPanel";
 import WalkthroughPanel from "./recording/WalkthroughPanel";
 import ModuleDeckCapturePanel from "./module-deck-capture/ModuleDeckCapturePanel";
+import MessageRepliesPanel from "./message-replies/MessageRepliesPanel";
 import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
 import { listRecordingFiles, downloadRecordingFile, type RecordingFile } from "@/lib/recording-files";
@@ -57,7 +58,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // navigateToRecordingTool("grading") entry, exactly the same two entry
   // points "discussions" already has.
   const [recView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading" | "moduledeck"
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading" | "moduledeck" | "messages"
   >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
@@ -68,7 +69,8 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       v === "avatar" ||
       v === "announcement" ||
       v === "grading" ||
-      v === "moduledeck"
+      v === "moduledeck" ||
+      v === "messages"
       ? v
       : "record";
   });
@@ -583,7 +585,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           points at the record panel's id rather than a non-existent
           announcement-only one. */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["grading", "Grading (from a recording)"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["grading", "Grading (from a recording)"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
             aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}
@@ -859,6 +861,15 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           walkthrough-deck-acceptance-criteria.md AC1). */}
       <div role="tabpanel" id="rec-panel-moduledeck" aria-labelledby="rec-tab-moduledeck" style={{ display: recView === "moduledeck" ? undefined : "none" }}>
         <ModuleDeckCapturePanel active={active && recView === "moduledeck"} />
+      </div>
+
+      {/* Same always-mounted stack, same reason: an in-progress inbox capture
+          and its draft queue must survive the user switching to another
+          inner view - the message-replies feature's own capture loop needs
+          exactly the guarantee "discussions", "grading" and "moduledeck"
+          need above (docs/message-replies-acceptance-criteria.md M1). */}
+      <div role="tabpanel" id="rec-panel-messages" aria-labelledby="rec-tab-messages" style={{ display: recView === "messages" ? undefined : "none" }}>
+        <MessageRepliesPanel active={active && recView === "messages"} />
       </div>
 
       <div role="tabpanel" id="rec-panel-captions" aria-labelledby="rec-tab-captions" style={{ display: recView === "captions" ? undefined : "none" }}>

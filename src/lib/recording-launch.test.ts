@@ -233,6 +233,13 @@ describe("recording-launch", () => {
         capturePrefill: {},
       });
     });
+
+    // docs/message-replies-acceptance-criteria.md M1: "messages" is the
+    // tenth recView, appended after "moduledeck" - mirrors the moduledeck
+    // bare-view case above.
+    it("accepts the messages view - the message-replies tool's own dedicated view", () => {
+      expect(parseRecordingLaunch({ view: "messages" })).toEqual({ view: "messages" });
+    });
   });
 
   describe("openRecordingTool / takeRecordingKnowledgeContext (write-then-consume)", () => {
@@ -586,6 +593,21 @@ describe("recording-launch", () => {
         expect.objectContaining({
           type: RECORDING_LAUNCH_EVENT,
           detail: { view: "moduledeck" },
+        })
+      );
+      eventSpy.mockRestore();
+    });
+
+    // docs/message-replies-acceptance-criteria.md M1: proves "messages" is a
+    // valid, dispatchable target the same way every pre-existing view already
+    // was - mirrors the moduledeck dispatch case above.
+    it("navigateToRecordingTool dispatches RECORDING_LAUNCH_EVENT for the messages view", () => {
+      const eventSpy = vi.spyOn(window, "dispatchEvent");
+      navigateToRecordingTool("messages");
+      expect(eventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: RECORDING_LAUNCH_EVENT,
+          detail: { view: "messages" },
         })
       );
       eventSpy.mockRestore();

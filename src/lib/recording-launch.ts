@@ -54,7 +54,8 @@ export type RecordingLaunchView =
   | "slides"
   | "avatar"
   | "grading"
-  | "moduledeck";
+  | "moduledeck"
+  | "messages";
 
 const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "record",
@@ -66,6 +67,7 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "avatar",
   "grading",
   "moduledeck",
+  "messages",
 ];
 
 /** Already-framed, already-capped prompt text - built via

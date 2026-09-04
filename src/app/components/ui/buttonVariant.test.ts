@@ -89,6 +89,7 @@ const SECTION_4_DIRS = [
   "src/app/components/caption-studio",
   "src/app/components/slide-studio",
   "src/app/components/ui",
+  "src/app/components/message-replies",
 ];
 const SECTION_4_EXTRA_FILES = ["src/app/components/RecordingTab.tsx"];
 
@@ -179,6 +180,21 @@ const FROZEN_PRIMARY_SITES: Record<string, number> = {
   // 3: same for Choose video (fix wave).
   "src/app/components/slide-studio/VideoModeSection.tsx": 3,
   "src/app/components/ui/ConfirmArmButtons.tsx": 0,
+  // 1: "Draft the missing replies" (MessageReplyToolbar.tsx) is the
+  // message-replies feature's only contained/variantFor( site - every row
+  // control stays outlined per M14's "no row control is contained while
+  // idle" rule (docs/message-replies-acceptance-criteria.md M3).
+  "src/app/components/message-replies/MessageReplyToolbar.tsx": 1,
+  // 1 (CC1): Start/Stop capture picks up the primary whenever nothing else
+  // has a claim on it - `variantFor(capturing || (primaryAction === null &&
+  // !drafting))`, the same formula DiscussionRepliesPanel.tsx applies - so
+  // the panel always has a primary even once the table is empty and nothing
+  // is capturing or drafting.
+  "src/app/components/message-replies/MessageRepliesPanel.tsx": 1,
+  "src/app/components/message-replies/MessageCaptureSettings.tsx": 0,
+  "src/app/components/message-replies/MessageThreadTable.tsx": 0,
+  "src/app/components/message-replies/MessageThreadRow.tsx": 0,
+  "src/app/components/message-replies/MessageThreadRowActions.tsx": 0,
 };
 
 describe("frozen ternary canary (CC1): the literal lives in buttonVariant.ts and nowhere else in section 4", () => {

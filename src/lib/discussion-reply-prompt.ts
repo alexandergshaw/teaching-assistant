@@ -340,7 +340,7 @@ const AUDIENCE_STANCE: Record<DiscussionAudience, string> = {
 // middle stop contributes NOTHING (empty string, dropped by
 // .filter(Boolean)) so a default-formality call is byte-identical to a call
 // that never mentioned formality at all.
-function formalityClause(formality: ReplyFormality): string {
+export function formalityClause(formality: ReplyFormality): string {
   switch (formality) {
     case "casual":
       return "Lean casual in how you write this: contractions are fine, favor shorter sentences and everyday word choices - without abandoning the tone and substance described above.";

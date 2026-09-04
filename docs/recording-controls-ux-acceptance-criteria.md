@@ -744,7 +744,7 @@ Wave 1 (concurrent, after wave 0 is on disk and `tsc` is clean):
 | M | Module deck | `module-deck-capture/ModuleDeckCapturePanel.tsx`, NEW `module-deck-capture/ModuleDeckSettings.tsx`, `module-deck-capture.structure.test.ts` (widen the ordinal canary), `ModuleDeckCapturePanel.wiring.test.ts` (widen the two ordering anchors only) |
 | S | Speed + Captions | `recording/SpeedPanel.tsx`, `caption-studio/CaptionStudio.tsx`, `VideoSource.tsx`, `CaptionsList.tsx`, `PreviewExport.tsx`, `caption-studio-wiring.structure.test.ts` (widen only) |
 | N | Narrate + Avatar | `slide-studio/SlideStudio.tsx`, `DeckModeSection.tsx`, `VideoModeSection.tsx`, `StockVoiceSection.tsx`, `VoiceCloneSection.tsx`, `VoiceRecordingSection.tsx`, `recording/AvatarStudioPanel.tsx` |
-| T | Tab strip + wiring | `RecordingTab.tsx` (CC9; the library picker block 743-780 adopts `.adaptRow`/CC3), `recording/recording-split.structure.test.ts` (the 61-key set, the `isWired` block for both keys, the nine-and-nine tabpanel assertion) |
+| T | Tab strip + wiring | `RecordingTab.tsx` (CC9; the library picker block 743-780 adopts `.adaptRow`/CC3), `recording/recording-split.structure.test.ts` (the 61-key set, the `isWired` block for both keys, the ten-and-nine tabpanel assertion) |
 
 Between waves, orchestrator-owned: `git status --short` against the
 assignment lists; the orphan ratchet must read exactly 137;

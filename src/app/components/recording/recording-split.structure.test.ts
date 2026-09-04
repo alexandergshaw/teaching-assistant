@@ -112,20 +112,21 @@ describe("recording-split structure", () => {
     // The strip is one inline array-of-tuples literal rendered via .map -
     // this pins the entry COUNT (a fresh entry silently dropped, or an old
     // one silently duplicated, both change this number without changing any
-    // other visible source text) at nine: the pre-existing six
+    // other visible source text) at ten: the pre-existing six
     // (record/discussions/speed/captions/slides/avatar), the dedicated
     // Announcement front door added for recording FOR an announcement, the
-    // dedicated Grading front door for grading-via-recording, and the
-    // dedicated Module walkthrough deck front door for the module-
-    // walkthrough-deck feature (docs/module-walkthrough-deck-acceptance-
-    // criteria.md AC1).
-    it("should render exactly nine inner-view tabs", () => {
+    // dedicated Grading front door for grading-via-recording, the dedicated
+    // Module walkthrough deck front door for the module-walkthrough-deck
+    // feature (docs/module-walkthrough-deck-acceptance-criteria.md AC1), and
+    // the dedicated Message replies front door for the message-replies
+    // feature (docs/message-replies-acceptance-criteria.md M1).
+    it("should render exactly ten inner-view tabs", () => {
       const stripLine = recordingTabContent
         .split("\n")
         .find((line: string) => line.includes('["record", "Record"]'));
       expect(stripLine, "expected to find the inner-view strip's array literal in RecordingTab.tsx").toBeTruthy();
       const entries = stripLine!.match(/\["[a-z]+",\s*"[^"]+"\]/g) ?? [];
-      expect(entries).toHaveLength(9);
+      expect(entries).toHaveLength(10);
     });
 
     it("should include a dedicated announcement entry in the strip, not only the pre-existing per-take route", () => {
@@ -151,11 +152,11 @@ describe("recording-split structure", () => {
     // chain itself (bounded by its own `return`/ternary) rather than the
     // whole file, so this cannot be satisfied by the value appearing
     // anywhere else in the source (e.g. only in the strip above).
-    it("should accept every non-default recView value in the restored-view equality chain, including announcement and grading", () => {
+    it("should accept every non-default recView value in the restored-view equality chain, including announcement, grading and messages", () => {
       const guardMatch = recordingTabContent.match(/return v === "discussions"[\s\S]*?: "record";/);
       expect(guardMatch, "expected to find the persisted-view restore guard in RecordingTab.tsx").toBeTruthy();
       const guard = guardMatch![0];
-      for (const value of ["discussions", "speed", "captions", "slides", "avatar", "announcement", "grading"]) {
+      for (const value of ["discussions", "speed", "captions", "slides", "avatar", "announcement", "grading", "messages"]) {
         expect(guard, `expected the restore guard to accept "${value}"`).toContain(`v === "${value}"`);
       }
     });
@@ -168,25 +169,28 @@ describe("recording-split structure", () => {
     );
 
     // CC9's own text: "the record/announcement pair shares ONE wrapper", so
-    // nine tabs are served by EIGHT panel divs, not nine - the brief that
-    // commissioned this test named "nine" for both counts; reported as a
-    // deviation from that brief rather than encoded here as a wrong fact,
-    // since CC9's own worked example (record/announcement sharing a panel)
-    // proves eight is the only count consistent with the design it describes.
-    it("renders exactly eight tabpanel content divs (nine tabs, record/announcement sharing one)", () => {
+    // ten tabs are served by NINE panel divs, not ten - the brief that
+    // commissioned this test named "nine" for both counts (before this
+    // feature's own tenth tab); reported as a deviation from that brief
+    // rather than encoded here as a wrong fact, since CC9's own worked
+    // example (record/announcement sharing a panel) proves nine is the only
+    // count consistent with the design it describes now that "messages" adds
+    // its own dedicated panel (docs/message-replies-acceptance-criteria.md
+    // M1/M2).
+    it("renders exactly nine tabpanel content divs (ten tabs, record/announcement sharing one)", () => {
       const matches = recordingTabContent.match(/role="tabpanel"/g) ?? [];
-      expect(matches).toHaveLength(8);
+      expect(matches).toHaveLength(9);
     });
 
-    // The nine tab buttons render from ONE array literal via a single
+    // The ten tab buttons render from ONE array literal via a single
     // .map() lambda (pinned one-line by the "inner-view strip" canary
     // above), so the button JSX - including its aria-controls expression -
-    // appears exactly ONCE in source and is applied nine times at render. A
+    // appears exactly ONCE in source and is applied ten times at render. A
     // literal per-tab occurrence count cannot see through a single JSX
-    // expression reused nine times; this instead pins that one expression's
-    // exact shape and proves, for every one of the nine keys in the strip,
+    // expression reused ten times; this instead pins that one expression's
+    // exact shape and proves, for every one of the ten keys in the strip,
     // that the id it resolves to is one some tabpanel div actually declares.
-    it("gives every tab button an aria-controls expression that resolves to a real tabpanel id for all nine keys", () => {
+    it("gives every tab button an aria-controls expression that resolves to a real tabpanel id for all ten keys", () => {
       expect(recordingTabContent).toContain(
         'aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}'
       );
@@ -194,6 +198,7 @@ describe("recording-split structure", () => {
         "record",
         "announcement",
         "discussions",
+        "messages",
         "grading",
         "moduledeck",
         "speed",
@@ -204,7 +209,7 @@ describe("recording-split structure", () => {
       const panelTargets = new Set(
         keys.map((key) => (key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`))
       );
-      expect(panelTargets.size).toBe(8);
+      expect(panelTargets.size).toBe(9);
       for (const target of panelTargets) {
         expect(recordingTabContent, `expected a tabpanel div with id="${target}"`).toContain(`id="${target}"`);
       }
@@ -235,7 +240,7 @@ describe("recording-split structure", () => {
         sharedLabelledBy,
         "expected the shared panel's aria-labelledby expression to name rec-tab-announcement"
       ).toContain("rec-tab-announcement");
-      for (const key of ["discussions", "grading", "moduledeck", "speed", "captions", "slides", "avatar"]) {
+      for (const key of ["discussions", "messages", "grading", "moduledeck", "speed", "captions", "slides", "avatar"]) {
         expect(recordingTabContent, `expected aria-labelledby="rec-tab-${key}" on its panel`).toContain(
           `aria-labelledby="rec-tab-${key}"`
         );

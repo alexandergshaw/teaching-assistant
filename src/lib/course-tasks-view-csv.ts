@@ -46,6 +46,24 @@ export function escapeCsvValue(value: string): string {
   return value;
 }
 
+/** Joins already-ordered field values into one escaped CSV row. Lifted out of
+ * src/app/components/message-replies/message-replies-log.ts and
+ * src/app/components/recording/discussion-replies-log.ts, which both carried
+ * a byte-identical private copy; each calls `escapeCsvValue` with exactly the
+ * one argument it takes, rather than `values.map(escapeCsvValue)`, which
+ * passes `Array.prototype.map`'s own `(value, index, array)` to it. */
+export function csvRow(values: readonly string[]): string {
+  return values.map((value) => escapeCsvValue(value)).join(",");
+}
+
+/** "Yes"/"No" for a boolean CSV column - this codebase's existing
+ * boolean-CSV-column convention (e.g. AutomationRow.tsx's "Unattended"
+ * column), rather than a bare `true`/`false` spelling. Lifted alongside
+ * `csvRow` for the same reason. */
+export function yesNo(value: boolean): string {
+  return value ? "Yes" : "No";
+}
+
 /** Renders one cell's EFFECTIVE (period-scoped) status as the source
  * sheet's own token - "Y"/"N"/"N/A"/"" - so an expired daily/weekly
  * completion exports as blank, matching what the grid visually shows rather

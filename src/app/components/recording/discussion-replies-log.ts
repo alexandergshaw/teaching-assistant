@@ -11,12 +11,10 @@
 // timestamp(s) it needs as data, never calls Date.now()/Date.now().toISOString()
 // itself) - so a test pins an exact rendered CSV/JSON rather than asserting
 // around "now". CSV+JSON pairing, both built from the same in-memory record.
-// A slugified-name + YYYYMMDD-HHMMSS filename convention, reimplemented here
-// (not imported - repo-grading-log.ts's slugify/fileStamp are module-private)
-// for the same reason that file's own header gives for not importing
-// repoGradesLog.ts's copy: a report filename needs the same "always a valid
-// filename" treatment, but the two logs are unrelated shapes with unrelated
-// lifetimes.
+// A slugified-name + YYYYMMDD-HHMMSS filename convention, via the shared
+// `logFileName` (src/lib/log-file-name.ts) - repo-grading-log.ts and
+// message-replies-log.ts build their own filenames the same way, off the
+// same leaf.
 //
 // THIS FILE IS NOT THAT ONE - it is a different, unrelated log for a
 // different surface (a live screen-capture session, not a batch grading
@@ -50,10 +48,10 @@
 // twice where the tested copy is not the live one).
 
 import { resolveDraftParent, type ReplyRow, type ReplyRowState } from "./discussion-capture";
-import { escapeCsvValue } from "@/lib/course-tasks-view-csv";
-// F7 fix (fixer pass, RC4/RC7): the "; " concepts joiner is owned by
-// discussion-serialization.ts, not restated here - see that file's own
-// comment on `CONCEPT_JOINER`.
+import { csvRow, yesNo } from "@/lib/course-tasks-view-csv";
+import { logFileName } from "@/lib/log-file-name";
+// The "; " concepts joiner is owned by discussion-serialization.ts, not
+// restated here - see that file's own comment on `CONCEPT_JOINER`.
 import { CONCEPT_JOINER } from "./discussion-serialization";
 // Y12: `ResourceSearchOutcome` (the row's Y9 field's type) is likewise owned
 // there, not restated - a separate import line so the CONCEPT_JOINER import
@@ -437,8 +435,8 @@ export function discussionRepliesLogSummaryLine(summary: DiscussionRepliesLogSum
 }
 
 // ---------------------------------------------------------------------------
-// CSV. Every field goes through escapeCsvValue (src/lib/course-tasks-view-csv.ts),
-// reused rather than a new local escaper - the same discipline
+// CSV. Every field goes through csvRow/escapeCsvValue (src/lib/course-tasks-
+// view-csv.ts), reused rather than a new local escaper - the same discipline
 // src/lib/repo-grading-log.ts's own formatRepoGradingLogCsv documents (see
 // REGRESSION entry 267 check 4 / entry 333). Rows joined with \r\n, matching
 // that file.
@@ -480,12 +478,6 @@ const ROW_CSV_HEADER = [
   "Links",
   "Resource search outcome",
 ];
-
-function csvRow(values: readonly string[]): string {
-  return values.map(escapeCsvValue).join(",");
-}
-
-const yesNo = (b: boolean): string => (b ? "Yes" : "No");
 
 export function formatDiscussionRepliesLogCsv(log: DiscussionRepliesRunLog): string {
   const lines: string[] = [];
@@ -578,31 +570,14 @@ export function formatDiscussionRepliesLogJson(log: DiscussionRepliesRunLog, met
 }
 
 // ---------------------------------------------------------------------------
-// Filename. Reimplements src/lib/repo-grading-log.ts's `slugify`/`fileStamp`
-// shape locally (those two helpers are not exported from that file) - see
-// this file's header for why that is reuse-of-idiom, not reinvention.
+// Filename, via the shared `logFileName` (src/lib/log-file-name.ts) - see
+// this file's header for the full reasoning.
 // ---------------------------------------------------------------------------
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function fileStamp(atIso: string): string {
-  const match = atIso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-  if (!match) return atIso.replace(/[^0-9a-zA-Z]+/g, "-").replace(/^-+|-+$/g, "");
-  const [, year, month, day, hour, minute, second] = match;
-  return `${year}${month}${day}-${hour}${minute}${second}`;
-}
 
 /** `discussion-replies-log-<course-slug>-<YYYYMMDD-HHMMSS>.<ext>`. A course
  * name that slugs to nothing (blank, no course selected) drops that segment
  * entirely rather than emitting a dangling double dash - same rule as
  * `repoGradingLogFileName`. */
 export function discussionRepliesLogFileName(courseName: string, extension: string, atIso: string): string {
-  const slug = slugify(courseName);
-  const parts = ["discussion-replies-log", slug, fileStamp(atIso)].filter((part) => part !== "");
-  return `${parts.join("-")}.${extension}`;
+  return logFileName("discussion-replies-log", courseName, extension, atIso);
 }

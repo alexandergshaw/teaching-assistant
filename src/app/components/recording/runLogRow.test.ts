@@ -1,10 +1,12 @@
 // docs/recording-controls-ux-acceptance-criteria.md CC8 / section 6: the
-// five run-bearing panels render ONE shared <RunLogRow> each, and the label
+// run-bearing panels render ONE shared <RunLogRow> each, and the label
 // literal no longer lives in any of them. Frozen by the orchestrator after
-// wave 1 (2026-09-02): a count over the five NAMED panels, not repo-wide - a
-// sixth copy of the same label at drafted-grades/RepoGradingLogPanel.tsx is
-// outside the group and must not be counted. Comments are stripped first so
-// a header note that mentions the component does not double-count.
+// wave 1 (2026-09-02), widened to six by docs/message-replies-acceptance-
+// criteria.md M3 (MessageRepliesPanel.tsx joins the five): a count over the
+// NAMED panels, not repo-wide - a seventh copy of the same label at
+// drafted-grades/RepoGradingLogPanel.tsx is outside the group and must not
+// be counted. Comments are stripped first so a header note that mentions the
+// component does not double-count.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -15,6 +17,7 @@ const RUN_BEARING_PANELS = [
   "src/app/components/grading-recording/LegibilityProbeModal.tsx",
   "src/app/components/module-deck-capture/ModuleDeckCapturePanel.tsx",
   "src/app/components/recording/TakeAnnouncementPanel.tsx",
+  "src/app/components/message-replies/MessageRepliesPanel.tsx",
 ];
 
 function stripComments(source: string): string {
@@ -31,7 +34,7 @@ function read(rel: string): string {
 }
 
 describe("RunLogRow adoption (CC8)", () => {
-  it("each of the five run-bearing panels renders exactly one <RunLogRow", () => {
+  it("each of the six run-bearing panels renders exactly one <RunLogRow", () => {
     const counts = Object.fromEntries(
       RUN_BEARING_PANELS.map((rel) => [rel, (read(rel).match(/<RunLogRow\b/g) ?? []).length])
     );

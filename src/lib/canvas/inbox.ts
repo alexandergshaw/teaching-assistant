@@ -2,7 +2,7 @@
  * Canvas inbox/conversations: reading and managing inbox messages and conversations.
  */
 
-import { canvasError, resolveDefaultInstitution, resolveInstitution, resolveInstitutionByCode, type CanvasInstitution } from "../canvas-core";
+import { canvasError, parseNextLink, resolveDefaultInstitution, resolveInstitution, resolveInstitutionByCode, type CanvasInstitution } from "../canvas-core";
 
 export interface CanvasConversationSummary {
   id: number;
@@ -94,15 +94,7 @@ async function getSelfId(ctx: { token: string; baseUrl: string }): Promise<numbe
   return null;
 }
 
-export async function listConversations(code?: string): Promise<CanvasConversationSummary[]> {
-  const { institution, token, baseUrl } = resolveInbox(code);
-  const response = await fetch(`${baseUrl}/api/v1/conversations?per_page=50`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) {
-    throw canvasError(response.status, institution);
-  }
-  const items = (await response.json()) as CanvasConversationListItem[];
+function mapConversationList(items: CanvasConversationListItem[]): CanvasConversationSummary[] {
   return items
     .filter((c) => typeof c.id === "number")
     .map((c) => ({
@@ -114,6 +106,54 @@ export async function listConversations(code?: string): Promise<CanvasConversati
       workflowState: c.workflow_state ?? "",
       lastMessageAt: c.last_message_at ?? null,
     }));
+}
+
+// M15 (docs/message-replies-acceptance-criteria.md): `opts` is additive and
+// OFF by default - every existing caller (institution-wide inbox reads) omits
+// it and gets exactly today's request: `per_page=50`, page 1 only, no course
+// filter, byte-identical URL and behaviour. When `opts` IS supplied
+// (Match to Canvas, M15), the request gains `filter[]=course_<id>` and
+// `scope=` (the grading-queue.ts:174 idiom - `?scope=unread&filter[]=course_
+// ${courseId}&per_page=100`) and follows `parseNextLink` (the same Link-header
+// pagination grading-queue.ts's own `getCourseNotifications` uses at
+// grading-queue.ts:161-174) for at most 5 pages, so a large inbox can never
+// spin an unbounded number of requests just to find one course's threads.
+export async function listConversations(
+  code?: string,
+  opts?: { courseId?: string; scope?: "unread" | "archived"; perPage?: number }
+): Promise<CanvasConversationSummary[]> {
+  const { institution, token, baseUrl } = resolveInbox(code);
+
+  if (!opts) {
+    const response = await fetch(`${baseUrl}/api/v1/conversations?per_page=50`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const items = (await response.json()) as CanvasConversationListItem[];
+    return mapConversationList(items);
+  }
+
+  const params = new URLSearchParams();
+  params.set("per_page", String(opts.perPage ?? 100));
+  if (opts.courseId) params.append("filter[]", `course_${opts.courseId}`);
+  if (opts.scope) params.set("scope", opts.scope);
+
+  const out: CanvasConversationSummary[] = [];
+  let next: string | null = `${baseUrl}/api/v1/conversations?${params.toString()}`;
+  let pagesFetched = 0;
+  while (next && pagesFetched < 5) {
+    const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      throw canvasError(response.status, institution);
+    }
+    const items = (await response.json()) as CanvasConversationListItem[];
+    out.push(...mapConversationList(items));
+    pagesFetched++;
+    next = parseNextLink(response.headers.get("link"));
+  }
+  return out;
 }
 
 /** Fetch one conversation's full thread, oldest message first. */

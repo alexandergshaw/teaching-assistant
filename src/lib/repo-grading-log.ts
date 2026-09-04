@@ -44,6 +44,7 @@
 // budget.
 
 import { escapeCsvValue } from "@/lib/course-tasks-view-csv";
+import { logFileName } from "@/lib/log-file-name";
 
 /** R1.2: what happened to one attempted repo. A repo the run never reached
  * is not an entry at all (see `notReached` on RepoGradingRunLog below) -
@@ -389,38 +390,14 @@ export function buildRepoGradingReportMarkdown(
   return lines.join("\n");
 }
 
-/** Lowercased, non-alphanumerics collapsed to single dashes, ends trimmed -
- * mirrors repoGradesLog.ts's own slugifyCourseName, reimplemented here (not
- * imported - that module is Repo Grades view-specific, see this file's
- * header) since a report filename needs the same "always a valid filename"
- * treatment. */
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-/** "2026-08-24T15:04:05.123Z" -> "20260824-150405". Colons and dots are not
- * safe in a Windows filename, and the sub-second part carries no information
- * a human reading a filename wants - mirrors repoGradesLog.ts's own
- * fileStamp for the same reason (see slugify above). */
-function fileStamp(atIso: string): string {
-  const match = atIso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-  if (!match) return atIso.replace(/[^0-9a-zA-Z]+/g, "-").replace(/^-+|-+$/g, "");
-  const [, year, month, day, hour, minute, second] = match;
-  return `${year}${month}${day}-${hour}${minute}${second}`;
-}
-
-/** `repo-grading-log-<name-slug>-<YYYYMMDD-HHMMSS>.<ext>`. A name that slugs
- * to nothing (blank, or punctuation only) drops that segment entirely rather
- * than emitting a dangling double dash, so the result is always a valid,
- * non-empty filename - same rule as repoGradesLog.ts's own
- * repoGradeLogFileName. */
+/** `repo-grading-log-<name-slug>-<YYYYMMDD-HHMMSS>.<ext>`, via the shared
+ * `logFileName` (src/lib/log-file-name.ts) - the slugify/fileStamp/"drop a
+ * segment that slugs to nothing" logic lives there once, shared with
+ * repoGradesLog.ts's own repoGradeLogFileName-shaped callers in
+ * message-replies-log.ts and discussion-replies-log.ts, each of which used
+ * to carry a byte-identical private copy of the same two helpers. */
 export function repoGradingLogFileName(name: string, extension: string, atIso: string): string {
-  const slug = slugify(name);
-  const parts = ["repo-grading-log", slug, fileStamp(atIso)].filter((part) => part !== "");
-  return `${parts.join("-")}.${extension}`;
+  return logFileName("repo-grading-log", name, extension, atIso);
 }
 
 // ---------------------------------------------------------------------------

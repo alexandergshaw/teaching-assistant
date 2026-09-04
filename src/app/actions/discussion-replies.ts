@@ -11,7 +11,7 @@
 // 17b, AC64, AC65 - this file is built to that contract exactly.
 
 import { requireOwner } from "@/lib/supabase/auth";
-import { callLlm, describeLlmFailure, describeEmptyLlmText, type LlmProvider, type LlmPart } from "@/lib/llm";
+import { callLlm, describeLlmFailure, describeEmptyLlmText, type LlmProvider, type LlmPart, type LlmUsage } from "@/lib/llm";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 import { parseLenientJsonArray } from "@/lib/lenient-json";
 import { getWritingStyleBlock } from "./shared";
@@ -56,11 +56,13 @@ import {
   buildPostExtractionPrompt,
   buildReplyDraftingPrompt,
   parseReplyConcepts,
+  parsePostQuestions,
   type DiscussionAudience,
   type ThreadPosition,
   type ReplyIngredient,
   type ReplyFormality,
   type ReplyCompositionSettings,
+  type PostQuestion,
 } from "@/lib/discussion-reply-prompt";
 
 // docs/discussion-thread-structure-acceptance-criteria.md T2b/T3: the
@@ -113,7 +115,12 @@ function coerceCompositionAtBoundary(value: unknown): ReplyCompositionSettings {
       ? (obj.formality as ReplyFormality)
       : DEFAULT_REPLY_COMPOSITION.formality;
 
-  return { ingredients, addressByName, formality };
+  // docs/post-questions-acceptance-criteria.md Q4: same never-trust-the-wire
+  // rule as every other field on this boundary.
+  const answerQuestions =
+    typeof obj.answerQuestions === "boolean" ? obj.answerQuestions : DEFAULT_REPLY_COMPOSITION.answerQuestions;
+
+  return { ingredients, addressByName, formality, answerQuestions };
 }
 
 // "Activate this recording from the Knowledge base" (src/lib/recording-launch.ts's
@@ -287,7 +294,29 @@ export async function draftDiscussionRepliesAction(
   // coerced below the same way `composition` is - never trusted as-is, since
   // it arrives from the client over the Server Action wire.
   knowledgeContext?: string
-): Promise<{ replies: Array<{ id: string; reply: string; concepts?: string[] }> } | { error: string }> {
+): Promise<
+  | {
+      replies: Array<{
+        id: string;
+        reply: string;
+        concepts?: string[];
+        questions?: PostQuestion[];
+        questionsDropped?: number;
+      }>;
+      finishReason?: string;
+      usage?: LlmUsage;
+      elapsedMs?: number;
+    }
+  // VERIFIER FINDING 1: the FAILURE branch carries the same three fields.
+  // Widening only the success branch lost the reason on the single failure
+  // this feature actually creates: the AC's own measurements put ~25% of
+  // mid-array truncations at "parseLenientJsonArray returns null", which is
+  // this branch, not the partial-recovery branch below. Without these the
+  // loop's MAX_TOKENS message can never fire for that case, the draft log's
+  // `finishReason` is "" for exactly the calls that hit the limit, and
+  // `draftCallsHitLengthLimit` structurally undercounts.
+  | { error: string; finishReason?: string; usage?: LlmUsage; elapsedMs?: number }
+> {
   try {
     const user = await requireOwner();
 
@@ -308,8 +337,16 @@ export async function draftDiscussionRepliesAction(
     // AC4b-ii: temperature 0.7 is advisory on the default Gemini 3 model
     // (normalizeGenerationConfig deletes any temperature < 1 there) and is
     // passed as stated, with no special-casing.
+    // docs/post-questions-acceptance-criteria.md Q4: maxOutputTokens rises to
+    // 8192 only when answerQuestions is on - the OFF path sends the
+    // byte-identical { temperature: 0.7, maxOutputTokens: 4096 } it always
+    // has. normalizeGenerationConfig only RAISES a cap below 512, so 8192
+    // passes through unchanged on the ON path.
     const r = await callLlm(
-      { contents: [{ role: "user", parts }], generationConfig: { temperature: 0.7, maxOutputTokens: 4096 } },
+      {
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: safeComposition.answerQuestions ? 8192 : 4096 },
+      },
       provider
     );
 
@@ -317,9 +354,20 @@ export async function draftDiscussionRepliesAction(
     if (!r.text.trim()) return { error: describeEmptyLlmText(r, "Drafting replies") };
 
     const raw = parseLenientJsonArray(r.text) as
-      | Array<{ post?: unknown; reply?: unknown; concepts?: unknown }>
+      | Array<{ post?: unknown; reply?: unknown; concepts?: unknown; questions?: unknown }>
       | null;
-    if (!raw) return { error: "Could not read the drafted replies from the model output." };
+    if (!raw) {
+      // VERIFIER FINDING 1: a truncated response is the commonest way this
+      // parse fails, so the reason travels with the error - the loop turns
+      // `finishReason === "MAX_TOKENS"` into a message that names the length
+      // limit and tells the instructor Retry usually lands.
+      return {
+        error: "Could not read the drafted replies from the model output.",
+        ...(r.finishReason ? { finishReason: r.finishReason } : {}),
+        ...(r.usage ? { usage: r.usage } : {}),
+        ...(typeof r.elapsedMs === "number" ? { elapsedMs: r.elapsedMs } : {}),
+      };
+    }
 
     // F2: a model can return the same positional index twice (e.g. two
     // elements both carrying "post": 2). Left undeduped, both map to the
@@ -328,7 +376,7 @@ export async function draftDiscussionRepliesAction(
     // construction, so only the FIRST occurrence of each index is kept.
     const seenPositions = new Set<number>();
     const byPosition = raw.filter(
-      (r2): r2 is { post: number; reply: string; concepts?: unknown } => {
+      (r2): r2 is { post: number; reply: string; concepts?: unknown; questions?: unknown } => {
         if (
           !Number.isInteger(r2.post) ||
           (r2.post as number) < 1 ||
@@ -364,22 +412,66 @@ export async function draftDiscussionRepliesAction(
     // is dropped - capping to 3 before that drop would have silently
     // discarded it. 6 is a generous cushion (twice the eventual cap) for a
     // model that returns more than the requested 1-3 terms.
-    function withConcepts(
+    //
+    // docs/post-questions-acceptance-criteria.md Q4: `questions` is emitted
+    // ONLY when safeComposition.answerQuestions is true AND parsePostQuestions
+    // returns a non-empty array - a model that volunteers "questions" while
+    // the setting is OFF is ignored outright; the setting gates the OUTPUT,
+    // not only the prompt. `questionsDropped` (raw element count minus kept
+    // items) is emitted only when it is greater than 0, so a server-side drop
+    // is visible to the run log without a noisy `questionsDropped: 0` on
+    // every reply.
+    function rawQuestionsCount(rawQuestions: unknown): number {
+      if (Array.isArray(rawQuestions)) return rawQuestions.length;
+      return rawQuestions !== null && typeof rawQuestions === "object" ? 1 : 0;
+    }
+
+    function withOutputs(
       id: string,
       reply: string,
       rawConcepts: unknown,
+      rawQuestions: unknown,
       author: string
-    ): { id: string; reply: string; concepts?: string[] } {
+    ): {
+      id: string;
+      reply: string;
+      concepts?: string[];
+      questions?: PostQuestion[];
+      questionsDropped?: number;
+    } {
       const concepts = parseReplyConcepts(rawConcepts, 6)
         .filter((term) => /\p{L}/u.test(redactAuthorNameFromText(term, author)))
         .slice(0, 3);
-      return concepts.length > 0 ? { id, reply, concepts } : { id, reply };
+
+      const out: {
+        id: string;
+        reply: string;
+        concepts?: string[];
+        questions?: PostQuestion[];
+        questionsDropped?: number;
+      } = { id, reply };
+      if (concepts.length > 0) out.concepts = concepts;
+
+      if (safeComposition.answerQuestions) {
+        const questions = parsePostQuestions(rawQuestions);
+        if (questions.length > 0) out.questions = questions;
+        const dropped = rawQuestionsCount(rawQuestions) - questions.length;
+        if (dropped > 0) out.questionsDropped = dropped;
+      }
+
+      return out;
     }
 
-    let replies: Array<{ id: string; reply: string; concepts?: string[] }>;
+    let replies: Array<{
+      id: string;
+      reply: string;
+      concepts?: string[];
+      questions?: PostQuestion[];
+      questionsDropped?: number;
+    }>;
     if (byPosition.length > 0) {
       replies = byPosition.map((r2) =>
-        withConcepts(posts[r2.post - 1].id, r2.reply.trim(), r2.concepts, posts[r2.post - 1].author)
+        withOutputs(posts[r2.post - 1].id, r2.reply.trim(), r2.concepts, r2.questions, posts[r2.post - 1].author)
       );
     } else if (raw.length === posts.length) {
       // Belt and braces: the array came back the right length but no element
@@ -389,15 +481,35 @@ export async function draftDiscussionRepliesAction(
       replies = raw
         .map((r2, i) =>
           typeof r2.reply === "string" && r2.reply.trim()
-            ? withConcepts(posts[i].id, r2.reply.trim(), r2.concepts, posts[i].author)
+            ? withOutputs(posts[i].id, r2.reply.trim(), r2.concepts, r2.questions, posts[i].author)
             : null
         )
-        .filter((r2): r2 is { id: string; reply: string; concepts?: string[] } => r2 !== null);
+        .filter(
+          (
+            r2
+          ): r2 is {
+            id: string;
+            reply: string;
+            concepts?: string[];
+            questions?: PostQuestion[];
+            questionsDropped?: number;
+          } => r2 !== null
+        );
     } else {
       replies = [];
     }
 
-    return { replies };
+    // docs/post-questions-acceptance-criteria.md Q4: copied straight off the
+    // real LlmResult, the same conditional-spread idiom callGemini itself
+    // uses for these same optional fields (see src/lib/llm.ts around
+    // postGenerateContent's own return) - a key is present only when the
+    // result actually carried it, never `key: undefined`.
+    return {
+      replies,
+      ...(r.finishReason ? { finishReason: r.finishReason } : {}),
+      ...(r.usage ? { usage: r.usage } : {}),
+      ...(typeof r.elapsedMs === "number" ? { elapsedMs: r.elapsedMs } : {}),
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not draft replies." };
   }
@@ -464,6 +576,7 @@ function resourceSearchOutcomeFor(co: ConceptOutcome | undefined): ResourceSearc
       counts: ZERO_RESOURCE_SEARCH_COUNTS,
     };
   }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- rest-sibling destructure to exclude concept/failed from `counts`; pre-existing pattern, unrelated to this feature.
   const { concept: _concept, failed: _failed, ...counts } = co;
   let kind: ResourceSearchOutcomeKind;
   if (co.failed !== undefined) kind = "failed";

@@ -62,14 +62,18 @@ import { greetingNameFromAuthor } from "@/lib/person-name";
 // discussion-reply-prompt.ts's own dependency-free leaf contract), so this
 // adds no new coupling concern.
 import type { RecordingKnowledgeContext } from "@/lib/recording-launch";
-import type { LlmProvider } from "@/lib/llm";
+import type { LlmProvider, LlmUsage } from "@/lib/llm";
 import type { UseReplyRowsReturn } from "./useReplyRows";
 import type { UseReplyResourcesReturn } from "./useReplyResources";
 // docs/DEV_LOOP.md's "every feature needs a downloadable log" rule
 // (REGRESSION entries 369/372/373/374 record this surface's unpaid debt):
 // the sealed return widens by exactly one field, `runLog`, below - see that
 // field's own doc comment for what builds it and where.
-import type { DiscussionRepliesRunLog } from "./discussion-replies-log";
+import type { DiscussionRepliesRunLog, DiscussionRepliesLogDraft } from "./discussion-replies-log";
+// docs/post-questions-acceptance-criteria.md Q1: type-only, imported ONLY
+// from the leaf - never re-exported from discussion-serialization.ts or
+// discussion-capture.ts.
+import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 
 // --- S6: both sub-hooks' real return types are used directly - no hand-
 // written duplicate interface and no `as` assertion at the call site below.
@@ -137,6 +141,21 @@ export interface UseDiscussionRepliesReturn {
    *  impossible rather than merely discouraged - see this function's own
    *  implementation in useDiscussionReplies.ts. */
   insertResource: (id: string, resource: ReplyResource) => void;
+
+  /** docs/post-questions-acceptance-criteria.md Q7: one-click insert for a
+   *  post-question's answer - the same MOVE shape as `insertResource` above:
+   *  `appendAnswerToReply` (discussion-reply-insert.ts) computes the next
+   *  reply text, C2's `editReply` writes it, and C2's `removeQuestion`
+   *  removes the item from the row's `questions` list, so the SAME item's
+   *  Insert control unmounts with it. A no-op when the row is gone or
+   *  `item.answer === ""` (an item with only a `needsYou` note has nothing
+   *  to insert). */
+  insertAnswer: (id: string, item: PostQuestion) => void;
+
+  /** docs/post-questions-acceptance-criteria.md Q7: forwarded straight
+   *  through from C2's `useReplyRows`, exactly like `removeResource` above -
+   *  no queue involvement. */
+  removeQuestion: (id: string, question: string) => void;
 
   /**
    * "Activate this recording from the Knowledge base": the label of the
@@ -322,7 +341,13 @@ export function writeLocalStorage(key: string, value: string): void {
 export function coerceReplyComposition(
   rawIngredients: string | null,
   rawAddressByName: string | null,
-  rawFormality: string | null
+  rawFormality: string | null,
+  // docs/post-questions-acceptance-criteria.md Q5/Q8: a FOURTH TRAILING
+  // parameter, defaulted so every existing three-arg call site keeps
+  // compiling unchanged. Mirrors `rawAddressByName`'s own rule exactly: "0"
+  // -> false, "1" -> true, anything else (including the default `null`) ->
+  // DEFAULT_REPLY_COMPOSITION.answerQuestions (ON).
+  rawAnswerQuestions: string | null = null
 ): ReplyCompositionSettings {
   let ingredients: readonly ReplyIngredient[] = DEFAULT_REPLY_COMPOSITION.ingredients;
   if (rawIngredients !== null) {
@@ -356,7 +381,11 @@ export function coerceReplyComposition(
       ? (rawFormality as ReplyFormality)
       : DEFAULT_REPLY_COMPOSITION.formality;
 
-  return { ingredients, addressByName, formality };
+  // Q8: same rule as addressByName above - default is ON.
+  const answerQuestions =
+    rawAnswerQuestions === "0" ? false : rawAnswerQuestions === "1" ? true : DEFAULT_REPLY_COMPOSITION.answerQuestions;
+
+  return { ingredients, addressByName, formality, answerQuestions };
 }
 
 // ---------------------------------------------------------------------------
@@ -408,7 +437,31 @@ export type DraftDiscussionRepliesAction = (
   composition: ReplyCompositionSettings,
   provider: LlmProvider,
   knowledgeContext?: string
-) => Promise<{ replies: Array<{ id: string; reply: string; concepts?: string[] }> } | { error: string }>;
+) => Promise<
+  | {
+      replies: Array<{
+        id: string;
+        reply: string;
+        concepts?: string[];
+        // docs/post-questions-acceptance-criteria.md Q4/Q5: the third
+        // per-row output, present only when `answerQuestions` was on for
+        // this dispatch AND the model returned at least one kept question.
+        // `questionsDropped` is a server-side-only fact (the count of raw
+        // array elements minus kept items) - present only when > 0.
+        questions?: PostQuestion[];
+        questionsDropped?: number;
+      }>;
+      // Q4: copied verbatim from the LlmResult the server action already
+      // holds and discards - src/lib/llm.ts's `LlmResult` success branch.
+      finishReason?: string;
+      usage?: LlmUsage;
+      elapsedMs?: number;
+    }
+  // The failure branch carries the same three fields - see the server
+  // action's own comment on why (a truncated response fails the PARSE more
+  // often than it fails a row, and the reason must survive either way).
+  | { error: string; finishReason?: string; usage?: LlmUsage; elapsedMs?: number }
+>;
 
 // T6a's budget figure (docs/discussion-thread-structure-acceptance-criteria.md
 // section 6): "worst case is 5 x 600 characters, about 3.5% input growth."
@@ -417,6 +470,19 @@ export type DraftDiscussionRepliesAction = (
 // a full post, not a CONTEXT ONLY parent excerpt - so this is its own named
 // constant rather than a reuse of that one. Truncates, never drops: a parent
 // over budget still gives the model SOME context rather than none.
+// docs/post-questions-acceptance-criteria.md Q5, and VERIFIER FINDING 1:
+// the one owner of the "this row got no reply" text. A length-limited
+// response (the questions output can push a batch's JSON past
+// maxOutputTokens - see the AC's Limits) gets a message that names the real
+// cause and the real fix, rather than the generic string, which reads as a
+// transient failure. Exported so a test can pin both branches without
+// re-spelling either sentence.
+export function missingRowMessage(finishReason?: string): string {
+  return finishReason === "MAX_TOKENS"
+    ? "No reply came back for this post - the model's output hit its length limit. Retry usually lands."
+    : "No reply came back for this post.";
+}
+
 const MAX_DRAFT_PARENT_CHARS = 600;
 
 function truncateDraftParentText(text: string): string {
@@ -481,6 +547,14 @@ export interface RunDraftLoopDeps {
   knowledgeContextRef: MutableRefObject<RecordingKnowledgeContext | null>;
   pushNotice: (text: string) => void;
   draftAction: DraftDiscussionRepliesAction;
+  /** docs/post-questions-acceptance-criteria.md Q5/Q9: called EXACTLY ONCE
+   *  per `draftAction` call, after the result (or the catch) resolves and
+   *  BEFORE the `loopsActiveRef` guard just below - a dispatch whose loop
+   *  was stopped mid-flight still happened and is still worth logging.
+   *  Built from the DISPATCH-TIME `compositionNow`/`audienceNow` captured
+   *  below, never a fresh read of `compositionRef.current`/`audienceRef.current`,
+   *  which could have changed while the request was in flight. */
+  pushDraftEvent: (event: DiscussionRepliesLogDraft) => void;
 }
 
 export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promise<void> {
@@ -499,6 +573,7 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
     knowledgeContextRef,
     pushNotice,
     draftAction,
+    pushDraftEvent,
   } = deps;
 
   // NEW-1: see runExtractionLoop's identical comment in useDiscussionReplies.ts.
@@ -616,6 +691,67 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
     } catch (err) {
       result = { error: err instanceof Error ? err.message : "Could not draft replies." };
     }
+
+    // docs/post-questions-acceptance-criteria.md Q5/Q9: exactly once per
+    // draftAction call, BEFORE the loopsActiveRef guard below - see
+    // RunDraftLoopDeps.pushDraftEvent's own doc comment. `compositionNow`/
+    // `audienceNow` are the DISPATCH-TIME values already captured above,
+    // never a fresh ref read.
+    if ("error" in result) {
+      pushDraftEvent({
+        at: new Date().toISOString(),
+        rowIds: ids,
+        audience: audienceNow,
+        ingredients: [...compositionNow.ingredients],
+        addressByName: compositionNow.addressByName,
+        formality: compositionNow.formality,
+        answerQuestions: compositionNow.answerQuestions,
+        outcome: "error",
+        error: result.error,
+        repliesReturned: 0,
+        rowsMissing: ids.length,
+        questionsReturned: 0,
+        questionsNeedingYou: 0,
+        questionsDropped: 0,
+        // VERIFIER FINDING 1: read from the failure result, not hardcoded -
+        // a batch that failed BECAUSE it was length-limited is exactly the
+        // call whose finishReason and timing the log most needs.
+        finishReason: result.finishReason ?? "",
+        candidatesTokenCount: result.usage?.candidatesTokenCount ?? null,
+        elapsedMs: result.elapsedMs ?? null,
+      });
+    } else {
+      const returnedIdsForLog = new Set(result.replies.map((r) => r.id));
+      let questionsReturned = 0;
+      let questionsNeedingYouForLog = 0;
+      let questionsDropped = 0;
+      for (const reply of result.replies) {
+        const qs = reply.questions ?? [];
+        questionsReturned += qs.length;
+        questionsNeedingYouForLog += qs.filter((q) => q.needsYou !== undefined && q.needsYou !== "").length;
+        questionsDropped += reply.questionsDropped ?? 0;
+      }
+      pushDraftEvent({
+        at: new Date().toISOString(),
+        rowIds: ids,
+        audience: audienceNow,
+        ingredients: [...compositionNow.ingredients],
+        addressByName: compositionNow.addressByName,
+        formality: compositionNow.formality,
+        answerQuestions: compositionNow.answerQuestions,
+        outcome: "ok",
+        error: "",
+        repliesReturned: result.replies.length,
+        rowsMissing: ids.filter((id) => !returnedIdsForLog.has(id)).length,
+        questionsReturned,
+        questionsNeedingYou: questionsNeedingYouForLog,
+        questionsDropped,
+        finishReason: result.finishReason ?? "",
+        candidatesTokenCount: result.usage?.candidatesTokenCount ?? null,
+        elapsedMs: result.elapsedMs ?? null,
+      });
+    }
+
     if (!loopsActiveRef.current) return;
 
     // F10: a row edited WHILE it was "drafting" (after dispatch, before
@@ -647,7 +783,16 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
       const { unchanged, editedDuringDispatch } = partitionDraftOutcome(ids, isUnchanged);
       editedDuringDispatch.forEach(resolveEditedDuringDispatch);
       if (unchanged.length > 0) {
-        rowsApiRef.current.markFailed(unchanged, result.error);
+        // VERIFIER FINDING 1: a length-limited batch that failed the PARSE
+        // outright (the commonest truncation outcome, ~25% of cut positions
+        // by the AC's own measurement) reaches HERE, not the missing-rows
+        // branch below - so it needs the same message that names the length
+        // limit. The provider's own error text is kept alongside it, never
+        // replaced: the real reason must survive.
+        rowsApiRef.current.markFailed(
+          unchanged,
+          result.finishReason === "MAX_TOKENS" ? `${result.error} ${missingRowMessage(result.finishReason)}` : result.error
+        );
       }
       pushNotice(result.error);
       continue;
@@ -670,7 +815,19 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
         // discard path above (`resolveEditedDuringDispatch`) stays
         // three-argument, since it is re-applying the user's OWN text, not
         // a model-authored reply with concepts of its own.
-        rowsApiRef.current.applyReply(reply.id, reply.reply, false, reply.concepts ?? []);
+        // docs/post-questions-acceptance-criteria.md Q5: the FIFTH argument
+        // - `undefined` when the setting was OFF for this dispatch (leave
+        // the row's current questions alone: turning the feature off stops
+        // producing, it does not delete what a row has), `reply.questions ??
+        // []` when it was ON (an array replaces, `[]` clears - the same
+        // "model returned none this time" reading `concepts` already uses).
+        rowsApiRef.current.applyReply(
+          reply.id,
+          reply.reply,
+          false,
+          reply.concepts ?? [],
+          compositionNow.answerQuestions ? (reply.questions ?? []) : undefined
+        );
         // R6: the ONE trigger point - enqueue a resource search only
         // after a model-authored reply lands. Never on the discard path
         // above, which re-applies the user's own text and searched
@@ -696,7 +853,12 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
       // written a reply.
       missingEdited.forEach(resolveEditedDuringDispatch);
       if (stillFailed.length > 0) {
-        rowsApiRef.current.markFailed(stillFailed, "No reply came back for this post.");
+        // docs/post-questions-acceptance-criteria.md Q5: a length-limited
+        // response (the questions output can push a batch's JSON past
+        // maxOutputTokens - see the AC's own Limits section) gets a message
+        // that names the real cause and the real fix, rather than the
+        // generic "no reply came back" that reads as a transient failure.
+        rowsApiRef.current.markFailed(stillFailed, missingRowMessage(result.finishReason));
       }
     }
   }

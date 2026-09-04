@@ -101,7 +101,10 @@ describe("draftDiscussionRepliesAction", () => {
     expect(callLlm).not.toHaveBeenCalled();
   });
 
-  it("uses maxOutputTokens 4096 and temperature 0.7", async () => {
+  // docs/post-questions-acceptance-criteria.md Q4: maxOutputTokens depends on
+  // answerQuestions - DEFAULT_REPLY_COMPOSITION has it ON (8192); explicitly
+  // OFF sends the byte-identical pre-feature config (4096).
+  it("uses maxOutputTokens 8192 and temperature 0.7 under the default composition (answerQuestions ON)", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -110,8 +113,56 @@ describe("draftDiscussionRepliesAction", () => {
     } as never);
     await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
     const callArgs = vi.mocked(callLlm).mock.calls[0][0];
-    expect(callArgs.generationConfig?.maxOutputTokens).toBe(4096);
+    expect(callArgs.generationConfig?.maxOutputTokens).toBe(8192);
     expect(callArgs.generationConfig?.temperature).toBe(0.7);
+  });
+
+  it("answerQuestions OFF sends generationConfig byte-identical to the pre-feature shape", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: "",
+      text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
+    } as never);
+    await draftDiscussionRepliesAction(
+      posts,
+      "students",
+      "",
+      { ...DEFAULT_REPLY_COMPOSITION, answerQuestions: false },
+      "gemini"
+    );
+    const callArgs = vi.mocked(callLlm).mock.calls[0][0];
+    expect(callArgs.generationConfig).toEqual({ temperature: 0.7, maxOutputTokens: 4096 });
+  });
+
+  it("a model that volunteers `questions` while answerQuestions is OFF is ignored - no `questions` key on any reply", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: "",
+      text: JSON.stringify(
+        posts.map((_, i) => ({
+          post: i + 1,
+          reply: `Reply ${i + 1}`,
+          questions: [{ question: "A volunteered question?", implied: false, answer: "A volunteered answer." }],
+        }))
+      ),
+    } as never);
+    const result = await draftDiscussionRepliesAction(
+      posts,
+      "students",
+      "",
+      { ...DEFAULT_REPLY_COMPOSITION, answerQuestions: false },
+      "gemini"
+    );
+    expect("replies" in result).toBe(true);
+    if ("replies" in result) {
+      expect(result.replies).toHaveLength(posts.length);
+      for (const reply of result.replies) {
+        expect("questions" in reply).toBe(false);
+        expect("questionsDropped" in reply).toBe(false);
+      }
+    }
   });
 
   it("fetches the writing style block for the owner and lets a failure inside it not fail the draft", async () => {
@@ -355,6 +406,7 @@ describe("draftDiscussionRepliesAction", () => {
         ingredients: ["insight", "resources"],
         addressByName: false,
         formality: "formal",
+        answerQuestions: false,
       };
       await draftDiscussionRepliesAction(posts, "students", "", composition, "gemini");
       expect(buildReplyDraftingPrompt).toHaveBeenCalledTimes(1);
@@ -637,6 +689,181 @@ describe("draftDiscussionRepliesAction", () => {
       } as never);
       const result = await draftDiscussionRepliesAction([post], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
       expect(result).toEqual({ replies: [{ id: "row-x", reply: "A reply.", concepts: ["gravity"] }] });
+    });
+  });
+
+  // docs/post-questions-acceptance-criteria.md Q3/Q4: parsePostQuestions
+  // parses whatever "questions" the model returned per reply; withOutputs
+  // gates the OUTPUT on answerQuestions being true AND a non-empty parse
+  // (the OFF-path gating is covered above, in "answerQuestions OFF..." and
+  // "a model that volunteers `questions`..."), and separately surfaces
+  // questionsDropped (raw element count minus kept items) only when it is
+  // greater than 0. The widened success return also copies finishReason,
+  // usage and elapsedMs straight off the real LlmResult the action already
+  // holds and discards.
+  describe("questions (docs/post-questions-acceptance-criteria.md Q3/Q4)", () => {
+    it("a reply with a valid question round-trips it onto the returned reply, answerQuestions ON by default", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([
+          {
+            post: 1,
+            reply: "Reply to Priya.",
+            questions: [
+              {
+                question: "Why does the loop run twice?",
+                implied: false,
+                answer: "Because the condition re-checks after each pass.",
+              },
+            ],
+          },
+        ]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([posts[0]], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect("replies" in result).toBe(true);
+      if ("replies" in result) {
+        expect(result.replies[0].questions).toEqual([
+          {
+            question: "Why does the loop run twice?",
+            implied: false,
+            answer: "Because the condition re-checks after each pass.",
+          },
+        ]);
+      }
+    });
+
+    it("emits no questions key when the model returns an empty array (a post with no questions)", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([{ post: 1, reply: "Reply to Priya.", questions: [] }]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([posts[0]], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect("replies" in result).toBe(true);
+      if ("replies" in result) {
+        expect("questions" in result.replies[0]).toBe(false);
+        expect("questionsDropped" in result.replies[0]).toBe(false);
+      }
+    });
+
+    it("questionsDropped is emitted only when the parse actually dropped an item", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([
+          {
+            post: 1,
+            reply: "Reply to Priya.",
+            // Two raw items; the second has neither an answer nor a
+            // needsYou and is dropped by parsePostQuestions's own Q1
+            // invariant check.
+            questions: [
+              {
+                question: "Why does the loop run twice?",
+                implied: false,
+                answer: "Because the condition re-checks after each pass.",
+              },
+              { question: "What is the meaning of life?", implied: false, answer: "" },
+            ],
+          },
+        ]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([posts[0]], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect("replies" in result).toBe(true);
+      if ("replies" in result) {
+        expect(result.replies[0].questions).toHaveLength(1);
+        expect(result.replies[0].questionsDropped).toBe(1);
+      }
+    });
+
+    it("questionsDropped is absent (never 0) when nothing was dropped", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([
+          {
+            post: 1,
+            reply: "Reply to Priya.",
+            questions: [
+              {
+                question: "Why does the loop run twice?",
+                implied: false,
+                answer: "Because the condition re-checks after each pass.",
+              },
+            ],
+          },
+        ]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([posts[0]], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect("replies" in result).toBe(true);
+      if ("replies" in result) {
+        expect("questionsDropped" in result.replies[0]).toBe(false);
+      }
+    });
+
+    it("also applies through the positional fallback path (no usable post index, right-length array)", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify([
+          {
+            reply: "Reply to Priya.",
+            questions: [
+              {
+                question: "Why does the loop run twice?",
+                implied: false,
+                answer: "Because the condition re-checks after each pass.",
+              },
+            ],
+          },
+        ]),
+      } as never);
+      const result = await draftDiscussionRepliesAction([posts[0]], "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect("replies" in result).toBe(true);
+      if ("replies" in result) {
+        expect(result.replies[0].questions).toHaveLength(1);
+      }
+    });
+
+    it("passes finishReason, usage and elapsedMs through from the real LlmResult", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
+        finishReason: "STOP",
+        usage: { promptTokenCount: 120, candidatesTokenCount: 340, totalTokenCount: 460 },
+        elapsedMs: 987,
+      } as never);
+      const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect("replies" in result).toBe(true);
+      if ("replies" in result) {
+        expect(result.finishReason).toBe("STOP");
+        expect(result.usage).toEqual({ promptTokenCount: 120, candidatesTokenCount: 340, totalTokenCount: 460 });
+        expect(result.elapsedMs).toBe(987);
+      }
+    });
+
+    it("finishReason/usage/elapsedMs are undefined when the LlmResult does not carry them", async () => {
+      vi.mocked(callLlm).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: "",
+        text: JSON.stringify(posts.map((_, i) => ({ post: i + 1, reply: `Reply ${i + 1}` }))),
+      } as never);
+      const result = await draftDiscussionRepliesAction(posts, "students", "", DEFAULT_REPLY_COMPOSITION, "gemini");
+      expect("replies" in result).toBe(true);
+      if ("replies" in result) {
+        expect(result.finishReason).toBeUndefined();
+        expect(result.usage).toBeUndefined();
+        expect(result.elapsedMs).toBeUndefined();
+      }
     });
   });
 });

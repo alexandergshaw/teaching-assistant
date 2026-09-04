@@ -88,7 +88,12 @@ import {
   type ReplyResource,
 } from "./discussion-capture";
 // Resource-controls feature: the one-click insert's pure text-append leaf.
-import { appendResourceToReply, replyAlreadyHasResource } from "./discussion-reply-insert";
+// docs/post-questions-acceptance-criteria.md Q7: appendAnswerToReply /
+// replyAlreadyHasAnswer are the same shape, one function pair per output.
+import { appendResourceToReply, replyAlreadyHasResource, appendAnswerToReply, replyAlreadyHasAnswer } from "./discussion-reply-insert";
+// Q1: type-only, imported ONLY from the leaf - never re-exported from
+// discussion-serialization.ts or discussion-capture.ts.
+import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 import { useDiscussionCapture } from "./useDiscussionCapture";
 import { useReplyRows } from "./useReplyRows";
 import { useReplyResources } from "./useReplyResources";
@@ -137,6 +142,7 @@ import {
   makeDiscussionRepliesLogBatch,
   type DiscussionRepliesLogBatch,
   type DiscussionRepliesLogRetry,
+  type DiscussionRepliesLogDraft,
 } from "./discussion-replies-log";
 import { useDiscussionRepliesRunLog } from "./useDiscussionRepliesRunLog";
 // The notices system (AC38): a capped, deduped list plus the log mirror
@@ -226,6 +232,14 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   const [logFramesCaptured, setLogFramesCaptured] = useState(0);
   const [logBatches, setLogBatches] = useState<DiscussionRepliesLogBatch[]>([]);
   const [logRetries, setLogRetries] = useState<DiscussionRepliesLogRetry[]>([]);
+  // docs/post-questions-acceptance-criteria.md Q5/Q9: one entry per
+  // draftAction call, appended by `pushDraftEvent` below - the same
+  // useState-array-appended-from-inside-an-async-loop shape as `logRetries`
+  // above.
+  const [logDrafts, setLogDrafts] = useState<DiscussionRepliesLogDraft[]>([]);
+  const pushDraftEvent = useCallback((event: DiscussionRepliesLogDraft) => {
+    setLogDrafts((prev) => [...prev, event]);
+  }, []);
 
   // docs/REGRESSION.md entry 383's Limits, verified real: C1's own
   // `droppedFrames` resets to 0 on every capture start() (see
@@ -529,8 +543,9 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
         knowledgeContextRef,
         pushNotice,
         draftAction: draftDiscussionRepliesAction,
+        pushDraftEvent,
       }),
-    [pushNotice, waitForWake, loopsActiveRef, loopEpochRef, knowledgeContextRef]
+    [pushNotice, waitForWake, loopsActiveRef, loopEpochRef, knowledgeContextRef, pushDraftEvent]
   );
 
   // --- Starts (and pauses/resumes) the shared wake ticker - see
@@ -680,6 +695,30 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     rowsApiRef.current.removeResource(id, resource.url);
   }, []);
 
+  // docs/post-questions-acceptance-criteria.md Q7: insertAnswer - a MOVE,
+  // the same shape as insertResource above. Reads rawRows, never the
+  // filtered rows (B3/B5 discipline). A no-op when the row is gone or
+  // item.answer === "" (an item carrying only a needsYou note has nothing
+  // to insert - Copy/Remove are still the row's only controls for it).
+  // replyAlreadyHasAnswer guards a redraft/remount case the same way
+  // replyAlreadyHasResource does for resources.
+  const insertAnswer = useCallback((id: string, item: PostQuestion) => {
+    if (item.answer === "") return;
+    const row = rowsApiRef.current.rawRows.find((r) => r.id === id);
+    if (!row) return;
+    if (!replyAlreadyHasAnswer(row.reply, item.answer)) {
+      const nextReply = appendAnswerToReply(row.reply, item.answer);
+      rowsApiRef.current.editReply(id, nextReply);
+    }
+    rowsApiRef.current.removeQuestion(id, item.question);
+  }, []);
+
+  // Q7: a plain row mutator, forwarded the same way removeResource above is
+  // - no queue involvement.
+  const removeQuestion = useCallback((id: string, question: string) => {
+    rowsApiRef.current.removeQuestion(id, question);
+  }, []);
+
   const retryRow = useCallback(
     (id: string) => {
       // S1: force wins here - Retry is a targeted, single-row explicit user
@@ -789,6 +828,7 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     logBatches,
     logAllNotices,
     logRetries,
+    logDrafts,
     rawRows: rowsApi.rawRows,
   });
 
@@ -864,6 +904,16 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     removeResource,
     searchRow: resourcesApi.searchRow,
     insertResource,
+
+    // docs/post-questions-acceptance-criteria.md Q7/Q12: the post-questions
+    // pair, forwarded exactly like insertResource/removeResource above. The
+    // PANEL passes `insertAnswer` into useDiscussionReplyFiltering (which
+    // wraps it as `handleInsertAnswerForRow` to clear `handledAt`) and hands
+    // the table the WRAPPED one - passing this raw callback to the table
+    // compiles and ships the handled-badge lie, which is why
+    // postQuestions.wiring.test.ts pins the wrapped name at that call site.
+    insertAnswer,
+    removeQuestion,
 
     runLog,
   };

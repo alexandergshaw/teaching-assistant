@@ -29,8 +29,11 @@ import {
   serializeReplyTable,
   deserializeReplyTable,
   mergeLegacyReplyFlags,
+  coercePostQuestions,
+  nextRowAfterRemoveQuestion,
   type ReplyRow,
 } from "./discussion-serialization";
+import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 
 function makeRow(overrides: Partial<ReplyRow>): ReplyRow {
   return {
@@ -327,6 +330,205 @@ describe("resourceSearchOutcome (Y9)", () => {
     const restored = deserializeReplyTable(raw);
     expect(restored[0].resourceSearchOutcome).toEqual(OUTCOME);
     expect(restored[0].resourceSearchOutcome?.counts.droppedDuplicate).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/post-questions-acceptance-criteria.md Q6: questions - PERSISTED,
+// absent-stays-absent like concepts/resources above. coercePostQuestions is
+// shape-only (never re-applies Q3's caps) and dedupes on postQuestionKey.
+// ---------------------------------------------------------------------------
+
+describe("questions (Q6)", () => {
+  const QA: PostQuestion = {
+    question: "Why does the loop run twice?",
+    implied: false,
+    answer: "Because the outer loop iterates twice before the inner loop finishes.",
+  };
+  const QB: PostQuestion = {
+    question: "What is the due date?",
+    implied: true,
+    answer: "",
+    needsYou: "The actual due date for this assignment.",
+  };
+
+  it("round-trips a non-empty questions array", () => {
+    const rows = [makeRow({ id: "a", questions: [QA, QB] })];
+    const restored = deserializeReplyTable(serializeReplyTable(rows));
+    expect(restored[0].questions).toEqual([QA, QB]);
+  });
+
+  it("a row that never had questions round-trips with the field still absent (absent-stays-absent)", () => {
+    const rows = [makeRow({ id: "a" })];
+    const restored = deserializeReplyTable(serializeReplyTable(rows));
+    expect(restored[0].questions).toBeUndefined();
+    expect(JSON.parse(serializeReplyTable(rows)).rows[0]).not.toHaveProperty("questions");
+  });
+
+  it("serializes an emptied questions array as an absent key, mirroring resources' own R3d rule", () => {
+    const rows = [makeRow({ id: "a", questions: [] })];
+    const written = JSON.parse(serializeReplyTable(rows)).rows[0];
+    expect(written).not.toHaveProperty("questions");
+  });
+
+  describe("coercePostQuestions", () => {
+    // VERIFIER FINDING 6: "   " is truthy, so a whitespace-only question used
+    // to survive this coercer and render as a blank item title with an
+    // unreadable accessible name. Q6 drops an entry whose question is not a
+    // NON-EMPTY string; this is the pin for that.
+    it("drops an entry whose question is whitespace only, not merely empty", () => {
+      const raw: unknown = [
+        { question: "   ", implied: false, answer: "An answer that would otherwise render under a blank title." },
+        { question: "\n\t ", implied: false, answer: "Same." },
+      ];
+      expect(coercePostQuestions(raw)).toBeUndefined();
+    });
+
+    it("trims a padded question rather than storing the padding", () => {
+      const raw: unknown = [{ question: "  Why does it run twice?  ", implied: false, answer: "Because." }];
+      expect(coercePostQuestions(raw)).toEqual([
+        { question: "Why does it run twice?", implied: false, answer: "Because." },
+      ]);
+    });
+
+    it("keeps a well-formed entry, coercing a non-boolean-true implied value to false", () => {
+      // A persisted string "true" is not the boolean `true` - Q3's lenient
+      // string/kind aliasing ("implicit", a `kind`/`type` key, etc.) is the
+      // MODEL-OUTPUT PARSER's job (Group A, leaf), never re-applied here:
+      // this coercer only re-validates the SHAPE of a value this app itself
+      // already wrote.
+      const raw: unknown = [{ question: "Why?", implied: "true", answer: "Because." }];
+      expect(coercePostQuestions(raw)).toEqual([{ question: "Why?", implied: false, answer: "Because." }]);
+    });
+
+    it("implied: false round-trips exactly", () => {
+      const raw: unknown = [{ question: "Why?", implied: false, answer: "Because." }];
+      expect(coercePostQuestions(raw)).toEqual([{ question: "Why?", implied: false, answer: "Because." }]);
+    });
+
+    it("needsYou absent stays absent (key omitted, never an empty string)", () => {
+      const raw: unknown = [{ question: "Why?", implied: false, answer: "Because." }];
+      const result = coercePostQuestions(raw);
+      expect(result).toHaveLength(1);
+      expect(result![0]).not.toHaveProperty("needsYou");
+    });
+
+    it("needsYou: '' is treated the same as absent - dropped, never kept as an empty string", () => {
+      const raw: unknown = [{ question: "Why?", implied: false, answer: "Because.", needsYou: "" }];
+      const result = coercePostQuestions(raw);
+      expect(result).toHaveLength(1);
+      expect(result![0]).not.toHaveProperty("needsYou");
+    });
+
+    it("dedupes on postQuestionKey, keeping the first - SABOTAGE CHECK: a quoted/punctuated variant of an already-kept question is still dropped, not just an exact string repeat", () => {
+      const raw: unknown = [
+        { question: "Why does the loop run twice?", implied: false, answer: "First answer." },
+        { question: '"Why does the loop run twice?"', implied: true, answer: "Second answer, dropped." },
+      ];
+      const result = coercePostQuestions(raw);
+      expect(result).toHaveLength(1);
+      expect(result![0].answer).toBe("First answer.");
+      expect(result![0].implied).toBe(false);
+    });
+
+    it("drops an item violating the Q1 invariant (answer === '' and no needsYou) - SABOTAGE CHECK", () => {
+      const raw: unknown = [{ question: "Why?", implied: false, answer: "" }];
+      expect(coercePostQuestions(raw)).toBeUndefined();
+    });
+
+    it("keeps an item with an empty answer as long as needsYou is set", () => {
+      const raw: unknown = [{ question: "What is the policy?", implied: false, answer: "", needsYou: "The late policy." }];
+      expect(coercePostQuestions(raw)).toEqual([
+        { question: "What is the policy?", implied: false, answer: "", needsYou: "The late policy." },
+      ]);
+    });
+
+    it("drops an entry whose question is not a non-empty string, keeping the rest", () => {
+      const raw: unknown = [
+        { question: "", implied: false, answer: "x" },
+        { question: 5, implied: false, answer: "x" },
+        { question: "Kept?", implied: false, answer: "Kept answer." },
+      ];
+      expect(coercePostQuestions(raw)).toEqual([{ question: "Kept?", implied: false, answer: "Kept answer." }]);
+    });
+
+    it("a non-array input yields undefined, never throws", () => {
+      expect(coercePostQuestions("not an array")).toBeUndefined();
+      expect(coercePostQuestions(null)).toBeUndefined();
+      expect(coercePostQuestions(undefined)).toBeUndefined();
+      expect(coercePostQuestions({})).toBeUndefined();
+    });
+
+    it("an empty result (every entry dropped) yields undefined, never []", () => {
+      expect(coercePostQuestions([{ question: "", implied: false, answer: "" }])).toBeUndefined();
+      expect(coercePostQuestions([])).toBeUndefined();
+    });
+
+    it("never re-applies Q3's caps - a long question/answer survives uncapped", () => {
+      const longQuestion = "x".repeat(500);
+      const longAnswer = "y".repeat(2000);
+      const result = coercePostQuestions([{ question: longQuestion, implied: false, answer: longAnswer }]);
+      expect(result![0].question).toHaveLength(500);
+      expect(result![0].answer).toHaveLength(2000);
+    });
+
+    it("a non-object entry (a string, a number, an array) is dropped, never thrown on", () => {
+      const raw: unknown = ["a string", 5, ["nested", "array"], { question: "Real one", implied: false, answer: "x" }];
+      expect(coercePostQuestions(raw)).toEqual([{ question: "Real one", implied: false, answer: "x" }]);
+    });
+  });
+
+  describe("nextRowAfterRemoveQuestion", () => {
+    it("removes every item whose question equals the argument exactly", () => {
+      const row = makeRow({ id: "a", questions: [QA, QB] });
+      const next = nextRowAfterRemoveQuestion(row, QA.question);
+      expect(next.questions).toEqual([QB]);
+    });
+
+    it("clears the field to undefined when the list empties", () => {
+      const row = makeRow({ id: "a", questions: [QA] });
+      const next = nextRowAfterRemoveQuestion(row, QA.question);
+      expect(next.questions).toBeUndefined();
+    });
+
+    it("IDEMPOTENCE: a second call with the same question (now absent) yields the same value as calling it once more never changes anything further", () => {
+      const row = makeRow({ id: "a", questions: [QA, QB] });
+      const once = nextRowAfterRemoveQuestion(row, QA.question);
+      const twice = nextRowAfterRemoveQuestion(once, QA.question);
+      expect(twice.questions).toEqual([QB]);
+      expect(twice).toEqual(once);
+    });
+
+    it("a no-op removal (question not present) leaves the row's questions unchanged in VALUE", () => {
+      const row = makeRow({ id: "a", questions: [QA] });
+      const next = nextRowAfterRemoveQuestion(row, "Not a real question in this row.");
+      expect(next.questions).toEqual([QA]);
+    });
+
+    it("does not mutate the input row (returns a new object)", () => {
+      const row = makeRow({ id: "a", questions: [QA, QB] });
+      const frozenQuestions = row.questions;
+      nextRowAfterRemoveQuestion(row, QA.question);
+      expect(row.questions).toBe(frozenQuestions);
+      expect(row.questions).toEqual([QA, QB]);
+    });
+
+    // VERIFIER FINDING 7: this was titled "is scoped by row only", which it
+    // could never have proven - `nextRowAfterRemoveQuestion` takes exactly
+    // ONE row and cannot reach a second by construction, so it passed no
+    // matter what the real id-scoped mutator did. Retitled to the property
+    // it actually establishes. The real row scoping lives in
+    // useReplyRows.ts's `removeQuestion` (`raw.findIndex(r => r.id === id)`)
+    // and is covered there, against the mutator that actually does it.
+    it("returns a NEW row and never mutates the one it was given - two rows built from the same question object stay independent", () => {
+      const rowA = makeRow({ id: "a", questions: [QA] });
+      const rowB = makeRow({ id: "b", questions: [QA] });
+      const nextA = nextRowAfterRemoveQuestion(rowA, QA.question);
+      expect(nextA).not.toBe(rowA);
+      expect(nextA.questions).toBeUndefined();
+      expect(rowA.questions).toEqual([QA]);
+      expect(rowB.questions).toEqual([QA]);
+    });
   });
 });
 

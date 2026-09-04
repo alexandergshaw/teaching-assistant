@@ -26,6 +26,7 @@ import {
   type DiscussionRepliesLogBatch,
   type DiscussionRepliesLogNotice,
   type DiscussionRepliesLogRetry,
+  type DiscussionRepliesLogDraft,
   type DiscussionRepliesRunLog,
 } from "./discussion-replies-log";
 import type { DiscussionAudience, ReplyCompositionSettings } from "@/lib/discussion-reply-prompt";
@@ -44,6 +45,10 @@ export interface UseDiscussionRepliesRunLogArgs {
   logBatches: DiscussionRepliesLogBatch[];
   logAllNotices: DiscussionRepliesLogNotice[];
   logRetries: DiscussionRepliesLogRetry[];
+  /** docs/post-questions-acceptance-criteria.md Q9: one entry per
+   *  `draftAction` call - collected in useDiscussionReplies.ts the same way
+   *  `logRetries` is. */
+  logDrafts: DiscussionRepliesLogDraft[];
   /** F0-2/F11: the UNFILTERED table (`rowsApi.rawRows`, never the
    *  display-filtered `rows`) - a search-box keystroke must never make the
    *  downloaded log silently omit a row the instructor cannot currently
@@ -65,6 +70,7 @@ export function useDiscussionRepliesRunLog(args: UseDiscussionRepliesRunLogArgs)
     logBatches,
     logAllNotices,
     logRetries,
+    logDrafts,
     rawRows,
   } = args;
 
@@ -79,12 +85,16 @@ export function useDiscussionRepliesRunLog(args: UseDiscussionRepliesRunLogArgs)
         ingredients: composition.ingredients,
         addressByName: composition.addressByName,
         formality: composition.formality,
+        // Q9: the CURRENT setting, read the same way the other three
+        // composition fields above already are.
+        answerQuestions: composition.answerQuestions,
         framesCaptured: logFramesCaptured,
         droppedFrames,
         stalled,
         batches: logBatches,
         notices: logAllNotices,
         retries: logRetries,
+        drafts: logDrafts,
       },
       rawRows
     );
@@ -101,6 +111,7 @@ export function useDiscussionRepliesRunLog(args: UseDiscussionRepliesRunLogArgs)
     logBatches,
     logAllNotices,
     logRetries,
+    logDrafts,
     rawRows,
   ]);
 }

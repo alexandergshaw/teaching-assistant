@@ -9,9 +9,11 @@ import {
   formatDiscussionRepliesLogJson,
   discussionRepliesLogFileName,
   type DiscussionRepliesLogInput,
+  type DiscussionRepliesLogDraft,
   type DiscussionRepliesRunLog,
 } from "./discussion-replies-log";
 import type { ReplyRow } from "./discussion-capture";
+import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 
 const AT = "2026-08-31T09:00:00.000Z";
 
@@ -37,12 +39,37 @@ function emptyInput(overrides: Partial<DiscussionRepliesLogInput> = {}): Discuss
     ingredients: [],
     addressByName: true,
     formality: "balanced",
+    // docs/post-questions-acceptance-criteria.md Q8/Q9: the CURRENT setting
+    // (default ON), and Q5/Q9's drafts event stream (default empty).
+    answerQuestions: true,
     framesCaptured: 0,
     droppedFrames: 0,
     stalled: false,
     batches: [],
     notices: [],
     retries: [],
+    drafts: [],
+    ...overrides,
+  };
+}
+
+function draftEvent(overrides: Partial<DiscussionRepliesLogDraft> & { at: string; rowIds: string[] }): DiscussionRepliesLogDraft {
+  return {
+    audience: "students",
+    ingredients: [],
+    addressByName: true,
+    formality: "balanced",
+    answerQuestions: true,
+    outcome: "ok",
+    error: "",
+    repliesReturned: overrides.rowIds.length,
+    rowsMissing: 0,
+    questionsReturned: 0,
+    questionsNeedingYou: 0,
+    questionsDropped: 0,
+    finishReason: "",
+    candidatesTokenCount: null,
+    elapsedMs: null,
     ...overrides,
   };
 }
@@ -73,6 +100,9 @@ describe("buildDiscussionRepliesLogRowEntry", () => {
       resourceQuerySource: "",
       resourceSearchOutcome: null,
       resourceCount: 0,
+      questionCount: 0,
+      questionsNeedingYou: 0,
+      questions: [],
     });
   });
 
@@ -194,9 +224,11 @@ describe("buildDiscussionRepliesRunLog", () => {
       ingredients: ["compliment", "resources"],
       addressByName: false,
       formality: "formal",
+      answerQuestions: false,
       framesCaptured: 12,
       droppedFrames: 3,
       stalled: true,
+      drafts: [draftEvent({ at: AT, rowIds: ["r9"] })],
     });
     const log = buildDiscussionRepliesRunLog(input, []);
     expect(log.startedAt).toBe(AT);
@@ -206,9 +238,12 @@ describe("buildDiscussionRepliesRunLog", () => {
     expect(log.ingredients).toEqual(["compliment", "resources"]);
     expect(log.addressByName).toBe(false);
     expect(log.formality).toBe("formal");
+    expect(log.answerQuestions).toBe(false);
     expect(log.framesCaptured).toBe(12);
     expect(log.droppedFrames).toBe(3);
     expect(log.stalled).toBe(true);
+    expect(log.drafts).toHaveLength(1);
+    expect(log.drafts[0]!.rowIds).toEqual(["r9"]);
   });
 });
 
@@ -327,6 +362,11 @@ describe("summarizeDiscussionRepliesRunLog", () => {
       noticeCount: 0,
       droppedFrames: 0,
       rowsWithNoResources: 0,
+      rowsWithQuestions: 0,
+      questionsTotal: 0,
+      questionsNeedingYou: 0,
+      draftCalls: 0,
+      draftCallsHitLengthLimit: 0,
     });
   });
 
@@ -400,6 +440,39 @@ describe("summarizeDiscussionRepliesRunLog", () => {
     ];
     const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
     expect(summary.rowsWithNoResources).toBe(2);
+  });
+
+  // -------------------------------------------------------------------
+  // docs/post-questions-acceptance-criteria.md Q9: rowsWithQuestions /
+  // questionsTotal / questionsNeedingYou (rows-derived, "still showing")
+  // and draftCalls / draftCallsHitLengthLimit (drafts-derived, "found").
+  // -------------------------------------------------------------------
+
+  it("Q9: rowsWithQuestions / questionsTotal / questionsNeedingYou sum across rows", () => {
+    const q1: PostQuestion = { question: "Why?", implied: false, answer: "Because." };
+    const q2: PostQuestion = { question: "What is the due date?", implied: true, answer: "", needsYou: "The due date." };
+    const rows: ReplyRow[] = [
+      row({ id: "r1", author: "A", questions: [q1, q2] }),
+      row({ id: "r2", author: "B", questions: [q1] }),
+      row({ id: "r3", author: "C" }),
+    ];
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(summary.rowsWithQuestions).toBe(2);
+    expect(summary.questionsTotal).toBe(3);
+    expect(summary.questionsNeedingYou).toBe(1);
+  });
+
+  it("Q9: draftCalls is log.drafts.length; draftCallsHitLengthLimit counts only finishReason === 'MAX_TOKENS'", () => {
+    const input = emptyInput({
+      drafts: [
+        draftEvent({ at: AT, rowIds: ["r1"], finishReason: "MAX_TOKENS" }),
+        draftEvent({ at: AT, rowIds: ["r2"], finishReason: "STOP" }),
+        draftEvent({ at: AT, rowIds: ["r3"], outcome: "error", error: "boom", finishReason: "" }),
+      ],
+    });
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(input, []));
+    expect(summary.draftCalls).toBe(3);
+    expect(summary.draftCallsHitLengthLimit).toBe(1);
   });
 });
 
@@ -523,6 +596,54 @@ describe("discussionRepliesLogSummaryLine", () => {
       "2 replies captured across 0 batches - 2 drafted, 0 failed, 0 never drafted, 0 retried, 0 notices. 2 replies got no links."
     );
   });
+
+  // -------------------------------------------------------------------
+  // docs/post-questions-acceptance-criteria.md Q9: the questions clause -
+  // appended LAST, present only when questionsTotal > 0.
+  // -------------------------------------------------------------------
+
+  it("Q9: the summary line is UNCHANGED (every existing frozen oracle above stays true) when questionsTotal is 0", () => {
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), []));
+    expect(summary.questionsTotal).toBe(0);
+    expect(discussionRepliesLogSummaryLine(summary)).toBe(
+      "0 replies captured across 0 batches - 0 drafted, 0 failed, 0 never drafted, 0 retried, 0 notices."
+    );
+    expect(discussionRepliesLogSummaryLine(summary)).not.toContain("question");
+  });
+
+  it("Q9: singular 'question found' at exactly 1, no needs-you clause when questionsNeedingYou is 0", () => {
+    const q: PostQuestion = { question: "Why?", implied: false, answer: "Because." };
+    const rows = [row({ id: "r1", author: "A", state: "ready", questions: [q] })];
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(discussionRepliesLogSummaryLine(summary)).toBe(
+      "1 reply captured across 0 batches - 1 drafted, 0 failed, 0 never drafted, 0 retried, 0 notices. 1 question found."
+    );
+  });
+
+  it("Q9: plural 'questions found', with the '(N needs you)' clause when questionsNeedingYou > 0", () => {
+    const q1: PostQuestion = { question: "Why?", implied: false, answer: "Because." };
+    const q2: PostQuestion = { question: "What is the due date?", implied: true, answer: "", needsYou: "The due date." };
+    const rows = [row({ id: "r1", author: "A", state: "ready", questions: [q1, q2] })];
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(discussionRepliesLogSummaryLine(summary)).toBe(
+      "1 reply captured across 0 batches - 1 drafted, 0 failed, 0 never drafted, 0 retried, 0 notices. 2 questions found (1 needs you)."
+    );
+  });
+
+  it("Q9: singular 'needs you' (not 'need you') at exactly 1", () => {
+    const q1: PostQuestion = { question: "Why?", implied: false, answer: "", needsYou: "A fact." };
+    const rows = [row({ id: "r1", author: "A", state: "ready", questions: [q1] })];
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(discussionRepliesLogSummaryLine(summary)).toContain("(1 needs you)");
+  });
+
+  it("Q9: plural 'need you' at 2", () => {
+    const q1: PostQuestion = { question: "Why?", implied: false, answer: "", needsYou: "A fact." };
+    const q2: PostQuestion = { question: "What time?", implied: false, answer: "", needsYou: "Another fact." };
+    const rows = [row({ id: "r1", author: "A", state: "ready", questions: [q1, q2] })];
+    const summary = summarizeDiscussionRepliesRunLog(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(discussionRepliesLogSummaryLine(summary)).toContain("(2 need you)");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -591,6 +712,9 @@ describe("formatDiscussionRepliesLogCsv", () => {
       "Ingredients,compliment",
       "Address by first name,Yes",
       "Formality,balanced",
+      // docs/post-questions-acceptance-criteria.md Q9: immediately after
+      // Formality. emptyInput()'s default answerQuestions is true (ON).
+      "Answer questions (at export time),Yes",
       "Frames captured,6",
       "Batches sent,2",
       "Dropped frames,1",
@@ -601,6 +725,11 @@ describe("formatDiscussionRepliesLogCsv", () => {
       "2026-08-31T09:00:00.000Z,3,2,2,0,No,No,",
       "2026-08-31T09:02:00.000Z,3,1,0,1,No,No,",
       "",
+      // Q9: a new section, after === Batches === and before === Notices ===.
+      // emptyInput()'s default `drafts` is [], so only the header renders.
+      "=== Drafts ===",
+      "At,Row IDs,Audience,Ingredients,Address by first name,Formality,Answer questions,Outcome,Error,Replies returned,Rows missing,Questions returned,Questions needing you,Questions dropped,Finish reason,Candidates token count,Elapsed ms",
+      "",
       "=== Notices ===",
       "At,Text",
       '2026-08-31T09:00:00.000Z,"Some of the screen could not be read: rate limited, try again"',
@@ -610,10 +739,14 @@ describe("formatDiscussionRepliesLogCsv", () => {
       "2026-08-31T09:03:00.000Z,r2",
       "",
       "=== Rows ===",
-      "Row ID,Author,Thread position,Replying to,Parent resolved,Draft state,User edited,Retried,Error,Resource state,Resource error,Search terms,Resource search text,Resource search source,Links,Resource search outcome",
-      "r1,Ana,root,,No,ready,No,No,,,,,,,0,",
-      'r2,"Bob, Jr.",reply,Ana,Yes,failed,No,Yes,"429 Too Many Requests, retry later",,,,,,0,',
-      "r3,Cy,,,No,ready,No,No,,,,,the original post text used as fallback,post,0,",
+      // Q9: "Questions" and "Needs you" inserted immediately after "Error"
+      // and before "Resource state" - the existing endsWith pin (below,
+      // Y12's own tests) stays true because Q9's columns land BEFORE the
+      // resource columns, not after them.
+      "Row ID,Author,Thread position,Replying to,Parent resolved,Draft state,User edited,Retried,Error,Questions,Needs you,Resource state,Resource error,Search terms,Resource search text,Resource search source,Links,Resource search outcome",
+      "r1,Ana,root,,No,ready,No,No,,0,0,,,,,,0,",
+      'r2,"Bob, Jr.",reply,Ana,Yes,failed,No,Yes,"429 Too Many Requests, retry later",0,0,,,,,,0,',
+      "r3,Cy,,,No,ready,No,No,,0,0,,,,the original post text used as fallback,post,0,",
     ].join("\r\n");
     expect(csv).toBe(expected);
   });
@@ -678,10 +811,77 @@ describe("formatDiscussionRepliesLogCsv", () => {
     const csv = formatDiscussionRepliesLogCsv(buildDiscussionRepliesRunLog(emptyInput(), []));
     expect(csv).toContain("=== Run ===");
     expect(csv).toContain("=== Batches ===");
+    // docs/post-questions-acceptance-criteria.md Q9.
+    expect(csv).toContain("=== Drafts ===");
     expect(csv).toContain("=== Notices ===");
     expect(csv).toContain("=== Retries ===");
     expect(csv).toContain("=== Rows ===");
     expect(csv).toContain("Started,");
+  });
+
+  // -------------------------------------------------------------------
+  // docs/post-questions-acceptance-criteria.md Q9: the === Drafts === section
+  // - one CSV row per draft event, rowIds joined with ";", question TEXT
+  // never appears anywhere in the CSV.
+  // -------------------------------------------------------------------
+
+  it("Q9: renders one row per draft event, rowIds joined with ';', in the interface's field order", () => {
+    const input = emptyInput({
+      drafts: [
+        draftEvent({
+          at: AT,
+          rowIds: ["r1", "r2"],
+          audience: "peers",
+          ingredients: ["compliment", "resources"],
+          addressByName: false,
+          formality: "formal",
+          answerQuestions: true,
+          outcome: "ok",
+          repliesReturned: 2,
+          rowsMissing: 0,
+          questionsReturned: 3,
+          questionsNeedingYou: 1,
+          questionsDropped: 1,
+          finishReason: "STOP",
+          candidatesTokenCount: 512,
+          elapsedMs: 987,
+        }),
+      ],
+    });
+    const csv = formatDiscussionRepliesLogCsv(buildDiscussionRepliesRunLog(input, []));
+    const lines = csv.split("\r\n");
+    const draftLine = lines.find((l) => l.startsWith(`${AT},r1;r2,`));
+    expect(draftLine).toBe(
+      `${AT},r1;r2,peers,"compliment, resources",No,formal,Yes,ok,,2,0,3,1,1,STOP,512,987`
+    );
+  });
+
+  it("Q9: candidatesTokenCount/elapsedMs render as empty cells (never the string 'null') when null", () => {
+    const input = emptyInput({
+      drafts: [
+        draftEvent({ at: AT, rowIds: ["r1"], outcome: "error", error: "429 Too Many Requests", repliesReturned: 0, rowsMissing: 1 }),
+      ],
+    });
+    const csv = formatDiscussionRepliesLogCsv(buildDiscussionRepliesRunLog(input, []));
+    const lines = csv.split("\r\n");
+    const draftLine = lines.find((l) => l.startsWith(`${AT},r1,`));
+    expect(draftLine).not.toContain("null");
+    // The last three columns (Finish reason, Candidates token count, Elapsed
+    // ms) are all empty for this event - three consecutive empty cells means
+    // the line ends in exactly three commas.
+    expect(draftLine?.endsWith(",,,")).toBe(true);
+  });
+
+  it("Q9: question TEXT never appears anywhere in the CSV, even when the row carries questions", () => {
+    const q: PostQuestion = {
+      question: "Why does this specific unique sentinel phrase appear in the post?",
+      implied: false,
+      answer: "Because the answer text is also excluded, by design.",
+    };
+    const rows: ReplyRow[] = [row({ id: "r1", author: "A", questions: [q] })];
+    const csv = formatDiscussionRepliesLogCsv(buildDiscussionRepliesRunLog(emptyInput(), rows));
+    expect(csv).not.toContain("sentinel phrase");
+    expect(csv).not.toContain(q.answer);
   });
 });
 

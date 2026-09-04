@@ -778,18 +778,30 @@ export interface DraftingArmSignatureArgs {
   ingredients: readonly string[];
   addressByName: boolean;
   formality: string;
+  // docs/post-questions-acceptance-criteria.md Q8: a FOURTH reply-composition
+  // control joins the signature, the SEVENTH field overall, after
+  // `formality` - "Draft answers to the questions in each post" is a real
+  // drafting input `redraftAll` (via runDraftLoop's `compositionNow`)
+  // actually consumes, so it must be able to re-arm "Redraft every reply"
+  // exactly like `ingredients`/`addressByName`/`formality` above (C6a's own
+  // reasoning, extended).
+  answerQuestions: boolean;
 }
 
-/** Every field is a drafting input `redraftAll` actually reads. Adding a
- * FOURTH drafting control to the panel in the future means adding it HERE
+/** Every field is a drafting input `redraftAll` actually reads.
+ * docs/post-questions-acceptance-criteria.md Q8's `answerQuestions` IS the
+ * fourth drafting control this comment used to warn about in the future
+ * tense - added HERE, as the doc comment on the field itself
+ * (`DraftingArmSignatureArgs.answerQuestions` above) explains. Adding a
+ * FIFTH drafting control to the panel in the future means adding it HERE
  * too, or it silently reopens this exact bug for that new control - this
  * function's own test asserts that varying each current field in isolation
  * changes the output, which is the property that would have caught the
  * shipped defect (an omitted field), not just a wrong separator.
  *
- * C6a: the three reply-composition fields below are each independently
- * covered by that same "varying X alone changes the signature" test - a
- * combined test would pass with only one of the three actually wired. */
+ * C6a: the reply-composition fields below are each independently covered by
+ * that same "varying X alone changes the signature" test - a combined test
+ * would pass with only one of them actually wired. */
 export function draftingArmSignature(args: DraftingArmSignatureArgs): string {
-  return `${args.rowCount}|${args.audience}|${args.courseId}|${args.ingredients.join(",")}|${args.addressByName}|${args.formality}`;
+  return `${args.rowCount}|${args.audience}|${args.courseId}|${args.ingredients.join(",")}|${args.addressByName}|${args.formality}|${args.answerQuestions}`;
 }

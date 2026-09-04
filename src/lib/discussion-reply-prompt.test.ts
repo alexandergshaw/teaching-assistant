@@ -39,6 +39,7 @@ const LEGACY_COMPOSITION: ReplyCompositionSettings = {
   ingredients: [],
   addressByName: false,
   formality: "balanced",
+  answerQuestions: false,
 };
 
 describe("EXTRACT_BATCH_SIZE / DRAFT_BATCH_SIZE / MAX_POST_CHARS", () => {
@@ -608,6 +609,7 @@ describe("buildReplyDraftingPrompt", () => {
           ingredients: [],
           addressByName: false,
           formality: "balanced",
+          answerQuestions: false,
         });
         expect(balanced).toBe(BASELINE_STUDENTS_PROMPT);
       });
@@ -653,6 +655,7 @@ describe("buildReplyDraftingPrompt", () => {
           ingredients: ["compliment", "insight"],
           addressByName: false,
           formality: "formal",
+          answerQuestions: false,
         });
         const postsBlockFrom = (p: string) => p.slice(p.indexOf("THE POSTS"), p.indexOf("OUTPUT"));
         // "THE POSTS" section still lists POST 1/2/3 with "Written by:" -
@@ -669,6 +672,7 @@ describe("buildReplyDraftingPrompt", () => {
           ingredients: ["compliment", "insight", "correction"],
           addressByName: true,
           formality: "casual",
+          answerQuestions: false,
         });
         expect(prompt).toContain("Return ONLY a JSON array with exactly 3 elements");
         expect(prompt).toContain("Include every post number from 1 to 3, in order");

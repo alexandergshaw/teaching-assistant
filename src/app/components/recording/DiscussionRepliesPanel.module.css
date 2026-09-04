@@ -433,3 +433,35 @@ td:hover .hoverReveal,
   flex-direction: column;
   align-items: stretch;
 }
+
+/* Post-questions: composed with .resourceItem for a line whose text WRAPS
+   (the question, the needs-you sentence). .resourceItem's own
+   `align-items: center` was tuned for a single nowrap link; on a 3-5 line
+   question it floats the badge and the controls at mid-paragraph. */
+.resourceItemTop {
+  align-items: flex-start;
+}
+
+/* Post-questions: composed with .resourceList. Items here are 2-3 lines
+   with an 8px internal gap, so the list gap must be wider than that (12px),
+   and the block must sit further from the resources block beneath it
+   (8px replyBlock gap + 8px here = 16px) than its own items sit from each
+   other. Textarea -> this block stays 8px on purpose: answers are material
+   for the reply, resources are appendices. */
+.questionList {
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+/* Post-questions: the answer paragraph. Content, not a hint -
+   --text-primary, not fieldHint's --text-secondary. .postCell is NOT
+   reusable here (fixed height, border, scroll). pre-wrap preserves the
+   "\n\n" paragraph breaks parsePostQuestions keeps. */
+.answerText {
+  margin: 0;
+  font-size: var(--font-size-md);
+  line-height: var(--line-snug);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

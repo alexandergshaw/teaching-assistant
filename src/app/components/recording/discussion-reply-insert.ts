@@ -56,3 +56,34 @@ export function appendResourceToReply(currentReply: string, resource: { title: s
 export function replyAlreadyHasResource(currentReply: string, resource: { url: string }): boolean {
   return currentReply.includes(resource.url);
 }
+
+// ---------------------------------------------------------------------------
+// docs/post-questions-acceptance-criteria.md Q7: one-click Insert for a
+// post-question's answer - the same MOVE shape as the resource insert above
+// (appendAnswerToReply computes the next text, useDiscussionReplies.ts's
+// insertAnswer calls editReply then removeQuestion), and the same
+// append-at-the-end placement decision, for the same two reasons given
+// above: no cursor-tracking infrastructure, and "resources/answers live
+// below the reply, never spliced into the middle of it" is already this
+// codebase's convention. Deliberately NO "Q:"/"A:" prefix (Q7) - the
+// answer's own standalone-paragraph rule (Q2) is what makes it read on its
+// own once appended.
+// ---------------------------------------------------------------------------
+
+/** Appends `answer` as its own paragraph (blank-line separated) after the
+ *  right-trimmed `currentReply`; an empty reply becomes just the answer text,
+ *  with no leading blank line - byte-for-byte the same shape
+ *  appendResourceToReply already gives a resource line. */
+export function appendAnswerToReply(currentReply: string, answer: string): string {
+  const trimmed = currentReply.replace(/\s+$/, "");
+  return trimmed.length > 0 ? `${trimmed}\n\n${answer}` : answer;
+}
+
+/** FIX 2's guard, reused verbatim for the answer case: checking the reply
+ *  TEXT itself for the answer (rather than a separate "already inserted"
+ *  id/text set) means a hand-deleted-then-reinsert case is never wrongly
+ *  blocked by stale state - see replyAlreadyHasResource's own doc comment
+ *  for the full reasoning, which applies here unchanged. */
+export function replyAlreadyHasAnswer(currentReply: string, answer: string): boolean {
+  return currentReply.includes(answer);
+}

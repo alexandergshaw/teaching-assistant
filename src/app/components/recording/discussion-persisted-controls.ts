@@ -151,7 +151,10 @@ export function useDiscussionPersistedControls(): UseDiscussionPersistedControls
     coerceReplyComposition(
       readLocalStorage("ta-rec-disc-ingredients"),
       readLocalStorage("ta-rec-disc-address-name"),
-      readLocalStorage("ta-rec-disc-formality")
+      readLocalStorage("ta-rec-disc-formality"),
+      // docs/post-questions-acceptance-criteria.md Q8: the FOURTH trailing
+      // argument, mirroring the three reads above exactly.
+      readLocalStorage("ta-rec-disc-answer-questions")
     )
   );
   const setComposition = useCallback((next: ReplyCompositionSettings) => {
@@ -159,6 +162,10 @@ export function useDiscussionPersistedControls(): UseDiscussionPersistedControls
     writeLocalStorage("ta-rec-disc-ingredients", JSON.stringify(next.ingredients));
     writeLocalStorage("ta-rec-disc-address-name", next.addressByName ? "1" : "0");
     writeLocalStorage("ta-rec-disc-formality", next.formality);
+    // Q8: whole string literal, never a template - see this file's own
+    // header on why the key inventory scan needs the literal, not a
+    // fragment.
+    writeLocalStorage("ta-rec-disc-answer-questions", next.answerQuestions ? "1" : "0");
   }, []);
 
   // Resource-controls feature.

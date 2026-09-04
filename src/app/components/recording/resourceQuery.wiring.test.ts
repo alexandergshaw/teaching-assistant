@@ -112,13 +112,26 @@ describe("RC3: applyReply (useReplyRows.ts) writes concepts from its fourth para
     return src.slice(start, end);
   }
 
-  const SIGNATURE = /\(id: string, reply: string, userEdited: boolean = false, concepts\?: readonly string\[\]\) => \{/;
+  // Post-questions (Q6) widened this signature with a FIFTH parameter
+  // (`questions`). The pin stays on the FACT and the ORDERING that RC3 cares
+  // about - `concepts` is the fourth positional parameter, after
+  // `userEdited` - and deliberately stops there rather than respelling the
+  // whole parameter list, which is what made this pin go red for a change
+  // that did not touch concepts at all (the repo's own recorded
+  // "source-text tests over-specify" lesson).
+  const SIGNATURE = /\(id: string, reply: string, userEdited: boolean = false, concepts\?: readonly string\[\][,)]/;
   const CONCEPTS_WRITE = /\.\.\.\(concepts === undefined \? \{\} : \{ concepts: nextConcepts \}\)/;
 
-  it("canary: the signature pattern matches the real four-parameter signature", () => {
+  it("canary: the signature pattern matches the real signature, four-parameter or wider", () => {
     expect(
       SIGNATURE.test(
         '(id: string, reply: string, userEdited: boolean = false, concepts?: readonly string[]) => {'
+      )
+    ).toBe(true);
+    // The post-questions fifth parameter must not break this pin.
+    expect(
+      SIGNATURE.test(
+        '(id: string, reply: string, userEdited: boolean = false, concepts?: readonly string[], questions?: readonly PostQuestion[]) => {'
       )
     ).toBe(true);
   });
@@ -133,7 +146,7 @@ describe("RC3: applyReply (useReplyRows.ts) writes concepts from its fourth para
     ).toBe(false);
   });
 
-  it("useReplyRows.ts's applyReply carries both the four-argument signature and the conditional concepts write", () => {
+  it("useReplyRows.ts's applyReply carries both the concepts parameter in fourth position and the conditional concepts write", () => {
     const body = extractApplyReplyBody(rowsHookSource);
     expect(body).toMatch(SIGNATURE);
     expect(body).toMatch(CONCEPTS_WRITE);
@@ -141,7 +154,13 @@ describe("RC3: applyReply (useReplyRows.ts) writes concepts from its fourth para
 });
 
 describe("RC3: editReply (useReplyRows.ts) clears concepts on a hand edit", () => {
-  const EDIT_CLEARS_CONCEPTS = /\{ \.\.\.r, reply: text, userEdited: true, state: nextState, error: null, concepts: undefined \}/;
+  // Whitespace-tolerant: post-questions (Q6) reformatted this row update
+  // across several lines and added a comment beside `concepts: undefined`
+  // explaining why `questions` is NOT cleared with it. The fact being pinned
+  // is unchanged - a hand edit writes the user's text, flags authorship, and
+  // clears concepts in ONE row update - so the pin tolerates the layout
+  // instead of forcing the code back onto one line.
+  const EDIT_CLEARS_CONCEPTS = /\{\s*\.\.\.r,\s*reply: text,\s*userEdited: true,\s*state: nextState,\s*error: null,\s*concepts: undefined,?\s/;
 
   it("canary: the pattern matches the real editReply row-update line", () => {
     expect(
@@ -149,11 +168,40 @@ describe("RC3: editReply (useReplyRows.ts) clears concepts on a hand edit", () =
         '{ ...r, reply: text, userEdited: true, state: nextState, error: null, concepts: undefined }'
       )
     ).toBe(true);
+    // The same fact written across lines, as the live code now writes it.
+    expect(
+      EDIT_CLEARS_CONCEPTS.test(
+        [
+          "{",
+          "  ...r,",
+          "  reply: text,",
+          "  userEdited: true,",
+          "  state: nextState,",
+          "  error: null,",
+          "  concepts: undefined,",
+          "  // questions are deliberately kept",
+          "}",
+        ].join("\n")
+      )
+    ).toBe(true);
   });
 
   it("canary: the pattern does NOT match the pre-RC3 row-update line (no concepts field touched)", () => {
     expect(
       EDIT_CLEARS_CONCEPTS.test('{ ...r, reply: text, userEdited: true, state: nextState, error: null }')
+    ).toBe(false);
+    expect(
+      EDIT_CLEARS_CONCEPTS.test(
+        [
+          "{",
+          "  ...r,",
+          "  reply: text,",
+          "  userEdited: true,",
+          "  state: nextState,",
+          "  error: null,",
+          "}",
+        ].join("\n")
+      )
     ).toBe(false);
   });
 

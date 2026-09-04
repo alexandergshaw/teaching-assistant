@@ -134,6 +134,138 @@ export function parseReplyConcepts(raw: unknown, max = 3): string[] {
   return result.slice(0, max);
 }
 
+// docs/post-questions-acceptance-criteria.md Q3: parsing for the new
+// "questions" output. Lenient, dependency-free (this file's own :3-4 import
+// rule) and never throws - the model is not a validator.
+export const MAX_POST_QUESTIONS = 3;
+export const MAX_QUESTION_CHARS = 300;
+export const MAX_ANSWER_CHARS = 1200;
+
+// Q3: "after trimming, a question, answer or needsYou matching this pattern
+// is treated as absent." Applied to the WHOLE trimmed field value, before
+// any further per-field processing (paragraph splitting for answer, the
+// truncation cap for question/needsYou).
+const POST_QUESTION_PLACEHOLDER_RE = /^(n\/?a|none|null|nil|-|no|not applicable)\.?$/i;
+
+function isPostQuestionPlaceholder(value: string): boolean {
+  return POST_QUESTION_PLACEHOLDER_RE.test(value.trim());
+}
+
+// Q3: "Key aliases, read in this order and only when the canonical key is
+// not a string" - the FIRST key in `keys` whose value on `obj` is actually a
+// string wins; a non-string value (or an absent key) falls through to the
+// next alias, never coerced.
+function firstStringField(obj: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+}
+
+// Q3: "answer: a string, or an array of strings joined with '\n\n'." The
+// same alias order as firstStringField, but a field's own value is also
+// accepted when it is an array of strings (only for "answer" - question and
+// needsYou are always plain strings).
+function resolveAnswerRaw(obj: Record<string, unknown>): string {
+  for (const key of ["answer", "a", "response"]) {
+    const value = obj[key];
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      const strings = value.filter((v): v is string => typeof v === "string");
+      if (strings.length > 0) return strings.join("\n\n");
+    }
+  }
+  return "";
+}
+
+// Q3: "answer" paragraph normalisation - split on a blank line, collapse
+// internal whitespace to one space inside each paragraph, trim, drop empty
+// paragraphs, rejoin with "\n\n". The whole-value placeholder check (see
+// isPostQuestionPlaceholder above) runs BEFORE splitting, since a
+// placeholder like "N/A" is a statement about the whole field, not a
+// paragraph within it.
+function normalizePostQuestionAnswer(raw: string): string {
+  const wholeTrimmed = raw.trim();
+  if (!wholeTrimmed || isPostQuestionPlaceholder(wholeTrimmed)) return "";
+  const paragraphs = wholeTrimmed
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter((p) => p.length > 0);
+  const joined = paragraphs.join("\n\n");
+  return joined.length > MAX_ANSWER_CHARS ? truncateWithMarker(joined, MAX_ANSWER_CHARS) : joined;
+}
+
+// Q3: "implied" is true for boolean true, the strings "true"/"implicit"/
+// "implied" (case-insensitive), a "kind" or "type" key equal to
+// "implicit"/"implied", or explicit === false; everything else -> false.
+function parsePostQuestionImplied(obj: Record<string, unknown>): boolean {
+  const implied = obj.implied;
+  if (implied === true) return true;
+  if (typeof implied === "string" && ["true", "implicit", "implied"].includes(implied.trim().toLowerCase())) {
+    return true;
+  }
+  const kind = obj.kind;
+  if (typeof kind === "string" && ["implicit", "implied"].includes(kind.trim().toLowerCase())) return true;
+  const type = obj.type;
+  if (typeof type === "string" && ["implicit", "implied"].includes(type.trim().toLowerCase())) return true;
+  return obj.explicit === false;
+}
+
+/**
+ * Parse whatever shape the model actually returned for a post's "questions"
+ * array into `PostQuestion[]`. Lenient, dependency-free, never throws - see
+ * docs/post-questions-acceptance-criteria.md Q3 for the exact rule table
+ * this implements (key aliases, placeholder detection, truncate-not-drop
+ * for question/answer/needsYou, the answer/needsYou invariant, dedupe on
+ * postQuestionKey keeping the first occurrence, `max` applied LAST).
+ */
+export function parsePostQuestions(raw: unknown, max = MAX_POST_QUESTIONS): PostQuestion[] {
+  let items: unknown[];
+  if (Array.isArray(raw)) {
+    items = raw;
+  } else if (raw !== null && typeof raw === "object") {
+    items = [raw];
+  } else {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const result: PostQuestion[] = [];
+
+  for (const item of items) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const obj = item as Record<string, unknown>;
+
+    let question = (firstStringField(obj, ["question", "q", "text"]) ?? "").replace(/\s+/g, " ").trim();
+    if (isPostQuestionPlaceholder(question)) question = "";
+    if (!question) continue;
+    if (question.length > MAX_QUESTION_CHARS) question = truncateWithMarker(question, MAX_QUESTION_CHARS);
+
+    const answer = normalizePostQuestionAnswer(resolveAnswerRaw(obj));
+
+    let needsYou = (firstStringField(obj, ["needsYou", "needs_you", "needsInstructor"]) ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (isPostQuestionPlaceholder(needsYou)) needsYou = "";
+    if (needsYou.length > MAX_QUESTION_CHARS) needsYou = truncateWithMarker(needsYou, MAX_QUESTION_CHARS);
+
+    // Invariant (Q1): answer !== "" || (needsYou !== undefined && needsYou
+    // !== ""). Neither is set -> drop the item.
+    if (!answer && !needsYou) continue;
+
+    const key = postQuestionKey(question);
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const parsed: PostQuestion = { question, implied: parsePostQuestionImplied(obj), answer };
+    if (needsYou) parsed.needsYou = needsYou;
+    result.push(parsed);
+  }
+
+  return result.slice(0, max);
+}
+
 // docs/discussion-thread-structure-acceptance-criteria.md T2: the three-
 // member set a captured post's thread position can hold. Lives HERE (not in
 // discussion-capture.ts or discussion-replies.ts) for the same reason
@@ -212,18 +344,85 @@ export const REPLY_FORMALITY_LABELS: Record<ReplyFormality, string> = {
  * C4b-i: the DEFAULTS ARE NOT INERT - two ingredients are pre-selected and
  * addressByName is ON, so the first capture after this ships produces visibly
  * different replies with no action taken. That is intended.
+ *
+ * docs/post-questions-acceptance-criteria.md Q1: `answerQuestions` is a
+ * REQUIRED field (not optional) - a caller that forgets it must fail to
+ * compile, not silently read as OFF. Default ON, the same C4b-i decision the
+ * other composition controls already took: the first capture after this
+ * ships produces the new "questions the post asks, each with an answer"
+ * output with no action taken.
  */
 export interface ReplyCompositionSettings {
   ingredients: readonly ReplyIngredient[];
   addressByName: boolean;
   formality: ReplyFormality;
+  answerQuestions: boolean;
 }
 
 export const DEFAULT_REPLY_COMPOSITION: ReplyCompositionSettings = {
   ingredients: ["compliment", "deeper-question"],
   addressByName: true,
   formality: "balanced",
+  answerQuestions: true,
 };
+
+/**
+ * docs/post-questions-acceptance-criteria.md Q1: a question the post asked
+ * or implied, with its own answer - a THIRD per-row output alongside the
+ * reply and its concepts. `answer` is "" exactly when only `needsYou` is
+ * set (an answer the model cannot honestly write without a course fact only
+ * the instructor knows); an item satisfying neither is dropped at parse
+ * time (parsePostQuestions below). `answer` never carries instructor-facing
+ * text - that goes in `needsYou`, which is never shown to a student.
+ */
+export interface PostQuestion {
+  question: string;
+  implied: boolean;
+  answer: string;
+  needsYou?: string;
+}
+
+/**
+ * Truncate `text` to at most `max` characters, cut back to the last space
+ * when one exists past index 0 (the same word-boundary rule
+ * `deriveResourceConcept` above uses), then append `marker`. Returns `text`
+ * unchanged - no marker - when it is already `max` characters or shorter.
+ * Three ASCII periods by default, never U+2026. Shared by parsePostQuestions
+ * (question/answer/needsYou), the run log, and Group C's aria clamp - one
+ * implementation, not four restatements of the same rule.
+ */
+export function truncateWithMarker(text: string, max: number, marker = "..."): string {
+  if (text.length <= max) return text;
+  const truncated = text.slice(0, max);
+  const lastSpace = truncated.lastIndexOf(" ");
+  const cut = lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
+  return `${cut}${marker}`;
+}
+
+// docs/post-questions-acceptance-criteria.md Q1: surrounding straight or
+// curly double quotes stripped by postQuestionKey below. Only DOUBLE quote
+// characters - the AC's own worked example never mixes in a single quote.
+const POST_QUESTION_KEY_QUOTES = new Set(['"', "“", "”"]);
+
+/**
+ * The dedupe identity for a question's text: lowercase, whitespace
+ * collapsed to single spaces, trimmed, surrounding straight or curly double
+ * quotes stripped (repeatedly, so a doubly-quoted value collapses the same
+ * as a singly-quoted one), trailing "?", "." and "!" characters stripped.
+ * Used by parsePostQuestions (Q3) and the row-storage coercer (Q6) so
+ * identity is unique by construction on both entry paths.
+ */
+export function postQuestionKey(question: string): string {
+  let key = question.toLowerCase().replace(/\s+/g, " ").trim();
+  while (
+    key.length >= 2 &&
+    POST_QUESTION_KEY_QUOTES.has(key[0]) &&
+    POST_QUESTION_KEY_QUOTES.has(key[key.length - 1])
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  return key.replace(/[?.!]+$/, "").trim();
+}
 
 /**
  * Coerce an arbitrary value (localStorage, a form control, an untrusted
@@ -515,6 +714,40 @@ export function buildReplyDraftingPrompt(
         ].join("\n")
       : "";
 
+  // docs/post-questions-acceptance-criteria.md Q2: emitted ONLY when
+  // composition.answerQuestions is true - with it false the returned prompt
+  // is byte-identical to the pre-feature prompt for the same other inputs.
+  // Placed immediately after greetingNamesBlock and before "THE POSTS",
+  // never restated anywhere else in this builder.
+  const questionsBlock = composition.answerQuestions
+    ? [
+        "QUESTIONS IN THE POST",
+        "- Separately from the reply, list the questions each post asks. Include every question the post asks outright, and any question it only implies - a stated confusion, a wrong assumption stated as fact, or something the writer says they could not work out. Phrase an implied question as the question the writer would have asked. One entry per distinct question; split a compound sentence only when its parts need different answers.",
+        "- Answer each one in plain prose, 1 to 4 sentences, in your own voice, pitched at the people in this discussion. No markdown, no bullet lists. Write each answer to the person who asked, so that it reads on its own as a paragraph of the reply with the question never shown: its first sentence names the point being answered, and it never begins with Yes, No, or a word that refers back to the question.",
+        '- If answering would require a fact about the course that is not written in the posts or the reference material shown to you here - a due date, a policy, what a reading or the assignment says, a grade - leave "answer" empty and name that fact in "needsYou" as a short sentence fragment addressed to the instructor: the thing itself, not an instruction. Give "needsYou" alongside an "answer" only when the answer is partial and the rest depends on such a fact. Nothing addressed to the instructor ever goes in "answer". Never write a placeholder such as null, N/A or None for either field - leave the key out.',
+        "- Do not list a question the post itself goes on to answer, a question it repeats from the discussion prompt in order to answer it, or a rhetorical question. A post with no questions gets an empty array.",
+        '- The reply may still do what the rules above ask of it, including a brief correction, but it must not reproduce an answer written in "questions". A clause is enough; the full answer belongs in "questions", where the instructor decides whether to use it. If the reply mentions a question, it does not say whether, where or by whom it will be answered.',
+      ].join("\n")
+    : "";
+
+  // docs/post-questions-acceptance-criteria.md Q2(b): the element-shape line
+  // gains a "questions" key ONLY when the flag is on; the OFF branch is
+  // byte-identical to today's line.
+  const elementShapeLine = composition.answerQuestions
+    ? 'Each element is {"post": <the POST number>, "reply": "...", "concepts": ["...", "..."], "questions": [...]} - the number, not the name.'
+    : 'Each element is {"post": <the POST number>, "reply": "...", "concepts": ["...", "..."]} - the number, not the name.';
+
+  // Q2(b): a new array element immediately after the "concepts" line and
+  // before "Write the reply as plain text...", "" (dropped) when the flag
+  // is off. The within-element order reply, concepts, questions is
+  // load-bearing (see this function's own header comment on ordering
+  // elsewhere in this file for why - the data pass measured truncation
+  // recovery against this exact order) - never reorder, never move
+  // "questions" into a second top-level array.
+  const questionsOutputLine = composition.answerQuestions
+    ? '"questions" is an array, at most 3 per post - when there are more, keep the ones asked outright first, then the ones that matter most. Each is {"question": "...", "implied": true or false, "answer": "..."}, plus "needsYou": "..." only when the rules above call for it. It does not count toward the element count above.'
+    : "";
+
   return [
     AUDIENCE_STANCE[audience],
     formalityClause(composition.formality),
@@ -546,6 +779,7 @@ export function buildReplyDraftingPrompt(
 
     ingredientsBlock,
     greetingNamesBlock,
+    questionsBlock,
 
     "THE POSTS",
     posts
@@ -559,9 +793,10 @@ export function buildReplyDraftingPrompt(
 
     "OUTPUT",
     `Return ONLY a JSON array with exactly ${posts.length} elements, and nothing else.`,
-    'Each element is {"post": <the POST number>, "reply": "...", "concepts": ["...", "..."]} - the number, not the name.',
+    elementShapeLine,
     `Include every post number from 1 to ${posts.length}, in order.`,
     '"concepts" is one to three short noun phrases (2 to 5 words each) naming the ideas that reply discusses, copied from the reply\'s own wording. Never a person\'s name, never an idea the reply does not mention. It does not count toward the element count above.',
+    questionsOutputLine,
     // C3-i: this line CHANGED (not supplemented) - "if you need one" was a
     // suggestion; C3 requires a paragraph break, with a blank line, for a
     // reply over roughly 60 words.

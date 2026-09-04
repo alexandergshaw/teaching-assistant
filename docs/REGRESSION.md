@@ -38948,3 +38948,240 @@ sequential model calls with no count confirm and no Stop; `checkSent` has
 no failure text of its own; the 5-page Canvas cap is silent; a launcher
 button for `openRecordingTool({ view: "messages" })`; group conversations
 and attachments; Outlook as a send target; a `groundingNow` seam.
+
+## 394. A third per-row output on the Discussion replies tool: the questions each post asks, explicit or implied, each with an answer the instructor can insert, copy or dismiss
+
+Owner request 2026-09-04: "i need another output to the discussion board
+screen reader to be answering questions (explicit or implicit) within the
+original posts." AC: `docs/post-questions-acceptance-criteria.md` (revision
+2, as built). Baseline: entries 361-393 already cover this surface; no fresh
+baseline was needed.
+
+**What it is.** A row on the Discussion replies sub-tab already carried two
+outputs (the reply with its concept terms, and the resources). It now
+carries a third: `PostQuestion[]` - the questions the post asks outright
+("Asked") or only implies ("Implied": a stated confusion, a wrong assumption
+stated as fact, something the writer says they could not work out), each with
+an answer written TO THE STUDENT that stands on its own as a paragraph. When
+answering would need a course fact the model cannot know - a due date, a
+policy, what a reading says, a grade - the item carries no answer and instead
+a "Needs you" note written TO THE INSTRUCTOR naming the fact to supply. Both
+together is legal: a partial answer plus the gap. The prompt's standing rule
+(never state a course fact not written in the posts shown) is extended to the
+new output, not relaxed.
+
+Why a separate output rather than folding the answer into the reply, which is
+what the sibling Message replies tool's `"answer"` ingredient does: on a
+discussion board, choosing NOT to answer in the thread is a real pedagogical
+move, and answering privately is another. The block gives that choice per
+question - Insert (a MOVE: `appendAnswerToReply` through `editReply`, then
+the item is removed), Copy (the answer alone; the item stays), or nothing at
+all, since an un-inserted item never reaches the clipboard. Remove is a
+one-click dismiss with no confirm, because it discards a model suggestion,
+not the instructor's work.
+
+**One setting, ON by default.** `ReplyCompositionSettings` gains a REQUIRED
+fourth field `answerQuestions` (required, not optional, so a caller that
+forgets it fails to compile rather than silently reading as OFF), persisted
+under `ta-rec-disc-answer-questions`, controlled by a second checkbox beside
+address-by-name ("Draft answers to the questions in each post"), folded into
+the "Redraft every reply" arming signature as its seventh field. With it OFF
+the drafting prompt is byte-identical to before this entry and
+`generationConfig` is exactly `{ temperature: 0.7, maxOutputTokens: 4096 }`;
+with it ON the budget is 8192. A model that volunteers questions while the
+setting is off has them dropped at the action - the setting gates the OUTPUT,
+not only the prompt.
+
+**Generated in the SAME drafting call as the reply** - no second pass, no
+second queue, no new state machine. The element order (reply, concepts,
+questions) is load-bearing and measured: `parseLenientJsonArray` recovers
+every complete element on 60% of mid-array truncation positions with this
+order versus 19% with questions first. `parsePostQuestions` is lenient in the
+shape of `parseReplyConcepts` (key aliases, placeholder values like "N/A"
+treated as absent, a lone object wrapped, an array answer joined, `implied`
+read from strings/`kind`/`type`/`explicit`), truncates an over-long question
+rather than dropping it, drops an item satisfying neither half of the
+invariant, and dedupes on `postQuestionKey` (case, whitespace, wrapping
+quotes and trailing `?.!` all normalised).
+
+**The lifecycle asymmetry, which is a precondition and not a preference.** A
+hand edit CLEARS `concepts` (they describe the generated reply) but KEEPS
+`questions` (they describe the post, which the edit did not change). This is
+required by Insert: Insert routes through `editReply`, so clearing questions
+on edit would make inserting the answer to question 1 delete questions 2 and
+3 on the same row. Turning the setting off leaves existing questions alone
+(`undefined` = leave, `[]` = the model found none this time = clear), the
+same rule unchecking "resources" already follows for existing links.
+
+**The run log grew a drafting event stream, which it never had.** Every
+drafting-side fact in this log used to be inferred from live rows at download
+time, which cannot answer "was the setting on for the dispatch that drafted
+row X" - a row with no questions is otherwise ambiguous four ways. `drafts`
+is now one entry per `draftAction` call carrying the dispatch-time settings,
+the outcome, replies returned, rows missing, questions returned/dropped/
+needing you, `finishReason`, `candidatesTokenCount` and `elapsedMs` - the
+last two being numbers the code already received from the provider and threw
+away. Per row the log carries `questionCount`, `questionsNeedingYou`, and
+each item's question and needsYou REDACTED through the same
+`redactAuthorNameFromText` leaf `resourceQuery` already uses, plus the
+answer's LENGTH ONLY. The answer text never leaves the browser in an export:
+this log carried no unredacted student content before this entry and still
+does not.
+
+### How it was built
+
+AC written first, then five concurrent pre-code passes (adversarial sabotage
+check, architect, UX, data engineer, aesthetics) whose disagreements are
+recorded in the AC's section 5 with the decision: no visible heading but an
+accessible name on the list (aesthetics over UX); a text Copy button with a
+transient confirmation line rather than an icon swap (aesthetics over UX);
+Copy's announcement names the question, because identical announce text is
+not re-spoken by a live region (UX over architect); the CSV counts go before
+the resource columns to keep an existing frozen pin true (sabotage over
+architect). A second sabotage check against revision 2 found thirteen more
+citation and mechanism errors - the key-count pin is derived by regex and
+lives at a different line, the orphan-class ratchet is an exact tree-wide
+total that must NOT be touched, the CSV section is named `=== Batches ===`,
+the widened action return needed the conditional-spread idiom so thirteen
+existing deep-equals would keep passing - and those were relayed to the three
+implementer groups mid-flight.
+
+Three implementer groups on disjoint file sets (prompt+server; rows/loop/log/
+persistence; UI). Group B was cut off by a session limit mid-edit; its
+remaining two gaps (the orchestrator's sealed return and the filtering
+wrapper) were finished by hand.
+
+### Five test failures at the wave gate, and what they were
+
+Four were over-specific source-text pins, the repo's own recorded trap:
+regexes written against single-line code that this feature reformatted across
+several lines, plus one pinning `applyReply`'s "four-argument signature" that
+a fifth parameter broke. The code was correct in every case; the pins were
+loosened to the FACT and the ORDERING rather than the spelling, and each
+loosened pin was then re-proved by sabotage (deleting the gated fifth
+argument, and deleting `concepts: undefined` from `editReply`, each turn
+their pin red).
+
+The fifth was a real defect in a new test: the discard-path fixture queued a
+`userEdited` row with `force: false`, which `isDispatchableDraftItem` refuses,
+so the loop skipped the row and the path under test never ran. It asserted on
+an empty array. Fixed by forcing the dispatch, which is what Retry and
+Redraft actually do.
+
+`discussion-replies-log.test.ts` reached 993 lines - seven from the ceiling -
+so its post-questions block was split into
+`discussion-replies-log.questions.test.ts`, with its `row` helper duplicated
+rather than imported (importing a helper from another `*.test.ts` re-runs
+that file's describe blocks).
+
+### The verification pass, and the three real defects it found
+
+A fresh reviewer read the as-built diff against the AC. Ten findings, all
+resolved before push; the three that mattered:
+
+1. **The length-limit reason was lost on the exact failure this feature
+   creates.** Only the action's SUCCESS branch had been widened with
+   `finishReason`/`usage`/`elapsedMs`. But the commonest truncation outcome -
+   ~25% of cut positions by this feature's own measurement - is
+   `parseLenientJsonArray` returning null, which is the ERROR branch: the
+   instructor saw "Could not read the drafted replies from the model output."
+   with nothing about length, the draft log recorded `finishReason: ""` for
+   precisely the calls that hit the limit, and `draftCallsHitLengthLimit`
+   structurally undercounted. The Limits bullet claiming the loop names the
+   length limit was false for that path. Fixed by widening the failure branch
+   too, reading it into the error-path draft event, and routing both failure
+   paths through one exported `missingRowMessage` owner - the provider's own
+   text is kept alongside the friendlier sentence, never replaced.
+2. **The list's accessible name was silently dropped in Safari/VoiceOver.**
+   `.resourceList` sets `list-style: none`, and WebKit strips list semantics
+   from such a list - taking the `aria-label` with it. Since the design
+   traded away a visible heading specifically because that label would name
+   the block, the block had no name at all on that browser and merged into
+   the resources list beneath it. Fixed with `role="list"`.
+3. **The Insert announcement was constant per row, so the second insert was
+   silent.** The panel's live region is `setAdhocAnnouncement(text)`: setting
+   an identical string re-renders nothing and is never spoken. Copy had
+   already been fixed for this exact mechanism by naming the question;
+   Insert had not, and inserting two or three answers from one row is the
+   designed flow. Both announcements are now built by exported functions in
+   the pure leaf - which is what gives them a test surface at all, since
+   nothing renders in this repo's vitest.
+
+Also fixed: a whitespace-only persisted question survived the invariant
+coercer and rendered a blank item title (`"   "` is truthy - it is trimmed
+before the non-empty test now); a cap test written entirely in terms of the
+imported constant, so raising `MAX_POST_QUESTIONS` to 4 kept it green while
+the prompt still told the model "at most 3" (literals now, plus a pin that
+the prompt states the constant's own value); the 60-character clamp restated
+inline in the component rather than reusing the leaf's; and a test titled
+"is scoped by row only" that called a pure single-row function and therefore
+could not fail on row scoping - retitled to the non-mutation property it
+actually proves, with the real scoping left to the mutator's own test.
+
+Each of the three fixes above was proved by sabotage: breaking the
+error-path reason turns three tests red, breaking the announcement two,
+breaking the trim two.
+
+One verifier finding was rejected after checking: the `eslint-disable` on a
+pre-existing rest-sibling destructure is NOT an unused directive - removing
+it produces two real warnings, and this project's gate is 0 errors AND 0
+warnings.
+
+### Gates
+
+tsc 0 errors; eslint 0 errors and 0 warnings across the recording folder and
+the touched lib/actions files; full vitest green; no
+emoji, no BOM, no CRLF; every touched file under the 1000-line ceiling
+(largest: `DiscussionReplyRow.tsx` 952, `useReplyRows.ts` 947,
+`DiscussionRepliesPanel.tsx` 939, `discussion-replies-log.test.ts` 930); the
+orphan-class ratchet unchanged at 137, all three new CSS classes referenced.
+
+### Limits - read before trusting this in a live course
+
+- Same-call generation multiplies each drafting batch's output by 3.5-4x with
+  the setting on, and batches are sequential: a whole-table redraft takes
+  roughly three times longer than with it off. The `drafts` log section
+  carries the real `elapsedMs` per call, so the estimate can be replaced with
+  a measurement after one real run.
+- At every parse cap simultaneously (3 questions x 300-char question x
+  1200-char answer x 5 posts) the response does not fit 8192 output tokens.
+  The loop then marks the missing rows failed with a message that names the
+  length limit, and Retry usually lands.
+- `parseLenientJsonArray` loses the last COMPLETE element on roughly 60% of
+  truncation positions for the pre-existing shape and fails the whole batch
+  on 25-40%. Measured during this feature, NOT fixed by it - 14 callers, and
+  it needs a frozen oracle of its own.
+- The log's per-row question counts are "still showing", not "found": Insert
+  and Remove both delete the item from the row. The `drafts` section carries
+  "found".
+- The log export carries redacted question text and the answer's length,
+  never the answer text. Full answers in an export would be a deliberate
+  download-time opt-in; this is not that.
+- A row whose table write fails on quota loses its questions with everything
+  else - there is no partial write, and the existing storage-full message is
+  the only voice for it. Measured: 3 realistic questions add ~1.5KB per row,
+  ~0.7MiB across a full 500-row table against a ~5MiB origin quota.
+- The answer paragraph is 14px under a 13px question title - the same size
+  inversion the resources list beneath it already has. Deliberately NOT fixed
+  one-sidedly: correcting only the new list would create a fresh
+  inconsistency with its sibling. Both lists together are the follow-up.
+- `questionsDropped` conflates two causes: hitting the 3-question cap and
+  dropping a malformed item are indistinguishable in the log's column, and a
+  `questions` value that is neither an array nor an object reports nothing
+  dropped at all.
+- A needs-you-only item has no Copy control - both Insert and Copy are gated
+  on a non-empty answer - so the one output that most needs carrying
+  elsewhere is the one the block will not put on the clipboard. Remove is its
+  only control.
+- Nothing renders in this repo's vitest (node env), so every UI and
+  accessibility requirement here - focus targets after Insert and Remove, the
+  omitted empty paragraph, the list's accessible name, controls staying live
+  on a skipped row - is verified by READING, not by a green suite.
+
+**Follow-ups, none requested.** A "Needs you" status-filter chip in the
+toolbar (the real click sink is finding which rows need the instructor across
+30 rows); the `parseLenientJsonArray` truncation defect above; the
+13px-title-over-14px-body size inversion across BOTH the resources and
+questions lists; gating `clearHandled` on the
+insert guard in both wrappers, so a no-op Insert stops clearing the copied
+badge; a caret-to-end after the post-Insert focus move.

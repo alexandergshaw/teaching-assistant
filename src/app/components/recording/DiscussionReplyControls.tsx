@@ -43,6 +43,10 @@ const FORMALITY_LABEL_ID = "discussion-reply-formality-label";
 // SHOULD 3 fixer pass: id for the address-by-name checkbox's caveat hint,
 // referenced by the checkbox's own aria-describedby below.
 const ADDRESS_BY_NAME_HINT_ID = "discussion-reply-address-by-name-hint";
+// docs/post-questions-acceptance-criteria.md Q8: id for the new
+// "Draft answers to the questions in each post" checkbox's own hint,
+// referenced by that checkbox's own aria-describedby below.
+export const ANSWER_QUESTIONS_HINT_ID = "discussion-reply-answer-questions-hint";
 
 // C4a: three stops, marks built once from the same REPLY_FORMALITY_STOPS
 // order the prompt builder reads, so the slider's own visible order can
@@ -122,31 +126,57 @@ export default function DiscussionReplyControls({
         ))}
       </TextField>
 
-      <div>
-        <FormControlLabel
-          control={
-            <Checkbox
-              size="small"
-              checked={composition.addressByName}
-              onChange={(e) => onChange({ ...composition, addressByName: e.target.checked })}
-              // SHOULD 3 fixer pass: ties the checkbox to its own caveat
-              // hint below, the same idiom DiscussionReplyRow.tsx already
-              // uses for its "(derived)"/"(no greeting)" hints - a `title`
-              // alone (or nothing at all, as this control had before) never
-              // reaches assistive tech.
-              aria-describedby={ADDRESS_BY_NAME_HINT_ID}
-            />
-          }
-          // SHOULD 2 fixer pass: this toggle also applies to the peers
-          // register, where the person addressed is a fellow educator, not
-          // a student - "the student's first name" was false for half of
-          // this control's uses. "the person's" is true in both registers.
-          label="Open each reply with the person's first name"
-        />
-        <p id={ADDRESS_BY_NAME_HINT_ID} className={styles.fieldHint}>
-          Uses the name as captured off the screen; skips the greeting for a post where a clean first name can&apos;t
-          be read.
-        </p>
+      {/* docs/post-questions-acceptance-criteria.md Q8: the bare <div> that
+          used to wrap only the address-by-name pair now stacks TWO such
+          pairs - `controls.stack` (RecordingControls.module.css) gives 8px
+          between them and 0 within each (a plain <div>, not a flex child,
+          carries no gap of its own); `controls.fieldGrow`
+          (`flex: 1 1 300px`) is the same flex-grow rule the other rows in
+          this cluster use on their own taller composite block. */}
+      <div className={`${controls.stack} ${controls.fieldGrow}`}>
+        <div>
+          <FormControlLabel
+            control={
+              <Checkbox
+                size="small"
+                checked={composition.addressByName}
+                onChange={(e) => onChange({ ...composition, addressByName: e.target.checked })}
+                // SHOULD 3 fixer pass: ties the checkbox to its own caveat
+                // hint below, the same idiom DiscussionReplyRow.tsx already
+                // uses for its "(derived)"/"(no greeting)" hints - a `title`
+                // alone (or nothing at all, as this control had before) never
+                // reaches assistive tech.
+                aria-describedby={ADDRESS_BY_NAME_HINT_ID}
+              />
+            }
+            // SHOULD 2 fixer pass: this toggle also applies to the peers
+            // register, where the person addressed is a fellow educator, not
+            // a student - "the student's first name" was false for half of
+            // this control's uses. "the person's" is true in both registers.
+            label="Open each reply with the person's first name"
+          />
+          <p id={ADDRESS_BY_NAME_HINT_ID} className={styles.fieldHint}>
+            Uses the name as captured off the screen; skips the greeting for a post where a clean first name can&apos;t
+            be read.
+          </p>
+        </div>
+        <div>
+          <FormControlLabel
+            control={
+              <Checkbox
+                size="small"
+                checked={composition.answerQuestions}
+                onChange={(e) => onChange({ ...composition, answerQuestions: e.target.checked })}
+                aria-describedby={ANSWER_QUESTIONS_HINT_ID}
+              />
+            }
+            label="Draft answers to the questions in each post"
+          />
+          <p id={ANSWER_QUESTIONS_HINT_ID} className={styles.fieldHint}>
+            Listed under the reply: what the post asks or implies, each with an answer you can insert, copy, or
+            dismiss. The reply itself leaves the answering to you.
+          </p>
+        </div>
       </div>
 
       {/* Fixer pass finding 5: `controls.sliderBox` (RecordingControls.module

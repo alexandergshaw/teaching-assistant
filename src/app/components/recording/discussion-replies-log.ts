@@ -58,6 +58,11 @@ import { CONCEPT_JOINER } from "./discussion-serialization";
 // above stays byte-identical to what discussionReplyResources.wiring.test.ts's
 // F7 block pins across all three files.
 import type { ResourceSearchOutcome } from "./discussion-serialization";
+// docs/post-questions-acceptance-criteria.md Q9: the row-entry redaction
+// step reuses the SAME leaf `resourceQuery` already goes through - one
+// implementation, two callers (a "use client" hook and this dependency-free
+// module), never a second hand-rolled name-stripping pass.
+import { redactAuthorNameFromText } from "@/lib/discussion-reply-redact";
 
 // ---------------------------------------------------------------------------
 // Event-stream records. Each carries the ISO 8601 timestamp of the event -
@@ -161,6 +166,45 @@ export interface DiscussionRepliesLogRetry {
   rowId: string;
 }
 
+/** docs/post-questions-acceptance-criteria.md Q5/Q9: one `draftAction` call
+ *  (one batch dispatched by the drafting queue), collected the moment its
+ *  result (or its catch) resolves - `discussion-draft-loop.ts`'s
+ *  `runDraftLoop` pushes exactly one of these per call, on both the `ok` and
+ *  `error` paths. Answers the diagnostic questions this log exists for: was
+ *  the "answer questions" setting on for the dispatch that drafted row X,
+ *  how many questions did the model return and how many did the server
+ *  drop, were any flagged "needs you", and how long did the call take (did
+ *  it hit the length limit). `rowIds` is the dispatched ids, IN ORDER;
+ *  `ingredients`/`addressByName`/`formality`/`answerQuestions` are the
+ *  DISPATCH-TIME composition, not the CURRENT one (that is
+ *  `DiscussionRepliesLogInput.answerQuestions` below, labelled "at export
+ *  time" in the CSV) - a returning instructor asking "was this setting on
+ *  when THIS batch drafted" needs the value that actually reached the
+ *  model, which can differ from what the checkbox shows now. `error` is
+ *  `""` when `outcome` is `"ok"`. `candidatesTokenCount` and `elapsedMs` are
+ *  `null` when absent (an error, or a success the server action's own
+ *  LlmResult did not carry usage/timing for) - never `undefined`, so the
+ *  exported JSON always carries the key. */
+export interface DiscussionRepliesLogDraft {
+  at: string;
+  rowIds: string[];
+  audience: string;
+  ingredients: string[];
+  addressByName: boolean;
+  formality: string;
+  answerQuestions: boolean;
+  outcome: "ok" | "error";
+  error: string;
+  repliesReturned: number;
+  rowsMissing: number;
+  questionsReturned: number;
+  questionsNeedingYou: number;
+  questionsDropped: number;
+  finishReason: string;
+  candidatesTokenCount: number | null;
+  elapsedMs: number | null;
+}
+
 /** One reply row's full debugging picture, read from the live `ReplyRow` at
  * the moment the log is built (download time) - never accumulated as its own
  * event stream, since every field here is already the row's current,
@@ -183,7 +227,17 @@ export interface DiscussionRepliesLogRetry {
  * `rowsWithNoResources` below counts against, rather than the outcome
  * field's presence, which an instructor's own hand edit (clearing
  * `resources` without leaving an outcome) does not set. It also backs the
- * CSV's `Links` column (see `formatDiscussionRepliesLogCsv`'s own comment). */
+ * CSV's `Links` column (see `formatDiscussionRepliesLogCsv`'s own comment).
+ * docs/post-questions-acceptance-criteria.md Q9: `questionCount` and
+ * `questionsNeedingYou` are the row's OWN "questions still showing" counts
+ * (Insert and Remove both delete the item from the row, so this is "still
+ * showing", not "found" - the drafts section above carries "found"; see
+ * Limits). `questions` carries the redacted question/needsYou TEXT plus the
+ * answer's LENGTH ONLY - the answer text itself is never carried into this
+ * log (a download-time opt-in would be a new, explicit feature, not this
+ * one). `question`/`needsYou` are passed through `redactAuthorNameFromText`
+ * at log-build time, same as `resourceQuery` already is; `needsYou` is `""`
+ * when the item has none. */
 export interface DiscussionRepliesLogRowEntry {
   rowId: string;
   author: string;
@@ -201,6 +255,9 @@ export interface DiscussionRepliesLogRowEntry {
   resourceQuerySource: string;
   resourceSearchOutcome: ResourceSearchOutcome | null;
   resourceCount: number;
+  questionCount: number;
+  questionsNeedingYou: number;
+  questions: Array<{ question: string; implied: boolean; needsYou: string; answerChars: number }>;
 }
 
 /** What `useDiscussionReplies.ts` collects, before the `rows` snapshot is
@@ -219,12 +276,22 @@ export interface DiscussionRepliesLogInput {
   ingredients: readonly string[];
   addressByName: boolean;
   formality: string;
+  // docs/post-questions-acceptance-criteria.md Q9: the CURRENT setting, read
+  // at export time (useDiscussionRepliesRunLog.ts, from `composition`) -
+  // labelled "Answer questions (at export time)" in the CSV, honest the same
+  // way "Stalled at export time" already is; each individual dispatch's OWN
+  // value lives on its own `drafts` entry below instead.
+  answerQuestions: boolean;
   framesCaptured: number;
   droppedFrames: number;
   stalled: boolean;
   batches: readonly DiscussionRepliesLogBatch[];
   notices: readonly DiscussionRepliesLogNotice[];
   retries: readonly DiscussionRepliesLogRetry[];
+  /** Q5/Q9: one entry per `draftAction` call, collected in
+   *  useDiscussionReplies.ts (a `useState` array like `logRetries`), pushed
+   *  through `runDraftLoop`'s `pushDraftEvent` dep. */
+  drafts: readonly DiscussionRepliesLogDraft[];
 }
 
 /** The whole run record: everything `DiscussionRepliesLogInput` collects,
@@ -246,6 +313,14 @@ export function buildDiscussionRepliesLogRowEntry(
   retriedIds: ReadonlySet<string>
 ): DiscussionRepliesLogRowEntry {
   const parent = resolveDraftParent(row, rawRows);
+  // Q9: redacted at log-build time, the same leaf `resourceQuery` already
+  // goes through - never the answer text, only its length.
+  const questions = (row.questions ?? []).map((q) => ({
+    question: redactAuthorNameFromText(q.question, row.author),
+    implied: q.implied,
+    needsYou: q.needsYou ? redactAuthorNameFromText(q.needsYou, row.author) : "",
+    answerChars: q.answer.length,
+  }));
   return {
     rowId: row.id,
     author: row.author,
@@ -263,6 +338,9 @@ export function buildDiscussionRepliesLogRowEntry(
     resourceQuerySource: row.resourceQuerySource ?? "",
     resourceSearchOutcome: row.resourceSearchOutcome ?? null,
     resourceCount: row.resources?.length ?? 0,
+    questionCount: questions.length,
+    questionsNeedingYou: questions.filter((q) => q.needsYou !== "").length,
+    questions,
   };
 }
 
@@ -327,6 +405,16 @@ export interface DiscussionRepliesLogSummary {
   // every done-with-nothing row, whether or not an outcome happens to be
   // attached.
   rowsWithNoResources: number;
+  // docs/post-questions-acceptance-criteria.md Q9: rows/questions counted
+  // off the CURRENT row snapshot (Limits: "still showing", not "found" -
+  // Insert and Remove both delete the item), plus the dispatch-level counts
+  // off the `drafts` stream (which DOES say "found", since a draft event is
+  // never mutated after the fact).
+  rowsWithQuestions: number;
+  questionsTotal: number;
+  questionsNeedingYou: number;
+  draftCalls: number;
+  draftCallsHitLengthLimit: number;
 }
 
 export function summarizeDiscussionRepliesRunLog(log: DiscussionRepliesRunLog): DiscussionRepliesLogSummary {
@@ -336,8 +424,14 @@ export function summarizeDiscussionRepliesRunLog(log: DiscussionRepliesRunLog): 
   let failed = 0;
   let retriedRows = 0;
   let rowsWithNoResources = 0;
+  let rowsWithQuestions = 0;
+  let questionsTotal = 0;
+  let questionsNeedingYouTotal = 0;
   for (const row of log.rows) {
     if (row.resourceState === "done" && row.resourceCount === 0) rowsWithNoResources += 1;
+    if (row.questionCount > 0) rowsWithQuestions += 1;
+    questionsTotal += row.questionCount;
+    questionsNeedingYouTotal += row.questionsNeedingYou;
     switch (row.draftState) {
       case "pending":
         neverDrafted += 1;
@@ -376,6 +470,15 @@ export function summarizeDiscussionRepliesRunLog(log: DiscussionRepliesRunLog): 
     }
   }
 
+  // Q9: draftCalls/draftCallsHitLengthLimit are drafts-derived (the "found"
+  // side of the log) - unlike rowsWithQuestions/questionsTotal/
+  // questionsNeedingYou above, which are rows-derived (the "still showing"
+  // side - see Limits).
+  let draftCallsHitLengthLimit = 0;
+  for (const d of log.drafts) {
+    if (d.finishReason === "MAX_TOKENS") draftCallsHitLengthLimit += 1;
+  }
+
   return {
     totalRows: log.rows.length,
     neverDrafted,
@@ -394,6 +497,11 @@ export function summarizeDiscussionRepliesRunLog(log: DiscussionRepliesRunLog): 
     noticeCount: log.notices.length,
     droppedFrames: log.droppedFrames,
     rowsWithNoResources,
+    rowsWithQuestions,
+    questionsTotal,
+    questionsNeedingYou: questionsNeedingYouTotal,
+    draftCalls: log.drafts.length,
+    draftCallsHitLengthLimit,
   };
 }
 
@@ -427,10 +535,22 @@ export function discussionRepliesLogSummaryLine(summary: DiscussionRepliesLogSum
     summary.rowsWithNoResources > 0
       ? ` ${summary.rowsWithNoResources} repl${summary.rowsWithNoResources === 1 ? "y" : "ies"} got no links.`
       : "";
+  // docs/post-questions-acceptance-criteria.md Q9: appended last, same
+  // conditional-clause idiom as `discarded`/`noLinks` above - present only
+  // when at least one question was found, so every existing frozen
+  // summary-line oracle (questionsTotal === 0) is unchanged.
+  const questions =
+    summary.questionsTotal > 0
+      ? ` ${summary.questionsTotal} question${summary.questionsTotal === 1 ? "" : "s"} found${
+          summary.questionsNeedingYou > 0
+            ? ` (${summary.questionsNeedingYou} need${summary.questionsNeedingYou === 1 ? "s" : ""} you)`
+            : ""
+        }.`
+      : "";
   return (
     `${summary.totalRows} ${replyWord} captured across ${summary.batchesSent} ${batchWord} - ` +
     `${summary.ready} drafted, ${summary.failed} failed, ${summary.neverDrafted} never drafted, ` +
-    `${summary.retriedRows} retried, ${summary.noticeCount} ${noticeWord}.${discarded}${noLinks}`
+    `${summary.retriedRows} retried, ${summary.noticeCount} ${noticeWord}.${discarded}${noLinks}${questions}`
   );
 }
 
@@ -455,6 +575,27 @@ export function discussionRepliesLogSummaryLine(summary: DiscussionRepliesLogSum
 
 const RUN_CSV_HEADER = ["Field", "Value"];
 const BATCH_CSV_HEADER = ["At", "Frames in batch", "Posts extracted", "Posts added", "Posts duplicate", "Capped", "Discarded", "Error"];
+// docs/post-questions-acceptance-criteria.md Q9: one row per draft event,
+// columns in DiscussionRepliesLogDraft's own field order.
+const DRAFT_CSV_HEADER = [
+  "At",
+  "Row IDs",
+  "Audience",
+  "Ingredients",
+  "Address by first name",
+  "Formality",
+  "Answer questions",
+  "Outcome",
+  "Error",
+  "Replies returned",
+  "Rows missing",
+  "Questions returned",
+  "Questions needing you",
+  "Questions dropped",
+  "Finish reason",
+  "Candidates token count",
+  "Elapsed ms",
+];
 const NOTICE_CSV_HEADER = ["At", "Text"];
 const RETRY_CSV_HEADER = ["At", "Row ID"];
 const ROW_CSV_HEADER = [
@@ -467,6 +608,12 @@ const ROW_CSV_HEADER = [
   "User edited",
   "Retried",
   "Error",
+  // Q9: reply-derived outputs before resource outputs, immediately after
+  // Error and before Resource state - the two question counts (never the
+  // question TEXT, which never appears in the CSV) - so the existing
+  // endsWith(",Links,Resource search outcome") pin stays true.
+  "Questions",
+  "Needs you",
   "Resource state",
   "Resource error",
   "Search terms",
@@ -491,6 +638,10 @@ export function formatDiscussionRepliesLogCsv(log: DiscussionRepliesRunLog): str
   lines.push(csvRow(["Ingredients", log.ingredients.join(", ")]));
   lines.push(csvRow(["Address by first name", yesNo(log.addressByName)]));
   lines.push(csvRow(["Formality", log.formality]));
+  // Q9: immediately after Formality, "at export time" like the Stalled line
+  // below - the CURRENT setting, not any one dispatch's own value (that
+  // lives on its own row in === Drafts === below).
+  lines.push(csvRow(["Answer questions (at export time)", yesNo(log.answerQuestions)]));
   lines.push(csvRow(["Frames captured", String(log.framesCaptured)]));
   lines.push(csvRow(["Batches sent", String(log.batches.length)]));
   lines.push(csvRow(["Dropped frames", String(log.droppedFrames)]));
@@ -510,6 +661,33 @@ export function formatDiscussionRepliesLogCsv(log: DiscussionRepliesRunLog): str
         yesNo(b.capped),
         yesNo(b.discarded),
         b.error,
+      ])
+    );
+  }
+
+  lines.push("");
+  lines.push(csvRow(["=== Drafts ==="]));
+  lines.push(csvRow(DRAFT_CSV_HEADER));
+  for (const d of log.drafts) {
+    lines.push(
+      csvRow([
+        d.at,
+        d.rowIds.join(";"),
+        d.audience,
+        d.ingredients.join(", "),
+        yesNo(d.addressByName),
+        d.formality,
+        yesNo(d.answerQuestions),
+        d.outcome,
+        d.error,
+        String(d.repliesReturned),
+        String(d.rowsMissing),
+        String(d.questionsReturned),
+        String(d.questionsNeedingYou),
+        String(d.questionsDropped),
+        d.finishReason,
+        d.candidatesTokenCount === null ? "" : String(d.candidatesTokenCount),
+        d.elapsedMs === null ? "" : String(d.elapsedMs),
       ])
     );
   }
@@ -543,6 +721,9 @@ export function formatDiscussionRepliesLogCsv(log: DiscussionRepliesRunLog): str
         yesNo(row.userEdited),
         yesNo(row.retried),
         row.error,
+        // Q9: the two counts only - question TEXT never appears in the CSV.
+        String(row.questionCount),
+        String(row.questionsNeedingYou),
         row.resourceState,
         row.resourceError,
         row.concepts.join(CONCEPT_JOINER),

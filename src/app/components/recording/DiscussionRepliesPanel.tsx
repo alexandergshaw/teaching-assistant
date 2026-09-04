@@ -199,6 +199,14 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     removeResource,
     searchRow,
     insertResource,
+    // docs/post-questions-acceptance-criteria.md Q7/Q12: forwarded straight
+    // through from the hook - `insertAnswer` is threaded INTO
+    // useDiscussionReplyFiltering below (which wraps it into
+    // `handleInsertAnswerForRow`, the clear-handled idiom Q7 requires), and
+    // `removeQuestion` is passed straight to the table (Remove has no
+    // arm/confirm and does not touch `handledAt`, Q7).
+    insertAnswer,
+    removeQuestion,
     runLog,
   } = useDiscussionReplies(active);
 
@@ -222,7 +230,18 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     handleClearFilters,
     handleEditReply,
     handleInsertResourceForRow,
-  } = useDiscussionReplyFiltering({ rawRows, rows, filterText, setFilterText, editReply, insertResource, setHandledAt, setSkipped });
+    handleInsertAnswerForRow,
+  } = useDiscussionReplyFiltering({
+    rawRows,
+    rows,
+    filterText,
+    setFilterText,
+    editReply,
+    insertResource,
+    insertAnswer,
+    setHandledAt,
+    setSkipped,
+  });
 
   // docs/DEV_LOOP.md's downloadable-log rule: the two format handlers,
   // mirroring RepoGradingLogPanel.tsx's own handleDownload exactly - the one
@@ -428,6 +447,11 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     ingredients: composition.ingredients,
     addressByName: composition.addressByName,
     formality: composition.formality,
+    // docs/post-questions-acceptance-criteria.md Q8: a real drafting input
+    // `redraftAll`/`runDraftLoop` dispatches with (compositionRef.current),
+    // so it must disarm a pending "Redraft every reply" confirm exactly like
+    // the other three composition fields above.
+    answerQuestions: composition.answerQuestions,
   });
   const deleteArmed = isConfirmArmed(deleteArmedFor, deleteSignature);
   const redraftArmed = isConfirmArmed(redraftArmedFor, redraftSignature);
@@ -888,6 +912,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           removeResource={removeResource}
           insertResource={handleInsertResourceForRow}
           searchRow={searchRow}
+          insertAnswer={handleInsertAnswerForRow}
+          removeQuestion={removeQuestion}
           handledAtById={handledAtById}
           skippedById={skippedById}
           onMarkHandled={markHandled}

@@ -27,6 +27,14 @@
 
 import { coerceResourceKind, type ResourceKind } from "@/lib/resource-kind";
 import { VALID_THREAD_POSITIONS } from "./discussion-thread";
+// docs/post-questions-acceptance-criteria.md Q1/Q6: `PostQuestion` is one
+// type, one path - imported ONLY from the leaf, never re-exported from this
+// file or from discussion-capture.ts (see that leaf's own comment on why a
+// type "restated in four modules" is the exact lesson this repo already
+// learned once). `postQuestionKey` is the dedupe identity `coercePostQuestions`
+// below shares with the model-output parser (Q3, Group A) - one
+// implementation of "what makes two questions the same question."
+import { postQuestionKey, type PostQuestion } from "@/lib/discussion-reply-prompt";
 // docs/reply-resource-search-yield-acceptance-criteria.md Y5/Y8/Y9: the
 // outcome kind/counts/shape types are owned by the neutral, dependency-free
 // leaf src/lib/resource-search-outcome.ts - imported here and re-exported
@@ -118,6 +126,16 @@ export interface ReplyRow {
   // DOES return resources. PERSISTED, absent-stays-absent. A hand edit that
   // clears `concepts` (editReply, useReplyRows.ts) does NOT touch this field.
   resourceSearchOutcome?: ResourceSearchOutcome;
+  // docs/post-questions-acceptance-criteria.md Q6: the questions the post
+  // asks or implies, each with an answer (or a "needs you" note) - a THIRD
+  // per-row output, set by applyReply exactly like `concepts` above (a
+  // three-way switch: undefined leave / [] clear / array replace).
+  // PERSISTED, absent-stays-absent like every optional field above.
+  // Deliberately NOT cleared by editReply (see that function's own comment)
+  // - questions describe the POST, which a reply edit does not change, and
+  // Insert IS an editReply call, so clearing here would make inserting one
+  // answer delete the row's other questions.
+  questions?: PostQuestion[];
 }
 
 const VALID_RESOURCE_QUERY_SOURCES: ReadonlySet<string> = new Set(["concepts", "post", "post-reply"]);
@@ -203,6 +221,74 @@ export function coerceConcepts(raw: unknown): string[] | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// docs/post-questions-acceptance-criteria.md Q6: `questions` - PERSISTED,
+// absent-stays-absent like `concepts` above.
+// ---------------------------------------------------------------------------
+
+/** Q6: shape-only coercion for a persisted `questions` value - never
+ *  re-applies Q3's `MAX_POST_QUESTIONS`/`MAX_QUESTION_CHARS`/`MAX_ANSWER_CHARS`
+ *  caps (those are the MODEL-OUTPUT parser's job, applied once, at parse
+ *  time; a value already sitting in localStorage has already been through
+ *  that gate once and is re-validated here only for SHAPE). Drops an entry
+ *  whose `question` is not a non-empty string, or that violates the Q1
+ *  invariant (`answer !== "" || (needsYou !== undefined && needsYou !== "")`)
+ *  - an item satisfying neither is not a usable question/answer pair.
+ *  `implied` coerces to `=== true` exactly (never Q3's lenient string/kind
+ *  aliasing - that leniency belongs to the model-output parser, not a
+ *  persisted value this app itself wrote). `needsYou` is kept only as a
+ *  non-empty string - an empty string is treated the same as absent, never
+ *  round-tripped as `""`. Dedupes on `postQuestionKey` (first kept) so
+ *  identity is unique by construction on both entry paths (a freshly
+ *  drafted reply via `applyReply`, and a persisted table read back through
+ *  `deserializeReplyTable`). An empty result -> `undefined`, never `[]`. */
+export function coercePostQuestions(raw: unknown): PostQuestion[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: PostQuestion[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    // VERIFIER FINDING 6: `.trim()` before the non-empty test - "   " is
+    // truthy, so a whitespace-only persisted question used to survive and
+    // render as a blank item title with an unreadable accessible name
+    // ("Remove the question "   " from the reply to X"). Q6 says an entry
+    // whose question is not a NON-EMPTY string is dropped; this is what
+    // makes that true. The model path was always safe (parsePostQuestions
+    // collapses and trims first) - this is the persisted/hand-edited path.
+    const question = typeof e.question === "string" ? e.question.trim() : "";
+    if (!question) continue;
+    const answer = typeof e.answer === "string" ? e.answer : "";
+    const needsYou = typeof e.needsYou === "string" && e.needsYou.length > 0 ? e.needsYou : undefined;
+    // Q1 invariant: an item with an empty answer AND no needsYou is neither
+    // a student-facing answer nor an instructor-facing gap - drop it.
+    if (answer === "" && needsYou === undefined) continue;
+    const implied = e.implied === true;
+    const key = postQuestionKey(question);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(needsYou !== undefined ? { question, implied, answer, needsYou } : { question, implied, answer });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/** Q6: the pure row transform `removeQuestion` (useReplyRows.ts) applies -
+ *  filters out EVERY item whose `question` equals `question` exactly,
+ *  clearing the field to `undefined` when the list empties. Idempotent: a
+ *  second call with the same `question` (now absent) returns a row with the
+ *  same VALUE (not necessarily the same reference) as the first call's
+ *  result - see this function's own test for the idempotence proof.
+ *  Extracted here, rather than left inline inside the useCallback body in
+ *  useReplyRows.ts, for the same reason the resource mutators' own
+ *  `nextRowAfter*` transforms were pulled into
+ *  useReplyRowResourceMutators.ts: a comparison/transform buried inside a
+ *  useCallback body has no test surface in this repo's node-env vitest (see
+ *  useReplyRows.ts's own file header). Never mutates `row`. */
+export function nextRowAfterRemoveQuestion(row: ReplyRow, question: string): ReplyRow {
+  const remaining = (row.questions ?? []).filter((q) => q.question !== question);
+  return { ...row, questions: remaining.length > 0 ? remaining : undefined };
+}
+
+// ---------------------------------------------------------------------------
 // AC22: serialization. `deserializeReplyTable` must NEVER throw, following
 // `coerceMessageDraftPayload`'s discipline (src/lib/message-drafts.ts:54):
 // drop what is malformed rather than fail the whole load.
@@ -236,6 +322,8 @@ export function serializeReplyTable(rows: ReadonlyArray<ReplyRow>): string {
     // spring into existence just because it went through a save/load cycle.
     const resourceState: ReplyRow["resourceState"] = r.resourceState === "searching" ? "idle" : r.resourceState;
     const hasResources = Array.isArray(r.resources) && r.resources.length > 0;
+    // Q6: same "only when non-empty" idiom as `resources` above.
+    const hasQuestions = Array.isArray(r.questions) && r.questions.length > 0;
 
     return {
       ...r,
@@ -244,6 +332,7 @@ export function serializeReplyTable(rows: ReadonlyArray<ReplyRow>): string {
       resources: hasResources ? r.resources : undefined, // JSON.stringify drops undefined keys - R3c "only when non-empty"
       resourceState,
       resourceError: resourceState === "failed" ? (r.resourceError ?? null) : resourceState === undefined ? undefined : null,
+      questions: hasQuestions ? r.questions : undefined,
     };
   });
   return JSON.stringify({ v: DISCUSSION_TABLE_VERSION, rows: normalized });
@@ -341,6 +430,11 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
       // undefined (dropped), never a sentinel or a throw.
       const resourceSearchOutcome = coerceResourceSearchOutcome(r.resourceSearchOutcome);
 
+      // Q6: same absent-stays-absent discipline as concepts above - a
+      // present-but-invalid value falls back to undefined (dropped), never
+      // thrown on.
+      const questions = coercePostQuestions(r.questions);
+
       rows.push({
         id,
         author,
@@ -363,6 +457,7 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
         resourceQuery,
         resourceQuerySource,
         resourceSearchOutcome,
+        questions,
       });
     });
 

@@ -353,6 +353,7 @@ describe("recording-split structure", () => {
         "ta-rec-card-title",
         "ta-rec-cards",
         "ta-rec-disc-address-name",
+        "ta-rec-disc-answer-questions",
         "ta-rec-disc-audience",
         "ta-rec-disc-course",
         "ta-rec-disc-filter",
@@ -504,8 +505,8 @@ describe("recording-split structure", () => {
         expect(discKeys.length).toBeGreaterThan(0);
       });
 
-      it("finds exactly fifteen ta-rec-disc-* keys (C5c-ii's nine, the 'activate from Knowledge base' group's own ta-rec-disc-kb-context-label, the resource-controls group's own resource-kinds/video-min/video-max, and the aesthetics-pass redesign's own flags/status-filter)", () => {
-        expect(discKeys).toHaveLength(15);
+      it("finds exactly sixteen ta-rec-disc-* keys (C5c-ii's nine, the 'activate from Knowledge base' group's own ta-rec-disc-kb-context-label, the resource-controls group's own resource-kinds/video-min/video-max, the aesthetics-pass redesign's own flags/status-filter, and the post-questions group's own answer-questions)", () => {
+        expect(discKeys).toHaveLength(16);
       });
 
       // D1/D9 migration (aesthetics-pass redesign): "ta-rec-disc-flags" is

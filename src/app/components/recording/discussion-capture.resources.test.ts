@@ -231,18 +231,21 @@ describe("draftingArmSignature (redraft-signature live-bug fix)", () => {
     ingredients: ["compliment"],
     addressByName: true,
     formality: "balanced",
+    // docs/post-questions-acceptance-criteria.md Q8: the fourth
+    // reply-composition control.
+    answerQuestions: true,
   };
 
   it("frozen literal: base case", () => {
-    expect(draftingArmSignature(base)).toBe("3|students|course-1|compliment|true|balanced");
+    expect(draftingArmSignature(base)).toBe("3|students|course-1|compliment|true|balanced|true");
   });
 
   it("frozen literal: no course selected (courseId is an empty string)", () => {
-    expect(draftingArmSignature({ ...base, courseId: "" })).toBe("3|students||compliment|true|balanced");
+    expect(draftingArmSignature({ ...base, courseId: "" })).toBe("3|students||compliment|true|balanced|true");
   });
 
   it("frozen literal: zero ingredients selected (C2c - legal, not the default)", () => {
-    expect(draftingArmSignature({ ...base, ingredients: [] })).toBe("3|students|course-1||true|balanced");
+    expect(draftingArmSignature({ ...base, ingredients: [] })).toBe("3|students|course-1||true|balanced|true");
   });
 
   it("is deterministic - the same inputs produce the identical signature every call", () => {
@@ -289,11 +292,20 @@ describe("draftingArmSignature (redraft-signature live-bug fix)", () => {
     expect(a).not.toBe(b);
   });
 
-  it("SABOTAGE CHECK (f): the frozen base-case literal alone already pins all six fields being present, in order", () => {
-    // If draftingArmSignature dropped ANY one of the six fields, this exact
-    // literal would fail - verified by sabotage (dropping courseId, then
-    // dropping audience, then each of the three new fields) in the report
-    // handed back to the dispatcher.
+  // docs/post-questions-acceptance-criteria.md Q8: the fourth
+  // reply-composition control, tested independently like the three above -
+  // one combined test would pass even if only the other three were wired.
+  it("C6a: varying answerQuestions alone changes the signature", () => {
+    const a = draftingArmSignature(base);
+    const b = draftingArmSignature({ ...base, answerQuestions: false });
+    expect(a).not.toBe(b);
+  });
+
+  it("SABOTAGE CHECK (f): the frozen base-case literal alone already pins all seven fields being present, in order", () => {
+    // If draftingArmSignature dropped ANY one of the seven fields, this
+    // exact literal would fail - verified by sabotage (dropping courseId,
+    // then dropping audience, then each of the four composition fields) in
+    // the report handed back to the dispatcher.
     expect(
       draftingArmSignature({
         rowCount: 7,
@@ -302,8 +314,9 @@ describe("draftingArmSignature (redraft-signature live-bug fix)", () => {
         ingredients: ["resources", "correction"],
         addressByName: false,
         formality: "casual",
+        answerQuestions: false,
       })
-    ).toBe("7|peers|abc|resources,correction|false|casual");
+    ).toBe("7|peers|abc|resources,correction|false|casual|false");
   });
 });
 

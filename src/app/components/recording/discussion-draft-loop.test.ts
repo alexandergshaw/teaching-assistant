@@ -146,6 +146,10 @@ async function dispatchOneBatch(args: {
     knowledgeContextRef,
     pushNotice: () => {},
     draftAction,
+    // docs/post-questions-acceptance-criteria.md Q5: RunDraftLoopDeps now
+    // requires this - the dedicated pushDraftEvent behaviour tests live in
+    // discussion-draft-loop.questions.test.ts, not here.
+    pushDraftEvent: () => {},
   };
 
   await runDraftLoop(0, deps);
@@ -313,6 +317,7 @@ describe("runDraftLoop / JOB3 - composition and greetingName wiring", () => {
       ingredients: ["insight", "correction"],
       addressByName: false,
       formality: "formal",
+      answerQuestions: false,
     };
 
     const { composition: received } = await dispatchOneBatch({
@@ -412,7 +417,7 @@ describe("runDraftLoop / SHOULD 1 - the 'resources' ingredient gates the resourc
     const { enqueueResourcesCalls } = await dispatchOneBatch({
       rawRows: [child],
       queue: [{ id: "c1", force: false }],
-      composition: { ingredients: ["resources"], addressByName: false, formality: "balanced" },
+      composition: { ingredients: ["resources"], addressByName: false, formality: "balanced", answerQuestions: false },
     });
     expect(enqueueResourcesCalls).toEqual([["c1"]]);
   });
@@ -422,7 +427,7 @@ describe("runDraftLoop / SHOULD 1 - the 'resources' ingredient gates the resourc
     const { enqueueResourcesCalls } = await dispatchOneBatch({
       rawRows: [child],
       queue: [{ id: "c1", force: false }],
-      composition: { ingredients: ["compliment"], addressByName: false, formality: "balanced" },
+      composition: { ingredients: ["compliment"], addressByName: false, formality: "balanced", answerQuestions: false },
     });
     expect(enqueueResourcesCalls).toEqual([]);
   });
@@ -432,7 +437,7 @@ describe("runDraftLoop / SHOULD 1 - the 'resources' ingredient gates the resourc
     const { enqueueResourcesCalls } = await dispatchOneBatch({
       rawRows: [child],
       queue: [{ id: "c1", force: false }],
-      composition: { ingredients: [], addressByName: false, formality: "balanced" },
+      composition: { ingredients: [], addressByName: false, formality: "balanced", answerQuestions: false },
     });
     expect(enqueueResourcesCalls).toEqual([]);
   });
@@ -446,7 +451,7 @@ describe("runDraftLoop / SHOULD 1 - the 'resources' ingredient gates the resourc
         { id: "a1", force: false },
         { id: "a2", force: false },
       ],
-      composition: { ingredients: ["resources"], addressByName: false, formality: "balanced" },
+      composition: { ingredients: ["resources"], addressByName: false, formality: "balanced", answerQuestions: false },
     });
     expect(enqueueResourcesCalls).toEqual([["a1"], ["a2"]]);
   });
@@ -575,6 +580,7 @@ describe("runDraftLoop / 'Activate this recording from the Knowledge base' wirin
       knowledgeContextRef,
       pushNotice: () => {},
       draftAction,
+      pushDraftEvent: () => {},
     };
 
     await runDraftLoop(0, deps);
@@ -599,6 +605,14 @@ describe("runDraftLoop / 'Activate this recording from the Knowledge base' wirin
 // than the shared `dispatchOneBatch`) because the shared fake's `applyReply`
 // stub discards its arguments and its `draftAction` never varies `concepts`
 // per reply.
+//
+// docs/post-questions-acceptance-criteria.md Q5/Q6: `applyReply`'s FIFTH
+// argument (questions, gated on `answerQuestions`) is covered in the
+// dedicated discussion-draft-loop.questions.test.ts, which stayed under this
+// file's own 1000-line ceiling only by moving there - this test's own
+// callback below still discards a 5th real argument silently (JS tolerates a
+// callback declaring fewer params than it is called with), so it needed no
+// change of its own.
 // ---------------------------------------------------------------------------
 
 describe("runDraftLoop / RC2b - applyReply's fourth argument mirrors the reply's concepts", () => {
@@ -661,6 +675,7 @@ describe("runDraftLoop / RC2b - applyReply's fourth argument mirrors the reply's
       knowledgeContextRef,
       pushNotice: () => {},
       draftAction,
+      pushDraftEvent: () => {},
     };
 
     await runDraftLoop(0, deps);
@@ -707,10 +722,14 @@ describe("coerceReplyComposition (C5a)", () => {
     expect(coerceReplyComposition(null, null, null)).toEqual(DEFAULT_REPLY_COMPOSITION);
   });
 
-  it("round-trips a valid, fully custom stored value", () => {
+  it("round-trips a valid, fully custom stored value - the three-arg call form defaults the fourth (answerQuestions) to ON", () => {
     const result = coerceReplyComposition('["insight","resources"]', "0", "formal");
-    expect(result).toEqual({ ingredients: ["insight", "resources"], addressByName: false, formality: "formal" });
+    expect(result).toEqual({ ingredients: ["insight", "resources"], addressByName: false, formality: "formal", answerQuestions: true });
   });
+
+  // docs/post-questions-acceptance-criteria.md Q8: the fourth trailing
+  // parameter's own dedicated cases ("0"/"1"/"garbage"/null) live in
+  // discussion-draft-loop.questions.test.ts.
 
   it("C2c: zero ingredients selected is legal and is NOT replaced with the default", () => {
     expect(coerceReplyComposition("[]", "1", "balanced").ingredients).toEqual([]);
@@ -779,3 +798,8 @@ describe("coerceReplyComposition (C5a)", () => {
     }
   });
 });
+
+// docs/post-questions-acceptance-criteria.md Q5/Q9: the MAX_TOKENS
+// missing-row failure message and pushDraftEvent's own behaviour live in
+// discussion-draft-loop.questions.test.ts - moved there to stay under this
+// file's own 1000-line ceiling (recording-split.structure.test.ts).

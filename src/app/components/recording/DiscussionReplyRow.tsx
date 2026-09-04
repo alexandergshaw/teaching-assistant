@@ -34,6 +34,12 @@ import controls from "./RecordingControls.module.css";
 import { CopyIcon, CheckIcon, ArrowUpIcon, ArrowDownIcon, MoreIcon } from "./discussion-icons";
 import { replyClipboardText, type ReplyRow, type ReplyRowState, type ReplyResource } from "./discussion-capture";
 import DiscussionReplyResources from "./DiscussionReplyResources";
+// docs/post-questions-acceptance-criteria.md Q10: the third per-row output -
+// mounted between the reply TextField and the resource list below. See that
+// component's own header for why it owns its own focus restoration and
+// clipboard call rather than this file growing those a second time.
+import DiscussionReplyQuestions from "./DiscussionReplyQuestions";
+import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 // CC5/CC20: the row's own arm/confirm control for Redraft.
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 // CC14: the shared clipboard guard (was three inline copies).
@@ -156,6 +162,14 @@ export interface DiscussionReplyRowProps {
    *  the table-wide resource queue (useReplyResources.ts's `searchRow` doc
    *  comment has the full account). */
   onSearchRow: (id: string) => void;
+  /** docs/post-questions-acceptance-criteria.md Q7/Q10: MOVE - inserts
+   *  `item.answer` into the reply, then removes the question. Forwarded
+   *  through DiscussionReplyTable.tsx unwrapped as `insertAnswer`, bound to
+   *  `row.id` by this row's own useCallback below. */
+  onInsertAnswer: (id: string, item: PostQuestion) => void;
+  /** Q7: forwarded straight through as `removeQuestion`, bound to `row.id`
+   *  by this row's own useCallback below. */
+  onRemoveQuestion: (id: string, question: string) => void;
   /** D1 (docs/aesthetics-pass-acceptance-criteria.md section 4b): the
    *  moment a successful Copy reply set this row's `handledAt` - a real
    *  ReplyRow field (discussion-serialization.ts), passed here as a plain
@@ -208,6 +222,8 @@ function DiscussionReplyRowImpl({
   onRemoveResource,
   onInsertResource,
   onSearchRow,
+  onInsertAnswer,
+  onRemoveQuestion,
   handledAt,
   onMarkHandled,
   onToggleHandled,
@@ -341,6 +357,15 @@ function DiscussionReplyRowImpl({
   // beside the chips that show what the LAST search used - stable useCallback
   // for the same memo reason as handleRetryResources above.
   const handleSearchResources = useCallback(() => onSearchRow(row.id), [onSearchRow, row.id]);
+
+  // Q10: bound to this row's id, stable for DiscussionReplyQuestions' own
+  // memo - the same reasoning as handleSearchResources above.
+  const handleInsertAnswer = useCallback((item: PostQuestion) => onInsertAnswer(row.id, item), [onInsertAnswer, row.id]);
+  const handleRemoveQuestion = useCallback((question: string) => onRemoveQuestion(row.id, question), [onRemoveQuestion, row.id]);
+  // Q10: the fallback focus target after the block's last Remove click, and
+  // the target after every Insert click - see DiscussionReplyQuestions.tsx's
+  // own doc comment on `focusReplyInput`.
+  const focusReplyInput = useCallback(() => replyInputRef.current?.focus(), []);
 
   const handleCopy = async () => {
     // R9a: a row whose draft failed but whose resources landed still has
@@ -881,6 +906,19 @@ function DiscussionReplyRowImpl({
                 // on a row removal, whose own fallback is the panel's
                 // actions container).
                 inputRef={replyInputRef}
+              />
+
+              {/* docs/post-questions-acceptance-criteria.md Q10: the third
+                  per-row output, between the reply TextField and the
+                  resource list below. */}
+              <DiscussionReplyQuestions
+                authorName={row.author}
+                questions={row.questions}
+                onInsertAnswer={handleInsertAnswer}
+                onRemoveQuestion={handleRemoveQuestion}
+                focusReplyInput={focusReplyInput}
+                announce={announce}
+                onCopyError={onCopyError}
               />
 
               {/* CC17/RC6: the search-terms chip row, the "Search for

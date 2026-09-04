@@ -29,6 +29,10 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReplyRow, ReplyResource } from "./discussion-capture";
+// docs/post-questions-acceptance-criteria.md Q1: PostQuestion is imported
+// only from the prompt leaf, never re-exported through discussion-capture.ts
+// - one type, one path.
+import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 import {
   isReplyStatusFilter,
   computeReplyStatusCounts,
@@ -48,6 +52,11 @@ export interface UseDiscussionReplyFilteringArgs {
   setFilterText: (next: string) => void;
   editReply: (id: string, text: string) => void;
   insertResource: (id: string, resource: ReplyResource) => void;
+  /** docs/post-questions-acceptance-criteria.md Q7: inserting an answer
+   *  changes the reply text, so it needs the same handledAt invalidation
+   *  `insertResource` above already gets - REQUIRED, so the panel cannot
+   *  forget to thread it. */
+  insertAnswer: (id: string, item: PostQuestion) => void;
   /** D1/D9: the real ReplyRow mutators, forwarded from useReplyRows.ts
    *  through useDiscussionReplies.ts (UseDiscussionRepliesReturn). */
   setHandledAt: (id: string, at: number | null) => void;
@@ -77,6 +86,9 @@ export interface UseDiscussionReplyFilteringReturn {
    *  forward these to the table INSTEAD of the raw mutators. */
   handleEditReply: (id: string, text: string) => void;
   handleInsertResourceForRow: (id: string, resource: ReplyResource) => void;
+  /** Q7: the same wrapper for a post-question answer - forward THIS to the
+   *  table, never the raw `insertAnswer`. */
+  handleInsertAnswerForRow: (id: string, item: PostQuestion) => void;
 }
 
 export function useDiscussionReplyFiltering({
@@ -86,6 +98,7 @@ export function useDiscussionReplyFiltering({
   setFilterText,
   editReply,
   insertResource,
+  insertAnswer,
   setHandledAt,
   setSkipped,
 }: UseDiscussionReplyFilteringArgs): UseDiscussionReplyFilteringReturn {
@@ -168,6 +181,16 @@ export function useDiscussionReplyFiltering({
     },
     [insertResource, clearHandled]
   );
+  // Q7: inserting an answer appends a paragraph to the reply through the
+  // same `editReply` mutator, so it invalidates "handled" exactly as an
+  // edit or a resource insert does.
+  const handleInsertAnswerForRow = useCallback(
+    (id: string, item: PostQuestion) => {
+      clearHandled(id);
+      insertAnswer(id, item);
+    },
+    [insertAnswer, clearHandled]
+  );
 
   return {
     statusFilter,
@@ -184,5 +207,6 @@ export function useDiscussionReplyFiltering({
     handleClearFilters,
     handleEditReply,
     handleInsertResourceForRow,
+    handleInsertAnswerForRow,
   };
 }

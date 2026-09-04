@@ -65,7 +65,11 @@ import { filterRowsByQuery, sortReplyRowsForTable, moveVisibleRow, REPLY_ROW_HAY
 // via the discussion-capture.ts re-export - that file's own re-export list
 // is a different, concurrently-owned surface this migration has no reason
 // to touch.
-import { mergeLegacyReplyFlags } from "./discussion-serialization";
+import { mergeLegacyReplyFlags, nextRowAfterRemoveQuestion } from "./discussion-serialization";
+// docs/post-questions-acceptance-criteria.md Q1: type-only, imported ONLY
+// from the leaf - never re-exported from discussion-serialization.ts or
+// discussion-capture.ts (see that leaf's own comment on `questions`).
+import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 // RC10 (docs/reply-resource-concepts-acceptance-criteria.md): the resource
 // mutators and their own STRUCTURAL_DEBOUNCE_MS/TYPING_DEBOUNCE_MS constants
 // moved into this leaf to keep this file under the soft line cap - see that
@@ -279,8 +283,25 @@ export interface UseReplyRowsReturn {
    *  since that call is not about concepts at all); `[]` means "the model
    *  returned none this time" and SETS the field to `undefined`; a
    *  non-empty array replaces it (copied, so the caller's own array is
-   *  never aliased into the row). */
-  applyReply: (id: string, reply: string, userEdited?: boolean, concepts?: readonly string[]) => void;
+   *  never aliased into the row).
+   *  docs/post-questions-acceptance-criteria.md Q6: `questions` is a FIFTH,
+   *  identically-shaped three-way switch - undefined leave / [] clear /
+   *  array replace with a COPY. `undefined` is what runDraftLoop passes on
+   *  the discard path (re-applying the user's own text) and on a dispatch
+   *  where the setting was OFF; `[]` is a dispatch where the setting was ON
+   *  and the model returned none this time. */
+  applyReply: (id: string, reply: string, userEdited?: boolean, concepts?: readonly string[], questions?: readonly PostQuestion[]) => void;
+
+  /** docs/post-questions-acceptance-criteria.md Q6: removes EVERY item on
+   *  the row whose `question` equals the argument exactly (idempotent - a
+   *  second call with the same text, now absent, is a no-op), clearing the
+   *  field to `undefined` when the list empties. Mirrors `removeResource`'s
+   *  shape exactly (useReplyRowResourceMutators.ts) - the pure transform
+   *  lives in `nextRowAfterRemoveQuestion` (discussion-serialization.ts) for
+   *  the same "no test surface inside a useCallback body" reason that
+   *  file's own `nextRowAfter*` siblings exist. Scoped by `id`: the same
+   *  question text can legitimately appear on two different rows. */
+  removeQuestion: (id: string, question: string) => void;
 
   /** AC27. Same edit-guard expectation as applyReply: a caller dispatching
    *  a batch-level failure across several ids should drop any id that is
@@ -658,7 +679,23 @@ export function useReplyRows(): UseReplyRowsReturn {
       // record the LAST search, which is still a true fact about this row
       // even after the reply text changes.
       const next = raw.map((r, i) =>
-        i === idx ? { ...r, reply: text, userEdited: true, state: nextState, error: null, concepts: undefined } : r
+        i === idx
+          ? {
+              ...r,
+              reply: text,
+              userEdited: true,
+              state: nextState,
+              error: null,
+              concepts: undefined,
+              // docs/post-questions-acceptance-criteria.md Q6: `questions` is
+              // deliberately NOT cleared here, unlike `concepts` above -
+              // questions describe the POST, which this edit did not
+              // change. Insert IS an editReply call (appendAnswerToReply
+              // writes through this same mutator), so clearing questions
+              // here would make inserting answer 1 delete questions 2 and 3
+              // on the same row.
+            }
+          : r
       );
       commitRows(next);
       scheduleSave(TYPING_DEBOUNCE_MS);
@@ -731,7 +768,7 @@ export function useReplyRows(): UseReplyRowsReturn {
   // the moment a draft you dispatched before the edit happens to land is
   // exactly the bug this parameter exists to prevent.
   const applyReply = useCallback(
-    (id: string, reply: string, userEdited: boolean = false, concepts?: readonly string[]) => {
+    (id: string, reply: string, userEdited: boolean = false, concepts?: readonly string[], questions?: readonly PostQuestion[]) => {
       const raw = rowsRef.current;
       const idx = raw.findIndex((r) => r.id === id);
       if (idx === -1) return; // AC40: row removed or table cleared under us
@@ -742,6 +779,12 @@ export function useReplyRows(): UseReplyRowsReturn {
       // array reference).
       const nextConcepts: string[] | undefined =
         concepts === undefined ? undefined : concepts.length > 0 ? [...concepts] : undefined;
+      // docs/post-questions-acceptance-criteria.md Q6: `questions` mirrors
+      // `concepts` exactly, one parameter later - the same three-way switch,
+      // the same "omitted means untouched" rule, the same COPY-never-alias
+      // discipline.
+      const nextQuestions: PostQuestion[] | undefined =
+        questions === undefined ? undefined : questions.length > 0 ? [...questions] : undefined;
       const next = raw.map((r, i) =>
         i === idx
           ? {
@@ -751,6 +794,7 @@ export function useReplyRows(): UseReplyRowsReturn {
               state: "ready" as const,
               error: null,
               ...(concepts === undefined ? {} : { concepts: nextConcepts }),
+              ...(questions === undefined ? {} : { questions: nextQuestions }),
             }
           : r
       );
@@ -817,6 +861,28 @@ export function useReplyRows(): UseReplyRowsReturn {
   );
 
   // ---------------------------------------------------------------------
+  // docs/post-questions-acceptance-criteria.md Q6: removeQuestion. Mirrors
+  // removeResource's own shape (useReplyRowResourceMutators.ts) exactly -
+  // the pure row transform (`nextRowAfterRemoveQuestion`) lives in
+  // discussion-serialization.ts, imported above, so it has a test surface
+  // this useCallback body itself does not.
+  // ---------------------------------------------------------------------
+
+  const removeQuestion = useCallback(
+    (id: string, question: string) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      if (idx === -1) return; // AC40: row removed or table cleared under us
+      const row = raw[idx];
+      if (!row.questions?.some((q) => q.question === question)) return; // no-op: nothing to remove
+      const next = raw.map((r, i) => (i === idx ? nextRowAfterRemoveQuestion(r, question) : r));
+      commitRows(next);
+      scheduleSave(STRUCTURAL_DEBOUNCE_MS);
+    },
+    [commitRows, scheduleSave]
+  );
+
+  // ---------------------------------------------------------------------
   // docs/discussion-reply-resources-acceptance-criteria.md R3/R7, RC10: the
   // resource mutators themselves now live in useReplyRowResourceMutators.ts
   // - see that file's own header for the two guards (tableEpochRef,
@@ -869,6 +935,7 @@ export function useReplyRows(): UseReplyRowsReturn {
     clearTable,
     markDrafting,
     applyReply,
+    removeQuestion,
     markFailed,
     bumpEditSeq,
     snapshotEditSeq,

@@ -39514,3 +39514,81 @@ g. Group C deviated from the spec's letter on the page fetch: it uses
    The spec's actual concern - never a per-id Promise.all loop against the 60s
    Vercel ceiling - is satisfied, with fewer round trips.
 
+## 397. The chat can load a whole institution's knowledge base from an @ typeahead
+
+Typing `@` at a word boundary in the chat composer opens a listbox of the
+registered institution acronyms; selecting one loads every knowledge page for that
+institution into the conversation context. The chat ALREADY carried knowledge pages
+end to end (AiChatFab holds knowledgeContext, sends contextPageIds, route.ts
+resolves them owner-scoped and frames them), so this added the institution ->
+page-ids resolution and the UI to drive it, and NO second grounding path.
+
+1. The trigger is `@` with a hard WORD-BOUNDARY rule: the character before it must
+   not exist or must be whitespace. That single rule is what makes an email address
+   never trigger. The predicate is CARET-RELATIVE, not "last @ in the string", so
+   editing mid-message works, and the query caps at 12 characters because an
+   acronym is short and a 13-character run is prose.
+
+2. THE CAP IS NO LONGER SILENT. route.ts slices the requested id list at 100
+   (`MAX_KNOWLEDGE_CONTEXT_PAGE_IDS`) with no error and no signal, so an
+   institution with 143 pages loaded 100 and said nothing. The route slices BEFORE
+   it counts, so `omittedPages` measures character-budget drops only and the server
+   CANNOT report this. The client just fetched the list and knows the true total,
+   so the strip states "100 of 143". The constant moved into the existing leaf
+   `src/lib/chat/knowledge-context.ts` (NOT a new near-homonym module) and route.ts
+   imports it, so client and server share one number by construction.
+
+3. A LIVE DEFECT FIXED IN PASSING. Once the first reply landed, the context strip
+   preferred the server-confirmed counts and rendered only "N pages in context",
+   using `label` solely in the else branch - so the institution name AND the cap
+   disclosure both vanished at exactly the moment the user still needed to know
+   what was loaded. Two independent design passes found it separately. NO TEST
+   PINNED THE WORDING, which is why it survived. The composer is now a pure
+   function with its own tests, and its no-institution branch reproduces today's
+   output verbatim so the Knowledge-tab bulk path does not regress.
+
+4. ENTER. The popup intercept precedes the plain send in handleKeyDown, and that
+   ORDERING IS PINNED BY A SOURCE-TEXT TEST because no test in this repo renders a
+   component. Shift+Enter is never intercepted. A popup open with ZERO matches does
+   not intercept Enter at all - there is nothing to select, so it sends, which is
+   consistent with the aria-expanded="false" it reports in that state.
+
+5. EVENT SLOTS ARE LOAD-BEARING, and getting them wrong fails silently.
+   onKeyDown/onKeyUp reach the textarea ONLY through slotProps.input; ARIA and
+   onClick/onSelect reach it ONLY through slotProps.htmlInput. Via slotProps.input,
+   onClick and onSelect land on the ROOT DIV, where currentTarget.selectionStart is
+   undefined and a caret-relative predicate breaks with no error. And putting
+   onKeyDown in htmlInput would SILENTLY OVERRIDE the existing handler (InputBase
+   spreads inputProps after it) and kill Enter-to-send with every gate green.
+
+6. The popup is IN-WINDOW, not portalled: the chat window is draggable AND
+   `resize: both`, so an in-window popup follows it for free while a portalled one
+   would need repositioning for both. Its max-height is a FIXED 160px, never a
+   percentage - a percentage resolves against the anchor (~55px), which would have
+   rendered a one-row sliver. The anchor carries `flex-shrink: 0` because
+   `.selectionChatInputRow` has it today and wrapping it would otherwise let the
+   composer collapse.
+
+7. Surfaces: the global chat only. SelectionChatWidget renders the same
+   AiChatWindow but posts to selectionChatAction, which has no contextPageIds
+   field, so a typeahead there would render and never load anything; it is gated
+   off purely by omitting the prop, and its markup is unchanged byte for byte
+   (htmlInput is omitted entirely, not merely inert). CopilotChatPanel has its own
+   composer and its own endpoint.
+
+## Known limits, and what is NOT verified
+
+a. No component is rendered by any test in this repo. Everything above about
+   markup, ARIA, focus and keyboard behaviour comes from reading the source and
+   from source-text assertions, not from a rendered DOM. There is no in-repo
+   precedent for a hand-rolled combobox - role="listbox" appears nowhere else in
+   src/ - so this ARIA is entirely new work with nothing to copy.
+b. `pages.length` is the true total only up to hosted Supabase's `db-max-rows`
+   default of 1000. At realistic sizes the "of 143" denominator is honest; it is
+   not unbounded.
+c. The popup occupies nearly all the space above the composer at the window's
+   minimum height (300px). Accepted deliberately - 160px fits the ~171px available
+   there, so it is never clipped by the window's overflow:hidden.
+d. Copy items 19-22 (how many institutions match the in-progress query) are owned
+   by the popup hook, not the resolution side; AiChatFab structurally cannot
+   compute them because the seam carries only the unfiltered list.

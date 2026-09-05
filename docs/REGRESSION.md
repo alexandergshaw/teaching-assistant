@@ -39388,3 +39388,129 @@ post into a straight one. The line is now commented to say so.
 7. No component is rendered by any test in this repo. Everything claimed
    above about markup, focus order and keyboard behaviour comes from reading
    the source and from source-scan assertions, not from a rendered DOM.
+## 396. Knowledge overview: an AI summary of a scope, and an Ask AI box that answers from it
+
+The Knowledge tab could hold a policy tree but could not answer a question about
+it. An instructor looking up "how much time off do I get" had to remember which
+page it was on and read it. This adds, to any PARENT scope, a persisted AI
+summary of every page in that scope and a question box that answers from those
+pages only.
+
+"Parent" is built for BOTH readings of the request, one implementation and two
+entry points: the institution ROOT view (no page selected; scope = every page
+under that acronym) and any SELECTED page that has descendants (scope = that page
+plus its whole subtree). A leaf page renders nothing new.
+
+1. Scope membership and the has-descendants gate both derive from `buildPageTree`
+   (`knowledge-overview-scope.ts`), NOT `collectSubtreePageIds`. The two
+   genuinely disagree, and not for the reason first assumed: a parent CYCLE is
+   unreachable through the UI (`moveInstitutionPage` calls `wouldCreateCycle`
+   before every parent change), but ORDER always diverges -
+   `collectSubtreePageIds` walks a `stack.pop()` DFS over raw insertion order
+   with NO sibling sort, while `buildPageTree` sorts siblings by position then
+   title and is what the sidebar actually renders. Citations and the "drew from"
+   list would otherwise be ordered differently from the tree beside them. The
+   test pins the sibling-ordering oracle, not a cycle.
+
+2. Staleness is a PURE SET DIFF over `(id, updatedAt)` fingerprints, with no
+   clock comparison anywhere in `knowledge-overview-stale.ts` (the only mentions
+   of `Date` in that file are comments explaining its absence). The AC as
+   originally written said "when any in-scope page's updatedAt is newer than
+   generatedAt" and was AMENDED before implementation, because that check is
+   wrong twice over: a DELETED page bumps nobody's `updated_at`, so a shrunken
+   scope reports as fresh forever while the summary describes a page that no
+   longer exists; and `institution_pages.updated_at` is written by the app
+   (`new Date().toISOString()`) while a DB-defaulted `generated_at` comes from
+   `now()`, so mixing them can make a summary born stale. `changed` is a STRING
+   inequality on `updatedAt`, never `>`. `generated_at` survives for display
+   only and is written explicitly from the Node clock.
+
+3. The nullable scope key. There is no row representing an institution
+   (the acronym registry is client-side localStorage), so `scope_page_id` is
+   nullable and NULL means the root scope. Postgres treats NULLs as DISTINCT in
+   a unique index, so a plain unique index would silently accept unlimited
+   duplicate root summaries. The obvious fix - two PARTIAL unique indexes - was
+   REJECTED: PostgREST's upsert emits `ON CONFLICT (cols)` with no WHERE, and
+   Postgres infers a partial index as an arbiter only when the statement's own
+   WHERE implies the predicate, so every save would have failed at runtime with
+   42P10 while reviewing clean. Instead a STORED GENERATED column
+   `scope_key uuid = coalesce(scope_page_id, nil uuid)` carries ONE non-partial
+   unique index. It is uuid not text so the expression contains no cast of a
+   column. `scope_key` is on the Row type only, never Insert/Update, which turns
+   "cannot insert into column scope_key" from a runtime rejection into a compile
+   error. There is NO `.is()`-vs-`.eq()` branch in the data layer: every scope
+   filter goes through `.eq("scope_key", scopeKeyFor(id))`, because
+   `.eq("scope_page_id", null)` matches nothing in PostgREST and the root read
+   would have returned null forever while every generate wrote a new row.
+
+4. Citations are MARKER-INDEXED, never title-matched. The prompt assigns
+   `[P1]..[Pn]` over the INCLUDED pages and the model returns markers; a marker
+   outside 1..n is DROPPED, never guessed. A policy tree plausibly holds two
+   pages both titled "Attendance" under different parents, and title matching
+   would deep-link the wrong one. This also covers the budget: survivorship
+   comes from `buildKnowledgeContextBlock`'s `pageResults` zipped POSITIONALLY,
+   never from included/omitted COUNTS - that budget loop uses `continue`, not
+   `break`, so "the first N made it" is false.
+
+5. The vocabulary bridge is the load-bearing clause, and it was MISSING from the
+   first implementation with every gate green. Nothing else in the pipeline can
+   connect "how much time off do I get" to a page titled "Paid Leave":
+   `searchPages` lowercases the whole query as ONE string and substring-matches
+   (so it returns nothing for any natural-language question), there is no vector
+   store or embedding index in this repo, and Postgres FTS would not help either
+   because "time off" does not stem to "leave". `VOCABULARY_BRIDGE_CONTRACT`
+   tells the model to search by SUBJECT before concluding absence, and names
+   alternates for the three subjects the feature was requested for. It is
+   emitted BEFORE the grounding contract in both prompts and that ORDERING IS
+   PINNED BY A TEST: the grounding contract ends in the refusal, so the reverse
+   order leaves both blocks present and still produces confident "That is not in
+   your knowledge base" answers to questions the pages do answer.
+
+6. Read-only BY CONSTRUCTION, not by prompt. The actions import no page-mutating
+   function and declare no tools - a plain single-shot text call. So the worst
+   case of "delete my attendance policy" is wrong words, never a lost page.
+   `deleteInstitutionPage` cascades an entire subtree, which is why this
+   boundary is structural. The prompt also carries a clause forbidding the model
+   from claiming it did so.
+
+7. Injection framing is preserved BY SIGNATURE. `FRAMING_HEADER` is
+   module-private to `knowledge-context.ts`, so the tempting shortcut -
+   concatenating page bodies into the prompt because the constant is not
+   importable - would ship an unframed prompt with every test green. Neither
+   prompt builder has a parameter capable of carrying a raw page body; both take
+   an ALREADY-FRAMED `contextBlock` string and treat it as opaque. The prompt
+   module never imports, exports or restates `FRAMING_HEADER`.
+
+## Known limits, and what is NOT verified
+
+a. No component is rendered by any test in this repo (vitest is node-env and
+   collects `src/**/*.test.ts` only). Everything about markup, focus order,
+   aria-live behaviour and keyboard handling comes from reading the source, not
+   from a rendered DOM.
+b. No model was called. Every claim about answer quality, refusal behaviour and
+   the vocabulary bridge is a claim about the PROMPT TEXT and its ordering, not
+   a measured hit rate. The bridge makes the right behaviour more likely; it
+   does not guarantee it.
+c. `buildKnowledgeContextBlock` places ALL pages before ANY attachment, so on
+   overflow attachments are the first thing dropped. At whole-institution scope
+   attachment grounding will effectively rarely fire.
+d. The page-id cap was raised to 400 for this feature and pages beyond it are
+   reported as `hardCappedPages`, separately from budget-omitted pages. Beyond
+   400 pages in one scope the summary is still partial - it now SAYS so rather
+   than silently claiming completeness.
+e. `markdownToHtml` emits h1-h6 as authored, so a model-emitted heading can
+   break the panel's outline. Mitigated in the prompt (## only) and by pinning
+   the font size in CSS. That is cosmetic, not semantic, and is a knowing
+   tradeoff.
+f. The de-duplication debt: `buildKnowledgeContextForTurn` in
+   `api/ai-chat/route.ts:340` does substantially the same resolve-and-frame work
+   as `knowledge-scope-context.ts`. It was deliberately NOT refactored - that
+   route is I/O and vitest covers none of it, so a change there would break the
+   live Ask-AI chat with every gate green. Two implementations now exist.
+g. Group C deviated from the spec's letter on the page fetch: it uses
+   `listInstitutionPages` (one query for the institution) plus in-memory
+   `collectScopePages`, rather than `getInstitutionPagesByIds`, because the
+   pinned `collectScopePages` signature needs body-inclusive rows to begin with.
+   The spec's actual concern - never a per-id Promise.all loop against the 60s
+   Vercel ceiling - is satisfied, with fewer round trips.
+

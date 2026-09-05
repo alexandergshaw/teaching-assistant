@@ -899,6 +899,32 @@ export default function KnowledgeTab({
 
               <p className={styles.kbMeta}>Last edited {formatRelative(selectedPage.updatedAt)}</p>
 
+              {/* Placed HIGH - directly under the page meta, above tags,
+                  attachments and the body - not at the bottom of the pane.
+                  It shipped at the bottom to satisfy a self-imposed "nothing
+                  above it moves" rule, and the result was a feature the owner
+                  could not find at all: on any page with real content the
+                  panel sat below the fold. Discoverability beats layout
+                  stability for a control this feature exists to provide.
+                  It renders for EVERY page, not only one with descendants:
+                  a leaf page scopes to the whole institution (scopePageId
+                  null) so the Ask AI box is reachable from wherever the
+                  owner happens to be standing, rather than only from the
+                  handful of pages that happen to be parents. The panel
+                  states its own scope ("Scoped to ...") so the two cases are
+                  never ambiguous, and its open/closed state persists per
+                  scope, so collapsing it once on a page keeps it collapsed
+                  there. */}
+              {loadState === "idle" && !isEditing && pages && pages.length > 0 && (
+                <KnowledgeOverviewPanel
+                  institution={active}
+                  scopePageId={scopeHasDescendants(pages, selectedPage.id) ? selectedPage.id : null}
+                  pages={pages}
+                  headingLevel={3}
+                  onSelectPage={openSearchHit}
+                />
+              )}
+
               {isEditing ? (
                 <div className={styles.field}>
                   <label>Title</label>
@@ -957,20 +983,6 @@ export default function KnowledgeTab({
                 <p className={styles.kbBodyEmpty}>This page has no content yet. Click Edit to add some.</p>
               )}
 
-              {/* X5/AC1(d): LAST child of the detail pane, after the body -
-                  the only placement that leaves every existing element above
-                  at its current vertical position. AC1(b)/(c): only for a
-                  page that actually has descendants (buildPageTree's own
-                  nesting, C3/X10 - never the raw parentId walk), never a leaf. */}
-              {loadState === "idle" && !isEditing && pages && scopeHasDescendants(pages, selectedPage.id) && (
-                <KnowledgeOverviewPanel
-                  institution={active}
-                  scopePageId={selectedPage.id}
-                  pages={pages}
-                  headingLevel={3}
-                  onSelectPage={openSearchHit}
-                />
-              )}
             </>
           )}
         </div>

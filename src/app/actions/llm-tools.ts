@@ -257,6 +257,16 @@ export async function selectionChatAction(
   provider: LlmProvider = "gemini"
 ): Promise<string | { error: string }> {
   try {
+    // SECURITY: this action is called from SelectionChatWidget, which is
+    // mounted in the ROOT layout (src/app/layout.tsx), so its action id ships
+    // in the client bundle of EVERY route - including /login, which the
+    // request gate deliberately exempts. Without this guard the action is a
+    // POST endpoint any anonymous visitor can call to spend the deployment's
+    // LLM budget on prompts of their choosing. The gate is not a backstop for
+    // anything reachable under a public prefix; every sibling export in this
+    // file guards itself, and this one was the exception.
+    await requireOwner();
+
     // Embedded Deterministic Engine: the ask-anything router handles the
     // request with the highlighted text as primary context — Q&A over the
     // selection (with conversational follow-ups and glossary-backed
@@ -343,6 +353,8 @@ export async function generateCopilotProjectPromptAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ prompt: string } | { error: string }> {
   try {
+    await requireOwner();
+
     if (provider === "other") {
       const resp = await courseEngineCopilotPrompt(fileContent, fileName);
       return resp.prompt
@@ -431,6 +443,8 @@ export async function generateCourseRubricFromZipAction(
   const MAX_FILE_CHARS = 3000;
 
   try {
+    await requireOwner();
+
     const JSZip = (await import("jszip")).default;
     const buffer = Buffer.from(zipBase64, "base64");
     const zip = await JSZip.loadAsync(buffer);

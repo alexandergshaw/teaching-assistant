@@ -48,7 +48,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { InstitutionPage } from "@/lib/knowledge-base";
 import { useLlmProvider } from "@/lib/llm-provider";
 import { collectScopePages, describeScope, scopeStorageKey } from "@/lib/knowledge-overview-scope";
-import { summaryStaleness, type SummaryStaleness } from "@/lib/knowledge-overview-stale";
+import { summaryStaleness, fingerprintScopePages, type SummaryStaleness } from "@/lib/knowledge-overview-stale";
 import { MAX_SCOPE_QA_ENTRIES, type ScopeSummary, type ScopeQuestion } from "@/lib/knowledge-overview";
 import {
   getKnowledgeOverviewAction,
@@ -134,6 +134,12 @@ export interface UseKnowledgeOverviewReturn {
   toggleHistoryOpen: () => void;
 }
 
+/** How long the page list must sit still before the summary refreshes
+ *  itself. Long enough that deleting several pages, or dragging a subtree,
+ *  is ONE regeneration rather than one per intermediate state; short enough
+ *  that a single edit refreshes while the owner is still looking at it. */
+const AUTO_REFRESH_DEBOUNCE_MS = 2000;
+
 export function useKnowledgeOverview({ institution, scopePageId, allPages }: UseKnowledgeOverviewArgs): UseKnowledgeOverviewReturn {
   const [provider] = useLlmProvider();
 
@@ -197,6 +203,9 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
   // change alongside the summary and question list below.
   const [hardCappedPages, setHardCappedPages] = useState<KnowledgeOverviewPageRef[]>([]);
   const [skippedAttachments, setSkippedAttachments] = useState(0);
+  /** The scope fingerprint the auto-refresh below has already acted on - see
+   *  that effect's anti-loop guard. */
+  const [autoRefreshedFor, setAutoRefreshedFor] = useState<string | null>(null);
 
   const [prevScopeKey, setPrevScopeKey] = useState(scopeKey);
   if (scopeKey !== prevScopeKey) {
@@ -208,6 +217,7 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
     setCitationsUnavailableFor(null);
     setHardCappedPages([]);
     setSkippedAttachments(0);
+    setAutoRefreshedFor(null);
   }
 
   useEffect(() => {
@@ -258,6 +268,51 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
       setSkippedAttachments(result.skippedAttachments);
     })();
   };
+
+  // ── Auto-refresh the summary when the scope changes underneath it ───────
+  //
+  // Requested behaviour: the summary updates itself whenever a page in scope
+  // is added, changed, or deleted, so it is something to READ rather than a
+  // button to remember to press. All three cases are already detected by
+  // summaryStaleness's pure set diff, so this effect only has to act on it.
+  //
+  // Three guards, each load-bearing:
+  //
+  //  - ONLY WHEN A SUMMARY ALREADY EXISTS. A scope that has never been
+  //    summarized stays on the explicit Generate button. Auto-generating on
+  //    first sight would fire a model call for every institution and every
+  //    parent page merely BROWSED, which is a real bill for something the
+  //    owner never asked to see.
+  //  - DEBOUNCED. Deleting four pages, or dragging a subtree, lands as a
+  //    burst of separate page-list updates; without the delay each one would
+  //    start its own generation and the last would win after paying for all
+  //    of them.
+  //  - KEYED ON THE EXACT FINGERPRINT SET, not on `stale`. This is the
+  //    anti-loop guard: if generation FAILS (offline, model error, quota),
+  //    `stale` stays true forever, and a bare "regenerate while stale" effect
+  //    would retry without end, every render, silently spending money. Having
+  //    already attempted THIS page-set means it is not attempted again until
+  //    the pages actually change once more - and the manual Regenerate button
+  //    is always there to retry deliberately.
+  const scopeSignature = useMemo(
+    () => fingerprintScopePages(scopePages).map((f) => `${f.id}:${f.updatedAt}`).join("|"),
+    [scopePages]
+  );
+
+  useEffect(() => {
+    if (!summary || !staleness?.stale || generating || !hasContent) return;
+    if (autoRefreshedFor === scopeSignature) return;
+    const timer = setTimeout(() => {
+      setAutoRefreshedFor(scopeSignature);
+      generateSummary();
+    }, AUTO_REFRESH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // generateSummary is redefined every render and would make this effect
+    // re-run (and re-arm its timer) on every render if listed; the values it
+    // actually closes over - institution, scopePageId, provider, generating -
+    // are either in this dep list or constant for the life of a scope.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary, staleness, generating, hasContent, autoRefreshedFor, scopeSignature]);
 
   // ── Ask AI (AC4/AC5/AC6) ─────────────────────────────────────────────────
   const [asking, setAsking] = useState(false);

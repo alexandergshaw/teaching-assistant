@@ -152,95 +152,14 @@ export default function KnowledgeOverviewPanel({ institution, scopePageId, pages
                 </p>
               )}
 
-              {/* ── AI summary (AC2/AC3) ────────────────────────────────── */}
-              <div className={kbStyles.kbOverviewSection}>
-                <SectionHeading level={headingLevel + 1} className={kbStyles.kbOverviewSectionTitle}>
-                  AI summary
-                </SectionHeading>
-
-                <div className={kbStyles.kbOverviewMetaRow}>
-                  {summary && (
-                    <span className={styles.fieldHint} style={{ margin: 0 }}>
-                      Generated {formatRelative(summary.generatedAt)}
-                    </span>
-                  )}
-                  {staleNote && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>{staleNote}</span>}
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={generateSummary}
-                    disabled={generating || !hasContent}
-                    loading={generating}
-                    loadingPosition="start"
-                  >
-                    {summary ? "Regenerate summary" : "Generate summary"}
-                  </Button>
-                </div>
-
-                <p role="status" aria-live="polite" aria-atomic="true" className={kbStyles.kbOverviewStatus}>
-                  {generating ? "Generating summary…" : ""}
-                </p>
-                <p className={`${styles.error} ${kbStyles.kbOverviewAlert}`} role="alert">
-                  {generateError}
-                </p>
-
-                {summary ? (
-                  <>
-                    <div
-                      className={kbStyles.kbOverviewSummaryText}
-                      dangerouslySetInnerHTML={{ __html: renderOverviewMarkdown(summary.summary) }}
-                    />
-                    {summaryIncluded.length > 0 && (
-                      <div className={kbStyles.kbOverviewSources}>
-                        <span className={styles.fieldHint} style={{ margin: 0 }}>
-                          Drew from:
-                        </span>
-                        {summaryIncluded.map((p) => (
-                          <Button
-                            key={p.id}
-                            size="small"
-                            variant="text"
-                            className={kbStyles.kbOverviewChip}
-                            onClick={() => onSelectPage(p.id)}
-                          >
-                            {p.title.trim() || "Untitled page"}
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                    {describeOmittedPages(summaryOmitted) && (
-                      <p className={styles.fieldHint} style={{ margin: 0 }}>
-                        {describeOmittedPages(summaryOmitted)}
-                      </p>
-                    )}
-                    {/* X8/X14: three DIFFERENT reasons a page or file can be
-                        missing from this summary, said separately because they
-                        mean different things to the instructor. The one above
-                        is "considered but did not fit"; a hard-capped page was
-                        never looked at at all and carries no sourcePages entry,
-                        so without this line it would vanish in silence while
-                        the summary implied it had covered everything. */}
-                    {describeHardCappedPages(hardCappedPages.map((p) => p.title)) && (
-                      <p className={styles.fieldHint} style={{ margin: 0 }}>
-                        {describeHardCappedPages(hardCappedPages.map((p) => p.title))}
-                      </p>
-                    )}
-                    {describeSkippedAttachments(skippedAttachments) && (
-                      <p className={styles.fieldHint} style={{ margin: 0 }}>
-                        {describeSkippedAttachments(skippedAttachments)}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  !generating && (
-                    <p className={styles.fieldHint} style={{ margin: 0 }}>
-                      No summary yet. Generate one for a policy-lookup overview of every page in this scope.
-                    </p>
-                  )
-                )}
-              </div>
-
-              {/* ── Ask AI (AC4/AC5/AC6) ────────────────────────────────── */}
+              {/* ── Ask AI (AC4/AC5/AC6)
+                  FIRST, above the summary, at the owner's request: asking a
+                  question is the frequent action and reading the summary is
+                  the occasional one, so the control used every visit sits
+                  where it needs no scrolling. The summary below also
+                  refreshes itself now, which makes it something you READ
+                  rather than something you operate - a second reason it does
+                  not need the top slot. */}
               <div className={kbStyles.kbOverviewSection}>
                 <SectionHeading level={headingLevel + 1} className={kbStyles.kbOverviewSectionTitle}>
                   Ask AI
@@ -343,6 +262,94 @@ export default function KnowledgeOverviewPanel({ institution, scopePageId, pages
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* ── AI summary (AC2/AC3) ────────────────────────────────── */}
+              <div className={kbStyles.kbOverviewSection}>
+                <SectionHeading level={headingLevel + 1} className={kbStyles.kbOverviewSectionTitle}>
+                  AI summary
+                </SectionHeading>
+
+                <div className={kbStyles.kbOverviewMetaRow}>
+                  {summary && (
+                    <span className={styles.fieldHint} style={{ margin: 0 }}>
+                      Generated {formatRelative(summary.generatedAt)}
+                    </span>
+                  )}
+                  {staleNote && <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>{staleNote}</span>}
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={generateSummary}
+                    disabled={generating || !hasContent}
+                    loading={generating}
+                    loadingPosition="start"
+                  >
+                    {summary ? "Regenerate summary" : "Generate summary"}
+                  </Button>
+                </div>
+
+                <p role="status" aria-live="polite" aria-atomic="true" className={kbStyles.kbOverviewStatus}>
+                  {generating ? "Generating summary…" : ""}
+                </p>
+                <p className={`${styles.error} ${kbStyles.kbOverviewAlert}`} role="alert">
+                  {generateError}
+                </p>
+
+                {summary ? (
+                  <>
+                    <div
+                      className={kbStyles.kbOverviewSummaryText}
+                      dangerouslySetInnerHTML={{ __html: renderOverviewMarkdown(summary.summary) }}
+                    />
+                    {summaryIncluded.length > 0 && (
+                      <div className={kbStyles.kbOverviewSources}>
+                        <span className={styles.fieldHint} style={{ margin: 0 }}>
+                          Drew from:
+                        </span>
+                        {summaryIncluded.map((p) => (
+                          <Button
+                            key={p.id}
+                            size="small"
+                            variant="text"
+                            className={kbStyles.kbOverviewChip}
+                            onClick={() => onSelectPage(p.id)}
+                          >
+                            {p.title.trim() || "Untitled page"}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                    {describeOmittedPages(summaryOmitted) && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {describeOmittedPages(summaryOmitted)}
+                      </p>
+                    )}
+                    {/* X8/X14: three DIFFERENT reasons a page or file can be
+                        missing from this summary, said separately because they
+                        mean different things to the instructor. The one above
+                        is "considered but did not fit"; a hard-capped page was
+                        never looked at at all and carries no sourcePages entry,
+                        so without this line it would vanish in silence while
+                        the summary implied it had covered everything. */}
+                    {describeHardCappedPages(hardCappedPages.map((p) => p.title)) && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {describeHardCappedPages(hardCappedPages.map((p) => p.title))}
+                      </p>
+                    )}
+                    {describeSkippedAttachments(skippedAttachments) && (
+                      <p className={styles.fieldHint} style={{ margin: 0 }}>
+                        {describeSkippedAttachments(skippedAttachments)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  !generating && (
+                    <p className={styles.fieldHint} style={{ margin: 0 }}>
+                      No summary yet. Generate one for a policy-lookup overview of every page in this scope.
+                    </p>
+                  )
+                )}
               </div>
 
               <KnowledgeOverviewHistory

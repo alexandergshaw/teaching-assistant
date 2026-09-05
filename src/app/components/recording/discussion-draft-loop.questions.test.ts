@@ -134,7 +134,7 @@ async function dispatchCapturingApplyReply(args: {
   return applyReplyCalls;
 }
 
-describe("runDraftLoop / Q5-Q6 - applyReply's fifth argument mirrors the reply's questions, gated by answerQuestions", () => {
+describe("runDraftLoop / Q5-Q6 - applyReply's fifth argument mirrors the reply's questions, gated by answerQuestions (A7: OFF now clears rather than leaves alone)", () => {
   it("ON + the model returned questions -> the array reaches applyReply's fifth argument", async () => {
     const a = makeRow({ id: "a", author: "Jordan Lee", post: "Post A." });
     const question: PostQuestion = { question: "Why does the loop run twice?", implied: false, answer: "Because it does." };
@@ -166,7 +166,7 @@ describe("runDraftLoop / Q5-Q6 - applyReply's fifth argument mirrors the reply's
     expect(applyReplyCalls[0]?.[4]).toEqual([]);
   });
 
-  it("OFF -> undefined reaches applyReply's fifth argument, EVEN IF the model volunteered questions anyway - leave the row's current questions alone", async () => {
+  it("OFF -> [] reaches applyReply's fifth argument, EVEN IF the model volunteered questions anyway - a redraft with the setting off still CLEARS the row's questions rather than keeping them", async () => {
     const a = makeRow({ id: "a", author: "Jordan Lee", post: "Post A." });
     const question: PostQuestion = { question: "Why does the loop run twice?", implied: false, answer: "Because it does." };
 
@@ -179,10 +179,15 @@ describe("runDraftLoop / Q5-Q6 - applyReply's fifth argument mirrors the reply's
       }),
     });
 
-    expect(applyReplyCalls[0]?.[4]).toBeUndefined();
+    // docs/answers-in-the-reply-acceptance-criteria.md A7: this reverses the
+    // old Q5 behaviour (`undefined`, "leave alone"). `answer` now quotes one
+    // particular draft (D4), so a redraft that replaces `reply` - even with
+    // the setting off - must not leave the OLD row's questions standing
+    // against a reply that no longer contains what they quote.
+    expect(applyReplyCalls[0]?.[4]).toEqual([]);
   });
 
-  it("the discard path (edited during dispatch) stays a THREE-argument applyReply call - no concepts, no questions", async () => {
+  it("the discard path (edited during dispatch) leaves concepts untouched but CLEARS questions (A7): applyReply's fourth argument is undefined, the fifth is []", async () => {
     const a = makeRow({ id: "a", author: "Jordan Lee", post: "Post A.", reply: "Hand-typed reply.", userEdited: true });
 
     const applyReplyCalls = await dispatchCapturingApplyReply({
@@ -205,10 +210,14 @@ describe("runDraftLoop / Q5-Q6 - applyReply's fifth argument mirrors the reply's
     expect(call[0]).toBe("a");
     expect(call[1]).toBe("Hand-typed reply.");
     expect(call[2]).toBe(true);
-    // Only 3 real arguments were passed at the call site - JS leaves the
-    // rest `undefined`, which is exactly the "concepts/questions omitted
-    // entirely" shape this discard path must keep (resolveEditedDuringDispatch
-    // re-applies the user's OWN text, never a model-authored questions list).
+    // VERIFY PASS: BOTH the fourth (`concepts`) and fifth (`questions`)
+    // arguments stay `undefined` - untouched. This path replaces nothing:
+    // it writes the row's own hand-typed text back over itself because the
+    // model's reply is being discarded, so the questions the row is holding
+    // still belong to the text that is still in the box. An earlier revision
+    // passed `[]` here, which deleted the row's whole question list - and the
+    // only copy of any answer not located in the reply - merely because the
+    // instructor typed while a redraft was in flight.
     expect(call[3]).toBeUndefined();
     expect(call[4]).toBeUndefined();
   });
@@ -405,6 +414,11 @@ describe("runDraftLoop / Q5-Q9 - pushDraftEvent", () => {
     expect(event.repliesReturned).toBe(1);
     expect(event.rowsMissing).toBe(0);
     expect(event.questionsReturned).toBe(2);
+    // "Because." is 8 normalised characters - under
+    // MIN_LOCATABLE_ANSWER_CHARS (12), so replyContainsAnswer never even
+    // reaches a containment check; questionNeedingYou's answer is "" and is
+    // never checked at all. Both land in "not located".
+    expect(event.questionsAnsweredInReply).toBe(0);
     expect(event.questionsNeedingYou).toBe(1);
     expect(event.questionsDropped).toBe(1);
     expect(event.finishReason).toBe("STOP");
@@ -428,10 +442,49 @@ describe("runDraftLoop / Q5-Q9 - pushDraftEvent", () => {
     expect(event.repliesReturned).toBe(0);
     expect(event.rowsMissing).toBe(1);
     expect(event.questionsReturned).toBe(0);
+    expect(event.questionsAnsweredInReply).toBe(0);
     expect(event.questionsNeedingYou).toBe(0);
     expect(event.questionsDropped).toBe(0);
     expect(event.finishReason).toBe("");
     expect(event.candidatesTokenCount).toBeNull();
     expect(event.elapsedMs).toBeNull();
+  });
+
+  // docs/answers-in-the-reply-acceptance-criteria.md A7: questionsAnsweredInReply
+  // - a fixture pair, one answer really is in its own reply's text, one is
+  // not, and a needs-you-only item (no answer at all) is never checked -
+  // summed across every reply landing in the same batch.
+  it("A7: questionsAnsweredInReply counts only the questions whose answer replyContainsAnswer locates in THAT reply, summed across the batch", async () => {
+    const a = makeRow({ id: "a", author: "Jordan Lee", post: "Post A." });
+    const b = makeRow({ id: "b", author: "Sam Rivera", post: "Post B." });
+
+    const inReplyAnswer = "The outer loop is re-entered before the inner one drains its own buffer.";
+    const notInReplyAnswer = "The deadline moves to the following Monday at noon.";
+    const qLocated: PostQuestion = { question: "Why does it loop twice?", implied: false, answer: inReplyAnswer };
+    const qNotLocated: PostQuestion = { question: "When is the makeup deadline?", implied: true, answer: notInReplyAnswer };
+    // No answer at all - a needs-you-only item. Never counted: `answer !==
+    // ""` gates the check before replyContainsAnswer is ever called.
+    const qNeedsYouOnly: PostQuestion = { question: "Which rubric applies?", implied: false, answer: "", needsYou: "The grading rubric." };
+
+    const { draftEvents } = await dispatchOneBatch({
+      rawRows: [a, b],
+      queue: [
+        { id: "a", force: false },
+        { id: "b", force: false },
+      ],
+      draftActionOverride: async (posts) => ({
+        replies: posts.map((p) =>
+          p.id === "a"
+            ? { id: p.id, reply: `${inReplyAnswer} That is the whole story.`, questions: [qLocated, qNotLocated] }
+            : { id: p.id, reply: "A short reply with nothing quoted from any answer.", questions: [qNeedsYouOnly] }
+        ),
+      }),
+    });
+
+    expect(draftEvents).toHaveLength(1);
+    expect(draftEvents[0]!.questionsReturned).toBe(3);
+    // 1 from row a's qLocated; row a's qNotLocated and row b's
+    // qNeedsYouOnly both land in "not located".
+    expect(draftEvents[0]!.questionsAnsweredInReply).toBe(1);
   });
 });

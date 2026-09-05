@@ -43,9 +43,9 @@ const FORMALITY_LABEL_ID = "discussion-reply-formality-label";
 // SHOULD 3 fixer pass: id for the address-by-name checkbox's caveat hint,
 // referenced by the checkbox's own aria-describedby below.
 const ADDRESS_BY_NAME_HINT_ID = "discussion-reply-address-by-name-hint";
-// docs/post-questions-acceptance-criteria.md Q8: id for the new
-// "Draft answers to the questions in each post" checkbox's own hint,
-// referenced by that checkbox's own aria-describedby below.
+// docs/answers-in-the-reply-acceptance-criteria.md A6: id for the
+// "Answer the questions in each post" checkbox's own hint, referenced by
+// that checkbox's own aria-describedby below.
 export const ANSWER_QUESTIONS_HINT_ID = "discussion-reply-answer-questions-hint";
 
 // C4a: three stops, marks built once from the same REPLY_FORMALITY_STOPS
@@ -170,11 +170,11 @@ export default function DiscussionReplyControls({
                 aria-describedby={ANSWER_QUESTIONS_HINT_ID}
               />
             }
-            label="Draft answers to the questions in each post"
+            label="Answer the questions in each post"
           />
           <p id={ANSWER_QUESTIONS_HINT_ID} className={styles.fieldHint}>
-            Listed under the reply: what the post asks or implies, each with an answer you can insert, copy, or
-            dismiss. The reply itself leaves the answering to you.
+            The reply answers what the post asks or implies, in its own words. The list under the reply says which
+            questions it answered; a question that needs a course fact only you have is flagged instead.
           </p>
         </div>
       </div>

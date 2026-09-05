@@ -74,6 +74,13 @@ import type { DiscussionRepliesRunLog, DiscussionRepliesLogDraft } from "./discu
 // from the leaf - never re-exported from discussion-serialization.ts or
 // discussion-capture.ts.
 import type { PostQuestion } from "@/lib/discussion-reply-prompt";
+// docs/answers-in-the-reply-acceptance-criteria.md A7: the SAME predicate
+// the block (DiscussionReplyQuestions.tsx) uses to derive its live per-item
+// state, called here once per reply at RECEIVE time to build the draft
+// event's `questionsAnsweredInReply` count - never a second, hand-rolled
+// containment check (D3's "one predicate" rule is repo-wide, not scoped to
+// the client component).
+import { replyContainsAnswer } from "@/lib/discussion-answer-location";
 
 // --- S6: both sub-hooks' real return types are used directly - no hand-
 // written duplicate interface and no `as` assertion at the call site below.
@@ -141,16 +148,6 @@ export interface UseDiscussionRepliesReturn {
    *  impossible rather than merely discouraged - see this function's own
    *  implementation in useDiscussionReplies.ts. */
   insertResource: (id: string, resource: ReplyResource) => void;
-
-  /** docs/post-questions-acceptance-criteria.md Q7: one-click insert for a
-   *  post-question's answer - the same MOVE shape as `insertResource` above:
-   *  `appendAnswerToReply` (discussion-reply-insert.ts) computes the next
-   *  reply text, C2's `editReply` writes it, and C2's `removeQuestion`
-   *  removes the item from the row's `questions` list, so the SAME item's
-   *  Insert control unmounts with it. A no-op when the row is gone or
-   *  `item.answer === ""` (an item with only a `needsYou` note has nothing
-   *  to insert). */
-  insertAnswer: (id: string, item: PostQuestion) => void;
 
   /** docs/post-questions-acceptance-criteria.md Q7: forwarded straight
    *  through from C2's `useReplyRows`, exactly like `removeResource` above -
@@ -711,6 +708,9 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
         repliesReturned: 0,
         rowsMissing: ids.length,
         questionsReturned: 0,
+        // A7: no replies landed on the error path, so nothing was there to
+        // check an answer against.
+        questionsAnsweredInReply: 0,
         questionsNeedingYou: 0,
         questionsDropped: 0,
         // VERIFIER FINDING 1: read from the failure result, not hardcoded -
@@ -723,11 +723,18 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
     } else {
       const returnedIdsForLog = new Set(result.replies.map((r) => r.id));
       let questionsReturned = 0;
+      let questionsAnsweredInReplyForLog = 0;
       let questionsNeedingYouForLog = 0;
       let questionsDropped = 0;
       for (const reply of result.replies) {
         const qs = reply.questions ?? [];
         questionsReturned += qs.length;
+        // A7: computed HERE, against THIS reply's own text, at the moment it
+        // landed - the one point in the loop where "the reply this question
+        // was drafted for" and "the reply text" are still the same value.
+        questionsAnsweredInReplyForLog += qs.filter(
+          (q) => q.answer !== "" && replyContainsAnswer(reply.reply, q.answer)
+        ).length;
         questionsNeedingYouForLog += qs.filter((q) => q.needsYou !== undefined && q.needsYou !== "").length;
         questionsDropped += reply.questionsDropped ?? 0;
       }
@@ -744,6 +751,7 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
         repliesReturned: result.replies.length,
         rowsMissing: ids.filter((id) => !returnedIdsForLog.has(id)).length,
         questionsReturned,
+        questionsAnsweredInReply: questionsAnsweredInReplyForLog,
         questionsNeedingYou: questionsNeedingYouForLog,
         questionsDropped,
         finishReason: result.finishReason ?? "",
@@ -776,7 +784,22 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
       // model's), so it must keep its authorship flag. applyReply's
       // default (userEdited=false) is for the OTHER call site below,
       // where a real model reply is landing.
-      if (current) rowsApiRef.current.applyReply(id, current.reply, current.userEdited);
+      // VERIFY PASS - this argument was `[]` (clear) for one revision, and
+      // that was wrong. The AC's A7 rule is "questions travel with the reply
+      // they were drafted for", and this call site REPLACES NOTHING: it
+      // writes the row's own current text (`current.reply`, read from
+      // `rawRows` just above) back over itself, because the model's reply is
+      // being discarded and never reaches the row. The questions sitting on
+      // the row at this instant were written by an earlier `applyReply`
+      // TOGETHER WITH the text that is still in the box - they belong to it.
+      // Clearing them here deleted the row's whole question list, including
+      // the only copy of any answer that had not been located in the reply,
+      // on a path where the instructor merely typed while a redraft was in
+      // flight. Left `undefined` (untouched), which also keeps this call
+      // symmetrical with `concepts` (the fourth argument): two outputs of the
+      // same draft, treated the same way, on a path where neither input
+      // changed.
+      if (current) rowsApiRef.current.applyReply(id, current.reply, current.userEdited, undefined, undefined);
     };
 
     if ("error" in result) {
@@ -812,21 +835,25 @@ export async function runDraftLoop(epoch: number, deps: RunDraftLoopDeps): Promi
         // RC2b/RC3 (docs/reply-resource-concepts-acceptance-criteria.md):
         // `reply.concepts ?? []` - `[]` when the model returned none this
         // time means "clear", not "leave alone"; the re-apply call on the
-        // discard path above (`resolveEditedDuringDispatch`) stays
-        // three-argument, since it is re-applying the user's OWN text, not
-        // a model-authored reply with concepts of its own.
-        // docs/post-questions-acceptance-criteria.md Q5: the FIFTH argument
-        // - `undefined` when the setting was OFF for this dispatch (leave
-        // the row's current questions alone: turning the feature off stops
-        // producing, it does not delete what a row has), `reply.questions ??
-        // []` when it was ON (an array replaces, `[]` clears - the same
-        // "model returned none this time" reading `concepts` already uses).
+        // discard path above (`resolveEditedDuringDispatch`) leaves its own
+        // fourth argument `undefined` instead, since it is re-applying the
+        // user's OWN text, not a model-authored reply with concepts of its
+        // own.
+        // docs/answers-in-the-reply-acceptance-criteria.md A7: the FIFTH
+        // argument is now `[]` on BOTH branches, never `undefined` - `answer`
+        // quotes words from the specific draft that produced it (D4), so any
+        // path that replaces `reply` invalidates every question the row was
+        // carrying, whether or not this dispatch itself returned new ones.
+        // This reverses the old Q5 reasoning ("turning the feature off stops
+        // producing, it does not delete what a row has"), which held only
+        // while `answer` was independent, appended prose (the now-deleted
+        // Insert path, D5) rather than a quotation of THIS reply.
         rowsApiRef.current.applyReply(
           reply.id,
           reply.reply,
           false,
           reply.concepts ?? [],
-          compositionNow.answerQuestions ? (reply.questions ?? []) : undefined
+          compositionNow.answerQuestions ? (reply.questions ?? []) : []
         );
         // R6: the ONE trigger point - enqueue a resource search only
         // after a model-authored reply lands. Never on the discard path

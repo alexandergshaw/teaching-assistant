@@ -173,10 +173,12 @@ export interface DiscussionRepliesLogRetry {
  *  `error` paths. Answers the diagnostic questions this log exists for: was
  *  the "answer questions" setting on for the dispatch that drafted row X,
  *  how many questions did the model return and how many did the server
- *  drop, were any flagged "needs you", and how long did the call take (did
- *  it hit the length limit). `rowIds` is the dispatched ids, IN ORDER;
- *  `ingredients`/`addressByName`/`formality`/`answerQuestions` are the
- *  DISPATCH-TIME composition, not the CURRENT one (that is
+ *  drop, were any flagged "needs you", how many of those answers actually
+ *  landed in the drafted reply (docs/answers-in-the-reply-acceptance-
+ *  criteria.md A7 - see `questionsAnsweredInReply` below), and how long did
+ *  the call take (did it hit the length limit). `rowIds` is the dispatched
+ *  ids, IN ORDER; `ingredients`/`addressByName`/`formality`/`answerQuestions`
+ *  are the DISPATCH-TIME composition, not the CURRENT one (that is
  *  `DiscussionRepliesLogInput.answerQuestions` below, labelled "at export
  *  time" in the CSV) - a returning instructor asking "was this setting on
  *  when THIS batch drafted" needs the value that actually reached the
@@ -198,6 +200,20 @@ export interface DiscussionRepliesLogDraft {
   repliesReturned: number;
   rowsMissing: number;
   questionsReturned: number;
+  // docs/answers-in-the-reply-acceptance-criteria.md A7: of the
+  // `questionsReturned` above, how many had their `answer` LOCATED IN the
+  // drafted reply text (`replyContainsAnswer`,
+  // src/lib/discussion-answer-location.ts), computed by `runDraftLoop` at
+  // the moment this reply landed. Placed IMMEDIATELY after
+  // `questionsReturned` so the CSV's trailing columns keep their positions.
+  // Never recomputed later against a possibly-edited reply, and never
+  // stored per question on the row entry below - that would be answering a
+  // different question ("is it in the CURRENT reply") at a different time
+  // (every render, via useReplyRows) under a name that looks like this one.
+  // Labelled "located in the reply" everywhere it is shown, never
+  // "answered" - it inherits the predicate's miss rate (D6) and must not
+  // overclaim.
+  questionsAnsweredInReply: number;
   questionsNeedingYou: number;
   questionsDropped: number;
   finishReason: string;
@@ -230,9 +246,11 @@ export interface DiscussionRepliesLogDraft {
  * CSV's `Links` column (see `formatDiscussionRepliesLogCsv`'s own comment).
  * docs/post-questions-acceptance-criteria.md Q9: `questionCount` and
  * `questionsNeedingYou` are the row's OWN "questions still showing" counts
- * (Insert and Remove both delete the item from the row, so this is "still
- * showing", not "found" - the drafts section above carries "found"; see
- * Limits). `questions` carries the redacted question/needsYou TEXT plus the
+ * (Remove deletes the item from the row, and is now the ONLY thing that
+ * does - docs/answers-in-the-reply-acceptance-criteria.md D5 deletes
+ * Insert, which used to be the other one - so this is "still showing", not
+ * "found" - the drafts section above carries "found"; see Limits).
+ * `questions` carries the redacted question/needsYou TEXT plus the
  * answer's LENGTH ONLY - the answer text itself is never carried into this
  * log (a download-time opt-in would be a new, explicit feature, not this
  * one). `question`/`needsYou` are passed through `redactAuthorNameFromText`
@@ -407,9 +425,11 @@ export interface DiscussionRepliesLogSummary {
   rowsWithNoResources: number;
   // docs/post-questions-acceptance-criteria.md Q9: rows/questions counted
   // off the CURRENT row snapshot (Limits: "still showing", not "found" -
-  // Insert and Remove both delete the item), plus the dispatch-level counts
-  // off the `drafts` stream (which DOES say "found", since a draft event is
-  // never mutated after the fact).
+  // Remove deletes the item, and is now the only thing that does; Insert
+  // used to be the other one and is deleted, docs/answers-in-the-reply-
+  // acceptance-criteria.md D5), plus the dispatch-level counts off the
+  // `drafts` stream (which DOES say "found", since a draft event is never
+  // mutated after the fact).
   rowsWithQuestions: number;
   questionsTotal: number;
   questionsNeedingYou: number;
@@ -577,6 +597,10 @@ const RUN_CSV_HEADER = ["Field", "Value"];
 const BATCH_CSV_HEADER = ["At", "Frames in batch", "Posts extracted", "Posts added", "Posts duplicate", "Capped", "Discarded", "Error"];
 // docs/post-questions-acceptance-criteria.md Q9: one row per draft event,
 // columns in DiscussionRepliesLogDraft's own field order.
+// docs/answers-in-the-reply-acceptance-criteria.md A7: "Questions located in
+// the reply" is added immediately after "Questions returned", matching the
+// interface's own field order above - never "answered", see that field's
+// own doc comment for why.
 const DRAFT_CSV_HEADER = [
   "At",
   "Row IDs",
@@ -590,6 +614,7 @@ const DRAFT_CSV_HEADER = [
   "Replies returned",
   "Rows missing",
   "Questions returned",
+  "Questions located in the reply",
   "Questions needing you",
   "Questions dropped",
   "Finish reason",
@@ -683,6 +708,7 @@ export function formatDiscussionRepliesLogCsv(log: DiscussionRepliesRunLog): str
         String(d.repliesReturned),
         String(d.rowsMissing),
         String(d.questionsReturned),
+        String(d.questionsAnsweredInReply),
         String(d.questionsNeedingYou),
         String(d.questionsDropped),
         d.finishReason,

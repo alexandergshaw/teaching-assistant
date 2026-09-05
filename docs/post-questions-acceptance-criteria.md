@@ -1,5 +1,17 @@
 # Answers to the questions in each post - acceptance criteria
 
+> **PARTLY SUPERSEDED (2026-09-04) by
+> `docs/answers-in-the-reply-acceptance-criteria.md`.** The owner reversed
+> this document's central decision: the drafted reply now ANSWERS the
+> questions in its own prose, rather than holding the answers outside it for
+> the instructor to insert. Q2's separation rule, Q7's entire Insert path
+> and the "an un-inserted answer never reaches the clipboard" guarantee are
+> all gone. Everything else here - what counts as an asked or implied
+> question, the parsing table, row storage, the control, the run log, the
+> block's focus and clipboard behaviour - still describes what ships. Read
+> the newer document first, and do not restore a rule from this one without
+> reading its section 0.
+
 Owner request 2026-09-04: "i need another output to the discussion board
 screen reader to be answering questions (explicit or implicit) within the
 original posts."

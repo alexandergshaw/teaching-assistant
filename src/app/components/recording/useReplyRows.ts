@@ -287,9 +287,10 @@ export interface UseReplyRowsReturn {
    *  docs/post-questions-acceptance-criteria.md Q6: `questions` is a FIFTH,
    *  identically-shaped three-way switch - undefined leave / [] clear /
    *  array replace with a COPY. `undefined` is what runDraftLoop passes on
-   *  the discard path (re-applying the user's own text) and on a dispatch
-   *  where the setting was OFF; `[]` is a dispatch where the setting was ON
-   *  and the model returned none this time. */
+   *  the discard path, which re-applies the row's own text and so replaces
+   *  nothing the questions were drafted against; `[]` is a dispatch that DID
+   *  replace the reply but carries no questions for it - the setting was
+   *  off, or on with none returned this time. */
   applyReply: (id: string, reply: string, userEdited?: boolean, concepts?: readonly string[], questions?: readonly PostQuestion[]) => void;
 
   /** docs/post-questions-acceptance-criteria.md Q6: removes EVERY item on
@@ -687,13 +688,16 @@ export function useReplyRows(): UseReplyRowsReturn {
               state: nextState,
               error: null,
               concepts: undefined,
-              // docs/post-questions-acceptance-criteria.md Q6: `questions` is
-              // deliberately NOT cleared here, unlike `concepts` above -
-              // questions describe the POST, which this edit did not
-              // change. Insert IS an editReply call (appendAnswerToReply
-              // writes through this same mutator), so clearing questions
-              // here would make inserting answer 1 delete questions 2 and 3
-              // on the same row.
+              // docs/answers-in-the-reply-acceptance-criteria.md D2:
+              // `questions` is deliberately NOT cleared here, unlike
+              // `concepts` above - though the OLD reason ("they describe the
+              // POST, which this edit did not change") died with D4, since
+              // `answer` now quotes one specific draft. It survives a
+              // keystroke because the UI derives each item's state at RENDER
+              // time from the LIVE reply text (replyContainsAnswer), never
+              // from a stored flag, so an edit reads correctly on the next
+              // render with nothing here to keep in sync. Only a path that
+              // REPLACES the reply clears them - see discussion-draft-loop.ts.
             }
           : r
       );

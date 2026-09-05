@@ -65,6 +65,8 @@ function draftEvent(overrides: Partial<DiscussionRepliesLogDraft> & { at: string
     repliesReturned: overrides.rowIds.length,
     rowsMissing: 0,
     questionsReturned: 0,
+    // docs/answers-in-the-reply-acceptance-criteria.md A7.
+    questionsAnsweredInReply: 0,
     questionsNeedingYou: 0,
     questionsDropped: 0,
     finishReason: "",
@@ -728,7 +730,7 @@ describe("formatDiscussionRepliesLogCsv", () => {
       // Q9: a new section, after === Batches === and before === Notices ===.
       // emptyInput()'s default `drafts` is [], so only the header renders.
       "=== Drafts ===",
-      "At,Row IDs,Audience,Ingredients,Address by first name,Formality,Answer questions,Outcome,Error,Replies returned,Rows missing,Questions returned,Questions needing you,Questions dropped,Finish reason,Candidates token count,Elapsed ms",
+      "At,Row IDs,Audience,Ingredients,Address by first name,Formality,Answer questions,Outcome,Error,Replies returned,Rows missing,Questions returned,Questions located in the reply,Questions needing you,Questions dropped,Finish reason,Candidates token count,Elapsed ms",
       "",
       "=== Notices ===",
       "At,Text",
@@ -840,6 +842,10 @@ describe("formatDiscussionRepliesLogCsv", () => {
           repliesReturned: 2,
           rowsMissing: 0,
           questionsReturned: 3,
+          // docs/answers-in-the-reply-acceptance-criteria.md A7: placed
+          // between questionsReturned and questionsNeedingYou below, matching
+          // the interface's own field order.
+          questionsAnsweredInReply: 2,
           questionsNeedingYou: 1,
           questionsDropped: 1,
           finishReason: "STOP",
@@ -852,7 +858,7 @@ describe("formatDiscussionRepliesLogCsv", () => {
     const lines = csv.split("\r\n");
     const draftLine = lines.find((l) => l.startsWith(`${AT},r1;r2,`));
     expect(draftLine).toBe(
-      `${AT},r1;r2,peers,"compliment, resources",No,formal,Yes,ok,,2,0,3,1,1,STOP,512,987`
+      `${AT},r1;r2,peers,"compliment, resources",No,formal,Yes,ok,,2,0,3,2,1,1,STOP,512,987`
     );
   });
 
@@ -868,7 +874,10 @@ describe("formatDiscussionRepliesLogCsv", () => {
     expect(draftLine).not.toContain("null");
     // The last three columns (Finish reason, Candidates token count, Elapsed
     // ms) are all empty for this event - three consecutive empty cells means
-    // the line ends in exactly three commas.
+    // the line ends in exactly three commas. docs/answers-in-the-reply-
+    // acceptance-criteria.md A7's new column sits BEFORE Questions needing
+    // you, nowhere near the trailing columns, so this pin is unaffected by
+    // its addition.
     expect(draftLine?.endsWith(",,,")).toBe(true);
   });
 

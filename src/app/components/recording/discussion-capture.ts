@@ -780,7 +780,7 @@ export interface DraftingArmSignatureArgs {
   formality: string;
   // docs/post-questions-acceptance-criteria.md Q8: a FOURTH reply-composition
   // control joins the signature, the SEVENTH field overall, after
-  // `formality` - "Draft answers to the questions in each post" is a real
+  // `formality` - "Answer the questions in each post" is a real
   // drafting input `redraftAll` (via runDraftLoop's `compositionNow`)
   // actually consumes, so it must be able to re-arm "Redraft every reply"
   // exactly like `ingredients`/`addressByName`/`formality` above (C6a's own

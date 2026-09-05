@@ -719,14 +719,55 @@ export function buildReplyDraftingPrompt(
   // is byte-identical to the pre-feature prompt for the same other inputs.
   // Placed immediately after greetingNamesBlock and before "THE POSTS",
   // never restated anywhere else in this builder.
+  // docs/answers-in-the-reply-acceptance-criteria.md A2: the answering rule
+  // was rewritten from "answer separately, as a paragraph the reply never
+  // shows" to "the reply itself answers it". The listing bullet (asked /
+  // implied) immediately below and the skip bullet (post already answers
+  // it / repeats the prompt / rhetorical) two bullets down are UNCHANGED -
+  // only the answering bullet and the needsYou bullet's own text move.
   const questionsBlock = composition.answerQuestions
     ? [
         "QUESTIONS IN THE POST",
-        "- Separately from the reply, list the questions each post asks. Include every question the post asks outright, and any question it only implies - a stated confusion, a wrong assumption stated as fact, or something the writer says they could not work out. Phrase an implied question as the question the writer would have asked. One entry per distinct question; split a compound sentence only when its parts need different answers.",
-        "- Answer each one in plain prose, 1 to 4 sentences, in your own voice, pitched at the people in this discussion. No markdown, no bullet lists. Write each answer to the person who asked, so that it reads on its own as a paragraph of the reply with the question never shown: its first sentence names the point being answered, and it never begins with Yes, No, or a word that refers back to the question.",
-        '- If answering would require a fact about the course that is not written in the posts or the reference material shown to you here - a due date, a policy, what a reading or the assignment says, a grade - leave "answer" empty and name that fact in "needsYou" as a short sentence fragment addressed to the instructor: the thing itself, not an instruction. Give "needsYou" alongside an "answer" only when the answer is partial and the rest depends on such a fact. Nothing addressed to the instructor ever goes in "answer". Never write a placeholder such as null, N/A or None for either field - leave the key out.',
+        // VERIFY PASS: the opening phrase was "Separately from the reply,
+        // list the questions ...", written when the ANSWERS lived outside
+        // the reply too. Only the LIST is separate now; leaving "separately
+        // from the reply" one bullet above "the reply itself answers each
+        // question" is an instruction to keep them out, which is the exact
+        // behaviour this change exists to reverse. The rest of this bullet
+        // is byte-unchanged and pinned as such.
+        "- Alongside the reply, list the questions each post asks. Include every question the post asks outright, and any question it only implies - a stated confusion, a wrong assumption stated as fact, or something the writer says they could not work out. Phrase an implied question as the question the writer would have asked. One entry per distinct question; split a compound sentence only when its parts need different answers.",
+        // A2: replaces the old "answer separately, as a standalone
+        // paragraph" rule. The reply answers in its own flow, not a
+        // labelled aside - never appended at the end, never introduced by
+        // restating the question, never labelled. "Answer in the register
+        // you are already writing in, giving your reading of the point
+        // rather than a tutorial" is deliberately audience-blind wording
+        // (no branch on `audience`, which this block never even receives)
+        // chosen so it reads true against BOTH the peers register's "do
+        // not explain the underlying concepts back to them" (:530) and the
+        // students register, which has no such prohibition -
+        // questions.test.ts:604 pins this block as structural either way.
+        // The final sentence is the one clause kept from the old
+        // separation rule this replaces (A2, "KEEP its final clause") -
+        // without it, "I'll come back to that below" re-enters a reply
+        // that has no below.
+        // VERIFY PASS: "except the ones the next rule sets aside" is not
+        // decoration. Without it this bullet is unconditional and the
+        // needsYou carve-out arrives one bullet LATER, so a model that has
+        // already committed to answering every listed question answers the
+        // gap-bearing one too - normally by inventing a plausible due date,
+        // which is the exact failure the course-fact rule in EVERY REPLY
+        // exists to prevent.
+        '- The reply itself answers each question listed above, except the ones the next rule sets aside, in its own voice and flow, at the point in its own argument where it naturally reaches it - never appended at the end, never introduced by restating the question, and never labelled as an answer. Answer in the register you are already writing in, giving your reading of the point rather than a tutorial. What you put in "answer" must be text that actually appears in the reply, copied from it - never new prose written only for this field. If the reply mentions a question without yet answering it, it does not say whether, where or by whom it will be answered.',
+        // needsYou text is UNCHANGED through "leave the key out." The final
+        // sentence is new (A2): the old rule already told the model to
+        // withhold "answer" and name the gap in "needsYou"; this says what
+        // the REPLY does about that same gap - the same "write around it"
+        // duty the EVERY REPLY section already states above, restated here
+        // for the one case the model might otherwise think this new
+        // answer-in-the-reply rule overrides it.
+        '- If answering would require a fact about the course that is not written in the posts or the reference material shown to you here - a due date, a policy, what a reading or the assignment says, a grade - leave "answer" empty and name that fact in "needsYou" as a short sentence fragment addressed to the instructor: the thing itself, not an instruction. Give "needsYou" alongside an "answer" only when the answer is partial and the rest depends on such a fact. Nothing addressed to the instructor ever goes in "answer". Never write a placeholder such as null, N/A or None for either field - leave the key out. Where a question needs such a fact, the reply itself writes around it exactly as the rule above already requires - it does not answer that question, invent the fact, or promise to check.',
         "- Do not list a question the post itself goes on to answer, a question it repeats from the discussion prompt in order to answer it, or a rhetorical question. A post with no questions gets an empty array.",
-        '- The reply may still do what the rules above ask of it, including a brief correction, but it must not reproduce an answer written in "questions". A clause is enough; the full answer belongs in "questions", where the instructor decides whether to use it. If the reply mentions a question, it does not say whether, where or by whom it will be answered.',
       ].join("\n")
     : "";
 
@@ -744,9 +785,29 @@ export function buildReplyDraftingPrompt(
   // elsewhere in this file for why - the data pass measured truncation
   // recovery against this exact order) - never reorder, never move
   // "questions" into a second top-level array.
+  // docs/answers-in-the-reply-acceptance-criteria.md A2: keeps every key and
+  // the within-element order (reply, concepts, questions) from the line
+  // above and this line's own shape - only "answer"'s description changes,
+  // from "the answer text" to "the words from the reply that answer it,
+  // copied exactly", matching D4/A2's "answer changes meaning, not type".
   const questionsOutputLine = composition.answerQuestions
-    ? '"questions" is an array, at most 3 per post - when there are more, keep the ones asked outright first, then the ones that matter most. Each is {"question": "...", "implied": true or false, "answer": "..."}, plus "needsYou": "..." only when the rules above call for it. It does not count toward the element count above.'
+    ? '"questions" is an array, at most 3 per post - when there are more, keep the ones asked outright first, then the ones that matter most. Each is {"question": "...", "implied": true or false, "answer": "..."}, plus "needsYou": "..." only when the rules above call for it; "answer" is the words from the reply that answer it, copied exactly. It does not count toward the element count above.'
     : "";
+
+  // docs/answers-in-the-reply-acceptance-criteria.md A2: ONE line, made
+  // conditional, rather than a second sentence count restated inside
+  // questionsBlock - two different counts in one prompt, the stricter one
+  // first, is the defect this ternary avoids. The OFF arm is the exact
+  // pre-existing string, byte-for-byte, so the frozen baselines
+  // (discussion-reply-prompt.test.ts:363-367,
+  // discussion-reply-prompt.questions.test.ts:513-516) stay untouched. The
+  // ON arm widens the ceiling to make room for answering questions in flow
+  // and states which rule wins when the two collide: at MAX_POST_QUESTIONS
+  // the "answer every question" duty and the sentence ceiling can meet, and
+  // the ceiling wins - shorter answers, never an eleventh sentence.
+  const sentenceCountLine = composition.answerQuestions
+    ? "- 3 to 6 sentences, up to 10 when you are answering questions the post asks. If ten sentences is not enough room, answer each question more briefly rather than write an eleventh. Plain prose."
+    : "- 3 to 6 sentences. Plain prose.";
 
   return [
     AUDIENCE_STANCE[audience],
@@ -757,7 +818,7 @@ export function buildReplyDraftingPrompt(
 
     "EVERY REPLY, BOTH REGISTERS",
     "- Write in the first person, as yourself.",
-    "- 3 to 6 sentences. Plain prose.",
+    sentenceCountLine,
     "- No markdown, no headings, no bullet lists, no bold.",
     nameLine(addressing, audience),
     "- No emoji.",
@@ -800,6 +861,12 @@ export function buildReplyDraftingPrompt(
     // C3-i: this line CHANGED (not supplemented) - "if you need one" was a
     // suggestion; C3 requires a paragraph break, with a blank line, for a
     // reply over roughly 60 words.
+    //
+    // docs/answers-in-the-reply-acceptance-criteria.md A2 ("4"): this rule
+    // is left UNCHANGED here on purpose, even though a longer, questions-
+    // answering reply changes its effect - a reply that now runs past 60
+    // words more often will break into paragraphs more often as a result,
+    // with no edit to this line needed to make that happen.
     'Write the reply as plain text. If it runs longer than about 60 words, break it into at least two paragraphs, separated by a blank line ("\\n\\n"). No backticks.',
     "No prose before or after the array. No code fences.",
     // knowledgeContext BEFORE styleBlock, never after - see this function's

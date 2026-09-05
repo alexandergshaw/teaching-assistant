@@ -36,7 +36,6 @@ import controls from "./RecordingControls.module.css";
 import { type ReplyRow, type ReplyResource, type ReplySort } from "./discussion-capture";
 import DiscussionReplyRow, { DISCUSSION_TABLE_COLUMN_COUNT } from "./DiscussionReplyRow";
 import type { LlmProvider } from "@/lib/llm";
-import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 
 /** AC14/F6: only First/Last/Captured carry aria-sort; "none" on every
  * sortable header that is not the active sort, never omitted - omitting it
@@ -119,11 +118,6 @@ export interface DiscussionReplyTableProps {
   /** Resource-controls feature: per-row targeted search. Forwarded straight
    *  through from R-D (useReplyResources.ts's `searchRow`). */
   searchRow: (id: string) => void;
-  /** docs/post-questions-acceptance-criteria.md Q12: forwarded UNWRAPPED to
-   *  every DiscussionReplyRow as `onInsertAnswer` - the panel passes the
-   *  WRAPPED `handleInsertAnswerForRow` here, never the raw hook mutator
-   *  (which compiles and ships the handled-badge lie - Q7). */
-  insertAnswer: (id: string, item: PostQuestion) => void;
   /** Q12: forwarded UNWRAPPED to every DiscussionReplyRow as
    *  `onRemoveQuestion`. */
   removeQuestion: (id: string, question: string) => void;
@@ -164,7 +158,6 @@ export default function DiscussionReplyTable({
   removeResource,
   insertResource,
   searchRow,
-  insertAnswer,
   removeQuestion,
   handledAtById,
   skippedById,
@@ -308,7 +301,6 @@ export default function DiscussionReplyTable({
                   onRemoveResource={removeResource}
                   onInsertResource={insertResource}
                   onSearchRow={searchRow}
-                  onInsertAnswer={insertAnswer}
                   onRemoveQuestion={removeQuestion}
                   handledAt={handledAtById[row.id]}
                   skipped={!!skippedById[row.id]}

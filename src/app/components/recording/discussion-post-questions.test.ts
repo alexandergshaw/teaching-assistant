@@ -2,32 +2,37 @@ import { describe, it, expect } from "vitest";
 import {
   QUESTION_BADGE_LABELS,
   questionBadgeLabel,
-  insertAnswerAriaLabel,
+  questionAnswerDisplay,
   copyAnswerAriaLabel,
   removeQuestionAriaLabel,
   neighbourQuestionAfterRemove,
   COPY_RESET_MS,
   ANSWER_CLIPBOARD_FAILURE_MESSAGE,
   clampQuestion,
-  insertedAnswerAnnouncement,
   copiedAnswerAnnouncement,
 } from "./discussion-post-questions";
 
-// docs/post-questions-acceptance-criteria.md Q10/Q11: every export of the
-// pure leaf gets its own test here (vitest is node-env and renders no
-// component in this repo - see discussion-reply-controls.ts's own header for
-// why this leaf exists as a plain .ts file at all).
+// docs/answers-in-the-reply-acceptance-criteria.md A4/section 6 (GROUP C):
+// every export of the pure leaf gets its own test here (vitest is node-env
+// and renders no component in this repo - see discussion-reply-controls.ts's
+// own header for why this leaf exists as a plain .ts file at all).
 //
 // NOTE: this leaf imports `truncateWithMarker` from
-// `@/lib/discussion-reply-prompt` (Group A's file, Q1). Until Group A lands
-// that export, every test below that reaches `clampQuestion` (the three aria
+// `@/lib/discussion-reply-prompt` (Group A's file). Until that export lands,
+// every test below that reaches `clampQuestion` (the two remaining aria
 // builders) fails at module load, not at assertion - report that as expected
 // red, per the AC's "red until [sibling group] lands" instruction for
 // cross-group contract names.
 
 describe("QUESTION_BADGE_LABELS", () => {
-  it("is the exact three-key vocabulary", () => {
-    expect(QUESTION_BADGE_LABELS).toEqual({ asked: "Asked", implied: "Implied", needsYou: "Needs you" });
+  it("is the exact five-key vocabulary - one table, never a second", () => {
+    expect(QUESTION_BADGE_LABELS).toEqual({
+      asked: "Asked",
+      implied: "Implied",
+      needsYou: "Needs you",
+      inReply: "In the reply",
+      notInReply: "Not in the reply",
+    });
   });
 });
 
@@ -51,6 +56,50 @@ describe("questionBadgeLabel", () => {
 
   it('returns "Implied" for implied: true', () => {
     expect(questionBadgeLabel({ implied: true })).toBe("Implied");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4's state table (the doc's `| answer present, inReply | answer present,
+// not inReply | answer empty |` table), as a pure function of the two
+// booleans the component derives per item. `hasAnswer: false` always wins
+// regardless of `inReply` - the component only ever passes
+// `inReply = hasAnswer && replyContainsAnswer(...)`, so that combination
+// cannot occur in practice, but the function's own contract must still hold
+// it (an empty answer can never be "in the reply").
+// ---------------------------------------------------------------------------
+
+describe("questionAnswerDisplay", () => {
+  it("answer empty: no badge, no answer text, no Copy", () => {
+    expect(questionAnswerDisplay(false, false)).toEqual({
+      badgeLabel: null,
+      showAnswerText: false,
+      showCopy: false,
+    });
+  });
+
+  it("answer empty even if inReply were somehow true: still no badge, text, or Copy", () => {
+    expect(questionAnswerDisplay(false, true)).toEqual({
+      badgeLabel: null,
+      showAnswerText: false,
+      showCopy: false,
+    });
+  });
+
+  it('answer present and inReply: "In the reply" badge, no answer text, no Copy', () => {
+    expect(questionAnswerDisplay(true, true)).toEqual({
+      badgeLabel: "In the reply",
+      showAnswerText: false,
+      showCopy: false,
+    });
+  });
+
+  it('answer present and NOT inReply: "Not in the reply" badge, answer text, and Copy', () => {
+    expect(questionAnswerDisplay(true, false)).toEqual({
+      badgeLabel: "Not in the reply",
+      showAnswerText: true,
+      showCopy: true,
+    });
   });
 });
 
@@ -80,23 +129,6 @@ describe("neighbourQuestionAfterRemove", () => {
   });
 });
 
-describe("insertAnswerAriaLabel", () => {
-  it("names the question and the author, clamped to 60 chars via truncateWithMarker", () => {
-    const short = { question: "Why does the loop run twice?" };
-    expect(insertAnswerAriaLabel(short, "Diego Chen")).toBe(
-      'Insert the answer to "Why does the loop run twice?" into the reply to Diego Chen'
-    );
-  });
-
-  it("clamps a question longer than 60 characters", () => {
-    const long = { question: "a".repeat(80) };
-    const label = insertAnswerAriaLabel(long, "Diego Chen");
-    // truncateWithMarker cuts to 60 chars then appends "..." (no word
-    // boundary exists in a run of "a"s, so it cuts at exactly 60).
-    expect(label).toBe(`Insert the answer to "${"a".repeat(60)}..." into the reply to Diego Chen`);
-  });
-});
-
 describe("copyAnswerAriaLabel", () => {
   it("names only the question, never the author", () => {
     const item = { question: "Is this graded?" };
@@ -106,26 +138,20 @@ describe("copyAnswerAriaLabel", () => {
 });
 
 describe("removeQuestionAriaLabel", () => {
-  it("names the question and the author", () => {
+  it('names the question and the author, via "from the list for the reply to" (A4: one word changed from the pre-existing wording, since removal never touches reply text)', () => {
     const item = { question: "Is this graded?" };
     expect(removeQuestionAriaLabel(item, "Diego Chen")).toBe(
-      'Remove the question "Is this graded?" from the reply to Diego Chen'
+      'Remove the question "Is this graded?" from the list for the reply to Diego Chen'
     );
   });
 });
 
 // ---------------------------------------------------------------------------
-// VERIFIER FINDING 3/5: the two spoken announcements. Both live here (not
-// inline in the .tsx) so they HAVE a test surface - vitest here is node-env
-// and renders no component, so a string built inside DiscussionReplyQuestions
-// .tsx is never exercised by anything.
-//
-// The property that matters is not the wording, it is that two DIFFERENT
-// questions in the SAME row produce two DIFFERENT strings: the panel's live
-// region is `setAdhocAnnouncement(text)`, and re-setting an identical string
-// re-renders nothing, so an announcement that varied only by author would be
-// spoken on the first Insert of a row and then stay silent for the second and
-// third - which is the designed flow.
+// The one remaining spoken announcement (Copy - Insert's own announcement,
+// `insertedAnswerAnnouncement`, is deleted end to end with D5). Lives here
+// (not inline in the .tsx) so it HAS a test surface - vitest here is
+// node-env and renders no component, so a string built inside
+// DiscussionReplyQuestions.tsx is never exercised by anything.
 // ---------------------------------------------------------------------------
 
 describe("clampQuestion", () => {
@@ -142,32 +168,20 @@ describe("clampQuestion", () => {
   });
 });
 
-describe("insertedAnswerAnnouncement / copiedAnswerAnnouncement", () => {
+describe("copiedAnswerAnnouncement", () => {
   const q1 = { question: "Why does the loop run twice?" };
   const q2 = { question: "Is the lab due Friday or Sunday?" };
 
-  it("names the question AND the author on insert", () => {
-    const out = insertedAnswerAnnouncement(q1, "Priya Natarajan");
-    expect(out).toContain("Why does the loop run twice?");
-    expect(out).toContain("Priya Natarajan");
-  });
-
-  it("names the question on copy", () => {
+  it("names the question", () => {
     expect(copiedAnswerAnnouncement(q1)).toContain("Why does the loop run twice?");
   });
 
-  it("two questions in ONE row give two DIFFERENT insert strings - the live region only speaks a string that actually changed", () => {
-    const author = "Priya Natarajan";
-    expect(insertedAnswerAnnouncement(q1, author)).not.toBe(insertedAnswerAnnouncement(q2, author));
-  });
-
-  it("two questions in ONE row give two DIFFERENT copy strings, for the same reason", () => {
+  it("two questions in ONE row give two DIFFERENT copy strings - the live region only speaks a string that actually changed", () => {
     expect(copiedAnswerAnnouncement(q1)).not.toBe(copiedAnswerAnnouncement(q2));
   });
 
-  it("clamps the question inside both announcements, so a 300-character question does not become a 300-character utterance", () => {
+  it("clamps the question inside the announcement, so a 300-character question does not become a 300-character utterance", () => {
     const long = { question: "a".repeat(300) };
-    expect(insertedAnswerAnnouncement(long, "Priya Natarajan").length).toBeLessThan(140);
     expect(copiedAnswerAnnouncement(long).length).toBeLessThan(100);
   });
 });

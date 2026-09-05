@@ -88,12 +88,7 @@ import {
   type ReplyResource,
 } from "./discussion-capture";
 // Resource-controls feature: the one-click insert's pure text-append leaf.
-// docs/post-questions-acceptance-criteria.md Q7: appendAnswerToReply /
-// replyAlreadyHasAnswer are the same shape, one function pair per output.
-import { appendResourceToReply, replyAlreadyHasResource, appendAnswerToReply, replyAlreadyHasAnswer } from "./discussion-reply-insert";
-// Q1: type-only, imported ONLY from the leaf - never re-exported from
-// discussion-serialization.ts or discussion-capture.ts.
-import type { PostQuestion } from "@/lib/discussion-reply-prompt";
+import { appendResourceToReply, replyAlreadyHasResource } from "./discussion-reply-insert";
 import { useDiscussionCapture } from "./useDiscussionCapture";
 import { useReplyRows } from "./useReplyRows";
 import { useReplyResources } from "./useReplyResources";
@@ -695,24 +690,6 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     rowsApiRef.current.removeResource(id, resource.url);
   }, []);
 
-  // docs/post-questions-acceptance-criteria.md Q7: insertAnswer - a MOVE,
-  // the same shape as insertResource above. Reads rawRows, never the
-  // filtered rows (B3/B5 discipline). A no-op when the row is gone or
-  // item.answer === "" (an item carrying only a needsYou note has nothing
-  // to insert - Copy/Remove are still the row's only controls for it).
-  // replyAlreadyHasAnswer guards a redraft/remount case the same way
-  // replyAlreadyHasResource does for resources.
-  const insertAnswer = useCallback((id: string, item: PostQuestion) => {
-    if (item.answer === "") return;
-    const row = rowsApiRef.current.rawRows.find((r) => r.id === id);
-    if (!row) return;
-    if (!replyAlreadyHasAnswer(row.reply, item.answer)) {
-      const nextReply = appendAnswerToReply(row.reply, item.answer);
-      rowsApiRef.current.editReply(id, nextReply);
-    }
-    rowsApiRef.current.removeQuestion(id, item.question);
-  }, []);
-
   // Q7: a plain row mutator, forwarded the same way removeResource above is
   // - no queue involvement.
   const removeQuestion = useCallback((id: string, question: string) => {
@@ -905,14 +882,10 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     searchRow: resourcesApi.searchRow,
     insertResource,
 
-    // docs/post-questions-acceptance-criteria.md Q7/Q12: the post-questions
-    // pair, forwarded exactly like insertResource/removeResource above. The
-    // PANEL passes `insertAnswer` into useDiscussionReplyFiltering (which
-    // wraps it as `handleInsertAnswerForRow` to clear `handledAt`) and hands
-    // the table the WRAPPED one - passing this raw callback to the table
-    // compiles and ships the handled-badge lie, which is why
-    // postQuestions.wiring.test.ts pins the wrapped name at that call site.
-    insertAnswer,
+    // docs/answers-in-the-reply-acceptance-criteria.md A5/D5: `insertAnswer`
+    // is deleted end to end - the block now reads `reply` live instead of
+    // needing a MOVE into it. `removeQuestion` is forwarded exactly like
+    // removeResource above.
     removeQuestion,
 
     runLog,

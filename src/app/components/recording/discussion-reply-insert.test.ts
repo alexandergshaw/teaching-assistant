@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  appendResourceToReply,
-  replyAlreadyHasResource,
-  appendAnswerToReply,
-  replyAlreadyHasAnswer,
-} from "./discussion-reply-insert";
+import { appendResourceToReply, replyAlreadyHasResource } from "./discussion-reply-insert";
 
 const RESOURCE_A = { title: "MDN: Array.prototype.map()", url: "https://developer.mozilla.org/map" };
 const RESOURCE_B = { title: "Second resource", url: "https://example.com/2" };
@@ -105,81 +100,5 @@ describe("replyAlreadyHasResource", () => {
     // own "title - url" formatting, which would make it fragile to a title
     // edit; the URL alone is the identity FIX 2 cares about duplicating.
     expect(replyAlreadyHasResource(`See ${RESOURCE_A.url} for details.`, RESOURCE_A)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// docs/post-questions-acceptance-criteria.md Q7: appendAnswerToReply /
-// replyAlreadyHasAnswer - the same append-at-the-end shape as
-// appendResourceToReply/replyAlreadyHasResource above, but for a
-// post-question's answer text (no "title - url" formatting, no "Q:"/"A:"
-// prefix - the answer stands alone as its own paragraph, per Q2).
-// ---------------------------------------------------------------------------
-
-const ANSWER_A = "Because the outer loop iterates twice before the inner loop finishes.";
-const ANSWER_B = "The trolley problem is a thought experiment, not a real policy proposal.";
-
-describe("appendAnswerToReply", () => {
-  it("an empty reply becomes just the answer text, no leading blank line", () => {
-    expect(appendAnswerToReply("", ANSWER_A)).toBe(ANSWER_A);
-  });
-
-  it("a whitespace-only reply is treated as empty - no leading blank lines before the answer", () => {
-    expect(appendAnswerToReply("   \n  ", ANSWER_A)).toBe(ANSWER_A);
-  });
-
-  it("a non-empty reply gets the answer appended after a blank-line separator, with no 'Q:'/'A:' prefix", () => {
-    expect(appendAnswerToReply("Great point about closures.", ANSWER_A)).toBe(
-      `Great point about closures.\n\n${ANSWER_A}`
-    );
-  });
-
-  it("trims trailing whitespace on the existing reply before separating, so it never doubles a blank line", () => {
-    expect(appendAnswerToReply("Great point.   \n\n", ANSWER_A)).toBe(`Great point.\n\n${ANSWER_A}`);
-  });
-
-  it("never touches text BEFORE the append point - the entire prior string survives as an exact prefix", () => {
-    const before = "Every word of this instructor-written reply, verbatim.";
-    const after = appendAnswerToReply(before, ANSWER_A);
-    expect(after.startsWith(before)).toBe(true);
-  });
-
-  it("inserting a SECOND answer appends after the first, never replacing or duplicating it", () => {
-    const once = appendAnswerToReply("Great point about closures.", ANSWER_A);
-    const twice = appendAnswerToReply(once, ANSWER_B);
-    expect(twice).toBe(`Great point about closures.\n\n${ANSWER_A}\n\n${ANSWER_B}`);
-  });
-
-  it("SABOTAGE CHECK: appending is not idempotent on a repeated call with the SAME answer - dedup is the caller's job (removing the question from the row after one insert)", () => {
-    const once = appendAnswerToReply("Reply text.", ANSWER_A);
-    const calledAgain = appendAnswerToReply(once, ANSWER_A);
-    expect(calledAgain.split(ANSWER_A).length - 1).toBe(2);
-  });
-});
-
-describe("replyAlreadyHasAnswer", () => {
-  it("true once the reply already contains the answer text", () => {
-    const reply = appendAnswerToReply("Great point.", ANSWER_A);
-    expect(replyAlreadyHasAnswer(reply, ANSWER_A)).toBe(true);
-  });
-
-  it("false for a reply that has never had this answer inserted", () => {
-    expect(replyAlreadyHasAnswer("Great point about closures.", ANSWER_A)).toBe(false);
-  });
-
-  it("false for an empty reply", () => {
-    expect(replyAlreadyHasAnswer("", ANSWER_A)).toBe(false);
-  });
-
-  it("a DIFFERENT answer's text present does not mark THIS answer as already-inserted", () => {
-    const reply = appendAnswerToReply("Great point.", ANSWER_B);
-    expect(replyAlreadyHasAnswer(reply, ANSWER_A)).toBe(false);
-  });
-
-  it("MANUAL-DELETE-THEN-REINSERT CASE: false again once the instructor deletes the inserted answer by hand", () => {
-    const withAnswer = appendAnswerToReply("Great point.", ANSWER_A);
-    expect(replyAlreadyHasAnswer(withAnswer, ANSWER_A)).toBe(true);
-    const afterManualDelete = "Great point.";
-    expect(replyAlreadyHasAnswer(afterManualDelete, ANSWER_A)).toBe(false);
   });
 });

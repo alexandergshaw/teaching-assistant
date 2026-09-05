@@ -579,12 +579,127 @@ describe("Q2: buildReplyDraftingPrompt - QUESTIONS IN THE POST block and OUTPUT 
     expect(block).toContain("due date");
   });
 
-  it("ON: the reply-must-not-reproduce-the-answer rule is present in the block", () => {
+  // docs/answers-in-the-reply-acceptance-criteria.md A2 (section 0/1): the
+  // feature reverses docs/post-questions-acceptance-criteria.md's own rule
+  // that the reply "must not reproduce an answer written in questions" -
+  // the reply now answers in its own flow instead, so this assertion goes
+  // RED under the new prompt and is replaced (not deleted) by its inverse:
+  // the integration rule is present, and the old separation phrase is gone.
+  it("ON: the reply-answers-in-its-own-flow rule is present, and the old separation phrase is gone", () => {
     const prompt = buildReplyDraftingPrompt(posts, "students", "", "", ON_COMPOSITION);
     const questionsIdx = prompt.indexOf("QUESTIONS IN THE POST");
     const nextSectionIdx = prompt.indexOf("THE POSTS");
     const block = prompt.slice(questionsIdx, nextSectionIdx).toLowerCase();
-    expect(block).toContain("must not reproduce an answer");
+    // The fact, not the exact spelling: the reply itself answers each
+    // question, and what goes in "answer" must be reply text.
+    expect(block).toContain("answers each question");
+    expect(block).toContain("must be text that actually appears in the reply");
+    expect(block).not.toContain("must not reproduce");
+  });
+
+  it("ON: keeps the no-forward-promise clause - never appended at the end, never a label, and never says whether/where/by whom a question will be answered", () => {
+    const prompt = buildReplyDraftingPrompt(posts, "students", "", "", ON_COMPOSITION);
+    const questionsIdx = prompt.indexOf("QUESTIONS IN THE POST");
+    const nextSectionIdx = prompt.indexOf("THE POSTS");
+    const block = prompt.slice(questionsIdx, nextSectionIdx).toLowerCase();
+    expect(block).toContain("never appended at the end");
+    expect(block).toContain("never labelled");
+    expect(block).toContain("where or by whom it will be answered");
+  });
+
+  it("ON: register-compatible wording, with no audience branch inside the block (structural, not audience-scoped)", () => {
+    const studentsPrompt = buildReplyDraftingPrompt(posts, "students", "", "", ON_COMPOSITION);
+    const peersPrompt = buildReplyDraftingPrompt(posts, "peers", "", "", ON_COMPOSITION);
+    const studentsBlock = studentsPrompt.slice(
+      studentsPrompt.indexOf("QUESTIONS IN THE POST"),
+      studentsPrompt.indexOf("THE POSTS")
+    );
+    const peersBlock = peersPrompt.slice(
+      peersPrompt.indexOf("QUESTIONS IN THE POST"),
+      peersPrompt.indexOf("THE POSTS")
+    );
+    // Byte-identical: the block never reads `audience` at all.
+    expect(studentsBlock).toBe(peersBlock);
+    expect(studentsBlock.toLowerCase()).toContain("rather than a tutorial");
+  });
+
+  it("ON: the needsYou rule still tells the reply to write around a fact it cannot know, not answer, invent or promise to check", () => {
+    const prompt = buildReplyDraftingPrompt(posts, "students", "", "", ON_COMPOSITION);
+    const questionsIdx = prompt.indexOf("QUESTIONS IN THE POST");
+    const nextSectionIdx = prompt.indexOf("THE POSTS");
+    const block = prompt.slice(questionsIdx, nextSectionIdx).toLowerCase();
+    expect(block).toContain("writes around it");
+    expect(block).toContain("invent the fact");
+    expect(block).toContain("promise to check");
+  });
+
+  it("ON: the listing bullet no longer tells the model to keep answers separate from the reply", () => {
+    // VERIFY PASS. "Separately from the reply, list the questions ..." was
+    // written when the answers lived outside the reply as well. Only the
+    // LIST is separate now, and that phrase sitting one bullet above "the
+    // reply itself answers each question" is a direct instruction to do the
+    // thing this feature reverses.
+    const prompt = buildReplyDraftingPrompt(posts, "students", "", "", ON_COMPOSITION).toLowerCase();
+    expect(prompt).toContain("alongside the reply, list the questions each post asks");
+    expect(prompt).not.toContain("separately from the reply");
+  });
+
+  it("ON: the listing rule (asked/implied) and the skip rule are byte-unchanged from the pre-existing prompt", () => {
+    const prompt = buildReplyDraftingPrompt(posts, "students", "", "", ON_COMPOSITION);
+    expect(prompt).toContain(
+      "Include every question the post asks outright, and any question it only implies - a stated confusion, a wrong assumption stated as fact, or something the writer says they could not work out."
+    );
+    expect(prompt).toContain(
+      "Do not list a question the post itself goes on to answer, a question it repeats from the discussion prompt in order to answer it, or a rhetorical question. A post with no questions gets an empty array."
+    );
+  });
+
+  // docs/answers-in-the-reply-acceptance-criteria.md A2: "the sentence rule
+  // is ONE line, made conditional - not restated in the questions block."
+  describe("the sentence-count line", () => {
+    it("OFF arm is byte-identical to the frozen pre-feature string", () => {
+      const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+      expect(prompt).toContain("- 3 to 6 sentences. Plain prose.");
+    });
+
+    it("ON arm widens the ceiling to 10 and states which rule wins, in EVERY REPLY, not inside QUESTIONS IN THE POST", () => {
+      const prompt = buildReplyDraftingPrompt(posts, "students", "", "", ON_COMPOSITION);
+      const everyReplyIdx = prompt.indexOf("EVERY REPLY, BOTH REGISTERS");
+      const questionsIdx = prompt.indexOf("QUESTIONS IN THE POST");
+      const sentenceLineIdx = prompt.indexOf("up to 10");
+      expect(sentenceLineIdx).toBeGreaterThan(everyReplyIdx);
+      expect(sentenceLineIdx).toBeLessThan(questionsIdx);
+      // Only ONE sentence-count statement in the ON prompt - never restated
+      // inside the questions block itself. (The needsYou bullet legitimately
+      // says "sentence fragment", unrelated to a count, so this checks for
+      // the count phrasing specifically rather than the bare word.)
+      const block = prompt.slice(questionsIdx, prompt.indexOf("THE POSTS")).toLowerCase();
+      expect(block).not.toContain("3 to 6");
+      expect(block).not.toContain("up to 10");
+    });
+
+    it("the OFF byte-identity oracle still passes with the ternary in place", () => {
+      const prompt = buildReplyDraftingPrompt(posts, "students", "", "", LEGACY_COMPOSITION);
+      expect(prompt).toBe(BASELINE_STUDENTS_PROMPT);
+    });
+  });
+
+  it("block order is unchanged: GREETING NAMES/ingredients, then QUESTIONS IN THE POST, then THE POSTS", () => {
+    const prompt = buildReplyDraftingPrompt(
+      [{ ...posts[0], greetingName: "Priya" }, posts[1], posts[2]],
+      "students",
+      "",
+      "",
+      { ...ON_COMPOSITION, addressByName: true, ingredients: ["compliment"] }
+    );
+    const ingredientsIdx = prompt.indexOf("EACH REPLY SHOULD INCLUDE");
+    const greetingIdx = prompt.indexOf("GREETING NAMES");
+    const questionsIdx = prompt.indexOf("QUESTIONS IN THE POST");
+    const postsIdx = prompt.indexOf("THE POSTS");
+    expect(ingredientsIdx).toBeGreaterThanOrEqual(0);
+    expect(greetingIdx).toBeGreaterThan(ingredientsIdx);
+    expect(questionsIdx).toBeGreaterThan(greetingIdx);
+    expect(postsIdx).toBeGreaterThan(questionsIdx);
   });
 
   it("toggling answerQuestions is the ONLY difference between two otherwise-identical calls", () => {

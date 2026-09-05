@@ -131,10 +131,18 @@ export interface ReplyRow {
   // per-row output, set by applyReply exactly like `concepts` above (a
   // three-way switch: undefined leave / [] clear / array replace).
   // PERSISTED, absent-stays-absent like every optional field above.
-  // Deliberately NOT cleared by editReply (see that function's own comment)
-  // - questions describe the POST, which a reply edit does not change, and
-  // Insert IS an editReply call, so clearing here would make inserting one
-  // answer delete the row's other questions.
+  //
+  // docs/answers-in-the-reply-acceptance-criteria.md D2/A7 (VERIFY PASS):
+  // still deliberately NOT cleared by editReply, but for a NEW reason. The
+  // old one - "questions describe the POST, which a reply edit does not
+  // change, and Insert IS an editReply call" - is false twice over now:
+  // `answer` quotes one particular draft rather than describing the post,
+  // and the Insert path is deleted (D5). The reason it survives a keystroke
+  // is that the UI derives each item's state from the LIVE reply text at
+  // render (`replyContainsAnswer`), so an edit needs no stored value kept in
+  // sync - it simply reads differently on the next render. What DOES clear
+  // them is a reply REPLACEMENT (a redraft, or an edited-during-dispatch
+  // discard), since answers quoting a discarded draft describe nothing.
   questions?: PostQuestion[];
 }
 

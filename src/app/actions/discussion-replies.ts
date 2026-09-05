@@ -353,7 +353,16 @@ export async function draftDiscussionRepliesAction(
     if (!r.ok) return { error: describeLlmFailure(r, "Drafting replies failed") };
     if (!r.text.trim()) return { error: describeEmptyLlmText(r, "Drafting replies") };
 
-    const raw = parseLenientJsonArray(r.text) as
+    // docs/answers-in-the-reply-acceptance-criteria.md A8: this is the ONE
+    // call site that opts into truncated-element recovery. Measured over
+    // every cut position of a realistic drafting response, 18.2% of
+    // truncations here lose the whole batch to a slice that ends inside an
+    // inner "concepts"/"questions" array - and losing every reply in a batch
+    // is strictly worse for this caller than returning the replies that did
+    // arrive, since each element is an independent per-post draft the
+    // instructor reviews on its own. Callers whose elements are parts of one
+    // document must NOT copy this.
+    const raw = parseLenientJsonArray(r.text, { recoverTruncatedElements: true }) as
       | Array<{ post?: unknown; reply?: unknown; concepts?: unknown; questions?: unknown }>
       | null;
     if (!raw) {

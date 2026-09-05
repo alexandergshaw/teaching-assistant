@@ -39,7 +39,6 @@ import DiscussionReplyResources from "./DiscussionReplyResources";
 // component's own header for why it owns its own focus restoration and
 // clipboard call rather than this file growing those a second time.
 import DiscussionReplyQuestions from "./DiscussionReplyQuestions";
-import type { PostQuestion } from "@/lib/discussion-reply-prompt";
 // CC5/CC20: the row's own arm/confirm control for Redraft.
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 // CC14: the shared clipboard guard (was three inline copies).
@@ -162,11 +161,6 @@ export interface DiscussionReplyRowProps {
    *  the table-wide resource queue (useReplyResources.ts's `searchRow` doc
    *  comment has the full account). */
   onSearchRow: (id: string) => void;
-  /** docs/post-questions-acceptance-criteria.md Q7/Q10: MOVE - inserts
-   *  `item.answer` into the reply, then removes the question. Forwarded
-   *  through DiscussionReplyTable.tsx unwrapped as `insertAnswer`, bound to
-   *  `row.id` by this row's own useCallback below. */
-  onInsertAnswer: (id: string, item: PostQuestion) => void;
   /** Q7: forwarded straight through as `removeQuestion`, bound to `row.id`
    *  by this row's own useCallback below. */
   onRemoveQuestion: (id: string, question: string) => void;
@@ -222,7 +216,6 @@ function DiscussionReplyRowImpl({
   onRemoveResource,
   onInsertResource,
   onSearchRow,
-  onInsertAnswer,
   onRemoveQuestion,
   handledAt,
   onMarkHandled,
@@ -360,11 +353,9 @@ function DiscussionReplyRowImpl({
 
   // Q10: bound to this row's id, stable for DiscussionReplyQuestions' own
   // memo - the same reasoning as handleSearchResources above.
-  const handleInsertAnswer = useCallback((item: PostQuestion) => onInsertAnswer(row.id, item), [onInsertAnswer, row.id]);
   const handleRemoveQuestion = useCallback((question: string) => onRemoveQuestion(row.id, question), [onRemoveQuestion, row.id]);
-  // Q10: the fallback focus target after the block's last Remove click, and
-  // the target after every Insert click - see DiscussionReplyQuestions.tsx's
-  // own doc comment on `focusReplyInput`.
+  // Q10: the fallback focus target after the block's last Remove click - see
+  // DiscussionReplyQuestions.tsx's own doc comment on `focusReplyInput`.
   const focusReplyInput = useCallback(() => replyInputRef.current?.focus(), []);
 
   const handleCopy = async () => {
@@ -914,7 +905,7 @@ function DiscussionReplyRowImpl({
               <DiscussionReplyQuestions
                 authorName={row.author}
                 questions={row.questions}
-                onInsertAnswer={handleInsertAnswer}
+                reply={row.reply}
                 onRemoveQuestion={handleRemoveQuestion}
                 focusReplyInput={focusReplyInput}
                 announce={announce}

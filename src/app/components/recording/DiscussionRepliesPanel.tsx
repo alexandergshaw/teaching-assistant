@@ -199,13 +199,10 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     removeResource,
     searchRow,
     insertResource,
-    // docs/post-questions-acceptance-criteria.md Q7/Q12: forwarded straight
-    // through from the hook - `insertAnswer` is threaded INTO
-    // useDiscussionReplyFiltering below (which wraps it into
-    // `handleInsertAnswerForRow`, the clear-handled idiom Q7 requires), and
+    // docs/answers-in-the-reply-acceptance-criteria.md A5/D5: `insertAnswer`
+    // is gone - the block now reads the row's live `reply` instead.
     // `removeQuestion` is passed straight to the table (Remove has no
     // arm/confirm and does not touch `handledAt`, Q7).
-    insertAnswer,
     removeQuestion,
     runLog,
   } = useDiscussionReplies(active);
@@ -230,7 +227,6 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     handleClearFilters,
     handleEditReply,
     handleInsertResourceForRow,
-    handleInsertAnswerForRow,
   } = useDiscussionReplyFiltering({
     rawRows,
     rows,
@@ -238,7 +234,6 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     setFilterText,
     editReply,
     insertResource,
-    insertAnswer,
     setHandledAt,
     setSkipped,
   });
@@ -912,7 +907,6 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
           removeResource={removeResource}
           insertResource={handleInsertResourceForRow}
           searchRow={searchRow}
-          insertAnswer={handleInsertAnswerForRow}
           removeQuestion={removeQuestion}
           handledAtById={handledAtById}
           skippedById={skippedById}

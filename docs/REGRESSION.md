@@ -39185,3 +39185,206 @@ toolbar (the real click sink is finding which rows need the instructor across
 questions lists; gating `clearHandled` on the
 insert guard in both wrappers, so a no-op Insert stops clearing the copied
 badge; a caret-to-end after the post-Insert focus move.
+## 395. The drafted reply now answers the post's questions itself, and the question list becomes a receipt rather than a holding pen
+
+Owner request 2026-09-04: "when a question is identified in a discussion
+board post, it should be integrated naturally into the drafted reply." AC:
+`docs/answers-in-the-reply-acceptance-criteria.md` (revision 2, plus the
+verify-pass corrections recorded in it). Baseline: entry 394 covers this
+surface; no fresh baseline was needed.
+
+**What it is.** Entry 394 shipped the answers OUTSIDE the reply, one click
+away, and argued for it: on a discussion board, choosing not to answer in the
+thread is a real pedagogical move. The owner has reversed that default. The
+drafted reply now answers each question it identifies, in its own voice and
+flow, at the point its own argument reaches it - never appended, never
+labelled, never introduced by restating the question.
+
+The per-row list stops being where the answer LIVES and becomes the receipt
+for it - the answer to "did it see my student's second question?", which is
+the only thing a count could not tell you. Per item: **In the reply** (the
+answer's words are present - one line, badges, question, Remove, nothing
+else, because everything else is six lines above in the reply box), **Not in
+the reply** (the model drifted, or the instructor edited those sentences out
+- renders the answer text and Copy), and an orthogonal **Needs you** note
+that can appear alongside either. Two clicks to accept a two-question draft
+became zero.
+
+**Insert had to go, and that was the hard call.** `appendAnswerToReply`'s own
+header said it needed no "Q:"/"A:" prefix BECAUSE the prompt forced every
+answer to stand alone as a paragraph - the exact rule this change deletes.
+Once `answer` is mid-flow reply prose ("It does, but only because the outer
+loop is re-entered before the inner one drains."), appending it after the
+reply's own mandated closing question is a dangling fragment answering
+nothing. So the whole path went: `appendAnswerToReply`,
+`replyAlreadyHasAnswer`, `insertAnswer`, `handleInsertAnswerForRow`, the prop
+chain through panel/table/row, the block's button, two aria/announcement
+builders, and 12 assertions. Copy is the escape hatch; the old
+separate-answer workflow survives as the "Not in the reply" state an
+instructor reaches by deleting the sentences.
+
+### The state is derived, never stored
+
+`PostQuestion` gained no field. Each item's state is computed at render from
+`replyContainsAnswer(reply, item.answer)` against the row's LIVE reply text,
+so an edit that removes an answer is reflected on the next render with
+nothing to keep in sync. A stored flag drifts the moment the instructor
+types, and surviving an edit is this feature's whole job.
+
+`src/lib/discussion-answer-location.ts` is that predicate: three EXACT
+containment attempts over a normalised projection (case-folded; zero-width
+characters dropped; curly quotes, dashes and U+2026 folded; whitespace runs
+collapsed; no word deleted) - the whole answer, the whole answer minus a
+trailing truncation marker, then every sentence in order with a spread bound.
+There is deliberately no fuzzy path. A false "In the reply" tells the
+instructor the reply answers a question it does not and they post it; a false
+"Not in the reply" only costs the item its one-line form. The error direction
+is chosen, not accidental.
+
+A raw `reply.includes(answer)` cannot do this job, and that is the argument
+the first draft of the AC missed: `normalizePostQuestionAnswer` REWRITES the
+answer before storage - collapsing whitespace inside paragraphs and
+truncating at 1200 chars with a literal three-period marker - so a model that
+copies a reply span back perfectly still yields a stored answer that is not a
+substring of the reply.
+
+### What the four pre-code passes overturned
+
+The first revision of the AC was reviewed by an architect, a UX, a data and
+an adversarial sabotage pass before any code was written. Between them they
+reversed four of its decisions:
+
+- **Insert kept as a fallback -> deleted** (sabotage): the reasoning above.
+- **An 8-word-prefix match fallback -> removed** (sabotage + data): it would
+  badge a drifted answer "In the reply" while the code silently refused to
+  offer it. The data pass also found the phrase read three ways, two of which
+  admit false positives.
+- **"Show in reply" -> dropped** (UX): the scroll objection was wrong (the
+  textarea has no `maxRows`, so `TextareaAutosize` never overflows) but the
+  control hands back a focused textarea with the answer SELECTED, and the
+  next keystroke replaces it with no reliable undo in a controlled MUI
+  textarea.
+- **A three-state table -> two states plus an orthogonal "Needs you"**
+  (sabotage): both-fields-set is legal and the prompt produces it; the first
+  table had no state for it, so the one thing only the instructor can supply
+  would have silently vanished.
+
+The data pass also reversed the cost assumption. Duplication is
+self-limiting: capping the reply's length caps what `answer` can quote, so
+output grows 38% at two questions per post and SHRINKS 19% at three.
+
+### The verification pass, and the four real defects it found
+
+Every gate was green - 885 files, 17,780 tests, tsc clean, lint clean -
+before any of these were found.
+
+1. **The feature's central line had no oracle at all.** The only test that
+   read `DiscussionReplyQuestions.tsx` was deleted with the Insert path and
+   never replaced. Changing `const inReply = hasAnswer && replyContainsAnswer(...)`
+   to `const inReply = hasAnswer` left tsc clean, eslint clean and all 17,780
+   tests passing, while every item badged "In the reply" whether the reply
+   answered it or not - the exact failure the design calls the only one that
+   matters. Source-scan assertions now pin the call, the conjunction, and the
+   display object gating each render decision; the guard was proved by
+   applying that sabotage and watching it go red.
+2. **The edited-during-dispatch discard destroyed the row's questions.** The
+   AC told it to clear them, and the AC was wrong: that path replaces
+   nothing, it writes the row's OWN current text back because the model's
+   reply is being discarded. The questions on the row belonged to the text
+   still in the box. Typing while a redraft was in flight deleted the whole
+   list, including the only copy of any unlocated answer - and treated
+   `questions` and `concepts` oppositely on a path where neither input
+   changed.
+3. **The truncation recovery corrupted its own output.** It ran the leniency
+   repair chain over a slice the string-aware depth scan had already made
+   valid, and the unquoted-key rewrite does not know about string interiors:
+   a reply containing ", though: the outer iterator re-enters" had `, though:`
+   rewritten to `, "though":`, the parse threw, and recovery silently
+   returned null - failing the precise input it exists for. It now tries the
+   slice unrepaired first.
+4. **The recovery was changing 18 unrelated call sites.** It turned "null"
+   into "a partial array" for grading extraction, module content, syllabus
+   templates, decks and research, any of which may read null as "retry the
+   whole batch". It is now opt-in, and only the discussion drafting call opts
+   in - where the elements are independent per-post drafts and a partial
+   batch beats losing every reply in it.
+
+The sabotage guard for the deleted Insert path was also narrower than its own
+title: it scanned for `onInsertAnswer` only, so reinstating the hook mutator
+in `useDiscussionReplies.ts` passed the whole suite. Widened, and proved by
+reinstating it.
+
+### Found by reading, not by any gate
+
+Three stale premises no group could see from inside its own file set. The
+prompt's listing bullet still opened "Separately from the reply, list the
+questions each post asks" - written when the answers lived outside the reply,
+and sitting one bullet above "the reply itself answers each question", a
+direct instruction to do the thing being reversed. `discussion-serialization.ts`
+justified not clearing questions on a keystroke by citing the Insert path,
+which no longer exists. And the new answering rule was unconditional, with
+the "needs you" carve-out arriving a bullet LATER - so a model already
+committed to answering every listed question would answer the gap-bearing one
+too, normally by inventing a plausible due date.
+
+Also found in passing and deliberately NOT fixed: the shared parser's
+smart-quote repair step (`lenient-json.ts:43`) is a no-op - both character
+classes hold the same ASCII quote twice. Making it live would be a content
+bug, not a fix: it runs over the whole payload including string values, so it
+would rewrite every curly quote inside a drafted reply or a quoted student
+post into a straight one. The line is now commented to say so.
+
+### Gates
+
+- vitest 885 files / 17,780 tests passed (baseline before this work: 884 /
+  17,753 - the delta is the new locator's 20 cases plus 7 net, with 12
+  assertions deleted alongside the Insert path they tested).
+- `tsc --noEmit` exit 0; `eslint` 0 errors (6 pre-existing warnings);
+  `next build` compiles clean (the prerender tail needs Supabase env vars
+  that do not exist locally, as always).
+- Hygiene scan over every changed file: no BOM, no CRLF, no mojibake; every
+  non-ASCII line pre-existing and byte-identical except the locator's
+  deliberate curly-quote and dash fixtures.
+- File sizes, `@(Get-Content).Count`: `DiscussionReplyRow.tsx` 943 (down from
+  952 - the Insert plumbing left), `useReplyRows.ts` 951, `DiscussionRepliesPanel.tsx`
+  933, `discussion-replies-log.test.ts` 939. None near the 1000 ceiling.
+- Regression pass against entries 390-394: nothing broken. Copy's
+  dual-channel clipboard failure, Remove's focus restoration, the "Needs you"
+  tone, `role="list"`, the persisted key, `DISCUSSION_TABLE_VERSION` 1, the
+  row CSV header, the orphan-class ratchet at 137 - all hold. Every
+  difference is a documented reversal.
+
+### Limits - read before trusting this in a live course
+
+1. Every row persisted before this ships holds an `answer` written under the
+   old rule as a standalone paragraph deliberately ABSENT from the reply, so
+   after deploy all of them read "Not in the reply" with their answer text
+   and a Copy control. Correct, and it accuses nobody, but it is not "nothing
+   visible changes".
+2. Output grows 38% per batch at two questions per post and shrinks 19% at
+   three. Prompt cost is +199 chars.
+3. A question routed to "Needs you" is one the reply does NOT answer, so the
+   posted reply can read as if it ignored the student's main question. The
+   note names exactly what to add; the app cannot add it. Nothing verifies
+   the model actually withheld it - "Needs you" is a model self-report, and a
+   reply that answers it anyway with an invented fact would still badge that
+   way.
+4. The predicate is exact-only. A light edit inside an answered span, a
+   paraphrase instead of a quote, or an inserted connective flips the item to
+   "Not in the reply" while the answer is substantially still there. Chosen
+   error direction, not a defect. The real-world miss rate is NOT MEASURED -
+   no model was called; the 13-17% figure in the data pass is over a corpus
+   deliberately weighted toward failure modes.
+5. The peers register's "do not explain the underlying concepts back to them"
+   still sits in tension with answering an IMPLIED question (which is, by
+   definition, explaining something the writer got wrong). The new rule is
+   worded to be register-neutral rather than branching on audience, because
+   the block is pinned as structural; the tension survives the wording.
+6. Truncation is not reachable at realistic volumes (~5,300 tokens of
+   headroom against `maxOutputTokens: 8192`), so the recovery in this entry
+   is insurance. The underlying parser still slices to the last "]" on the
+   primary path; only the null fallback is depth-aware, and only for the one
+   caller that opts in.
+7. No component is rendered by any test in this repo. Everything claimed
+   above about markup, focus order and keyboard behaviour comes from reading
+   the source and from source-scan assertions, not from a rendered DOM.

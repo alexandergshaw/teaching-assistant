@@ -1,21 +1,28 @@
 "use client";
 
-// docs/post-questions-acceptance-criteria.md Q10/Q11: the third per-row
-// output - the questions a post asks or implies, each with an answer, or a
-// "needs you" note naming a course fact only the instructor can supply.
-// Mounted by DiscussionReplyRow.tsx, inside `panelStyles.replyBlock`,
-// directly after the reply TextField and BEFORE <DiscussionReplyResources>.
+// docs/answers-in-the-reply-acceptance-criteria.md A4 (GROUP C): the third
+// per-row output - the questions a post asks or implies, each shown with
+// where its answer stands relative to the reply, or a "needs you" note
+// naming a course fact only the instructor can supply. Mounted by
+// DiscussionReplyRow.tsx, inside `panelStyles.replyBlock`, directly after the
+// reply TextField and BEFORE <DiscussionReplyResources>.
 //
 // memo()-wrapped for the same reason DiscussionReplyResources.tsx is - every
 // callback prop below is expected to be a STABLE reference from the row (a
 // useCallback there), so this block does not re-render on every keystroke in
-// the row's own reply textarea.
+// the row's own reply textarea. `reply` itself IS a per-keystroke prop (A4),
+// but recomputing this list's derived state against it is deliberately cheap
+// (measured 0.27 ms/keystroke for 3 items, ~3,800 keystrokes/sec headroom
+// before one frame budget) rather than memoised away with
+// `useDeferredValue` or a debounce - see the AC's section 3 A4 for the full
+// reasoning and section 8f for what that decision overturned.
 //
-// Q10/section 5 (architect+sabotage vs aesthetics decision): this block OWNS
-// its own Remove-button focus restoration and its own clipboard call, rather
-// than the row owning them the way it owns the resource list's equivalents -
-// landing this in the row pushed it over the 960-line cap. The keyed-ref/
-// pending-focus/deps-less-useLayoutEffect idiom below is the SAME one
+// docs/post-questions-acceptance-criteria.md Q10/section 5 (architect+
+// sabotage vs aesthetics decision): this block OWNS its own Remove-button
+// focus restoration and its own clipboard call, rather than the row owning
+// them the way it owns the resource list's equivalents - landing this in the
+// row pushed it over the 960-line cap. The keyed-ref/pending-focus/
+// deps-less-useLayoutEffect idiom below is the SAME one
 // DiscussionReplyRow.tsx already uses for resource removal
 // (registerResourceRemoveRef, :284-303) and DiscussionRepliesPanel.tsx uses
 // for row removal - relocated one level down, not reinvented.
@@ -36,39 +43,35 @@ import panelStyles from "./DiscussionRepliesPanel.module.css";
 import { CloseIcon } from "./discussion-icons";
 import { writeClipboardText } from "../ui/clipboard";
 import type { PostQuestion } from "@/lib/discussion-reply-prompt";
+import { replyContainsAnswer } from "@/lib/discussion-answer-location";
 import {
   QUESTION_BADGE_LABELS,
   questionBadgeLabel,
-  insertAnswerAriaLabel,
+  questionAnswerDisplay,
   copyAnswerAriaLabel,
   removeQuestionAriaLabel,
   neighbourQuestionAfterRemove,
-  insertedAnswerAnnouncement,
   copiedAnswerAnnouncement,
   COPY_RESET_MS,
   ANSWER_CLIPBOARD_FAILURE_MESSAGE,
 } from "./discussion-post-questions";
 
 export interface DiscussionReplyQuestionsProps {
-  /** For per-item accessible names ("Insert the answer to X into the reply
-   *  to Y", "Remove the question X from the reply to Y") - the row's own
+  /** For per-item accessible names ("Copy the answer to X", "Remove the
+   *  question X from the list for the reply to Y") - the row's own
    *  `row.author`, passed as a plain string so an unrelated row's own state
    *  changing never defeats this component's memo. */
   authorName: string;
   questions: PostQuestion[] | undefined;
-  /** Already bound to this row's id by the caller - see
-   *  DiscussionReplyRow.tsx's own useCallback. A MOVE (edits the reply, then
-   *  removes the item) - see UseDiscussionRepliesReturn.insertAnswer's own
-   *  doc comment for the full reasoning. */
-  onInsertAnswer: (item: PostQuestion) => void;
+  /** A4: the row's own LIVE reply text. Read only - this block never writes
+   *  to it. Drives `inReply` per item via `replyContainsAnswer` (D3's one
+   *  predicate), never a stored flag, so the derivation survives an edit to
+   *  the reply the instant it happens. */
+  reply: string;
   /** Already bound to this row's id by the caller. */
   onRemoveQuestion: (question: string) => void;
   /** The row's own reply textarea - the fallback focus target after the
-   *  last Remove click (nothing left to focus in this block), and the
-   *  target after every Insert click (never a neighbour's own controls, the
-   *  same "focus the thing that just changed" reasoning
-   *  DiscussionReplyRow.tsx's own handleInsertResource already applies to
-   *  resource inserts). */
+   *  last Remove click, since nothing is left in this block to focus. */
   focusReplyInput: () => void;
   /** The panel's single ad hoc polite region, forwarded unwrapped. */
   announce: (text: string) => void;
@@ -80,7 +83,7 @@ export interface DiscussionReplyQuestionsProps {
 function DiscussionReplyQuestionsImpl({
   authorName,
   questions,
-  onInsertAnswer,
+  reply,
   onRemoveQuestion,
   focusReplyInput,
   announce,
@@ -109,6 +112,11 @@ function DiscussionReplyQuestionsImpl({
   // changes) is the right tool here rather than a normal effect: it must
   // still apply a pending intent on the render where this component's own
   // list just changed shape, and it must do nothing on every other render.
+  //
+  // A4/D5: this idiom is kept for REMOVE only. The pending-focus-fallback
+  // intent that used to be set before `onInsertAnswer` ran is deleted along
+  // with Insert itself - there is no longer a second control that can move
+  // focus off this block.
   const removeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pendingFocusQuestionRef = useRef<string | null>(null);
   const pendingFocusFallbackRef = useRef(false);
@@ -128,19 +136,6 @@ function DiscussionReplyQuestionsImpl({
     if (next) next.focus();
     else focusReplyInput();
   });
-
-  // Q7 (from the block, per section 5's decision): the fallback intent is
-  // set BEFORE onInsertAnswer runs - the `handleInsertResource` shape
-  // (DiscussionReplyRow.tsx:329-335) - since Insert always focuses the reply
-  // textarea, never a neighbour's own Remove button.
-  const handleInsert = (item: PostQuestion) => {
-    pendingFocusFallbackRef.current = true;
-    onInsertAnswer(item);
-    // VERIFIER FINDING 3: names the question, so inserting a SECOND answer
-    // from the same row is a different string and is actually spoken - see
-    // insertedAnswerAnnouncement's own comment for the live-region mechanism.
-    announce(insertedAnswerAnnouncement(item, authorName));
-  };
 
   // Q11 "Focus after Remove": the neighbour computed from the list as it
   // stood just before this removal - `questions` is still the pre-removal
@@ -194,24 +189,28 @@ function DiscussionReplyQuestionsImpl({
       aria-label={`Questions in the post by ${authorName}`}
     >
       {questions.map((item) => {
+        // A4: `inReply` is derived from the LIVE reply text on every render,
+        // never stored - D2/D3. `questionAnswerDisplay` then turns the two
+        // booleans into the state table's three render decisions (badge
+        // text, answer text, Copy) as one pure, independently-tested call -
+        // no per-item useMemo (illegal inside .map) and no debounce (A4:
+        // perf was measured, not assumed).
         const hasAnswer = item.answer !== "";
+        const inReply = hasAnswer && replyContainsAnswer(reply, item.answer);
+        const display = questionAnswerDisplay(hasAnswer, inReply);
         return (
           <li key={item.question} className={`${panelStyles.resourceItem} ${panelStyles.resourceItemStacked}`}>
             <div className={`${panelStyles.resourceItem} ${panelStyles.resourceItemTop}`}>
               <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>{questionBadgeLabel(item)}</span>
-              <span className={styles.ghRowName}>{item.question}</span>
-              {hasAnswer && (
-                <Button
-                  size="small"
-                  variant="text"
-                  style={{ minWidth: 0 }}
-                  aria-label={insertAnswerAriaLabel(item, authorName)}
-                  onClick={() => handleInsert(item)}
-                >
-                  Insert
-                </Button>
+              {display.badgeLabel && (
+                // A4: both `In the reply` and `Not in the reply` are neutral
+                // - hand-deleting an answer out of a drafted reply is a
+                // supported workflow, never badged as a problem. Never
+                // ghBadgeDanger, never ghBadgeAccent.
+                <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral}`}>{display.badgeLabel}</span>
               )}
-              {hasAnswer && (
+              <span className={styles.ghRowName}>{item.question}</span>
+              {display.showCopy && (
                 <Button
                   size="small"
                   variant="text"
@@ -232,8 +231,12 @@ function DiscussionReplyQuestionsImpl({
                 <CloseIcon />
               </IconButton>
             </div>
-            {hasAnswer && <p className={panelStyles.answerText}>{item.answer}</p>}
+            {display.showAnswerText && <p className={panelStyles.answerText}>{item.answer}</p>}
             {item.needsYou && (
+              // A4: orthogonal to the answer-location column above - an item
+              // can show `In the reply` (or `Not in the reply`) AND
+              // `Needs you` together, since a partial answer and a course-
+              // fact gap can both be true of the same question.
               <div className={`${panelStyles.resourceItem} ${panelStyles.resourceItemTop}`}>
                 <span className={`${styles.ghBadge} ${styles.ghBadgeWarning}`}>{QUESTION_BADGE_LABELS.needsYou}</span>
                 <p className={styles.fieldHint}>{item.needsYou}</p>

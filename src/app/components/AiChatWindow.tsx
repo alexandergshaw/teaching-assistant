@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -19,6 +20,9 @@ import {
   extractPastedImageFiles,
   nextPastedImageName,
 } from "@/lib/chat/attachments";
+import InstitutionTypeahead from "./chat/InstitutionTypeahead";
+import { useInstitutionTrigger } from "./chat/useInstitutionTrigger";
+import { visuallyHidden } from "./ui/visuallyHidden";
 
 /** Reads a File into a base64 string (no data-URL prefix), like the voice-style upload flow. */
 function readFileAsBase64(file: File): Promise<string> {
@@ -79,6 +83,44 @@ interface AiChatWindowProps {
    * silently didn't help is diagnosable rather than invisible.
    */
   skippedFiles?: string[];
+  /** Composer placeholder. Defaults to today's "Type your message…"; the FAB
+   * chat passes one that also mentions the "@" trigger. */
+  placeholder?: string;
+  /** Enables the "@institution" typeahead (SPEC-TYPEAHEAD.md) - the ONLY
+   * on/off gate for the whole feature. SelectionChatWidget omits this
+   * entirely (AC11: no `contextPageIds` channel to load pages into) and
+   * must render today's plain textbox byte-for-byte, no combobox role. */
+  institutionTypeahead?: {
+    /** Registered institution acronyms, in registry order. */
+    institutions: string[];
+    /** Hoisted to the front of the popup and highlighted on open. */
+    activeInstitution: string;
+    /** Currently loaded into context, if any - "Loaded" tag in the popup,
+     * and the knowledge strip's Clear button's accessible name. */
+    loadedInstitution: string | null;
+    /** Fired once the trigger token is already removed from the composer
+     * text - the caller resolves `code` to page ids and updates its own
+     * knowledge-context state. */
+    onSelect: (code: string) => void;
+  };
+  /** One-line institution-load result that is not itself the knowledge
+   * strip - "no pages"/"load failed", with an optional retry (copy items
+   * 15-17). `null`/omitted renders nothing. */
+  institutionNotice?: { text: string; onRetry?: () => void } | null;
+  /** Disables Send (with this text as its tooltip) while, e.g., an
+   * institution's pages are still loading. */
+  sendBlockedReason?: string | null;
+  /** Renders a "Clear" control inside the knowledge-context strip. */
+  onClearKnowledgeContext?: () => void;
+  /** Text for the always-mounted polite live region's RESOLUTION-side
+   * announcements (copy items 23-24, 26-28). The popup's own open/filter/
+   * empty announcements (19-22) are computed internally and take priority
+   * whenever they have something to say - the two are temporally disjoint
+   * in practice. Only rendered while `institutionTypeahead` is set. */
+  liveMessage?: string;
+  /** Text for the always-mounted assertive live region - a load FAILURE
+   * (item 29). Only rendered while `institutionTypeahead` is set. */
+  liveAlert?: string;
   position: { x: number; y: number };
   onHeaderMouseDown: (e: React.MouseEvent) => void;
   onSend: (text: string, attachments: ChatAttachment[]) => void;
@@ -103,6 +145,13 @@ export default function AiChatWindow({
   attachDisabled = false,
   attachDisabledReason,
   skippedFiles = [],
+  placeholder = "Type your message…",
+  institutionTypeahead,
+  institutionNotice = null,
+  sendBlockedReason = null,
+  onClearKnowledgeContext,
+  liveMessage,
+  liveAlert,
   position,
   onHeaderMouseDown,
   onSend,
@@ -116,6 +165,59 @@ export default function AiChatWindow({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // "@institution" typeahead (SPEC-TYPEAHEAD.md). Always called (rules of
+  // hooks), but fully inert whenever `institutionTypeahead` is absent -
+  // `enabled` gates every method to a no-op and `open` to permanently
+  // false, so SelectionChatWidget (which never passes it) is unaffected,
+  // and every new render site below is separately gated on the prop too.
+  const institutionTrigger = useInstitutionTrigger({
+    enabled: Boolean(institutionTypeahead),
+    institutions: institutionTypeahead?.institutions ?? [],
+    activeInstitution: institutionTypeahead?.activeInstitution ?? "",
+  });
+
+  // Stable ids so aria-controls/aria-activedescendant always resolve to
+  // ids InstitutionTypeahead actually renders.
+  const institutionIdBase = useId();
+  const institutionListboxId = `${institutionIdBase}-institution-listbox`;
+  const getInstitutionOptionId = useCallback(
+    (index: number) => `${institutionIdBase}-institution-option-${index}`,
+    [institutionIdBase]
+  );
+  const institutionListboxOpen =
+    institutionTrigger.open && !institutionTrigger.institutionsEmpty && institutionTrigger.matches.length > 0;
+
+  // Caret restore after a selection rewrites `input` - the TextField is
+  // controlled, so setting its value parks the caret at the end. Pure DOM
+  // side effect (no setState inside it), so the setState-in-effect lint
+  // rule does not apply.
+  const pendingCaretRef = useRef<number | null>(null);
+  useEffect(() => {
+    const pos = pendingCaretRef.current;
+    if (pos !== null && inputRef.current) {
+      inputRef.current.setSelectionRange(pos, pos);
+    }
+    pendingCaretRef.current = null;
+  }, [input]);
+
+  // Set right before a keydown branch that changes `input` out from under a
+  // stale-closured keyup handler (Enter/Tab/Arrow/Escape below) - without
+  // this, the keyup that follows would recompute the trigger from the OLD
+  // text/caret (React has not re-rendered yet) and could reopen a popup
+  // that keydown just closed or acted on.
+  const suppressKeyUpRef = useRef(false);
+
+  const commitInstitutionSelection = useCallback(
+    (code?: string) => {
+      const result = institutionTrigger.select(input, code);
+      if (!result) return;
+      setInput(result.text);
+      pendingCaretRef.current = result.caret;
+      institutionTypeahead?.onSelect(result.code);
+    },
+    [institutionTrigger, input, institutionTypeahead]
+  );
 
   // Focus input whenever the window mounts.
   useEffect(() => {
@@ -134,14 +236,95 @@ export default function AiChatWindow({
     setInput("");
     setPendingFiles([]);
     setAttachError(null);
-  }, [input, isLoading, onSend, pendingFiles]);
+    // DISMISSAL (SPEC-TYPEAHEAD.md section 3): this sets `input` with no
+    // onChange, which would otherwise leave a stuck popup - reset the
+    // trigger explicitly rather than relying on a change event that never
+    // fires for a programmatic `setInput`.
+    institutionTrigger.reset();
+  }, [input, isLoading, onSend, pendingFiles, institutionTrigger]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // The popup's own keys take priority over Enter-to-send, only while
+    // there is something to act on - zero matches (aria-expanded="false")
+    // falls through to the plain send path (SPEC-TYPEAHEAD.md section 4).
+    // PINNED ORDER: this block precedes `handleSend()` below - see
+    // institutionTriggerWiring.test.ts.
+    if (institutionTypeahead && institutionTrigger.open && institutionTrigger.matches.length > 0) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        suppressKeyUpRef.current = true;
+        commitInstitutionSelection();
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        suppressKeyUpRef.current = true;
+        commitInstitutionSelection();
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        suppressKeyUpRef.current = true;
+        institutionTrigger.moveHighlight(e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        suppressKeyUpRef.current = true;
+        institutionTrigger.dismiss();
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      suppressKeyUpRef.current = true;
       handleSend();
     }
   };
+
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = e.target.value;
+      setInput(value);
+      if (institutionTypeahead) {
+        institutionTrigger.recompute(value, e.target.selectionStart ?? value.length);
+      }
+    },
+    [institutionTypeahead, institutionTrigger]
+  );
+
+  const handleInputKeyUp = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (suppressKeyUpRef.current) {
+        suppressKeyUpRef.current = false;
+        return;
+      }
+      if (!institutionTypeahead) return;
+      institutionTrigger.recompute(input, e.currentTarget.selectionStart ?? input.length);
+    },
+    [institutionTypeahead, institutionTrigger, input]
+  );
+
+  // onClick/onSelect reach the actual textarea only via slotProps.htmlInput
+  // (SPEC-TYPEAHEAD.md section 2) - via slotProps.input they land on
+  // InputBase's root <div>, where selectionStart is undefined.
+  const handleInputCaretEvent = useCallback(
+    (e: React.SyntheticEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (!institutionTypeahead) return;
+      const target = e.currentTarget;
+      institutionTrigger.recompute(input, target.selectionStart ?? input.length);
+    },
+    [institutionTypeahead, institutionTrigger, input]
+  );
+
+  const handleInputBlur = useCallback(() => {
+    if (!institutionTypeahead) return;
+    // Safe against an option click: onMouseDown preventDefault there
+    // suppresses the browser's default focus change, so this never fires
+    // for a selection.
+    institutionTrigger.reset();
+  }, [institutionTypeahead, institutionTrigger]);
 
   const handleAttachClick = useCallback(() => {
     if (attachDisabled) return;
@@ -345,8 +528,84 @@ export default function AiChatWindow({
     if (isLoading) return;
     setInput(text);
     setPendingFiles(attachments ?? []);
+    // DISMISSAL (SPEC-TYPEAHEAD.md section 3): same reasoning as
+    // handleSend above - this is a programmatic `setInput` with no
+    // onChange, which would otherwise leave a stuck popup.
+    institutionTrigger.reset();
     setTimeout(() => inputRef.current?.focus(), 0);
-  }, [isLoading]);
+  }, [isLoading, institutionTrigger]);
+
+  // A plain JSX value (not a nested component) so it can render either bare
+  // (today's markup, byte-for-byte, when `institutionTypeahead` is absent)
+  // or wrapped in `.institutionTypeaheadAnchor` below, with no duplicate copy
+  // to drift.
+  const inputRow = (
+    <div className={styles.selectionChatInputRow}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => void handleFileChange(e)}
+      />
+      <IconButton
+        size="small"
+        onClick={handleAttachClick}
+        disabled={isLoading || attachDisabled}
+        aria-label="Attach files"
+        title={
+          attachDisabled
+            ? attachDisabledReason ?? "Attachments are unavailable"
+            : `Attach files (up to ${MAX_ATTACHMENTS_PER_MESSAGE} per message)`
+        }
+      >
+        <AttachIcon />
+      </IconButton>
+      <TextField
+        inputRef={inputRef}
+        multiline
+        maxRows={4}
+        size="small"
+        fullWidth
+        placeholder={placeholder}
+        value={input}
+        disabled={isLoading}
+        onChange={handleInputChange}
+        onBlur={handleInputBlur}
+        slotProps={{
+          // onKeyDown/onKeyUp reach the textarea only through this slot
+          // (SPEC-TYPEAHEAD.md section 2); onPaste is unchanged.
+          input: { onKeyDown: handleKeyDown, onKeyUp: handleInputKeyUp, onPaste: handlePaste },
+          // ARIA + onClick/onSelect exist only while enabled - omitted
+          // entirely (not merely inert) for SelectionChatWidget.
+          htmlInput: institutionTypeahead
+            ? {
+                role: "combobox",
+                "aria-expanded": institutionTrigger.open,
+                "aria-haspopup": "listbox",
+                "aria-autocomplete": "list",
+                "aria-multiline": true,
+                "aria-controls": institutionListboxOpen ? institutionListboxId : undefined,
+                "aria-activedescendant": institutionListboxOpen
+                  ? getInstitutionOptionId(institutionTrigger.highlightIndex)
+                  : undefined,
+                onClick: handleInputCaretEvent,
+                onSelect: handleInputCaretEvent,
+              }
+            : undefined,
+        }}
+      />
+      <IconButton
+        size="small"
+        onClick={handleSend}
+        disabled={!input.trim() || isLoading || Boolean(sendBlockedReason)}
+        aria-label="Send"
+        title={sendBlockedReason || "Send"}
+      >
+        <SendIcon />
+      </IconButton>
+    </div>
+  );
 
   return (
     <div
@@ -359,6 +618,23 @@ export default function AiChatWindow({
       onDragLeave={handleWindowDragLeave}
       onDrop={handleWindowDrop}
     >
+      {/* Two always-mounted live regions for the typeahead (SPEC-TYPEAHEAD.md
+          section 7), rendered only while the feature is enabled. Polite
+          prefers the popup's own transient text (open/filter/empty) and
+          falls back to the caller's resolution-side `liveMessage` - the two
+          are temporally disjoint in practice. Assertive is a load FAILURE
+          (item 29), owned entirely by the caller via `liveAlert`. */}
+      {institutionTypeahead && (
+        <div role="status" aria-live="polite" style={visuallyHidden}>
+          {institutionTrigger.liveMessage || liveMessage || ""}
+        </div>
+      )}
+      {institutionTypeahead && (
+        <div aria-live="assertive" style={visuallyHidden}>
+          {liveAlert || ""}
+        </div>
+      )}
+
       {/* Drag-and-drop affordance (AC8) - covers the whole window (header,
           messages, input row alike), pointer-events: none so it never
           itself becomes a fresh dragenter/dragleave target for the depth
@@ -396,14 +672,45 @@ export default function AiChatWindow({
       )}
 
       {/* Knowledge-tab context summary (A7) - see the prop's own doc for why
-          this is a separate strip from contextText rather than routed
-          through it. Reuses selectionChatContext (the strip shell) and
-          toneStatusChip (wrap normally instead of the ellipsis-truncating
-          default) - no new CSS, and no color modifier: selectionChatContext's
-          own base color already reads as neutral status text. */}
+          this is a separate strip from contextText. Reuses selectionChatContext
+          (the strip shell) and toneStatusChip (wrap normally, no ellipsis).
+          No role="status" (SPEC-TYPEAHEAD.md section 7): this strip now also
+          mounts a Clear control, and role="status" would re-announce its
+          label on every change - the polite live region above announces
+          context changes instead. */}
       {knowledgeContextSummary && (
-        <div className={`${styles.selectionChatContext} ${styles.toneStatusChip}`} role="status">
+        <div className={`${styles.selectionChatContext} ${styles.toneStatusChip}`}>
           {knowledgeContextSummary}
+          {onClearKnowledgeContext && (
+            <button
+              type="button"
+              className={styles.knowledgeContextClear}
+              onClick={onClearKnowledgeContext}
+              aria-label={
+                institutionTypeahead?.loadedInstitution
+                  ? `Clear ${institutionTypeahead.loadedInstitution} knowledge base from context`
+                  : "Clear knowledge pages from context"
+              }
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Institution load result that is not itself the knowledge strip -
+          "no pages" or "load failed" (copy sheet items 15-17). Purely
+          visual: the equivalent sentence is what `liveAlert`/`liveMessage`
+          already announces, so this does not carry its own role="status"
+          (that would double-announce it). */}
+      {institutionNotice && (
+        <div className={styles.selectionChatContext}>
+          {institutionNotice.text}
+          {institutionNotice.onRetry && (
+            <button type="button" className={styles.institutionNoticeAction} onClick={institutionNotice.onRetry}>
+              Try again
+            </button>
+          )}
         </div>
       )}
 
@@ -582,50 +889,32 @@ export default function AiChatWindow({
         </p>
       )}
 
-      {/* Input */}
-      <div className={styles.selectionChatInputRow}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          style={{ display: "none" }}
-          onChange={(e) => void handleFileChange(e)}
-        />
-        <IconButton
-          size="small"
-          onClick={handleAttachClick}
-          disabled={isLoading || attachDisabled}
-          aria-label="Attach files"
-          title={
-            attachDisabled
-              ? attachDisabledReason ?? "Attachments are unavailable"
-              : `Attach files (up to ${MAX_ATTACHMENTS_PER_MESSAGE} per message)`
-          }
-        >
-          <AttachIcon />
-        </IconButton>
-        <TextField
-          inputRef={inputRef}
-          multiline
-          maxRows={4}
-          size="small"
-          fullWidth
-          placeholder="Type your message…"
-          value={input}
-          disabled={isLoading}
-          onChange={(e) => setInput(e.target.value)}
-          slotProps={{ input: { onKeyDown: handleKeyDown, onPaste: handlePaste } }}
-        />
-        <IconButton
-          size="small"
-          onClick={handleSend}
-          disabled={!input.trim() || isLoading}
-          aria-label="Send"
-          title="Send"
-        >
-          <SendIcon />
-        </IconButton>
-      </div>
+      {/* Input - wrapped in .institutionTypeaheadAnchor only while enabled
+          (SPEC-TYPEAHEAD.md section 1): the anchor needs `position: relative`
+          for the popup and `flex-shrink: 0`, since wrapping the row makes the
+          wrapper (not the row) the flex item, and a wrapper defaults to
+          flex-shrink: 1 - without this the composer collapses on a short
+          window. SelectionChatWidget never gets this wrapper. */}
+      {institutionTypeahead ? (
+        <div className={styles.institutionTypeaheadAnchor}>
+          {institutionTrigger.open && (
+            <InstitutionTypeahead
+              query={institutionTrigger.query}
+              matches={institutionTrigger.matches}
+              highlightIndex={institutionTrigger.highlightIndex}
+              institutionsEmpty={institutionTrigger.institutionsEmpty}
+              loadedInstitution={institutionTypeahead.loadedInstitution}
+              activeInstitution={institutionTypeahead.activeInstitution}
+              listboxId={institutionListboxId}
+              getOptionId={getInstitutionOptionId}
+              onOptionActivate={commitInstitutionSelection}
+            />
+          )}
+          {inputRow}
+        </div>
+      ) : (
+        inputRow
+      )}
     </div>
   );
 }

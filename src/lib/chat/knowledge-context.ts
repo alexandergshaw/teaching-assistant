@@ -82,6 +82,23 @@ export interface KnowledgeContextBlockResult {
 export const DEFAULT_KNOWLEDGE_CONTEXT_MAX_CHARS = 10000;
 
 /**
+ * Cap on how many page ids a single request's `contextPageIds` will be
+ * processed for, independent of the char budget above. Originally lived in
+ * src/app/api/ai-chat/route.ts (the only place that enforced it) as a
+ * defensive ceiling on Promise.all-ed ownership lookups - see that file's
+ * `dedupedIds` line, which still applies this exact constant. It moved to
+ * this leaf, and got exported, because the institution-typeahead feature
+ * needs the SAME number on the client: when an institution has more pages
+ * than this cap, the UI must say so ("loaded 100 of 143 pages") rather than
+ * silently claiming the whole institution is in context (AC5) - which means
+ * the cap can no longer be a route-local secret the client has to guess or
+ * hardcode a second copy of. Parent (route.ts) importing from this leaf,
+ * never the other way around: this file still has no Supabase client and no
+ * server-action import (see this file's own header comment).
+ */
+export const MAX_KNOWLEDGE_CONTEXT_PAGE_IDS = 100;
+
+/**
  * The block's own framing sentence, prepended whenever there is anything to
  * render. Page bodies are free text the instructor authored, and attachment
  * text comes from documents they uploaded - either may read like
@@ -243,4 +260,73 @@ export function buildKnowledgeContextBlock(
   if (text.length > maxChars) text = text.slice(0, maxChars);
 
   return { text, includedPages, omittedPages, includedAttachments, omittedAttachments, pageResults };
+}
+
+/** Arguments for {@link knowledgeContextStripText}. See that function's doc
+ * for why this is the entire seam AiChatFab.tsx needs, with no `label`
+ * field: the existing `knowledgeContext.label` override (an arbitrary
+ * instructor-facing string from the Knowledge tab's bulk "Ask AI" action,
+ * unrelated to institutions) stays a decision AiChatFab makes BEFORE calling
+ * this function, not something this function renders itself. */
+export interface KnowledgeContextStripArgs {
+  /** Institution acronym, when the context strip's source is the
+   * "@institution" typeahead rather than the Knowledge tab's bulk "Ask AI"
+   * action. Absent for the latter (and for the pre-existing, institution-
+   * unaware callers this function must reproduce verbatim - see below). */
+  institution?: string;
+  /** Pages actually in context right now. */
+  included: number;
+  /** The institution's full page count, when known and larger than
+   * `included` is worth disclosing (AC5's "loaded 100 of 143 pages"). Only
+   * ever rendered when `institution` is also present and `total >
+   * included` - omitted entirely otherwise, INCLUDING when `institution` is
+   * absent, so a caller that has no institution never has to worry about
+   * this field changing the no-institution wording. */
+  total?: number;
+  attachments: number;
+}
+
+/**
+ * Render the chat window's knowledgeContextSummary strip text - the single
+ * source for both the pre-existing "N pages in context" wording and the new
+ * "INSTITUTION knowledge base: ..." wording the "@institution" typeahead
+ * adds (AC4/AC5). A pure function (no React, testable without rendering
+ * anything - see this file's header) so the exact wording, including every
+ * plural and the cap disclosure, is pinned by tests rather than living only
+ * in JSX string interpolation.
+ *
+ * WITHOUT `institution`, this MUST reproduce today's shipped output
+ * verbatim (see `AiChatFab.tsx:536-547`, both of its existing branches: the
+ * server-confirmed-counts branch, and the client-requested-count fallback
+ * once its own `label` override does not apply). Both of those branches
+ * reduce to the exact same shape once you strip out the `label` decision
+ * that happens before this function is ever called: "`N page(s)[ and M
+ * attachment(s)]` in context" - which is exactly what the branch below
+ * renders. A format string that assumed an institution was always present
+ * would render "undefined knowledge base: 5 pages in context" on that
+ * existing Knowledge-tab path - a regression of a shipped feature, which is
+ * why this is a hard contract, not a convenience.
+ *
+ * WITH `institution`, the wording additionally states which institution's
+ * knowledge base is loaded and, when the true total is larger than what
+ * actually made it into context, how much of it - see AC5 and the copy
+ * sheet's items 8-11 for the exact strings this produces.
+ */
+export function knowledgeContextStripText(args: KnowledgeContextStripArgs): string {
+  const { institution, included, total, attachments } = args;
+  const pageWord = `page${included === 1 ? "" : "s"}`;
+  const attachmentsClause =
+    attachments > 0 ? ` and ${attachments} attachment${attachments === 1 ? "" : "s"}` : "";
+
+  if (institution) {
+    const ofTotalClause = total !== undefined && total > included ? ` of ${total}` : "";
+    return `${institution} knowledge base: ${included}${ofTotalClause} ${pageWord}${attachmentsClause} in context`;
+  }
+
+  // No institution: today's shipped wording, unchanged. `total` is
+  // deliberately never consulted in this branch - the pre-existing callers
+  // this reproduces never had a "true total" concept at all, so looking at
+  // it here would risk this branch's output changing for a reason that had
+  // nothing to do with it.
+  return `${included} ${pageWord}${attachmentsClause} in context`;
 }

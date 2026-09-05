@@ -45,6 +45,23 @@ export type ChatToneStatus = "active" | "no-sample" | "embedded";
 export interface ChatKnowledgeContext {
   knowledgePageIds: string[];
   label?: string;
+  /**
+   * Institution acronym, set only when this context came from the
+   * "@institution" typeahead (as opposed to the Knowledge tab's bulk
+   * "Ask AI" action, which never sets this). Drives the
+   * `knowledgeContextStripText` "INSTITUTION knowledge base: ..." wording
+   * (src/lib/chat/knowledge-context.ts) instead of the pre-existing,
+   * institution-unaware strip text.
+   */
+  institution?: string;
+  /**
+   * The institution's true page count at selection time, before
+   * MAX_KNOWLEDGE_CONTEXT_PAGE_IDS truncated `knowledgePageIds` down to the
+   * cap. Only meaningful alongside `institution`; used to disclose "loaded
+   * 100 of 143 pages" rather than silently claiming the whole institution
+   * is in context whenever this is larger than what actually got sent.
+   */
+  totalPages?: number;
 }
 
 /**

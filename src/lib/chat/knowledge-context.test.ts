@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   buildKnowledgeContextBlock,
   DEFAULT_KNOWLEDGE_CONTEXT_MAX_CHARS,
+  MAX_KNOWLEDGE_CONTEXT_PAGE_IDS,
+  knowledgeContextStripText,
   type KnowledgeContextPage,
   type KnowledgeContextAttachment,
 } from "./knowledge-context";
@@ -361,5 +363,147 @@ describe("buildKnowledgeContextBlock - pageResults per-page identity", () => {
       expect(entry.included).toBe(present);
     });
     expect(result.pageResults.filter((r) => r.included).length).toBe(result.includedPages);
+  });
+});
+
+describe("MAX_KNOWLEDGE_CONTEXT_PAGE_IDS", () => {
+  it("is 100 - the seam route.ts and the client both rely on", () => {
+    expect(MAX_KNOWLEDGE_CONTEXT_PAGE_IDS).toBe(100);
+  });
+});
+
+describe("knowledgeContextStripText - the four combinations (institution x server counts)", () => {
+  // These four are the exact matrix called out in the acceptance criteria:
+  // institution present/absent, crossed with server-confirmed counts
+  // present/absent. "Server counts absent" is modeled here the same way the
+  // caller (AiChatFab) would model it: `attachments: 0` (nothing confirmed
+  // yet) and, for the no-institution case, no `total` either.
+
+  it("institution present + server counts present (capped): states the true total", () => {
+    // Copy sheet #10: "MCC knowledge base: 100 of 143 pages in context"
+    const text = knowledgeContextStripText({ institution: "MCC", included: 100, total: 143, attachments: 0 });
+    expect(text).toBe("MCC knowledge base: 100 of 143 pages in context");
+  });
+
+  it("institution present + server counts absent (just loaded, nothing sent yet): no cap to disclose", () => {
+    // Copy sheet #9: "MCC knowledge base: 12 pages in context" - total
+    // equals included (nothing was capped), so the "of N" clause is absent.
+    const text = knowledgeContextStripText({ institution: "MCC", included: 12, total: 12, attachments: 0 });
+    expect(text).toBe("MCC knowledge base: 12 pages in context");
+  });
+
+  it("institution absent + server counts present: reproduces today's server-confirmed-counts branch verbatim", () => {
+    // AiChatFab.tsx:536-541's existing branch, with attachments - never
+    // mentions an institution because there isn't one.
+    const text = knowledgeContextStripText({ included: 12, attachments: 3 });
+    expect(text).toBe("12 pages and 3 attachments in context");
+  });
+
+  it("institution absent + server counts absent: reproduces today's fallback branch verbatim", () => {
+    // The exact regression named in the spec: this must render "5 pages in
+    // context", never "undefined knowledge base: 5 pages in context".
+    const text = knowledgeContextStripText({ included: 5, attachments: 0 });
+    expect(text).toBe("5 pages in context");
+    expect(text).not.toContain("undefined");
+    expect(text).not.toContain("knowledge base");
+  });
+});
+
+describe("knowledgeContextStripText - pluralization", () => {
+  it("uses singular 'page' for exactly one page, with an institution", () => {
+    expect(knowledgeContextStripText({ institution: "MCC", included: 1, attachments: 0 })).toBe(
+      "MCC knowledge base: 1 page in context"
+    );
+  });
+
+  it("uses singular 'page' for exactly one page, without an institution", () => {
+    expect(knowledgeContextStripText({ included: 1, attachments: 0 })).toBe("1 page in context");
+  });
+
+  it("uses singular 'attachment' for exactly one attachment", () => {
+    expect(knowledgeContextStripText({ institution: "MCC", included: 12, attachments: 1 })).toBe(
+      "MCC knowledge base: 12 pages and 1 attachment in context"
+    );
+  });
+
+  it("uses plural 'attachments' for more than one", () => {
+    expect(knowledgeContextStripText({ institution: "MCC", included: 12, attachments: 3 })).toBe(
+      "MCC knowledge base: 12 pages and 3 attachments in context"
+    );
+  });
+});
+
+describe("knowledgeContextStripText - attachments clause presence", () => {
+  it("omits the attachments clause entirely when there are none, with an institution", () => {
+    const text = knowledgeContextStripText({ institution: "MCC", included: 12, attachments: 0 });
+    expect(text).toBe("MCC knowledge base: 12 pages in context");
+    expect(text).not.toContain("attachment");
+  });
+
+  it("omits the attachments clause entirely when there are none, without an institution", () => {
+    const text = knowledgeContextStripText({ included: 12, attachments: 0 });
+    expect(text).toBe("12 pages in context");
+    expect(text).not.toContain("attachment");
+  });
+
+  it("includes the attachments clause once there is at least one, with an institution", () => {
+    expect(knowledgeContextStripText({ institution: "MCC", included: 12, attachments: 3 })).toContain(
+      "and 3 attachments"
+    );
+  });
+});
+
+describe("knowledgeContextStripText - the cap wording boundary (99/100/101/143)", () => {
+  // included is pinned at MAX_KNOWLEDGE_CONTEXT_PAGE_IDS (100) throughout -
+  // the realistic "capped" shape - varying only `total` across the exact
+  // boundary values called out in the test brief.
+
+  it("total 99 (below included): no 'of' clause - total > included is false", () => {
+    const text = knowledgeContextStripText({
+      institution: "MCC",
+      included: MAX_KNOWLEDGE_CONTEXT_PAGE_IDS,
+      total: 99,
+      attachments: 0,
+    });
+    expect(text).toBe("MCC knowledge base: 100 pages in context");
+  });
+
+  it("total 100 (equal to included): no 'of' clause - nothing was actually capped", () => {
+    const text = knowledgeContextStripText({
+      institution: "MCC",
+      included: MAX_KNOWLEDGE_CONTEXT_PAGE_IDS,
+      total: 100,
+      attachments: 0,
+    });
+    expect(text).toBe("MCC knowledge base: 100 pages in context");
+  });
+
+  it("total 101 (one over included): the 'of' clause appears at the smallest possible overage", () => {
+    const text = knowledgeContextStripText({
+      institution: "MCC",
+      included: MAX_KNOWLEDGE_CONTEXT_PAGE_IDS,
+      total: 101,
+      attachments: 0,
+    });
+    expect(text).toBe("MCC knowledge base: 100 of 101 pages in context");
+  });
+
+  it("total 143 (the copy sheet's own example): matches AC5's stated example verbatim", () => {
+    const text = knowledgeContextStripText({
+      institution: "MCC",
+      included: MAX_KNOWLEDGE_CONTEXT_PAGE_IDS,
+      total: 143,
+      attachments: 0,
+    });
+    expect(text).toBe("MCC knowledge base: 100 of 143 pages in context");
+  });
+
+  it("never discloses a total when institution is absent, no matter how large", () => {
+    // total is not even consulted in the no-institution branch (see this
+    // function's own doc) - this guards against a future edit accidentally
+    // wiring it in.
+    const text = knowledgeContextStripText({ included: 100, total: 143, attachments: 0 });
+    expect(text).toBe("100 pages in context");
+    expect(text).not.toContain("143");
   });
 });

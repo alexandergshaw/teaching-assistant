@@ -20,7 +20,11 @@ import {
   type GroundingCourse,
   type GroundingPage,
 } from "@/lib/chat/entity-grounding";
-import { buildKnowledgeContextBlock, type KnowledgeContextAttachment } from "@/lib/chat/knowledge-context";
+import {
+  buildKnowledgeContextBlock,
+  MAX_KNOWLEDGE_CONTEXT_PAGE_IDS,
+  type KnowledgeContextAttachment,
+} from "@/lib/chat/knowledge-context";
 import {
   listInstitutionPageAttachmentsForPages,
   INSTITUTION_ATTACHMENTS_BUCKET,
@@ -241,19 +245,6 @@ const MAX_KNOWLEDGE_ATTACHMENT_DOWNLOAD_BYTES = 5 * 1024 * 1024;
  * this cap are reported in `skippedAttachments`, never silently dropped.
  */
 const MAX_KNOWLEDGE_CONTEXT_ATTACHMENTS = MAX_ATTACHMENTS_PER_PAGE;
-
-/**
- * Cap on how many page ids a single request's `contextPageIds` will be
- * processed for, independent of the char budget applied to the rendered
- * block. Ownership re-verification below is one getInstitutionPage call
- * per id (Promise.all) - there is no batch-by-ids accessor in
- * src/lib/knowledge-base.ts - so an unbounded, possibly-malicious id array
- * would otherwise mean an unbounded number of parallel database calls for
- * a single chat turn. 100 is far beyond anything the bulk-select UI would
- * realistically produce (a select-all over a large knowledge base), so
- * this is a defensive ceiling, not a working limit.
- */
-const MAX_KNOWLEDGE_CONTEXT_PAGE_IDS = 100;
 
 /** The canned acknowledgement that follows every synthetic reference-context
  * exchange injected into `contents` (see the `contents.unshift(...)` calls

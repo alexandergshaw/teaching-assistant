@@ -4469,6 +4469,120 @@ a.instFieldValue:hover {
   padding: 0 var(--space-3);
 }
 
+/* "@institution" typeahead popup (SPEC-TYPEAHEAD.md sections 1/8) - wraps
+   .selectionChatInputRow only while AiChatWindow's institutionTypeahead
+   prop is set (see InstitutionTypeahead.tsx). IN-WINDOW, never portalled:
+   .selectionChatWindow is already `position: fixed` and draggable/
+   resizable, so an absolutely-positioned child moves and resizes with it
+   for free. flex-shrink: 0 is load-bearing - .selectionChatInputRow already
+   carries it, but wrapping the row makes THIS anchor the flex item instead,
+   and a wrapper defaults to flex-shrink: 1, which would collapse the
+   composer on a short window. */
+.institutionTypeaheadAnchor {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* max-height is a FIXED px, never a percentage: a percentage here would
+   resolve against the anchor's own ~55px height (just the input row), not
+   the window, producing a one-row sliver. 160px fits the space available
+   above the composer even at the window's smallest size. */
+.institutionTypeaheadPopup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: var(--space-1);
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--field-background);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.institutionTypeaheadList {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.institutionTypeaheadOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+}
+
+.institutionTypeaheadOption[aria-selected="true"] {
+  background: var(--accent-surface);
+  color: var(--accent-ink);
+}
+
+.institutionTypeaheadMeta {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.institutionTypeaheadOption[aria-selected="true"] .institutionTypeaheadMeta {
+  color: inherit;
+}
+
+.institutionTypeaheadHint {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+/* Clear control inside the knowledge-context strip (AiChatWindow.tsx only -
+   the strip is rendered there from a plain string prop). Inline within the
+   strip's own text, not a separate row, since "Clear" is short. */
+.knowledgeContextClear {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.knowledgeContextClear:hover {
+  opacity: 0.8;
+}
+
+/* "Try again" retry action inside the institution-load notice line
+   (AiChatWindow.tsx only). */
+.institutionNoticeAction {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.institutionNoticeAction:hover {
+  opacity: 0.8;
+}
+
 .selectionChatInputRow {
   display: flex;
   align-items: flex-end;

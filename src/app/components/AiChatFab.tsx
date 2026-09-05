@@ -29,8 +29,9 @@ import { CHAT_ATTACHMENT_BUDGET_BYTES, trimAttachmentsToBudget } from "@/lib/cha
 import { OPEN_AI_CHAT_EVENT, parseOpenChatDetail } from "@/lib/chat/open-chat";
 import { navigateToRecordingTool } from "@/lib/recording-launch";
 import { getStoredProvider } from "@/lib/llm-provider";
-import { readActiveInstitution } from "@/lib/institutions";
-import { getChatToneStatusAction } from "../actions";
+import { readActiveInstitution, useInstitutionSelection } from "@/lib/institutions";
+import { MAX_KNOWLEDGE_CONTEXT_PAGE_IDS, knowledgeContextStripText } from "@/lib/chat/knowledge-context";
+import { getChatToneStatusAction, listInstitutionPageSummariesAction } from "../actions";
 import styles from "../page.module.css";
 
 interface Pos { x: number; y: number }
@@ -142,6 +143,40 @@ export default function AiChatFab() {
   // never linger and describe the wrong thing.
   const [knowledgeContextInfo, setKnowledgeContextInfo] = useState<ChatKnowledgeContextSummary | null>(null);
 
+  // Institution typeahead resolution (the chat's own "@MCC" trigger - see
+  // src/app/components/chat/InstitutionTypeahead.tsx for the popup this
+  // drives). Three pieces of state, each with its own reset rule:
+  //
+  // - institutionLoading: the acronym currently being resolved, or null.
+  //   Non-null for the whole span of the listInstitutionPageSummariesAction
+  //   call below - Send is disabled for that whole span (see
+  //   sendBlockedReason further down) because a turn the user believes is
+  //   grounded must never go out ungrounded with nothing saying so.
+  // - institutionNotice: set INSTEAD OF knowledgeContext when a selection
+  //   resolves to nothing usable (zero pages) or fails outright - an empty
+  //   knowledgeContext would make the strip lie about what's loaded, so
+  //   neither case ever calls setKnowledgeContext. Carries its own retry
+  //   callback for the failure case (copy item 17, "Try again").
+  // - liveMessage / liveAlert: the two always-mounted live regions
+  //   AiChatWindow renders. This component only ever describes RESOLUTION
+  //   events here - loading/loaded/cleared/failed. The popup's own
+  //   open/filter announcements (copy items 19-22) are computed inside
+  //   AiChatWindow/useInstitutionTrigger, which has the live query and
+  //   match state this component does not.
+  const [institutionLoading, setInstitutionLoading] = useState<string | null>(null);
+  const [institutionNotice, setInstitutionNotice] = useState<{ text: string; onRetry?: () => void } | null>(null);
+  const [liveMessage, setLiveMessage] = useState("");
+  const [liveAlert, setLiveAlert] = useState("");
+
+  // Guards the resolution race (two institutions picked in quick succession):
+  // each call to handleSelectInstitution stamps a fresh token here BEFORE
+  // its await, and only the call whose token still matches when the promise
+  // settles is allowed to commit a result. This is an event-callback race,
+  // not an effect cleanup, so there is no existing `cancelled`-flag idiom to
+  // reuse (see the tone-status effect above for that idiom, which does not
+  // apply here).
+  const institutionRequestIdRef = useRef(0);
+
   // Modules bulk-select context (C2), set when "open-ai-chat" is dispatched
   // with a usable `selectionContext` detail (see the "open-ai-chat"
   // listener below and parseOpenChatDetail's own C1 validation, which
@@ -195,6 +230,17 @@ export default function AiChatFab() {
   }, [chatOpen]);
 
   const { suggestions, recordPrompt } = usePromptSuggestions();
+
+  // Reactive registry of institution acronyms (Settings dropdown) plus the
+  // globally shared "active" one - both purely for the typeahead popup:
+  // `institutions` is the full list it filters as the user types (AC1),
+  // `active` is hoisted to the top and pre-highlighted on open (spec
+  // section 3) so the common case is "@ then Enter". Reactive (unlike the
+  // one-off readActiveInstitution read in handleSend below) because the
+  // popup must reflect an institution added in Settings while this chat
+  // window is already open - selecting one here never changes this shared
+  // "active" value itself, it only loads that institution's pages.
+  const { institutions, active: activeInstitution } = useInstitutionSelection();
 
   // Stable session ID for the lifetime of this chat window; regenerated on close.
   const sessionIdRef = useRef<string>(crypto.randomUUID());
@@ -483,6 +529,102 @@ export default function AiChatFab() {
     }
   }, [messages, recordPrompt, knowledgeContext, selectionContext]);
 
+  // Resolves an institution picked from the typeahead popup (AC2) into a
+  // knowledgeContext covering every page under it, up to the shared cap
+  // (AC5), and loads it into the conversation. Owns the ONLY call to
+  // listInstitutionPageSummariesAction on this surface - AiChatWindow is
+  // shared with SelectionChatWidget and holds no context state of its own
+  // (spec section 5) - and mirrors, rather than duplicates, the
+  // setKnowledgeContextInfo(null) reset the "open-ai-chat" listener above
+  // already performs when a fresh selection replaces a prior one.
+  //
+  // Deliberately has NO "already this institution, no-op" early return: per
+  // spec section 9, re-selecting the active institution RE-LOADS (its pages
+  // may have changed since it was first picked) rather than doing nothing.
+  const handleSelectInstitution = useCallback(
+    // A named function expression, not the anonymous arrow every other
+    // handler in this file uses: the failure branch's "Try again" needs to
+    // call this SAME resolution again for the SAME code, and referencing
+    // the outer `const handleSelectInstitution` from inside its own
+    // useCallback factory is a TDZ hazard the react-hooks lint rule (added
+    // for eslint-config-next's React Compiler support) now flags - "accessed
+    // before it is declared". The function's own name (`resolveInstitution`,
+    // scoped only to this expression) is bound the instant the function
+    // starts running, with no such hazard, and is invisible outside this
+    // useCallback the same way any function expression's own name is.
+    async function resolveInstitution(code: string) {
+      const requestId = ++institutionRequestIdRef.current;
+      // Captured before any state changes below, so a failed/zero-page
+      // selection (which never calls setKnowledgeContext) can never make a
+      // LATER, different selection's "replacing X" announcement point at
+      // the wrong institution.
+      const previousInstitution = knowledgeContext?.institution ?? null;
+
+      setInstitutionLoading(code);
+      setInstitutionNotice(null);
+      setLiveMessage(`Loading ${code} knowledge base.`);
+
+      const result = await listInstitutionPageSummariesAction(code);
+
+      // RACE: a second selection made while this one was in flight has
+      // already bumped institutionRequestIdRef past `requestId` - drop this
+      // stale result entirely (including the loading-indicator clear
+      // below, which belongs only to whichever call is still current).
+      if (requestId !== institutionRequestIdRef.current) return;
+      setInstitutionLoading(null);
+
+      if ("error" in result) {
+        const text = `Could not load ${code} pages. Nothing was added to context.`;
+        setInstitutionNotice({ text, onRetry: () => void resolveInstitution(code) });
+        // ASSERTIVE, not polite: the question the user is about to type
+        // will not be grounded if they proceed - that has to interrupt
+        // rather than wait to be noticed.
+        setLiveAlert(text);
+        return;
+      }
+
+      const total = result.pages.length;
+      if (total === 0) {
+        // A registered institution with no Knowledge Base pages yet - do
+        // NOT set an empty knowledgeContext (it would make the strip lie
+        // about there being something in context).
+        setInstitutionNotice({ text: `${code} has no Knowledge Base pages, so nothing was loaded.` });
+        setLiveMessage(`${code} has no Knowledge Base pages. Nothing was loaded.`);
+        return;
+      }
+
+      const ids = result.pages.slice(0, MAX_KNOWLEDGE_CONTEXT_PAGE_IDS).map((p) => p.id);
+      setKnowledgeContext({ knowledgePageIds: ids, institution: code, totalPages: total });
+      // Same reset the "open-ai-chat" listener performs above: a fresh
+      // selection's server-confirmed counts have not arrived yet, so any
+      // counts left over from a PRIOR selection must not linger and
+      // describe the wrong institution.
+      setKnowledgeContextInfo(null);
+
+      const pagesPart =
+        total > ids.length
+          ? `${ids.length} of ${total} pages in context. The rest are not loaded.`
+          : `${ids.length} page${ids.length === 1 ? "" : "s"} in context.`;
+      const prefix =
+        previousInstitution && previousInstitution !== code
+          ? `${code} knowledge base loaded, replacing ${previousInstitution}.`
+          : `${code} knowledge base loaded.`;
+      setLiveMessage(`${prefix} ${pagesPart}`);
+    },
+    [knowledgeContext]
+  );
+
+  // AC6's "way to clear the loaded context without closing the chat". Nulls
+  // knowledgeContext AND its server-confirmed counts together (they
+  // describe the same selection); selectionContext is left untouched - the
+  // two context channels are independent (see ChatSelectionContext's own
+  // doc comment), and clearing one is never a reason to clear the other.
+  const handleClearKnowledgeContext = useCallback(() => {
+    setKnowledgeContext(null);
+    setKnowledgeContextInfo(null);
+    setLiveMessage("Knowledge context cleared.");
+  }, []);
+
   const handleChatClose = useCallback(() => {
     setChatOpen(false);
     setMessages([]);
@@ -494,6 +636,13 @@ export default function AiChatFab() {
     // again rather than a stale selection silently carrying over.
     setKnowledgeContext(null);
     setKnowledgeContextInfo(null);
+    // Same session scope for the institution-typeahead resolution state - a
+    // notice or announcement from this conversation must not resurface in
+    // the next one.
+    setInstitutionLoading(null);
+    setInstitutionNotice(null);
+    setLiveMessage("");
+    setLiveAlert("");
     // Modules-selection context is scoped to this session too, same reason
     // as knowledgeContext just above (C2) - closing the window is what ends
     // the conversation the selection was gathered for, so a re-opened chat
@@ -524,26 +673,51 @@ export default function AiChatFab() {
   // and this mirrors the same non-reactive check the tone-status effect uses.
   const attachDisabled = getStoredProvider() === "embedded";
 
-  // A7: "the user can see what was loaded". Two sources, preferred in order:
-  // (1) knowledgeContextInfo - the SERVER's confirmed includedPages/
-  // includedAttachments once a response has come back (see handleSend) -
-  // this is the trustworthy number: it reflects A3's ownership re-check and
-  // whatever the budget actually fit, so it can legitimately be lower than
-  // what was requested. (2) Until that first response lands (context was
-  // just loaded via "Ask AI", nothing sent yet), fall back to the client's
-  // own requested-selection count/label so the strip appears immediately
-  // rather than staying blank for the whole first turn.
-  const knowledgeContextPart = knowledgeContextInfo
-    ? `${knowledgeContextInfo.includedPages} page${knowledgeContextInfo.includedPages === 1 ? "" : "s"}${
-        knowledgeContextInfo.includedAttachments > 0
-          ? ` and ${knowledgeContextInfo.includedAttachments} attachment${knowledgeContextInfo.includedAttachments === 1 ? "" : "s"}`
-          : ""
-      } in context`
+  // A7/AC4/AC5: "the user can see what was loaded, including the cap
+  // disclosure, for as long as the context stays loaded" - not just until
+  // the first reply lands. THE BUG THIS FIXES: this used to inline the
+  // sentence twice - once for "before the first reply" (used
+  // knowledgeContext.label, no cap disclosure) and once for "after the
+  // first reply" (used knowledgeContextInfo, which dropped BOTH the
+  // institution name and the cap disclosure the moment it took over - see
+  // the feature's own regression note). knowledgeContextStripText
+  // (src/lib/chat/knowledge-context.ts) is now the ONE place that renders
+  // this sentence - its own doc confirms both old branches reduce to the
+  // exact same shape once `label` is out of the way, so this file no
+  // longer hand-rolls the "N page(s)[ and M attachments] in context"
+  // formula at all. Checked in order:
+  //   1. A selection is actively resolving - say so instead of whatever the
+  //      PREVIOUS selection's strip said (copy item 7).
+  //   2. knowledgeContext.label is set - the Knowledge tab's bulk "Ask AI"
+  //      action's own arbitrary, instructor-facing override (unrelated to
+  //      institutions - see KnowledgeContextStripArgs' own doc for why this
+  //      decision happens here, before the shared function is ever called).
+  //   3. The server has confirmed counts for the CURRENT selection - use
+  //      those (they reflect A3's ownership re-check and A5's budget, so
+  //      can legitimately be lower than what was requested).
+  //   4. Nothing confirmed yet - `institution`/`totalPages` are undefined
+  //      for the Knowledge-tab path (reproducing today's shipped output
+  //      verbatim) and set for a fresh institution selection, so the cap is
+  //      disclosed from the moment it loads (AC5: "never silent") rather
+  //      than waiting for a reply just to say "of 143".
+  const knowledgeContextPart = institutionLoading
+    ? `Loading ${institutionLoading} knowledge base…`
+    : knowledgeContextInfo
+    ? knowledgeContextStripText({
+        institution: knowledgeContext?.institution,
+        included: knowledgeContextInfo.includedPages,
+        total: knowledgeContext?.totalPages,
+        attachments: knowledgeContextInfo.includedAttachments,
+      })
     : knowledgeContext
-    ? `${
-        knowledgeContext.label ??
-        `${knowledgeContext.knowledgePageIds.length} page${knowledgeContext.knowledgePageIds.length === 1 ? "" : "s"}`
-      } in context`
+    ? knowledgeContext.label
+      ? `${knowledgeContext.label} in context`
+      : knowledgeContextStripText({
+          institution: knowledgeContext.institution,
+          included: knowledgeContext.knowledgePageIds.length,
+          total: knowledgeContext.totalPages,
+          attachments: 0,
+        })
     : undefined;
 
   // C4: the Modules-selection half of the strip. There is no server-
@@ -569,6 +743,12 @@ export default function AiChatFab() {
   const knowledgeContextSummary =
     [knowledgeContextPart, selectionContextPart].filter((part): part is string => Boolean(part)).join("; ") ||
     undefined;
+
+  // Disables Send (and supplies its tooltip) for the whole span of an
+  // in-flight institution resolution - see handleSelectInstitution's own
+  // comment for why this must never be silent: a turn the user believes is
+  // grounded must never go out ungrounded with nothing saying so.
+  const sendBlockedReason = institutionLoading ? `Loading ${institutionLoading} knowledge base…` : null;
 
   return (
     <>
@@ -647,6 +827,7 @@ export default function AiChatFab() {
           title="AI Chatbot"
           icon={<ChatIcon />}
           emptyMessage="Ask me anything!"
+          placeholder="Type your message, or @ to load an institution…"
           knowledgeContextSummary={knowledgeContextSummary}
           toneStatus={toneStatus}
           suggestions={suggestions}
@@ -657,6 +838,17 @@ export default function AiChatFab() {
           onHeaderMouseDown={onChatHeaderMouseDown}
           onSend={handleSend}
           onClose={handleChatClose}
+          institutionTypeahead={{
+            institutions,
+            activeInstitution,
+            loadedInstitution: knowledgeContext?.institution ?? null,
+            onSelect: handleSelectInstitution,
+          }}
+          institutionNotice={institutionNotice}
+          sendBlockedReason={sendBlockedReason}
+          onClearKnowledgeContext={handleClearKnowledgeContext}
+          liveMessage={liveMessage}
+          liveAlert={liveAlert}
         />
       )}
 

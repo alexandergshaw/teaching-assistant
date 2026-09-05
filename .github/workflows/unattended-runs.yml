@@ -56,3 +56,54 @@ jobs:
             echo "Endpoint returned $code (expected 200 with a Bearer CRON_SECRET)."
             exit 1
           fi
+
+          # A 200 only means the route ran and returned JSON - it does not mean
+          # every schedule/trigger inside that JSON succeeded. The route
+          # (src/app/api/cron/run-schedules/route.ts) reports each schedule and
+          # trigger's own outcome as a "status" field that can be "error"
+          # without ever changing the HTTP status, so a naive "code == 200"
+          # check goes green on a run where every single schedule failed.
+          # GitHub's default failure email on this workflow is the ONLY
+          # outbound alert this deployment has (no error tracking, no APM), so
+          # that gap would mean a broken schedule is never noticed.
+          #
+          # THREE result arrays, TWO status vocabularies. Schedules
+          # (.results) and triggers (.triggers) report "ok" | "error" |
+          # "skipped", but scheduled releases (.releases) report
+          # "released" | "skipped" | "failed" - see ReleaseRunResult in
+          # src/lib/release-runner.ts:139-146. A check that only looks for
+          # "error" therefore goes green on a release that failed, which is
+          # exactly the silent failure this gate exists to catch.
+          #
+          # "skipped" is NOT a failure in either vocabulary: an already-claimed
+          # occurrence and a not-yet-due one both report it on a healthy tick.
+          #
+          # jq ships preinstalled on GitHub's ubuntu-latest runner image, so
+          # this is the primary path. The grep fallback below is dependency-
+          # free and deliberately crude: it counts literal occurrences of both
+          # failure spellings in the raw body, which can only ever OVER-count
+          # (e.g. if that literal text ever showed up inside a free-text
+          # `detail` string) and never UNDER-count - safe as a yes/no trip for
+          # this gate even though it is not an exact count.
+          if command -v jq >/dev/null 2>&1; then
+            errors=$(jq '[(.results // [])[], (.triggers // [])[], (.releases // [])[]] | map(select(.status == "error" or .status == "failed")) | length' /tmp/resp.json 2>/dev/null)
+            due=$(jq '((.results // []) | length) + ((.triggers // []) | length) + ((.releases // []) | length)' /tmp/resp.json 2>/dev/null)
+          else
+            echo "jq not found on this runner; falling back to a grep-based error count."
+            errors=$(grep -oE '"status":"(error|failed)"' /tmp/resp.json 2>/dev/null | wc -l | tr -d ' ')
+            due="unknown (grep fallback does not count non-error entries)"
+          fi
+
+          if [ -z "$errors" ]; then
+            echo "Could not read a schedule/trigger/release failure count from the response body - failing closed, since this workflow's failure email is the only alert this deployment has."
+            exit 1
+          fi
+
+          echo "Schedules/triggers/releases due this tick: $due; reporting error status: $errors"
+
+          if [ "$errors" != "0" ]; then
+            echo "One or more schedules, triggers or releases reported a failure status - see the JSON body above. Not failing on an empty/zero-due tick (that is the normal quiet case)."
+            exit 1
+          fi
+
+          echo "Run complete: no schedule, trigger or release reported a failure status."

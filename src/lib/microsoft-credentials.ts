@@ -40,9 +40,35 @@ export async function getCredentials(userId: string, institution: string): Promi
   }
   if (!data) return null;
   const row = data as CredentialsTable["Row"];
+
+  let accessToken: string;
+  let refreshToken: string | null;
+  try {
+    accessToken = row.access_token ? decryptSecret(row.access_token) : "";
+    refreshToken = row.refresh_token ? decryptSecret(row.refresh_token) : null;
+  } catch (decryptError) {
+    // Mirrors src/lib/google-credentials.ts: a rotated/mistyped
+    // GOOGLE_TOKEN_ENC_KEY or a tampered row must not throw out of this read
+    // path as a 500. We deliberately collapse it into the same `null` this
+    // function already returns for "not connected" rather than a third return
+    // value, since the sole caller (messaging-outlook.ts, via
+    // listConnectedInstitutionsWithScope / getValidAccessToken) already treats
+    // `null`/absence as "no usable connection, offer to (re)connect" - exactly
+    // the right recovery path here, and a distinct state would require
+    // changing that call site too. The row is left untouched (no delete): a
+    // transient key misconfiguration on one deploy must not wipe every user's
+    // credential for this school. Only the error's message is logged, never
+    // the ciphertext or any decrypted value.
+    console.error(
+      "[microsoft-credentials] Could not decrypt stored tokens for a user; treating as not connected.",
+      decryptError instanceof Error ? decryptError.message : String(decryptError)
+    );
+    return null;
+  }
+
   return {
-    accessToken: row.access_token ? decryptSecret(row.access_token) : "",
-    refreshToken: row.refresh_token ? decryptSecret(row.refresh_token) : null,
+    accessToken,
+    refreshToken,
     expiry: row.expiry ? new Date(row.expiry) : null,
     scope: row.scope,
   };

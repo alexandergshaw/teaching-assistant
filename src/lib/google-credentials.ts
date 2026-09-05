@@ -39,9 +39,37 @@ export async function getCredentials(userId: string): Promise<StoredGoogleTokens
   }
   if (!data) return null;
   const row = data as CredentialsTable["Row"];
+
+  let accessToken: string;
+  let refreshToken: string | null;
+  try {
+    accessToken = row.access_token ? decryptSecret(row.access_token) : "";
+    refreshToken = row.refresh_token ? decryptSecret(row.refresh_token) : null;
+  } catch (decryptError) {
+    // A rotated/mistyped GOOGLE_TOKEN_ENC_KEY or a tampered row must not throw
+    // out of this read path and surface as a 500: it needs to read as a
+    // recoverable "please reconnect Google" state instead. We deliberately
+    // collapse that into the same `null` this function already returns for
+    // "not connected" rather than inventing a third return value: every
+    // existing caller (course-hub-integrations.ts, google-calendar.ts,
+    // messaging-scheduling.ts, course-calendar.ts) already treats `null` as
+    // "no usable Google connection, offer to (re)connect", which is exactly
+    // the right recovery path for an undecryptable row - and a distinct
+    // "needs reconnect" state would require changing every one of those call
+    // sites in lockstep with this one. The row itself is left untouched (no
+    // delete): a transient key misconfiguration on one deploy must not wipe
+    // every user's credential. Only the error's message is logged, never the
+    // ciphertext or any decrypted value.
+    console.error(
+      "[google-credentials] Could not decrypt stored tokens for a user; treating as not connected.",
+      decryptError instanceof Error ? decryptError.message : String(decryptError)
+    );
+    return null;
+  }
+
   return {
-    accessToken: row.access_token ? decryptSecret(row.access_token) : "",
-    refreshToken: row.refresh_token ? decryptSecret(row.refresh_token) : null,
+    accessToken,
+    refreshToken,
     expiry: row.expiry ? new Date(row.expiry) : null,
     scope: row.scope,
   };

@@ -344,9 +344,20 @@ export default function KnowledgeOverviewPanel({ institution, scopePageId, pages
                     )}
                   </>
                 ) : (
-                  !generating && (
+                  /* No summary yet. This line promises a summary is coming,
+                     so it must NOT appear in the two cases where none is:
+                     after a failed generation (the alert above already says
+                     what went wrong, and the auto-refresh will not retry the
+                     same page-set - Regenerate is the deliberate retry), and
+                     when no page in scope has any content to summarize (the
+                     line above the summary section already explains that
+                     one). Otherwise the panel would sit claiming to be
+                     writing something forever. */
+                  !generating &&
+                  !generateError &&
+                  hasContent && (
                     <p className={styles.fieldHint} style={{ margin: 0 }}>
-                      No summary yet. Generate one for a policy-lookup overview of every page in this scope.
+                      Writing a policy-lookup overview of every page in this scope… this happens on its own, and again whenever a page here changes.
                     </p>
                   )
                 )}

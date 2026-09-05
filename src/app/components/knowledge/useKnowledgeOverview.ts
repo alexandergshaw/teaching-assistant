@@ -271,18 +271,28 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
 
   // ── Auto-refresh the summary when the scope changes underneath it ───────
   //
-  // Requested behaviour: the summary updates itself whenever a page in scope
-  // is added, changed, or deleted, so it is something to READ rather than a
-  // button to remember to press. All three cases are already detected by
-  // summaryStaleness's pure set diff, so this effect only has to act on it.
+  // Requested behaviour: the summary writes itself on first view AND updates
+  // itself whenever a page in scope is added, changed, or deleted, so it is
+  // something to READ rather than a button to remember to press. The three
+  // change cases are already detected by summaryStaleness's pure set diff, so
+  // this effect only has to act on it; the first-view case is simply "loaded,
+  // and there is no summary".
+  //
+  // The debounce does double duty for first-view generation: merely CLICKING
+  // THROUGH pages does not generate anything, because the scope has to sit
+  // still for the delay before a call starts. Only landing somewhere and
+  // staying does.
   //
   // Three guards, each load-bearing:
   //
-  //  - ONLY WHEN A SUMMARY ALREADY EXISTS. A scope that has never been
-  //    summarized stays on the explicit Generate button. Auto-generating on
-  //    first sight would fire a model call for every institution and every
-  //    parent page merely BROWSED, which is a real bill for something the
-  //    owner never asked to see.
+  //  - WAITS FOR THE INITIAL LOAD (`loading`/`loadError`). This is the guard
+  //    that makes first-view generation safe at all: on mount `summary` is
+  //    null because the fetch has not returned YET, not because no summary
+  //    exists. Firing before the load settles would generate a fresh summary
+  //    over the top of a perfectly good stored one, on every single mount,
+  //    for every scope - the most expensive possible bug here. A failed load
+  //    also blocks it, because a load error means we do not KNOW whether a
+  //    summary exists.
   //  - DEBOUNCED. Deleting four pages, or dragging a subtree, lands as a
   //    burst of separate page-list updates; without the delay each one would
   //    start its own generation and the last would win after paying for all
@@ -300,7 +310,10 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
   );
 
   useEffect(() => {
-    if (!summary || !staleness?.stale || generating || !hasContent) return;
+    // Never before the initial load settles - see the guard note above.
+    if (loading || loadError || generating || !hasContent) return;
+    // Up to date: a summary exists and nothing in scope has moved.
+    if (summary && !staleness?.stale) return;
     if (autoRefreshedFor === scopeSignature) return;
     const timer = setTimeout(() => {
       setAutoRefreshedFor(scopeSignature);
@@ -312,7 +325,7 @@ export function useKnowledgeOverview({ institution, scopePageId, allPages }: Use
     // actually closes over - institution, scopePageId, provider, generating -
     // are either in this dep list or constant for the life of a scope.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary, staleness, generating, hasContent, autoRefreshedFor, scopeSignature]);
+  }, [loading, loadError, summary, staleness, generating, hasContent, autoRefreshedFor, scopeSignature]);
 
   // ── Ask AI (AC4/AC5/AC6) ─────────────────────────────────────────────────
   const [asking, setAsking] = useState(false);

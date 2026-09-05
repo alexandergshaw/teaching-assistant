@@ -381,6 +381,215 @@
   line-height: var(--line-normal);
 }
 
+/* ── Knowledge overview panel (AI summary + Ask AI - KnowledgeOverviewPanel.tsx
+   / KnowledgeOverviewHistory.tsx) ────────────────────────────────────────
+   Local to this feature, deliberately not reaching into .attachments*/
+   .kbBulkLabel per the house rule (a future edit to AttachmentsPanel must
+   not be able to reshape this panel) - styled to match that panel's own
+   collapsible-box look (bordered box, toggle row with a rotating chevron,
+   padded body) rather than share its classes. */
+
+.kbOverview {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--card-background);
+  overflow: hidden;
+}
+
+/* Heading wraps the toggle button (see the component's own comment on why) -
+   this class resets the heading element's own default margin/font so it
+   reads as a plain toggle row, not a second document heading visually
+   competing with the page's real title. */
+.kbOverviewToggleHeading {
+  margin: 0;
+  font: inherit;
+  font-weight: inherit;
+}
+
+.kbOverviewToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kbOverviewChevron,
+.kbOverviewChevronOpen {
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--text-secondary);
+  transform: rotate(-90deg);
+  transition: transform var(--transition-base);
+}
+
+.kbOverviewChevronOpen {
+  transform: rotate(0deg);
+}
+
+.kbOverviewBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.kbOverviewSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+}
+
+.kbOverviewSectionTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.kbOverviewMetaRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Two always-mounted aria-live="polite" regions (one per section) - zero
+   height/padding at rest so an empty status never inserts visible flow
+   height, the same trade K2's .kbOverlayAnchor documents for a different
+   reason. Unlike that class this stays in NORMAL flow (not absolutely
+   positioned) - once populated it must push later content down, not
+   overlay it. */
+.kbOverviewStatus {
+  margin: 0;
+  min-height: 0;
+}
+
+/* Always-mounted role="alert" paragraph - `:empty` only matches when React
+   rendered `{null}` (no error), never an empty STRING child, so callers
+   must pass `{error}` directly rather than `{error ?? ""}` for this to
+   collapse to zero height at rest. */
+.kbOverviewAlert {
+  margin: 0;
+}
+.kbOverviewAlert:empty {
+  display: none;
+}
+
+.kbOverviewAnswerBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kbOverviewAskRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.kbOverviewSources {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.kbOverviewChip {
+  text-transform: none;
+  font-weight: 600;
+}
+
+.kbOverviewChipDeleted {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.kbOverviewHistoryHeaderRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Prose rendered from Markdown (the summary, the current answer, and every
+   history entry's answer - all via renderOverviewMarkdown). X1/X14: pinned
+   to ONE heading size regardless of h1-h6, since a model-emitted heading
+   must never outrank (or visually compete with) this panel's own section
+   titles above, and the prompt already restricts the model to paragraphs/
+   bullets/"## " sub-headings only - this pin is cosmetic backstop, not the
+   only mitigation. */
+.kbOverviewSummaryText,
+.kbOverviewAnswer,
+.kbOverviewHistoryAnswer {
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+  color: var(--text-primary);
+}
+
+.kbOverviewSummaryText :is(h1, h2, h3, h4, h5, h6),
+.kbOverviewAnswer :is(h1, h2, h3, h4, h5, h6),
+.kbOverviewHistoryAnswer :is(h1, h2, h3, h4, h5, h6) {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.kbOverviewSummaryText p,
+.kbOverviewAnswer p,
+.kbOverviewHistoryAnswer p {
+  margin: 0 0 var(--space-2);
+}
+
+.kbOverviewSummaryText ul,
+.kbOverviewSummaryText ol,
+.kbOverviewAnswer ul,
+.kbOverviewAnswer ol,
+.kbOverviewHistoryAnswer ul,
+.kbOverviewHistoryAnswer ol {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-5);
+}
+
+.kbOverviewSummaryText li,
+.kbOverviewAnswer li,
+.kbOverviewHistoryAnswer li {
+  margin-bottom: var(--space-1);
+}
+
+.kbOverviewSummaryText a,
+.kbOverviewAnswer a,
+.kbOverviewHistoryAnswer a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.kbOverviewSummaryText code,
+.kbOverviewAnswer code,
+.kbOverviewHistoryAnswer code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--surface-muted);
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-xs);
+}
+
 /* ── Embeds rendered inline in a page's body (PageBody.tsx) ─────────────── */
 
 .embedImage {

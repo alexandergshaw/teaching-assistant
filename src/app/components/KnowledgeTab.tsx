@@ -59,6 +59,8 @@ import ParentPicker from "./knowledge/ParentPicker";
 import AttachmentsPanel from "./knowledge/AttachmentsPanel";
 import PageBody from "./knowledge/PageBody";
 import KnowledgeBulkBar from "./knowledge/KnowledgeBulkBar";
+import KnowledgeOverviewPanel from "./knowledge/KnowledgeOverviewPanel";
+import { scopeHasDescendants } from "@/lib/knowledge-overview-scope";
 import { useKbPageTree } from "./knowledge/useKbPageTree";
 import { useKbEditSession } from "./knowledge/useKbEditSession";
 import { useKbAttachments } from "./knowledge/useKbAttachments";
@@ -831,13 +833,29 @@ export default function KnowledgeTab({
         {/* Right pane: selected page */}
         <div className={styles.kbDetailPane}>
           {!selectedPage ? (
-            <div className={styles.kbDetailEmpty}>
-              <p style={{ margin: 0 }}>
-                {tree.length === 0
-                  ? "This institution has no pages yet. Add one to start recording policies and deadlines."
-                  : "Select a page from the tree to view it."}
-              </p>
-            </div>
+            <>
+              {/* X5: a SIBLING above the dashed empty-state box, never its
+                  child - .kbDetailEmpty (page.module.css, not this file
+                  set's to edit) centers its own content and sets its own
+                  min-height, which would shrink-wrap and center this panel
+                  too if it were nested inside instead. */}
+              {loadState === "idle" && !isEditing && pages && pages.length > 0 && (
+                <KnowledgeOverviewPanel
+                  institution={active}
+                  scopePageId={null}
+                  pages={pages}
+                  headingLevel={2}
+                  onSelectPage={openSearchHit}
+                />
+              )}
+              <div className={styles.kbDetailEmpty}>
+                <p style={{ margin: 0 }}>
+                  {tree.length === 0
+                    ? "This institution has no pages yet. Add one to start recording policies and deadlines."
+                    : "Select a page from the tree to view it."}
+                </p>
+              </div>
+            </>
           ) : (
             <>
               {breadcrumb.length > 1 && (
@@ -937,6 +955,21 @@ export default function KnowledgeTab({
                 <PageBody body={selectedPage.body} attachments={attachments} />
               ) : (
                 <p className={styles.kbBodyEmpty}>This page has no content yet. Click Edit to add some.</p>
+              )}
+
+              {/* X5/AC1(d): LAST child of the detail pane, after the body -
+                  the only placement that leaves every existing element above
+                  at its current vertical position. AC1(b)/(c): only for a
+                  page that actually has descendants (buildPageTree's own
+                  nesting, C3/X10 - never the raw parentId walk), never a leaf. */}
+              {loadState === "idle" && !isEditing && pages && scopeHasDescendants(pages, selectedPage.id) && (
+                <KnowledgeOverviewPanel
+                  institution={active}
+                  scopePageId={selectedPage.id}
+                  pages={pages}
+                  headingLevel={3}
+                  onSelectPage={openSearchHit}
+                />
               )}
             </>
           )}

@@ -719,6 +719,100 @@ export interface InstitutionFieldsUpdate {
   updated_at?: string;
 }
 
+// supabase/migrations/20261011000000_institution_knowledge_overview.sql
+// Alphabetically between institution_fields and institution_page_attachments
+// ("knowledge_questions" < "knowledge_summaries", so questions comes first).
+// scope_key is Row-ONLY (never Insert/Update) - it is a Postgres GENERATED
+// column, so including it on Insert/Update would let a caller believe it
+// could write that column, turning a compile-time impossibility into a
+// runtime PostgREST rejection instead. See the migration's own header
+// comment for the coalesce-to-nil-uuid design scope_key implements.
+export interface InstitutionKnowledgeQuestionsRow {
+  id: string;
+  user_id: string;
+  institution: string;
+  scope_page_id: string | null;
+  scope_key: string;
+  question: string;
+  answer: string;
+  citations: Json;
+  source_pages: Json;
+  grounded: boolean;
+  model: string | null;
+  created_at: string;
+}
+
+export interface InstitutionKnowledgeQuestionsInsert {
+  id?: string;
+  user_id: string;
+  institution: string;
+  scope_page_id?: string | null;
+  question: string;
+  answer: string;
+  citations?: Json;
+  source_pages?: Json;
+  grounded?: boolean;
+  model?: string | null;
+  created_at?: string;
+}
+
+export interface InstitutionKnowledgeQuestionsUpdate {
+  id?: string;
+  user_id?: string;
+  institution?: string;
+  scope_page_id?: string | null;
+  question?: string;
+  answer?: string;
+  citations?: Json;
+  source_pages?: Json;
+  grounded?: boolean;
+  model?: string | null;
+  created_at?: string;
+}
+
+// generated_at is REQUIRED (not optional) on Insert - the app's own process
+// clock supplies it on every write, never the column default; see
+// upsertScopeSummary in src/lib/knowledge-overview.ts.
+export interface InstitutionKnowledgeSummariesRow {
+  id: string;
+  user_id: string;
+  institution: string;
+  scope_page_id: string | null;
+  scope_key: string;
+  summary: string;
+  source_pages: Json;
+  model: string | null;
+  generated_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InstitutionKnowledgeSummariesInsert {
+  id?: string;
+  user_id: string;
+  institution: string;
+  scope_page_id?: string | null;
+  summary?: string;
+  source_pages?: Json;
+  model?: string | null;
+  generated_at: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InstitutionKnowledgeSummariesUpdate {
+  id?: string;
+  user_id?: string;
+  institution?: string;
+  scope_page_id?: string | null;
+  summary?: string;
+  source_pages?: Json;
+  model?: string | null;
+  generated_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface InstitutionPageAttachmentsRow {
   id: string;
   page_id: string;

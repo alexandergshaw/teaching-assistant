@@ -53,6 +53,12 @@ import type {
   InstitutionFieldsRow,
   InstitutionFieldsInsert,
   InstitutionFieldsUpdate,
+  InstitutionKnowledgeQuestionsRow,
+  InstitutionKnowledgeQuestionsInsert,
+  InstitutionKnowledgeQuestionsUpdate,
+  InstitutionKnowledgeSummariesRow,
+  InstitutionKnowledgeSummariesInsert,
+  InstitutionKnowledgeSummariesUpdate,
   InstitutionPageAttachmentsRow,
   InstitutionPageAttachmentsInsert,
   InstitutionPageAttachmentsUpdate,
@@ -279,6 +285,18 @@ export interface Database {
         Row: Expand<InstitutionFieldsRow>;
         Insert: Expand<InstitutionFieldsInsert>;
         Update: Expand<InstitutionFieldsUpdate>;
+        Relationships: [];
+      };
+      institution_knowledge_questions: {
+        Row: Expand<InstitutionKnowledgeQuestionsRow>;
+        Insert: Expand<InstitutionKnowledgeQuestionsInsert>;
+        Update: Expand<InstitutionKnowledgeQuestionsUpdate>;
+        Relationships: [];
+      };
+      institution_knowledge_summaries: {
+        Row: Expand<InstitutionKnowledgeSummariesRow>;
+        Insert: Expand<InstitutionKnowledgeSummariesInsert>;
+        Update: Expand<InstitutionKnowledgeSummariesUpdate>;
         Relationships: [];
       };
       institution_page_attachments: {

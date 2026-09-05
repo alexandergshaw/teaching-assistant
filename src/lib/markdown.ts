@@ -5,7 +5,18 @@
 
 import { parse, HTMLElement, NodeType, type Node } from "node-html-parser";
 
-const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// Escapes the characters that are unsafe wherever this lands: element text
+// AND (for renderInlineMd's link rule, below) an HTML attribute value. The
+// double quote used to be missing here, which let a Markdown link target
+// like `[click](" onfocus="alert(1)  x)` break out of the `href="..."`
+// attribute it gets interpolated into and inject arbitrary attributes -
+// this is the ONLY place in the file that writes an interpolated value into
+// an attribute, so this one omission was the whole hole. Used only on the
+// Markdown -> HTML side (renderInlineMd and the ```code``` block below); the
+// HTML -> Markdown direction (renderInline/renderBlock/listToMarkdown) never
+// calls it, so widening it to escape quotes cannot change anything there.
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // ── HTML -> Markdown ───────────────────────────────────────────────────────────
 
@@ -95,11 +106,41 @@ export function htmlToMarkdown(html: string): string {
 
 // ── Markdown -> HTML ───────────────────────────────────────────────────────────
 
+// The only link targets a Markdown-authored [text](href) is allowed to
+// become a clickable <a href> for. renderInlineMd interpolates the captured
+// href straight into an attribute (see below), so an unconstrained href
+// lets whoever can edit the Markdown body (e.g. a synced assignment
+// description) turn a link into a `javascript:` URI that runs on click -
+// escapeHtml's quote fix stops the attribute-breakout variant of this attack
+// but does nothing about a scheme that is simply dangerous by itself, which
+// is what this allowlist is for. `https:`/`http:`, `mailto:`, `#` (in-page
+// anchors) and `/` (site-relative paths) are the targets real instruction
+// content actually needs. `//` is deliberately excluded from the `/` case:
+// a protocol-relative URL like `//evil.example/x` also starts with a single
+// `/` character-wise, but a browser resolves it against WHATEVER scheme the
+// current page is loaded over, i.e. it silently leaves the site - not what
+// "site-relative path" is meant to allow. `attachment:` is included even
+// though the intended attachment-embed syntax is normally extracted before
+// this function ever runs (see splitBodyIntoSegments in
+// src/app/components/knowledge/attachment-embed.ts) - a reference typed
+// inline within a sentence, rather than alone on its own line, is
+// documented there to intentionally fall through and round-trip as an
+// ordinary link instead of an embed, and `attachment:` is an inert custom
+// scheme (nothing a browser will execute), so allowing it here preserves
+// that documented behavior rather than silently turning those inline
+// references into plain text.
+const ALLOWED_LINK_HREF = /^(https?:|mailto:|attachment:|#|\/(?!\/))/i;
+
 function renderInlineMd(text: string): string {
   let s = escapeHtml(text);
   // Inline code first so its contents aren't re-processed.
   s = s.replace(/`([^`]+)`/g, (_m, c: string) => `<code>${c}</code>`);
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, t: string, href: string) => `<a href="${href}">${t}</a>`);
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, t: string, href: string) =>
+    // Anything outside the allowlist is not merely left unlinked but
+    // rendered as its own plain visible text - content is never dropped,
+    // only the dangerous href.
+    ALLOWED_LINK_HREF.test(href) ? `<a href="${href}">${t}</a>` : t
+  );
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
   return s;

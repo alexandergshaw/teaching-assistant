@@ -383,11 +383,15 @@
 
 /* ── Knowledge overview panel (AI summary + Ask AI - KnowledgeOverviewPanel.tsx
    / KnowledgeOverviewHistory.tsx) ────────────────────────────────────────
-   Local to this feature, deliberately not reaching into .attachments*/
-   .kbBulkLabel per the house rule (a future edit to AttachmentsPanel must
-   not be able to reshape this panel) - styled to match that panel's own
-   collapsible-box look (bordered box, toggle row with a rotating chevron,
-   padded body) rather than share its classes. */
+   Local to this feature, deliberately not reaching into the attachments
+   classes or .kbBulkLabel per the house rule (a future edit to
+   AttachmentsPanel must not be able to reshape this panel) - styled to match
+   that panel's own collapsible-box look (bordered box, toggle row with a
+   rotating chevron, padded body) rather than share its classes.
+   Do not write a star immediately followed by a slash anywhere in this
+   comment: it closes the comment early and the following lines are then
+   parsed as selectors, which fails ONLY in next build - lint, tsc and vitest
+   all stay green. That is exactly how this shipped broken once. */
 
 .kbOverview {
   border: 1px solid var(--card-border);

@@ -78,7 +78,25 @@ const ACTION_BUTTON_CLASS: Record<AccountAction, string> = {
   demote: securityStyles.remove,
 };
 
-const DIALOG_TITLES: Record<"approve" | "suspend" | "promote" | "demote", string> = {
+/**
+ * The actions that open a confirmation dialog. NOT every AccountAction:
+ * `restore` is deliberately immediate, because it only moves a row toward
+ * access and there is nothing to warn about.
+ *
+ * This is a named type rather than an inline union so that the three maps
+ * below and ConfirmDialog's own prop all key on the SAME thing. Adding a
+ * sixth confirming action then fails to compile in every one of those places
+ * at once, which is the point - an earlier version cast `pendingAction` to
+ * the inline union at the call site, and a cast would have let a new action
+ * through to render a dialog with an undefined title and no body.
+ */
+type ConfirmingAction = "approve" | "suspend" | "promote" | "demote";
+
+function isConfirmingAction(action: AccountAction): action is ConfirmingAction {
+  return action === "approve" || action === "suspend" || action === "promote" || action === "demote";
+}
+
+const DIALOG_TITLES: Record<ConfirmingAction, string> = {
   approve: "Approve this account?",
   suspend: "Suspend this account?",
   promote: "Make this account an owner?",
@@ -92,7 +110,7 @@ const DIALOG_TITLES: Record<"approve" | "suspend" | "promote" | "demote", string
 // already specified in the copy sheet's own "Action buttons" table ("Make
 // owner" / "Remove owner") is the smallest, most consistent choice available
 // rather than inventing new wording.
-const DIALOG_CONFIRM_LABELS: Record<"approve" | "suspend" | "promote" | "demote", string> = {
+const DIALOG_CONFIRM_LABELS: Record<ConfirmingAction, string> = {
   approve: "Approve account",
   suspend: "Suspend account",
   promote: "Make owner",
@@ -210,7 +228,7 @@ function statusChangeText(row: AccountRow): string {
  * per that note's own instruction the first paragraph stands alone rather
  * than being softened to compensate.
  */
-function dialogBodyParagraphs(action: "approve" | "suspend" | "promote" | "demote", email: string | null): string[] {
+function dialogBodyParagraphs(action: ConfirmingAction, email: string | null): string[] {
   const who = email;
   switch (action) {
     case "approve":
@@ -376,7 +394,7 @@ function feedbackFor(action: AccountAction, email: string | null, result: Accoun
 }
 
 interface ConfirmDialogProps {
-  action: "approve" | "suspend" | "promote" | "demote";
+  action: ConfirmingAction;
   email: string | null;
   restoreFocusRef: RefObject<HTMLElement | null>;
   onCancel: () => void;
@@ -524,9 +542,9 @@ function AccountRowItem({ row, onMutated }: AccountRowItemProps) {
             {feedback.text}
           </p>
         )}
-        {pendingAction && (
+        {pendingAction && isConfirmingAction(pendingAction) && (
           <ConfirmDialog
-            action={pendingAction as "approve" | "suspend" | "promote" | "demote"}
+            action={pendingAction}
             email={row.email}
             restoreFocusRef={triggerRef}
             onCancel={() => setPendingAction(null)}
@@ -545,9 +563,16 @@ interface AccountTableProps {
 
 // No <caption> element: the <h2> immediately preceding each call site
 // already names what the table holds ("Waiting for approval" / "All
-// accounts"), and this app has no visually-hidden utility class to give a
-// caption an accessible-only presentation without also rendering visible,
-// redundant text right above the column headers.
+// accounts"), so a caption would restate it.
+//
+// CORRECTION (2026-09-06): an earlier version of this comment justified the
+// omission by claiming this app has no visually-hidden utility. It does -
+// `visuallyHidden` in ../../components/ui/visuallyHidden.ts, a CSSProperties
+// object used by seventeen files. The omission is still right, but for the
+// reason above and not for a missing tool, and the difference matters: a
+// reader who believed the original would hand-roll an off-screen span, or
+// drop an accessible name entirely, rather than importing the one that
+// already exists.
 function AccountTable({ rows, onMutated }: AccountTableProps) {
   return (
     <div className={styles.tableWrap}>

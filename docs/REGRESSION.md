@@ -40061,7 +40061,9 @@ are not the owner" would tell the actual owner they had lost their access.
   the GitHub Action on push.
 - **No approval has ever been performed.** The containment stands: nothing can
   set a non-owner `active` except this surface, and it has not been used.
-  `requireOwner()` still means "any active account" at 532 call sites, so
+  `requireOwner()` still means "any active account" at 533 textual
+  occurrences across 119 files (occurrences, NOT call sites - the figure
+  includes comments; the code's own estimate of real invocations is ~496), so
   approving somebody grants everything the approve dialog says it does.
 - **GC6 remains open.** `email_confirmed_at` is now READ for the list, but
   still not persisted, so the approve dialog cannot render its per-row

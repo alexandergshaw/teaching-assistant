@@ -4,6 +4,7 @@ import {
   type CanvasInstitution,
 } from "../canvas-core";
 import { fetchWithThrottleRetry, isCanvasRateLimitStatus, type ThrottleBudget } from "../canvas-throttle";
+import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 
 export type CourseContext = {
   courseId: string;
@@ -22,14 +23,33 @@ export type CourseContext = {
   throttleBudget?: ThrottleBudget;
 };
 
-/** GET every page of a list endpoint, following the RFC-5988 Link header. */
+/**
+ * GET every page of a list endpoint, following the RFC-5988 Link header.
+ *
+ * Two guards on the follow, per E-CRIT1
+ * (docs/lms-credentials-acceptance-criteria.md, src/lib/canvas-remote-url.ts):
+ * every `next` link is verified same-origin with `ctx.baseUrl` before it is
+ * ever dialed - and the DIALED url is the guard's own return value, not the
+ * raw header candidate, because a relative Link header resolves against the
+ * base inside the guard and only that resolved string is safe to fetch. And
+ * the loop is capped at `CANVAS_PAGINATION_PAGE_CAP` pages so the remote host
+ * can never control how long this runs - unbounded pagination here today
+ * ends as a silent 60s function kill with no thrown error and no log row.
+ */
 export async function fetchAll<T>(
   startUrl: string,
   ctx: CourseContext
 ): Promise<T[]> {
   let next: string | null = startUrl;
   const all: T[] = [];
+  let pageCount = 0;
   while (next) {
+    pageCount += 1;
+    if (pageCount > CANVAS_PAGINATION_PAGE_CAP) {
+      throw new Error(
+        `Canvas pagination exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages while reading ${startUrl} - refusing to follow further "next" links.`
+      );
+    }
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${ctx.token}` },
     });
@@ -38,7 +58,8 @@ export async function fetchAll<T>(
     }
     const page = (await response.json()) as T[];
     all.push(...page);
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, ctx.baseUrl) : null;
   }
   return all;
 }

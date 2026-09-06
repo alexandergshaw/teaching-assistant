@@ -11,7 +11,7 @@ export async function listBulkItems(
   kind: BulkKind,
   code?: string
 ): Promise<BulkItem[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
 
   if (kind === "Page") {
@@ -200,7 +200,7 @@ export async function bulkUpdate(
   // per-write retry would burn the full backoff on every id and blow the 60s
   // function cap - reporting nothing instead of per-item failures. See
   // src/lib/canvas-throttle.ts.
-  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
+  const ctx = { ...(await resolveCourse(courseUrl, code)), throttleBudget: createThrottleBudget() };
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   let updated = 0;
   const failures: Array<{ id: string; error: string }> = [];
@@ -225,7 +225,7 @@ export async function bulkDelete(
   code?: string
 ): Promise<BulkResult> {
   // One shared budget for the whole delete loop - same reasoning as bulkUpdate.
-  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
+  const ctx = { ...(await resolveCourse(courseUrl, code)), throttleBudget: createThrottleBudget() };
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const path =
     kind === "Assignment"

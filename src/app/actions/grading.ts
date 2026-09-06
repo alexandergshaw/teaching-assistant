@@ -132,7 +132,7 @@ export async function listMissingSubmissionsAction(input: {
     await requireOwner();
 
     // Resolve institution/token from course URL
-    const { baseUrl, token, institution } = resolveInstitution(input.courseUrl);
+    const { baseUrl, token, institution } = await resolveInstitution(input.courseUrl);
 
     // Parse course ID from URL
     const courseId = parseCourseIdFromCanvasUrl(input.courseUrl);
@@ -239,7 +239,7 @@ export async function draftZerosForMissingAction(input: {
     const supabase = createServiceClient();
 
     // Resolve institution/token from course URL
-    const { baseUrl, token, institution } = resolveInstitution(input.courseUrl);
+    const { baseUrl, token, institution } = await resolveInstitution(input.courseUrl);
 
     // Parse course ID from URL
     const courseId = parseCourseIdFromCanvasUrl(input.courseUrl);

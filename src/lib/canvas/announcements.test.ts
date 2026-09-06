@@ -10,7 +10,26 @@
 // globalThis.fetch is stubbed directly rather than mocking canvas-core, so
 // the real resolveCourse/canvasError/textToHtml/htmlToText run - closer to
 // the real request shape these functions actually build.
+//
+// resolveCourse now delegates to resolveCanvasCredential
+// (src/lib/canvas-credentials.ts), which resolves the CALLING USER's own
+// identity via getEffectiveIdentity() before ever looking at env vars - see
+// docs/lms-credentials-acceptance-criteria.md E-ARCH6. Per that section's own
+// instruction to every wave touching one of the 22 existing Canvas test
+// files: mock the identity/credential-store boundary to `role: "owner"` with
+// no stored row, which keeps the ENV branch alive (vi.stubEnv below still
+// governs the resolved credential) and every assertion in this file testing
+// what it always tested.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn(),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn(),
+  recordLmsCredentialFailure: vi.fn(),
+}));
+
 import {
   listAnnouncements,
   createAnnouncement,
@@ -18,9 +37,19 @@ import {
   updateAnnouncementSchedule,
   getAnnouncementById,
   buildAnnouncementBodyHtml,
+  exportCourseCartridge,
 } from "./announcements";
 import { courseFileDownloadUrl } from "../canvas-url";
 import { buildAnnouncementImageAltText } from "../take-announcement";
+import { getEffectiveIdentity } from "../supabase/effective-identity";
+import { getLmsCredentialSecret, recordLmsCredentialFailure } from "../lms-credentials";
+import { CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
+
+const mockGetEffectiveIdentity = vi.mocked(getEffectiveIdentity);
+const mockGetLmsCredentialSecret = vi.mocked(getLmsCredentialSecret);
+const mockRecordLmsCredentialFailure = vi.mocked(recordLmsCredentialFailure);
+
+const OWNER_IDENTITY = { id: "owner-1", email: "owner@example.edu", role: "owner" as const, status: "active" as const };
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -42,11 +71,15 @@ describe("Canvas announcements transport", () => {
   beforeEach(() => {
     vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
     vi.stubGlobal("fetch", vi.fn());
+    mockGetEffectiveIdentity.mockResolvedValue(OWNER_IDENTITY);
+    mockGetLmsCredentialSecret.mockResolvedValue(null);
+    mockRecordLmsCredentialFailure.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
   describe("listAnnouncements", () => {
@@ -90,6 +123,46 @@ describe("Canvas announcements transport", () => {
         "https://canvas.mccneb.edu/api/v1/courses/123/discussion_topics?page=2"
       );
       expect(result.map((a) => a.id).sort()).toEqual([1, 2]);
+    });
+
+    it("refuses to follow a Link-header rel=next that points at a DIFFERENT host, and never sends the bearer token there (E-CRIT1 exfiltration case)", async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(
+        fakeResponse({
+          ok: true,
+          body: [{ id: 1, title: "Page one item" }],
+          linkHeader: '<https://collector.evil/steal>; rel="next"',
+        })
+      );
+
+      await expect(listAnnouncements(COURSE_URL, "MCC", { allPages: true })).rejects.toThrow(
+        /Refusing to follow a Canvas-supplied URL/
+      );
+
+      // Only the first, legitimate request happened - the hostile "next"
+      // link was never dialed at all, so the bearer token was never sent to
+      // collector.evil in any form (neither the retry-with-bearer shape nor
+      // any other).
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      for (const call of fetchMock.mock.calls) {
+        expect(String(call[0])).not.toContain("collector.evil");
+      }
+    });
+
+    it("stops after CANVAS_PAGINATION_PAGE_CAP pages rather than following an unbounded chain of same-origin next links (E-REL2)", async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockImplementation(async () =>
+        fakeResponse({
+          ok: true,
+          body: [{ id: 1, title: "Item" }],
+          linkHeader: '<https://canvas.mccneb.edu/api/v1/courses/123/discussion_topics?page=loop>; rel="next"',
+        })
+      );
+
+      await expect(listAnnouncements(COURSE_URL, "MCC", { allPages: true })).rejects.toThrow(
+        new RegExp(`exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages`)
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(CANVAS_PAGINATION_PAGE_CAP);
     });
 
     it("preserves the sort contract: scheduled items first by soonest delayedPostAt, then posted items by newest postedAt (entry 235 check 3)", async () => {
@@ -309,6 +382,130 @@ describe("Canvas announcements transport", () => {
 
       const result = await getAnnouncementById(COURSE_URL, 88, "MCC");
       expect(result).toMatchObject({ id: 88, title: "Week 3", delayedPostAt: "2026-01-19T08:00:00Z" });
+    });
+  });
+
+  describe("exportCourseCartridge - the fetch-then-retry-with-bearer primitive (E-CRIT1/SEC3)", () => {
+    it("downloads a same-origin export attachment, retrying with the bearer token only against the SAME resolved URL the unauthenticated attempt used", async () => {
+      const fetchMock = vi.mocked(fetch);
+      const attachmentUrl = "https://canvas.mccneb.edu/files/1/download";
+      fetchMock
+        .mockResolvedValueOnce(fakeResponse({ ok: true, body: { id: "exp-1" } }))
+        .mockResolvedValueOnce(
+          fakeResponse({
+            ok: true,
+            body: {
+              workflow_state: "exported",
+              attachment: { url: attachmentUrl, filename: "course.imscc" },
+            },
+          })
+        )
+        .mockResolvedValueOnce({ ok: false, status: 404 } as unknown as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => new TextEncoder().encode("cartridge-bytes").buffer,
+        } as unknown as Response);
+
+      const result = await exportCourseCartridge(COURSE_URL, "MCC");
+
+      expect(result.fileName).toBe("course.imscc");
+      expect(result.base64).toBe(Buffer.from("cartridge-bytes").toString("base64"));
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      // Both the unauthenticated first attempt and the authenticated retry
+      // dial the SAME resolved URL - the guard's return value, not a second,
+      // independently-computed string.
+      expect(String(fetchMock.mock.calls[2][0])).toBe(attachmentUrl);
+      expect(String(fetchMock.mock.calls[3][0])).toBe(attachmentUrl);
+      // The first attempt carried no Authorization header at all.
+      expect(fetchMock.mock.calls[2][1]).toBeUndefined();
+      const retryInit = fetchMock.mock.calls[3][1];
+      expect((retryInit?.headers as Record<string, string>).Authorization).toBe("Bearer test-token");
+    });
+
+    it("never sends the bearer token to a DIFFERENT host, even though the free download may go there (exfiltration case)", async () => {
+      // THE PROPERTY IS ABOUT THE TOKEN, NOT ABOUT THE ORIGIN.
+      //
+      // An earlier version of this guard required same-origin for BOTH
+      // fetches, which would have broken real Canvas: a content-export
+      // attachment is routinely served from a separate storage host. So the
+      // unauthenticated download is allowed to leave the Canvas origin (it
+      // carries no credential), and only the retry - the one that attaches
+      // the bearer - is origin-locked. A cross-host attachment that fails
+      // free therefore fails the whole operation instead of being retried
+      // with the token, which is the outcome worth having.
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(fakeResponse({ ok: true, body: { id: "exp-1" } }))
+        .mockResolvedValueOnce(
+          fakeResponse({
+            ok: true,
+            body: {
+              workflow_state: "exported",
+              attachment: { url: "https://collector.evil/steal", filename: "course.imscc" },
+            },
+          })
+        )
+        // The free download is attempted and fails, which is what would
+        // otherwise trigger the retry-with-bearer.
+        .mockResolvedValueOnce(fakeResponse({ ok: false, body: {} }));
+
+      await expect(exportCourseCartridge(COURSE_URL, "MCC")).rejects.toThrow(
+        /Refusing to follow a Canvas-supplied URL/
+      );
+
+      // The hostile host WAS dialled once, unauthenticated - and that call
+      // must carry no Authorization header. The retry never happened.
+      const hostileCalls = fetchMock.mock.calls.filter((call) =>
+        String(call[0]).includes("collector.evil")
+      );
+      expect(hostileCalls).toHaveLength(1);
+      for (const call of hostileCalls) {
+        const headers = (call[1]?.headers ?? {}) as Record<string, string>;
+        expect(
+          headers.Authorization,
+          "the bearer token was sent to a host outside the Canvas origin"
+        ).toBeUndefined();
+      }
+    });
+
+    it("downloads an export served from a SEPARATE storage host, which real Canvas does", async () => {
+      // The regression the split exists to prevent. Requiring same-origin on
+      // the free download would turn this legitimate case into a hard
+      // failure, and it is the common case for content exports.
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(fakeResponse({ ok: true, body: { id: "exp-1" } }))
+        .mockResolvedValueOnce(
+          fakeResponse({
+            ok: true,
+            body: {
+              workflow_state: "exported",
+              attachment: {
+                url: "https://instructure-uploads.s3.amazonaws.com/exports/course.imscc",
+                filename: "course.imscc",
+              },
+            },
+          })
+        )
+        // The download itself returns bytes, not JSON, so it needs a real
+        // arrayBuffer - fakeResponse only models the JSON endpoints.
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => new TextEncoder().encode("cartridge-bytes").buffer,
+          headers: { get: () => null },
+        } as unknown as Response);
+
+      const result = await exportCourseCartridge(COURSE_URL, "MCC");
+      expect(result.fileName).toBe("course.imscc");
+
+      const storageCalls = fetchMock.mock.calls.filter((call) =>
+        String(call[0]).includes("s3.amazonaws.com")
+      );
+      expect(storageCalls).toHaveLength(1);
+      const headers = (storageCalls[0][1]?.headers ?? {}) as Record<string, string>;
+      expect(headers.Authorization).toBeUndefined();
     });
   });
 });

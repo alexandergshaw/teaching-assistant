@@ -82,7 +82,7 @@ export async function createCartridgeMigration(
   opts: { selective: boolean; overwriteQuizzes: boolean },
   code?: string
 ): Promise<CartridgeMigrationResult> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
 
   const params = new URLSearchParams();
   // VERIFIED 2026-08-21 against the Canvas content_migrations API docs: this

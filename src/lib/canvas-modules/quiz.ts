@@ -32,7 +32,7 @@ export async function listQuizQuestions(
   quizId: number,
   code?: string
 ): Promise<QuizQuestion[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const raw = await fetchAll<RawQuizQuestion>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${quizId}/questions?per_page=100`,
     ctx
@@ -50,7 +50,7 @@ export async function createQuizQuestion(
   question: QuizQuestionInput,
   code?: string
 ): Promise<QuizQuestion> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const raw = await writeJson<RawQuizQuestion>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${quizId}/questions`,
     "POST",
@@ -68,7 +68,7 @@ export async function updateQuizQuestion(
   question: QuizQuestionInput,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   await writeJson(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${quizId}/questions/${questionId}`,
     "PUT",
@@ -84,7 +84,7 @@ export async function deleteQuizQuestion(
   questionId: number,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   await writeJson(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/quizzes/${quizId}/questions/${questionId}`,
     "DELETE",

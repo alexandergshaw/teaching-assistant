@@ -3,18 +3,11 @@ import { writeJson } from "./fetch-helpers";
 import type { SelectiveNode } from "./types";
 import type { RawMigration, RawSelective } from "./raw-types";
 
-/** Content types that can be selected when copying a course (copy[all_<key>]). */
-export const COURSE_COPY_TYPES: Array<{ key: string; label: string }> = [
-  { key: "context_modules", label: "Modules" },
-  { key: "assignments", label: "Assignments" },
-  { key: "quizzes", label: "Quizzes" },
-  { key: "discussion_topics", label: "Discussions" },
-  { key: "wiki_pages", label: "Pages" },
-  { key: "announcements", label: "Announcements" },
-  { key: "attachments", label: "Files" },
-  { key: "rubrics", label: "Rubrics" },
-  { key: "syllabus_body", label: "Syllabus" },
-];
+// Re-exported from a client-safe leaf. It lives there because this module
+// imports ../canvas-core, which is now genuinely server-only, and a Client
+// Component needs this list. See ./copy-types.ts for the full reasoning.
+// Server callers and the barrel are unaffected by the move.
+export { COURSE_COPY_TYPES } from "./copy-types";
 
 /**
  * Start a course-copy migration in `destCourseId`, pulling content from
@@ -29,7 +22,7 @@ export async function createCourseCopy(
   selective: boolean,
   code?: string
 ): Promise<{ migrationId: number; state: string }> {
-  const ctx = resolveCourse(contextCourseUrl, code);
+  const ctx = await resolveCourse(contextCourseUrl, code);
   const params = new URLSearchParams();
   params.append("migration_type", "course_copy_importer");
   params.append("settings[source_course_id]", sourceCourseId);
@@ -51,7 +44,7 @@ export async function getMigrationState(
   migrationId: number,
   code?: string
 ): Promise<string> {
-  const ctx = resolveCourse(contextCourseUrl, code);
+  const ctx = await resolveCourse(contextCourseUrl, code);
   const response = await fetch(
     `${ctx.baseUrl}/api/v1/courses/${destCourseId}/content_migrations/${migrationId}`,
     { headers: { Authorization: `Bearer ${ctx.token}` } }
@@ -78,7 +71,7 @@ export async function getSelectiveData(
   migrationId: number,
   code?: string
 ): Promise<SelectiveNode[]> {
-  const ctx = resolveCourse(contextCourseUrl, code);
+  const ctx = await resolveCourse(contextCourseUrl, code);
   const response = await fetch(
     `${ctx.baseUrl}/api/v1/courses/${destCourseId}/content_migrations/${migrationId}/selective_data`,
     { headers: { Authorization: `Bearer ${ctx.token}` } }
@@ -97,7 +90,7 @@ export async function submitSelectiveImport(
   code?: string
 ): Promise<void> {
   if (properties.length === 0) throw new Error("Select at least one item to copy.");
-  const ctx = resolveCourse(contextCourseUrl, code);
+  const ctx = await resolveCourse(contextCourseUrl, code);
   const params = new URLSearchParams();
   for (const p of properties) params.append(p, "1");
   await writeJson(
@@ -117,7 +110,7 @@ export async function selectCopyTypes(
   code?: string
 ): Promise<void> {
   if (types.length === 0) throw new Error("Choose at least one content type to copy.");
-  const ctx = resolveCourse(contextCourseUrl, code);
+  const ctx = await resolveCourse(contextCourseUrl, code);
   const params = new URLSearchParams();
   for (const t of types) params.append(`copy[all_${t}]`, "1");
   await writeJson(

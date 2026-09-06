@@ -998,3 +998,48 @@ revealed suffix by calling the REAL `maskToken` twice - once with an empty
 string to obtain pure filler, once with the candidate - and diffing, then
 verifies the result is a genuine suffix before trusting it. A change to the
 reveal threshold or the filler cannot desynchronise them.
+
+
+## Wave 4 scoping decision (2026-09-06)
+
+The architect pass put TWO changes in wave 4: adding `await` at the ~104
+resolver call sites, and routing all 73 bearer-carrying Canvas fetches through
+wave 1's `canvasFetch`. **These are split. Wave 4 is the await migration plus
+the same-origin guard; routing through `canvasFetch` is wave 4b.**
+
+The reason is diagnostic, not effort. `canvasFetch` is a different transport -
+`node:https` with DNS pinning, manual redirect handling, its own timeout and a
+response byte cap. Swapping 73 call sites onto it in the same wave that
+rewrites 104 others would make any regression ambiguous about which change
+caused it, across seven concurrent agents in one working tree.
+
+Nothing is left exposed by the split. E-CRIT1 requires the GUARD to land
+before the first credential is saved, and no credential can be saved until the
+settings surface exists in wave 5. The guard
+(`assertCanvasSuppliedUrlIsSameOrigin`) is applied in wave 4; the transport
+swap follows.
+
+**Wave 4 therefore delivers:** an `await` at every resolver call site; the
+same-origin guard plus a page cap at every `parseNextLink` follow and every
+attachment-URL re-fetch; the SEC10 self-id cache re-key; deletion of the
+duplicate hand-rolled guard in `migrations.ts`; and repair of the test
+assertions that pinned the three collapsed "not configured" messages.
+
+**One convention was stated identically in all seven briefs**, because 22 test
+files break the same way and five different fixes would be worse than the bug:
+mock the effective identity to `role: "owner"` so the env branch stays alive
+and each test keeps testing what it was written to test.
+
+**Verified in passing (wave 4 group 7):** importing `canvas-credentials.ts`
+into a test pulls in `effective-identity.ts` and `lms-credentials.ts` with no
+module-scope side effects - Supabase client construction in this codebase is
+lazy, inside functions, never at module top level. That is what makes the
+identity-mocking convention workable without a heavier harness.
+
+**Also corrected in wave 4 group 7:** a doc comment in
+`course-picker-availability.ts` said the live Canvas branch fails when the
+`<ACRONYM>_CANVAS_URL` / `_CANVAS_API_TOKEN` env vars are unset. That was the
+pre-wave-3 single cause. The same call now also fails for a signed-in
+non-owner with no stored credential, which has nothing to do with those
+variables. The pass-through of the underlying error is unchanged and remains
+deliberate - only the comment was wrong.

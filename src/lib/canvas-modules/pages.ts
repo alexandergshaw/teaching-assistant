@@ -25,7 +25,7 @@ export async function listPages(
   courseUrl: string,
   code?: string
 ): Promise<CanvasPageSummary[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const raw = await fetchAll<RawPage>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/pages?per_page=100&sort=title`,
     ctx
@@ -41,7 +41,7 @@ export async function getPage(
   pageUrl: string,
   code?: string
 ): Promise<CanvasPage> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const response = await fetch(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/pages/${encodeURIComponent(pageUrl)}`,
     { headers: { Authorization: `Bearer ${ctx.token}` } }
@@ -71,7 +71,7 @@ export async function updatePage(
   code?: string,
   opts?: { pageId?: number }
 ): Promise<CanvasPage> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   if (typeof fields.title === "string") params.append("wiki_page[title]", fields.title);
   if (typeof fields.body === "string") params.append("wiki_page[body]", fields.body);
@@ -93,7 +93,7 @@ export async function createPage(
   code?: string
 ): Promise<CanvasPage> {
   if (!fields.title.trim()) throw new Error("A page needs a title.");
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("wiki_page[title]", fields.title.trim());
   if (typeof fields.body === "string") params.append("wiki_page[body]", fields.body);
@@ -113,7 +113,7 @@ export async function deletePage(
   pageUrl: string,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   await writeJson<RawPage>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/pages/${encodeURIComponent(pageUrl)}`,
     "DELETE",
@@ -147,7 +147,7 @@ export async function createCodeFilePage(
   opts: { filePath: string; content: string; title: string; published?: boolean },
   code?: string
 ): Promise<{ page: CanvasPage; htmlUrl: string }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const page = await createPage(
     courseUrl,
     {

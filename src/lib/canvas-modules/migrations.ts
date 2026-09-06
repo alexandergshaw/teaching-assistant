@@ -16,14 +16,25 @@
  * may fetch a URL taken from that JSON without first checking its origin
  * matches the Canvas host this request was already authorized for - a
  * mismatch would mean sending this course's bearer token to an arbitrary
- * host named by whatever answered the content_migrations request. See
- * assertProgressUrlIsSameOrigin below; every fetch of a remote-supplied URL
- * in this file goes through it first.
+ * host named by whatever answered the content_migrations request. This was
+ * the one hand-rolled instance of that check in the codebase - see
+ * src/lib/canvas-remote-url.ts's own header for how it was generalized from
+ * here into `assertCanvasSuppliedUrlIsSameOrigin`, which this file now calls
+ * directly rather than keeping a second, locally-owned copy. Every fetch of a
+ * remote-supplied URL in this file goes through it first, and dials the
+ * value IT RETURNS (never the raw candidate - a relative candidate resolves
+ * against the base inside the guard, so only the returned string is safe).
  */
 
 import { canvasError, resolveCourse } from "../canvas-core";
+import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
 import { fetchAll, writeJson, type CourseContext } from "./fetch-helpers";
 import type { RawMigration } from "./raw-types";
+// Re-exported from a client-safe leaf. Both are pure, and a Client Component
+// (the diagnostics page) needs classifyMigration - but this module imports
+// ../canvas-core, which is now genuinely server-only and cannot be bundled
+// for a browser target. See ./migration-verdict.ts for the full reasoning.
+export { classifyMigration, type MigrationVerdict } from "./migration-verdict";
 
 /**
  * The content_migrations list/show response carries several fields
@@ -71,22 +82,6 @@ export interface MigrationProgress {
   message: string | null;
 }
 
-/** The outcome of classifying one migration+progress pair for display. */
-export interface MigrationVerdict {
-  kind:
-    | "stuck-no-file"
-    | "parked"
-    | "cancellable"
-    | "running"
-    | "done"
-    | "failed"
-    | "unknown";
-  /** The ONLY place any user-facing sentence about a migration's state is
-   * written. The UI renders this verbatim rather than re-wording it, so a
-   * wording change here is the whole fix - never patch a sentence in the UI. */
-  sentence: string;
-  cancellable: boolean;
-}
 
 function mapContentMigration(row: RawContentMigration): ContentMigrationRow {
   // row.id is already known numeric here - callers filter before mapping.
@@ -131,7 +126,7 @@ export async function listContentMigrations(
   courseUrl: string,
   code?: string
 ): Promise<ContentMigrationRow[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const rows = await fetchAll<RawContentMigration>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/content_migrations?per_page=100`,
     ctx
@@ -142,26 +137,13 @@ export async function listContentMigrations(
     .sort((a, b) => createdAtSortKey(b.createdAt) - createdAtSortKey(a.createdAt));
 }
 
-/**
- * Refuse to follow a remote-supplied URL that is not on the Canvas host this
- * request already resolved credentials for. Must run BEFORE any fetch of
- * that URL - never after, and never "log and continue".
- */
-function assertProgressUrlIsSameOrigin(progressUrl: string, ctx: CourseContext): void {
-  const progressOrigin = new URL(progressUrl).origin;
-  const canvasOrigin = new URL(ctx.baseUrl).origin;
-  if (progressOrigin !== canvasOrigin) {
-    throw new Error(
-      "Refusing to follow a progress URL that is not on this Canvas host."
-    );
-  }
-}
-
 /** Shared by getMigrationProgress and cancelMigrationJob so the SSRF guard
- * lives in exactly one place for every GET of a progress_url. */
+ * lives in exactly one place for every GET of a progress_url. Guarded with
+ * `assertCanvasSuppliedUrlIsSameOrigin` (src/lib/canvas-remote-url.ts) -
+ * fetches the value IT RETURNS, never the raw progressUrl parameter. */
 async function fetchProgress(progressUrl: string, ctx: CourseContext): Promise<MigrationProgress> {
-  assertProgressUrlIsSameOrigin(progressUrl, ctx);
-  const response = await fetch(progressUrl, {
+  const safeUrl = assertCanvasSuppliedUrlIsSameOrigin(progressUrl, ctx.baseUrl);
+  const response = await fetch(safeUrl, {
     headers: { Authorization: `Bearer ${ctx.token}` },
   });
   if (!response.ok) throw canvasError(response.status, ctx.institution);
@@ -177,7 +159,7 @@ export async function getMigrationProgress(
   progressUrl: string,
   code?: string
 ): Promise<MigrationProgress> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   return fetchProgress(progressUrl, ctx);
 }
 
@@ -195,7 +177,7 @@ export async function cancelMigrationJob(
   migrationId: number,
   code?: string
 ): Promise<{ progressState: string }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const response = await fetch(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/content_migrations/${migrationId}`,
     { headers: { Authorization: `Bearer ${ctx.token}` } }
@@ -218,9 +200,9 @@ export async function cancelMigrationJob(
     );
   }
 
-  assertProgressUrlIsSameOrigin(progressUrl, ctx);
+  const safeProgressUrl = assertCanvasSuppliedUrlIsSameOrigin(progressUrl, ctx.baseUrl);
   const result = await writeJson<RawProgress>(
-    `${progressUrl}/cancel`,
+    `${safeProgressUrl}/cancel`,
     "POST",
     ctx,
     new URLSearchParams({ message: "Cancelled from the diagnostics screen" })
@@ -228,80 +210,3 @@ export async function cancelMigrationJob(
   return { progressState: result.workflow_state ?? "" };
 }
 
-/**
- * Classify a migration+progress pair into exactly one verdict, PURE and
- * exhaustively unit-testable (no I/O, no imports beyond types already in
- * this file). Every user-facing sentence about a migration's state is
- * written here and ONLY here - see the MigrationVerdict.sentence doc comment.
- *
- * `progressState` is the Progress object's workflow_state, or null when
- * there is no progress object to read (no progress_url, or it was never
- * fetched). Order matters: the migration's own workflow_state is checked
- * first for the two states that mean "no job exists yet", then the
- * progress state for the states that mean an actual job is in flight, then
- * either state for the terminal outcomes, falling back to "unknown" rather
- * than inventing a diagnosis for any other combination.
- */
-export function classifyMigration(
-  workflowState: string,
-  progressState: string | null
-): MigrationVerdict {
-  if (workflowState === "pre_processing") {
-    return {
-      kind: "stuck-no-file",
-      sentence:
-        "The file for this migration never finished uploading to Canvas, so there is no job to cancel and no way to delete this row.",
-      cancellable: false,
-    };
-  }
-
-  if (workflowState === "waiting_for_select") {
-    return {
-      kind: "parked",
-      sentence:
-        "Nothing has been imported yet - Canvas is waiting for content types to be selected, and abandoning it imports nothing.",
-      cancellable: false,
-    };
-  }
-
-  if (progressState === "queued") {
-    return {
-      kind: "cancellable",
-      sentence: "This job is queued and has not started running yet. It can be cancelled.",
-      cancellable: true,
-    };
-  }
-
-  if (progressState === "running") {
-    return {
-      kind: "running",
-      sentence:
-        "This job is running now. Cancelling it may leave partially imported content in the course.",
-      cancellable: true,
-    };
-  }
-
-  if (progressState === "completed" || workflowState === "completed") {
-    return {
-      kind: "done",
-      sentence: "This migration finished successfully. There is nothing left to do.",
-      cancellable: false,
-    };
-  }
-
-  if (progressState === "failed" || workflowState === "failed") {
-    return {
-      kind: "failed",
-      sentence: "This migration's job failed. There is nothing left to cancel.",
-      cancellable: false,
-    };
-  }
-
-  return {
-    kind: "unknown",
-    sentence: `Canvas reports migration state "${workflowState}" and progress state "${
-      progressState ?? "none"
-    }", which does not match a known combination.`,
-    cancellable: false,
-  };
-}

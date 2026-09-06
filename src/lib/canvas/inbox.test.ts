@@ -13,8 +13,33 @@
 // IDENTICAL to today - a literal oracle of today's URL, pinned before AND
 // after the M15 widening (the "before" half is this file's very first test).
 
+//
+// E-ARCH6/E6: resolveInstitutionByCode/resolveDefaultInstitution now read a
+// per-user credential store before ever touching the env vars this file
+// stubs. Following this wave's one convention (grades.test.ts and this
+// file's siblings): mock getEffectiveIdentity to an "owner" identity and
+// getLmsCredentialSecret to "no stored row", so resolveCanvasCredential falls
+// through to the SAME owner-env branch these tests already exercise with
+// vi.stubEnv - byte-identical URLs, no second mocking convention invented.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { listConversations } from "./inbox";
+
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn().mockResolvedValue({
+    id: "test-owner",
+    email: "owner@example.edu",
+    role: "owner",
+    status: "active",
+  }),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
+  recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { listConversations, getConversation } from "./inbox";
+import { getEffectiveIdentity } from "../supabase/effective-identity";
+
+const mockGetEffectiveIdentity = vi.mocked(getEffectiveIdentity);
 
 function fakeResponse(opts: { ok: boolean; status?: number; body?: unknown; linkHeader?: string | null }): Response {
   return {
@@ -205,5 +230,90 @@ describe("listConversations", () => {
 
       await expect(listConversations(undefined, { courseId: "456" })).rejects.toThrow();
     });
+  });
+});
+
+// SEC10 (docs/lms-credentials-acceptance-criteria.md): selfIdCache used to be
+// keyed on baseUrl alone, so two different users' credentials against the
+// SAME Canvas host would share one cache entry - the second caller's thread
+// would render the FIRST caller's Canvas identity as "me". The fix keys the
+// cache on `${identity.id}:${baseUrl}` instead (see inbox.ts's own comment on
+// selfIdCache). This suite proves both directions: two different identities
+// never share an entry, and one identity's own entry still hits the cache
+// (this is a re-key, not a cache deletion).
+describe("getConversation - SEC10: the self-id cache cannot leak across credentials", () => {
+  beforeEach(() => {
+    vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  function identity(id: string) {
+    return { id, email: `${id}@example.edu`, role: "owner" as const, status: "active" as const };
+  }
+
+  function fetchImplFor(selfId: number) {
+    return async (url: string | URL | Request) => {
+      const s = String(url);
+      if (s.includes("/users/self")) {
+        return fakeResponse({ ok: true, body: { id: selfId } });
+      }
+      return fakeResponse({
+        ok: true,
+        body: { id: 1, subject: "Thread", participants: [], messages: [] },
+      });
+    };
+  }
+
+  it("two different identities against the SAME base URL each resolve their OWN self id - never a shared cache entry (the SABOTAGE direction)", async () => {
+    const fetchMock = vi.mocked(fetch);
+
+    mockGetEffectiveIdentity.mockResolvedValue(identity("user-a"));
+    fetchMock.mockImplementation(fetchImplFor(111));
+    const resultA = await getConversation(1);
+    expect(resultA.selfId).toBe(111);
+
+    // SABOTAGE-CHECK ANCHOR: with the pre-fix baseUrl-only key, this second
+    // identity would hit user-a's cached entry and never call /users/self
+    // again, so resultB.selfId would come back 111 instead of 222. Verified
+    // by temporarily re-keying on ctx.baseUrl alone and confirming this
+    // assertion fails with `expected 111 to be 222` - reverted after
+    // confirming the failure.
+    mockGetEffectiveIdentity.mockResolvedValue(identity("user-b"));
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(fetchImplFor(222));
+    const resultB = await getConversation(1);
+    expect(resultB.selfId).toBe(222);
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/users/self"))).toBe(true);
+  });
+
+  it("the SAME identity's self id is still served from cache on a second call (this is a re-key, not a cache deletion)", async () => {
+    const fetchMock = vi.mocked(fetch);
+
+    mockGetEffectiveIdentity.mockResolvedValue(identity("user-a"));
+    fetchMock.mockImplementation(fetchImplFor(111));
+    const first = await getConversation(1);
+    expect(first.selfId).toBe(111);
+
+    // Same identity, same base URL, second call: /users/self must NOT be
+    // fetched again - the cache still functions within one identity.
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(async (url: string | URL | Request) => {
+      const s = String(url);
+      if (s.includes("/users/self")) {
+        throw new Error("must not be called - user-a's self id should already be cached");
+      }
+      return fakeResponse({
+        ok: true,
+        body: { id: 1, subject: "Thread", participants: [], messages: [] },
+      });
+    });
+
+    const second = await getConversation(1);
+    expect(second.selfId).toBe(111);
   });
 });

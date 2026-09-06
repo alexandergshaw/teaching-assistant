@@ -101,7 +101,7 @@ export async function fetchCanvasMeta(
       "Could not read a discussion or assignment from that URL. Expected .../courses/123/discussion_topics/456 or .../courses/123/assignments/456."
     );
   }
-  return fetchCanvasMetaWith(resolveInstitution(url), parsed);
+  return fetchCanvasMetaWith(await resolveInstitution(url), parsed);
 }
 
 /**
@@ -175,7 +175,7 @@ export async function fetchAssignmentPointsPossible(url: string): Promise<number
   const parsed = parseCanvasUrl(url);
   if (!parsed) return null;
 
-  const { institution, token, baseUrl } = resolveInstitution(url);
+  const { institution, token, baseUrl } = await resolveInstitution(url);
 
   try {
     let assignmentId = parsed.kind === "assignment" ? parsed.id : "";
@@ -220,7 +220,7 @@ export async function getSpeedGraderUrl(url: string): Promise<string | null> {
 
   let ctx: { institution: CanvasInstitution; token: string; baseUrl: string };
   try {
-    ctx = resolveInstitution(url);
+    ctx = await resolveInstitution(url);
   } catch {
     return null;
   }

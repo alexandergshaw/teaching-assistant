@@ -57,7 +57,7 @@ export async function setDueDates(
 ): Promise<{ updated: number; failures: Array<{ contentId: number; error: string }> }> {
   // One shared throttle budget across every due-date write in this batch - see
   // src/lib/canvas-throttle.ts.
-  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
+  const ctx = { ...(await resolveCourse(courseUrl, code)), throttleBudget: createThrottleBudget() };
   let updated = 0;
   const failures: Array<{ contentId: number; error: string }> = [];
   for (const update of updates) {

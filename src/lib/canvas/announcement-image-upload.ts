@@ -58,7 +58,7 @@ export async function uploadAnnouncementImage(
   contentType: string,
   code?: string
 ): Promise<AnnouncementImageUploadResult> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const buffer = Buffer.from(base64, "base64");
 
   // Step 1: tell Canvas about the incoming file, get a pre-signed upload

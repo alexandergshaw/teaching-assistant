@@ -1,4 +1,5 @@
 import { canvasError, resolveCourse } from "../canvas-core";
+import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
 import {
   analyzeOfficeFile,
   extractOfficeImages,
@@ -55,7 +56,11 @@ async function fetchCanvasFile(
     throw new Error("This file is too large to edit here.");
   }
 
-  const fileResponse = await fetch(raw.url, { headers: { Authorization: `Bearer ${ctx.token}` } });
+  // SEC3/E-CRIT1: raw.url is a Canvas-supplied field, not something this app
+  // constructed - dial the guard's own return value, never the raw candidate
+  // (see src/lib/canvas-remote-url.ts's header for why the two can differ).
+  const fileDownloadUrl = assertCanvasSuppliedUrlIsSameOrigin(raw.url, ctx.baseUrl);
+  const fileResponse = await fetch(fileDownloadUrl, { headers: { Authorization: `Bearer ${ctx.token}` } });
   if (!fileResponse.ok) {
     throw canvasError(fileResponse.status, ctx.institution);
   }
@@ -124,7 +129,7 @@ export async function listScannableFiles(courseUrl: string, code?: string): Prom
 
 /** Fetch a course file's raw bytes (e.g. to scan a PDF). */
 export async function getCanvasFileBuffer(courseUrl: string, fileId: number, code?: string): Promise<Buffer> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { buffer } = await fetchCanvasFile(ctx, fileId);
   return buffer;
 }
@@ -135,7 +140,7 @@ export async function getPdfMeta(
   fileId: number,
   code?: string
 ): Promise<{ lang: string; title: string }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { buffer } = await fetchCanvasFile(ctx, fileId);
   return readPdfMeta(buffer);
 }
@@ -147,7 +152,7 @@ export async function savePdfFixes(
   fixes: { lang?: string; title?: string },
   code?: string
 ): Promise<Issue[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   const edited = await setPdfAccessibility(buffer, fixes);
   await overwriteCanvasFile({ ...ctx, courseId: ctx.courseId }, meta, edited);
@@ -156,7 +161,7 @@ export async function savePdfFixes(
 
 /** Read a file's images + current alt text (for the office alt remediation editor). */
 export async function getOfficeFileImages(courseUrl: string, fileId: number, code?: string): Promise<OfficeImage[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) return [];
   return extractOfficeImages(meta.kind, buffer);
@@ -168,7 +173,7 @@ export async function getOfficeFileImagesWithData(
   fileId: number,
   code?: string
 ): Promise<Array<OfficeImage & { mimeType?: string; base64?: string }>> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) return [];
   return extractOfficeImagesWithData(meta.kind, buffer);
@@ -180,7 +185,7 @@ export async function getOfficeFileScan(
   fileId: number,
   code?: string
 ): Promise<{ kind: OfficeKind; images: OfficeImage[]; hasHeadings: boolean; title: string } | null> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) return null;
   return { kind: meta.kind, ...(await analyzeOfficeFile(meta.kind, buffer)) };
@@ -193,7 +198,7 @@ export async function getOfficeFileImageData(
   imageId: string,
   code?: string
 ): Promise<{ mimeType: string; base64: string } | null> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) return null;
   return extractOfficeImageData(meta.kind, buffer, imageId);
@@ -214,7 +219,7 @@ export async function saveOfficeFileFixes(
   },
   code?: string
 ): Promise<{ kind: OfficeKind; images: OfficeImage[]; hasHeadings: boolean; title: string }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
   let edited = buffer;

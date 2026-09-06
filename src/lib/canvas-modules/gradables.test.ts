@@ -14,6 +14,31 @@
 //
 // No gradables.test.ts existed before this change (checked via Glob before
 // writing this file).
+//
+// resolveCourse now calls resolveCanvasCredential (src/lib/canvas-credentials.ts),
+// which asks getEffectiveIdentity() who the caller is and only falls back to
+// the env-configured pair below for an identity whose role is literally
+// "owner" (SEC13, docs/lms-credentials-acceptance-criteria.md). Stubbing
+// globalThis.fetch alone no longer keeps resolveCourse running for real: it
+// would hit getEffectiveIdentity's real cookie-session path and throw
+// "cookies was called outside a request scope" outside of Next's request
+// context. Mocked at the identity/credential-store boundary exactly like
+// canvas-credentials.test.ts mocks it, with role "owner" and no stored row,
+// so resolveCanvasCredential's real env-fallback logic still runs for real -
+// only the ambient-identity lookup and the credential store are faked.
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn().mockResolvedValue({
+    id: "owner-1",
+    email: "owner@example.edu",
+    role: "owner",
+    status: "active",
+  }),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
+  recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { updateGradable, descriptionToHtml } from "./gradables";
 

@@ -22,7 +22,7 @@ export async function fetchCanvasWork(
     );
   }
 
-  const { institution, token, baseUrl } = resolveInstitution(url);
+  const { institution, token, baseUrl } = await resolveInstitution(url);
 
   if (parsed.kind === "discussion") {
     const { students, dueAt } = await fetchDiscussion(baseUrl, token, institution, parsed.courseId, parsed.id);

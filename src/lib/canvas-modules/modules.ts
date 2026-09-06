@@ -13,7 +13,7 @@ export async function listModules(
   courseUrl: string,
   code?: string
 ): Promise<CanvasModule[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const rawModules = await fetchAll<RawModule>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/modules?per_page=100`,
     ctx
@@ -53,7 +53,7 @@ export async function createModule(
   code?: string
 ): Promise<CanvasModule> {
   if (!name.trim()) throw new Error("A module needs a name.");
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("module[name]", name.trim());
   if (typeof position === "number") params.append("module[position]", String(position));
@@ -83,7 +83,7 @@ export async function updateModule(
   fields: { name?: string; published?: boolean; position?: number },
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   if (typeof fields.name === "string") params.append("module[name]", fields.name.trim());
   if (typeof fields.published === "boolean") params.append("module[published]", String(fields.published));
@@ -103,7 +103,7 @@ export async function deleteModule(
   moduleId: number,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   await writeJson<RawModule>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/modules/${moduleId}`,
     "DELETE",

@@ -4,6 +4,7 @@
 
 import JSZip from "jszip";
 import { canvasError, htmlToText, parseNextLink, type CanvasInstitution } from "../canvas-core";
+import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 import type { CanvasStudentWork } from "./discussions";
 
 // Skip attachments larger than this to bound memory/latency.
@@ -45,13 +46,15 @@ export async function fetchAssignment(
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions?per_page=100&include[]=user`;
   const submissions: CanvasSubmission[] = [];
 
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
+    pagesFetched++;
     const page = (await response.json()) as CanvasSubmission[];
     submissions.push(...page);
     next = parseNextLink(response.headers.get("link"));
@@ -94,7 +97,13 @@ export async function fetchAssignment(
         continue;
       }
       try {
-        const fileRes = await fetch(attachment.url, {
+        // E-CRIT1: attachment.url is Canvas-supplied, so it is checked and
+        // then dialled by the guard's RETURNED string, never the raw
+        // candidate (see src/lib/canvas-remote-url.ts). A cross-origin or
+        // malformed attachment URL throws here and is caught below, skipping
+        // just that attachment rather than the whole fetch.
+        const safeAttachmentUrl = assertCanvasSuppliedUrlIsSameOrigin(attachment.url, baseUrl);
+        const fileRes = await fetch(safeAttachmentUrl, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!fileRes.ok) continue;

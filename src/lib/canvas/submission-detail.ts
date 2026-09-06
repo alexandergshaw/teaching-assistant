@@ -3,6 +3,7 @@
  */
 
 import { canvasError, htmlToText, resolveInstitutionByCode } from "../canvas-core";
+import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
 import type { CanvasStudentWork } from "./discussions";
 
 // Skip attachments larger than this to bound memory/latency.
@@ -73,7 +74,7 @@ export async function fetchSubmissionDetail(
   assignmentId: string,
   userId: number
 ): Promise<CanvasSubmissionDetail> {
-  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
 
   const assignmentResponse = await fetch(
     `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}`,
@@ -102,7 +103,13 @@ export async function fetchSubmissionDetail(
       continue;
     }
     try {
-      const fileRes = await fetch(attachment.url, {
+      // E-CRIT1: attachment.url is a Canvas-supplied field, not our own
+      // request's target - dial the guard's RETURNED string, never the raw
+      // candidate (see src/lib/canvas-remote-url.ts). A cross-origin or
+      // malformed attachment URL throws here and is caught below, skipping
+      // just that attachment rather than the whole submission.
+      const safeAttachmentUrl = assertCanvasSuppliedUrlIsSameOrigin(attachment.url, baseUrl);
+      const fileRes = await fetch(safeAttachmentUrl, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!fileRes.ok) continue;

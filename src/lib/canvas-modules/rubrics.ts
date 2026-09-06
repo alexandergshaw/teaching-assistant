@@ -1,6 +1,7 @@
 import { canvasError, parseNextLink, resolveCourse } from "../canvas-core";
 import { fetchAll, writeJson, type CourseContext } from "./fetch-helpers";
 import { createThrottleBudget } from "../canvas-throttle";
+import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 import type { CanvasRubric, RubricCriterionInput, RubricDetail } from "./types";
 import type { RawRubricCriterion } from "./raw-types";
 
@@ -119,7 +120,24 @@ async function listAccountRubrics(ctx: CourseContext): Promise<SourceOutcome> {
   }
   let next: string | null = `${ctx.baseUrl}/api/v1/accounts/${resolved.accountId}/rubrics?per_page=100`;
   const all: Array<{ id?: number; title?: string }> = [];
+  // E-CRIT1: this loop's own manual pagination (unlike the rest of this file,
+  // which reads through fetchAll's already-guarded pagination) - capped at
+  // CANVAS_PAGINATION_PAGE_CAP so a host that returns a self-pointing
+  // rel="next" cannot run this loop forever, and every candidate is checked
+  // same-origin against ctx.baseUrl before it is ever dialed (see
+  // src/lib/canvas-remote-url.ts). Both refusals are returned as a
+  // SourceOutcome failure rather than thrown, matching this function's own
+  // "never throws" contract (see listRubrics's doc comment).
+  let pageCount = 0;
   while (next) {
+    pageCount += 1;
+    if (pageCount > CANVAS_PAGINATION_PAGE_CAP) {
+      return {
+        ok: false,
+        rubrics: [],
+        error: `Canvas pagination exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages while loading account-level rubrics - refusing to follow further "next" links.`,
+      };
+    }
     let response: Response;
     try {
       response = await fetch(next, { headers: { Authorization: `Bearer ${ctx.token}` } });
@@ -158,7 +176,26 @@ async function listAccountRubrics(ctx: CourseContext): Promise<SourceOutcome> {
       };
     }
     all.push(...page);
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    if (!rawNext) {
+      next = null;
+    } else {
+      // Dial the guard's RETURN value, not rawNext itself: a relative Link
+      // header resolves against ctx.baseUrl INSIDE the guard, so the two can
+      // differ, and only the resolved string is verified safe to fetch.
+      try {
+        next = assertCanvasSuppliedUrlIsSameOrigin(rawNext, ctx.baseUrl);
+      } catch (err) {
+        return {
+          ok: false,
+          rubrics: [],
+          error:
+            err instanceof Error
+              ? err.message
+              : "Refused an unsafe Canvas pagination link while loading account-level rubrics.",
+        };
+      }
+    }
   }
   return { ok: true, rubrics: mapRawRubrics(all, "account") };
 }
@@ -177,7 +214,7 @@ export async function listRubrics(
   courseUrl: string,
   code?: string
 ): Promise<{ rubrics: CanvasRubric[]; error?: string }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const [course, account] = await Promise.all([listCourseRubrics(ctx), listAccountRubrics(ctx)]);
   const rubrics = [...course.rubrics, ...account.rubrics];
   const errors = [course, account].filter((r): r is Extract<SourceOutcome, { ok: false }> => !r.ok).map((r) => r.error);
@@ -205,7 +242,7 @@ function appendRubricFields(params: URLSearchParams, title: string, criteria: Ru
 
 /** Fetch one rubric with its criteria + rating tiers, for the editor. */
 export async function getRubric(courseUrl: string, rubricId: number, code?: string): Promise<RubricDetail> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const response = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubrics/${rubricId}`, {
     headers: { Authorization: `Bearer ${ctx.token}` },
   });
@@ -236,7 +273,7 @@ export async function updateRubric(
 ): Promise<void> {
   if (!input.title.trim()) throw new Error("A rubric needs a title.");
   if (input.criteria.length === 0) throw new Error("A rubric needs at least one criterion.");
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   appendRubricFields(params, input.title, input.criteria);
   await writeJson(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubrics/${rubricId}`, "PUT", ctx, params);
@@ -259,7 +296,7 @@ export async function createRubric(
 ): Promise<{ id: number; title: string }> {
   if (!input.title.trim()) throw new Error("A rubric needs a title.");
   if (input.criteria.length === 0) throw new Error("A rubric needs at least one criterion.");
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
 
   const params = new URLSearchParams();
   appendRubricFields(params, input.title, input.criteria);
@@ -291,7 +328,7 @@ export async function bulkAssociateRubric(
   // One shared throttle budget across every association in this loop - see
   // src/lib/canvas-throttle.ts for why an unbounded per-write retry would risk
   // the 60s function cap here under a sustained throttle.
-  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
+  const ctx = { ...(await resolveCourse(courseUrl, code)), throttleBudget: createThrottleBudget() };
   let updated = 0;
   const failures: Array<{ id: string; error: string }> = [];
   for (const id of assignmentIds) {

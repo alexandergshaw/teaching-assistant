@@ -12,12 +12,13 @@ import type { GradableKind, GradableDetail } from "./types";
 // have made that preview a lie about a live Canvas write while every gate
 // stayed green. plainTextToPageHtml now delegates to this export instead of
 // re-implementing it.
-export function descriptionToHtml(text: string): string {
-  if (text.trim() === "") return text;
-  if (/<\/?[a-z][\s\S]*>/i.test(text)) return text;
-  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return escaped.replace(/\r\n?/g, "\n").replace(/\n/g, "<br>\n");
-}
+// Moved to a client-safe leaf so a Client Component can reach it without
+// pulling this module's ../canvas-core import (and therefore the whole
+// server graph) into the browser bundle. Still ONE implementation - see
+// ./description-html.ts for both reasons. Imported (not just re-exported)
+// because updateGradable/createGradable below call it directly.
+import { descriptionToHtml } from "./description-html";
+export { descriptionToHtml };
 
 /** Fetch one assignment/quiz/discussion's title + description for editing. */
 export async function getGradable(
@@ -26,7 +27,7 @@ export async function getGradable(
   contentId: number,
   code?: string
 ): Promise<GradableDetail> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const url =
     kind === "Assignment"
@@ -70,7 +71,7 @@ export async function updateGradable(
   fields: { title?: string; description?: string; pointsPossible?: number; submissionType?: string },
   code?: string
 ): Promise<Record<string, unknown> | undefined> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const params = new URLSearchParams();
   const description = fields.description !== undefined ? descriptionToHtml(fields.description) : undefined;
@@ -118,7 +119,7 @@ export async function createGradable(
   fields: { title: string; description?: string; pointsPossible?: number; dueAt?: string | null; submissionType?: string },
   code?: string
 ): Promise<{ id: number }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const params = new URLSearchParams();
   const due = fields.dueAt ?? "";

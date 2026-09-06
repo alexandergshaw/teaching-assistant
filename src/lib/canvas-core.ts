@@ -6,19 +6,45 @@
  * (grading/communications in canvas.ts, course content in canvas-modules.ts)
  * resolves credentials and handles responses the same way.
  *
- * Server-only: reads instructor API tokens from the environment and never
- * exposes them to the client.
+ * CREDENTIAL RESOLUTION DELEGATES TO canvas-credentials.ts (Group E, wave 3;
+ * see docs/lms-credentials-acceptance-criteria.md E6, E7, E10, and
+ * docs/REGRESSION.md entry 402 for the measured baseline this replaced). The
+ * four resolvers below used to interpolate a CLIENT-SUPPLIED institution
+ * acronym directly into `process.env[`${CODE}_CANVAS_URL`]` /
+ * `process.env[`${CODE}_CANVAS_API_TOKEN`]` - so any signed-in caller could
+ * read the owner's environment back one bit at a time from which of three
+ * differently-worded "not configured" errors came back. They now call
+ * `resolveCanvasCredential(code)`, which resolves the CALLING USER's own
+ * stored credential first and falls back to the owner's env vars ONLY for an
+ * identity whose role is literally "owner" (SEC13) - see that module's own
+ * header for the full contract. DO NOT re-add a
+ * `process.env[`${code}_CANVAS_*`]` read here: that is precisely the
+ * vulnerability this file was rewritten to remove, and canvas-credentials.ts
+ * is now the ONLY module allowed to read those vars.
+ *
+ * Server-only: never exposes a token to the client.
  */
 
 import { parseCanvasCourseId } from "./canvas-url";
 import { describeInstitutionResolutionFailure } from "./institution-resolution";
+import { resolveCanvasCredential, CANVAS_CREDENTIAL_REQUIRED_MESSAGE } from "./canvas-credentials";
 
 /**
- * Registered Canvas institutions, keyed by hostname. The URL's host selects the
- * institution; its credentials come from per-institution env vars:
- *   <CODE>_CANVAS_API_TOKEN  (required) — instructor access token
- *   <CODE>_CANVAS_URL        (optional) — base URL override (defaults to https://<host>)
- * To add a school: add an entry here and set its env vars. No other code changes.
+ * Registered Canvas institutions, keyed by hostname. Purely a public
+ * host/code/name lookup table - it carries no credential, so it is safe to
+ * export. Used two ways:
+ *   - here, to turn a Canvas course/account URL into an institution CODE
+ *     before asking canvas-credentials.ts for that code's credential;
+ *   - by src/app/actions/course-hub-integrations.ts, which needs the same
+ *     table to discover which hardcoded institutions the owner has a token
+ *     env var set for, now that this file no longer exports a function that
+ *     does that lookup itself (listPreconfiguredInstitutionCodes was deleted
+ *     - see this change's own report for what replaced its one caller).
+ * canvas-credentials.ts keeps its own tiny local copy of the one entry it
+ * needs (HARDCODED_INSTITUTION_HOSTS) rather than importing this array - that
+ * module shipped in an earlier wave and is out of this wave's file set to
+ * edit, so the export below makes deduplication POSSIBLE for whoever next
+ * touches that file, without this wave performing the edit itself.
  */
 export interface CanvasInstitution {
   code: string;
@@ -26,7 +52,7 @@ export interface CanvasInstitution {
   host: string;
 }
 
-const CANVAS_INSTITUTIONS: CanvasInstitution[] = [
+export const CANVAS_INSTITUTIONS: CanvasInstitution[] = [
   { code: "MCC", name: "Metropolitan Community College", host: "canvas.mccneb.edu" },
 ];
 
@@ -39,29 +65,6 @@ function institutionForUrl(url: string): CanvasInstitution | null {
     return null;
   }
   return CANVAS_INSTITUTIONS.find((inst) => inst.host.toLowerCase() === host) ?? null;
-}
-
-function institutionBaseUrl(inst: CanvasInstitution): string {
-  return (process.env[`${inst.code}_CANVAS_URL`]?.trim() || `https://${inst.host}`).replace(/\/+$/, "");
-}
-
-function institutionToken(inst: CanvasInstitution): string | undefined {
-  // Trim so a trailing newline pasted into the env var doesn't produce an
-  // invalid "Authorization: Bearer …" header value.
-  return process.env[`${inst.code}_CANVAS_API_TOKEN`]?.trim() || undefined;
-}
-
-/**
- * Codes of the hardcoded CANVAS_INSTITUTIONS (which derive their base URL from a
- * built-in host, so they work with only a token set) that currently have an API
- * token configured. Unioned into "all institutions" discovery so a token-only
- * preconfigured school is not silently missed by env-var scanning that expects a
- * `<CODE>_CANVAS_URL`.
- */
-export function listPreconfiguredInstitutionCodes(): string[] {
-  return CANVAS_INSTITUTIONS.filter((inst) => institutionToken(inst)).map((inst) =>
-    inst.code.toUpperCase()
-  );
 }
 
 // Minimal HTML-to-text for Canvas message/body bodies (stored as HTML).
@@ -111,120 +114,112 @@ export function canvasError(status: number, inst: CanvasInstitution): Error {
   }
 }
 
-/** Resolve the institution + credentials for a URL, or throw a clear error. */
-export function resolveInstitution(url: string): {
+/**
+ * Resolve the institution + credentials for a URL, or throw the one
+ * indistinguishable failure (E6/E7). Before this wave, an unrecognized host
+ * threw "That Canvas host is not configured. Supported institutions: <list>."
+ * - naming every configured host outright, one of the three messages
+ * canvas-credentials.ts's own header documents as the enumeration oracle this
+ * change removes. An unrecognized host and a recognized-but-uncredentialed
+ * one must read identically to the caller.
+ */
+export async function resolveInstitution(url: string): Promise<{
   institution: CanvasInstitution;
   token: string;
   baseUrl: string;
-} {
+}> {
   const institution = institutionForUrl(url);
   if (!institution) {
-    const supported = CANVAS_INSTITUTIONS.map((inst) => inst.host).join(", ");
-    throw new Error(
-      `That Canvas host is not configured. Supported institutions: ${supported || "none"}.`
-    );
+    throw new Error(CANVAS_CREDENTIAL_REQUIRED_MESSAGE);
   }
-  const token = institutionToken(institution);
-  if (!token) {
-    throw new Error(
-      `Canvas API token is not configured for ${institution.name}. Set ${institution.code}_CANVAS_API_TOKEN in the environment.`
-    );
-  }
-  return { institution, token, baseUrl: institutionBaseUrl(institution) };
+  const credential = await resolveCanvasCredential(institution.code);
+  return { institution, token: credential.token, baseUrl: credential.baseUrl };
 }
 
 /**
  * Resolve credentials for institution-wide calls that have no course URL to key
- * off (e.g. the Inbox, which is account-wide). Picks the first registered
- * institution that has a token configured. With a single institution this is
- * unambiguous; if more are added, a chooser can select among them.
+ * off (e.g. the Inbox, which is account-wide). Tries each registered
+ * institution's code against resolveCanvasCredential, in the table's order,
+ * and returns the first that resolves for the CALLING user (their own stored
+ * row, or - only for an owner identity with none - the owner's env pair).
+ * With a single institution this is unambiguous; if more are added, a
+ * chooser can select among them.
  */
-export function resolveDefaultInstitution(): {
+export async function resolveDefaultInstitution(): Promise<{
   institution: CanvasInstitution;
   token: string;
   baseUrl: string;
-} {
+}> {
   for (const institution of CANVAS_INSTITUTIONS) {
-    const token = institutionToken(institution);
-    if (token) {
-      return { institution, token, baseUrl: institutionBaseUrl(institution) };
+    try {
+      const credential = await resolveCanvasCredential(institution.code);
+      return { institution, token: credential.token, baseUrl: credential.baseUrl };
+    } catch {
+      // Not configured/connected for this institution and this caller - try
+      // the next registered one rather than surfacing a per-institution
+      // reason (resolveCanvasCredential only ever throws the one
+      // indistinguishable failure, so there is nothing more specific to
+      // preserve here).
     }
   }
-  throw new Error(
-    "No Canvas API token is configured. Set <CODE>_CANVAS_API_TOKEN for a registered institution."
-  );
+  throw new Error(CANVAS_CREDENTIAL_REQUIRED_MESSAGE);
 }
 
 /**
  * Resolve Canvas credentials for an institution acronym (MCC, MPCC, ...) used by
- * the Live Feed, which has no course URL to key off. Everything is env-driven:
- *   <CODE>_CANVAS_URL        (required) — base URL, e.g. https://canvas.mccneb.edu
- *   <CODE>_CANVAS_API_TOKEN  (required) — instructor token
- * The host is derived from the base URL only for error/display purposes.
+ * the Live Feed, which has no course URL to key off. The host attached to the
+ * returned institution is derived from the resolved base URL only for
+ * error/display purposes.
  */
-export function resolveInstitutionByCode(code: string): {
+export async function resolveInstitutionByCode(code: string): Promise<{
   institution: CanvasInstitution;
   token: string;
   baseUrl: string;
-} {
+}> {
   const upper = code.trim().toUpperCase();
   if (!upper) {
     // Reached when a caller could not resolve an acronym through the shared
     // ladder (bound value -> course tile -> header -> single configured
     // institution) before getting here - see institution-resolution.ts. The
-    // header is only one rung of that ladder, never a precondition.
+    // header is only one rung of that ladder, never a precondition. This is
+    // a different failure from "not configured" and is not part of the
+    // enumeration oracle collapsed above - it never names an institution.
     throw new Error(describeInstitutionResolutionFailure());
   }
-  // Fall back to a hard-coded institution's host so a preconfigured school (e.g.
-  // MCC) keeps working with just its token, even without <CODE>_CANVAS_URL set.
-  const hardcoded = CANVAS_INSTITUTIONS.find((inst) => inst.code.toUpperCase() === upper);
-  // Trim env values: a trailing newline in the token makes the Authorization
-  // header invalid, and stray whitespace in the URL breaks request building.
-  const baseRaw =
-    process.env[`${upper}_CANVAS_URL`]?.trim() || (hardcoded ? `https://${hardcoded.host}` : undefined);
-  const token = process.env[`${upper}_CANVAS_API_TOKEN`]?.trim() || undefined;
-  if (!baseRaw) {
-    throw new Error(
-      `Canvas base URL is not configured for ${upper}. Set ${upper}_CANVAS_URL in the environment.`
-    );
-  }
-  if (!token) {
-    throw new Error(
-      `Canvas API token is not configured for ${upper}. Set ${upper}_CANVAS_API_TOKEN in the environment.`
-    );
-  }
+  const credential = await resolveCanvasCredential(upper);
   let host = "";
   try {
-    host = new URL(baseRaw).host.toLowerCase();
+    host = new URL(credential.baseUrl).host.toLowerCase();
   } catch {
     // Base URL is malformed; keep host blank — the fetch below will surface it.
   }
   return {
     institution: { code: upper, name: upper, host },
-    token,
-    baseUrl: baseRaw.replace(/\/+$/, ""),
+    token: credential.token,
+    baseUrl: credential.baseUrl,
   };
 }
 
 /** Resolve a course URL to its id + credentials, or throw a clear error. */
-export function resolveCourse(
+export async function resolveCourse(
   courseUrl: string,
   code?: string
-): {
+): Promise<{
   courseId: string;
   institution: CanvasInstitution;
   token: string;
   baseUrl: string;
-} {
+}> {
   const courseId = parseCanvasCourseId(courseUrl);
   if (!courseId) {
     throw new Error(
       "Could not read a course from that URL. Expected a link like .../courses/123."
     );
   }
-  // With an acronym, the base URL/token come from that school's env vars; without
-  // one, fall back to matching the URL host (the original single-school behavior).
-  const ctx = code ? resolveInstitutionByCode(code) : resolveInstitution(courseUrl);
+  // With an acronym, the credential comes from that institution's resolver;
+  // without one, fall back to matching the URL host (the original
+  // single-school behavior).
+  const ctx = code ? await resolveInstitutionByCode(code) : await resolveInstitution(courseUrl);
   return { courseId, ...ctx };
 }
 

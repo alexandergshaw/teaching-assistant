@@ -11,7 +11,29 @@
 // into a generic failure sentence. Several tests below exist only to pin that.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// canvas-core's resolvers now delegate to resolveCanvasCredential
+// (docs/lms-credentials-acceptance-criteria.md E-ARCH6), which reads the
+// caller's identity and any stored row before falling back to the owner's
+// env vars. Mocked at the same two-module boundary canvas-credentials.test.ts
+// already uses, with the identity fixed to role: "owner" and no stored row,
+// so the env-var-driven fetch stubbing below keeps exercising the exact path
+// these assertions were written against.
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn(),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn(),
+  recordLmsCredentialFailure: vi.fn(),
+}));
+
 import { createCartridgeMigration } from "./cartridge-migration";
+import { getEffectiveIdentity } from "../supabase/effective-identity";
+import { getLmsCredentialSecret, recordLmsCredentialFailure } from "../lms-credentials";
+
+const mockGetEffectiveIdentity = vi.mocked(getEffectiveIdentity);
+const mockGetLmsCredentialSecret = vi.mocked(getLmsCredentialSecret);
+const mockRecordLmsCredentialFailure = vi.mocked(recordLmsCredentialFailure);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 const BASE = "https://canvas.mccneb.edu";
@@ -34,11 +56,20 @@ function bodyParams(init: RequestInit | undefined): URLSearchParams {
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+  mockGetEffectiveIdentity.mockResolvedValue({
+    id: "owner-1",
+    email: "owner@example.edu",
+    role: "owner",
+    status: "active",
+  });
+  mockGetLmsCredentialSecret.mockResolvedValue(null);
+  mockRecordLmsCredentialFailure.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 describe("createCartridgeMigration (AC11) - request shape", () => {

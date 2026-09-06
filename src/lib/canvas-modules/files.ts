@@ -15,7 +15,7 @@ export async function requestFileUpload(
   file: { name: string; size: number; contentType?: string; folderPath?: string },
   code?: string
 ): Promise<FileUploadTicket> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("name", file.name);
   params.append("size", String(file.size));
@@ -46,7 +46,7 @@ export async function requestFileUpload(
 
 /** List every file in the course (paginated), newest first. */
 export async function listCourseFiles(courseUrl: string, code?: string): Promise<CourseFile[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const raw = await fetchAll<RawCourseFile>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files?per_page=100&sort=updated_at&order=desc`,
     ctx
@@ -73,7 +73,7 @@ export async function renameCourseFile(
   code?: string
 ): Promise<void> {
   if (!name.trim()) throw new Error("A file needs a name.");
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("name", name.trim());
   const response = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
@@ -88,7 +88,7 @@ export async function renameCourseFile(
 
 /** Delete a course file. */
 export async function deleteCourseFile(courseUrl: string, fileId: number, code?: string): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const response = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${ctx.token}` },
@@ -112,7 +112,7 @@ export async function uploadFileToModule(
   position?: number,
   code?: string
 ): Promise<CanvasModuleItem> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const buffer = Buffer.from(base64, "base64");
 
   const params = new URLSearchParams();

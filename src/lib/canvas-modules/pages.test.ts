@@ -12,6 +12,28 @@
 // No pages.test.ts existed before this change (checked via Glob before
 // writing this file).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// resolveCourse (via resolveInstitutionByCode) now delegates credential
+// resolution to canvas-credentials.ts, which resolves the calling identity
+// server-side before ever reading an env var (E-ARCH4). Mocking the identity
+// to role: "owner" (E-ARCH6's uniform convention across every one of this
+// repo's 22 Canvas test files) keeps the env-var branch this suite's
+// vi.stubEnv calls rely on reachable, without a real Supabase call - the
+// stored-credential branch is mocked to "no row" (null) so it falls through
+// to that owner env branch instead of attempting a real DB read.
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn().mockResolvedValue({
+    id: "owner-1",
+    email: "owner@example.edu",
+    role: "owner",
+    status: "active",
+  }),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
+  recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { updatePage, codeFileToPageHtml } from "./pages";
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";

@@ -4,6 +4,7 @@
 
 import { canvasError, parseNextLink, type CanvasInstitution } from "../canvas-core";
 import { isZeroableAssignment } from "../grade-zeros";
+import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 
 /** A non-submitter for an assignment (missing submission past due date). */
 export interface CanvasNonSubmitter {
@@ -111,8 +112,17 @@ export async function listAssignmentNonSubmitters(
   // Page the submissions
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions?per_page=100&include[]=user`;
   const submissions: CanvasSubmission[] = [];
+  let pageCount = 0;
 
   while (next) {
+    // E-REL2 - cap follows; see CANVAS_PAGINATION_PAGE_CAP's own doc comment
+    // for why an uncapped loop here would be a silent 60s function kill.
+    pageCount += 1;
+    if (pageCount > CANVAS_PAGINATION_PAGE_CAP) {
+      throw new Error(
+        `Canvas pagination exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages while reading submissions for assignment ${assignmentId} - refusing to follow further "next" links.`
+      );
+    }
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -121,7 +131,11 @@ export async function listAssignmentNonSubmitters(
     }
     const page = (await response.json()) as CanvasSubmission[];
     submissions.push(...page);
-    next = parseNextLink(response.headers.get("link"));
+    // E-CRIT1 - verified same-origin with baseUrl before being dialed, and
+    // the URL fetched next iteration is the guard's own RETURNED string, not
+    // the raw Link header candidate (see src/lib/canvas-remote-url.ts).
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   const nonSubmitters: CanvasNonSubmitter[] = [];
@@ -179,8 +193,17 @@ export async function listAssignmentBriefsWithDue(
 ): Promise<CanvasAssignmentWithDue[]> {
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments?per_page=100`;
   const assignments: CanvasAssignmentWithDue[] = [];
+  let pageCount = 0;
 
   while (next) {
+    // E-REL2 - cap follows; see CANVAS_PAGINATION_PAGE_CAP's own doc comment
+    // for why an uncapped loop here would be a silent 60s function kill.
+    pageCount += 1;
+    if (pageCount > CANVAS_PAGINATION_PAGE_CAP) {
+      throw new Error(
+        `Canvas pagination exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages while listing assignments for course ${courseId} - refusing to follow further "next" links.`
+      );
+    }
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -213,7 +236,11 @@ export async function listAssignmentBriefsWithDue(
       }
     }
 
-    next = parseNextLink(response.headers.get("link"));
+    // E-CRIT1 - verified same-origin with baseUrl before being dialed, and
+    // the URL fetched next iteration is the guard's own RETURNED string, not
+    // the raw Link header candidate (see src/lib/canvas-remote-url.ts).
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   return assignments;

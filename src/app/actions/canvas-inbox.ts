@@ -139,7 +139,7 @@ export async function listAssignmentDueDatesByUrlAction(
     // Resolve institution from URL, with fallback to acronym for relative URLs only
     let resolved;
     try {
-      resolved = resolveInstitution(courseUrl);
+      resolved = await resolveInstitution(courseUrl);
     } catch (e) {
       // Absolute URLs must resolve from their host; don't fall back to acronym
       if (isAbsolute) {
@@ -147,7 +147,7 @@ export async function listAssignmentDueDatesByUrlAction(
       }
       // Relative URLs can fall back to the provided acronym
       try {
-        resolved = resolveInstitutionByCode((fallbackAcronym ?? "").trim().toUpperCase());
+        resolved = await resolveInstitutionByCode((fallbackAcronym ?? "").trim().toUpperCase());
       } catch {
         return { error: "Could not match the course URL to a configured institution." };
       }
@@ -188,13 +188,13 @@ export async function listAssignmentBriefsByUrlAction(
 
     let resolved;
     try {
-      resolved = resolveInstitution(courseUrl);
+      resolved = await resolveInstitution(courseUrl);
     } catch (e) {
       if (isAbsolute) {
         return { error: e instanceof Error ? e.message : "Could not match the course URL to a configured institution." };
       }
       try {
-        resolved = resolveInstitutionByCode((fallbackAcronym ?? "").trim().toUpperCase());
+        resolved = await resolveInstitutionByCode((fallbackAcronym ?? "").trim().toUpperCase());
       } catch {
         return { error: "Could not match the course URL to a configured institution." };
       }

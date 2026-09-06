@@ -1,4 +1,5 @@
 import { canvasError, resolveCourse } from "../canvas-core";
+import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
 import {
   parseOfficeParagraphs,
   applyOfficeSections,
@@ -51,7 +52,11 @@ async function fetchCanvasFile(
     throw new Error("This file is too large to edit here.");
   }
 
-  const fileResponse = await fetch(raw.url, { headers: { Authorization: `Bearer ${ctx.token}` } });
+  // SEC3/E-CRIT1: raw.url is a Canvas-supplied field, not something this app
+  // constructed - dial the guard's own return value, never the raw candidate
+  // (see src/lib/canvas-remote-url.ts's header for why the two can differ).
+  const fileDownloadUrl = assertCanvasSuppliedUrlIsSameOrigin(raw.url, ctx.baseUrl);
+  const fileResponse = await fetch(fileDownloadUrl, { headers: { Authorization: `Bearer ${ctx.token}` } });
   if (!fileResponse.ok) {
     throw canvasError(fileResponse.status, ctx.institution);
   }
@@ -105,7 +110,7 @@ export async function getOfficeEditable(
   fileId: number,
   code?: string
 ): Promise<{ name: string; kind: OfficeKind; paragraphs: OfficeParagraph[] }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) {
     throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
@@ -121,7 +126,7 @@ export async function saveOfficeEdits(
   sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }>,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) {
     throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
@@ -138,7 +143,7 @@ export async function appendOfficeParagraph(
   style: string,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (meta.kind !== "docx") throw new Error("Sections can only be moved into a Word (.docx) file.");
   const edited = await appendDocxParagraph(buffer, spans, style);
@@ -151,7 +156,7 @@ export async function getOfficeFileStructure(
   fileId: number,
   code?: string
 ): Promise<{ name: string; title: string; paragraphs: OfficeParagraph[] } | null> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (meta.kind !== "docx") return null;
   const [paragraphs, title] = await Promise.all([parseOfficeParagraphs("docx", buffer), extractDocxTitle(buffer)]);
@@ -171,7 +176,7 @@ export async function saveOfficeFileStructure(
   sections: Array<{ sourceId: string; spans: RunSpan[]; style?: string }>,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (meta.kind !== "docx") throw new Error("Only Word (.docx) files have a document title and headings.");
   let edited = buffer;
@@ -187,7 +192,7 @@ export async function saveOfficeFileImageAlt(
   edits: Record<string, string>,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const { meta, buffer } = await fetchCanvasFile(ctx, fileId);
   if (!meta.kind) throw new Error("Only Word (.docx) and PowerPoint (.pptx) files can be edited here.");
   const edited = await setOfficeImageAlt(meta.kind, buffer, edits);

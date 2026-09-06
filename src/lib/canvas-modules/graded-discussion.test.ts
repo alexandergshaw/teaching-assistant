@@ -11,7 +11,30 @@
 //
 // canvas.mccneb.edu is the hardcoded host for the "MCC" institution code in
 // src/lib/canvas-core.ts.
+//
+// resolveCourse now calls resolveCanvasCredential (src/lib/canvas-credentials.ts),
+// which asks getEffectiveIdentity() who the caller is and only falls back to
+// the env-configured pair below for an identity whose role is literally
+// "owner" (SEC13, docs/lms-credentials-acceptance-criteria.md). Mocked at the
+// identity/credential-store boundary exactly like canvas-credentials.test.ts
+// mocks it, with role "owner" and no stored row, so resolveCanvasCredential's
+// real env-fallback logic still runs for real - only the ambient-identity
+// lookup and the credential store are faked.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn().mockResolvedValue({
+    id: "owner-1",
+    email: "owner@example.edu",
+    role: "owner",
+    status: "active",
+  }),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
+  recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { createGradedDiscussion, checkpointDate, type NewGradedDiscussion } from "./graded-discussion";
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";

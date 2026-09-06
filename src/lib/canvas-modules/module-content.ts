@@ -66,7 +66,7 @@ export async function fetchModuleContentForWeeks(
   if (weeks.length === 0) return out;
 
   try {
-    const ctx = resolveCourse(courseUrl, code);
+    const ctx = await resolveCourse(courseUrl, code);
     const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
 
     const rawModules = await fetchAll<RawModule>(`${base}/modules?per_page=100`, ctx);

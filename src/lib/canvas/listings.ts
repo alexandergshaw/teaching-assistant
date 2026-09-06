@@ -3,6 +3,7 @@
  */
 
 import { canvasError, parseNextLink, resolveInstitutionByCode, type CanvasInstitution } from "../canvas-core";
+import { CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 
 /** One assignment in a course, for the pull-back picker. */
 export interface CanvasAssignmentBrief {
@@ -67,11 +68,13 @@ async function fetchCoursesForQuery(
   const { institution, token, baseUrl } = ctx;
   let next: string | null = `${baseUrl}/api/v1/courses?${query}`;
   const courses: Array<{ id: string; name: string }> = [];
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
+    pagesFetched++;
     const page = (await response.json()) as CanvasCourseListItem[];
     for (const course of page) {
       if (typeof course.id === "number") {
@@ -112,7 +115,7 @@ async function listTeacherCoursesForPicker(
 
 /** List the courses the token user teaches, for the course pickers. */
 export async function listCourses(code: string): Promise<CanvasCourse[]> {
-  return listTeacherCoursesForPicker(resolveInstitutionByCode(code));
+  return listTeacherCoursesForPicker(await resolveInstitutionByCode(code));
 }
 
 /** List teacher courses with term information, optionally filtering by term name. */
@@ -128,7 +131,7 @@ export async function listCoursesByTerm(
     startAt: string | null;
   }>
 > {
-  const ctx = resolveInstitutionByCode(code);
+  const ctx = await resolveInstitutionByCode(code);
   const { institution, token, baseUrl } = ctx;
   let next: string | null = `${baseUrl}/api/v1/courses?enrollment_type=teacher&include[]=term&per_page=100`;
   const courses: Array<{
@@ -139,11 +142,13 @@ export async function listCoursesByTerm(
     startAt: string | null;
   }> = [];
 
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
+    pagesFetched++;
     const page = (await response.json()) as CanvasCourseWithTermListItem[];
     for (const course of page) {
       if (typeof course.id === "number") {
@@ -169,17 +174,19 @@ export async function listCoursesByTerm(
 
 /** List assignments in a course for the pull-back picker. */
 export async function listAssignments(code: string, courseId: string): Promise<CanvasAssignmentBrief[]> {
-  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments?per_page=100`;
   const assignments: CanvasAssignmentBrief[] = [];
 
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
+    pagesFetched++;
     const page = (await response.json()) as CanvasAssignmentListItemBrief[];
     for (const item of page) {
       if (typeof item.id === "number") {
@@ -199,17 +206,19 @@ export async function listAssignments(code: string, courseId: string): Promise<C
 
 /** List students enrolled in a course for the pull-back picker. */
 export async function listStudents(code: string, courseId: string): Promise<CanvasPerson[]> {
-  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/users?enrollment_type[]=student&per_page=100`;
   const students: CanvasPerson[] = [];
 
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
+    pagesFetched++;
     const page = (await response.json()) as CanvasUserListItem[];
     for (const user of page) {
       if (typeof user.id === "number") {
@@ -236,17 +245,19 @@ export interface CanvasRosterEntry {
 
 /** List a course's students with display name, sortable name, and login id. */
 export async function listCourseRoster(code: string, courseId: string): Promise<CanvasRosterEntry[]> {
-  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/users?enrollment_type[]=student&per_page=100`;
   const entries: CanvasRosterEntry[] = [];
 
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
+    pagesFetched++;
     const page = (await response.json()) as CanvasUserListItem[];
     for (const user of page) {
       if (typeof user.id === "number") {
@@ -270,17 +281,19 @@ export async function listStudentGradeSummaries(
   code: string,
   courseId: string
 ): Promise<Array<{ userId: string; name: string; currentScore: number | null; finalScore: number | null }>> {
-  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/enrollments?type[]=StudentEnrollment&state[]=active&per_page=100`;
   const summaries: Array<{ userId: string; name: string; currentScore: number | null; finalScore: number | null }> = [];
 
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
+    pagesFetched++;
     const page = (await response.json()) as Array<{
       user_id?: number;
       user?: { name?: string; sortable_name?: string };
@@ -323,17 +336,19 @@ export async function listAssignmentTextSubmissions(
   courseId: string,
   assignmentId: string
 ): Promise<CanvasTextSubmission[]> {
-  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions?per_page=100&include[]=user`;
   const submissions: CanvasSubmission[] = [];
 
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
+    pagesFetched++;
     const page = (await response.json()) as CanvasSubmission[];
     submissions.push(...page);
     next = parseNextLink(response.headers.get("link"));
@@ -368,7 +383,7 @@ export async function listCourseAssignmentDueDates(
   code: string,
   courseId: string
 ): Promise<Array<{ assignmentId: string; name: string; dueAt: string | null }>> {
-  const { baseUrl, token, institution } = resolveInstitutionByCode(code);
+  const { baseUrl, token, institution } = await resolveInstitutionByCode(code);
   const { listAssignmentBriefsWithDue } = await import("./auto-zero");
   const briefs = await listAssignmentBriefsWithDue(baseUrl, token, institution, courseId);
   return briefs

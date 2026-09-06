@@ -31,7 +31,7 @@ function htmlItem(
  * skipped. Best-effort per type — one failing type doesn't blank the others.
  */
 export async function listAccessibilityContent(courseUrl: string, code?: string): Promise<ScannableItem[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
 
   const [pageSummaries, assignments, quizzes, topics, course] = await Promise.all([
@@ -81,7 +81,7 @@ export async function listAccessibilityContent(courseUrl: string, code?: string)
  * whole-course scan can be done in small batches instead of one heavy request.
  */
 export async function listAccessibilityItems(courseUrl: string, code?: string): Promise<AccessibilityItemRef[]> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
 
   const [pageSummaries, assignments, quizzes, topics, course] = await Promise.all([
@@ -116,7 +116,7 @@ export async function getAccessibilityItem(
   id: string,
   code?: string
 ): Promise<ScannableItem | null> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   if (type === "page") {
     try {
@@ -156,7 +156,7 @@ function parseLinkRef(type: string, contentUrl: string): { itemType: AccessibleI
 
 /** Get the status + results of the course's last link-validation run. */
 export async function getLinkValidation(courseUrl: string, code?: string): Promise<{ state: string; links: BrokenLink[] }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const res = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/link_validation`, {
     headers: { Authorization: `Bearer ${ctx.token}` },
   });
@@ -181,7 +181,7 @@ export async function getLinkValidation(courseUrl: string, code?: string): Promi
 
 /** Kick off a fresh course link-validation run. */
 export async function startLinkValidation(courseUrl: string, code?: string): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const res = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/link_validation`, {
     method: "POST",
     headers: { Authorization: `Bearer ${ctx.token}` },
@@ -197,7 +197,7 @@ export async function saveAccessibilityItemHtml(
   html: string,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const params = new URLSearchParams();
   if (type === "page") {

@@ -7,7 +7,33 @@
 //
 // The AC2/AC3 SSRF guard is the point of several tests here: progress_url is
 // remote-supplied JSON, and a foreign-origin value must be refused BEFORE
-// any fetch is issued - not caught after the fact by a failed request.
+// any fetch is issued - not caught after the fact by a failed request. The
+// guard itself is now the shared `assertCanvasSuppliedUrlIsSameOrigin`
+// (src/lib/canvas-remote-url.ts), promoted out of this file's own
+// hand-rolled `assertProgressUrlIsSameOrigin` - see this change's own report
+// for the semantics comparison. The refusal message text below matches that
+// shared module's `refuse()` wording, not the retired local wording.
+//
+// resolveCourse now calls resolveCanvasCredential (src/lib/canvas-credentials.ts),
+// which asks getEffectiveIdentity() who the caller is and only falls back to
+// the env-configured pair below for an identity whose role is literally
+// "owner" (SEC13, docs/lms-credentials-acceptance-criteria.md). Mocked at the
+// identity/credential-store boundary exactly like canvas-credentials.test.ts
+// mocks it, with role "owner" and no stored row, so resolveCanvasCredential's
+// real env-fallback logic still runs for real - only the ambient-identity
+// lookup and the credential store are faked.
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn().mockResolvedValue({
+    id: "owner-1",
+    email: "owner@example.edu",
+    role: "owner",
+    status: "active",
+  }),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
+  recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -200,7 +226,9 @@ describe("getMigrationProgress (AC2) - SSRF guard", () => {
 
     await expect(
       getMigrationProgress(COURSE_URL, "https://evil.example.com/api/v1/progress/501")
-    ).rejects.toThrow("Refusing to follow a progress URL that is not on this Canvas host.");
+    ).rejects.toThrow(
+      'Refusing to follow a Canvas-supplied URL: expected it to be on https://canvas.mccneb.edu, but it resolved to a different origin (https://evil.example.com). Received "https://evil.example.com/api/v1/progress/501".'
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -210,7 +238,9 @@ describe("getMigrationProgress (AC2) - SSRF guard", () => {
 
     await expect(
       getMigrationProgress(COURSE_URL, "https://canvas.mccneb.edu:8443/api/v1/progress/501")
-    ).rejects.toThrow("Refusing to follow a progress URL that is not on this Canvas host.");
+    ).rejects.toThrow(
+      'Refusing to follow a Canvas-supplied URL: expected it to be on https://canvas.mccneb.edu, but it resolved to a different origin (https://canvas.mccneb.edu:8443). Received "https://canvas.mccneb.edu:8443/api/v1/progress/501".'
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -269,7 +299,7 @@ describe("cancelMigrationJob (AC3)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(cancelMigrationJob(COURSE_URL, 1)).rejects.toThrow(
-      "Refusing to follow a progress URL that is not on this Canvas host."
+      'Refusing to follow a Canvas-supplied URL: expected it to be on https://canvas.mccneb.edu, but it resolved to a different origin (https://evil.example.com). Received "https://evil.example.com/api/v1/progress/501".'
     );
     // Only the trusted GET of the migration itself - never a fetch to the
     // foreign host, for the state check OR the cancel POST.

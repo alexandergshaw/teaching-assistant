@@ -16,7 +16,11 @@ import {
   submitSelectiveImportAction,
 } from "../../actions";
 import type { BulkItem, BulkKind, SelectiveNode } from "@/lib/canvas-modules";
-import { COURSE_COPY_TYPES } from "@/lib/canvas-modules";
+// Imported from the client-safe leaf DIRECTLY, never through the
+// @/lib/canvas-modules barrel: the barrel re-exports copy.ts, which imports
+// canvas-core and so drags the whole server graph (next/headers,
+// node:async_hooks) into this browser chunk. That broke next build.
+import { COURSE_COPY_TYPES } from "@/lib/canvas-modules/copy-types";
 import { Button, Checkbox, FormControlLabel, IconButton, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import { ModalShell } from "../ui/ModalShell";

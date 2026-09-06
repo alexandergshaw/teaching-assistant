@@ -69,7 +69,10 @@
 // existing tests and any other caller; it is not a second source of truth.
 
 import { classifyCommandProposalRows, type CommandProposalContext, type CommandProposalField, type CommandProposalRow } from "./command-proposal";
-import { descriptionToHtml } from "./canvas-modules/gradables";
+// From the client-safe leaf, NOT gradables.ts: this module is reachable from
+// a Client Component (useCommandInterface -> ModulesView), and gradables.ts
+// imports canvas-core, which is now genuinely server-only.
+import { descriptionToHtml } from "./canvas-modules/description-html";
 import { commandWriteRouteForItem, type CommandWriteRoute } from "./command-write-support";
 
 // ---------------------------------------------------------------------------

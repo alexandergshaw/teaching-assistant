@@ -307,7 +307,7 @@ export async function createGradedDiscussion(
   // meaning; CanvasGraphqlContext and CourseContext both accept the same
   // optional `throttleBudget` field, so the one object built here satisfies
   // both canvasGraphql and writeJson (via createClassicDiscussion) below.
-  const ctx = { ...resolveCourse(courseUrl, code), throttleBudget: createThrottleBudget() };
+  const ctx = { ...(await resolveCourse(courseUrl, code)), throttleBudget: createThrottleBudget() };
 
   // H1: checkpoints are explicit opt-in. A failed checkpoints attempt leaves
   // an orphaned Canvas assignment behind (see header comment), so this

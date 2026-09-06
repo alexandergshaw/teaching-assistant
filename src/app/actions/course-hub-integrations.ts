@@ -1,9 +1,10 @@
 "use server";
 
 import { getCourseNotifications } from "@/lib/canvas";
-import { listPreconfiguredInstitutionCodes } from "@/lib/canvas-core";
+import { CANVAS_INSTITUTIONS } from "@/lib/canvas-core";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
+import { listLmsCredentials } from "@/lib/lms-credentials";
 import { getCredentials, deleteCredentials } from "@/lib/google-credentials";
 import { loadInstitutionFields, saveInstitutionFields, listAllInstitutionFields, type InstitutionField } from "@/lib/institution-fields";
 
@@ -143,6 +144,20 @@ export async function listInstitutionFeedUrlsAction(acronym: string): Promise<
  * Report, per institution acronym, whether its Canvas and grading-service env
  * vars are configured — so the Live Feed table can flag missing setup without
  * exposing any secret values.
+ *
+ * DAT2 (docs/lms-credentials-acceptance-criteria.md) - requireOwner() is a
+ * deprecated alias for requireUser() ("any active account" - see auth.ts's
+ * own comment on it), so this action is already reachable by every signed-in
+ * member, not only the owner. Before Group E's per-user credentials, an
+ * unconditional env read here made this a probe oracle: any member could
+ * submit acronyms and read the owner's environment back one bit at a time.
+ * Fixed in the BODY, not the guard - swapping requireOwner() for
+ * getEffectiveIdentity() to "simplify" this would stop enforcing BLOCK2 for
+ * this action specifically (see effective-identity.ts's own header), which
+ * is a bigger, separately-reviewed change this wave does not make (E-ARCH8).
+ * Only an identity whose role is LITERALLY "owner" ever sees the env-derived
+ * status; everyone else sees only whether THEY have their own stored Canvas
+ * credential for that institution (src/lib/lms-credentials.ts).
  */
 export async function checkInstitutionsAction(
   acronyms: string[]
@@ -151,14 +166,19 @@ export async function checkInstitutionsAction(
   | { error: string }
 > {
   try {
-    await requireOwner();
+    const identity = await requireOwner();
+    const isOwner = identity.role === "owner";
+    const ownInstitutions = new Set(
+      (await listLmsCredentials(identity.id)).map((cred) => cred.institution)
+    );
     const statuses = acronyms.map((raw) => {
       const code = raw.trim().toUpperCase();
+      const envCanvasConfigured =
+        isOwner && !!process.env[`${code}_CANVAS_URL`] && !!process.env[`${code}_CANVAS_API_TOKEN`];
       return {
         acronym: code,
-        canvasConfigured:
-          !!process.env[`${code}_CANVAS_URL`] && !!process.env[`${code}_CANVAS_API_TOKEN`],
-        llmConfigured: !!process.env[`${code}_LLM_URL`] && !!process.env[`${code}_LLM_API`],
+        canvasConfigured: ownInstitutions.has(code) || envCanvasConfigured,
+        llmConfigured: isOwner && !!process.env[`${code}_LLM_URL`] && !!process.env[`${code}_LLM_API`],
       };
     });
     return { statuses };
@@ -168,31 +188,50 @@ export async function checkInstitutionsAction(
 }
 
 /**
- * Every institution the server actually has Canvas credentials for, derived
- * from the `<ACRONYM>_CANVAS_URL` / `<ACRONYM>_CANVAS_API_TOKEN` env vars. This
- * is the ONLY institution list available server-side (the acronym registry
- * otherwise lives in client localStorage), so it is what "all institutions"
- * options resolve to for unattended runs and event triggers.
+ * Every institution the calling identity actually has Canvas access to. This
+ * is what "all institutions" options resolve to for unattended runs and
+ * event triggers (8 non-test consumers - docs/REGRESSION.md entry 402h).
+ *
+ * DAT2's repoint, replacing the unconditional `<ACRONYM>_CANVAS_URL` /
+ * `<ACRONYM>_CANVAS_API_TOKEN` env scan every signed-in member used to be
+ * able to trigger (see checkInstitutionsAction's comment above for why
+ * requireOwner() alone does not gate this): an identity whose role is
+ * literally "owner" sees the union of env-configured acronyms - including
+ * any hardcoded institution (CANVAS_INSTITUTIONS in canvas-core.ts) that
+ * derives its host and so works with just a token env var, which is why this
+ * is the one place outside canvas-credentials.ts still allowed to read a
+ * `<CODE>_CANVAS_*` env var by name - AND their own stored rows; everyone
+ * else sees ONLY their own stored rows (src/lib/lms-credentials.ts). A member
+ * with no stored credential yet gets an empty list rather than the owner's
+ * configured institutions.
  */
 export async function listConfiguredInstitutionsAction(): Promise<
   { acronyms: string[] } | { error: string }
 > {
   try {
-    await requireOwner();
+    const identity = await requireOwner();
     const acronyms = new Set<string>();
-    for (const key of Object.keys(process.env)) {
-      const m = /^([A-Z][A-Z0-9]*)_CANVAS_URL$/.exec(key);
-      if (!m) continue;
-      const code = m[1];
-      if (process.env[key] && process.env[`${code}_CANVAS_API_TOKEN`]) {
-        acronyms.add(code);
+    if (identity.role === "owner") {
+      for (const key of Object.keys(process.env)) {
+        const m = /^([A-Z][A-Z0-9]*)_CANVAS_URL$/.exec(key);
+        if (!m) continue;
+        const code = m[1];
+        if (process.env[key] && process.env[`${code}_CANVAS_API_TOKEN`]) {
+          acronyms.add(code);
+        }
+      }
+      // Hardcoded institutions derive their host and so work with only a
+      // token set (no `<CODE>_CANVAS_URL`); env-name scanning alone would
+      // miss them, making "all institutions" narrower than what actually
+      // works for the owner.
+      for (const inst of CANVAS_INSTITUTIONS) {
+        if (process.env[`${inst.code}_CANVAS_API_TOKEN`]) {
+          acronyms.add(inst.code.toUpperCase());
+        }
       }
     }
-    // Also include hardcoded institutions that derive their host and so work
-    // with only a token set (no `<CODE>_CANVAS_URL`); env scanning alone would
-    // miss them, making "all institutions" narrower than what actually works.
-    for (const code of listPreconfiguredInstitutionCodes()) {
-      acronyms.add(code);
+    for (const cred of await listLmsCredentials(identity.id)) {
+      acronyms.add(cred.institution);
     }
     return { acronyms: [...acronyms].sort() };
   } catch (err) {

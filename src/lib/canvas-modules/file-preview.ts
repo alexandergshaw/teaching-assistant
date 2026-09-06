@@ -1,4 +1,5 @@
 import { canvasError, resolveCourse } from "../canvas-core";
+import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
 import { extractTextFromBuffer } from "../office-extract";
 import type { FilePreview } from "./types";
 
@@ -11,7 +12,7 @@ export async function getFilePreview(
   fileId: number,
   code?: string
 ): Promise<FilePreview> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const metaResponse = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
     headers: { Authorization: `Bearer ${ctx.token}` },
   });
@@ -35,7 +36,15 @@ export async function getFilePreview(
     return { name, mimeType, base64: "", text: "This file is too large to preview here. Open it in Canvas.", truncated: false };
   }
 
-  const fileResponse = await fetch(meta.url, { headers: { Authorization: `Bearer ${ctx.token}` } });
+  // SEC3 (docs/lms-credentials-acceptance-criteria.md) - meta.url is a
+  // Canvas-supplied field (this course's own /files/:id response), and the
+  // bearer token is about to be attached to a fetch of it. Verified same
+  // origin as ctx.baseUrl BEFORE that fetch is issued, and the URL actually
+  // dialed is the guard's own return value, never the raw candidate (a
+  // relative candidate resolves against the base inside the guard, so only
+  // the returned string is safe - see src/lib/canvas-remote-url.ts).
+  const fileUrl = assertCanvasSuppliedUrlIsSameOrigin(meta.url, ctx.baseUrl);
+  const fileResponse = await fetch(fileUrl, { headers: { Authorization: `Bearer ${ctx.token}` } });
   if (!fileResponse.ok) {
     throw canvasError(fileResponse.status, ctx.institution);
   }

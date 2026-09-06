@@ -14,7 +14,7 @@ export async function listAddableContent(
   courseUrl: string,
   code?: string
 ): Promise<CanvasAddableContent> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const [assignments, quizzes, discussions, files] = await Promise.all([
     safeFetchAll<RawAssignment>(`${base}/assignments?per_page=100`, ctx),
@@ -40,7 +40,7 @@ export async function listAddableContent(
 
 /** The course's assignment groups (for the editor's group picker). */
 export async function listAssignmentGroups(courseUrl: string, code?: string): Promise<Array<{ id: number; name: string }>> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const raw = await safeFetchAll<{ id?: number; name?: string }>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/assignment_groups?per_page=100`,
     ctx

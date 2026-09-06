@@ -69,9 +69,10 @@ export function describeLiveSelectionNeedsInstitution(): string {
  * live Canvas content the instructor actually selected - docs/REGRESSION.md
  * entry 296's follow-up bug: an institution acronym being registered (e.g.
  * WNCC) does not mean that school has a working live Canvas connection, only
- * that `resolveInstitutionByCode` can attempt one. When it can't (no
- * `<ACRONYM>_CANVAS_URL` / `_CANVAS_API_TOKEN` set), `ContentTab`'s live
- * branch recovers by reading the SAME course's newest instructor-provided
+ * that `resolveInstitutionByCode` can attempt one. When it can't (no usable
+ * Canvas credential for that institution and this caller - see
+ * CANVAS_CREDENTIAL_REQUIRED_MESSAGE in canvas-credentials.ts), `ContentTab`'s
+ * live branch recovers by reading the SAME course's newest instructor-provided
  * export instead of dead-ending on the raw thrown error - see
  * `tryExportFallbackForFailedLiveRead` in ContentTab.tsx. `liveError` is that
  * raw underlying message, carried through verbatim rather than swallowed, so

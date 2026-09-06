@@ -9,7 +9,7 @@ export async function createAssignment(
   code?: string
 ): Promise<{ id: number; name: string; htmlUrl: string }> {
   if (!a.name.trim()) throw new Error("An assignment needs a name.");
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("assignment[name]", a.name.trim());
   if (a.description.trim()) params.append("assignment[description]", textToHtml(a.description.trim()));

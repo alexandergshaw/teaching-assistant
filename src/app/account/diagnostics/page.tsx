@@ -10,7 +10,12 @@ import {
   listMigrationProgressAction,
   cancelMigrationJobAction,
 } from "../../actions";
-import { classifyMigration, type ContentMigrationRow, type MigrationProgress } from "@/lib/canvas-modules";
+// The VALUE comes from the client-safe leaf directly; the types still come
+// from the barrel, because type-only imports erase at compile time and
+// carry no module graph. Mixing them on one line is what put this Client
+// Component's bundle on a path to next/headers and node:async_hooks.
+import { classifyMigration } from "@/lib/canvas-modules/migration-verdict";
+import type { ContentMigrationRow, MigrationProgress } from "@/lib/canvas-modules";
 import styles from "../security/security.module.css";
 
 /**

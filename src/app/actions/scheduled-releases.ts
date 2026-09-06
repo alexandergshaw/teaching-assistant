@@ -144,7 +144,7 @@ async function fetchUnpublishableFlags(
   courseUrl: string,
   code: string | undefined
 ): Promise<{ assignments: Map<number, boolean>; quizzes: Map<number, boolean> }> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const base = `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`;
   const [rawAssignments, rawQuizzes] = await Promise.all([
     fetchAll<RawUnpublishableRow>(`${base}/assignments?per_page=100`, ctx),

@@ -5,6 +5,7 @@
 import { canvasError, parseNextLink, resolveInstitutionByCode, type CanvasInstitution } from "../canvas-core";
 import { fetchCanvasMetaWith } from "./metadata";
 import { listActiveTeacherCourses } from "./listings";
+import { CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 
 /** One assignment/discussion needing grading, one row in the Live Feed table. */
 export interface CanvasQueueItem {
@@ -57,11 +58,13 @@ async function scanNeedsGrading(ctx: {
   const items: CanvasQueueItem[] = [];
   for (const course of courses) {
     let next: string | null = `${baseUrl}/api/v1/courses/${course.id}/assignments?bucket=ungraded&include[]=needs_grading_count&per_page=100`;
-    while (next) {
+    let pagesFetched = 0;
+    while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
       const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) {
         throw canvasError(response.status, institution);
       }
+      pagesFetched++;
       const page = (await response.json()) as CanvasAssignmentListItem[];
       for (const assignment of page) {
         if (typeof assignment.id !== "number") continue;
@@ -99,7 +102,7 @@ async function scanNeedsGrading(ctx: {
 }
 
 export async function listGradingQueue(code: string): Promise<CanvasQueueItem[]> {
-  const ctx = resolveInstitutionByCode(code);
+  const ctx = await resolveInstitutionByCode(code);
   const items = await scanNeedsGrading(ctx);
 
   // The assignments list omits the full description (and a graded discussion's
@@ -136,7 +139,7 @@ export async function getNeedsGradingCount(
   code: string,
   exclude?: { courses?: Set<string>; assignments?: Set<string> }
 ): Promise<number> {
-  const ctx = resolveInstitutionByCode(code);
+  const ctx = await resolveInstitutionByCode(code);
   const items = await scanNeedsGrading(ctx);
   return items.reduce((sum, item) => {
     if (exclude?.courses?.has(item.courseId)) return sum;
@@ -155,13 +158,15 @@ export async function getCourseNotifications(
   code: string,
   courseId: string
 ): Promise<{ needsGrading: number; unread: number }> {
-  const { institution, token, baseUrl } = resolveInstitutionByCode(code);
+  const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
 
   let needsGrading = 0;
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments?bucket=ungraded&include[]=needs_grading_count&per_page=100`;
-  while (next) {
+  let pagesFetched = 0;
+  while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
     const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) throw canvasError(response.status, institution);
+    pagesFetched++;
     const page = (await response.json()) as Array<{ needs_grading_count?: number }>;
     for (const a of page) {
       if (typeof a.needs_grading_count === "number" && a.needs_grading_count > 0) needsGrading += a.needs_grading_count;

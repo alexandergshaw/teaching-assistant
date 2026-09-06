@@ -41,7 +41,12 @@
 //   any error/timeout state.
 import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { COURSE_COPY_TYPES, type FileUploadTicket } from "@/lib/canvas-modules";
+import type { FileUploadTicket } from "@/lib/canvas-modules";
+// Imported from the client-safe leaf DIRECTLY, never through the
+// @/lib/canvas-modules barrel: the barrel re-exports copy.ts, which imports
+// canvas-core and so drags the whole server graph (next/headers,
+// node:async_hooks) into this browser chunk. That broke next build.
+import { COURSE_COPY_TYPES } from "@/lib/canvas-modules/copy-types";
 import { downloadCourseZipBlob } from "@/lib/course-files";
 import { latestSourceExportFile } from "@/lib/courses-table-helpers";
 import type { Database } from "@/lib/supabase/types";

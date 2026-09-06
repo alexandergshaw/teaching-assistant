@@ -1,4 +1,26 @@
+// E-ARCH6/E6: resolveInstitutionByCode now reads a per-user credential store
+// before ever touching the env vars this file stubs. Following this wave's
+// one convention (grades.test.ts, inbox.test.ts, and this file's other
+// siblings): mock getEffectiveIdentity to an "owner" identity and
+// getLmsCredentialSecret to "no stored row", so resolveCanvasCredential falls
+// through to the SAME owner-env branch this file already exercises with
+// process.env.TEST_CANVAS_URL/TEST_CANVAS_API_TOKEN - byte-identical
+// behavior, no second mocking convention invented.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+vi.mock("./supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn().mockResolvedValue({
+    id: "test-owner",
+    email: "owner@example.edu",
+    role: "owner",
+    status: "active",
+  }),
+}));
+vi.mock("./lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
+  recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { listAssignments, listStudents, fetchSubmissionDetail } from "./canvas";
 
 // Mock fetch for all tests in this suite

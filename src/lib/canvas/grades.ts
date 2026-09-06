@@ -48,7 +48,7 @@ export async function postCanvasGrades(
     );
   }
 
-  const { institution, token, baseUrl } = resolveInstitution(url);
+  const { institution, token, baseUrl } = await resolveInstitution(url);
 
   let assignmentId = parsed.kind === "assignment" ? parsed.id : "";
   if (parsed.kind === "discussion") {

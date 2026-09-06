@@ -1,3 +1,5 @@
+import { parseIpv4, isSpecialPurposeIpv4, isSpecialPurposeIpv6 } from "./lms-address-rules";
+
 /**
  * Refuses to let this app dial a URL that a remote Canvas host chose, unless
  * that URL is on the exact same origin as the Canvas base URL this request's
@@ -268,4 +270,85 @@ export function assertCanvasSuppliedUrlIsSameOrigin(candidate: unknown, baseUrl:
   }
 
   return resolved.href;
+}
+
+/**
+ * A weaker guard for a remote-supplied URL that will be dialled WITHOUT
+ * credentials: it must be https and must not name a special-purpose address,
+ * but it MAY point at a different host than the Canvas base URL.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS NOT THE SAME-ORIGIN GUARD.
+ *
+ * The exfiltration risk this module was written for is the BEARER TOKEN
+ * reaching a host that is not the one the credentials were resolved for.
+ * Downloading a public file with no Authorization header is not that risk.
+ *
+ * And requiring same-origin for the unauthenticated download would BREAK REAL
+ * CANVAS. A content-export attachment is routinely served from a separate
+ * storage host rather than the Canvas application host, so a strict
+ * same-origin check there turns a legitimate cartridge download into a hard
+ * failure. The first version of this fix did exactly that; the group that
+ * wrote it flagged the risk rather than shipping it silently.
+ *
+ * So the two fetches get two different rules, and the split IS the security
+ * argument:
+ *   - unauthenticated download -> this function (public host, any origin)
+ *   - retry WITH the bearer     -> assertCanvasSuppliedUrlIsSameOrigin
+ * A cross-host attachment that fails unauthenticated therefore fails the
+ * whole operation rather than being retried with the token attached. That is
+ * the correct outcome: there is no download worth leaking a credential for.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT CLOSE. It checks the hostname as written.
+ * It does NOT resolve DNS, so a name that is public now can point somewhere
+ * private at connect time (rebinding), and it does not follow or re-check
+ * redirects. Both belong to the fetch layer - `canvasFetch` in
+ * ./canvas-fetch.ts resolves, classifies every returned address and pins the
+ * connection to the vetted one. Routing these call sites through it is a
+ * separate, deliberate chunk; until then this is a hostname-level check and
+ * says so rather than implying more.
+ */
+export function assertCanvasSuppliedUrlIsPublic(candidate: unknown): string {
+  if (typeof candidate !== "string" || candidate.trim() === "") {
+    throw new Error(
+      "Refusing to download a file from the LMS: the URL it supplied was missing or not a string."
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate.trim());
+  } catch {
+    throw new Error(
+      "Refusing to download a file from the LMS: the URL it supplied could not be parsed."
+    );
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new Error(
+      `Refusing to download a file from the LMS over ${parsed.protocol.replace(":", "")}: only https is allowed.`
+    );
+  }
+
+  // Credentials in the authority read as one host to a person and resolve to
+  // another - the same trick the base-URL validator refuses.
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new Error(
+      "Refusing to download a file from the LMS: its URL carries credentials in the authority."
+    );
+  }
+
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  const octets = parseIpv4(host);
+  if (octets && isSpecialPurposeIpv4(octets)) {
+    throw new Error(
+      `Refusing to download a file from the LMS: ${parsed.hostname} is a reserved or private address.`
+    );
+  }
+  if (host.includes(":") && isSpecialPurposeIpv6(host)) {
+    throw new Error(
+      `Refusing to download a file from the LMS: ${parsed.hostname} is a reserved or private address.`
+    );
+  }
+
+  return parsed.toString();
 }

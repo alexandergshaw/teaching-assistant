@@ -12,6 +12,7 @@ import {
   describeLiveSelectionNeedsInstitution,
   describeNoInstitutionSelected,
 } from "./course-picker-availability";
+import { CANVAS_CREDENTIAL_REQUIRED_MESSAGE } from "./canvas-credentials";
 import type { Course, CourseMaterialFile } from "./supabase/courses";
 
 function file(overrides: Partial<CourseMaterialFile> = {}): CourseMaterialFile {
@@ -96,10 +97,15 @@ describe("describeLiveSelectionNeedsInstitution", () => {
 
 describe("describeExportFallbackAfterLiveFailure", () => {
   it("carries the underlying live error verbatim, not summarized or dropped", () => {
-    const message = describeExportFallbackAfterLiveFailure(
-      "Canvas base URL is not configured for WNCC. Set WNCC_CANVAS_URL in the environment."
-    );
-    expect(message).toContain("Canvas base URL is not configured for WNCC. Set WNCC_CANVAS_URL in the environment.");
+    // A realistic underlying error, imported by identity from
+    // canvas-credentials.ts rather than copied as a literal (see that
+    // module's own header, and OWNER_ONLY_MESSAGE in supabase/auth.ts for the
+    // established precedent) - a copied string here would keep passing after
+    // the real message changed, proving nothing. What this test actually
+    // pins is the pass-through fact: whatever the underlying error says, it
+    // must survive into the composed message unchanged.
+    const message = describeExportFallbackAfterLiveFailure(CANVAS_CREDENTIAL_REQUIRED_MESSAGE);
+    expect(message).toContain(CANVAS_CREDENTIAL_REQUIRED_MESSAGE);
   });
 
   it("names both that the export was used and that live Canvas was the reason", () => {

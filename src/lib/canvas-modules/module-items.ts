@@ -12,7 +12,7 @@ export async function createModuleItem(
   code?: string
 ): Promise<CanvasModuleItem> {
   if (!item.type.trim()) throw new Error("A module item needs a type.");
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("module_item[type]", item.type);
   if (item.title?.trim()) params.append("module_item[title]", item.title.trim());
@@ -42,7 +42,7 @@ export async function updateModuleItem(
   fields: { title?: string; indent?: number; published?: boolean; position?: number; targetModuleId?: number },
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   if (typeof fields.title === "string") params.append("module_item[title]", fields.title.trim());
   if (typeof fields.indent === "number") params.append("module_item[indent]", String(fields.indent));
@@ -67,7 +67,7 @@ export async function deleteModuleItem(
   itemId: number,
   code?: string
 ): Promise<void> {
-  const ctx = resolveCourse(courseUrl, code);
+  const ctx = await resolveCourse(courseUrl, code);
   await writeJson<RawModuleItem>(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/modules/${moduleId}/items/${itemId}`,
     "DELETE",

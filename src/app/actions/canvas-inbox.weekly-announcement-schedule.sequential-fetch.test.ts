@@ -18,6 +18,17 @@
 // (fake-timer) delay per request and tracks how many are in flight
 // simultaneously - a Promise.all-style dispatch would show 2 requests in
 // flight at once; a true sequential for-loop never shows more than 1.
+//
+// resolveCourse (inside createScheduledAnnouncementResilient's real
+// transport) now delegates to resolveCanvasCredential
+// (src/lib/canvas-credentials.ts), which resolves the CALLING USER's own
+// identity via getEffectiveIdentity() before ever looking at env vars - see
+// docs/lms-credentials-acceptance-criteria.md E-ARCH6. Per that section's own
+// instruction to every wave touching one of the 22 existing Canvas test
+// files: mock the identity/credential-store boundary to `role: "owner"` with
+// no stored row, which keeps the ENV branch alive (vi.stubEnv below still
+// governs the resolved credential) and every assertion in this file testing
+// what it always tested.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/supabase/auth", () => ({
@@ -35,6 +46,14 @@ vi.mock("@/lib/supabase/weekly-announcement-schedule", () => ({
   rescheduleScheduledAnnouncement: vi.fn(),
 }));
 
+vi.mock("@/lib/supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn(),
+}));
+vi.mock("@/lib/lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn(),
+  recordLmsCredentialFailure: vi.fn(),
+}));
+
 import { requireOwner } from "@/lib/supabase/auth";
 import {
   listScheduledAnnouncementRows,
@@ -42,9 +61,12 @@ import {
   confirmScheduledAnnouncement,
   type ScheduledAnnouncementRow,
 } from "@/lib/supabase/weekly-announcement-schedule";
+import { getEffectiveIdentity } from "@/lib/supabase/effective-identity";
+import { getLmsCredentialSecret, recordLmsCredentialFailure } from "@/lib/lms-credentials";
 import { scheduleWeeklyAnnouncementsAction } from "./canvas-inbox";
 
 const OWNER = { id: "owner-1", email: "owner@example.com" };
+const OWNER_IDENTITY = { id: "owner-1", email: "owner@example.com", role: "owner" as const, status: "active" as const };
 // canvas.mccneb.edu is the hardcoded host for the "MCC" institution code in
 // src/lib/canvas-core.ts - matching src/lib/canvas/announcements.test.ts's
 // own setup, since this file exercises the SAME real transport that file
@@ -77,6 +99,9 @@ describe("scheduleWeeklyAnnouncementsAction issues Canvas creates sequentially, 
       .mockReset()
       .mockImplementation(async (_s, _u, _c, week) => storedRow({ weekNumber: week, status: "pending" }));
     vi.mocked(confirmScheduledAnnouncement).mockReset().mockResolvedValue(undefined);
+    vi.mocked(getEffectiveIdentity).mockReset().mockResolvedValue(OWNER_IDENTITY);
+    vi.mocked(getLmsCredentialSecret).mockReset().mockResolvedValue(null);
+    vi.mocked(recordLmsCredentialFailure).mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {

@@ -40163,3 +40163,141 @@ absence of enforcement and is not.
 only `src/**` files ending `.test.ts`. Every claim in this entry about a
 `.tsx` file comes from reading it. Nothing in waves 3-5 will be verified by a
 rendered component.
+
+
+## 403. Canvas resolution goes per-user, and the token stops following strangers (Group E waves 3-4)
+
+The change entry 402 was written to be compared against. The four resolvers in
+`canvas-core.ts` are now async and delegate to per-user credential resolution;
+every one of their ~104 call sites was migrated; and the URL a remote host can
+choose is no longer dialled with a bearer token attached.
+
+**403a - the async cut.** `resolveInstitution`, `resolveDefaultInstitution`,
+`resolveInstitutionByCode` and `resolveCourse` keep their names and arguments
+and became async, delegating to `resolveCanvasCredential`. The client-supplied
+acronym interpolated into `process.env` is DELETED; the env read survives only
+inside the resolver's owner branch, where the key is server-decided.
+`institutionBaseUrl`, `institutionToken` and `listPreconfiguredInstitutionCodes`
+were removed after confirming each was unreachable.
+
+Entry 402c's measurement held: 103 of 104 call sites were already inside async
+functions, and the one exception (`resolveInbox`, a private helper in
+`canvas/inbox.ts`) was made async with its five callers updated. The migration
+was one `await` per site, as predicted.
+
+**403b - the three "not configured" messages collapsed into one.** They used
+to differ by cause - unknown host, missing base URL, missing token - which
+told any signed-in caller which acronyms the owner had configured and how
+completely, and they named an environment variable at a user who cannot set
+one. All three now throw one exported constant, compared BY IDENTITY at every
+consumer, never by copied text.
+
+**403c - E-CRIT1: `parseNextLink` no longer leads anywhere.** It returns
+whatever URL sits in a `Link: rel="next"` header, and callers dialled it with
+`Authorization: Bearer` attached, with no host check, across 26 sites in 11
+files - all but one loop with no page cap, so the termination condition
+belonged to the remote host.
+
+Every such follow now passes through `assertCanvasSuppliedUrlIsSameOrigin` and
+dials the guard's RETURNED string. That distinction is load-bearing: the guard
+accepts a relative Link header and resolves it against the base, so for a
+relative candidate the return value differs from the input, and dialling the
+input would pass the check then fetch something else. Every loop is now capped.
+
+The one hand-rolled predecessor (`assertProgressUrlIsSameOrigin` in
+`canvas-modules/migrations.ts`) was deleted after a semantics comparison
+proved the shared guard is a strict superset: same origin equality, plus a
+typed refusal instead of a raw parser exception on malformed input, plus
+correct handling of a relative candidate that the local version crashed on.
+
+**403d - SEC10: the self-id cache was keyed on the wrong thing.**
+`canvas/inbox.ts` cached the Canvas self-id per BASE URL. That was correct
+when one deployment had one token per host; with per-user credentials, two
+users on the same Canvas host shared an entry, so one could be served the
+OTHER's Canvas identity. Re-keyed on `${identity.id}:${baseUrl}` - the app's
+own user id, never token-shaped material in a Map key. Sabotage-checked: with
+the old key the new test fails with `expected 111 to be 222`.
+
+**403e - the attachment guard was WRONG on first landing, and the group that
+wrote it said so.** It required same-origin for BOTH the unauthenticated
+download and the bearer retry of a content-export attachment. Real Canvas
+routinely serves those from a separate storage host, so that would have turned
+every legitimate cartridge download into a hard failure.
+
+Corrected: the two fetches get two different rules, and the split IS the
+security argument. The risk is the BEARER TOKEN reaching a foreign host, not a
+credential-free download. So the free download takes a public-host check
+(`assertCanvasSuppliedUrlIsPublic` - https, no userinfo, no special-purpose
+literal address) and MAY leave the Canvas origin; the retry is origin-locked.
+A cross-host attachment that fails free therefore fails the whole operation
+rather than being retried with the token - correct, because no export is worth
+leaking a credential for. Both directions are tested, including an
+S3-hosted-export regression test, and both fail if the over-strict version
+returns.
+
+**403f - a build-breaking client-bundle leak, found and closed.** Making
+`canvas-core.ts` genuinely server-only (it now reaches `next/headers` and
+`node:async_hooks`) exposed FOUR pre-existing edges where client-reachable
+code value-imported a PURE value out of a server-only module:
+`COURSE_COPY_TYPES` from `copy.ts` (twice), `classifyMigration` from
+`migrations.ts`, and `descriptionToHtml` from `gradables.ts`. Each moved to a
+leaf importing nothing, re-exported from the server module so no server caller
+changed, and imported directly by the client - never through the barrel, which
+is the thing that drags the server graph in.
+
+**Two guards, because one was not enough.**
+`canvas-client-boundary.test.ts` checks `"use client"` files importing the two
+barrels. `canvas-client-boundary.transitive.test.ts` asks the question the
+bundler asks: from every client entry, following value imports, can the
+browser reach `canvas-core.ts`? Three rules make it accurate - type-only
+imports are erased (THAT distinction is the bug: in the file that broke the
+build, line 18 was `import type` and harmless while line 19 was fatal), a
+`"use server"` module is a WALL (walking through one produced 339 false
+positives in the first attempt), and import cycles exist so the walk must
+terminate. Sabotage-checked against the real bug: the direct guard stayed
+15/15 GREEN while the transitive one went red and named the file.
+
+**403g - gates, with real numbers.**
+- `npx vitest run`: 934 files, 18794 tests, all passing.
+- `npx tsc --noEmit`: exit 0, clean repo-wide.
+- `npx eslint .`: 0 errors (6 pre-existing warnings).
+- `npx next build`: "Compiled successfully" AND "Finished TypeScript". The
+  static-prerender tail fails on a missing Supabase URL/key - there is no
+  `.env*` file on this machine - and the page it names varies per run because
+  parallel workers race. Environmental, not a code defect.
+- Byte-scan across all 68 changed paths: ten carry non-ASCII (em dash,
+  ellipsis, box-drawing, a triangle) and ALL ten were proven pre-existing by
+  diffing their non-ASCII lines against HEAD. Zero introduced.
+- One group's byte-scan caught the Edit tool silently converting SEVEN files
+  to CRLF, including lines it never touched. Normalised back to LF before
+  reporting. Nothing else caught it.
+
+**403h - one convention, stated identically in all seven briefs.** 22 test
+files used this repo's deliberate idiom of stubbing only `globalThis.fetch`
+and letting `resolveCourse` run for real against `vi.stubEnv`. Database-backed
+resolution breaks that. Every group mocks `getEffectiveIdentity` to
+`role: "owner"` and `getLmsCredentialSecret` to `null`, so the env branch
+stays alive and each test keeps testing what it was written to test. Five
+agents inventing five conventions would have been worse than the bug.
+
+**403i - LIMITS. What was NOT done, and what is not proven.**
+
+- **The transport swap did NOT happen.** Routing the 73 bearer-carrying
+  fetches through `canvasFetch` (wave 1's `node:https` layer, with DNS pinning
+  and manual redirect handling) is deliberately a SEPARATE chunk, so a
+  regression in this wave is unambiguous. Until it lands, the same-origin
+  guard is a HOSTNAME-level check: it does not resolve DNS, so a name that is
+  public now can point somewhere private at connect time, and redirects are
+  still followed by the default fetch.
+- **`auto-zero.ts`'s two newly-guarded pagination loops have no test.** No
+  test file exists for that module and creating one was outside the assigned
+  file set. The guard mirrors a tested pattern; nothing proves it here.
+- **Nothing ran against a real Canvas or a real database.** Every test uses
+  fakes. In particular, the S3-hosted-export case is modelled from a mocked
+  response, not observed against a live Canvas content export.
+- **No credential has ever been stored.** The settings surface does not exist
+  yet, so the per-user path has never resolved a real stored row - only the
+  owner env branch has run.
+- The `parseNextLink` guard is applied where a loop exists TODAY. A future
+  loop added without it is caught by no test; only the two client-boundary
+  guards are automated.

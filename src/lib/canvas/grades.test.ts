@@ -17,7 +17,30 @@
 // stubbed directly (not canvas-core), so the real resolveInstitution/
 // parseCanvasUrl/canvasError run - closer to the real request shape this
 // function actually builds.
+//
+// E-ARCH6/E6: resolveInstitution now reads a per-user credential store
+// before ever touching the env vars this file stubs. Following this wave's
+// one convention (see grading-queue.ts, inbox.ts, listings.ts's own siblings
+// in the same change): mock getEffectiveIdentity to an "owner" identity and
+// getLmsCredentialSecret to "no stored row", so resolveCanvasCredential falls
+// through to the SAME owner-env branch this file already exercises with
+// vi.stubEnv - the env-based resolution path stays alive, byte-identical to
+// before this migration, without inventing a second mocking convention.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn().mockResolvedValue({
+    id: "test-owner",
+    email: "owner@example.edu",
+    role: "owner",
+    status: "active",
+  }),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
+  recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { postCanvasGrades } from "./grades";
 
 const ASSIGNMENT_URL = "https://canvas.mccneb.edu/courses/123/assignments/456";

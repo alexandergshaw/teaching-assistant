@@ -4,8 +4,36 @@
 // canvas-core mocked), matching announcements.test.ts's own pattern, so the
 // real resolveCourse/canvasError run - these tests exercise the true request
 // shapes this function builds, and no test here reaches the network.
+//
+// resolveCourse now delegates to resolveCanvasCredential
+// (src/lib/canvas-credentials.ts), which resolves the CALLING USER's own
+// identity via getEffectiveIdentity() before ever looking at env vars - see
+// docs/lms-credentials-acceptance-criteria.md E-ARCH6. Per that section's own
+// instruction to every wave touching one of the 22 existing Canvas test
+// files: mock the identity/credential-store boundary to `role: "owner"` with
+// no stored row, which keeps the ENV branch alive and every assertion below
+// testing what it always tested (this repo's idiom is to stub
+// globalThis.fetch and let resolveCourse run for real, not to mock
+// canvas-core itself).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("../supabase/effective-identity", () => ({
+  getEffectiveIdentity: vi.fn(),
+}));
+vi.mock("../lms-credentials", () => ({
+  getLmsCredentialSecret: vi.fn(),
+  recordLmsCredentialFailure: vi.fn(),
+}));
+
 import { uploadAnnouncementImage, resolveAnnouncementImage } from "./announcement-image-upload";
+import { getEffectiveIdentity } from "../supabase/effective-identity";
+import { getLmsCredentialSecret, recordLmsCredentialFailure } from "../lms-credentials";
+
+const mockGetEffectiveIdentity = vi.mocked(getEffectiveIdentity);
+const mockGetLmsCredentialSecret = vi.mocked(getLmsCredentialSecret);
+const mockRecordLmsCredentialFailure = vi.mocked(recordLmsCredentialFailure);
+
+const OWNER_IDENTITY = { id: "owner-1", email: "owner@example.edu", role: "owner" as const, status: "active" as const };
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 const BASE64_PNG = Buffer.from("fake-image-bytes").toString("base64");
@@ -25,11 +53,15 @@ describe("uploadAnnouncementImage", () => {
   beforeEach(() => {
     vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
     vi.stubGlobal("fetch", vi.fn());
+    mockGetEffectiveIdentity.mockResolvedValue(OWNER_IDENTITY);
+    mockGetLmsCredentialSecret.mockResolvedValue(null);
+    mockRecordLmsCredentialFailure.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
   it("Step 1: POSTs name/size/content_type/parent_folder_path=uploads/on_duplicate=rename to the course files endpoint", async () => {
@@ -155,11 +187,15 @@ describe("resolveAnnouncementImage", () => {
   beforeEach(() => {
     vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
     vi.stubGlobal("fetch", vi.fn());
+    mockGetEffectiveIdentity.mockResolvedValue(OWNER_IDENTITY);
+    mockGetLmsCredentialSecret.mockResolvedValue(null);
+    mockRecordLmsCredentialFailure.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
   it("resolves to the course-scoped download URL (frozen literal), never Canvas's raw per-upload url - that url needs this app's own bearer token and would 401 for a student's browser", async () => {

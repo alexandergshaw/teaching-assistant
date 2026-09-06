@@ -5,6 +5,11 @@
 import { canvasError, htmlToText, textToHtml, resolveCourse } from "../canvas-core";
 import { parseNextLink } from "./pagination";
 import { fetchWithThrottleRetry } from "../canvas-throttle";
+import {
+  assertCanvasSuppliedUrlIsSameOrigin,
+  assertCanvasSuppliedUrlIsPublic,
+  CANVAS_PAGINATION_PAGE_CAP,
+} from "../canvas-remote-url";
 
 /** One announcement, ready for the UI. The message is plain text. */
 export interface CanvasAnnouncement {
@@ -49,7 +54,7 @@ function toAnnouncement(
 
 /** Fetch the course's display name for a heading. */
 export async function getCourseName(courseUrl: string, code?: string): Promise<string> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
   const response = await fetch(`${baseUrl}/api/v1/courses/${courseId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -65,7 +70,7 @@ export async function getCourseInfo(
   courseUrl: string,
   code?: string
 ): Promise<{ name: string; startAt: string | null; syllabusBody: string }> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
   const response = await fetch(`${baseUrl}/api/v1/courses/${courseId}?include[]=syllabus_body`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -89,7 +94,7 @@ export async function exportCourseCartridge(
   courseUrl: string,
   code?: string
 ): Promise<{ fileName: string; base64: string }> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
 
   const exportResponse = await fetch(
     `${baseUrl}/api/v1/courses/${courseId}/content_exports?export_type=common_cartridge&skip_notifications=true`,
@@ -139,9 +144,33 @@ export async function exportCourseCartridge(
     throw new Error("Timed out waiting for the LMS export (try again in a minute).");
   }
 
-  let attachmentResponse = await fetch(attachment.url);
+  // E-CRIT1/SEC3 - `attachment.url` is supplied by Canvas's JSON response and
+  // is not necessarily on Canvas's own host. THE TWO FETCHES BELOW GET TWO
+  // DIFFERENT RULES, and that split is the whole security argument.
+  //
+  // The risk this closes is the BEARER TOKEN reaching a host other than the
+  // one these credentials were resolved for - the "fails free
+  // unauthenticated, then gets the token on retry" primitive this function
+  // used to contain. Downloading a public file with no Authorization header
+  // is not that risk.
+  //
+  // And requiring same-origin for the unauthenticated download would BREAK
+  // REAL CANVAS: a content-export attachment is routinely served from a
+  // separate storage host rather than the Canvas application host, so a
+  // strict same-origin check there turns a legitimate cartridge download into
+  // a hard failure. An earlier version of this fix did exactly that.
+  //
+  // So: public-host check for the free download, same-origin for the retry.
+  // A cross-host attachment that fails unauthenticated therefore fails the
+  // whole operation instead of being retried with the token attached - which
+  // is correct, because there is no export worth leaking a credential for.
+  // Both fetches dial their guard's RETURNED string, never the raw candidate.
+  const downloadUrl = assertCanvasSuppliedUrlIsPublic(attachment.url);
+
+  let attachmentResponse = await fetch(downloadUrl);
   if (!attachmentResponse.ok) {
-    attachmentResponse = await fetch(attachment.url, {
+    const authorizedUrl = assertCanvasSuppliedUrlIsSameOrigin(attachment.url, baseUrl);
+    attachmentResponse = await fetch(authorizedUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!attachmentResponse.ok) {
@@ -177,12 +206,23 @@ export async function listAnnouncements(
   code?: string,
   opts?: { allPages?: boolean }
 ): Promise<CanvasAnnouncement[]> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
   const topics: CanvasDiscussionTopicListItem[] = [];
   let url: string | null =
     `${baseUrl}/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=50`;
+  let pageCount = 0;
 
   while (url) {
+    // E-REL2 - the loop's continuation condition is otherwise controlled
+    // entirely by the remote host's Link header; cap it so a next-link
+    // pointing at itself cannot run unbounded (see CANVAS_PAGINATION_PAGE_CAP's
+    // own doc comment for what an uncapped loop costs on this platform).
+    pageCount += 1;
+    if (pageCount > CANVAS_PAGINATION_PAGE_CAP) {
+      throw new Error(
+        `Canvas pagination exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages while listing announcements for course ${courseId} - refusing to follow further "next" links.`
+      );
+    }
     const response: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) {
       throw canvasError(response.status, institution);
@@ -192,7 +232,12 @@ export async function listAnnouncements(
     // Header NAME lookups (Headers.get) are already case-insensitive per the
     // Fetch spec - AC4 item 14's case-insensitivity applies to the rel
     // VALUE, which parseNextLink itself handles.
-    url = opts?.allPages ? parseNextLink(response.headers.get("Link")) : null;
+    const rawNext = opts?.allPages ? parseNextLink(response.headers.get("Link")) : null;
+    // E-CRIT1 - verified same-origin with baseUrl before being dialed, and
+    // the URL actually fetched next iteration is the guard's own RETURNED
+    // string (a relative Link header resolves against baseUrl inside the
+    // guard), never the raw header candidate.
+    url = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   const announcements = topics
@@ -285,7 +330,7 @@ export async function createAnnouncement(
 ): Promise<CanvasAnnouncement> {
   if (!title.trim()) throw new Error("An announcement needs a title.");
   if (!message.trim()) throw new Error("An announcement needs a message.");
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
 
   const params = new URLSearchParams();
   params.append("title", title.trim());
@@ -352,7 +397,7 @@ export async function createScheduledAnnouncementResilient(
   delayedPostAtIso: string,
   code?: string
 ): Promise<{ id: number }> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("title", title.trim());
   params.append("message", textToHtml(message.trim()));
@@ -394,7 +439,7 @@ export async function updateAnnouncementSchedule(
   delayedPostAtIso: string,
   code?: string
 ): Promise<void> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("delayed_post_at", delayedPostAtIso);
 
@@ -428,7 +473,7 @@ export async function getAnnouncementById(
   topicId: number,
   code?: string
 ): Promise<CanvasAnnouncement | null> {
-  const { courseId, institution, token, baseUrl } = resolveCourse(courseUrl, code);
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
   const response = await fetchWithThrottleRetry(() =>
     fetch(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`, {
       headers: { Authorization: `Bearer ${token}` },

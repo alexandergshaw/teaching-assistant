@@ -30,6 +30,21 @@ const SERVICE_UNAVAILABLE_MESSAGE =
   "The account service is temporarily unavailable. Please try again in a moment.";
 
 /**
+ * ADMIN-GUARD FIX (denial message): the message for an `active` decision
+ * reaching `throwForDecision` - which, as of this fix, can only happen via
+ * requireAppOwner()'s session path (see that function below). `canUseApp`
+ * treats "active" as authorized, so requireUser() never denies on this
+ * decision and never reaches this branch; only requireAppOwner() denies an
+ * active-but-non-owner account. NOT_AUTHORIZED_MESSAGE ("Sign in with an
+ * approved account") is false for every one of those callers - they are
+ * signed in, with an approved, active account - so this is a distinct
+ * message rather than a reuse of that one. Do not widen this branch's
+ * reach: it exists to describe "you are allowed in, just not as owner",
+ * never "you are not signed in" or "your account is not yet approved".
+ */
+export const OWNER_ONLY_MESSAGE = "This action is limited to the workspace owner.";
+
+/**
  * BUG 4 FIX: throws the message that matches WHY a decision denies, instead
  * of the single generic "Not authorized" every denial used to throw
  * regardless of cause. `unavailable` means a Supabase outage or a lookup
@@ -39,10 +54,18 @@ const SERVICE_UNAVAILABLE_MESSAGE =
  * (anonymous, pending, suspended) keeps the original message: none of them
  * are a system failure, and this fix is not the place to redesign what each
  * of those tells the caller.
+ *
+ * ADMIN-GUARD FIX (denial message): `active` is likewise carved out, for the
+ * same reason `unavailable` was - see OWNER_ONLY_MESSAGE's own doc comment
+ * just above. `anonymous`, `pending` and `suspended` are intentionally left
+ * exactly as they were: each is already correct for its case.
  */
 function throwForDecision(decision: AccessDecision): never {
   if (decision === "unavailable") {
     throw new Error(SERVICE_UNAVAILABLE_MESSAGE);
+  }
+  if (decision === "active") {
+    throw new Error(OWNER_ONLY_MESSAGE);
   }
   throw new Error(NOT_AUTHORIZED_MESSAGE);
 }
@@ -352,23 +375,40 @@ export async function requireUser(): Promise<AuthorizedUser> {
  * smaller list than "everything that used to call requireOwner()".
  *
  * SECURITY: honours an impersonated identity ONLY when its `role` is
- * literally "owner" - see requireUser() above and
- * src/lib/supabase/owner-context.ts for why that check exists at all: an
- * impersonated identity that is merely "active" (a member's own scheduled
- * workflow, per AC AM3) must never be treated as the owner here. This is
- * currently the SAME effective check requireUser()'s own impersonation
- * branch makes (BUG 2's stopgap fix) - not a redundancy to remove, but a
- * fact that will stop being true the moment BUG 2's fix is superseded by the
- * real Group E containment, at which point this function remains the one
- * enforcement point that must still say "owner", full stop.
+ * literally "owner" AND its `status` is literally "active" - see
+ * requireUser() above and src/lib/supabase/owner-context.ts for why that
+ * check exists at all: an impersonated identity that is merely "active" (a
+ * member's own scheduled workflow, per AC AM3) must never be treated as the
+ * owner here, and neither must one that carries role "owner" but a non-active
+ * status (a suspended/pending owner account impersonated by mistake, or a
+ * hand-rolled identity that never went through resolveImpersonationIdentity,
+ * which itself only ever returns status "active" or null).
+ *
+ * ADMIN-GUARD FIX: this used to check `role` only, leaving the MORE
+ * privileged guard with the LOOSER impersonation precondition of the two -
+ * requireUser() already required both status and role. That asymmetry had
+ * never been exercised because this function had no callers; it is fixed
+ * now, before the account-admin surface becomes its first consumer. This is
+ * the SAME check requireUser()'s own impersonation branch makes (BUG 2's
+ * stopgap fix) - not a redundancy to remove, but a fact that will stop being
+ * true the moment BUG 2's fix is superseded by the real Group E containment,
+ * at which point this function remains the one enforcement point that must
+ * still say "owner", full stop.
  *
  * BUG 4 FIX: throws a message distinguishable by decision - see
- * throwForDecision (top of file).
+ * throwForDecision (top of file). ADMIN-GUARD FIX: for the session (non-
+ * impersonation) path just below, an `active` decision now throws
+ * OWNER_ONLY_MESSAGE rather than NOT_AUTHORIZED_MESSAGE - see that message's
+ * own doc comment for why. The impersonation branch immediately above keeps
+ * throwing the generic NOT_AUTHORIZED_MESSAGE: it has no `AccessDecision` to
+ * distinguish on (it never calls resolveAccess), and its only callers are the
+ * four trusted unattended entry points in owner-context.ts, not a human ever
+ * reading the message in a browser.
  */
 export async function requireAppOwner(): Promise<AuthorizedUser> {
   const impersonated = getImpersonatedOwner();
   if (impersonated) {
-    if (impersonated.role !== "owner") {
+    if (impersonated.status !== "active" || impersonated.role !== "owner") {
       throw new Error(NOT_AUTHORIZED_MESSAGE);
     }
     return identityFrom(impersonated);

@@ -39876,3 +39876,198 @@ observed live (AC10) with PLACEHOLDER Supabase credentials, so the signed-in,
 pending and suspended paths through it have still never been exercised against
 a real session - only the anonymous one has. `crypto.ts`, the credential decrypt handling and the CI
 failure gate shipped ahead of this chunk in their own commits.
+
+
+## 400. Area baseline - the owner's admin surface, before one exists
+
+Recorded BEFORE the Group C build, so that what the account-management work
+changes can be told apart from what it merely moved. Everything below was
+measured on 2026-09-06 against the working tree, not inferred from the
+acceptance criteria.
+
+**400a - `/account` is a 404 and always has been.** `src/app/account/`
+contains four subdirectories - `diagnostics/`, `integrations/`, `security/`
+and `voice-style/`, each with its own `page.tsx` - and NO `page.tsx` of its
+own. Next.js therefore has no route for the bare segment. Five links point
+into the namespace (`TopBar.tsx:407,415,423,431` to the four subpages, and
+`AiChatWindow.tsx:735` to `/account/voice-style`); none of them target
+`/account` itself, which is why nobody has hit the 404.
+
+**400b - no client component can know it is an owner.** `isOwnerEmail`
+(`src/lib/owner.ts`) is imported by exactly twelve modules, and ZERO of them
+are `.tsx`: `access.ts`, `access.test.ts`, `account-admin-rules.ts`,
+`owner.ts`, `signup-rules.ts`, `supabase/app-users.ts`, `supabase/proxy.ts`,
+`app/actions/auth-signup.ts` and the four Google/Microsoft OAuth route
+handlers. `SupabaseProvider` (`src/context/SupabaseProvider.tsx`, 74 lines)
+exposes a session and a loading flag and no role, so the ONLY way the client
+learns anything about ownership today is by being told by the server, and
+nothing tells it. Any owner-only navigation entry is therefore new plumbing,
+not a new consumer of existing plumbing.
+
+**400c - `requireAppOwner()` has no callers.** Every textual occurrence
+outside its own definition in `src/lib/supabase/auth.ts` and the guard
+coverage test is a COMMENT: `owner-context.ts:78,87,95,118`,
+`supabase/proxy.ts:81`, `app/actions/auth-signup.ts:40`. The function's role
+check has consequently never run in production. `owner-context.ts:95` states
+this in the source itself - "requireAppOwner(), which has no call sites yet".
+The admin surface is that guard's first caller, so a Group C regression in
+which non-owners reach the page would be a first-ever failure of that check,
+with no prior green run to appeal to.
+
+**400d - `requireOwner(` appears 532 times.** That is the deprecated alias
+which now delegates to `requireUser()`, i.e. it authorises ANY active
+account. The containment holding today is not the guard; it is that no code
+path can set a non-owner `active`. Group C is that code path. Count measured
+with `grep -rn "requireOwner(" src --include=*.ts --include=*.tsx | wc -l`;
+the string `requireAppOwner(` does not match it, so the two are not conflated.
+
+**400e - what already IS baselined, so it is not re-measured here.** Entry
+398 covers the access gate before the multi-user work; entry 399 covers roles,
+status and the rewritten gate as shipped. The TopBar settings menu structure,
+its `.menu` focus-ring reset and the account-page conventions are baselined in
+the earlier TopBar entry (`TopBar.tsx:296-372`, `TopBar.module.css:120-147`).
+MFA enrolment on `/account/security` is baselined at 399's B7.
+
+**400f - the standing limit that makes all of the above readable.** This
+repo's vitest is node-environment and collects only `src/**` files ending
+`.test.ts`. No component has ever been rendered by a test, and none of the
+login or account UI is. Every claim in this entry about a `.tsx` file comes
+from reading it. A green suite after Group C will prove nothing about that
+page's markup, its keyboard behaviour or its disabled-button reasons.
+
+
+## 401. The owner can actually administer accounts (Group C)
+
+The surface `requireAppOwner()` was written for. Before this, that guard had
+ZERO call sites (entry 400c) and `/account` itself was a 404 (400a).
+
+**401a - what shipped.**
+
+- `/account` - the missing index, listing the four sibling areas.
+- `/account/people` - the owner's account list: pending first then newest
+  first, with approve / suspend / restore / promote / demote.
+- `src/lib/account-admin-rules.ts` - the five-action rule engine. Reads NO
+  environment; `isAllowlisted` and the owner count arrive as data.
+- `src/lib/account-people-view.ts` - the pure view model. Every judgement about
+  a row lives here because vitest renders no component, so a rule in JSX is a
+  rule nothing can test.
+- `src/lib/supabase/app-users-directory.ts` - joins `app_users` to the auth
+  provider for `email_confirmed_at`.
+- `role_granted_by` (migration 20261014000000) and `countEffectiveOwners`.
+- The access decision now travels on a gate-stamped request header instead of
+  being recomputed in the root layout.
+
+**401b - the allowlist is HALF the break-glass, and that was a real bug in the
+design.** `resolveAccess` grants `owner` only on
+`isOwnerEmail(email) && emailVerified`, but `isAllowlisted` is
+`isOwnerEmail(email)` ALONE. The first version of the view model overrode
+display on that flag by itself, so an allowlisted address that never confirmed
+its email - somebody who claimed it before its real owner signed up - rendered
+as `owner`/`active`, hid its true `pending`, and had suspend AND demote
+refused by the allowlist rule. An unverified impostor shown as an owner nobody
+could remove. Found by an adversarial pass AFTER the module had passed 31/31
+of the orchestrator's own tests. `emailVerified` is now a REQUIRED field, and
+`allowlistUnverified` is its own third ownership state.
+
+**401c - the same contract failed to pin the thing it existed to pin.** The
+view model must pass STORED role/status to `canPerformAccountAction`, never
+the overridden values, because that module's rules are written against the
+database as it is. The contract asserted this in prose and tested it nowhere:
+flipping the implementation to the overridden values kept the whole suite
+green. Two discriminating tests were added and SABOTAGE-VERIFIED in both
+directions.
+
+**401d - a substring coupling that would have decayed in silence.**
+`setAppUserStatus` reports all three suspend failures as a bare `Error`, so
+the action layer tells them apart by matching fixed substrings of its message.
+The original test handed the classifier a string the TEST wrote - it proved
+only that the code could read its own constants back, and would have stayed
+green on the day the coupling broke, while the operator silently stopped being
+told an account may be locked out at the provider with no automatic recovery.
+The judgement moved to `src/lib/account-suspend-failure.ts` (a "use server"
+file cannot export a pure function for a test to reach, but it CAN import
+one), and `account-suspend-failure.test.ts` drives the REAL `setAppUserStatus`
+into all three failure modes. Sabotage-checked: rewording the message turns
+exactly the two locked-out tests red.
+
+A source-text canary would NOT have worked - the locked-out sentence is split
+across a string concatenation in app-users.ts, so it exists in the runtime
+string but never as a contiguous run in the file.
+
+**401e - `status_changed_by` was doing two incompatible jobs.** It was both the
+audit stamp AND the gate on allowlist revocation, so suspending an account
+once permanently disarmed demotion. `role_granted_by` now carries the second
+job, stamped only by `setAppUserRole` and cleared on demote. Backfilled NULL,
+deliberately: guessing from `status_changed_by` would re-import the exact
+ambiguity being removed. One-time cost, stated in the migration - a human
+promotion made before this deploys becomes demotable again on that account's
+next sign-in.
+
+**401f - the gate forwards the decision it already computed.** The root layout
+was re-reading the profile on every request, duplicating the gate's own read.
+With GC10's retry finding (a timed-out PostgREST read does not match
+postgrest-js's `AbortError` check and is retried 3 more times, ~39s worst case
+against a 60s cap) two such reads in series is a request that dies with no
+page. The gate now stamps `x-ta-access-decision` via
+`NextResponse.next({ request: { headers } })`. It OVERWRITES that header on
+every path including the public-path early return - a client could otherwise
+send it - and the layout validates against the known decisions and fails
+closed. This is DISCOVERABILITY ONLY; a fully spoofed header grants nothing
+but a visible nav link, because `requireAppOwner()` is the boundary.
+
+**401g - a correct denial was being presented as a crash.** The request gate
+admits any ACTIVE account, so an ordinary member reaching `/account/people`
+was refused by `requireAppOwner()` - correctly - but there is NO error boundary
+anywhere under `src/app` (no `error.tsx`, no `global-error.tsx`), so the throw
+rendered the framework's generic server-exception screen. The page now catches
+ONLY the owner-only refusal, recognised by comparing against
+`OWNER_ONLY_MESSAGE` exported from auth.ts (never a copied literal, so the two
+cannot drift), and rethrows everything else - turning a real outage into "you
+are not the owner" would tell the actual owner they had lost their access.
+
+**401h - gates, with real numbers.**
+
+- `npx vitest run`: 918 files, 18516 tests, all passing.
+- `npx tsc --noEmit`: exit 0, clean repo-wide.
+- `npx eslint .`: 0 errors (6 pre-existing warnings).
+- `npx next build`: "Compiled successfully" and "Finished TypeScript" both
+  reached. The static-prerender tail fails on a missing Supabase URL/key -
+  there is no `.env*` file on this machine at all - and the page it names
+  varies per run (/knowledge, /login/forgot, /_not-found, /account/diagnostics
+  all observed) because parallel workers race to hit it first. Environmental,
+  not a code defect.
+- `app-users.ts` finished at 995 lines against the 1000 ceiling; no split was
+  needed. Orphan-CSS ratchet TIGHTENED 137 -> 120 (nothing deleted; the new
+  index page and nav entry began using classes that were defined and unused).
+  Modal-adoption ratchet bumped 50 -> 51 and 35 -> 36 for the four
+  confirmation dialogs.
+- Byte-scan clean across every changed path. Three files carry non-ASCII or a
+  NUL - `TopBar.tsx`, `app-users.ts`, `REGRESSION.md` - and all three were
+  PROVEN pre-existing by diffing their non-ASCII lines against HEAD.
+
+**401i - LIMITS. What was never run, never rendered, never observed.**
+
+- **No component in this change has ever been rendered.** vitest here is
+  node-environment and collects only `*.test.ts`, never `.test.tsx`. The
+  account list, its seven-column table, the four confirmation dialogs, the
+  disabled-with-reason controls, the bidi-isolated name cell and the denial
+  page are verified BY READING ONLY. A green suite proves nothing about any
+  of it.
+- **The dialogs' focus trap, Escape handling and focus restoration are
+  unobserved.** They use the house ModalShell/useModalDismiss mechanism and
+  are reasoned against its contract and its existing adopters - not watched.
+- **Nothing was run against a real database or auth provider.** Every test
+  uses fake clients. The migration has not been applied here; it applies via
+  the GitHub Action on push.
+- **No approval has ever been performed.** The containment stands: nothing can
+  set a non-owner `active` except this surface, and it has not been used.
+  `requireOwner()` still means "any active account" at 532 call sites, so
+  approving somebody grants everything the approve dialog says it does.
+- **GC6 remains open.** `email_confirmed_at` is now READ for the list, but
+  still not persisted, so the approve dialog cannot render its per-row
+  unverified warning. Its first paragraph stands alone and correct.
+- **C5 (clearing a member's MFA factors) is NOT built.** No admin-side MFA
+  call exists anywhere in `src/`. The login and security pages' "use the
+  Supabase dashboard" copy must NOT be changed to name an administrator until
+  it is.
+- The pending-count nav badge (GC8) is not built.

@@ -1,0 +1,95 @@
+/* Owner account-management list (/account/people) - table, per-row action
+   controls and their confirmation dialogs. Layout only: colors, spacing and
+   button treatments are inherited from the shared settings-area stylesheet
+   (../security/security.module.css), imported alongside this file, so the
+   two surfaces read as one visual language rather than introducing a second
+   one just for this page.
+
+   No .page rule lives here on purpose (focusRing.wiring.test.ts's negative
+   case only reads a fixed file list - see that test's own header - and this
+   page reuses security.module.css's .page directly rather than declaring
+   its own, so there is nothing new for that guard to need to know about). */
+
+.tableWrap {
+  margin-top: var(--space-4);
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.table th,
+.table td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.table th {
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* A cell that stacks a primary value over an optional secondary line (the
+   ownership badge's own tooltip/warning text, or the "stored record still
+   says..." note) - Role and Status both use this. */
+.stackCell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.actionsCell {
+  min-width: 240px;
+}
+
+.actionButtons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* One action's button plus its own disabled-reason text, kept together so
+   the reason always reads as belonging to the control above it. */
+.actionSlot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 168px;
+}
+
+.actionReason {
+  font-size: var(--font-size-2xs);
+  color: var(--text-secondary);
+  line-height: var(--line-snug);
+}
+
+.dialogTitle {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: var(--line-tight);
+}
+
+.dialogBody {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  line-height: var(--line-normal);
+}
+
+.reloadBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}

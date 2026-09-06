@@ -270,7 +270,13 @@ const totalOrphanCount = orphanReports.reduce((sum, r) => sum + r.orphans.length
 // keys) is invisible to this scanner, so an orphan here is a CANDIDATE, not
 // a verdict.
 // ---------------------------------------------------------------------------
-const PINNED_ORPHAN_CEILING = 137;
+// Lowered 137 -> 120 on 2026-09-06 by the multi-user account surface work.
+// Nothing was deleted to achieve this: the count fell because the new
+// /account index page and the owner-aware navigation entry began USING
+// classes in security.module.css and TopBar.module.css that had been defined
+// but unreferenced. That is the direction this ratchet exists to capture, so
+// the pin follows it down in the same change, as the failure message demands.
+const PINNED_ORPHAN_CEILING = 120;
 
 function formatOrphanReport(): string {
   const lines: string[] = [];

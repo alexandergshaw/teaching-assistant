@@ -5,17 +5,42 @@ import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 import { setCacheOwner } from "@/lib/workflows/run-form-options-cache";
+import type { AccessDecision } from "@/lib/access";
 
 type SupabaseContextValue = {
   supabase: SupabaseClient<Database>;
   session: Session | null;
   user: User | null;
   loading: boolean;
+  /**
+   * The viewer's access decision, resolved on the SERVER (see
+   * src/app/layout.tsx) and handed down as a plain prop - never
+   * recomputed or seeded from localStorage on the client, which would be a
+   * hydration mismatch the moment the server and first client render
+   * disagreed. React only warns on that mismatch; it does not fail the
+   * build, so this is a real footgun, not a theoretical one.
+   *
+   * DISCOVERABILITY ONLY. This value (and `isOwnerDecision(accessDecision)`
+   * in particular) is what TopBar consults to decide whether to DRAW the
+   * owner-only "Accounts" nav entry - it is not, and must never become, an
+   * access-control check. The actual boundary is requireAppOwner() on the
+   * server (src/lib/supabase/auth.ts), which runs independently of
+   * whatever this field says and is not weakened by this field ever being
+   * wrong, stale, or "unavailable". See src/app/layout.tsx's own comment
+   * for how this is resolved and why it fails closed on any error.
+   */
+  accessDecision: AccessDecision;
 };
 
 const SupabaseContext = createContext<SupabaseContextValue | null>(null);
 
-export function SupabaseProvider({ children }: { children: React.ReactNode }) {
+export function SupabaseProvider({
+  children,
+  accessDecision,
+}: {
+  children: React.ReactNode;
+  accessDecision: AccessDecision;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,6 +87,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
     session,
     user: session?.user ?? null,
     loading,
+    accessDecision,
   };
 
   return <SupabaseContext.Provider value={value}>{children}</SupabaseContext.Provider>;

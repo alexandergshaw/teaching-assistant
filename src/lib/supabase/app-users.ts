@@ -87,11 +87,17 @@ export interface AppUserRow {
    * onto 'active'. Null for a row never touched by either function. */
   statusChangedAt: string | null;
   statusChangedBy: string | null;
+  /** GC1 FIX: set ONLY by setAppUserRole granting role='owner' - never by
+   * setAppUserStatus or reconciliation. ownerDemotionNeeded gates on THIS,
+   * not statusChangedBy - see that function's doc comment for why. */
+  roleGrantedBy: string | null;
 }
 
-type DbAppUserRow = Database["public"]["Tables"]["app_users"]["Row"];
+// Intersected in, not added to the generated Database type (types.tables-b.ts,
+// outside this change's file set) - matches this file's typed-mapper idiom.
+type DbAppUserRow = Database["public"]["Tables"]["app_users"]["Row"] & { role_granted_by: string | null };
 type DbAppUserInsert = Database["public"]["Tables"]["app_users"]["Insert"];
-type DbAppUserUpdate = Database["public"]["Tables"]["app_users"]["Update"];
+type DbAppUserUpdate = Database["public"]["Tables"]["app_users"]["Update"] & { role_granted_by?: string | null };
 
 /**
  * Map a raw app_users row (snake_case, as it comes back from Supabase) into
@@ -112,6 +118,7 @@ export function mapAppUserRow(row: DbAppUserRow): AppUserRow {
     updatedAt: row.updated_at,
     statusChangedAt: row.status_changed_at,
     statusChangedBy: row.status_changed_by,
+    roleGrantedBy: row.role_granted_by,
   };
 }
 
@@ -247,11 +254,41 @@ const LIFT_BAN_DURATION = "none";
  * action against someone else's id at all with what this codebase has
  * available.
  *
- * The ban/unban call happens BEFORE the app_users write and its error, if
- * any, is thrown immediately without touching the row - a suspend or
- * restore that fails to change the real Supabase account is therefore never
- * reported as a success (and the stored status is left exactly as it was,
- * so the UI and the account stay consistent with each other on failure too).
+ * The ban/unban call happens BEFORE the app_users write. If THAT call fails,
+ * its error is thrown immediately without ever touching the row - a suspend
+ * or restore that never changed the real Supabase account is therefore never
+ * reported as a success, and the stored status is left exactly as it was, so
+ * the UI and the account stay consistent with each other on that failure.
+ *
+ * BUG 1 FIX: the OTHER failure - the ban/unban call SUCCEEDS but the
+ * following `.update(...).select().single()` then fails - used to leave the
+ * real account already changed at the provider while the row kept saying
+ * whatever it said before, with NOTHING to notice the drift: nothing in this
+ * repository ever reads `banned_until` (the admin list renders straight from
+ * this row), so a suspend that "failed" here rendered as a healthy, active
+ * account while the account was actually banned for 100 years at the
+ * provider - and it could be UNRECOVERABLE from inside the app, because
+ * calling this same function again to reverse it hits the identical
+ * `.single()` failure mode (e.g. a row missing entirely, because the insert
+ * trigger absorbed a `lower(email)` collision). On a SUSPEND whose row write
+ * fails, this function now reverses the ban it just applied - before
+ * re-throwing - so the account's provider state goes back to matching its
+ * own (unchanged, because the write failed) row, exactly like the
+ * ban-failure branch above already guarantees. The thrown error says the
+ * account may be locked out, and says so more urgently if that reversal ALSO
+ * fails, since that is the one case with no automatic recovery left.
+ *
+ * The other direction (approve/restore, which LIFTS a ban) is deliberately
+ * NOT reversed on the same kind of failure: that call is harmless even when
+ * the account was never banned at all (an approve of a `pending` account has
+ * no ban to lift), so re-banning on a mere row-write failure would risk
+ * actively banning an account that was never suspended - a worse outcome
+ * than the failure being handled. Nothing is lost by skipping it either: the
+ * app_users row, not the provider ban, is what `resolveAccess`
+ * (src/lib/access.ts) actually gates on, so an account left unbanned with a
+ * stale `pending`/`suspended` row stays denied by that row check regardless;
+ * it only regains the provider ban's own separate layer of defense in depth
+ * once the write is retried and succeeds.
  *
  * HONESTY NOTE, because this matters for what "suspended" actually promises:
  * banning blocks future sign-in and refresh-token grants at Supabase's own
@@ -262,6 +299,9 @@ const LIFT_BAN_DURATION = "none";
  * suspended account's access ends within that remaining window, not
  * instantly. That is a real limit of the installed admin API's surface, not
  * an oversight in this function.
+ *
+ * GC1 FIX: never writes `role_granted_by` - only setAppUserRole may, so this
+ * function's ordinary actions never look like a human granting ownership.
  */
 export async function setAppUserStatus(
   id: string,
@@ -289,12 +329,34 @@ export async function setAppUserStatus(
 
   const { data, error } = await supabase
     .from("app_users")
-    .update(update)
+    .update(update as Database["public"]["Tables"]["app_users"]["Update"])
     .eq("id", id)
     .select()
     .single();
 
   if (error) {
+    if (status === "suspended") {
+      // BUG 1 FIX: the ban above already landed - reverse it before
+      // re-throwing. See this function's own doc comment for the full
+      // reasoning on why only THIS direction is compensated.
+      const { error: liftError } = await supabase.auth.admin.updateUserById(id, {
+        ban_duration: LIFT_BAN_DURATION,
+      });
+      if (liftError) {
+        throw new Error(
+          `Could not set status for app_users ${id}: ${error.message}. The account was already banned at ` +
+            `the provider, and reversing that ban ALSO failed (${liftError.message}) - the account may be ` +
+            `locked out at the provider with no automatic recovery. This needs manual intervention at the ` +
+            `auth provider (lift the ban on user ${id} directly).`
+        );
+      }
+      throw new Error(
+        `Could not set status for app_users ${id}: ${error.message}. The provider-side ban has been ` +
+          `reversed so the account is not left locked out while this write keeps failing - retry once the ` +
+          `underlying error is resolved.`
+      );
+    }
+
     throw new Error(`Could not set status for app_users ${id}: ${error.message}`);
   }
   return mapAppUserRow(data as DbAppUserRow);
@@ -308,6 +370,11 @@ export async function setAppUserStatus(
  * any record of who acted. Unlike setAppUserStatus, a role change never
  * needs to touch the account's Supabase session (role is an app-level
  * concept here, not something GoTrue's admin API bans or unbans).
+ *
+ * GC1 FIX: the ONLY function that ever writes `role_granted_by`. Promoting
+ * to 'owner' stamps it with `changedBy`; demoting CLEARS it to null instead -
+ * a stale value would mislead a later, unrelated promotion into inheriting a
+ * "human granted this" marker it never earned.
  */
 export async function setAppUserRole(
   id: string,
@@ -322,11 +389,12 @@ export async function setAppUserRole(
     updated_at: now,
     status_changed_at: now,
     status_changed_by: changedBy,
+    role_granted_by: role === "owner" ? changedBy : null,
   };
 
   const { data, error } = await supabase
     .from("app_users")
-    .update(update)
+    .update(update as Database["public"]["Tables"]["app_users"]["Update"])
     .eq("id", id)
     .select()
     .single();
@@ -338,9 +406,12 @@ export async function setAppUserRole(
 }
 
 /**
- * How many accounts are currently role='owner' AND status='active'. The
- * admin surface (a later wave) uses this to refuse a demotion or suspension
- * that would leave the deployment with zero owners able to approve anyone.
+ * How many accounts are currently STORED role='owner' AND status='active'.
+ *
+ * GC5 NOTE: undercounts the real owner population - an OWNER_EMAILS address
+ * that never signed in has no active row, invisible here even though it can
+ * sign in as owner via the break-glass path. See countEffectiveOwners below
+ * for "how many distinct owners exist"; this stays for existing callers.
  */
 export async function countActiveOwners(): Promise<number> {
   const supabase = createServiceClient();
@@ -354,6 +425,53 @@ export async function countActiveOwners(): Promise<number> {
     throw new Error(`Could not count active owners: ${error.message}`);
   }
   return count ?? 0;
+}
+
+/**
+ * GC5 FIX: the EFFECTIVE owner count - DISTINCT owner identities this
+ * deployment has, whether or not each has signed in. The union of (a) stored
+ * role='owner'/status='active' rows (countActiveOwners' own set) and (b)
+ * every OWNER_EMAILS address - a UNION, not a sum, so an address in both
+ * counts once, never twice.
+ *
+ * (a) alone undercounts: an OWNER_EMAILS address that never signed in has no
+ * reconciled row, yet resolveAccess (src/lib/access.ts) grants it 'owner'
+ * from the allowlist alone - a real owner countActiveOwners cannot see. A
+ * SUSPENDED stored row still counts too: resolveAccess's break-glass check
+ * returns 'owner' BEFORE the stored profile is read (its own doc comment,
+ * step 3), so every OWNER_EMAILS address is added unconditionally.
+ *
+ * Emails are trimmed/lower-cased exactly like isOwnerEmail (src/lib/owner.ts)
+ * - duplicated here because owner.ts exposes only a single-email predicate,
+ * not the parsed allowlist. A stored row with a null email (BUG 5) is added
+ * under a synthetic `id:<row id>` key so it still counts once.
+ *
+ * Deliberately uncached, with its own query - callers must invoke this
+ * INSIDE the mutation they are guarding, never carry a value forward from an
+ * earlier render.
+ */
+export async function countEffectiveOwners(): Promise<number> {
+  const allowlisted = (process.env.OWNER_EMAILS ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("app_users")
+    .select("id, email")
+    .eq("role", "owner")
+    .eq("status", "active");
+
+  if (error) {
+    throw new Error(`Could not count effective owners: ${error.message}`);
+  }
+
+  const identities = new Set<string>(allowlisted);
+  for (const row of (data ?? []) as { id: string; email: string | null }[]) {
+    identities.add(row.email ? row.email.trim().toLowerCase() : `id:${row.id}`);
+  }
+  return identities.size;
 }
 
 /**
@@ -408,26 +526,25 @@ function ownerPromotionNeeded(row: Pick<AppUserRow, "role" | "status">, isOwner:
  * pass inside ensureAppUser) reads OWNER_EMAILS exactly once and both halves
  * of that decision agree on the same snapshot of it.
  *
- * FU1 GATE (docs/multi-user-login-acceptance-criteria.md, "FOLLOW-UP
- * FINDINGS ON THE AS-BUILT CODE", FU1): reconciliation may demote a stored
- * role='owner' row ONLY when that row's own owner-hood came from
- * reconciliation itself - i.e. `statusChangedBy` is null. setAppUserRole
- * (below) always stamps `statusChangedBy` with the acting owner's real id
- * when a HUMAN explicitly promotes someone to 'owner' through the admin
- * surface. Without this gate, an owner's explicit promotion of a colleague
- * would be silently reverted on that colleague's very next request - the
- * exact "promote, and it un-promotes itself" bug FU1 describes. A row whose
- * `statusChangedBy` is non-null is left alone by this function entirely: an
- * owner explicitly promoted by another owner can only be walked back by
- * another explicit admin action (setAppUserRole), never by this silent
- * reconciliation pass.
+ * FU1 GATE (docs/multi-user-login-acceptance-criteria.md, FU1): reconciliation
+ * may demote a stored role='owner' row ONLY when its owner-hood came from
+ * reconciliation itself, never a human's explicit grant - otherwise an
+ * owner's promotion of a colleague would be silently reverted on their very
+ * next request.
+ *
+ * GC1 FIX: the test is `roleGrantedBy === null`, NOT the original FU1 gate's
+ * `statusChangedBy === null` - that column is ALSO the audit stamp
+ * setAppUserStatus writes on approve/suspend/restore, so gating on it made a
+ * merely-suspended-or-approved row look promoted, permanently disarming
+ * revocation. `roleGrantedBy` is written ONLY by setAppUserRole granting
+ * 'owner', so non-null means a human genuinely promoted this row.
  */
 function ownerDemotionNeeded(
-  row: Pick<AppUserRow, "role" | "statusChangedBy">,
+  row: Pick<AppUserRow, "role" | "roleGrantedBy">,
   isOwner: boolean,
   ownerEmailsConfigured: boolean
 ): boolean {
-  return !isOwner && ownerEmailsConfigured && row.role === "owner" && row.statusChangedBy === null;
+  return !isOwner && ownerEmailsConfigured && row.role === "owner" && row.roleGrantedBy === null;
 }
 
 /** The display_name fill half - see ownerPromotionNeeded above. */
@@ -735,20 +852,39 @@ export async function ensureAppUser(input: {
   // status write this function makes, exactly like setAppUserStatus and
   // setAppUserRole (above) stamp theirs on every write THEY make - this used
   // to be the one writer of role/status that left no record at all of what
-  // changed or when. The actor is explicitly `null`, not a fabricated id:
-  // both `approved_by` and `status_changed_by` are `uuid references
+  // changed or when. The actor defaults to `null`, not a fabricated id: both
+  // `approved_by` and `status_changed_by` are `uuid references
   // auth.users(id)` (see the migration), so a synthetic non-human sentinel
   // string cannot be written there without violating that foreign key, and
   // there is no dedicated "system" row in auth.users to point at instead
   // (adding one is a schema change outside this fix's scope). A non-null
   // `status_changed_at` paired with a null `status_changed_by` is this
-  // module's honest, self-documenting substitute: setAppUserStatus and
-  // setAppUserRole always receive a real caller id for this column, so that
-  // exact pairing can only mean "OWNER_EMAILS reconciliation did this," never
-  // "a person made this change but we forgot to record who."
+  // module's honest, self-documenting substitute for "OWNER_EMAILS
+  // reconciliation did this, not a person."
+  //
+  // BUG 2 FIX: that sentinel must not OVERWRITE a genuine human actor. The
+  // promotion branch above can fire against a row an owner just suspended
+  // (setAppUserStatus stamps status_changed_by with that owner's real id) -
+  // reconciliation then runs on that account's very next request (its token
+  // is still valid) and promotes it straight back via the OWNER_EMAILS
+  // break-glass path. Force-writing `null` here would silently erase the
+  // owner's own action from the record: the admin surface renders a null
+  // actor as "automatically", so the owner's deliberate suspend would read
+  // as a system event with no way to tell it apart from a genuine one.
+  // Preserving `current.statusChangedBy` when it is already non-null fixes
+  // that; when it is null (the common case - a row reconciliation itself
+  // promoted, or one that has never been touched by a human), this writes
+  // exactly the same `null` as before.
+  //
+  // GC1 FOLLOW-ON: no longer symmetric with promotion. The OLD gate meant
+  // demotion could only fire when `statusChangedBy` was already null; the
+  // new `roleGrantedBy` gate lets it fire on a row whose `statusChangedBy`
+  // is non-null (e.g. suspended, then later demoted) - preserving that would
+  // misattribute reconciliation's own action, so demotion always writes
+  // `null`; only promotion preserves it.
   if (update.role !== undefined || update.status !== undefined) {
     update.status_changed_at = new Date().toISOString();
-    update.status_changed_by = null;
+    update.status_changed_by = update.role === "owner" ? current.statusChangedBy : null;
   }
 
   if (displayNameFillNeeded(current) && resolvedDisplayName) {
@@ -771,7 +907,7 @@ export async function ensureAppUser(input: {
 
   const { data, error } = await supabase
     .from("app_users")
-    .update(update)
+    .update(update as Database["public"]["Tables"]["app_users"]["Update"])
     .eq("id", input.id)
     .select()
     .single();

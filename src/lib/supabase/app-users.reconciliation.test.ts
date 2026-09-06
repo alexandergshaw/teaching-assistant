@@ -19,6 +19,7 @@ import {
   ensureAppUser,
   ensureAppUserRowExists,
   appUserNeedsReconciliation,
+  setAppUserStatus,
   mapAppUserRow,
 } from "./app-users";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -36,6 +37,10 @@ interface FakeRow {
   updated_at: string;
   status_changed_at: string | null;
   status_changed_by: string | null;
+  // GC1: defaults to null in makeRow, so every existing case here keeps
+  // exercising ownerDemotionNeeded's demotable path unless a test explicitly
+  // overrides it to represent a genuine setAppUserRole promotion.
+  role_granted_by: string | null;
 }
 
 function makeRow(overrides: Partial<FakeRow> = {}): FakeRow {
@@ -51,9 +56,15 @@ function makeRow(overrides: Partial<FakeRow> = {}): FakeRow {
     updated_at: "2026-01-01T00:00:00.000Z",
     status_changed_at: null,
     status_changed_by: null,
+    role_granted_by: null,
     ...overrides,
   };
 }
+
+// Mirrors app-users.ts's own DbAppUserRow intersection (role_granted_by is
+// not on the generated Database row type) so a FakeRow can be cast to what
+// mapAppUserRow actually expects.
+type FakeDbRow = Database["public"]["Tables"]["app_users"]["Row"] & { role_granted_by: string | null };
 
 type FakeError = { message: string } | null;
 
@@ -179,7 +190,16 @@ describe("app-users: BUG 1 / FU1 - demotion and the human-approval / explicit-pr
     expect("status" in fake.captured.updates[0]).toBe(false);
   });
 
-  it("FU1: does NOT demote a role='owner' row an owner explicitly promoted via setAppUserRole (status_changed_by already set) - reconciliation must not silently undo an explicit promotion", async () => {
+  it("FU1/GC1: does NOT demote a role='owner' row an owner explicitly promoted via setAppUserRole (role_granted_by already set) - reconciliation must not silently undo an explicit promotion", async () => {
+    // GC1 FIX: this fixture now sets `role_granted_by` (the column
+    // ownerDemotionNeeded actually gates on), not only `status_changed_by`.
+    // A real setAppUserRole promotion stamps BOTH columns (see that
+    // function's own doc comment), so both are set here too - but it is
+    // `role_granted_by` alone that must be non-null for this test to prove
+    // anything about the CURRENT gate. See the "GC1" describe block below
+    // for the counter-case this composes with: a row whose `status_changed_by`
+    // is set by an ordinary suspend/approve (never by setAppUserRole) is NOT
+    // protected the way this one is, and reconciliation demotes it.
     process.env.OWNER_EMAILS = "someone-else@example.com";
 
     const fake = makeFakeServiceClient({
@@ -191,6 +211,7 @@ describe("app-users: BUG 1 / FU1 - demotion and the human-approval / explicit-pr
           role: "owner",
           status: "active",
           status_changed_by: "the-owner-who-promoted-them",
+          role_granted_by: "the-owner-who-promoted-them",
         }),
         error: null,
       },
@@ -201,6 +222,94 @@ describe("app-users: BUG 1 / FU1 - demotion and the human-approval / explicit-pr
 
     expect(result.role).toBe("owner");
     expect(fake.captured.updates).toHaveLength(0);
+  });
+});
+
+describe("app-users: GC1 - role_granted_by, not status_changed_by, gates demotion", () => {
+  const OWNER_EMAILS_BEFORE = process.env.OWNER_EMAILS;
+  beforeEach(() => vi.mocked(createServiceClient).mockReset());
+  afterEach(() => {
+    process.env.OWNER_EMAILS = OWNER_EMAILS_BEFORE;
+  });
+
+  it("THE EXACT BUG: an allowlisted owner suspended (or approved) by another owner is STILL demoted once removed from OWNER_EMAILS - impossible under the old statusChangedBy gate", async () => {
+    // Reproduces the bug verbatim: setAppUserStatus (suspend/approve/restore)
+    // stamps status_changed_by on every call, for every account - it is NOT
+    // evidence of an explicit role grant. Under the OLD gate
+    // (statusChangedBy === null), this row's non-null status_changed_by
+    // would have permanently blocked demotion the moment ANY admin action
+    // touched it. role_granted_by is null here (setAppUserRole never ran for
+    // this account - it became 'owner' via OWNER_EMAILS reconciliation
+    // alone), so the new gate correctly allows the demotion.
+    process.env.OWNER_EMAILS = "someone-else@example.com";
+
+    const fake = makeFakeServiceClient({
+      getUserById: { data: { user: { id: "suspended-then-removed", email: "removed3@example.com" } }, error: null },
+      maybeSingle: {
+        data: makeRow({
+          id: "suspended-then-removed",
+          email: "removed3@example.com",
+          role: "owner",
+          status: "suspended",
+          status_changed_by: "the-owner-who-suspended-them",
+          role_granted_by: null,
+        }),
+        error: null,
+      },
+      updateSingle: {
+        data: makeRow({
+          id: "suspended-then-removed",
+          email: "removed3@example.com",
+          role: "instructor",
+          status: "suspended",
+        }),
+        error: null,
+      },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(fake.client);
+
+    const result = await ensureAppUser({ id: "suspended-then-removed" });
+
+    expect(result.role).toBe("instructor");
+    expect(fake.captured.updates).toHaveLength(1);
+    expect(fake.captured.updates[0]).toMatchObject({ role: "instructor" });
+  });
+
+  it("a demotion always writes status_changed_by = null, even when the row's prior status_changed_by was a real owner's suspend/approve action - it must not misattribute reconciliation's own action", async () => {
+    process.env.OWNER_EMAILS = "someone-else@example.com";
+
+    const fake = makeFakeServiceClient({
+      getUserById: { data: { user: { id: "approved-then-removed", email: "removed4@example.com" } }, error: null },
+      maybeSingle: {
+        data: makeRow({
+          id: "approved-then-removed",
+          email: "removed4@example.com",
+          role: "owner",
+          status: "active",
+          approved_by: "the-owner-who-approved-them",
+          status_changed_by: "the-owner-who-approved-them",
+          role_granted_by: null,
+        }),
+        error: null,
+      },
+      updateSingle: {
+        data: makeRow({ id: "approved-then-removed", email: "removed4@example.com", role: "instructor", status: "active" }),
+        error: null,
+      },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(fake.client);
+
+    await ensureAppUser({ id: "approved-then-removed" });
+
+    const payload = fake.captured.updates[0];
+    expect(payload.role).toBe("instructor");
+    // approved_by is non-null (a human approved this account), so BUG 1's
+    // rule leaves status untouched here - only the allowlist-granted role
+    // reverts. See this file's earlier "demotes role but leaves status
+    // ALONE" test for that same rule with role_granted_by absent entirely.
+    expect("status" in payload).toBe(false);
+    expect(payload.status_changed_by).toBeNull();
+    expect(typeof payload.status_changed_at).toBe("string");
   });
 });
 
@@ -273,6 +382,58 @@ describe("app-users: BUG 6 - ensureAppUser's own writes stamp attribution", () =
     const payload = fake.captured.updates[0];
     expect(payload.approved_by).toBe("human-approver-id");
     expect(payload.approved_at).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  it("BUG 2 FIX: promotion PRESERVES an existing non-null status_changed_by (a human owner's prior suspend) instead of overwriting it with the reconciliation-did-this null sentinel", async () => {
+    // Sequence this reproduces: an owner suspends an allowlisted account
+    // (setAppUserStatus stamps status_changed_by with that owner's real id),
+    // then the suspended account makes one more request with a still-valid
+    // token. Reconciliation sees status !== 'active' and promotes it straight
+    // back via the OWNER_EMAILS break-glass path - it must not also erase the
+    // record of the owner's own suspend by overwriting status_changed_by with
+    // null (which the admin surface renders as "automatically").
+    process.env.OWNER_EMAILS = "allowlisted@example.com";
+
+    const fake = makeFakeServiceClient({
+      getUserById: {
+        data: {
+          user: {
+            id: "suspended-then-allowlisted",
+            email: "allowlisted@example.com",
+            email_confirmed_at: "2026-01-01T00:00:00.000Z",
+          },
+        },
+        error: null,
+      },
+      maybeSingle: {
+        data: makeRow({
+          id: "suspended-then-allowlisted",
+          email: "allowlisted@example.com",
+          role: "instructor",
+          status: "suspended",
+          status_changed_by: "owner-who-suspended",
+        }),
+        error: null,
+      },
+      updateSingle: {
+        data: makeRow({
+          id: "suspended-then-allowlisted",
+          email: "allowlisted@example.com",
+          role: "owner",
+          status: "active",
+          status_changed_by: "owner-who-suspended",
+        }),
+        error: null,
+      },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(fake.client);
+
+    await ensureAppUser({ id: "suspended-then-allowlisted" });
+
+    const payload = fake.captured.updates[0];
+    expect(payload.role).toBe("owner");
+    expect(payload.status).toBe("active");
+    expect(payload.status_changed_by).toBe("owner-who-suspended");
   });
 
   it("a display_name-only reconciliation does NOT stamp status_changed_at/status_changed_by - those columns track role/status changes, not name fills", async () => {
@@ -477,9 +638,7 @@ describe("app-users: BUG 7 - stale email reconciliation", () => {
   });
 
   it("appUserNeedsReconciliation reports true for a stale email even when role/status/display_name are all already correct", () => {
-    const row = mapAppUserRow(
-      makeRow({ email: "old@example.com", status: "active" }) as unknown as Database["public"]["Tables"]["app_users"]["Row"]
-    );
+    const row = mapAppUserRow(makeRow({ email: "old@example.com", status: "active" }) as unknown as FakeDbRow);
 
     expect(appUserNeedsReconciliation(row, "new@example.com")).toBe(true);
   });
@@ -544,5 +703,104 @@ describe("app-users: BUG 3 - ensureAppUserRowExists (insert-only recovery)", () 
       email: "recovered@example.com",
       display_name: "Recovered Name",
     });
+  });
+});
+
+// BUG 1 FIX coverage: setAppUserStatus compensates a just-applied SUSPEND ban
+// when the subsequent app_users row write fails. Uses its own minimal fake -
+// separate from makeFakeServiceClient above, which is shaped for
+// ensureAppUser/ensureAppUserRowExists's query surface, not setAppUserStatus's
+// (update-only, no upsert/maybeSingle, plus auth.admin.updateUserById).
+describe("app-users: BUG 1 - setAppUserStatus reverses a just-applied ban when the row write fails", () => {
+  beforeEach(() => vi.mocked(createServiceClient).mockReset());
+
+  interface StatusFakeConfig {
+    updateSingle?: { data: FakeRow | null; error: { message: string } | null };
+    /** Response for the SECOND auth.admin.updateUserById call only (the
+     * compensating reversal) - the first (the actual suspend) always
+     * succeeds in these tests, matching BUG 4's own dedicated tests for a
+     * failing FIRST call. */
+    compensatingBanCall?: { error: { message: string } | null };
+  }
+
+  function makeStatusFakeClient(config: StatusFakeConfig = {}) {
+    const banCalls: { id: string; attributes: Record<string, unknown> }[] = [];
+    const updates: Record<string, unknown>[] = [];
+
+    const client = {
+      auth: {
+        admin: {
+          updateUserById: (id: string, attributes: Record<string, unknown>) => {
+            banCalls.push({ id, attributes });
+            if (banCalls.length >= 2 && config.compensatingBanCall) {
+              return Promise.resolve(config.compensatingBanCall);
+            }
+            return Promise.resolve({ error: null });
+          },
+        },
+      },
+      from: (table: string) => {
+        if (table !== "app_users") throw new Error(`unexpected table in fake client: ${table}`);
+        return {
+          update: (payload: Record<string, unknown>) => {
+            updates.push(payload);
+            return {
+              eq: () => ({
+                select: () => ({
+                  single: () => Promise.resolve(config.updateSingle ?? { data: null, error: null }),
+                }),
+              }),
+            };
+          },
+        };
+      },
+    };
+
+    return { client: client as unknown as SupabaseClient<Database>, banCalls, updates };
+  }
+
+  it("lifts the ban it just applied before re-throwing, and says the account may be locked out", async () => {
+    const fake = makeStatusFakeClient({
+      updateSingle: { data: null, error: { message: "row not found" } },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(fake.client);
+
+    let thrown: Error | undefined;
+    try {
+      await setAppUserStatus("locked-user", "suspended", "owner-1");
+    } catch (e) {
+      thrown = e as Error;
+    }
+
+    expect(thrown?.message).toMatch(/row not found/);
+    expect(thrown?.message).toMatch(/locked out/i);
+    // The suspend's own ban call, then the compensating reversal - in that
+    // order, with the durations swapped.
+    expect(fake.banCalls).toHaveLength(2);
+    expect(fake.banCalls[0].attributes.ban_duration).toBe("876000h");
+    expect(fake.banCalls[1].attributes.ban_duration).toBe("none");
+    // The row write itself was never retried - only one update call.
+    expect(fake.updates).toHaveLength(1);
+  });
+
+  it("when the compensating reversal ALSO fails, says so explicitly and calls for manual intervention", async () => {
+    const fake = makeStatusFakeClient({
+      updateSingle: { data: null, error: { message: "row not found" } },
+      compensatingBanCall: { error: { message: "admin API unreachable" } },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(fake.client);
+
+    let thrown: Error | undefined;
+    try {
+      await setAppUserStatus("locked-user-2", "suspended", "owner-1");
+    } catch (e) {
+      thrown = e as Error;
+    }
+
+    expect(thrown?.message).toMatch(/row not found/);
+    expect(thrown?.message).toMatch(/admin API unreachable/);
+    expect(thrown?.message).toMatch(/locked out/i);
+    expect(thrown?.message).toMatch(/manual intervention/i);
+    expect(fake.banCalls).toHaveLength(2);
   });
 });

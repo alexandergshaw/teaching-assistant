@@ -44,19 +44,23 @@
 -- directly from the browser against Supabase Auth with the public anon key,
 -- so a value can reach this trigger having gone through no application
 -- validation at all. This migration does not attempt that sanitisation in
--- SQL - `clampDisplayName` remains the one real sanitiser, and it still runs
--- on the application side: `nameFromAuthMetadata`/`ensureAppUser` apply it to
--- the SAME `raw_user_meta_data` fields on every request that reaches
--- `requireUser()`'s reconciliation path, and `displayNameFillNeeded` means an
--- unclamped value written here by this trigger is only ever a STARTING
--- point - the first authorized request for that account that finds the
--- stored name still equal to whatever this trigger wrote will not re-fill it
--- (the column is already non-empty), but any code that renders
--- `display_name` must still treat it as self-asserted, not previously
--- untrusted, exactly as display-name.ts's own header comment already
--- requires of every caller. Put plainly: this migration exists to make sure
--- the column is filled in for the population that could never reach the
--- application-side clamp in the first place, not to replace that clamp.
+-- SQL, and `clampDisplayName` does NOT run a second time on a name THIS
+-- TRIGGER writes. `displayNameFillNeeded` (src/lib/supabase/app-users.ts) is
+-- `!row.displayName`: once this trigger has written a non-empty name, that
+-- check is false forever after, so `ensureAppUser` never re-clamps it - the
+-- fill-only path simply has no reason to run again. Worse, `ensureAppUser`'s
+-- reconciliation is reached only from `requireUser()`, and only AFTER that
+-- function's own deny check passes - so a `pending` or `suspended` account
+-- never reaches ANY application-side clamp at all. That denied population is
+-- exactly the one sitting in the owner's approval queue, which is the whole
+-- reason this migration exists (see this file's header above). For that
+-- population, a render-time clamp (a separate change, at the component that
+-- renders the approval queue) is the ONLY defence against a
+-- `raw_user_meta_data` value written directly from the browser with the
+-- public anon key - not a second layer behind this trigger's plain `left()`
+-- bound, which strips nothing but excess length. Put plainly: this migration
+-- fills the column in for a population the application-side clamp can never
+-- reach; it does not, and cannot by itself, make that value safe to render.
 --
 -- OBSERVABILITY FIX: the exception handler now RAISES A WARNING, with the
 -- failing id and the underlying SQLSTATE/SQLERRM, BEFORE it returns - the

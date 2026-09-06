@@ -19,6 +19,7 @@ import {
 import { confirmAndRemoveInstitution } from "@/lib/institution-removal";
 import { useThemePreference } from "@/hooks/useThemePreference";
 import { checkInstitutionsAction, getInstitutionDeletionImpactAction } from "../actions";
+import { isOwnerDecision, type AccessDecision } from "@/lib/access";
 import styles from "./TopBar.module.css";
 
 type InstitutionStatus = { canvasConfigured: boolean; llmConfigured: boolean };
@@ -28,6 +29,32 @@ type InstitutionStatus = { canvasConfigured: boolean; llmConfigured: boolean };
 // tabbed page.tsx: /knowledge, /account/*). Those routes never mount
 // KnowledgeTab.tsx, so there is no unsaved edit there to protect.
 const ALWAYS_ALLOW = () => true;
+
+/**
+ * DISCOVERABILITY ONLY - this is NOT the access control. It decides whether
+ * the owner-only "Accounts" entry (-> /account/people) is DRAWN in the
+ * Settings menu, so an owner can actually find that page; it is what AC C4
+ * calls "the nav entry renders from it". The boundary that keeps a
+ * non-owner OUT of /account/people is requireAppOwner() on the server
+ * (src/lib/supabase/auth.ts), enforced independently of whatever this
+ * function returns. A future reader must not "simplify" that server guard
+ * away on the theory that hiding this link is the real protection - it
+ * never was, and a non-owner who navigates to /account/people directly (or
+ * calls its server actions directly) is refused there regardless of this
+ * function's answer.
+ *
+ * Pure and exported so it is testable without rendering anything - see
+ * TopBar's own test file. Delegates to isOwnerDecision (src/lib/access.ts)
+ * rather than comparing against "owner" directly, so this can never quietly
+ * drift from the one place that rule is allowed to live. `null`/`undefined`
+ * (a context value that has not resolved, or a consumer outside the
+ * provider entirely) answers `false`, never `true` - matching the
+ * fail-closed contract of the server-side resolution that feeds this value
+ * (see src/app/layout.tsx's resolveViewerAccessDecision).
+ */
+export function shouldShowOwnerNavEntry(decision: AccessDecision | null | undefined): boolean {
+  return decision != null && isOwnerDecision(decision);
+}
 
 function InstitutionsSection({
   open,
@@ -323,6 +350,7 @@ function AppearanceSection() {
 }
 
 function SettingsMenu({ guardKbUnsavedEdits }: { guardKbUnsavedEdits: (code: string) => boolean }) {
+  const { accessDecision } = useSupabase();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -435,6 +463,16 @@ function SettingsMenu({ guardKbUnsavedEdits }: { guardKbUnsavedEdits: (code: str
           >
             Diagnostics
           </Link>
+          {shouldShowOwnerNavEntry(accessDecision) && (
+            <Link
+              href="/account/people"
+              className={styles.menuItem}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+            >
+              Accounts
+            </Link>
+          )}
         </div>
       )}
     </div>

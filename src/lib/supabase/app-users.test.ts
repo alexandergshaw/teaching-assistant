@@ -43,7 +43,9 @@ interface FakeRow {
   updated_at: string;
   status_changed_at: string | null;
   status_changed_by: string | null;
+  role_granted_by: string | null; // GC1: defaults to null in makeRow.
 }
+type FakeDbRow = Database["public"]["Tables"]["app_users"]["Row"] & { role_granted_by: string | null };
 
 function makeRow(overrides: Partial<FakeRow> = {}): FakeRow {
   return {
@@ -58,6 +60,7 @@ function makeRow(overrides: Partial<FakeRow> = {}): FakeRow {
     updated_at: "2026-01-01T00:00:00.000Z",
     status_changed_at: null,
     status_changed_by: null,
+    role_granted_by: null,
     ...overrides,
   };
 }
@@ -196,7 +199,7 @@ describe("app-users: mapAppUserRow", () => {
       status_changed_by: null,
     });
 
-    const mapped = mapAppUserRow(row as unknown as Database["public"]["Tables"]["app_users"]["Row"]);
+    const mapped = mapAppUserRow(row as unknown as FakeDbRow);
 
     expect(mapped).toEqual({
       id: "user-9",
@@ -210,6 +213,7 @@ describe("app-users: mapAppUserRow", () => {
       updatedAt: "2026-02-02T00:00:00.000Z",
       statusChangedAt: null,
       statusChangedBy: null,
+      roleGrantedBy: null,
     });
   });
 
@@ -220,7 +224,7 @@ describe("app-users: mapAppUserRow", () => {
       status_changed_by: "owner-3",
     });
 
-    const mapped = mapAppUserRow(row as unknown as Database["public"]["Tables"]["app_users"]["Row"]);
+    const mapped = mapAppUserRow(row as unknown as FakeDbRow);
 
     expect(mapped.statusChangedAt).toBe("2026-04-01T00:00:00.000Z");
     expect(mapped.statusChangedBy).toBe("owner-3");
@@ -752,7 +756,7 @@ describe("app-users: appUserNeedsReconciliation (differential against ensureAppU
       else delete process.env.OWNER_EMAILS;
 
       const predicateRow = c.row
-        ? mapAppUserRow(makeRow({ email: c.email, ...c.row }) as unknown as Database["public"]["Tables"]["app_users"]["Row"])
+        ? mapAppUserRow(makeRow({ email: c.email, ...c.row }) as unknown as FakeDbRow)
         : null;
       expect(appUserNeedsReconciliation(predicateRow, c.email)).toBe(c.expected);
 
@@ -850,13 +854,18 @@ describe("app-users: setAppUserStatus", () => {
     expect(typeof payload.status_changed_at).toBe("string");
   });
 
-  it("throws on a query error", async () => {
+  it("throws on a query error - the ban/unban call has already landed by then (BUG 1: see app-users.reconciliation.test.ts for the suspend-direction reversal this does NOT do here)", async () => {
     const fake = makeFakeServiceClient({
       updateSingle: { data: null, error: { message: "row not found" } },
     });
     vi.mocked(createServiceClient).mockReturnValue(fake.client);
 
     await expect(setAppUserStatus("missing", "active", "owner-1")).rejects.toThrow("row not found");
+    // A restore/approve's unban is never reversed on a row-write failure -
+    // see setAppUserStatus's own doc comment for why. Pin that only ONE ban
+    // call happened here (the original unban), not a second one.
+    expect(fake.captured.banCalls).toHaveLength(1);
+    expect(fake.captured.banCalls[0]).toMatchObject({ id: "missing", attributes: { ban_duration: "none" } });
   });
 
   it("BUG 4: suspending bans the Supabase account via auth.admin.updateUserById before writing app_users", async () => {
@@ -912,7 +921,7 @@ describe("app-users: setAppUserRole", () => {
     vi.mocked(createServiceClient).mockReset();
   });
 
-  it("updates role, updated_at, and (BUG 3) status_changed_at/status_changed_by", async () => {
+  it("updates role, updated_at, (BUG 3) status_changed_at/status_changed_by - see app-users.role-grant.test.ts for the (GC1) role_granted_by coverage", async () => {
     const fake = makeFakeServiceClient({
       updateSingle: { data: makeRow({ id: "u4", role: "owner" }), error: null },
     });

@@ -3,7 +3,13 @@ import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./types";
 import { getAppUserWithTimeout, ensureAppUserRowExists } from "./app-users";
-import { resolveAccess, isPublicPath, loginRedirectFor, type AccessProfile } from "../access";
+import {
+  resolveAccess,
+  isPublicPath,
+  loginRedirectFor,
+  type AccessProfile,
+  type AccessDecision,
+} from "../access";
 
 /**
  * BUG 1(a) (now fixed): a Supabase project that is slow but not fully DOWN
@@ -76,6 +82,54 @@ const boundedFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, signal: AbortSignal.timeout(PROFILE_LOOKUP_TIMEOUT_MS) });
 
 /**
+ * The header this gate stamps with the access decision it already computed,
+ * so the root layout (src/app/layout.tsx) can read it via `headers()`
+ * instead of recomputing the same getUser() + app_users lookup a SECOND time
+ * for every single request - that duplicate read (resolveViewerAccessDecision,
+ * deleted from layout.tsx by this same change) used to run this exact same
+ * resolveAccess pipeline again, moments after this function already had the
+ * answer, purely so TopBar could decide whether to draw the owner-only nav
+ * entry. See PROFILE_LOOKUP_TIMEOUT_MS's own comment for why a SINGLE such
+ * read already has a multi-second worst case on Vercel Hobby's 60s cap
+ * (postgrest-js does not recognize AbortSignal.timeout()'s "TimeoutError" as
+ * an abort, so a degraded read retries 3 more times with backoff) - two of
+ * them in series, on every anonymous request including /login, could
+ * approach that cap on their own.
+ *
+ * SECURITY: this header is ATTACKER-CONTROLLED INPUT on the way in - nothing
+ * stops a client from sending `x-ta-access-decision: owner` itself - so it
+ * must be treated as a PERFORMANCE / DISCOVERABILITY OPTIMISATION ONLY, never
+ * as an access-control signal. Two things make that safe:
+ *
+ *   1. This function OVERWRITES this header (or deletes it, when no decision
+ *      was computed) on EVERY response it returns - see `finalize` inside
+ *      updateSession below, which is the ONLY place either return path
+ *      constructs the response it actually sends, specifically so a
+ *      client-supplied value can never survive past this gate on any path it
+ *      handles, including the isPublicPath early return (a spoofed header
+ *      would otherwise reach /login untouched, since that path never calls
+ *      resolveAccess at all).
+ *   2. Even a value that somehow reached the layout unfiltered - a route this
+ *      gate's own matcher (src/proxy.ts's config.matcher) does not cover, for
+ *      instance - grants NOTHING: the layout's own parser
+ *      (parseAccessDecisionHeader in src/app/layout.tsx) still fails closed
+ *      on anything that is not a real, current AccessDecision literal, and
+ *      the parsed value only ever feeds TopBar's shouldShowOwnerNavEntry (a
+ *      nav-link VISIBILITY check - see SupabaseProvider.tsx's own doc
+ *      comment on the `accessDecision` field it carries). The actual boundary
+ *      that keeps a non-owner out of anything is requireAppOwner() on the
+ *      server (src/lib/supabase/auth.ts) plus this gate's own redirect above
+ *      - neither of those ever reads this header, so a fully spoofed value
+ *      can make an "Accounts" link merely visible, never usable.
+ *
+ * Kept to a single short token (one of the six AccessDecision literals, e.g.
+ * "owner" or "unavailable") rather than a JSON blob or anything larger - see
+ * the file-conventions/proxy.md doc's own warning that oversized headers can
+ * trigger a 431 from the backend web server.
+ */
+export const ACCESS_DECISION_HEADER = "x-ta-access-decision";
+
+/**
  * Refreshes the Supabase auth session on every request and gates the app
  * using the single access decision (resolveAccess, from ../access) - the
  * SAME decision the server-action guard (requireUser()/requireAppOwner() in
@@ -93,6 +147,67 @@ const boundedFetch: typeof fetch = (input, init) =>
  */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
+
+  /**
+   * Builds the response this function actually returns, on every path that
+   * is not one of the two redirects below - a redirect never forwards
+   * request headers upstream at all (NextResponse.redirect's own
+   * implementation, verified against the installed
+   * next/dist/server/web/spec-extension/response.js, never calls the
+   * internal handleMiddlewareField that NextResponse.next/rewrite do), so
+   * neither redirect needs to touch ACCESS_DECISION_HEADER for that reason -
+   * whatever this gate would have stamped is simply never read for a
+   * redirected request; the browser's follow-up request to /login runs this
+   * same gate again and gets its own fresh, correctly-sanitised header.
+   *
+   * `decision` is the decision already computed by this function, or `null`
+   * for the isPublicPath early return below, which never calls resolveAccess
+   * at all. `null` DELETES the header rather than inventing a fake decision
+   * to stamp for a path that never computed one - the layout's own parser
+   * (parseAccessDecisionHeader, src/app/layout.tsx) already treats an absent
+   * header as just one more case to fail closed on, exactly like a malformed
+   * or unrecognised one, so there is no separate "public path" literal that
+   * needs to exist in the AccessDecision union for this.
+   *
+   * Always clones `request.headers` FRESH, right here, rather than reusing a
+   * Headers object captured earlier in this function: the upstream-forwarding
+   * headers `NextResponse.next({ request: { headers } })` attaches are fixed
+   * at THAT CALL's construction time and are never updated by a later
+   * `response.cookies.set()`/`.delete()` (the cookies proxy in the installed
+   * response.js recomputes the middleware-request headers into a throwaway
+   * local clone on every cookie mutation, never writing them back onto the
+   * response's own header object - so whatever was true on `request.headers`
+   * when a given NextResponse.next(...) call was MADE is what actually ships,
+   * regardless of anything that happens to that response object afterwards).
+   * Reading `request.headers` fresh here - after getUser() and the MFA check
+   * below have already run, and therefore after any session refresh they
+   * triggered has already mutated `request.cookies`, and so `request.headers`,
+   * in place - is what makes the forwarded headers correct even when this
+   * request's session was refreshed earlier in this same call.
+   *
+   * `response` (the outer, `let`-bound variable @supabase/ssr's documented
+   * middleware pattern maintains via the cookies.setAll callback below) is
+   * never returned directly any more; its only remaining job is to accumulate
+   * whatever Set-Cookie a session refresh produced, which this function reads
+   * via `response.cookies.getAll()` and copies onto the response it actually
+   * returns - preserving the refreshed-session cookie exactly as before,
+   * without also inheriting `response`'s own stale (or, on the very first
+   * call, entirely client-supplied) request-header snapshot.
+   */
+  const finalize = (decision: AccessDecision | null): NextResponse => {
+    const headers = new Headers(request.headers);
+    // Unconditional: a client-supplied value must never survive, whether or
+    // not this call goes on to stamp a real decision in its place.
+    headers.delete(ACCESS_DECISION_HEADER);
+    if (decision) {
+      headers.set(ACCESS_DECISION_HEADER, decision);
+    }
+    const finalResponse = NextResponse.next({ request: { headers } });
+    for (const cookie of response.cookies.getAll()) {
+      finalResponse.cookies.set(cookie);
+    }
+    return finalResponse;
+  };
 
   const supabase = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -132,7 +247,12 @@ export async function updateSession(request: NextRequest) {
   // was 307-redirected to /login before its own HMAC verifier ever ran).
   const { pathname } = request.nextUrl;
   if (isPublicPath(pathname)) {
-    return response;
+    // No decision is computed on this path - see ACCESS_DECISION_HEADER's own
+    // comment for why a spoofed header reaching /login untouched used to be a
+    // real hole here specifically, and finalize's doc comment for why `null`
+    // (delete the header, stamp nothing) is the honest answer rather than
+    // inventing an AccessDecision literal for "never asked".
+    return finalize(null);
   }
 
   // BUG 1(b): `error` used to be destructured away entirely, so the gate
@@ -297,5 +417,12 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  return response;
+  // Reachable only when canUseApp(decision) is true (the redirectTarget
+  // branch above already returned otherwise) - decision is therefore always
+  // "active" or "owner" here, never one of the four blocked values. Stamping
+  // it lets the root layout answer TopBar's owner-nav check from this header
+  // instead of resolving the same decision a second time - see
+  // ACCESS_DECISION_HEADER's own comment for the duplicate-read problem this
+  // fixes and the security reasoning for why this is safe to expose.
+  return finalize(decision);
 }

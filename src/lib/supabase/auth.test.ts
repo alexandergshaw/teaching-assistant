@@ -43,6 +43,9 @@ function fakeAppUserRow(overrides: Partial<AppUserRow> = {}): AppUserRow {
     updatedAt: "2026-01-01T00:00:00.000Z",
     statusChangedAt: null,
     statusChangedBy: null,
+    // Null is the honest default: only setAppUserRole stamps this, so a
+    // fixture that has not been promoted by a human leaves it unset.
+    roleGrantedBy: null,
     ...overrides,
   };
 }
@@ -432,7 +435,40 @@ describe("requireAppOwner", () => {
     );
     vi.mocked(getAppUser).mockResolvedValue(fakeAppUserRow({ status: "active", role: "instructor" }));
 
-    await expect(requireAppOwner()).rejects.toThrow("Not authorized");
+    // ADMIN-GUARD FIX: this used to assert the generic "Not authorized. Sign
+    // in with an approved account." message - the EXACT message BUG 2 fixes,
+    // since it is false for this test's own caller (an active, already
+    // signed-in, already-approved account). Updated deliberately to the new
+    // owner-only wording rather than left asserting a message that is no
+    // longer thrown.
+    await expect(requireAppOwner()).rejects.toThrow("limited to the workspace owner");
+    await expect(requireAppOwner()).rejects.not.toThrow("Not authorized");
+  });
+
+  it("ADMIN-GUARD FIX: the active-non-owner denial is distinguishable from the generic 'Not authorized' message - an approved, signed-in instructor must never be told to sign in with an approved account when they already are one", async () => {
+    vi.mocked(createClient).mockResolvedValue(
+      makeFakeAuthClient({ user: { id: "u1", email: "m@example.com" } }) as never
+    );
+    vi.mocked(getAppUser).mockResolvedValue(fakeAppUserRow({ status: "active", role: "instructor" }));
+
+    await expect(requireAppOwner()).rejects.toThrow("This action is limited to the workspace owner.");
+  });
+
+  it("ADMIN-GUARD FIX: pending/suspended/unavailable denials for requireAppOwner() keep their EXISTING wording - only the active case's message changed", async () => {
+    vi.mocked(createClient).mockResolvedValue(
+      makeFakeAuthClient({ user: { id: "u1", email: "m@example.com" } }) as never
+    );
+
+    vi.mocked(getAppUser).mockResolvedValue(fakeAppUserRow({ status: "pending", role: "instructor" }));
+    await expect(requireAppOwner()).rejects.toThrow("Not authorized. Sign in with an approved account.");
+
+    vi.mocked(getAppUser).mockResolvedValue(fakeAppUserRow({ status: "suspended", role: "instructor" }));
+    await expect(requireAppOwner()).rejects.toThrow("Not authorized. Sign in with an approved account.");
+
+    vi.mocked(getAppUser).mockRejectedValue(new Error("connection reset"));
+    await expect(requireAppOwner()).rejects.toThrow(
+      "The account service is temporarily unavailable. Please try again in a moment."
+    );
   });
 
   it("throws when the app_users lookup throws (fails closed) - and (BUG 4) with the distinguishable 'unavailable' message", async () => {
@@ -533,9 +569,13 @@ describe("requireAppOwner", () => {
     await expect(runAsOwner(identity, () => requireUser())).rejects.toThrow("Not authorized");
   });
 
-  it("refuses a non-active owner-role identity in the impersonation store for requireAppOwner() too", async () => {
-    // role==='owner' alone must not be enough - a suspended/pending owner
-    // account impersonated by mistake must not be honoured either.
+  it("ADMIN-GUARD FIX: refuses a non-active owner-role identity in the impersonation store for requireAppOwner() too - role==='owner' alone is not enough", async () => {
+    // This used to be honoured: requireAppOwner() checked `role` only, making
+    // it the MORE privileged guard with the LOOSER impersonation
+    // precondition of the two (requireUser() already refused this same
+    // identity - see the parity test below). Fixed so a suspended/pending
+    // owner account impersonated by mistake, or a hand-rolled identity that
+    // never went through resolveImpersonationIdentity, is refused here too.
     const identity: OwnerIdentity = {
       id: "owner-2",
       email: "owner2@example.com",
@@ -543,16 +583,40 @@ describe("requireAppOwner", () => {
       status: "pending",
     };
 
-    // requireAppOwner() only checks `role`, by design (see its own doc
-    // comment) - this pins that this is a deliberate, narrow contract: the
-    // four callers of runAsOwner are responsible for never impersonating a
-    // non-active identity at all (resolveImpersonationIdentity always
-    // returns status 'active' or null), so requireAppOwner() itself does not
-    // re-derive status from an impersonated identity. Documented here so a
-    // future reader does not "fix" this into a status check without
-    // reading resolveImpersonationIdentity's contract first.
-    const result = await runAsOwner(identity, () => requireAppOwner());
-    expect(result.role).toBe("owner");
+    await expect(runAsOwner(identity, () => requireAppOwner())).rejects.toThrow("Not authorized");
+  });
+
+  it("ADMIN-GUARD FIX / PARITY CANARY: requireUser() and requireAppOwner() agree on every impersonated role/status combination - this fails if either guard's impersonation precondition drifts from the other's", async () => {
+    const statuses: Array<OwnerIdentity["status"]> = ["active", "pending", "suspended"];
+    const roles: Array<OwnerIdentity["role"]> = ["owner", "instructor"];
+
+    for (const status of statuses) {
+      for (const role of roles) {
+        const identity: OwnerIdentity = { id: "parity-check", email: "parity@example.com", role, status };
+
+        const userOutcome = await runAsOwner(identity, () => requireUser())
+          .then(() => "accepted" as const)
+          .catch(() => "refused" as const);
+        const ownerOutcome = await runAsOwner(identity, () => requireAppOwner())
+          .then(() => "accepted" as const)
+          .catch(() => "refused" as const);
+
+        // Both guards must reach the SAME verdict for the SAME impersonated
+        // identity - the exact property BUG 1 (the admin-capability review)
+        // found broken: requireAppOwner(), the MORE privileged guard, had a
+        // LOOSER precondition (role only) than requireUser() (role AND
+        // status). Wrapped with { status, role } so a failure names which
+        // combination diverged, rather than just "accepted" !== "refused".
+        expect({ status, role, userOutcome }).toEqual({ status, role, userOutcome: ownerOutcome });
+
+        const shouldAccept = role === "owner" && status === "active";
+        expect({ status, role, userOutcome }).toEqual({
+          status,
+          role,
+          userOutcome: shouldAccept ? "accepted" : "refused",
+        });
+      }
+    }
   });
 });
 

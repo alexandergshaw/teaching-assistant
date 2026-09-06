@@ -247,19 +247,181 @@ criterion.
 
 ## Group C - the owner's admin surface
 
-**C1. An owner can see who has an account.** A page under `/account` lists
-every profile with email, name, role, status and when they signed up, sorted
-newest first, with the pending ones surfaced first.
+REWRITTEN 2026-09-06, after Groups A and B shipped. Everything below is
+informed by what those chunks actually found; the original four criteria were
+written before any of it was known.
 
-**C2. Approve, suspend, restore, promote, demote.** Each is one click with an
-immediate optimistic state and a real error path. An owner cannot demote or
-suspend themselves into a state where no owner remains.
+**C0. APPROVING SOMEONE IS THE ACT THAT REMOVES THE CONTAINMENT. The UI must
+say so.** `requireOwner()` now means "any ACTIVE account" at ~496 invocations,
+and that is survivable today only because no code path can set a non-owner
+active. This surface is that code path. The moment an account is approved it
+reaches the owner's Canvas token, `GITHUB_TOKEN` (read AND write on private
+repositories), the cloned voice and the avatar likeness.
 
-**C3. Non-owners cannot reach it.** The page and every action behind it are
-gated by `requireAppOwner()`, and the check is on the server - hiding the nav
+So the approve confirmation states what it grants TODAY, in plain terms, and
+does not pretend the per-user credential work already exists. This is not a
+scary-dialog-for-its-own-sake: it is the one moment where the operator has the
+information and the authority to decide, and the cost of getting it wrong is
+someone else's Canvas gradebook.
+
+**C1. The account list.** Every row: email, display name, role, status, when
+they signed up, and when their status last changed and by whom. Pending first,
+then newest first. `display_name` is now written by the insert trigger, so
+rows have names - but it is SELF-ASSERTED and the browser can rewrite it after
+any clamp this app applies, so it is bidi-isolated and truncated AT RENDER as
+well. An owner reads that field next to an email to decide whom to approve; a
+right-to-left override in it changes what they read.
+
+**C1b. The queue cannot show an account with no row, and must not pretend
+otherwise.** The insert trigger swallows its exceptions, and a `lower(email)`
+collision discards the insert silently, so an account can exist in
+`auth.users` with nothing in `app_users`. The list reads `app_users`. Rather
+than leave that invisible, the page states the limitation where an owner will
+see it, and says what to ask for (the person's address) if someone reports
+signing up and never appearing.
+
+**C2. Approve, suspend, restore, promote, demote** - each gated by
+`canPerformAccountAction` in `src/lib/account-admin-rules.ts`, whose contract
+is already written and failing in `account-admin-rules.test.ts`. That module is
+the specification; the surface consumes it rather than re-deriving the rules.
+A control the rules refuse is rendered DISABLED WITH ITS REASON VISIBLE, never
+enabled-then-rejected.
+
+**C2b. The last-owner check cannot use `countActiveOwners` alone.** It counts
+stored `role='owner' AND status='active'` rows, and an `OWNER_EMAILS` owner
+who has not signed in since the migration is stored `instructor`/`pending` -
+so the count reads zero while a real owner exists, and the guard would refuse
+every demotion. It must fold in the allowlist.
+
+**C2c. Suspend and demote are unavailable for an `OWNER_EMAILS` account, and
+the UI says why.** The break-glass resolves such an address to `owner` without
+reading the row, and reconciliation rewrites the row on the next request. The
+control would write the database, report success, and change nothing - and
+worse, suspension DOES take effect at the auth provider, so the list would
+show `active` for an account that cannot sign in.
+
+**C3. Non-owners cannot reach it**, enforced by `requireAppOwner()` on the
+server. This surface is that guard's FIRST caller - it currently has none,
+which is why the role check it performs has been doing nothing. Hiding a nav
 entry is not the control.
 
-**C4. It is discoverable.** The owner does not have to know the URL.
+**C4. Discoverable, which needs plumbing that does not exist.**
+`SupabaseProvider` exposes no role, and `isOwnerEmail` is imported by zero
+`.tsx` files, so no client component can currently know it is an owner. The
+provider carries the access decision; the nav entry renders from it. `/account`
+itself has no page and 404s today while five links point into it.
+
+**C5. Clear a member's MFA factors.** The one lockout a member cannot resolve
+alone: both the login page and the security page tell them to use the Supabase
+dashboard, which only the owner can reach. With this capability, that copy
+finally changes to name the administrator - it would have been a lie before.
+
+**C6. Suspension already revokes the session, and the surface must not
+overstate it.** `setAppUserStatus` bans at the auth provider before writing the
+row, so a failed ban is never reported as a successful suspend. But an
+already-issued access token stays valid for its remaining lifetime, because
+PostgREST verifies it by signature alone. The confirmation says "within the
+hour", not "immediately".
+
+**C7. Every action is attributable.** `status_changed_at`/`status_changed_by`
+exist and are stamped. Reconciliation's own writes stamp a null actor
+deliberately - a real "system" actor would need a migration - so the list
+renders that as "automatically", never as a person.
+
+## Group C pre-build findings (2026-09-06)
+
+Four peer passes, run as four separate agents. The most consequential finding
+is a design flaw introduced by the FU1 fix two chunks ago.
+
+**GC1 (CRITICAL) - `status_changed_by` is doing two incompatible jobs.** FU1
+made reconciliation refuse to demote any row whose `status_changed_by` is set,
+so that an explicit promotion is never silently reverted. But that same column
+is the AUDIT stamp, written by approve, suspend and restore as well. So Group
+C's own buttons permanently disarm allowlist revocation: suspend an account
+once and removing its address from `OWNER_EMAILS` can never demote it again.
+The fail-closed revocation property recorded as PRESERVED under FU1 is lost
+the moment this surface exists.
+
+FIX: a dedicated column - `role_granted_by` - stamped only by
+`setAppUserRole`, with `ownerDemotionNeeded` checking that instead of the
+audit column. One idempotent `alter table add column if not exists`, one line
+in each of two functions, and the FU1 test updated to set the new column.
+
+**GC2 (HIGH) - the owner meets their own row at the top of their own approval
+queue, as a pending instructor.** `requireAppOwner` performs no reconciliation,
+and the break-glass admits an allowlisted address without ever reading its
+row - so the owner's stored row sits at the migration defaults
+(`instructor`/`pending`) indefinitely. The list sorts pending first, so it is
+the first thing they see. AMENDED: the list marks an allowlisted row as
+"owner via OWNER_EMAILS" and that badge OVERRIDES the displayed role and
+status, because the stored values are not the truth for that account.
+
+**GC3 (HIGH) - approving or promoting your own row converts revocable
+ownership into permanent ownership.** Following directly from GC2: the owner's
+own pending row is right there, and one click writes a stored `owner` that
+survives the address leaving `OWNER_EMAILS`. Together with self-suspend - one
+click, a 100-year provider ban, unrecoverable on a single-owner deployment -
+these are now refusals in the rules contract.
+
+**GC4 (HIGH) - five cells of the action matrix were unspecified, and each
+defaulted to something wrong.** Suspending a PENDING row is the sharp one:
+there is no "previous status" column, so restore writes `active` - meaning
+RESTORE APPROVES someone who was never approved, while the owner believes
+they are undoing a mistake. Promote on a pending row renders "Owner" for an
+account that cannot sign in. Both are now refused by the contract.
+
+**GC5 (HIGH) - the effective owner count is not what `countActiveOwners`
+counts.** It counts stored `role='owner' AND status='active'` rows. An
+allowlisted owner who has not signed in since the migration has neither, so
+the count reads zero while a real owner exists and the last-owner guard
+refuses every demotion. And the count must be recomputed INSIDE the mutation,
+never carried from the render, or two tabs each holding a stale count of two
+can leave the deployment with none.
+
+**GC6 (MEDIUM-HIGH) - "active" does not mean the address was ever confirmed,
+and the list cannot show that it wasn't.** `emailVerified` gates only the
+break-glass; the ordinary stored-row path admits an unconfirmed account. With
+confirmations off, approving grants everything in C0 to someone who never
+proved the address is theirs. `email_confirmed_at` is read by `ensureAppUser`
+and thrown away - nothing persists it. Deferred, with C0's confirmation
+carrying the warning in the interim.
+
+**GC7 (MEDIUM-HIGH) - "when they signed up" is the migration timestamp for
+every pre-existing account.** The backfill inserts no `created_at`, so every
+backfilled row shares the instant the Action ran, and the secondary sort
+returns zero for all of them. Label the column "account record created", or
+join the real value.
+
+**GC8 (HIGH, reliability) - RB8's alert as specified would destroy the only
+alert channel this deployment has.** A pending account is a legitimately
+persistent state; tripping the cron job on `pendingCount > 0` turns it red
+every fifteen minutes for as long as anyone is waiting, at 96 runs a day, and
+"this workflow is red" stops meaning "a schedule broke". AMENDED: trip on
+`oldestPendingAgeHours > 48`, in its own named step, gated to one tick a day.
+And add a live pending count to the nav - not a since-last-seen delta, because
+a pending account does not stop mattering when you look at it.
+
+**GC9 (MEDIUM) - there is still no rollback procedure, and Group C makes each
+artifact harder to undo.** A code revert removes the page and leaves the
+access: approvals persist, promotions are sticky by GC1's own gate, and bans
+live at the provider. The procedure's first line is the important one - UNDO
+THROUGH THE SURFACE BEFORE REVERTING THE CODE, because the page is the only
+thing that can move both systems together. And the mode that makes it
+unsafe: if the last owner has been suspended, the break-glass CANNOT save you,
+because a banned account can never mint a token for that decision to run
+against.
+
+---
+
+## Deliberately NOT in Group C
+
+Account deletion (nothing in `src/` calls `admin.deleteUser`, and the cascade
+would still leave storage objects, null-owner chat rows and third-party state
+behind); invite-by-email; admin-initiated password reset; email correction;
+per-account consumption counts; and any approval NOTIFICATION - there is no
+mailer in this repo and the auth provider sends only its own four templates,
+so a promise of one would be a lie. Each of these is recorded so its absence
+is a decision rather than an oversight.
 
 ---
 
@@ -1335,3 +1497,121 @@ direct test coverage; the ~60 files that mock `requireOwner` only test their
 own error handling. The access decision, the gate's routing table and the
 guard split therefore ship WITH tests written before the implementation, and
 those tests are the regression baseline for this area.
+
+## Group C build-wave findings and artifacts (2026-09-06)
+
+**GC10 (HIGH, reliability) - a bounded read is not a bounded operation.**
+Discovered while bounding the server Supabase clients. `AbortSignal.timeout()`
+rejects with a `DOMException` named `"TimeoutError"`. `postgrest-js` checks
+`fetchError?.name === 'AbortError'` before deciding a failure is not
+retryable - and `"TimeoutError"` does not match. So a timed-out SELECT is
+treated as an ordinary retryable network error and re-runs up to
+`DEFAULT_MAX_RETRIES` (3) more times, each with a FRESH timeout, separated by
+exponential backoff. One degraded read at an 8 second bound therefore costs up
+to 4 x 8s + ~7s of backoff, about 39 seconds, against a 60 second platform
+cap. Writes are not in `RETRYABLE_METHODS` and fail on the first timeout.
+
+Consequences taken here: the account list must NOT run its reads
+sequentially - two degraded reads in series exceed the cap on their own and
+the request dies with no page at all. The owner-count read and the account
+list read are issued together. This is also why the layout's decision read is
+bounded tightly and fails closed rather than retrying.
+
+Worth noting for anyone reading `server.ts` later: the final shape is still
+`{ data: null, error }`, never a thrown exception, so callers that check
+`error` are correct. But `error.hint` and `error.code` stay empty, because
+postgrest-js's own "aborted" hint-building recognises only `"AbortError"`
+too. A timed-out read is therefore an error with no diagnostic text.
+
+**Ban compensation is deliberately ASYMMETRIC, and that is not an oversight.**
+`setAppUserStatus` bans before writing the row, so a failed ban is never
+reported as a successful suspend. When the ban succeeds and the row write then
+fails, the suspend direction now reverses the ban before re-throwing. The
+approve/restore direction does NOT reverse its unban, because
+`LIFT_BAN_DURATION` is applied on every non-suspend transition including a
+first approval of an account that was never banned - "compensating" there
+would ban an account that had never been suspended, which is worse than the
+failure it is meant to handle. `resolveAccess` gates on the stored `status`
+column and never on `banned_until`, so the un-reversed unban costs one layer
+of defence-in-depth until a retry succeeds, and costs nothing in access terms.
+Do not make this symmetric.
+
+**Artifacts produced in this wave, so their absence later is noticed:**
+
+- `docs/account-people-copy.md` - every user-visible string on the account
+  list, with the claim each one makes checked against the code underneath it.
+  Written BEFORE the page, because the previous chunk's sabotage check caught
+  a missing copy sheet after the fact.
+- `docs/multi-user-rollback.md` - the GC9 procedure. Its first line is the
+  load-bearing one: undo through the surface before reverting the code, because
+  the surface is the only thing that moves the database and the auth provider
+  together.
+- `src/lib/account-people-view.ts` and its contract - the pure view-model. It
+  exists because this repo's vitest is node-environment and renders no
+  component, so a rule that lives in JSX is a rule nothing can test. Every
+  judgement on that surface lives in the module; the page owns layout and copy
+  and nothing else.
+
+**One decision recorded so it is not re-litigated:** the GC2 allowlist
+override changes what is DISPLAYED and must never change what is DECIDED.
+`canPerformAccountAction` receives the row's real stored role and status,
+because its own rules - the last-owner guard, the starting-state
+preconditions, the allowlist refusals - are written against the database as it
+actually is. Feeding it the overridden owner/active values would silently
+change verdicts on exactly the rows most likely to be wrong.
+
+---
+
+## BLOCKER4 - SIGNUP_MODE=open is dead code that reads as live (2026-09-06)
+
+Found during the rollback-doc rewrite, verified independently afterwards.
+
+`signupMode()`, `initialStatusForSignup()` and `decideInitialAccount()` in
+`src/lib/signup-rules.ts` have **ZERO production call sites**. Measured:
+
+```
+grep -rn "decideInitialAccount|initialStatusForSignup" src --include=*.ts --include=*.tsx
+grep -rn "signupMode\(" src --include=*.ts --include=*.tsx
+```
+
+Every hit is inside `signup-rules.ts` itself, `signup-rules.test.ts`, or a
+comment. `src/app/actions/auth-signup.ts` states in capitals in its own header
+that it NEVER writes `role` and does not persist `status` either; the account
+row comes from the insert trigger's column defaults, `role='instructor'` and
+`status='pending'`.
+
+**So the property "no code path can set a non-owner active" - the single
+containment holding this deployment together while `requireOwner()` means "any
+active account" at 532 call sites - holds because of a COLUMN DEFAULT, not
+because of the sign-up mode logic that appears to govern it.**
+
+That is fine today. It is a trap tomorrow. `signup-rules.ts` documents an
+`open` mode whose entire stated purpose is to activate an account
+immediately, and wiring it in is the obvious next step for anyone reading that
+file - the code looks finished and merely unreferenced. Wiring it in before
+Group D/E containment exists would give EVERY SIGNUP, from anyone who can
+reach the deployment, the owner's Canvas token, the GitHub token with
+read-write access to private repositories, the cloned voice and the avatar
+likeness, with no approval step in between.
+
+**Required before `SIGNUP_MODE` is connected to anything:**
+
+1. Group E per-user credentials must exist, so an active non-owner account
+   reaches its OWN credentials rather than the deployment owner's.
+2. The `requireOwner()` call sites must be reclassified, so "active" stops
+   meaning "owner".
+3. A test must assert that `open` cannot produce an `active` row while either
+   of the above is outstanding.
+
+Until then the honest options are to delete the dead mode or to leave it with
+this note attached. It is recorded here rather than only in the source because
+the source is exactly where it looks harmless.
+
+**Corrected in passing:** an earlier claim that a wrong `drop` order in the
+`app_users` migration "breaks sign-up project-wide" overstates it. The
+trigger's exception-swallow makes a wrong order survivable rather than fatal -
+sign-up keeps working, and every subsequent account silently gets no
+`app_users` row at all. Quiet, not loud, which is worse to diagnose and is
+what the rollback document now says.
+
+---

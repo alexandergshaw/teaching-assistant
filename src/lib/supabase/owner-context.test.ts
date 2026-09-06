@@ -44,6 +44,9 @@ function fakeAppUserRow(overrides: Partial<AppUserRow> = {}): AppUserRow {
     updatedAt: "2026-01-01T00:00:00.000Z",
     statusChangedAt: null,
     statusChangedBy: null,
+    // Null is the honest default: only setAppUserRole stamps this, so a
+    // fixture that has not been promoted by a human leaves it unset.
+    roleGrantedBy: null,
     ...overrides,
   };
 }

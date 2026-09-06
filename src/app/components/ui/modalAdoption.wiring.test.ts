@@ -263,7 +263,14 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // new send/delete confirm banner reuses KnowledgeTab.tsx's exact
     // role="alertdialog" .kbWarnBanner shell, so it adds to the non-adopting
     // side (PERMANENT_EXCLUSIONS), not to ADOPTING_PATHS.
-    expect(DIALOG_SITES.length).toBe(50);
+    //
+    // 51, not 50, as of the owner account-management screen chunk
+    // (docs/account-people-copy.md): account/people/AccountPeopleList.tsx is
+    // one more new dialog site, on the same terms as MessageDraftsTab.tsx's
+    // predecessors before it - it adopts ModalShell from birth for its four
+    // approve/suspend/promote/demote confirmations, so it lands in
+    // ADOPTING_PATHS below rather than on any non-adopting allowlist.
+    expect(DIALOG_SITES.length).toBe(51);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -320,7 +327,10 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // thirty-four described above plus
     // grading-recording/LegibilityProbeModal.tsx, which likewise adopts
     // ModalShell from birth.
-    expect(ADOPTING_PATHS.size).toBe(35);
+    // 36 as of the owner account-management screen chunk - the thirty-five
+    // described above plus account/people/AccountPeopleList.tsx, which
+    // likewise adopts ModalShell from birth.
+    expect(ADOPTING_PATHS.size).toBe(36);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

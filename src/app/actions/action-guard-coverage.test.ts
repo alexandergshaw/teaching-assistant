@@ -37,14 +37,38 @@ import { describe, expect, it } from "vitest";
  *      is the nudge to keep the list honest.
  */
 
-const ACTIONS_DIR = path.join(process.cwd(), "src", "app", "actions");
+// BUG 2(a) FIX: every "use server" module in this app lives somewhere under
+// src/app - not necessarily flat inside src/app/actions. The collector used
+// to do a single flat `readdirSync` of src/app/actions only, so an action placed in a
+// subdirectory (e.g. src/app/actions/admin/*.ts) or colocated with its own
+// page (e.g. src/app/account/.../actions.ts) was invisible to
+// `collectActionExports()` entirely - which both tests below key off of, so
+// such an action would silently escape BOTH the allowlist-free root-layout
+// check and the guard-coverage ratchet, exactly the class of bug this file
+// exists to prevent. Walking is now recursive, rooted at src/app rather than
+// just src/app/actions, so both examples are covered by the same fix.
+const APP_DIR = path.join(process.cwd(), "src", "app");
 const GUARD_CALL = /\brequire(Owner|User|AppOwner)\s*\(/;
+// BUG 2(b): these two are deliberately separate from GUARD_CALL above.
+// GUARD_CALL only proves SOME guard was called; an OWNER_ONLY entry needs to
+// prove WHICH one - requireAppOwner() is the only one that actually checks
+// for the owner. requireOwner() is a bare `return requireUser()` alias (see
+// src/lib/supabase/auth.ts) that admits ANY active account, not just the
+// owner, so its presence must fail an owner-only check exactly like a bare
+// requireUser() would.
+const REQUIRE_APP_OWNER_CALL = /\brequireAppOwner\s*\(/;
+const BARE_REQUIRE_OWNER_CALL = /\brequireOwner\s*\(/;
+const BARE_REQUIRE_USER_CALL = /\brequireUser\s*\(/;
 
 interface ActionExport {
   file: string;
   name: string;
   line: number;
   guarded: boolean;
+  // Full source of the export, from its signature line up to (excluding)
+  // the closing brace - kept so a caller can check WHICH guard was used
+  // (see OWNER_ONLY below), not merely whether one was called at all.
+  body: string;
 }
 
 function isUseServerModule(text: string): boolean {
@@ -52,17 +76,40 @@ function isUseServerModule(text: string): boolean {
 }
 
 /**
- * Collect every `export async function` in every "use server" module under
- * src/app/actions, and whether its body calls a guard. The body is taken as
- * everything up to the next closing brace in column zero, which is exactly
- * how a top-level function ends under this repo's formatting.
+ * Recursively list every non-test .ts/.tsx file under `dir`. Widened beyond
+ * .ts (BUG 2(a)): the `"use server"` directive is a file-level React/Next.js
+ * convention, not a `.ts`-specific one - node_modules/next/dist/docs's own
+ * `use-server.md` shows the identical file-level form under both a
+ * `page.tsx` filename and an `actions.ts` one, so a colocated action sitting
+ * in a `.tsx` file (plausible for the next actions this repo adds, colocated
+ * with an admin page) cannot be assumed away.
+ */
+function collectCandidateFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      found.push(...collectCandidateFiles(path.join(dir, entry.name)));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (!/\.tsx?$/.test(entry.name)) continue;
+    if (entry.name.includes(".test.")) continue;
+    found.push(path.join(dir, entry.name));
+  }
+  return found;
+}
+
+/**
+ * Collect every `export async function` in every "use server" module
+ * anywhere under src/app, and whether its body calls a guard. The body is
+ * taken as everything up to the next closing brace in column zero, which is
+ * exactly how a top-level function ends under this repo's formatting.
  */
 function collectActionExports(): ActionExport[] {
   const found: ActionExport[] = [];
 
-  for (const name of fs.readdirSync(ACTIONS_DIR)) {
-    if (!name.endsWith(".ts") || name.includes(".test.")) continue;
-    const text = fs.readFileSync(path.join(ACTIONS_DIR, name), "utf8");
+  for (const filePath of collectCandidateFiles(APP_DIR)) {
+    const text = fs.readFileSync(filePath, "utf8");
     if (!isUseServerModule(text)) continue;
 
     const lines = text.split(/\r?\n/);
@@ -71,11 +118,13 @@ function collectActionExports(): ActionExport[] {
       if (!match) continue;
       let end = i + 1;
       while (end < lines.length && lines[end] !== "}") end++;
+      const body = lines.slice(i, end).join("\n");
       found.push({
-        file: name,
+        file: path.relative(APP_DIR, filePath).replace(/\\/g, "/"),
         name: match[1],
         line: i + 1,
-        guarded: GUARD_CALL.test(lines.slice(i, end).join("\n")),
+        guarded: GUARD_CALL.test(body),
+        body,
       });
     }
   }
@@ -204,6 +253,88 @@ const PINNED_UNGUARDED = [
   "unsplashConfiguredAction",
 ].sort();
 
+/**
+ * BUG 2(b): `GUARD_CALL` above (and therefore the ratchet's `guarded`
+ * boolean) treats `requireOwner()`, `requireUser()`, and `requireAppOwner()`
+ * as interchangeable "some guard was called" evidence. That is correct for
+ * the ratchet's own job - keeping the UNGUARDED list from growing - but it
+ * cannot express a stronger requirement: an action that must be reachable by
+ * the OWNER ONLY (approve/suspend/promote/demote an account, and anything
+ * else that changes another account's standing) is not actually protected by
+ * `requireOwner()` or a bare `requireUser()` - both admit ANY ACTIVE ACCOUNT,
+ * because `requireOwner()` is now a `return requireUser()` alias (see
+ * src/lib/supabase/auth.ts). An admin action written with the guard
+ * everyone else in this file uses would still show `guarded: true` and pass
+ * every test above, while being reachable by any signed-in account rather
+ * than only the deployment owner - and lint, tsc, build, and the rest of
+ * this suite would all stay green.
+ *
+ * When the next agent adds them, each export name goes here with a one-line
+ * reason, and `checkOwnerOnlyEntry` below then requires that its body calls
+ * `requireAppOwner(` and calls neither `requireOwner(` nor a bare
+ * `requireUser(`. Do not add requireUser()/requireOwner() as a "temporary"
+ * entry to get this list populated - an entry here that isn't actually
+ * owner-gated defeats the point of the map.
+ *
+ * Populated below with the five account-admin actions
+ * (src/app/account/people/actions.ts): approve/suspend/restore/promote/demote
+ * another account. Each is a thin wrapper that calls requireAppOwner()
+ * directly in its own body (not merely through a shared helper - see that
+ * file's module comment for why the guard call has to be textually present in
+ * each export for this ratchet to see it) before delegating the rest of its
+ * work to a shared, unexported pipeline.
+ */
+const OWNER_ONLY: Record<string, string> = {
+  approveAccountAction:
+    "Approves a pending account onto the owner's own shared credentials (Canvas, GitHub, voice, avatar); only the owner may grant that access to another account.",
+  suspendAccountAction:
+    "Bans another account at the auth provider and revokes its stored access; only the owner may revoke another account's standing.",
+  restoreAccountAction:
+    "Reinstates a suspended account's access; only the owner may reverse a suspension they, or another owner, imposed.",
+  promoteAccountAction:
+    "Grants another account owner-level control over every account in this workspace, including the acting owner's own; only the owner may grant that.",
+  demoteAccountAction:
+    "Removes another account's owner-level control over the workspace; only the owner may revoke that standing.",
+};
+
+/**
+ * Checks one OWNER_ONLY entry against the collected action exports. Pulled
+ * out of the `it` block below so the failure path (an entry naming an export
+ * that does not exist, or one that relies on the wrong guard) can itself be
+ * exercised by a test with a synthetic fixture - see "the OWNER_ONLY check
+ * itself..." below - rather than relying on the real, currently-empty map to
+ * prove the logic works, which would pass vacuously either way.
+ */
+function checkOwnerOnlyEntry(
+  name: string,
+  reason: string,
+  byName: ReadonlyMap<string, ActionExport>
+): { ok: boolean; message: string } {
+  const action = byName.get(name);
+  if (!action) {
+    return { ok: false, message: `${name} is listed in OWNER_ONLY but is not an action export` };
+  }
+  if (reason.trim().length <= 10) {
+    return { ok: false, message: `${name} needs a stated reason` };
+  }
+  if (!REQUIRE_APP_OWNER_CALL.test(action.body)) {
+    return { ok: false, message: `${name} must call requireAppOwner( directly` };
+  }
+  if (BARE_REQUIRE_OWNER_CALL.test(action.body)) {
+    return {
+      ok: false,
+      message: `${name} must not rely on requireOwner( - it delegates to requireUser() and would admit any active account, not just the owner`,
+    };
+  }
+  if (BARE_REQUIRE_USER_CALL.test(action.body)) {
+    return {
+      ok: false,
+      message: `${name} must not rely on requireUser( - it would admit any active account, not just the owner`,
+    };
+  }
+  return { ok: true, message: "" };
+}
+
 describe("server actions reachable from the root layout", () => {
   it("finds the root-layout action surface at all", () => {
     // If this walk ever returns nothing, the test below passes vacuously and
@@ -273,5 +404,97 @@ describe("guard coverage ratchet over every other server action", () => {
     for (const pinned of PINNED_UNGUARDED) {
       expect(names.has(pinned), `${pinned} is pinned but no longer exists`).toBe(true);
     }
+  });
+});
+
+describe("owner-only guard ratchet (BUG 2(b))", () => {
+  it("every OWNER_ONLY action calls requireAppOwner directly, never requireOwner/requireUser", () => {
+    const byName = new Map(collectActionExports().map((a) => [a.name, a]));
+    for (const [name, reason] of Object.entries(OWNER_ONLY)) {
+      const result = checkOwnerOnlyEntry(name, reason, byName);
+      expect(result.ok, result.message).toBe(true);
+    }
+  });
+
+  it("the OWNER_ONLY check itself fails for a name that is not an action export", () => {
+    // Proves the ratchet cannot rot silently: with OWNER_ONLY empty today,
+    // the test above passes vacuously and demonstrates nothing about whether
+    // checkOwnerOnlyEntry actually catches anything. This exercises it
+    // directly against a synthetic, deliberately-invalid entry.
+    const byName = new Map(collectActionExports().map((a) => [a.name, a]));
+    const result = checkOwnerOnlyEntry(
+      "thisActionExportDoesNotExist",
+      "a real, long-enough reason",
+      byName
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("the OWNER_ONLY check itself fails for an action guarded by a bare requireUser()", () => {
+    // The exact scenario BUG 2(b) describes: an admin action written with
+    // the guard everyone else uses. Synthetic fixture, not a real export -
+    // see the test above for why a real one cannot prove this today.
+    const byName = new Map<string, ActionExport>([
+      [
+        "fakeApproveAccountAction",
+        {
+          file: "actions/fake.ts",
+          name: "fakeApproveAccountAction",
+          line: 1,
+          guarded: true,
+          body: "export async function fakeApproveAccountAction() {\n  await requireUser();\n}",
+        },
+      ],
+    ]);
+    const result = checkOwnerOnlyEntry(
+      "fakeApproveAccountAction",
+      "a real, long-enough reason",
+      byName
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("the OWNER_ONLY check itself fails for an action guarded by the requireOwner() alias", () => {
+    // requireOwner() is a bare `return requireUser()` (src/lib/supabase/auth.ts)
+    // - it must fail this check exactly like a direct requireUser() call.
+    const byName = new Map<string, ActionExport>([
+      [
+        "fakeSuspendAccountAction",
+        {
+          file: "actions/fake.ts",
+          name: "fakeSuspendAccountAction",
+          line: 1,
+          guarded: true,
+          body: "export async function fakeSuspendAccountAction() {\n  await requireOwner();\n}",
+        },
+      ],
+    ]);
+    const result = checkOwnerOnlyEntry(
+      "fakeSuspendAccountAction",
+      "a real, long-enough reason",
+      byName
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("the OWNER_ONLY check itself passes for an action guarded by requireAppOwner()", () => {
+    const byName = new Map<string, ActionExport>([
+      [
+        "fakePromoteAccountAction",
+        {
+          file: "actions/fake.ts",
+          name: "fakePromoteAccountAction",
+          line: 1,
+          guarded: true,
+          body: "export async function fakePromoteAccountAction() {\n  await requireAppOwner();\n}",
+        },
+      ],
+    ]);
+    const result = checkOwnerOnlyEntry(
+      "fakePromoteAccountAction",
+      "a real, long-enough reason",
+      byName
+    );
+    expect(result.ok, result.message).toBe(true);
   });
 });

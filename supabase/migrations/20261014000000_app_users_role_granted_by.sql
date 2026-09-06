@@ -1,0 +1,86 @@
+-- Multi-user login follow-up: role_granted_by, a column dedicated to exactly
+-- one question - "did a human explicitly grant this row its CURRENT
+-- role='owner' through the admin surface" - split out of status_changed_by,
+-- which answers a different question entirely. See
+-- src/lib/supabase/app-users.ts (setAppUserRole, setAppUserStatus,
+-- ownerDemotionNeeded) for the code this column backs, and
+-- supabase/migrations/20261012000000_create_app_users.sql for the table and
+-- the status_changed_at/status_changed_by columns this migration does not
+-- touch or redefine.
+--
+-- THE BUG THIS FIXES (GC1, CRITICAL): a prior fix (FU1) made
+-- ensureAppUser's OWNER_EMAILS reconciliation refuse to demote any row whose
+-- status_changed_by is set, so that an owner's explicit promotion of a
+-- colleague (setAppUserRole, which stamps status_changed_by) is never
+-- silently reverted on that colleague's very next request. But
+-- status_changed_by is ALSO the audit stamp written by setAppUserStatus -
+-- approve, suspend, and restore all set it too, on every single call, for
+-- every account, not only owners. So the admin surface's own ordinary
+-- buttons permanently disarm allowlist revocation: suspend an account once
+-- (or simply approve it), and removing its address from OWNER_EMAILS can
+-- never demote it again - the fail-closed revocation guarantee this table
+-- exists to provide is lost the moment anyone uses the admin surface at all,
+-- not only when someone is deliberately promoted.
+--
+-- THE FIX: role_granted_by is written ONLY by setAppUserRole
+-- (src/lib/supabase/app-users.ts), and ONLY when that call grants
+-- role='owner' - never by setAppUserStatus (approve/suspend/restore do not
+-- touch it, and must not), and never by ensureAppUser's own OWNER_EMAILS
+-- reconciliation (an allowlist-driven promotion is not a human decision to
+-- protect from later reconciliation - reversing it is exactly the job
+-- reconciliation exists to do). setAppUserRole also CLEARS this column back
+-- to null whenever it demotes a row to role='instructor' - see that
+-- function's own comment for why: the invariant this column exists to
+-- maintain is "non-null implies the row's CURRENT role='owner' was a
+-- human's doing, right now", and that would not hold if a demotion left a
+-- stale non-null value on an 'instructor' row for some later, unrelated
+-- promotion (human or reconciliation) to inherit and be misread by.
+--
+-- SAME REFERENCE TARGET AND ON-DELETE BEHAVIOUR AS status_changed_by: `uuid
+-- references auth.users (id) on delete set null` - the granting owner's own
+-- account being deleted later must not cascade-delete every row they ever
+-- promoted; it should simply forget who did it.
+--
+-- BACKFILL: NULL for every pre-existing row - the column carries no default
+-- and this migration issues no UPDATE at all. That is a deliberate
+-- fail-CLOSED choice, not an oversight, and it is the only choice that does
+-- not reintroduce the exact ambiguity this migration exists to remove:
+--   - A backfill that tried to GUESS role_granted_by from status_changed_by
+--     for existing role='owner' rows (e.g. "a non-null status_changed_by on
+--     an owner row means it was promoted") would import the very
+--     conflation GC1 is about into the new column on day one - that same
+--     non-null value is left by an approve, a suspend, or a restore just as
+--     often as by a genuine promotion, and there is no way to tell which,
+--     for any pre-existing row, from the data alone.
+--   - Leaving every pre-existing row NULL means every pre-existing
+--     role='owner' row is - once again - demotable by reconciliation the
+--     moment its email leaves OWNER_EMAILS. That is what "fail closed on
+--     revocation" means, and it is the same posture this table's very first
+--     migration chose for ITS OWN backfill: see
+--     20261012000000_create_app_users.sql's own BACKFILL note, which
+--     backfills status to 'pending' rather than 'active' specifically
+--     because the alternative grants access in a fail-open way. This
+--     migration makes the same call for the same reason, on the opposite
+--     side of the same table.
+--   - The cost is real but bounded and self-healing, not free: a
+--     co-instructor who was genuinely, deliberately promoted to owner by a
+--     human BEFORE this migration ran, and who is NOT on OWNER_EMAILS,
+--     becomes demotable again on their very next sign-in after this
+--     migration deploys - the FU1 bug, resurrected, but only once, and only
+--     for the population this column has no history to consult about.
+--     Re-promoting that account ONE more time through the admin surface
+--     (setAppUserRole) stamps role_granted_by from that point forward, and
+--     the row is protected from silent reconciliation permanently from
+--     then on. A backfill that instead preserved every existing role='owner'
+--     row's elevation unconditionally would trade a one-time, self-healing
+--     inconvenience for a permanent, silent hole in revocation - the wrong
+--     side of that trade for this table, per its own RLS header and its
+--     original BACKFILL note.
+--
+-- Written idempotently (`add column if not exists`): migrations auto-apply
+-- via a GitHub Action on push to main, so this file may run more than once
+-- against the same database and must not fail the second time.
+alter table public.app_users add column if not exists role_granted_by uuid references auth.users (id) on delete set null;
+
+comment on column public.app_users.role_granted_by is
+  'Set ONLY by setAppUserRole (src/lib/supabase/app-users.ts), and ONLY when it grants role=''owner'' - cleared back to null when that same function demotes a row to role=''instructor''. Never written by setAppUserStatus (approve/suspend/restore leave it untouched) and never by ensureAppUser''s own OWNER_EMAILS reconciliation. ownerDemotionNeeded (src/lib/supabase/app-users.ts) gates demotion on THIS column, not status_changed_by - status_changed_by is also the audit stamp for approve/suspend/restore and cannot distinguish a genuine human promotion from an unrelated admin action on the same row (GC1). Null for every row that predates this column (see this migration''s own BACKFILL note for why that is the deliberate fail-closed choice, not an oversight) and for any row whose current role=''owner'' came from OWNER_EMAILS reconciliation rather than a human explicitly granting it.';

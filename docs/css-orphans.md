@@ -15,7 +15,7 @@ These are CANDIDATES identified by a static text scan (every `.class` defined in
 
 **Global-selector caveat:** 2 of the orphan(s) below are classes referenced only inside a `:global(...)` wrapper (e.g. `.cellMenu :global(.MuiButtonBase-root):focus-visible`), used to target a class a third-party library (MUI) puts directly in the DOM. These are NOT CSS Modules exports - they structurally cannot be reached via `styles.foo` and are not dead code; they are marked `(global selector, not a JS-reachable export)` below instead of being ordinary deletion candidates.
 
-Total: 137 orphan candidate(s) of 1153 defined classes across 25 stylesheets (of which 2 are the global-selector case above, not real dead-code candidates).
+Total: 120 orphan candidate(s) of 1163 defined classes across 26 stylesheets (of which 2 are the global-selector case above, not real dead-code candidates).
 
 ## src/app/components/courses/CoursesTable.module.css
 
@@ -46,28 +46,11 @@ Total: 137 orphan candidate(s) of 1153 defined classes across 25 stylesheets (of
 
 ## src/app/components/TopBar.module.css
 
-20 orphan candidate(s) of 25 defined classes.
+3 orphan candidate(s) of 25 defined classes.
 
 - `.instAddBtn`
-- `.instAddRow`
-- `.instCode`
 - `.instInput`
-- `.instItem`
-- `.instList`
 - `.instRemove`
-- `.instStatus`
-- `.mark`
-- `.menu`
-- `.menuError`
-- `.menuHint`
-- `.menuItem`
-- `.menuLabel`
-- `.menuSection`
-- `.settings`
-- `.settingsButton`
-- `.themeOption`
-- `.themeOptionActive`
-- `.themeRow`
 
 ## src/app/page.module.css
 

@@ -78,6 +78,8 @@ type FakeError = { message: string } | null;
  */
 class FakeQuery implements PromiseLike<{ data: unknown; error: FakeError }> {
   private filters: Array<[string, unknown]> = [];
+  sawAbortSignal: AbortSignal | null = null;
+  sawRetry: boolean | null = null;
   private cols: string[] | null = null;
 
   constructor(
@@ -89,6 +91,23 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: FakeError }> {
 
   select(cols: string) {
     this.cols = cols.split(",").map((c) => c.trim());
+    return this;
+  }
+
+  /**
+   * Chain pass-throughs for the two bounds the real read applies. They are
+   * recorded rather than ignored so a test can assert the read is BOUNDED and
+   * NON-RETRYING - that pair is what keeps a degraded read from consuming the
+   * whole platform budget, and a fake that silently swallowed them would let
+   * their removal pass unnoticed.
+   */
+  abortSignal(signal: AbortSignal) {
+    this.sawAbortSignal = signal;
+    return this;
+  }
+
+  retry(enabled: boolean) {
+    this.sawRetry = enabled;
     return this;
   }
 
@@ -186,24 +205,31 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: FakeError }> {
 interface FakeClientHandle {
   client: SupabaseClient<Database>;
   rows: FakeDbRow[];
+  /** The most recent builder, so a test can assert how the read was bounded. */
+  lastQuery: () => FakeQuery | null;
 }
 
 function makeFakeClient(initialRows: FakeDbRow[] = [], forcedError: FakeError = null): FakeClientHandle {
   const rows = [...initialRows];
+  let created: FakeQuery | null = null;
   const client = {
     from: (table: string) => {
       if (table !== "lms_credentials") {
         throw new Error(`unexpected table in fake client: ${table}`);
       }
       return {
-        select: (cols: string) => new FakeQuery(rows, "select", undefined, forcedError).select(cols),
+        select: (cols: string) => {
+          const q = new FakeQuery(rows, "select", undefined, forcedError);
+          created = q;
+          return q.select(cols);
+        },
         upsert: (payload: Partial<FakeDbRow>) => new FakeQuery(rows, "upsert", payload, forcedError),
         update: (payload: Partial<FakeDbRow>) => new FakeQuery(rows, "update", payload, forcedError),
         delete: () => new FakeQuery(rows, "delete", undefined, forcedError),
       };
     },
   };
-  return { client: client as unknown as SupabaseClient<Database>, rows };
+  return { client: client as unknown as SupabaseClient<Database>, rows, lastQuery: () => created };
 }
 
 const USER_A = "11111111-1111-4111-8111-111111111111";
@@ -500,5 +526,40 @@ describe("recordLmsCredentialFailure", () => {
     const fake = makeFakeClient([seedRow()], { message: "write blew up" });
     vi.mocked(createServiceClient).mockReturnValue(fake.client);
     await expect(recordLmsCredentialFailure(USER_A, "MCC", "rejected")).resolves.toBeUndefined();
+  });
+});
+
+describe("the credential read is bounded and does not retry", () => {
+  /**
+   * These two are a pair and neither works alone.
+   *
+   * Reading a credential requires already knowing who the caller is, so it is
+   * necessarily IN SERIES behind the request guard's own profile read - they
+   * cannot be issued together the way an independent pair can. And a timed-out
+   * SELECT does not match postgrest-js's "AbortError" check, so by default it
+   * is retried three more times with fresh timeouts plus backoff. Two such
+   * reads in series exceed the platform's function cap before a single byte
+   * reaches Canvas, and the request dies with no page rather than a slow one.
+   *
+   * Without these assertions, deleting either call would pass every other test
+   * in this file and only show up as an outage under a degraded database.
+   */
+  it("passes an AbortSignal, so a hung read cannot run unbounded", async () => {
+    const { client, lastQuery } = makeFakeClient([seedRow()]);
+    vi.mocked(createServiceClient).mockReturnValue(client);
+
+    await getLmsCredentialSecret(USER_A, "MCC");
+
+    const signal = lastQuery()?.sawAbortSignal;
+    expect(signal, "the read was issued with no AbortSignal").toBeInstanceOf(AbortSignal);
+  });
+
+  it("disables retries, because a credential read has a correct answer on failure", async () => {
+    const { client, lastQuery } = makeFakeClient([seedRow()]);
+    vi.mocked(createServiceClient).mockReturnValue(client);
+
+    await getLmsCredentialSecret(USER_A, "MCC");
+
+    expect(lastQuery()?.sawRetry, "retries were left enabled on the credential read").toBe(false);
   });
 });

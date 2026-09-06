@@ -40073,3 +40073,93 @@ are not the owner" would tell the actual owner they had lost their access.
   Supabase dashboard" copy must NOT be changed to name an administrator until
   it is.
 - The pending-count nav badge (GC8) is not built.
+
+
+## 402. Area baseline - Canvas credential resolution, before it stops being an env var
+
+Recorded BEFORE Group E's waves 3 and 4, which convert four synchronous
+resolvers into async ones and route every outbound Canvas call through a new
+boundary. Everything below was measured on 2026-09-06 against the working
+tree, not taken from the acceptance criteria.
+
+**402a - the four resolvers, and what they read today.** `src/lib/canvas-core.ts`
+exports exactly four: `resolveInstitution(url)` (:115),
+`resolveDefaultInstitution()` (:142), `resolveInstitutionByCode(code)` (:165)
+and `resolveCourse(...)` (:210). All four are SYNCHRONOUS. They resolve a base
+URL and a token by interpolating a CLIENT-SUPPLIED acronym into
+`process.env[`${CODE}_CANVAS_URL`]` and `process.env[`${CODE}_CANVAS_API_TOKEN`]`.
+The acronym reaches the server from `localStorage` (`ta-institutions`,
+`src/lib/institutions.ts`), so today every user of this deployment acts as the
+deployment OWNER against the owner's Canvas.
+
+**402b - the call surface, measured, with the method.** 39 non-test files
+import `canvas-core`. A raw grep for the four resolver names across non-test
+files returns 118 lines; the architect pass measured 104 by walking each
+importer and skipping comment-leading lines. The gap is explained and is not a
+contradiction: TWO UNRELATED functions share the name `resolveInstitution` -
+`src/lib/institution-resolution.ts:46` (the pure acronym ladder) and a local
+one at `src/lib/workflow-triggers/event-sources.ts:186`. Neither touches
+credentials. Do not let a future reader conflate them; count by importer, not
+by name.
+
+**402c - 103 of the call sites are ALREADY inside async functions.** Exactly
+one synchronous encloser exists (a private six-line helper in
+`src/lib/canvas/inbox.ts`). The async migration is therefore one `await` per
+call site and one `async` keyword - mechanical, not a restructure. Recorded
+because assuming otherwise is how this wave gets over-engineered.
+
+**402d - 73 bearer-carrying fetch sites across 24 files** (45 under
+`src/lib/canvas/`, 28 under `src/lib/canvas-modules/`). That is the true scope
+of "route every Canvas call through the new boundary". Three of them live in
+`canvas-modules/fetch-helpers.ts` and cover most of `canvas-modules`, so the
+marginal cost is far below 73 - but it is not 1.
+
+**402e - `parseNextLink` has NO host check, and that is the state being
+fixed.** It returns whatever URL sits in a response's `Link: rel="next"`
+header, and its callers dial that URL with `Authorization: Bearer` attached.
+26 call sites across 11 files. All but one loop has no page cap, so the
+termination condition belongs to the remote host. Today the blast radius is
+zero because only the owner's configured hosts exist; it arms the moment a
+user can register their own host. `src/lib/canvas-remote-url.ts` shipped in
+wave 1 as the guard; APPLYING it at those sites is wave 4, and until then this
+baseline records the surface as unguarded.
+
+**402f - nothing bounds any Canvas call today.** `AbortSignal.timeout` appears
+fourteen times in `src/` and NONE of them is on a Canvas fetch. The only
+external-host precedent in the app is a 10s bound on a calendar feed in
+`src/app/actions/course-hub-integrations.ts`.
+
+**402g - the enumeration oracle that exists today.** `canvas-core.ts` carries
+three DIFFERENT "not configured" messages - one for an unknown host, one for a
+missing base URL and one for a missing token - which together tell any
+signed-in caller which acronyms the owner has configured and how completely.
+They also name the environment variable AT THE USER, which no member can set.
+Group E collapses all three into one message.
+
+**402h - `listConfiguredInstitutionsAction` has 8 non-test consumers**, not
+one: the workflow trigger event sources, the fan-out resolver, four workflow
+step modules, a planning step, and `TopBar.tsx` via `checkInstitutionsAction`.
+Repointing it from "the owner's env" to "the caller's rows" changes what
+workflow fan-out MEANS for every one of them. Baselined because a later diff
+that touches only the function looks small and is not.
+
+**402i - 22 test files exercise the real resolvers.** They use this repo's
+deliberate idiom of stubbing only `globalThis.fetch` and letting
+`resolveCourse` run for real against `vi.stubEnv`. Database-backed resolution
+kills that idiom in all 22. This is the largest cost in the feature and the
+acceptance criteria never mentioned it.
+
+**402j - what is NOT true, corrected here because two documents said it.** The
+1000-line ceiling IS enforced: `src/file-size-ceiling.structure.test.ts` sets
+`LIMIT = 1000`, collects violations and asserts the list is empty. It was
+observed failing on `app-users.ts` at 1030 lines on 2026-09-06. The confusion
+has a real source: the test carries an `ALLOWED_OVERAGE` map of five
+grandfathered files, each pinned to its measured count as a HARD RATCHET
+rather than an exemption - such a file may shrink freely but fails the moment
+it grows. So some files over 1000 lines legitimately pass, which reads as
+absence of enforcement and is not.
+
+**402k - the standing limit.** vitest here is node-environment and collects
+only `src/**` files ending `.test.ts`. Every claim in this entry about a
+`.tsx` file comes from reading it. Nothing in waves 3-5 will be verified by a
+rendered component.

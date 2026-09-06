@@ -951,3 +951,50 @@ institution - is ROW ABSENCE. There is no row to stamp it on, so permitting it
 in the column's domain would leave a value the application cannot produce and
 somebody eventually writes by hand. The CHECK constraint and the TypeScript
 type agree on three.
+
+
+## Wave 2 decisions (2026-09-06)
+
+**E-UX10 was WRONG and is corrected here.** That amendment said the knowledge
+tab's constraint sentence must be DELETED outright once per-user credentials
+ship. It should not be. The sentence has two halves and only one of them goes
+false:
+
+- "Registering an acronym here does not grant Canvas access" - STILL TRUE.
+  Registering an acronym is a browser-local act; connecting a credential is a
+  separate, deliberate one. This half is a genuinely useful warning and
+  deleting it removes the only place the distinction is stated.
+- "that still needs the institution's server-side env vars, configured
+  separately" - FALSE the day this ships, and it names an environment
+  variable at a user who cannot set one.
+
+So: keep the first half, replace the second with the real remedy. Credit to
+the pure-modules pass for refusing to delete a true sentence on a doc's say-so
+and flagging it instead of choosing silently.
+
+**The export ratchet permits ONE value export beside the resolver.**
+`CANVAS_CREDENTIAL_REQUIRED_MESSAGE` is allowed alongside
+`resolveCanvasCredential`. A literal reading of SEC5 ("exactly one export plus
+types") would forbid it and thereby forbid E-UX8's catch-by-identity pattern.
+Confirmed as correct: a message string carries no base URL and no token and
+cannot be used to reconstruct a mismatched pair, so the invariant the ratchet
+exists to protect is untouched, while accessor-shaped exports
+(`getBaseUrl`, `getToken`, `hasCredential`) stay hard-blocked and are named as
+forbidden in the test.
+
+**The credential read is now bounded AND non-retrying at the query builder.**
+The resolver could only race the read against a timer from its own module,
+which bounds its return but leaves an abandoned read retrying server-side.
+`.abortSignal()` and `.retry(false)` are both real APIs in the installed
+postgrest-js and are now applied where the query is actually built, with tests
+that fail if either is removed. This is the fix that turns a ~39-second
+degraded read into 5, and it is the difference between two serial reads
+fitting inside the platform cap and the request dying with no page.
+
+**The mask has two producers and they cannot drift.** The stored
+`token_last_four` column and `maskToken` would normally be kept in step by
+copying the latter's constants. They are not copied: the view derives the
+revealed suffix by calling the REAL `maskToken` twice - once with an empty
+string to obtain pure filler, once with the candidate - and diffing, then
+verifies the result is a genuine suffix before trusting it. A change to the
+reveal threshold or the filler cannot desynchronise them.

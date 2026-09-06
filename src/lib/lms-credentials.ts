@@ -169,6 +169,42 @@ export function mapLmsCredentialRow(row: Omit<DbRow, "user_id" | "encrypted_toke
  * shape to handle (null means "ask the user to reconnect Canvas"), never a
  * thrown error that a caller could forget to catch.
  */
+/**
+ * How long a single credential read may take, and why retries are OFF.
+ *
+ * THE BOUND. This is one indexed primary-key lookup on `(user_id,
+ * institution)`, so it has the request gate's shape - a point read - not the
+ * account list's scan-and-aggregate shape that justified the longer default
+ * elsewhere. Five seconds is generous for a point read and short enough that
+ * the caller still has budget left.
+ *
+ * THE RETRY, which is the part that actually matters. `AbortSignal.timeout()`
+ * rejects with a DOMException named "TimeoutError", and postgrest-js checks
+ * for "AbortError" before deciding a failure is non-retryable. "TimeoutError"
+ * does not match, so a timed-out SELECT is treated as an ordinary retryable
+ * network error and re-runs up to three more times, each with a FRESH
+ * timeout, separated by exponential backoff - roughly 4 x 5s + 7s of backoff
+ * for ONE degraded read.
+ *
+ * That cost cannot be absorbed here. Reading a credential requires already
+ * knowing who the caller is, so this read is necessarily IN SERIES behind the
+ * request guard's own profile read - the two cannot be issued together the
+ * way an independent pair can. Two retried reads in series exceed the
+ * platform's 60-second function cap before a single byte reaches Canvas, and
+ * the request dies with no page rather than a slow one.
+ *
+ * So retries are disabled deliberately. A credential read has a CORRECT
+ * ANSWER ON FAILURE - "we cannot tell whether you have a credential, so do
+ * not spend a token" - and that answer does not improve with three more
+ * attempts. Retrying is only worth thirty-four seconds of a sixty-second
+ * budget when the retry might succeed AND the caller could still use the
+ * result; here it can do neither.
+ *
+ * Do not raise this bound or re-enable retries without redoing that
+ * arithmetic against whatever the cap is at the time.
+ */
+const CREDENTIAL_READ_TIMEOUT_MS = 5_000;
+
 export async function getLmsCredentialSecret(
   userId: string,
   institution: string
@@ -178,6 +214,8 @@ export async function getLmsCredentialSecret(
     .select("base_url, encrypted_token")
     .eq("user_id", userId)
     .eq("institution", normalized)
+    .abortSignal(AbortSignal.timeout(CREDENTIAL_READ_TIMEOUT_MS))
+    .retry(false)
     .maybeSingle();
 
   if (error) {

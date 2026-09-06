@@ -53,6 +53,8 @@
 //    page reload always sees fresh data regardless of TTL, since this Map
 //    does not survive one.
 
+import { sweepClientState } from "@/lib/client-state-sweep";
+
 /** How long a cached list is trusted before a getCachedList() call treats it
  *  as a miss. Two minutes comfortably covers "switched tabs and came right
  *  back" without leaving a change made elsewhere invisible for long. */
@@ -158,6 +160,15 @@ export function setCacheOwner(userId: string | null): void {
   if (userId === currentOwner) return;
   clearAllCachedLists();
   for (const clear of ownerScopedClearers) clear();
+  // The in-memory caches above are only half of what a stale owner can leave
+  // behind - see client-state-sweep.ts's own header for the localStorage/
+  // IndexedDB half (course-planning form fields, the previous user's name
+  // and email, a granted backup-folder handle, uploaded file blobs...).
+  // Swept on every actual owner change here, the same as the caches above,
+  // not just on sign-out: an initial null -> first-user sign-in should not
+  // inherit whatever an earlier anonymous visit to this tab left behind
+  // either.
+  sweepClientState();
   currentOwner = userId;
 }
 

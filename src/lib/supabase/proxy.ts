@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./types";
-import { getAppUserWithTimeout } from "./app-users";
+import { getAppUserWithTimeout, ensureAppUserRowExists } from "./app-users";
 import { resolveAccess, isPublicPath, loginRedirectFor, type AccessProfile } from "../access";
 
 /**
@@ -194,6 +194,45 @@ export async function updateSession(request: NextRequest) {
       profile = row ? { role: row.role, status: row.status } : null;
     } catch {
       lookupFailed = true;
+    }
+
+    // FIX (missing-row recovery is reachable only from here): ensureAppUserRowExists
+    // (./app-users.ts) exists to create a bare row for an account that has
+    // none, but its only OTHER caller is requireUser() - and a row-less
+    // account resolves to `pending`, which this gate 307s to /login BEFORE
+    // any server action or route handler runs. /login is a client component
+    // that calls no server action, so the recovery could never fire for the
+    // exact population it was written for. This is the only remaining place
+    // it can run.
+    //
+    // Gated on `!lookupFailed && !profile`, not merely `!profile`: a lookup
+    // FAILURE means we do not know whether a row exists (`lookupFailed`), and
+    // inserting on that guess would be wrong - this only fires when the
+    // lookup itself SUCCEEDED and positively found no row. Deliberately
+    // outside the try/catch above so a failure inside ensureAppUserRowExists
+    // itself can never be mistaken for a failure of the profile lookup and
+    // flip `lookupFailed` to true - that would change the access decision
+    // computed below from what the lookup itself actually determined.
+    // Best-effort: awaited so the attempt has actually completed before this
+    // request finishes, but any failure is caught and swallowed here and
+    // must never change or delay the redirect decision already computed from
+    // `profile`/`lookupFailed` as they stand above.
+    //
+    // A collision on the unique `lower(email)` index (e.g. a case-differing
+    // duplicate email already claiming the row) makes the insert inside
+    // ensureAppUserRowExists a silent no-op rather than an error, so this
+    // retries harmlessly on every request for such an account without ever
+    // succeeding - a known, unrecoverable state that this call does not fix,
+    // not a bug in this call itself.
+    //
+    // isPublicPath's early return above already exits this function before
+    // this point for any public path, so this never runs for one.
+    if (user && !lookupFailed && !profile) {
+      try {
+        await ensureAppUserRowExists(user.id);
+      } catch {
+        // Best-effort recovery only - see the comment above.
+      }
     }
 
     // Account has MFA enrolled but hasn't completed it this session: send

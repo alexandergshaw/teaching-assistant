@@ -144,10 +144,34 @@ function actionsReachableFromRootLayout(): Set<string> {
 }
 
 /**
- * Actions that are still unguarded, pinned so the set can only shrink.
- * Every one of these is reachable by any signed-in account and most spend
- * the deployment's LLM budget. They are NOT anonymously reachable - the
- * first test below is what proves that.
+ * Actions that are DELIBERATELY public because they run BEFORE there is an
+ * account to authorize. A guard is not merely missing from these - it is
+ * impossible: `requireUser()` throws for anyone who is not already an active
+ * account, which is exactly who these serve.
+ *
+ * This list is a different thing from the ratchet below, and conflating the
+ * two was a real design error in the first version of this file: a sign-up
+ * action would have had to be added to a list documented as "should be
+ * guarded, not yet", which would have quietly redefined that list into
+ * "unguarded for any reason at all" and destroyed its meaning.
+ *
+ * The bar for an entry here is high. It must be genuinely pre-authentication,
+ * it must not spend an owner-funded resource beyond what the auth provider
+ * itself already exposes to anonymous callers, and it must carry a one-line
+ * reason. Anything reachable from the ROOT LAYOUT is still forbidden outright
+ * - the first test below has no allowlist, because that is the path that
+ * reaches the public /login bundle.
+ */
+const DELIBERATELY_PUBLIC: Record<string, string> = {
+  signUpAction:
+    "Creates the account a guard would need to authorize; requireUser()/requireAppOwner() both throw for anyone not already active, which is everyone this action serves.",
+};
+
+/**
+ * Actions that are still unguarded but SHOULD NOT BE, pinned so the set can
+ * only shrink. Every one of these is reachable by any signed-in account and
+ * most spend the deployment's LLM budget. They are NOT anonymously reachable -
+ * the first test below is what proves that.
  */
 const PINNED_UNGUARDED = [
   "buildScheduleWeekPlan",
@@ -209,9 +233,31 @@ describe("guard coverage ratchet over every other server action", () => {
     const unguarded = collectActionExports()
       .filter((a) => !a.guarded)
       .map((a) => a.name)
+      .filter((name) => !(name in DELIBERATELY_PUBLIC))
       .sort();
 
     expect(unguarded).toEqual(PINNED_UNGUARDED);
+  });
+
+  it("every deliberately-public action carries a reason, and is really an action", () => {
+    // An entry with an empty reason is someone silencing the ratchet.
+    const names = new Set(collectActionExports().map((a) => a.name));
+    for (const [name, reason] of Object.entries(DELIBERATELY_PUBLIC)) {
+      expect(names.has(name), `${name} is listed as public but is not an action export`).toBe(
+        true
+      );
+      expect(reason.trim().length, `${name} needs a stated reason`).toBeGreaterThan(10);
+    }
+  });
+
+  it("no deliberately-public action is reachable from the root layout", () => {
+    // The root-layout test above already forbids this with no allowlist. This
+    // asserts the two lists cannot be reconciled by moving a name between
+    // them: being "deliberately public" never buys a seat in the /login bundle.
+    const reachable = actionsReachableFromRootLayout();
+    for (const name of Object.keys(DELIBERATELY_PUBLIC)) {
+      expect(reachable.has(name), `${name} must not ship in every route's bundle`).toBe(false);
+    }
   });
 
   it("guards the overwhelming majority, so an exception stays exceptional", () => {

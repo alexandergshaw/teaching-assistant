@@ -107,46 +107,141 @@ convention, verified against a real build rather than assumed.
 
 ## Group B - the account surface people actually touch
 
+**B0. WHAT THIS APP CAN AND CANNOT ENFORCE - read before any other B
+criterion.** Sign-in, sign-up, password reset and token verification all run
+BROWSER-TO-SUPABASE with the public anon key, which is in every page bundle by
+construction. This app is not in that request path and cannot be. Therefore:
+
+- `SIGNUP_MODE` and `SIGNUP_ALLOWED_DOMAINS` gate THIS APP'S form. They cannot
+  bind `POST /auth/v1/signup`. `SIGNUP_MODE=closed` hides the form; it does
+  not close sign-ups.
+- No auth operation can be rate-limited by this app. There is no rate-limiting
+  primitive in this repo, and Vercel Hobby provides none. The only real limits
+  are Supabase's own email-send and request limits, and CAPTCHA - which the
+  installed client already threads through `signUp`, `resetPasswordForEmail`
+  and `verifyOtp`, so it is available if the operator enables it.
+- The enforceable boundary is: the Supabase dashboard sign-up toggle,
+  Supabase's own domain allowlist, CAPTCHA, and the fact that a new account is
+  created `pending` by a database trigger and can reach nothing.
+
+No criterion below may imply protection this app does not have, and no copy
+may either.
+
 **B1. Sign up.** A sign-up form reachable from `/login` in one click,
-collecting name, email and password. It validates on the client AND refuses on
-the server; a weak password, a malformed email, and a domain outside
-`SIGNUP_ALLOWED_DOMAINS` (when set) are each refused with a message that says
-what to fix.
+collecting name, email and password. Client-side validation exists only to
+give fast feedback; THE SERVER ACTION'S REFUSAL IS THE ONLY ENFORCEMENT THAT
+COUNTS, and the rules module carries `import "server-only"` so a client import
+is a build error rather than a silent permissive fallback. A weak password, a
+malformed email, and a domain outside `SIGNUP_ALLOWED_DOMAINS` are each refused
+with a message that says what to fix. The name is length-bounded and stripped
+of control and bidi characters BEFORE it is stored - it reaches the app chrome,
+the owner's account list, and the author field of every generated document, and
+a browser-path signup can set it without passing through this validation at
+all, so the clamp is applied again at the point of use.
 
 **B2. Email confirmation works end to end.** An `/auth/confirm` route handler
-verifies the token from the emailed link and lands the user somewhere that
-tells them what happened. It handles an expired link, an already-used link and
-a missing token without a stack trace or a blank page.
+verifies the emailed token and lands the user somewhere that says what
+happened. Constraints, each of which an obvious implementation gets wrong:
+
+- **It must not perform the verification on a GET.** The `/auth` prefix is
+  public for every method and subpath. A `token_hash` design is pure bearer -
+  nothing binds the token to the browser redeeming it - so a link built from
+  the ATTACKER's own confirmation email, opened by the owner, writes the
+  attacker's session into the owner's browser and silently swaps whose tenant
+  they are working in. Mail scanners that prefetch links also burn the
+  one-shot token before the user clicks. Prefer the PKCE `?code=` shape, whose
+  verifier cookie binds the link to the browser that requested it; treat
+  "opened on a different device" as a designed state, not a stack trace.
+- **It must read the existing session BEFORE verifying** and refuse a swap to
+  a different user id, rendering the wrong-account screen instead.
+- **Expired and already-used are the SAME observable** - Supabase returns
+  `otp_expired` for both - so they collapse into one "this link is no longer
+  valid" state with a resend. A missing token stays separate.
+- `type` is validated against a literal set, never passed through, and the
+  post-verify destination is derived from the verified result rather than from
+  a URL parameter.
 
 **B3. Both Supabase email-confirmation settings are handled.** With
 confirmations ON the user sees "check your email"; with them OFF they are
-signed in immediately. The app detects which happened from the sign-up
-response rather than assuming.
+signed in immediately - which is safe ONLY because the break-glass now requires
+a verified email, and would otherwise be the path to claiming an allowlisted
+address. The app detects which happened from the sign-up response rather than
+assuming. RECORDED: the only signal separating "we sent a confirmation" from
+"this address already has an account" is an empty `identities` array, and the
+app deliberately does not branch on it.
 
-**B4. Forgot password, and set a new one.** A request form that always reports
-the same thing whether or not the address exists (no account enumeration), and
-a reset screen reached from the emailed link that sets a new password and
-signs the user in.
+**B4. Forgot password, and set a new one.** The request form reports the same
+thing from THIS APP whether or not the address exists. That is a property of
+our copy, not of the system: a repeat request for a real address hits
+Supabase's send-rate limit while an address with no account never sends, and a
+real address does a measurably slower SMTP handoff. Both bypass this app
+entirely and are accepted, not fixed.
 
-**B5. Every account state has a designed screen.** `pending`, `suspended`,
-`confirm your email`, and `signed in as the wrong account` each render
-purposeful copy and a way forward - never the current text, which tells a
-stranger their "account is not approved for access" with no next step.
+The reset screen must run the TOTP step BEFORE the new-password fields for an
+account with an enrolled factor, because a recovery link yields an ordinary
+`authenticated` session at aal1, not a scoped one-purpose token. RECORDED AND
+NOT CLOSABLE HERE: the holder of a recovery link can skip every screen and use
+that session directly against PostgREST and Storage, because no RLS policy
+consults `app_users`. No copy may imply the link is only good for setting a
+password.
+
+**B5. Every account state has a designed screen, and `state` is not trusted.**
+`pending`, `suspended`, `confirm your email`, `link no longer valid`,
+`we could not check your access` and `signed in as the wrong account` each
+render purposeful copy and a way forward - never the current dead-end sentence.
+
+But `?state=` is attacker-authored: anyone can send
+`/login?state=suspended` and the victim reads an alarming message on the real
+domain with a real certificate. It is mapped through an exhaustive switch over
+the decision union whose default renders the plain sign-in card, is NEVER
+interpolated into copy, and renders nothing for `active`/`owner`, which the
+gate cannot produce. Same for `next`, which is never displayed as text.
+
+**B5b. The sign-in error must not enumerate accounts.** Supabase distinguishes
+`invalid_credentials`, `email_not_confirmed` and `user_banned` - and since
+suspension now bans the account, the third is the normal suspended state. The
+page currently renders `error.message` verbatim, which is how that reaches the
+screen. All three map to ONE generic failure. "Access paused" is reachable only
+AFTER a successful password authentication, via the gate's `state`. This
+resolves the direct conflict between B4 and B5.
 
 **B6. Sign out, and identity in the chrome.** The signed-in person's name or
-email is visible in the app chrome and sign-out is reachable from it. Signing
-out must clear cached per-user state (see REGRESSION entry 189 - sign-out is
-not a page reload, and the run-form options cache had to learn that the hard
-way).
+email is visible in the app chrome and sign-out is reachable from it.
+
+Sign-out performs a FULL DOCUMENT LOAD, not a client navigation, because the
+module registry survives the latter. REGRESSION entry 189's cache is already
+handled; these three are not, and each is load-bearing here:
+`hubCache` (`useCoursesData.ts:51`, module-scope and seeded into `useState`
+initializers, so the next user sees the previous user's courses with no
+loading flash), `ta-active-institution` (`institutions.ts:15`, which selects
+WHICH owner-funded Canvas token gets used), and the `ta-backup` IndexedDB
+directory handle (`backup-dir.ts:13-15`, a granted OS folder - the next user's
+recordings would be written into the previous user's directory with no prompt,
+because the grant is per-origin, not per-account). The owner-change sweep
+covers the `ta-`/`ta:`/`ta_` localStorage namespaces and both IndexedDB
+databases, and a test fails when a new module-scope cache is added without
+registering it.
+
+**B6b. `safeNextPath` is re-applied on every READ.** Today its only caller is
+the gate, which WRITES the parameter. The value round-trips through the
+address bar and emailed links; nothing binds what comes back to what the gate
+wrote. Every read site re-validates: the `/auth/confirm` handler on ALL
+branches including no-token and error, the sign-in page's post-success
+navigation, `/login/reset`, and any link rendered from it. The token or code is
+stripped from the URL before navigating away so it cannot leak by `Referer`.
 
 **B7. The auth screens reuse the app's existing visual language.** Same tokens
 and classes as `src/app/login/login.module.css`; no new design vocabulary, no
 emojis, keyboard-operable, with visible focus and `role="alert"` errors, and
 labels tied to inputs.
 
-**B8. Control state persists.** Per the repo standard, any new persistent
-control state uses the `ta-` localStorage key convention; auth screens
-deliberately persist nothing sensitive.
+**B8. Control state persists.** Any new persistent APP control state uses the
+repo's `ta-` localStorage convention. The earlier wording - "auth screens
+deliberately persist nothing sensitive" - was false of the client these
+screens must use: `@supabase/ssr` writes the session AND the PKCE code-verifier
+to non-httpOnly cookies via `document.cookie` on every one of them. That is a
+known and accepted exception, recorded here rather than contradicted by the
+criterion.
 
 ---
 
@@ -201,6 +296,230 @@ feature, so that section is rewritten, not appended to.
 authorization today and are protected only by the request gate. Each gains an
 explicit `requireUser()` so a pending account cannot reach an LLM-spending
 endpoint by calling it directly.
+
+---
+
+## B0 IS TIGHTER THAN IT SAYS, AND THE SCREENS MUST NOT GIVE THAT BACK
+
+B0 says sign-up runs browser-to-Supabase, so `SIGNUP_MODE` and
+`SIGNUP_ALLOWED_DOMAINS` cannot be enforced. That is true of what an ATTACKER
+can do and false of what the app's own form does: the shipped `signUpAction`
+calls `signUp` from the SERVER, which it must, because `validateSignup` carries
+`import "server-only"` and cannot run anywhere else.
+
+So the real picture is two paths, not one:
+
+- **Through our form:** the server action runs first, so the mode, the domain
+  allowlist, the password rules and the name clamp are ALL genuinely enforced.
+- **Straight to `POST /auth/v1/signup` with the public anon key:** none of them
+  are, and nothing this app can do changes that. The backstop remains the
+  `pending` default.
+
+**The constraint this puts on the screens wave, and it is easy to get wrong:**
+the sign-up page MUST call the server action. If it calls
+`supabase.auth.signUp` from the browser because that is what the existing
+sign-in page does, every one of those checks silently stops running - with no
+test failure, no type error and no build error, because the module boundary is
+the only thing enforcing it. That is the same shape as the `server-only`
+finding: an invisible failure whose only symptom is that a control quietly
+does nothing.
+
+Recorded because the implementer who wrote the action noticed the tension and
+asked, rather than assuming.
+
+**New env var:** `SIGNUP_EMAIL_REDIRECT_URL`, chosen by that implementer and
+not yet in the README (Group D). It must not be `window.location.origin`,
+which would make every preview deployment mint confirmation links to itself.
+Supabase's dashboard `Site URL` is the separate fallback used when it is
+omitted, and on an unconfigured project that is `http://localhost:3000`.
+
+---
+
+## GROUP B RESHAPED BY THE DATA PASS (2026-09-06)
+
+**DB1 - `app_users.display_name` is NULL for every row that has ever
+existed.** Nothing in this repo writes `user_metadata`: the trigger inserts
+`(id, email)` only, and the one sign-up helper takes no `options`. So
+`nameFromAuthMetadata` has never had anything to read.
+
+Worse, there is a PERMANENT window: `reconcileAppUserRow` runs AFTER
+`requireUser()`'s deny, so a `pending` or `suspended` account never reaches it.
+**The account queued for approval is exactly the account whose name can never
+be written** - and the pending queue is the one screen where a human name is
+the entire point. The owner would triage a list of blank names and email
+addresses.
+
+AMENDED: the name is written by the TRIGGER, at insert time, from
+`new.raw_user_meta_data->>'full_name'`, length-bounded in SQL. That is the only
+change that closes the window, it puts a name on the row at t0, and it leaves
+`ensureAppUser`'s never-overwrite rule intact. The sign-up action's job is
+therefore to pass a normalised name into `signUp({ options: { data } })` so the
+trigger has something to copy.
+
+**DB2 - B6's prefix sweep is provably insufficient, and I wrote it that way.**
+A sweep over `ta-`/`ta:`/`ta_` misses 16 keys defined in
+`components/course-planning/types.ts` - including `adapt_instructorName` and
+`adapt_instructorEmail`, which are the PREVIOUS USER'S NAME AND EMAIL sitting
+in the next user's form. It also misses the second IndexedDB database,
+`teaching-assistant-files`, which holds raw uploaded `File` blobs.
+
+AMENDED: the sweep is an explicit KEEP-LIST, not a prefix scan. Everything in
+`localStorage` is removed except a named set of DEVICE preferences; both
+IndexedDB databases are deleted; and the canary test asserts the KEEP set and
+the registered-clearer count rather than a prefix, so a new key is opt-in to
+survive rather than accidentally swept or accidentally missed.
+
+**DB3 - B6 and B8 contradict each other, and the sweep breaks the theme.**
+The owner-change sweep treats `null -> userId` as a change, so any `ta-` control
+persisted on a signed-out auth screen is wiped the instant sign-in succeeds -
+which makes B8's "use the `ta-` convention" and B6's sweep mutually exclusive
+on exactly the screens Group B is building. Resolved by B8's rewrite: the auth
+screens persist nothing. Separately, `ta-theme` is a DEVICE preference read by
+the anti-FOUC bootstrap; sweeping it flashes the app to light mode on every
+sign-in and sign-out. It is the first entry in the KEEP list.
+
+**DB4 - my "ACCEPTED DEVIATION" cost claim was wrong.**
+`getAuthenticatorAssuranceLevel()` is NOT a network round trip - with no `jwt`
+argument it decodes the stored access token locally. So moving it earlier does
+NOT cost a denied account "one extra round trip per request"; it costs a JWT
+decode. The deviation stands, but for a different reason than recorded, and the
+record is corrected rather than left flattering.
+
+**DB5 - the same `app_users` row is read TWICE per server-action interaction,
+and the gate's lookup is now the app's highest-frequency query.** The gate
+reads it uncached (deliberately, so a fresh value is seen) and the guard reads
+it through React `cache()`, whose scope does not extend to the proxy. Two
+queries, same key, same request. And the matcher covers RSC PREFETCHES, so
+every hovered link costs one more. Recorded as accepted for now - the fix is a
+request-scoped memo the proxy can share, which is not Group B's job - but it is
+the number to watch, not the AAL call.
+
+**DB6 - the recovery goes in the GATE, not on a screen.** Two passes reached
+this independently by different routes: `ensureAppUserRowExists` can only fire
+from `requireUser()`, and a row-less account is redirected by the gate before
+any server code runs. The admin pass proposed a server action on the pending
+screen; the data pass proposed moving it into the gate. THE GATE WINS: it fires
+automatically for exactly the denied population, needs no UI to cooperate, and
+cannot be forgotten by a later screen rewrite. Best-effort, never blocking the
+redirect.
+
+**DB7 - the email-collision lockout is unrecoverable, and the recovery written
+for it absorbs the collision identically.** The trigger's target-less
+`on conflict do nothing` discards the insert; the user sees the ordinary
+"waiting for approval" screen; the owner never sees them because the queue
+reads `app_users`; and `ensureAppUserRowExists` uses the same target-less
+upsert, so even when it becomes reachable it cannot help. Reachable through the
+email-correction lag, which `emailUpdateNeeded`'s own comment predicts. Group B
+must not pretend to fix this - it must ensure the pending screen shows the
+signed-in ADDRESS, so the person can at least tell the owner something the
+owner can act on.
+
+**DB8 - a smaller bug found in passing:** the email correction issues a plain
+`UPDATE` with no conflict handling, so a legitimate email move onto an address
+another row holds raises 23505 and is swallowed and re-logged on every request,
+forever.
+
+---
+
+## GROUP B RESHAPED BY THE RELIABILITY PASS (2026-09-06)
+
+**RB1 - THE EMAILED LINK IS REPLACED BY A TYPED CODE, AND `/auth/confirm` IS
+DELETED FROM THE PLAN.** B2's PKCE reasoning was right about session-swap and
+WRONG about availability, in the same bullet. Supabase's default template emits
+a link to GoTrue's OWN `/auth/v1/verify?token=...`, which consumes the one-shot
+token and THEN redirects to us with `?code=`. The burn happens one hop
+UPSTREAM, at a host this deployment does not control, so `/auth/confirm` never
+sees the token and no implementation of it can help. PKCE binds the EXCHANGE;
+nothing binds the VERIFY.
+
+Who this breaks: any mail gateway that fetches URLs in transit - Defender Safe
+Links, Proofpoint, Barracuda - which is near-universal on `.edu` addresses,
+i.e. this app's entire audience. The user clicks, gets `otp_expired`, is shown
+"resend", and the gateway burns the resent link too. A deterministic loop with
+no escape for password reset.
+
+DECISION: switch the two email templates to `{{ .Token }}` - a six-digit code -
+and take a typed code redeemed with `verifyOtp`. Nothing in the email is
+consumable by a GET, so scanner burn, prefetch, double-click and retry all stop
+being possible at once, rather than being handled one at a time.
+
+This makes Group B SMALLER. It deletes: the `/auth/confirm` route handler, its
+GET-versus-POST CSRF design, the session-swap check, the `next` re-validation
+on that handler, the cross-device PKCE failure state, and every finding in the
+verifier-slot family below. The one-code-input screen replaces all of it. Two
+dashboard template edits, no deploy.
+
+**RB2 - the verifier-slot problems this decision removes**, recorded so nobody
+reintroduces the link flow without knowing what comes back with it: there is
+ONE PKCE verifier slot per browser, and `exchangeCodeForSession` deletes it on
+EVERY path including failure - so a network blip during the exchange returns a
+retryable-LOOKING error whose retry can never succeed. Starting a reset while a
+sign-up confirmation is outstanding overwrites the sign-up's verifier. Opening a
+link twice fails the second time. Every one of these surfaces as the SAME error
+the design was going to label "opened on a different device", so all of them
+would have been misdiagnosed.
+
+**RB3 (CRITICAL) - the feature would ship dead.** The README currently
+instructs the operator to keep Supabase's "Allow new users to sign up" OFF, and
+the README correction lives in Group D - AFTER this chunk. So on Group B's
+deploy day the documented, followed state is sign-ups disabled, `signUp`
+returns 422 `signup_disabled`, and nothing detects it. AMENDED: the README
+sign-up paragraphs move INTO Group B, and `signup_disabled` gets its OWN
+state - it is the one provider error B5b must NOT flatten, because it is a
+property of the INSTANCE, not of an account, so the enumeration argument does
+not apply to it.
+
+**RB4 - real SMTP is a Group B PRECONDITION, not a Group D note.** The
+architecture note claims "sign-up still succeeds; the screen offers a resend".
+Both halves are wrong: the mailer limit rejects `POST /signup` itself with
+`over_email_send_rate_limit`, so the "check your email" screen is never
+reached - and the resend button posts through the same limiter, so the offered
+remedy IS the failing call. With the built-in sender, the third sign-up in an
+hour cannot create an account and nobody can reset a password for the rest of
+it. Add a distinct state for that error and a cooldown on resend.
+
+**RB5 - `Site URL`, not just Redirect URLs.** The README documents Redirect
+URLs only. Site URL is a separate field and is what GoTrue uses when the client
+sends no `redirectTo` - and the repo's one sign-up helper sends none, so an
+unconfigured project mints links to `http://localhost:3000`. Pass an explicit
+redirect from an env var, NOT `window.location.origin`, which would make every
+preview deployment mint links to itself.
+
+**RB6 (highest value per line in the whole pass) - the browser Supabase client
+has no timeout at all.** The gate bounds its calls at 5s; the browser client
+passes no `global.fetch`, and auth-js constructs no AbortController. So a
+degraded Supabase leaves "Signing in..." disabled forever, with no error and no
+way to tell whether the write landed - and Group B adds three more screens on
+that client, two of which write. The fix is the same four-line wrapper the
+proxy already uses, at a browser-appropriate timeout, and it repairs the
+EXISTING login page for free. Also: `setSubmitting(false)` belongs in a
+`finally`, because `signUp` re-throws anything that is not an `AuthError`.
+
+**RB7 - the client and the gate now disagree about one failure.** The login
+page discards the error from `getAuthenticatorAssuranceLevel()`, so on failure
+it skips the MFA branch and pushes into the app - while the gate, which now
+fails CLOSED on exactly that condition, bounces the user straight back with
+`state=unavailable`. Group B is already editing this file for B5b; fix it in
+the same pass.
+
+**RB8 - "We will email you" is a promise nothing can keep.** There is no mailer
+dependency in this repo; GoTrue sends only its own four auth templates. And no
+pending queue is visible to anyone, because Group C does not exist. So a person
+signs up, is told they are queued and will be emailed, and neither half is
+true. DELETE that sentence. The cheapest real signal reuses machinery that
+already works: the unattended-runs workflow already curls a `CRON_SECRET`-
+guarded endpoint every 15 minutes and already fails the job on a body-level
+error count. One more route returning `{ pendingCount, oldestPendingAgeHours }`
+and one `jq` line turns "someone has been waiting three days" into the one
+outbound alert channel this deployment has.
+
+**RB9 - rollback, and the one mode that makes it unsafe.** Reverting Group B
+alone is a Vercel instant rollback, and residual rows are `pending` and inert -
+EXCEPT under `SIGNUP_MODE=open`, where a code revert leaves live accounts with
+real access and requires a manual status reset. There is no in-app account
+deletion and Group C does not add one, so removing accounts strangers created
+means the Supabase dashboard by hand. Write the two SQL statements into this
+document as a named procedure, the way the migration wrote its own drop order.
 
 ---
 

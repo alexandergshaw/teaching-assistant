@@ -28,6 +28,7 @@ import { parseCartridgeBlob, type CartridgeCourseData } from "@/lib/cartridge-im
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { scheduleToCsv } from "@/lib/workflows/types";
 import type { Database } from "@/lib/supabase/types";
+import { registerOwnerScopedCache } from "@/lib/workflows/run-form-options-cache";
 
 export const NO_COURSE_SETTINGS_ERROR =
   "This export package has no Canvas course settings, so tiles cannot be populated from it.";
@@ -36,6 +37,21 @@ export const NO_COURSE_SETTINGS_ERROR =
 // switches do not re-download. Values are promises so concurrent clicks on
 // the same course share a single download+parse.
 const cartridgeCache = new Map<string, Promise<CartridgeCourseData>>();
+
+// OWNERSHIP - a parsed cartridge is downloaded from THIS user's Supabase
+// storage bucket (downloadCourseZipBlob, below), so a stale entry surviving
+// a client-side sign-out is another owner's course export content, not a
+// device preference. Same registration idiom as useCoursesData.ts's own
+// hubCache and useCourseTasksData.ts's hubCache (regression entry 189):
+// registered once at module scope with run-form-options-cache.ts's
+// setCacheOwner chokepoint, never from inside the hook body (this repo's
+// react-hooks/globals lint rule rejects a module-level mutation reached from
+// a component/hook's render body - a Map's own .clear() method call is fine
+// here precisely because it never reassigns the `cartridgeCache` binding
+// itself).
+registerOwnerScopedCache(() => {
+  cartridgeCache.clear();
+});
 
 export interface UseCourseImportActionsArgs {
   supabase: SupabaseClient<Database>;

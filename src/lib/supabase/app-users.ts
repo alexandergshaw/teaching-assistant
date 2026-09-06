@@ -58,6 +58,7 @@ import { cache } from "react";
 import { createServiceClient } from "./server";
 import type { Database } from "./types";
 import { isOwnerEmail } from "../owner";
+import { clampDisplayName } from "../display-name";
 
 export type AppUserStatus = "pending" | "active" | "suspended";
 export type AppUserRole = "owner" | "instructor";
@@ -365,11 +366,25 @@ export async function countActiveOwners(): Promise<number> {
  * writes to app_users.display_name, so importing it here for two lines of
  * metadata-reading would couple two modules that otherwise have no reason
  * to know about each other.
+ *
+ * BUG 2 FIX (AC B1): every candidate is run through `clampDisplayName`
+ * (../display-name.ts) - the same clamp `validateSignup` (../signup-rules.ts)
+ * applies to the form path. `user_metadata` is NOT this app's form: it is
+ * written by `@supabase/supabase-js` calls the browser makes directly against
+ * Supabase Auth with the public anon key, so `full_name`/`name` can carry
+ * arbitrary length, control characters, or a bidi override with nothing of
+ * this app's ever standing in the way - a name that reaches `app_users` by
+ * this route bypasses `validateSignup` entirely, so clamping only in that one
+ * place would leave this, the actual write path, wide open. `clampDisplayName`
+ * is already total (returns `""` for anything unusable), so the old
+ * `typeof candidate === "string" && candidate.trim()` guard is folded into it
+ * rather than duplicated here.
  */
 function nameFromAuthMetadata(user: { user_metadata?: unknown } | null | undefined): string | null {
   const meta = user?.user_metadata as { full_name?: unknown; name?: unknown } | undefined;
   for (const candidate of [meta?.full_name, meta?.name]) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    const clamped = clampDisplayName(candidate);
+    if (clamped) return clamped;
   }
   return null;
 }

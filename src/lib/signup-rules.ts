@@ -32,6 +32,7 @@ import "server-only";
 
 import type { AccessRole, AccessStatus } from "./access";
 import { isOwnerEmail } from "./owner";
+import { clampDisplayName } from "./display-name";
 
 /** The three modes a deployment's sign-up form can be in. */
 export type SignupMode = "open" | "approval" | "closed";
@@ -234,8 +235,18 @@ export function validateSignup(input: SignupInput): SignupResult {
     return refuse("mode", "Sign-ups are currently closed for this workspace.");
   }
 
+  // AC B1 / BUG 2 FIX: run the submitted name through the same clamp
+  // (./display-name.ts) that bounds length and strips control/bidi/
+  // zero-width characters everywhere else `display_name` can originate -
+  // this is the one route that passes through this app's own form, and it
+  // must not normalise the name differently than the other route
+  // (`nameFromAuthMetadata`, ./supabase/app-users.ts) does. Clamping BEFORE
+  // the emptiness check (rather than a bare `.trim()`) also closes a small
+  // gap the old check had: a name built entirely from bidi/invisible
+  // characters is not "whitespace" as `String.prototype.trim` defines it, so
+  // it used to read as non-empty and pass straight through.
   const fullNameRaw = typeof input?.fullName === "string" ? input.fullName : null;
-  const fullName = fullNameRaw !== null ? fullNameRaw.trim() : "";
+  const fullName = fullNameRaw !== null ? clampDisplayName(fullNameRaw) : "";
   if (!fullName) {
     return refuse("fullName", "Enter your full name.");
   }
@@ -272,6 +283,21 @@ export function validateSignup(input: SignupInput): SignupResult {
 
 export interface InitialAccountInput {
   email: string;
+  /**
+   * Whether the auth provider has confirmed this address belongs to the
+   * account being created - the caller passes
+   * `Boolean(user?.email_confirmed_at)`, mirroring
+   * `ResolveAccessInput.emailVerified` (./access.ts) and the same gate
+   * `ensureAppUser`'s owner-promotion branch applies
+   * (./supabase/app-users.ts). REQUIRED, not optional: an optional field with
+   * either default would silently reintroduce BUG 1 for whichever caller
+   * forgets to pass it - a permissive default (verified when omitted) hands
+   * out ownership from a bare unverified claim, and a strict default
+   * (unverified when omitted) would be trivially easy for a future caller to
+   * satisfy accidentally by never wiring the field through at all. Requiring
+   * it makes an omission a compile error instead of a silent grant.
+   */
+  emailVerified: boolean;
 }
 
 export interface InitialAccountDecision {
@@ -280,23 +306,70 @@ export interface InitialAccountDecision {
 }
 
 /**
- * Decides the role and status a brand-new account starts with. Takes only
- * an email - there is deliberately NO first-account bootstrap. An earlier
- * design promoted the first account created to owner whenever `OWNER_EMAILS`
- * was empty; that was removed because the failure mode it was meant to
- * prevent (an unset or unpropagated `OWNER_EMAILS` - a typo, an env var that
- * did not reach the deployment, a fresh preview branch) already has a safe
- * outcome: nobody is approved, which is recoverable by fixing the
- * environment. Bootstrap-on-empty turns that SAME misconfiguration into
- * handing the deployment, its service-role database access and every shared
- * API key to the first stranger who finds the URL - and it races, since two
- * concurrent sign-ups both observe "no accounts yet". Ownership comes from
- * `OWNER_EMAILS` and nowhere else; an unset allowlist means the deployment
- * has no owner yet, which is the same fail-closed state this app already
- * has, not a new one.
+ * Decides the role and status a brand-new account starts with. Takes only an
+ * email and its verification state - there is deliberately NO first-account
+ * bootstrap. An earlier design promoted the first account created to owner
+ * whenever `OWNER_EMAILS` was empty; that was removed because the failure
+ * mode it was meant to prevent (an unset or unpropagated `OWNER_EMAILS` - a
+ * typo, an env var that did not reach the deployment, a fresh preview
+ * branch) already has a safe outcome: nobody is approved, which is
+ * recoverable by fixing the environment. Bootstrap-on-empty turns that SAME
+ * misconfiguration into handing the deployment, its service-role database
+ * access and every shared API key to the first stranger who finds the URL -
+ * and it races, since two concurrent sign-ups both observe "no accounts
+ * yet". Ownership comes from `OWNER_EMAILS` and nowhere else; an unset
+ * allowlist means the deployment has no owner yet, which is the same
+ * fail-closed state this app already has, not a new one.
+ *
+ * BUG 1 FIX: an allowlisted email is granted `role: "owner", status: "active"`
+ * ONLY when `emailVerified` is also true. Before this fix the function
+ * trusted a bare, self-reported email match against `OWNER_EMAILS` with no
+ * verification at all - unlike every other owner-granting path in this
+ * repo, which by the time this was found already required it
+ * (`resolveAccess`'s break-glass in ./access.ts, and `ensureAppUser`'s
+ * promotion branch in ./supabase/app-users.ts). With Supabase email
+ * confirmations turned OFF - a configuration this app's acceptance criteria
+ * require supporting - an unverified check here would have let anyone who
+ * simply knows an allowlisted-but-not-yet-claimed address sign up as that
+ * address and be minted an ACTIVE OWNER on the spot, before the real person
+ * ever claims it: a straight account takeover, and one a caller could not
+ * even see coming, because this function's own return type gives no signal
+ * that anything was skipped.
+ *
+ * An allowlisted-but-unverified address deliberately falls through to
+ * EXACTLY the same outcome an ordinary, non-allowlisted address gets
+ * (`role: "instructor"`, status from `initialStatusForSignup()`) rather than
+ * being refused outright or given some third, unwritten outcome. This
+ * mirrors how `resolveAccess` and `ensureAppUser` both treat an unverified
+ * allowlisted address elsewhere in this codebase: verification gates the
+ * ELEVATION, not participation in the ordinary sign-up flow, so a real
+ * co-instructor whose address happens to be allowlisted before they have
+ * confirmed their email still gets a normal pending-or-active instructor
+ * account exactly like anyone else, and is free to become owner automatically
+ * the moment their email is verified - `ensureAppUser`'s reconciliation
+ * re-derives ownership from `OWNER_EMAILS` plus the VERIFIED auth record on
+ * every subsequent request, so nothing further needs to happen here for that
+ * promotion to complete once verification lands.
+ *
+ * A SIGN-UP ACTION MUST NEVER WRITE `role` (OR `status: "active"` FOR AN
+ * OWNER) DIRECTLY FROM THIS FUNCTION'S RESULT INTO A STORED ROW. This
+ * function's own verification check happens exactly once, at the moment of
+ * sign-up; a value written from it into `app_users` would then be trusted
+ * forever afterward with no re-check, which is exactly the shape of bug this
+ * fix exists to close (a promoted-then-demoted, or never-actually-verified,
+ * address staying `owner`/`active` because nothing ever re-derives it). The
+ * intended path for a brand-new account is: let the migration's trigger
+ * (`handle_new_auth_user`) create the row with its column defaults
+ * (`role='instructor'`, `status='pending'`), and let `ensureAppUser`'s own
+ * OWNER_EMAILS reconciliation - which re-verifies the email itself via the
+ * admin API on every call, never trusting a caller-supplied value - perform
+ * the actual promotion once verification is confirmed. This function exists
+ * to answer "what should a sign-up form tell the person about what happens
+ * next" (e.g. whether to show "pending approval" or "you're in"), not to
+ * hand a caller a role/status pair meant for direct persistence.
  */
 export function decideInitialAccount(input: InitialAccountInput): InitialAccountDecision {
-  if (isOwnerEmail(input.email)) {
+  if (isOwnerEmail(input.email) && input.emailVerified) {
     return { role: "owner", status: "active" };
   }
   return { role: "instructor", status: initialStatusForSignup() };

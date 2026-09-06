@@ -27,6 +27,7 @@ import type { Database } from "@/lib/supabase/types";
 import { adaptCartridgeToCourseContent } from "./adapter";
 import { KeyedPromiseCache } from "./cache";
 import type { ExportCourseContent } from "./types";
+import { registerOwnerScopedCache } from "@/lib/workflows/run-form-options-cache";
 
 // Parsed cartridges keyed by storage path - see cache.ts's header comment for
 // why this is a shared, extracted cache rather than a third hand-rolled copy.
@@ -45,6 +46,27 @@ import type { ExportCourseContent } from "./types";
 // in, forcing a caller to cast it back rather than widen the one place that
 // actually erased it.
 const cartridgeCache = new KeyedPromiseCache<CartridgeCourseData & { canvasIdentity?: CartridgeCanvasIdentity }>();
+
+// OWNERSHIP - this module's own header comment above says the zip download
+// and unzip "runs entirely in the browser", so cartridgeCache is browser-side
+// module state, keyed ONLY by storage path with no user scoping at all. A
+// client-side sign-out (TopBar.tsx's handleSignOut: supabase.auth.signOut()
+// followed by router.refresh()/router.push("/login")) never tears down the
+// JS module registry, so without this, user B signing in in the same tab
+// could be served user A's already-parsed course content straight from
+// memory - the same cross-user leak useCourseImportActions.ts's own
+// cartridgeCache (registered there for the identical reason) exists to
+// avoid. Registered with run-form-options-cache.ts's setCacheOwner
+// chokepoint, the same mechanism that sibling cache and useCourseTasksData.ts's
+// hubCache (regression entry 189) both use, rather than a parallel scheme.
+// Called once, at module scope, never from inside a function a React render
+// can reach - this repo's react-hooks/globals lint rule rejects a
+// module-level mutation reached from a component/hook's render body. A
+// KeyedPromiseCache's own .clear() method call is fine here precisely
+// because it never reassigns the `cartridgeCache` binding itself.
+registerOwnerScopedCache(() => {
+  cartridgeCache.clear();
+});
 
 /** Shared tail of both resolution paths below: given an already-resolved
  * course row, find its newest instructor-provided export, download + parse

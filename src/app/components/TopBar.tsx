@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
@@ -462,13 +461,20 @@ export interface TopBarProps {
 
 export default function TopBar({ guardKbUnsavedEdits = ALWAYS_ALLOW, onSelectCourse }: TopBarProps = {}) {
   const { supabase, user } = useSupabase();
-  const router = useRouter();
   const { institutions } = useInstitutionSelection();
 
+  // A FULL DOCUMENT LOAD, not router.refresh()/router.push(). Those are both
+  // client-side Next navigations, which never tear down the JS module
+  // registry - so every module-scope cache that setCacheOwner cannot reach
+  // (any future one someone forgets to register with
+  // run-form-options-cache.ts's registerOwnerScopedCache) would still be
+  // sitting in memory for whoever signs in next in this tab. A full load is
+  // the only thing that guarantees a completely clean slate regardless of
+  // registration. The registrations themselves still matter for the SIGN-IN
+  // direction, where there is no reload to fall back on.
   const handleSignOut = async () => {
     await supabase.auth.signOut();
-    router.refresh();
-    router.push("/login");
+    window.location.assign("/login");
   };
 
   return (

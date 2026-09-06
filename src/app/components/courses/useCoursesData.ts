@@ -14,6 +14,7 @@ import type { Course } from "@/lib/supabase/courses";
 import type { FinalizedSyllabusMeta } from "@/lib/supabase/course-syllabi";
 import type { SyllabusTemplateMeta } from "@/lib/supabase/syllabus-templates";
 import { splitCourseNotifResults } from "@/lib/courses-table-helpers";
+import { registerOwnerScopedCache } from "@/lib/workflows/run-form-options-cache";
 
 export interface UseCoursesDataReturn {
   courses: Course[];
@@ -49,6 +50,21 @@ export interface UseCoursesDataReturn {
 }
 
 let hubCache: { courses: Course[]; syllabi: FinalizedSyllabusMeta[]; templates: SyllabusTemplateMeta[]; orgs: string[] } | null = null;
+
+// OWNERSHIP - this module-scope cache survives a client-side sign-out the
+// same way run-form-options-cache.ts's own Map and useCourseTasksData.ts's
+// hubCache do (regression entry 189): TopBar.tsx's sign-out never tears down
+// the JS module registry on its own, so without this, user B signing in in
+// the same tab would mount straight from user A's cached course tiles/
+// syllabi/templates/orgs for one round trip. Registered with
+// run-form-options-cache.ts's setCacheOwner chokepoint rather than a second,
+// parallel invalidation scheme. Called once, at module scope - never from
+// inside the hook body below, since this repo's react-hooks/globals lint
+// rule rejects a module-level reassignment reached from a component/hook's
+// render body.
+registerOwnerScopedCache(() => {
+  hubCache = null;
+});
 
 export function useCoursesData(): UseCoursesDataReturn {
   const [courses, setCourses] = useState<Course[]>(() => hubCache?.courses ?? []);

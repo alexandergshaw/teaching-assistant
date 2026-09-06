@@ -340,11 +340,11 @@ describe("validateSignup", () => {
 describe("decideInitialAccount", () => {
   const OWNER = "boss@example.edu";
 
-  it("makes an allowlisted email an active owner, whatever the mode", () => {
+  it("makes a VERIFIED allowlisted email an active owner, whatever the mode", () => {
     process.env.OWNER_EMAILS = OWNER;
     for (const mode of ["open", "approval", "closed"] as const) {
       process.env.SIGNUP_MODE = mode;
-      expect(decideInitialAccount({ email: OWNER })).toMatchObject({
+      expect(decideInitialAccount({ email: OWNER, emailVerified: true })).toMatchObject({
         role: "owner",
         status: "active",
       });
@@ -355,7 +355,7 @@ describe("decideInitialAccount", () => {
     // The fail-closed property. An env var that failed to propagate must lock
     // the deployment, never hand it to whoever arrives first.
     process.env.SIGNUP_MODE = "approval";
-    expect(decideInitialAccount({ email: "first@example.edu" })).toMatchObject({
+    expect(decideInitialAccount({ email: "first@example.edu", emailVerified: true })).toMatchObject({
       role: "instructor",
       status: "pending",
     });
@@ -364,12 +364,14 @@ describe("decideInitialAccount", () => {
   it("does NOT promote anyone when the allowlist is present but does not match", () => {
     process.env.OWNER_EMAILS = OWNER;
     process.env.SIGNUP_MODE = "open";
-    expect(decideInitialAccount({ email: "stranger@example.edu" }).role).toBe("instructor");
+    expect(decideInitialAccount({ email: "stranger@example.edu", emailVerified: true }).role).toBe(
+      "instructor"
+    );
   });
 
   it("queues an ordinary account in approval mode", () => {
     process.env.SIGNUP_MODE = "approval";
-    expect(decideInitialAccount({ email: "dana@example.edu" })).toMatchObject({
+    expect(decideInitialAccount({ email: "dana@example.edu", emailVerified: true })).toMatchObject({
       role: "instructor",
       status: "pending",
     });
@@ -377,14 +379,14 @@ describe("decideInitialAccount", () => {
 
   it("activates an ordinary account in open mode", () => {
     process.env.SIGNUP_MODE = "open";
-    expect(decideInitialAccount({ email: "dana@example.edu" })).toMatchObject({
+    expect(decideInitialAccount({ email: "dana@example.edu", emailVerified: true })).toMatchObject({
       role: "instructor",
       status: "active",
     });
   });
 
   it("never returns an active instructor by default", () => {
-    expect(decideInitialAccount({ email: "dana@example.edu" })).toMatchObject({
+    expect(decideInitialAccount({ email: "dana@example.edu", emailVerified: true })).toMatchObject({
       role: "instructor",
       status: "pending",
     });
@@ -394,9 +396,60 @@ describe("decideInitialAccount", () => {
     process.env.OWNER_EMAILS = OWNER;
     for (const email of ["", "  ", "not-the-owner@example.edu", `${OWNER}.evil.com`, "example.edu"]) {
       expect(
-        decideInitialAccount({ email }).role,
+        decideInitialAccount({ email, emailVerified: true }).role,
         `${JSON.stringify(email)} must not be an owner`
       ).toBe("instructor");
     }
+  });
+
+  /**
+   * BUG 1 (CRITICAL, rival-model threat model): `decideInitialAccount` used
+   * to grant `role: "owner", status: "active"` for a bare allowlisted email
+   * match with NO verification at all - unlike every other owner-granting
+   * path in this repo (`resolveAccess`'s break-glass in ./access.ts, and
+   * `ensureAppUser`'s promotion branch in ./supabase/app-users.ts), both of
+   * which already gated this on `emailVerified`/`email_confirmed_at`. With
+   * Supabase email confirmations turned off, an unverified check here would
+   * let anyone who merely knows an allowlisted-but-unclaimed address sign up
+   * as it and become an ACTIVE OWNER on the spot - a straight account
+   * takeover of that address, and permanent, because nothing walks a stored
+   * active owner row back down on its own.
+   */
+  describe("BUG 1 FIX - the owner grant requires a VERIFIED email", () => {
+    it("does NOT grant owner to an allowlisted email that is not yet verified - falls through to the same outcome as an ordinary address", () => {
+      process.env.OWNER_EMAILS = OWNER;
+      process.env.SIGNUP_MODE = "approval";
+      expect(decideInitialAccount({ email: OWNER, emailVerified: false })).toMatchObject({
+        role: "instructor",
+        status: "pending",
+      });
+    });
+
+    it("promotes the SAME address once verified - the only difference is emailVerified", () => {
+      process.env.OWNER_EMAILS = OWNER;
+      process.env.SIGNUP_MODE = "approval";
+      expect(decideInitialAccount({ email: OWNER, emailVerified: true })).toMatchObject({
+        role: "owner",
+        status: "active",
+      });
+    });
+
+    it("an unverified allowlisted address gets exactly what an ordinary address gets in the same mode, never a third outcome", () => {
+      process.env.OWNER_EMAILS = OWNER;
+      for (const mode of ["open", "approval", "closed"] as const) {
+        process.env.SIGNUP_MODE = mode;
+        expect(decideInitialAccount({ email: OWNER, emailVerified: false })).toEqual(
+          decideInitialAccount({ email: "ordinary@example.edu", emailVerified: true })
+        );
+      }
+    });
+
+    it("never grants owner, however many times an unverified allowlisted address is decided", () => {
+      process.env.OWNER_EMAILS = OWNER;
+      process.env.SIGNUP_MODE = "open";
+      for (let i = 0; i < 3; i += 1) {
+        expect(decideInitialAccount({ email: OWNER, emailVerified: false }).role).toBe("instructor");
+      }
+    });
   });
 });

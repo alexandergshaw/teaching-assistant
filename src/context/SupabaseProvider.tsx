@@ -41,6 +41,13 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
       // Covers sign-out (next is null), sign-in, and a direct user switch -
       // see run-form-options-cache.ts's setCacheOwner for why a single
       // "owner changed" check replaces enumerating each of those paths.
+      // setCacheOwner also sweeps localStorage/IndexedDB now
+      // (client-state-sweep.ts) on the same owner-changed transition, so
+      // this one call is what erases the previous owner's browser-side state
+      // as well as clearing the in-memory caches - TopBar.tsx's sign-out
+      // still additionally does a full document reload, since that is the
+      // only thing that also tears down any module-scope cache that was
+      // never registered with setCacheOwner in the first place.
       setCacheOwner(next?.user.id ?? null);
     });
 

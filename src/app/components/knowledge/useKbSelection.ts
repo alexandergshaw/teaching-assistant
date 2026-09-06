@@ -62,11 +62,26 @@
 import { useCallback, useState } from "react";
 import type { InstitutionPage } from "@/lib/knowledge-base";
 import { allVisibleSelected, readBulkSelectedIds, writeBulkSelectedIds } from "./knowledge-helpers";
+import { registerOwnerScopedCache } from "@/lib/workflows/run-form-options-cache";
 
 /** Module-scoped, per-institution, NOT persisted to localStorage - see the
  *  module comment above. Cleared for free by a hard reload; survives a
  *  same-session KnowledgeTab unmount/remount. */
 const sessionSelectionCache = new Map<string, Set<string>>();
+
+// OWNERSHIP - a hard reload clears this Map for free (see the comment above
+// it), but nothing about a client-side sign-out does, so without this a
+// selection made by user A would still be sitting here - and would still
+// come back on a same-session remount - after user B signs in in the same
+// tab. Same idiom as useCoursesData.ts's hubCache and
+// useCourseImportActions.ts's cartridgeCache: registered once at module
+// scope with run-form-options-cache.ts's setCacheOwner chokepoint (a Map's
+// own .clear() call, not a reassignment of this binding, so this is safe
+// outside a component/hook body the same way this repo's react-hooks/globals
+// lint rule already allows for those two caches).
+registerOwnerScopedCache(() => {
+  sessionSelectionCache.clear();
+});
 
 /** Write-through used by every mutation below: keeps the per-institution
  *  localStorage copy (in-session institution-switch convenience, B5) and

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { runAsOwner } from "@/lib/supabase/owner-context";
-import { isOwnerEmail } from "@/lib/owner";
+import { runAsOwner, resolveImpersonationIdentity } from "@/lib/supabase/owner-context";
 import {
   listDueUnattendedWorkflowSchedules, claimWorkflowSchedule,
   claimFanoutSchedule, checkpointFanoutInstitution, deferFanoutResume, finishFanoutSchedule,
@@ -33,8 +32,8 @@ import type { LlmProvider } from "@/lib/llm";
 // asleep, so there is no session cookie and nobody to answer a mid-run pause.
 // See src/lib/workflows/headless.ts (which workflows are eligible),
 // src/lib/workflows/server-runner.ts (the run loop), and
-// src/lib/supabase/owner-context.ts (the owner-impersonation bypass this
-// route is the sole trusted caller of).
+// src/lib/supabase/owner-context.ts (the impersonation bypass this route is
+// one of FOUR trusted callers of - see that file's header for the full list).
 //
 // Runs on the Node.js runtime (not edge): it needs the service-role Supabase
 // client, Node crypto/AsyncLocalStorage, and the same server actions the app
@@ -107,9 +106,9 @@ function resolveTickSource(req: NextRequest): string {
 export async function GET(req: NextRequest) {
   // SECURITY: this check is the entire trust boundary for runAsOwner below.
   // Anyone who can guess/steal CRON_SECRET can trigger scheduled runs as
-  // their owning user (never as an arbitrary user - see the isOwnerEmail
-  // re-check per schedule further down), so keep it a long random secret and
-  // never log it.
+  // their owning user (never as an arbitrary user - see the
+  // resolveImpersonationIdentity re-check per schedule further down), so
+  // keep it a long random secret and never log it.
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     return NextResponse.json({ error: "CRON_SECRET is not configured." }, { status: 500 });
@@ -263,18 +262,29 @@ export async function GET(req: NextRequest) {
 
     for (const schedule of due) {
       try {
-        // Defensive re-check: confirm the schedule's owner is still an
-        // allowlisted owner right now, independent of whatever it was when the
-        // schedule was created (OWNER_EMAILS may have changed since).
+        // Defensive re-check: confirm the schedule's owning account is still
+        // active right now, independent of whatever it was when the schedule
+        // was created (its app_users row, or OWNER_EMAILS, may have changed
+        // since). AC AM3: this is "is the account ACTIVE", not "is the
+        // account the owner" - a member's own scheduled workflow must be
+        // able to fire. resolveImpersonationIdentity re-derives role/status
+        // from the SAME resolveAccess() decision the rest of the app uses
+        // and fails closed on a lookup error - see owner-context.ts.
         const { data: userRes, error: userErr } = await supabase.auth.admin.getUserById(schedule.userId);
-        if (userErr || !userRes?.user || !isOwnerEmail(userRes.user.email)) {
-          results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "owner is not allowlisted" });
+        if (userErr || !userRes?.user) {
+          results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "account not found" });
           continue;
         }
         const ownerEmail = userRes.user.email;
         if (!ownerEmail) {
           await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", "owner has no email on file").catch(() => {});
           results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "owner has no email on file" });
+          continue;
+        }
+        const identity = await resolveImpersonationIdentity(userRes.user.id, ownerEmail);
+        if (!identity) {
+          await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", "account is not active").catch(() => {});
+          results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "account is not active" });
           continue;
         }
 
@@ -344,7 +354,7 @@ export async function GET(req: NextRequest) {
             id: workflowRunId, workflowId: schedule.workflowId, workflowName: def!.name, triggerSource: "schedule", triggerRef: schedule.id,
             fieldValues: schedule.fieldValues,
           });
-          const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
+          const outcome = await runAsOwner(identity, () =>
             runWorkflowUnattended({
               def: def!,
               resolveWorkflow: lookup,
@@ -487,7 +497,7 @@ export async function GET(req: NextRequest) {
           id: workflowRunId, workflowId: schedule.workflowId, workflowName: def.name, triggerSource: "schedule", triggerRef: schedule.id,
           fieldValues: schedule.fieldValues,
         });
-        const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
+        const outcome = await runAsOwner(identity, () =>
           runWorkflowUnattended({
             def,
             resolveWorkflow: lookup,

@@ -39592,3 +39592,287 @@ c. The popup occupies nearly all the space above the composer at the window's
 d. Copy items 19-22 (how many institutions match the in-progress query) are owned
    by the popup hook, not the resolution side; AiChatFab structurally cannot
    compute them because the seam carries only the unfiltered list.
+## 398. Area baseline - the access gate, before it stops being an env allowlist
+
+Taken 2026-09-05, BEFORE the multi-user login work, because this area has
+never had a regression entry and has NO direct test coverage at all:
+`src/lib/owner.ts`, `src/lib/supabase/middleware.ts` and
+`src/lib/supabase/auth.ts` have zero `*.test.ts` files between them. The ~78
+test files that mock `requireOwner` assert their own caller's error handling,
+not the guard. So a change here today would be caught by nothing. This entry
+is what must keep working.
+
+Evidence at baseline time: full suite green before any edit; the behaviors
+below established by code trace at the cited file:line, not by observation in
+a browser, and this entry says so rather than implying otherwise.
+
+**B1 - the allowlist is pure, env-only, and fails closed.**
+`src/lib/owner.ts:8-14`. `isOwnerEmail` splits `OWNER_EMAILS` on commas,
+trims, lowercases, and returns `allowed.length > 0 && !!email &&
+allowed.includes(email.toLowerCase())`. Unset or empty means NOBODY is
+authorized - `README.md:45-47` states that contract deliberately. It reads
+`process.env` on every call (not once at module load), which is what makes it
+safe in the edge runtime. It imports nothing, so it is safe to import from
+edge middleware and from server actions alike. Any replacement must keep all
+four properties: pure, per-call env read, case-insensitive, fail-closed.
+
+**B2 - the request gate's routing table.**
+`src/lib/supabase/middleware.ts`. The matcher (`src/middleware.ts:8-13`)
+covers everything except `_next/static`, `_next/image`, `favicon.ico` and
+image extensions. Inside `updateSession`: create the SSR client, then
+`getUser()` with NOTHING between the two (the comment at `:35` is a real
+constraint, not decoration - code in between breaks cookie refresh). Public
+prefixes are exactly `/login`, `/auth`, `/api/cron`, `/api/triggers`
+(`:50-55`). A non-public path with a non-allowlisted user redirects to
+`/login` with `url.search = ""` (`:57-63`). Then, and only for a permitted
+user, the AAL2 step-up: if `nextLevel === "aal2" && currentLevel !== "aal2"`,
+redirect to `/login` (`:68-74`). A user with NO enrolled factor has
+`nextLevel === "aal1"`, so this can never lock out someone who has not set up
+MFA - that is the property to preserve, and it is easy to invert by accident.
+
+**B3 - two known defects in B2, recorded so a later "fix" is not read as a
+regression.** (i) `/api/github/webhook` is NOT in the public list even though
+it is the same class of caller as `/api/cron` and `/api/triggers` - no
+session, authenticated by an HMAC signature over the raw body
+(`src/app/api/github/webhook/route.ts:54-72`). Every push GitHub sends is
+307-redirected to `/login` before the verifier runs, and GitHub does not
+follow redirects, so the repo-push webhook is dead in production. (ii)
+`url.search = ""` discards the destination, so an expired session always
+lands on the home page rather than where the user was going. Both are
+intentional changes in the multi-user work, not regressions.
+
+**B4 - the server-side guard, and its one bypass.**
+`src/lib/supabase/auth.ts:29-57`. `requireOwner()` checks
+`getImpersonatedOwner()` FIRST and returns immediately when set, with no
+cookie and no MFA check (`:37-40`). This asymmetry with B2 is deliberate and
+load-bearing for unattended runs; `src/lib/supabase/owner-context.ts` carries
+a 50-line security preamble naming the only callers allowed to populate that
+AsyncLocalStorage store. Otherwise: `getUser()`, then `isOwnerEmail`, then the
+same AAL2 check, throwing "Not authorized. Sign in with an approved account."
+(`:48`) or "Multi-factor authentication required..." (`:53`). Measured shape
+of its consumers: 485 invocations across 105 non-test source files; 268 of the
+433 `await requireOwner()` calls DISCARD the return value and the remaining
+165 read ONLY `user.id`. `user.email` is read off the result exactly zero
+times. Any replacement returning `{ id, email, ... }` is therefore
+source-compatible with every existing call site.
+
+**B5 - impersonation is gated on a server-only secret at all four callers.**
+`api/cron/run-schedules/route.ts:117-120` (Bearer `CRON_SECRET`) then
+`:270` (`isOwnerEmail`); `api/triggers/[token]/route.ts:55-58` (256-bit
+per-trigger `webhook_token`) then `:64`; `api/github/webhook/route.ts:60-72`
+(timing-safe HMAC) then `:105`; `lib/workflow-trigger-runner.ts:63`. Nothing
+a browser can reach calls `runAsOwner`. `api/automations/run-now/route.ts:59`
+uses the caller's own cookie session and never impersonates. The secret gate
+must stay; the identity re-check is what the multi-user work changes, from
+"is an owner" to "is an active account".
+
+**B6 - sign-in and the MFA step-up as they render.**
+`src/app/login/page.tsx`: `signInWithPassword` (`:52`); on success,
+`mfa.getAuthenticatorAssuranceLevel()` (`:60`) and, when a step-up is needed,
+`mfa.listFactors()` (`:62`) with the first TOTP factor driving a second form
+that calls `mfa.challengeAndVerify` (`:82-85`); `finish()` is
+`router.refresh()` then `router.push("/")` (`:42-45`). A signed-in but
+unapproved user sees "Signed in as {email}, but this account is not approved
+for access" plus a sign-out button (`:200-214`) - the entire not-approved
+experience today, and a dead end by design of omission rather than intent.
+
+**B7 - MFA enrolment.** `src/app/account/security/page.tsx` is fully
+client-side against the browser client, with no server action and no database
+row: `listFactors` (`:29,:40`), `enroll({ factorType: "totp" })` (`:55-58`),
+`challengeAndVerify` (`:72-75`), `unenroll` on both the cancel (`:91`) and
+remove (`:103`, behind `window.confirm`) paths. Its recovery advice points at
+the Supabase dashboard (`:221-224`) - correct for a solo owner, unreachable
+for anyone else.
+
+**B8 - the tenancy properties that already hold, and must not be lost.**
+RLS is enabled on 43/43 tables; 39 carry `user_id` with `auth.uid() = user_id`
+policies and no looser expression anywhere. All 16 `storage.objects` policies
+are UID-partitioned (`bucket_id = '...' and (storage.foldername(name))[1] =
+auth.uid()::text`) across all four private buckets, and every path builder
+namespaces on the user id first segment
+(`recording-files.ts:81`, `course-files.ts:81,120`,
+`course-task-attachments.ts:127`, `cartridge-drops.ts:40`,
+`institution-page-attachments.ts:242`), with filenames from
+`crypto.randomUUID()` or a row id rather than user input. Storage is the one
+layer that is already correctly multi-tenant and needs no work.
+
+**B9 - the cache that already learned this lesson.**
+`src/lib/workflows/run-form-options-cache.ts` clears on owner change via
+`setCacheOwner`, called from BOTH the initial `getSession()` resolution and
+the `onAuthStateChange` subscription in `SupabaseProvider.tsx:26,39`. Entry
+189 documents why. Its 24 tests (`run-form-options-cache.test.ts:136-193`)
+pin: clear on A->B, no-op on repeat, clear on sign-out, clear on sign-in from
+null, and TTL undisturbed by a no-op. These must stay green - the no-op case
+in particular, without which every render wipes the cache and silently undoes
+the optimisation.
+
+**Limits of this baseline.** Everything above is a code trace. The suite is
+node-environment and collects only `src/**/*.test.ts`, so no component here
+has ever been rendered by a test and none of the login or account UI is
+covered by anything. The redirect behavior in B2/B3 has not been observed
+against a running server in this session. Treat B3(i) in particular as a
+code-level inference: a live GitHub push was never watched.
+
+## 399. The app grows accounts: roles, status, and a gate that stops asking "is this the owner"
+
+Group A of the multi-user login work. This entry is the durable behavioral
+contract; the acceptance criteria and every amendment that reshaped them live
+in `docs/multi-user-login-acceptance-criteria.md`, and the design reasoning in
+`docs/multi-user-login-architecture.md`.
+
+**What this chunk is NOT.** There is still no sign-up form, no password reset,
+no admin surface and no per-user LMS credential. `signup-rules.ts` is written,
+tested and deliberately unwired. This chunk replaces the authorization MODEL;
+the screens come next. Anyone reading this entry looking for the login flow
+itself is in the wrong entry.
+
+**AC1 - one access decision, and only one.** `src/lib/access.ts` resolves
+`(email, profile, lookupFailed, authFailed) -> anonymous | pending |
+suspended | unavailable | active | owner`, pure and importable from the edge.
+Its order is load-bearing and each step earns its place:
+`authFailed` first (an identity we could not determine is not the same fact as
+no identity), then a trimmed-empty email to `anonymous`, then the
+`OWNER_EMAILS` break-glass BEFORE any row is read, then `lookupFailed` to
+`unavailable`, then a missing row to `pending`, then the stored status, with
+an unrecognised role or status failing closed. The request gate, the
+server-action guard and (later) the UI all consume this one function; a second
+copy of the rule is the defect it exists to prevent, and it has grown one
+twice already during this work.
+
+**AC2 - the gate is a `proxy`, not a `middleware`.** `src/proxy.ts` and
+`src/lib/supabase/proxy.ts` replace the deleted `src/middleware.ts` and
+`src/lib/supabase/middleware.ts`. Next 16 deprecates the middleware
+convention; keeping both files present is an error, so the deletion is part of
+the same change. Verifying this is NOT a matter of reading the manifest:
+`.next/server/middleware-manifest.json` is empty and no artifact is named
+"proxy". The four signals that actually prove it are the build's
+`f Proxy (Middleware)` line, the `/_middleware` entry in
+`functions-config-manifest.json` whose `originalSource` matcher matches
+`src/proxy.ts` character for character, the existence of
+`.next/server/middleware.js`, and this gate's own marker strings inside the
+compiled chunk. That entry also records `"runtime": "nodejs"` - the gate moved
+off the Edge runtime as a consequence of the rename.
+
+**AC3 - the public-path table, and the webhook that was dead.**
+`isPublicPath` exempts `/login`, `/auth`, `/api/cron`, `/api/triggers` and
+`/api/github/webhook`, matching WHOLE SEGMENTS - `/loginish`, `/api/cronjobs`
+and `/api/github/webhooks-admin` are gated. The webhook entry is new and
+fixes a live bug recorded at entry 398 B3: GitHub's push webhook was
+307-redirected to `/login` before its own HMAC verifier ran, and GitHub does
+not follow redirects, so the feature was dead in production. NOTE this table
+is deliberately STRICTER than the baseline, which used bare `startsWith`;
+AC A5 said "verbatim" and this is not, which is a considered change rather
+than an oversight.
+
+**AC4 - the destination survives the bounce.** The old gate did
+`url.search = ""`, discarding where the user was going. The new one carries
+`?state=<decision>&next=<path>`, with `next` validated by `safeNextPath`,
+which is an open-redirect guard pinned by a PROPERTY (the destination resolved
+against a fixed origin must stay on that origin) rather than a denylist of
+shapes. It refuses protocol-relative and backslash forms, control characters
+that a browser strips before parsing (`/<TAB>/evil.com` IS `//evil.com`),
+every path under the login prefix, and non-string input. HALF-SHIPPED, on
+purpose: `src/app/login/page.tsx` reads neither parameter yet, so a bounced
+user today gets a bounce exactly as silent as the baseline's. Do not read AC
+A5's "a real explanation" as delivered.
+
+**AC5 - `app_users`, and why it cannot be edited by the person it describes.**
+Migration `20261012000000`. One row per `auth.users` row, carrying email,
+display name, role (`owner` | `instructor`), status (`pending` | `active` |
+`suspended`), approval and status-change attribution, created by a database
+trigger so no account can exist without one. RLS is the security core:
+exactly ONE policy, `for select using (auth.uid() = id)`, and NO insert,
+update or delete policy for `authenticated` - because RLS is ROW level and no
+policy can protect a COLUMN, so a row-scoped update policy would let a user
+run `update app_users set role='owner' where id = auth.uid()`. A before-update
+trigger additionally refuses a self-change of role or status, as a second
+layer under a policy set a future migration could loosen by accident. The
+insert trigger is the repo's first `security definer` function and carries
+`set search_path = ''` with every reference schema-qualified.
+
+**AC6 - the backfill preserves the status quo rather than granting access.**
+Every pre-existing account is backfilled `pending`, NOT `active`. Backfilling
+`active` reads like status-quo preservation and is the opposite: under the old
+gate a non-allowlisted account had no access at all, so activating it grants
+access it never had. The owner is not locked out by this because the
+`OWNER_EMAILS` break-glass never consults the row.
+
+**AC6b - removing an address from OWNER_EMAILS still revokes access.** The
+first cut of reconciliation demoted `role` and deliberately left `status`
+alone, so an address that was ever on the allowlist became a permanently
+`active` account with no way to revoke it - losing the instant, total
+revocation entry 398 point B1 pins as a property. Demotion now also sets
+`status='pending'`, gated on `approved_by IS NULL`: an account that was only
+ever active by virtue of the allowlist returns to pending, while one a human
+explicitly approved is untouched. NOTE the gate is `approved_by`, not
+`approved_at` - the promotion branch always stamps `approved_at`, so gating on
+it would silently defeat the whole fix.
+
+**AC6c - an explicit promotion is not undone by reconciliation.** Demotion
+additionally requires `status_changed_by IS NULL`, so a row promoted through
+the admin surface survives. Without it, "promote" would be a control that
+reports success and reverts on the promoted account's next request - the only
+durable route to ownership would have been an env var edit and a redeploy.
+
+**AC6d - the MFA step-up fails CLOSED.** The AAL check previously discarded
+its error, so a failed call left the step-up unenforced and the request
+proceeded. A failed determination now denies through the same single access
+decision. The property that must not invert: an account with NO enrolled
+factor is never locked out, because a no-factor account gets a SUCCESSFUL call
+returning `aal1` - only a genuinely failed call denies. auth-js returns a true
+discriminated union, so the two cannot be confused.
+
+**AC7 - the guard split, and what it currently means.** `requireUser()`
+authorizes any active account; `requireAppOwner()` authorizes `role='owner'`.
+`requireOwner()` survives as a deprecated alias delegating to `requireUser()`,
+so its ~496 invocations across ~104 files now mean "any active account". THIS
+IS THE MOST IMPORTANT SENTENCE IN THIS ENTRY: that loosening is contained only
+by the fact that no code path can set a non-owner account to `active` - the
+trigger and the backfill both write `pending`, reconciliation activates only
+an allowlisted email, and `setAppUserStatus` has no callers. It is a
+sequencing property, not a control. One hand-edited row in the Supabase
+dashboard defeats it. As a stopgap, BOTH guards additionally require
+`role === "owner"` on an IMPERSONATED identity, which is stricter than the
+design's own amendment says - because the role check's only enforcement point
+was `requireAppOwner()`, which has no call sites, so a merely-active identity
+would still have passed. The cost is that a non-owner's unattended workflows
+do not fire; that costs nothing while no member accounts exist, and it must be
+loosened only together with the resource-level credential guards. The `requireOwner` -> `requireAppOwner` reclassification
+and the resource-level credential guards MUST land before any member is
+approved.
+
+**AC8 - reconciliation, and the write that must not happen.**
+`ensureAppUser` creates a missing row and reconciles it against
+`OWNER_EMAILS`, called from `requireUser()`. It re-reads the verified email
+from the admin API rather than trusting its caller - that is the specific
+control preventing self-promotion. It runs on a path with ~496 call sites, so
+the steady state must cost NOTHING: a pure `appUserNeedsReconciliation`
+predicate, shared with `ensureAppUser` itself so the rule cannot drift, gates
+the call, and a differential test asserts predicate and function agree on
+every case. A reconciliation failure must never turn an authorized request
+into a denial, and the impersonation path must never reconcile at all.
+
+**AC9 - impersonation carries a role.** `OwnerIdentity` gained role and
+status, and all four `runAsOwner` callers resolve them through one shared
+`resolveImpersonationIdentity` rather than four copies of an `isOwnerEmail`
+check. Each still authenticates its own server-only secret FIRST - the cron
+bearer, the per-trigger token, the HMAC - and resolves the target through the
+admin API, never from caller input.
+
+**AC10 - the gate was verified against a running server, not only a build.**
+A production build with placeholder credentials, probed with manual redirect
+handling: `/` and every app route return 307 to
+`/login?state=anonymous&next=<encoded path>`; `/courses?tab=modules`
+round-trips its query string; `/login` returns 200; `/login/signup` returns
+404 rather than a redirect, so the unbuilt sign-up route is already covered by
+the exemption; `/loginish` and `/api/cronjobs` are BOTH gated, which a bare
+`startsWith` would not have done; and `/api/github/webhook` returns 405 from
+the handler itself rather than a 307, which is the proof that the previously
+dead webhook now reaches its HMAC verifier.
+
+**Limits of this entry.** The suite is node-environment and renders no
+component, so nothing here is verified against a browser. The gate's redirect was
+observed live (AC10) with PLACEHOLDER Supabase credentials, so the signed-in,
+pending and suspended paths through it have still never been exercised against
+a real session - only the anonymous one has. `crypto.ts`, the credential decrypt handling and the CI
+failure gate shipped ahead of this chunk in their own commits.

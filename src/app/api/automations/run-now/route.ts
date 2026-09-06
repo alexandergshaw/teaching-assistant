@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { User } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
+import { getAppUser } from "@/lib/supabase/app-users";
 import { getWorkflowSchedule } from "@/lib/workflow-schedules";
 import { getWorkflowTrigger } from "@/lib/workflow-triggers";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
@@ -118,10 +118,27 @@ export async function POST(req: NextRequest) {
       fieldValues: runInput.fieldValues,
     });
 
-    // `user` is `User | OwnerIdentity` (requireOwner's return type covers the
-    // cron route's impersonation path too); only a real Supabase User carries
-    // user_metadata, which resolveDocumentAuthor reads for a display name.
-    const author = resolveDocumentAuthor("user_metadata" in user ? (user as User) : null);
+    // BUG FIX: requireOwner() now returns AuthorizedUser
+    // (src/lib/supabase/auth.ts), which never carries `user_metadata` at
+    // all - the `"user_metadata" in user` check this replaced was therefore
+    // permanently false, resolveDocumentAuthor(null) fell through past the
+    // (now-removed) hardcoded DEFAULT_AUTHOR, and every "Run Now" document
+    // was stamped with the deployment-wide default name instead of the
+    // person who actually clicked the button. Use this caller's OWN
+    // app_users row instead of trying to read a field the guard's return
+    // type no longer has: display_name is exactly the per-user name AC R1
+    // asks for, looked up by the AUTHENTICATED caller's own id (never
+    // anything client-supplied). A lookup failure here must not abort the
+    // run itself - it only means the generated document falls back to
+    // resolveDocumentAuthor's own (neutral, non-personal) default.
+    let authorDisplayName: string | null = null;
+    try {
+      const appUser = await getAppUser(user.id);
+      authorDisplayName = appUser?.displayName ?? null;
+    } catch {
+      // Fall through to resolveDocumentAuthor's own fallback chain.
+    }
+    const author = resolveDocumentAuthor(null, authorDisplayName);
 
     const outcome = await runWorkflowUnattended({
       def,

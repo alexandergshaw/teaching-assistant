@@ -236,7 +236,7 @@ export default function SyllabusMode({
             type="text"
             size="small"
             fullWidth
-            placeholder="e.g. Alex Shaw"
+            placeholder="e.g. Jane Doe"
             value={adaptInstructorName}
             onChange={(e) => {
               onAdaptInstructorNameChange(e.target.value);

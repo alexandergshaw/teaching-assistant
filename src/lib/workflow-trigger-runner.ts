@@ -1,10 +1,13 @@
 // Server-side helper that evaluates and runs UNATTENDED event triggers across
 // ALL users while the app is closed. This is the event-trigger analog of the
 // schedule loop in src/app/api/cron/run-schedules/route.ts - same
-// owner-resolution, allowlist re-check, headless-safety re-check, runAsOwner
-// impersonation, and provider defaulting, but driven by workflow_triggers
-// instead of workflow_schedules. The Vercel Cron route (or any other trusted
-// server caller) invokes runDueUnattendedTriggers with a service-role client.
+// owner-resolution, active-account re-check (resolveImpersonationIdentity),
+// headless-safety re-check, runAsOwner impersonation, and provider
+// defaulting, but driven by workflow_triggers instead of workflow_schedules.
+// The Vercel Cron route (or any other trusted server caller) invokes
+// runDueUnattendedTriggers with a service-role client. This module is itself
+// a direct caller of runAsOwner - see src/lib/supabase/owner-context.ts's
+// header for the full list of trusted callers.
 //
 // This module must stay server-safe: no "use client", no window/DOM access.
 // It is imported by a Route Handler.
@@ -26,8 +29,7 @@ import { runWorkflowUnattended, buildServerStepRunHelpers } from "@/lib/workflow
 import { isHeadlessSafeWorkflow } from "@/lib/workflows/headless";
 import { listWorkflowDefs } from "@/lib/workflow-defs";
 import { allWorkflows } from "@/lib/workflows/presets";
-import { runAsOwner } from "@/lib/supabase/owner-context";
-import { isOwnerEmail } from "@/lib/owner";
+import { runAsOwner, resolveImpersonationIdentity } from "@/lib/supabase/owner-context";
 import { resolveDocumentAuthor } from "@/lib/author";
 
 export interface TriggerRunResult {
@@ -56,20 +58,30 @@ export async function runDueUnattendedTriggers(
 
   for (const trigger of due) {
     try {
-      // Defensive re-check: confirm the trigger's owner is still an
-      // allowlisted owner right now, independent of whatever it was when the
-      // trigger was created (OWNER_EMAILS may have changed since).
+      // Defensive re-check: confirm the trigger's owning account is still
+      // active right now, independent of whatever it was when the trigger
+      // was created (its app_users row, or OWNER_EMAILS, may have changed
+      // since). AC AM3: this is "is the account ACTIVE", not "is the
+      // account the owner" - a member's own event trigger must be able to
+      // fire.
       const { data: userRes, error } = await supabase.auth.admin.getUserById(trigger.userId);
-      if (error || !userRes?.user || !isOwnerEmail(userRes.user.email)) {
+      if (error || !userRes?.user) {
         await touchTriggerChecked(supabase, trigger, now).catch(() => {});
-        await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "owner is not allowlisted").catch(() => {});
-        results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "owner is not allowlisted" });
+        await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "account not found").catch(() => {});
+        results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "account not found" });
         continue;
       }
       const ownerEmail = userRes.user.email;
       if (!ownerEmail) {
         await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "owner has no email on file").catch(() => {});
         results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "owner has no email on file" });
+        continue;
+      }
+      const identity = await resolveImpersonationIdentity(userRes.user.id, ownerEmail);
+      if (!identity) {
+        await touchTriggerChecked(supabase, trigger, now).catch(() => {});
+        await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "account is not active").catch(() => {});
+        results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "account is not active" });
         continue;
       }
 
@@ -94,7 +106,7 @@ export async function runDueUnattendedTriggers(
       // Evaluate the event source inside runAsOwner so the server actions it
       // calls (getInstitutionCountsAction, checkStudentActivityAction, etc.)
       // resolve the impersonated owner exactly like the run itself does.
-      const evalResult = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
+      const evalResult = await runAsOwner(identity, () =>
         evaluateTrigger(trigger, {
           activeInstitution: trigger.institution ?? null,
           latestRun: (workflowId) => latestWorkflowRun(supabase, trigger.userId, workflowId),
@@ -143,7 +155,7 @@ export async function runDueUnattendedTriggers(
       triggerRef: trigger.id,
         fieldValues: { ...trigger.fieldValues, ...(evalResult.fireValues ?? {}) },
       });
-      const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
+      const outcome = await runAsOwner(identity, () =>
         runWorkflowUnattended({
           def,
           resolveWorkflow: lookup,

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { runAsOwner } from "@/lib/supabase/owner-context";
-import { isOwnerEmail } from "@/lib/owner";
+import { runAsOwner, resolveImpersonationIdentity } from "@/lib/supabase/owner-context";
 import { findEnabledWebhookTrigger, claimWebhookTrigger } from "@/lib/workflow-triggers";
 import { finishWorkflowRun } from "@/lib/workflow-runs";
 import { safeStartWorkflowRun } from "@/lib/workflows/run-logging";
@@ -57,15 +56,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
 
-    // Defensive re-check: confirm the trigger's owner is still an allowlisted
-    // owner right now, independent of whatever it was when the trigger was
-    // created (OWNER_EMAILS may have changed since).
+    // Defensive re-check: confirm the trigger's owning account is still
+    // active right now, independent of whatever it was when the trigger was
+    // created (its app_users row, or OWNER_EMAILS, may have changed since).
+    // AC AM3: this is "is the account ACTIVE", not "is the account the
+    // owner" - a member's own webhook trigger must be able to fire.
     const { data: userRes, error } = await supabase.auth.admin.getUserById(trigger.userId);
-    if (error || !userRes?.user || !isOwnerEmail(userRes.user.email)) {
+    if (error || !userRes?.user) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
-    const ownerEmail = userRes.user.email;
-    if (!ownerEmail) {
+    const identity = await resolveImpersonationIdentity(userRes.user.id, userRes.user.email);
+    if (!identity) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
 
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       triggerRef: trigger.id,
       fieldValues: { ...trigger.fieldValues, ...bodyValues },
     });
-    const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
+    const outcome = await runAsOwner(identity, () =>
       runWorkflowUnattended({
         def,
         resolveWorkflow: lookup,

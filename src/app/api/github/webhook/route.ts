@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { createServiceClient } from "@/lib/supabase/server";
-import { runAsOwner } from "@/lib/supabase/owner-context";
-import { isOwnerEmail } from "@/lib/owner";
+import { runAsOwner, resolveImpersonationIdentity } from "@/lib/supabase/owner-context";
 import { githubWebhookSecret } from "@/lib/github";
 import {
   listEnabledRepoPushTriggers,
@@ -35,8 +34,9 @@ import type { LlmProvider } from "@/lib/llm";
 // request body (X-Hub-Signature-256) verified against GITHUB_WEBHOOK_SECRET,
 // exactly like CRON_SECRET is for run-schedules. The signature is checked
 // with timing-safe comparison to prevent timing attacks. After HMAC
-// verification, every matched trigger's owner is re-checked against
-// isOwnerEmail and the workflow is gated through isHeadlessSafeWorkflow,
+// verification, every matched trigger's owning account is re-checked via
+// resolveImpersonationIdentity (is it currently ACTIVE, per AC AM3 - not "is
+// it the owner") and the workflow is gated through isHeadlessSafeWorkflow,
 // just like the token route.
 export const runtime = "nodejs";
 // 60s is the ceiling that builds on ALL plans (the Hobby cap). A higher value
@@ -100,11 +100,13 @@ export async function POST(req: NextRequest) {
 
     let fired = 0;
     for (const trigger of matches) {
-      // Owner re-check + headless gate, exactly like the token route.
+      // Active-account re-check + headless gate, exactly like the token
+      // route. AC AM3: "is the account ACTIVE", not "is the account the
+      // owner" - a member's own repo-push trigger must be able to fire.
       const { data: userRes, error } = await supabase.auth.admin.getUserById(trigger.userId);
-      if (error || !userRes?.user || !isOwnerEmail(userRes.user.email)) continue;
-      const ownerEmail = userRes.user.email;
-      if (!ownerEmail) continue;
+      if (error || !userRes?.user) continue;
+      const identity = await resolveImpersonationIdentity(userRes.user.id, userRes.user.email);
+      if (!identity) continue;
 
       const customDefs = await listWorkflowDefs(supabase, trigger.userId);
       const defs = allWorkflows(customDefs);
@@ -139,7 +141,7 @@ export async function POST(req: NextRequest) {
         fieldValues: { ...trigger.fieldValues, org, repo: repoName },
       });
 
-      const outcome = await runAsOwner({ id: userRes.user.id, email: ownerEmail }, () =>
+      const outcome = await runAsOwner(identity, () =>
         runWorkflowUnattended({
           def,
           resolveWorkflow: lookup,

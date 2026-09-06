@@ -1,14 +1,15 @@
 // Table type definitions for course_task_attachments, course_task_instructions
 // and message_drafts through workflow_triggers (includes workflow_run_steps,
 // alphabetically between workflow_defs and workflow_runs - the underscore in
-// "workflow_run_steps" sorts before the "s" in "workflow_runs").
-// course_task_attachments and course_task_instructions live in this file
-// rather than types.tables-a.ts (which also holds course_tasks/
-// course_task_defs) purely on the file-size rule stated in
-// docs/task-institution-instructions-acceptance-criteria.md AC6 item 28:
-// hand-maintained row types go in whichever of types.tables-a.ts /
+// "workflow_run_steps" sorts before the "s" in "workflow_runs"), plus
+// app_users appended at the end.
+// course_task_attachments, course_task_instructions and app_users live in
+// this file rather than types.tables-a.ts purely on the file-size rule
+// stated in docs/task-institution-instructions-acceptance-criteria.md AC6
+// item 28: hand-maintained row types go in whichever of types.tables-a.ts /
 // types.tables-b.ts is smaller, checked by line count, to keep both files
-// under the 1000-line cap.
+// under the 1000-line cap. types.tables-a.ts was the larger of the two when
+// app_users was added (supabase/migrations/20261012000000_create_app_users.sql).
 
 import type { Json } from "./types";
 
@@ -864,4 +865,59 @@ export interface WorkflowTriggersUpdate {
   last_run_status?: string | null;
   last_run_detail?: string | null;
   recovery_attempts?: number;
+}
+
+// supabase/migrations/20261012000000_create_app_users.sql
+//
+// BUG 5 FIX: `email` is NULLABLE in the migration itself (see that file's
+// long comment on the column - a phone/anonymous auth.users account has no
+// email at all, and a `not null` constraint here would turn every such
+// sign-up into a trigger exception that rolls back the account). These
+// hand-maintained types previously declared it `string` (Row) / required
+// (Insert), which type-checked but let a caller dereference `row.email` with
+// no null check and throw at runtime on exactly that kind of account. Row
+// and Update now say `string | null`; Insert makes the column optional-and-
+// nullable rather than required, matching the trigger's own
+// `insert (id, email) values (new.id, new.email)`, which never assumes a
+// value is present either.
+export interface AppUsersRow {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  status: "pending" | "active" | "suspended";
+  role: "owner" | "instructor";
+  approved_at: string | null;
+  approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+  status_changed_at: string | null;
+  status_changed_by: string | null;
+}
+
+export interface AppUsersInsert {
+  id: string;
+  email?: string | null;
+  display_name?: string | null;
+  status?: "pending" | "active" | "suspended";
+  role?: "owner" | "instructor";
+  approved_at?: string | null;
+  approved_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  status_changed_at?: string | null;
+  status_changed_by?: string | null;
+}
+
+export interface AppUsersUpdate {
+  id?: string;
+  email?: string | null;
+  display_name?: string | null;
+  status?: "pending" | "active" | "suspended";
+  role?: "owner" | "instructor";
+  approved_at?: string | null;
+  approved_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  status_changed_at?: string | null;
+  status_changed_by?: string | null;
 }

@@ -37,22 +37,130 @@ The grading pipeline uses these limits to reduce free-tier quota spikes by cappi
 
 - `TAVUS_API_KEY` (optional) — enables Avatar Studio (the Recording tab's likeness training and prompt-driven video generation). Server-side only; sent as `x-api-key` to `https://tavusapi.com`. Without it, the Avatar view explains what to set and disables training/generation instead of erroring on click. Note that custom face training also requires a paid Tavus plan — the free tier cannot train a likeness at all.
 
-### Access control (owner-only)
+### Access control (accounts, roles and sign-up)
 
-The app is gated to an allowlist of accounts so visitors cannot use your
-server-side credentials (e.g. the Canvas API token).
+The app supports more than one person, but sign-up is still deliberately
+gated: an unapproved account must not be able to spend the shared
+server-side credentials sitting behind it (Gemini, Canvas, GitHub, and so
+on). Every signed-in identity has a row in `public.app_users` with a
+**role** (`owner` or `instructor`) and a **status** (`pending`, `active`, or
+`suspended`). Only an `active` account (owners included) can reach the app
+or call a privileged server action; `pending` and `suspended` accounts are
+redirected to `/login` with an explanation of why.
 
-- `OWNER_EMAILS` (required to use the app) — comma-separated list of the email
-  addresses allowed in. Fails closed: if unset, no one is authorized and every
-  page redirects to `/login`.
+- `OWNER_EMAILS` (required for a deployment to have an owner) —
+  comma-separated list of email addresses that are always owners. This used
+  to be the *entire* access-control model — the only addresses allowed to
+  sign in at all — and it no longer is: it now means "these accounts are
+  owners", not "these are the only accounts that exist". It is reconciled on
+  every sign-in (add an address and that account becomes an owner the next
+  time it signs in — no database edit needed), and it doubles as the
+  break-glass path: an allowlisted email resolves to `owner` even when
+  `public.app_users` is unreachable or that account's row is missing, so
+  whoever pays for the deployment can never be locked out by an outage or a
+  bad migration. It still fails closed exactly as before: with no allowlist
+  there is no owner, which means there is nobody who can approve anybody
+  else — the same fully-locked state the app is in today, not a new failure
+  mode.
 - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (required) —
   Supabase project used for authentication.
 
-Sign-in uses Supabase Auth (email + password) at `/login`. Create your owner
-account in the Supabase dashboard (and disable public sign-ups there so only you
-can authenticate). Middleware redirects any non-owner to `/login`, and the
-privileged grading/Canvas server actions additionally verify the owner before
-running.
+#### Sign-up modes — documented contract, NOT YET WIRED
+
+**Until an in-app sign-up flow ships, leave "Allow new users to sign up"
+turned OFF in the Supabase dashboard (Authentication -> Providers -> Email).**
+There is no sign-up page in this app today (`src/app/login/page.tsx` is
+sign-in only, plus the MFA step) and nothing in `src/` reads `SIGNUP_MODE` or
+`SIGNUP_ALLOWED_DOMAINS` outside of `src/lib/signup-rules.ts`'s own test —
+`grep -rn "signup-rules" src` turns up only that test file. So today there is
+no code path — app-level or otherwise — standing between the public anon key
+(which ships in every browser bundle by construction) and Supabase's own
+`POST /auth/v1/signup` endpoint. With dashboard sign-ups left on, anyone can
+call that endpoint directly: each call creates an `auth.users` row, fires the
+trigger that inserts a matching `public.app_users` row, and sends a
+confirmation email — burning the SMTP quota and sender reputation this README
+asks you to set up below, with no code of this app's ever running. No access
+is granted this way (the row lands `pending` and the request gate refuses
+it), but the write and the email both already happened.
+
+- `SIGNUP_MODE` (optional, default `approval`) — reserved for the eventual
+  in-app sign-up form: `approval` (create `pending`, needs owner approval),
+  `open` (create `active` immediately), `closed` (hide the form and refuse
+  server-side). **Has no effect today** — nothing calls the module that reads
+  it.
+- `SIGNUP_ALLOWED_DOMAINS` (optional) — reserved the same way: intended to
+  restrict sign-up to listed email domains (a leading dot also allows
+  subdomains). **Has no effect today**, for the same reason.
+
+These two are documented now so the intended contract is on record, but
+setting either one changes nothing about who can create an account: sign-up,
+once built, is expected to run browser-to-Supabase directly rather than
+through this app's server, so an app-level mode can describe the intended
+door but cannot itself gate the one Supabase already exposes — only the
+dashboard toggle above does that. The real backstop in the meantime is that
+every `auth.users` row — however it was created — gets a `public.app_users`
+row that starts `pending` (the column's own default), and nothing short of an
+owner approving it changes that.
+
+#### Supabase configuration this depends on
+
+Sign-in runs against Supabase Auth, but the dashboard still needs configuring
+for the parts this app cannot set from code:
+
+- **Sign-ups (Authentication -> Providers -> Email) — turn OFF "Allow new
+  users to sign up" and leave it off.** See the warning above: this app has
+  no working gate of its own in front of Supabase's sign-up endpoint yet, so
+  the dashboard toggle is the only thing standing between the public anon
+  key and new, unapproved `auth.users` rows. Re-enable it only once an
+  in-app sign-up flow that actually reads `SIGNUP_MODE` /
+  `SIGNUP_ALLOWED_DOMAINS` exists.
+- **Email confirmations** (Authentication -> Providers -> Email) — either
+  setting works; the app reads which one is active off the sign-up response
+  rather than assuming. Only relevant once sign-up is re-enabled.
+- **Redirect URLs** (Authentication -> URL Configuration) — add this
+  deployment's URL, so the confirmation and password-reset links Supabase
+  emails land back on this app instead of bouncing.
+- **Real SMTP — required, not optional** (Authentication -> Settings -> SMTP
+  Settings). Supabase's built-in email sender is rate-limited to a handful
+  of messages an hour. That is fine for one person testing locally; the
+  moment more than one or two people use this app, confirmation and
+  password-reset email will silently stop being delivered. Configure a real
+  SMTP provider before pointing anyone else at this deployment.
+
+#### `GOOGLE_TOKEN_ENC_KEY`
+
+- `GOOGLE_TOKEN_ENC_KEY` (required once any Google, Microsoft, or — soon —
+  Canvas credential is stored) — a base64-encoded 32-byte AES-256-GCM key
+  (generate one with `openssl rand -base64 32`), read by `src/lib/crypto.ts`
+  and used to encrypt every stored third-party credential at rest for every
+  user. It was previously undocumented: it is not referenced anywhere else
+  in the repo — not in this README until now, not in any CI workflow, and
+  there is no example env file to list it in either; `src/lib/crypto.ts` is
+  the only functional reader. **Rotating this key currently makes every
+  already-stored credential undecryptable.** The stored payload does carry a
+  format-version prefix (`v1:iv:tag:ciphertext`; the older unversioned
+  `iv:tag:ciphertext` rows from before this prefix existed still decrypt too)
+  — but that prefix identifies the payload *format*, not which key encrypted
+  it, and there is still only the one `GOOGLE_TOKEN_ENC_KEY` slot, so
+  `decryptSecret` has no old key to fall back to and cannot distinguish "old
+  key" from "wrong key" either way. The version prefix is deliberate
+  groundwork for a future key-rotation scheme (a `v2` branch that tries a new
+  key and falls back to an old one) without having to migrate every
+  already-encrypted row when that ships, but that scheme does not exist yet.
+  Losing the key, or changing it without a migration plan, today is
+  equivalent to revoking every user's Google, Microsoft, and (once shipped)
+  Canvas connections at once.
+
+#### Env vars this system reads
+
+| Variable | Does what | Required? | If missing |
+| --- | --- | --- | --- |
+| `OWNER_EMAILS` | Comma-separated list of owner emails; reconciled on every sign-in; the break-glass path when the database is unreachable | Required for the deployment to have an owner | No owner exists, so no account can ever be approved — every request is refused (fails closed, same as today) |
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project used for auth and data | Required | The Supabase client cannot initialize; nobody can sign in |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service-role Supabase client (`createServiceClient` in `src/lib/supabase/server.ts`) used to look up an account's row when deciding access | Required for any non-owner account to reach the app | Every account lookup fails; every non-owner is refused as if unapproved, while an `OWNER_EMAILS` address is still admitted via the break-glass path (which never touches the database) — the app looks perfectly healthy to the owner while everyone else is locked out |
+| `SIGNUP_MODE` | Selects `approval` / `open` / `closed` for the eventual in-app sign-up form | Optional (default `approval`) | **Not yet wired — has no effect regardless.** Nothing in `src/` reads it outside its own test. Falls back to `approval`'s described behavior only once something reads it |
+| `SIGNUP_ALLOWED_DOMAINS` | Restricts sign-up to the listed email domains (a leading dot also allows subdomains), for the eventual in-app sign-up form | Optional | **Not yet wired — has no effect regardless**, for the same reason |
+| `GOOGLE_TOKEN_ENC_KEY` | AES-256-GCM key encrypting every stored Google/Microsoft/Canvas credential | Required once any such credential is stored | Saving or reading any such credential throws immediately |
 
 #### Two-factor authentication (TOTP)
 
@@ -64,12 +172,19 @@ setup (enforcement only triggers when a verified factor exists):
    app header) and add an authenticator: scan the QR in your app and enter the
    6-digit code to activate. Add a **second** authenticator as a backup.
 3. From then on, sign-in requires the password plus a 6-digit code, and both the
-   middleware and the privileged server actions require the elevated (AAL2)
-   session.
+   request gate (`src/proxy.ts` / `src/lib/supabase/proxy.ts`) and the
+   privileged server actions require the elevated (AAL2) session. This used
+   to be a `middleware.ts` file; Next.js replaced that file convention with
+   `proxy.ts`, which runs on the Node.js runtime instead of middleware's Edge
+   runtime — the request gate's logic is unchanged, but this affects
+   cold-start and per-request latency.
 
-Recovery: if you lose all authenticators, remove the factor from the Supabase
-dashboard (Authentication -> Users -> the user -> Factors) to regain access; this
-is why enrolling a backup factor is recommended.
+Recovery: removing a lost authenticator requires the Supabase dashboard
+(Authentication -> Users -> the user -> Factors), and only the deployment's
+owner can reach that dashboard. If you are an instructor (not the owner) and
+lose access to all your authenticators, you cannot clear the factor yourself —
+contact your workspace administrator and ask them to remove it for you. This
+is why enrolling a backup authenticator is recommended.
 
 ### Course Engine API (the "Other API" provider)
 

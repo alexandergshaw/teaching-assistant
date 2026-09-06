@@ -7,6 +7,21 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // src/lib/signup-rules.ts deliberately starts with `import "server-only";`
+      // as a build-time guard: without it, importing that module from a client
+      // component would silently no-op SIGNUP_MODE=closed and the domain
+      // allowlist, because non-NEXT_PUBLIC_ env vars are undefined in the
+      // browser and this module's fallbacks are permissive. The "server-only"
+      // package throws unconditionally outside an RSC build (it only swaps in
+      // its empty stub under the "react-server" export condition, which plain
+      // Node/Vitest never sets), so it must be aliased to that stub here for
+      // tests to import the module at all. Next's own Jest preset does the
+      // same thing (node_modules/next/dist/build/jest/jest.js maps
+      // '^server-only$' to an empty mock) - this does not weaken the guard
+      // for `next build`, which resolves the package normally.
+      "server-only": fileURLToPath(
+        new URL("./node_modules/server-only/empty.js", import.meta.url)
+      ),
     },
   },
   test: {

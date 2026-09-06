@@ -61,36 +61,55 @@ afterEach(() => {
 
 describe("resolveAccess - identity", () => {
   it("is anonymous with no email, whatever the profile says", () => {
-    expect(resolveAccess({ email: null, profile: profile("owner", "active") })).toBe(
+    expect(
+      resolveAccess({ email: null, profile: profile("owner", "active"), emailVerified: false })
+    ).toBe("anonymous");
+    expect(resolveAccess({ email: undefined, profile: null, emailVerified: false })).toBe(
       "anonymous"
     );
-    expect(resolveAccess({ email: undefined, profile: null })).toBe("anonymous");
-    expect(resolveAccess({ email: "", profile: null })).toBe("anonymous");
+    expect(resolveAccess({ email: "", profile: null, emailVerified: false })).toBe("anonymous");
   });
 
   it("treats a whitespace-only email as no identity at all", () => {
     // Trim before the emptiness check, or "   " reads as a signed-in person.
-    expect(resolveAccess({ email: "   ", profile: null })).toBe("anonymous");
-    expect(resolveAccess({ email: "\t\n", profile: profile("owner", "active") })).toBe(
+    expect(resolveAccess({ email: "   ", profile: null, emailVerified: false })).toBe(
       "anonymous"
     );
+    expect(
+      resolveAccess({
+        email: "\t\n",
+        profile: profile("owner", "active"),
+        emailVerified: false,
+      })
+    ).toBe("anonymous");
   });
 
-  it("is anonymous when nothing at all is supplied", () => {
-    expect(resolveAccess({})).toBe("anonymous");
+  it("is anonymous when nothing at all is supplied (beyond the now-required emailVerified)", () => {
+    expect(resolveAccess({ emailVerified: false })).toBe("anonymous");
   });
 });
 
 describe("resolveAccess - the OWNER_EMAILS break-glass path", () => {
+  // Every test in this describe block supplies `emailVerified: true` - these
+  // pin the break-glass's behaviour ONCE the address is verified. See the
+  // dedicated "requires a VERIFIED email" describe block below (BUG 1 FIX)
+  // for the unverified-address coverage this bug report asked for.
   it("returns owner for an allowlisted email with NO profile row", () => {
     process.env.OWNER_EMAILS = "boss@example.edu";
-    expect(resolveAccess({ email: "boss@example.edu", profile: null })).toBe("owner");
+    expect(
+      resolveAccess({ email: "boss@example.edu", profile: null, emailVerified: true })
+    ).toBe("owner");
   });
 
   it("returns owner for an allowlisted email even when the profile lookup failed", () => {
     process.env.OWNER_EMAILS = "boss@example.edu";
     expect(
-      resolveAccess({ email: "boss@example.edu", profile: null, lookupFailed: true })
+      resolveAccess({
+        email: "boss@example.edu",
+        profile: null,
+        lookupFailed: true,
+        emailVerified: true,
+      })
     ).toBe("owner");
   });
 
@@ -102,13 +121,19 @@ describe("resolveAccess - the OWNER_EMAILS break-glass path", () => {
     // or demote for one rather than reporting a success that does nothing.
     process.env.OWNER_EMAILS = "boss@example.edu";
     expect(
-      resolveAccess({ email: "boss@example.edu", profile: profile("instructor", "suspended") })
+      resolveAccess({
+        email: "boss@example.edu",
+        profile: profile("instructor", "suspended"),
+        emailVerified: true,
+      })
     ).toBe("owner");
   });
 
   it("matches the allowlist case-insensitively and across a comma list", () => {
     process.env.OWNER_EMAILS = "first@example.edu, Second@Example.edu";
-    expect(resolveAccess({ email: "SECOND@example.edu", profile: null })).toBe("owner");
+    expect(
+      resolveAccess({ email: "SECOND@example.edu", profile: null, emailVerified: true })
+    ).toBe("owner");
   });
 
   it("matches whole allowlist entries, not substrings of one", () => {
@@ -125,15 +150,18 @@ describe("resolveAccess - the OWNER_EMAILS break-glass path", () => {
       "boss@example.ed",
     ]) {
       expect(
-        resolveAccess({ email: near, profile: null }),
+        resolveAccess({ email: near, profile: null, emailVerified: true }),
         `${near} must not be an owner`
       ).toBe("pending");
     }
   });
 
-  it("agrees with the one allowlist implementation the app already has", () => {
+  it("agrees with the one allowlist implementation the app already has, given a verified email", () => {
     // AC A4: no second copy of the rule. A hand-rolled copy is where the
     // substring bug above comes from, so pin agreement rather than behaviour.
+    // `emailVerified: true` here isolates the allowlist-matching property
+    // from BUG 1's separate verification gate, which has its own dedicated
+    // describe block below.
     process.env.OWNER_EMAILS = "boss@example.edu, other@example.edu";
     for (const email of [
       "boss@example.edu",
@@ -146,26 +174,135 @@ describe("resolveAccess - the OWNER_EMAILS break-glass path", () => {
       "nobody@example.edu",
     ]) {
       expect(
-        resolveAccess({ email, profile: null }) === "owner",
+        resolveAccess({ email, profile: null, emailVerified: true }) === "owner",
         `resolveAccess and isOwnerEmail disagree about ${JSON.stringify(email)}`
       ).toBe(isOwnerEmail(email));
     }
   });
 
-  it("grants nobody owner status through an empty or unset allowlist", () => {
+  it("grants nobody owner status through an empty or unset allowlist, even when verified", () => {
     process.env.OWNER_EMAILS = "";
-    expect(resolveAccess({ email: "boss@example.edu", profile: null })).toBe("pending");
+    expect(
+      resolveAccess({ email: "boss@example.edu", profile: null, emailVerified: true })
+    ).toBe("pending");
     delete process.env.OWNER_EMAILS;
-    expect(resolveAccess({ email: "boss@example.edu", profile: null })).toBe("pending");
+    expect(
+      resolveAccess({ email: "boss@example.edu", profile: null, emailVerified: true })
+    ).toBe("pending");
   });
 
   it("reads the allowlist on every call, not once at module load", () => {
     // The gate runs per request and the value can differ between deployments
     // of the same bundle.
     delete process.env.OWNER_EMAILS;
-    expect(resolveAccess({ email: "boss@example.edu", profile: null })).toBe("pending");
+    expect(
+      resolveAccess({ email: "boss@example.edu", profile: null, emailVerified: true })
+    ).toBe("pending");
     process.env.OWNER_EMAILS = "boss@example.edu";
-    expect(resolveAccess({ email: "boss@example.edu", profile: null })).toBe("owner");
+    expect(
+      resolveAccess({ email: "boss@example.edu", profile: null, emailVerified: true })
+    ).toBe("owner");
+  });
+});
+
+/**
+ * BUG 1 FIX: the break-glass must not be claimable by an unverified email.
+ * Before this fix, `resolveAccess` granted `owner` from `isOwnerEmail(email)`
+ * alone, before any row was read - reachable whenever an allowlisted address
+ * had never signed up yet (add a co-instructor to OWNER_EMAILS before they
+ * create their account, and anyone who knows the address can create it first
+ * and claim ownership). `emailVerified` closes this: the break-glass now
+ * requires BOTH the allowlist match AND a verified email.
+ */
+describe("resolveAccess - the OWNER_EMAILS break-glass requires a VERIFIED email (BUG 1 fix)", () => {
+  it("does NOT grant owner to an allowlisted but UNVERIFIED email with no profile row - it falls through to the ordinary no-row path", () => {
+    process.env.OWNER_EMAILS = "boss@example.edu";
+    expect(
+      resolveAccess({ email: "boss@example.edu", profile: null, emailVerified: false })
+    ).toBe("pending");
+  });
+
+  it("does NOT grant owner to an allowlisted but UNVERIFIED email even when the profile lookup failed - fails closed via lookupFailed instead of via break-glass", () => {
+    process.env.OWNER_EMAILS = "boss@example.edu";
+    expect(
+      resolveAccess({
+        email: "boss@example.edu",
+        profile: null,
+        lookupFailed: true,
+        emailVerified: false,
+      })
+    ).toBe("unavailable");
+  });
+
+  it("does NOT grant owner to an allowlisted but UNVERIFIED email with a suspended stored row - the stale row's own status wins instead", () => {
+    process.env.OWNER_EMAILS = "boss@example.edu";
+    expect(
+      resolveAccess({
+        email: "boss@example.edu",
+        profile: profile("instructor", "suspended"),
+        emailVerified: false,
+      })
+    ).toBe("suspended");
+  });
+
+  it("grants owner to the SAME allowlisted email once it is verified - the only difference from the previous three tests is emailVerified", () => {
+    process.env.OWNER_EMAILS = "boss@example.edu";
+    expect(
+      resolveAccess({ email: "boss@example.edu", profile: null, emailVerified: true })
+    ).toBe("owner");
+  });
+
+  it("leaves an unverified NON-allowlisted email unaffected on every other branch - emailVerified only ever gates the break-glass", () => {
+    delete process.env.OWNER_EMAILS;
+    expect(
+      resolveAccess({ email: "member@example.edu", profile: null, emailVerified: false })
+    ).toBe("pending");
+    expect(
+      resolveAccess({
+        email: "member@example.edu",
+        profile: profile("instructor", "active"),
+        emailVerified: false,
+      })
+    ).toBe("active");
+    expect(
+      resolveAccess({
+        email: "member@example.edu",
+        profile: profile("instructor", "suspended"),
+        emailVerified: false,
+      })
+    ).toBe("suspended");
+    expect(
+      resolveAccess({
+        email: "member@example.edu",
+        profile: null,
+        lookupFailed: true,
+        emailVerified: false,
+      })
+    ).toBe("unavailable");
+    // A stored owner-role row's own elevation (step 7, unrelated to the
+    // break-glass) is likewise unaffected by emailVerified.
+    expect(
+      resolveAccess({
+        email: "member@example.edu",
+        profile: profile("owner", "active"),
+        emailVerified: false,
+      })
+    ).toBe("owner");
+  });
+
+  it("outranks emailVerified with authFailed, exactly like it outranks the allowlist match itself", () => {
+    // authFailed is checked before the break-glass at all (see resolveAccess's
+    // own ordering doc comment) - a verified email must not matter once we
+    // could not even determine identity.
+    process.env.OWNER_EMAILS = "boss@example.edu";
+    expect(
+      resolveAccess({
+        email: "boss@example.edu",
+        profile: null,
+        emailVerified: true,
+        authFailed: true,
+      })
+    ).toBe("unavailable");
   });
 });
 
@@ -192,10 +329,12 @@ describe("resolveAccess - the OWNER_EMAILS break-glass path", () => {
  */
 describe("resolveAccess - the identity could not be determined", () => {
   it("is unavailable, not anonymous, when authentication itself failed", () => {
-    expect(resolveAccess({ email: null, authFailed: true })).toBe("unavailable");
-    expect(resolveAccess({ email: undefined, profile: null, authFailed: true })).toBe(
+    expect(resolveAccess({ email: null, authFailed: true, emailVerified: false })).toBe(
       "unavailable"
     );
+    expect(
+      resolveAccess({ email: undefined, profile: null, authFailed: true, emailVerified: false })
+    ).toBe("unavailable");
   });
 
   it("outranks every other branch, including the owner break-glass", () => {
@@ -203,13 +342,19 @@ describe("resolveAccess - the identity could not be determined", () => {
     // match either - there is no verified email to match against.
     process.env.OWNER_EMAILS = "boss@example.edu";
     expect(
-      resolveAccess({ email: "boss@example.edu", profile: null, authFailed: true })
+      resolveAccess({
+        email: "boss@example.edu",
+        profile: null,
+        authFailed: true,
+        emailVerified: true,
+      })
     ).toBe("unavailable");
     expect(
       resolveAccess({
         email: "m@e.edu",
         profile: profile("owner", "active"),
         authFailed: true,
+        emailVerified: true,
       })
     ).toBe("unavailable");
   });
@@ -217,12 +362,14 @@ describe("resolveAccess - the identity could not be determined", () => {
   it("does not fire for an ordinary signed-out visitor", () => {
     // The common case by far. Misreading it as an outage would show every
     // logged-out person a "something went wrong" screen instead of sign-in.
-    expect(resolveAccess({ email: null, authFailed: false })).toBe("anonymous");
-    expect(resolveAccess({ email: null })).toBe("anonymous");
+    expect(resolveAccess({ email: null, authFailed: false, emailVerified: false })).toBe(
+      "anonymous"
+    );
+    expect(resolveAccess({ email: null, emailVerified: false })).toBe("anonymous");
   });
 
   it("routes to the login page like every other blocked decision", () => {
-    const decision = resolveAccess({ email: null, authFailed: true });
+    const decision = resolveAccess({ email: null, authFailed: true, emailVerified: false });
     expect(canUseApp(decision)).toBe(false);
     const target = loginRedirectFor(decision, "/courses");
     expect(target?.pathname).toBe("/login");
@@ -233,7 +380,12 @@ describe("resolveAccess - the identity could not be determined", () => {
 describe("resolveAccess - failing closed", () => {
   it("is unavailable, not active, when the profile lookup failed", () => {
     expect(
-      resolveAccess({ email: "member@example.edu", profile: null, lookupFailed: true })
+      resolveAccess({
+        email: "member@example.edu",
+        profile: null,
+        lookupFailed: true,
+        emailVerified: true,
+      })
     ).toBe("unavailable");
   });
 
@@ -245,12 +397,15 @@ describe("resolveAccess - failing closed", () => {
         email: "member@example.edu",
         profile: profile("owner", "active"),
         lookupFailed: true,
+        emailVerified: true,
       })
     ).toBe("unavailable");
   });
 
   it("treats a session with no profile row as pending, never as active", () => {
-    expect(resolveAccess({ email: "member@example.edu", profile: null })).toBe("pending");
+    expect(
+      resolveAccess({ email: "member@example.edu", profile: null, emailVerified: true })
+    ).toBe("pending");
   });
 
   it("fails closed on a role or status it does not recognise", () => {
@@ -258,12 +413,17 @@ describe("resolveAccess - failing closed", () => {
     // edits in the Supabase dashboard. A `return profile.status` implementation
     // would emit a value outside the union and leave the gate with no branch.
     expect(
-      resolveAccess({ email: "m@e.edu", profile: { role: "root", status: "active" } as never })
+      resolveAccess({
+        email: "m@e.edu",
+        profile: { role: "root", status: "active" } as never,
+        emailVerified: true,
+      })
     ).toBe("active");
     for (const status of ["deleted", "ACTIVE", "", null, undefined]) {
       const decision = resolveAccess({
         email: "m@e.edu",
         profile: { role: "instructor", status } as never,
+        emailVerified: true,
       });
       expect(canUseApp(decision), `status ${String(status)} must not admit`).toBe(false);
       expect(loginRedirectFor(decision, "/courses")?.pathname).toBe("/login");
@@ -273,30 +433,50 @@ describe("resolveAccess - failing closed", () => {
 
 describe("resolveAccess - stored status wins for everyone else", () => {
   it("maps each stored status to its decision for an instructor", () => {
-    expect(resolveAccess({ email: "m@e.edu", profile: profile("instructor", "active") })).toBe(
-      "active"
-    );
-    expect(resolveAccess({ email: "m@e.edu", profile: profile("instructor", "pending") })).toBe(
-      "pending"
-    );
     expect(
-      resolveAccess({ email: "m@e.edu", profile: profile("instructor", "suspended") })
+      resolveAccess({
+        email: "m@e.edu",
+        profile: profile("instructor", "active"),
+        emailVerified: true,
+      })
+    ).toBe("active");
+    expect(
+      resolveAccess({
+        email: "m@e.edu",
+        profile: profile("instructor", "pending"),
+        emailVerified: true,
+      })
+    ).toBe("pending");
+    expect(
+      resolveAccess({
+        email: "m@e.edu",
+        profile: profile("instructor", "suspended"),
+        emailVerified: true,
+      })
     ).toBe("suspended");
   });
 
   it("returns owner for an active owner-role profile with no env allowlist", () => {
-    expect(resolveAccess({ email: "m@e.edu", profile: profile("owner", "active") })).toBe(
-      "owner"
-    );
+    expect(
+      resolveAccess({ email: "m@e.edu", profile: profile("owner", "active"), emailVerified: true })
+    ).toBe("owner");
   });
 
   it("does not let a suspended or pending owner-role profile act as an owner", () => {
     expect(
-      resolveAccess({ email: "m@e.edu", profile: profile("owner", "suspended") })
+      resolveAccess({
+        email: "m@e.edu",
+        profile: profile("owner", "suspended"),
+        emailVerified: true,
+      })
     ).toBe("suspended");
-    expect(resolveAccess({ email: "m@e.edu", profile: profile("owner", "pending") })).toBe(
-      "pending"
-    );
+    expect(
+      resolveAccess({
+        email: "m@e.edu",
+        profile: profile("owner", "pending"),
+        emailVerified: true,
+      })
+    ).toBe("pending");
   });
 });
 
@@ -366,7 +546,7 @@ describe("safeNextPath - the open-redirect guard", () => {
       "/\t/evil.example.com",
       "/\n/evil.example.com",
       "/\r/evil.example.com",
-      "/ /evil.example.com",
+      "/\u0000/evil.example.com",
       "///evil.example.com",
     ]) {
       expect(safeNextPath(raw), `${JSON.stringify(raw)} must be refused`).toBe("/");

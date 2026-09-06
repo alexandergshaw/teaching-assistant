@@ -281,7 +281,11 @@ export async function GET(req: NextRequest) {
           results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "owner has no email on file" });
           continue;
         }
-        const identity = await resolveImpersonationIdentity(userRes.user.id, ownerEmail);
+        const identity = await resolveImpersonationIdentity(
+          userRes.user.id,
+          ownerEmail,
+          Boolean(userRes.user.email_confirmed_at)
+        );
         if (!identity) {
           await updateScheduleRunOutcome(supabase, schedule.userId, schedule.id, "skipped", "account is not active").catch(() => {});
           results.push({ scheduleId: schedule.id, workflowId: schedule.workflowId, status: "skipped", detail: "account is not active" });

@@ -542,6 +542,15 @@ export function appUserNeedsReconciliation(row: AppUserRow | null, email: string
  *      account promoted on its next sign-in without touching SQL, and it is
  *      deliberately unconditional on prior state: the break-glass path must
  *      never be blocked by the approval workflow it exists to bypass.
+ *      UNVERIFIED-EMAIL FIX: this promotion is additionally gated on the
+ *      VERIFIED auth email's `email_confirmed_at` (re-read in step 0, from
+ *      the admin API, never a caller-supplied value) - an allowlisted but
+ *      not-yet-confirmed address is left with whatever role/status it
+ *      already had, exactly mirroring resolveAccess's own break-glass gate
+ *      in src/lib/access.ts. Only the promotion is gated this way; a row
+ *      that is already role='owner' is never re-litigated by this check (see
+ *      the demotion branch immediately below, which reasons from `isOwner`
+ *      alone).
  *    - A stored role='owner' row whose email is NOT on the (non-empty)
  *      allowlist is demoted to 'instructor', and (BUG 1 FIX) its status is
  *      ALSO reset to 'pending' unless a human has explicitly approved this
@@ -642,6 +651,23 @@ export async function ensureAppUser(input: {
   }
 
   const isOwner = isOwnerEmail(email);
+  // UNVERIFIED-EMAIL FIX (distinct from this file's own "BUG 1 FIX" below,
+  // which is about the demotion branch's status reset): mirrors
+  // resolveAccess's ResolveAccessInput.emailVerified gate on the OWNER_EMAILS
+  // break-glass (see src/lib/access.ts) - this function re-reads the auth
+  // user from the admin API above, so it already has `email_confirmed_at` on
+  // hand. Without this, reconciliation could write role='owner' for an
+  // allowlisted-but-unverified address even on a request the gate itself
+  // refused to authorize as owner (the gate's own decision never depended on
+  // this write succeeding - see requireUser()'s reconcileAppUserRow doc
+  // comment - so nothing else stood between an unverified claim and a stored
+  // owner row). Gates the PROMOTION branch only, immediately below - an
+  // unverified address that already holds a stored role='owner' row (e.g.
+  // its verification state briefly flapped) is left exactly as-is: `isOwner`
+  // itself is NOT redefined in terms of this flag, so the demotion branch's
+  // own `!isOwner` check is unaffected and cannot misread "not yet verified"
+  // as "not on the allowlist" and demote someone still on it.
+  const emailVerified = Boolean(authRes.user.email_confirmed_at);
   // Not on the allowlist: a stale role='owner' row is demoted only when
   // OWNER_EMAILS is actually configured - see appUserNeedsReconciliation's
   // and ownerDemotionNeeded's doc comments for why an unset/empty allowlist
@@ -650,7 +676,7 @@ export async function ensureAppUser(input: {
 
   const update: DbAppUserUpdate = {};
 
-  if (ownerPromotionNeeded(current, isOwner)) {
+  if (ownerPromotionNeeded(current, isOwner) && emailVerified) {
     update.role = "owner";
     update.status = "active";
     update.approved_at = current.approvedAt ?? new Date().toISOString();

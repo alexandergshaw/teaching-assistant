@@ -105,7 +105,11 @@ export async function POST(req: NextRequest) {
       // owner" - a member's own repo-push trigger must be able to fire.
       const { data: userRes, error } = await supabase.auth.admin.getUserById(trigger.userId);
       if (error || !userRes?.user) continue;
-      const identity = await resolveImpersonationIdentity(userRes.user.id, userRes.user.email);
+      const identity = await resolveImpersonationIdentity(
+        userRes.user.id,
+        userRes.user.email,
+        Boolean(userRes.user.email_confirmed_at)
+      );
       if (!identity) continue;
 
       const customDefs = await listWorkflowDefs(supabase, trigger.userId);

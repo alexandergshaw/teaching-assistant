@@ -68,6 +68,34 @@ export interface ResolveAccessInput {
    * break-glass cannot apply.
    */
   authFailed?: boolean;
+  /**
+   * Whether the auth provider has confirmed this address belongs to the
+   * signed-in user - the caller passes `Boolean(user?.email_confirmed_at)`
+   * from the `@supabase/auth-js` `User` it already holds. REQUIRED, not
+   * optional with a default: a permissive default (treat as verified when
+   * omitted) would silently reintroduce BUG 1 - anyone who can create an
+   * account bearing an allowlisted-but-not-yet-claimed address becomes the
+   * owner - for any caller that forgets to pass it, and a strict default
+   * (treat as unverified when omitted) would silently lock out every
+   * deployment that has Supabase's email-confirmation requirement turned
+   * off. A forgotten caller must fail to compile, not fail open or closed at
+   * runtime.
+   *
+   * Consulted ONLY by the `isOwnerEmail` break-glass below - nowhere else in
+   * this function. An unverified email is NOT otherwise penalized: it still
+   * resolves through the ordinary stored-row path (steps 4-8 below), because
+   * requiring verification everywhere would lock out every account on a
+   * deployment that has email confirmations disabled entirely. The
+   * break-glass is the one path that grants a role from NO stored row and NO
+   * human approval whatsoever, purely from a self-reported email address -
+   * that is exactly the kind of claim that must be verified before it is
+   * trusted. See BUG 1 in docs/REGRESSION.md (or the deploy history) for the
+   * concrete exploit this closes: add a co-instructor to `OWNER_EMAILS`
+   * before they have ever signed up, and anyone who knows that address can
+   * create the account first and claim ownership - `email_confirmed_at` is
+   * the one signal that address was never actually theirs to claim.
+   */
+  emailVerified: boolean;
 }
 
 /**
@@ -84,13 +112,19 @@ export interface ResolveAccessInput {
  *    cannot apply either - an outage must not be a backdoor.
  * 2. No email (absent, or trims to empty) -> `anonymous`. Nothing else can
  *    be true without an identity.
- * 3. `isOwnerEmail(email)` -> `owner`, BEFORE the profile is consulted at
- *    all. This is the break-glass path: if the database is unreachable, or
- *    the owner's own row is missing or corrupted, the person who pays for
- *    the deployment can still get in and fix it. A stale `suspended` row for
- *    an allowlisted address must not lock its owner out - see the admin
- *    surface's own rule that suspend/demote must refuse rather than silently
- *    no-op on such an account.
+ * 3. `isOwnerEmail(email)` AND `input.emailVerified` -> `owner`, BEFORE the
+ *    profile is consulted at all. This is the break-glass path: if the
+ *    database is unreachable, or the owner's own row is missing or
+ *    corrupted, the person who pays for the deployment can still get in and
+ *    fix it. A stale `suspended` row for an allowlisted address must not
+ *    lock its owner out - see the admin surface's own rule that
+ *    suspend/demote must refuse rather than silently no-op on such an
+ *    account. BUG 1 FIX: `emailVerified` gates this branch and this branch
+ *    ONLY (see `ResolveAccessInput.emailVerified`'s own doc comment) -
+ *    without it, anyone who can create a Supabase account bearing an
+ *    allowlisted-but-not-yet-claimed address became its owner. An
+ *    allowlisted address that is not yet verified simply falls through to
+ *    the ordinary stored-row path below, exactly like any other address.
  * 4. `lookupFailed` -> `unavailable`. Checked only after the break-glass
  *    path, and before anything about the profile is trusted, so a database
  *    outage fails closed for everyone except the owner rather than being
@@ -127,8 +161,11 @@ export function resolveAccess(input: ResolveAccessInput): AccessDecision {
   // variable in this function's control flow. Pass the email through exactly
   // as received (not further normalised here) so this stays in agreement
   // with `isOwnerEmail`, which is the only place that rule is allowed to
-  // live.
-  if (isOwnerEmail(email)) {
+  // live. BUG 1 FIX: also require `emailVerified` - see that field's own doc
+  // comment for why an unverified allowlisted address must not be trusted
+  // here. This is the ONLY place `emailVerified` is consulted; an unverified
+  // email still falls through to the ordinary stored-row path below.
+  if (isOwnerEmail(email) && input.emailVerified) {
     return "owner";
   }
 

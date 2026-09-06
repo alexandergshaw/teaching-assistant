@@ -77,7 +77,11 @@ export async function runDueUnattendedTriggers(
         results.push({ triggerId: trigger.id, workflowId: trigger.workflowId, status: "skipped", detail: "owner has no email on file" });
         continue;
       }
-      const identity = await resolveImpersonationIdentity(userRes.user.id, ownerEmail);
+      const identity = await resolveImpersonationIdentity(
+        userRes.user.id,
+        ownerEmail,
+        Boolean(userRes.user.email_confirmed_at)
+      );
       if (!identity) {
         await touchTriggerChecked(supabase, trigger, now).catch(() => {});
         await updateTriggerRunOutcome(supabase, trigger.userId, trigger.id, "skipped", "account is not active").catch(() => {});

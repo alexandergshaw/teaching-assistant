@@ -204,6 +204,129 @@ endpoint by calling it directly.
 
 ---
 
+## GROUP B PRE-BUILD THREAT MODEL (2026-09-06): criteria that must be REWRITTEN
+
+The security pass on the account screens found that eight criteria promise
+things that cannot be delivered, and two defects in code that has ALREADY
+SHIPPED. The shipped ones are being fixed immediately; the criteria are
+rewritten here.
+
+**SHIPPED-CODE FIX 1 (CRITICAL) - the break-glass never checked that the email
+is VERIFIED.** `resolveAccess` returns `owner` from `isOwnerEmail(email)`
+alone. Nothing consults `email_confirmed_at`. So anyone who can create a
+Supabase account bearing an allowlisted address becomes the owner. Not
+reachable for the CURRENT owner - they already hold an `auth.users` row with
+that address, so GoTrue refuses a duplicate - but fully reachable for any
+allowlisted address that has NOT yet signed up. Add a co-instructor to
+`OWNER_EMAILS` before they create their account and whoever knows the address
+can claim it first. `emailVerified` becomes a REQUIRED input, so a caller that
+forgets it is a compile error rather than a silent default in either
+direction, and it gates the break-glass ONLY - an unverified email still
+resolves through the normal stored-row path, or a deployment with
+confirmations off would lock everyone out.
+
+**SHIPPED-CODE FIX 2 (HIGH) - `signup-rules.ts` fails OPEN in a client
+component.** It reads bare `process.env.SIGNUP_MODE` and
+`SIGNUP_ALLOWED_DOMAINS`, neither `NEXT_PUBLIC_`, so in the browser both are
+`undefined`: the mode falls back to `approval` (so `closed` closes nothing)
+and the empty allowlist is deliberately read as "no restriction" (so the
+domain rule becomes a no-op). Every gate stays green because the tests run in
+node. B1 asking for client-side validation is exactly what triggers it.
+`import "server-only"` makes it a build error instead.
+
+### The eight criteria being rewritten
+
+**B1** - "validates on the client AND refuses on the server" is reworded so
+the server refusal is the only enforcement that counts, and so that neither
+`SIGNUP_MODE` nor `SIGNUP_ALLOWED_DOMAINS` is described as binding GoTrue's
+own `/auth/v1/signup`. The enforceable boundary is the Supabase dashboard
+toggle, Supabase's own domain allowlist, and CAPTCHA. `SIGNUP_MODE=closed`
+hides this app's form; it does not close sign-ups.
+
+**B2** - "an expired link and an already-used link" are the SAME observable:
+GoTrue returns `otp_expired` for both. Collapsed into one "this link is no
+longer valid" state with a resend. "Missing token" stays separate, because it
+genuinely is distinguishable and it is the cleanest exploit if mishandled.
+
+**B3** - "with confirmations OFF they are signed in immediately" was the
+trigger for the critical above. It is supported only once the break-glass
+requires a verified email. Also recorded: the ONLY signal separating
+"confirmation sent" from "this address already has an account" is
+`identities.length === 0`, and the app deliberately does not branch on it.
+
+**B4** - "always reports the same thing whether or not the address exists" is
+not keepable as a SYSTEM property, only as a property of this app's copy. Two
+oracles bypass the app entirely: a repeat reset request for a real address
+returns `over_email_send_rate_limit` while an address with no account never
+sends and never rate-limits, and a real address does an inline SMTP handoff
+that is measurably slower. Rewritten to promise uniform copy and to name both
+residuals as accepted.
+
+**B4 vs B5 - a direct conflict, now resolved.** B5 wants a designed
+"suspended" screen; B4 wants no enumeration. They meet at the sign-in error,
+and suspension now bans the account, so GoTrue returns `user_banned` - which
+leaks both existence and status. Resolution: `user_banned`,
+`email_not_confirmed` and `invalid_credentials` all render ONE generic
+sign-in failure, and "Access paused" is reachable only AFTER a successful
+password authentication, via the gate's `state`. The login page must stop
+rendering `error.message` verbatim, which is how the leak reaches the screen
+today.
+
+**B6** - REGRESSION 189's cache is already handled. The three that are NOT,
+and that sign-out must actually clear: `hubCache`
+(`useCoursesData.ts:51`, module-scope, seeded into `useState` initializers, so
+the next user sees the previous user's courses with no loading flash),
+`ta-active-institution` (`institutions.ts:15`, which feeds the env-var Canvas
+token lookup, so user B inherits which owner-funded token gets used), and the
+`ta-backup` IndexedDB directory handle (`backup-dir.ts:13-15`, a granted OS
+folder - user B's recordings would be written into user A's folder with no
+prompt, because the grant is per-origin, not per-account).
+
+**B8** - "auth screens deliberately persist nothing sensitive" is FALSE of the
+client these screens must use: `@supabase/ssr` persists the session and the
+PKCE code-verifier to non-httpOnly cookies via `document.cookie` on every one
+of them. Rescoped to app control state, with the Supabase-managed cookies
+named as a known exception.
+
+**NEW CRITERION - `safeNextPath` must be re-applied on every READ.** Today its
+only caller is `loginRedirectFor`, the side that WRITES the parameter. The
+value round-trips through the address bar, emailed links, and anything anyone
+chooses to send; nothing binds what comes back to what the gate wrote. Every
+read site re-validates: the `/auth/confirm` handler on ALL branches including
+the no-token and error ones, the sign-in page's post-success navigation,
+`/login/reset`, and any link rendered from the parameter.
+
+### Three Group B design constraints, decided now rather than discovered later
+
+**`/auth/confirm` must not act on a GET.** The `/auth` prefix is exempt for
+every method and subpath. With a `token_hash` design, `verifyOtp` is pure
+bearer - nothing binds the token to the browser redeeming it - so a link
+crafted from the ATTACKER's own confirmation email, opened by the owner,
+writes the attacker's session into the owner's browser and silently swaps
+whose tenant the owner is working in. Mail scanners that prefetch links also
+burn the one-shot token before the user clicks. Use the PKCE `?code=` shape,
+which requires a verifier cookie and therefore binds the link to the browser
+that requested it; handle "opened on a different device" as a designed state,
+not a stack trace. Whichever shape, read the existing session BEFORE verifying
+and refuse a swap to a different user id.
+
+**A recovery link yields a full, MFA-less session.** It is an ordinary
+`authenticated` session, not a scoped one-purpose token, and the browser talks
+directly to PostgREST and Storage where no policy consults `app_users`. The
+app-side mitigation is real but partial: `/login/reset` must run the TOTP step
+before the password fields for an MFA-enrolled account. The residual - a
+recovery link holder using the raw session against the database without ever
+touching a screen - is NOT closable by Group B, and no copy may imply the link
+is only good for setting a password.
+
+**`state` is attacker-authored copy on the real login card.** Anyone can send
+`/login?state=suspended`, and the victim sees an alarming message on the
+genuine domain with a genuine certificate. It must be mapped through an
+exhaustive switch whose default renders the plain sign-in card, never
+interpolated, and the same for `next`.
+
+---
+
 ## ACCEPTED DEVIATION: the MFA check now fails closed, and runs earlier
 
 The AAL step-up check discarded its error, so a failed call left `aal` null,

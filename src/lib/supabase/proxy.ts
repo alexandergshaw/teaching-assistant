@@ -229,6 +229,13 @@ export async function updateSession(request: NextRequest) {
     profile,
     lookupFailed,
     authFailed: authFailed || mfaCheckFailed,
+    // BUG 1 FIX: threads the verified state into the single access decision
+    // (see resolveAccess's own ResolveAccessInput.emailVerified doc comment)
+    // so the OWNER_EMAILS break-glass cannot be claimed by an unverified
+    // account. `user` already comes from this gate's own getUser() call
+    // above; `email_confirmed_at` is on the installed @supabase/auth-js
+    // `User` type.
+    emailVerified: Boolean(user?.email_confirmed_at),
   });
   const redirectTarget = loginRedirectFor(decision, `${pathname}${request.nextUrl.search}`);
   if (redirectTarget) {

@@ -47,7 +47,19 @@ function fakeAppUserRow(overrides: Partial<AppUserRow> = {}): AppUserRow {
   };
 }
 
-type FakeAuthUser = { id: string; email: string | null } | null;
+type FakeAuthUser = {
+  id: string;
+  email: string | null;
+  /**
+   * BUG 1 FIX coverage: resolveAccess's OWNER_EMAILS break-glass now also
+   * requires `emailVerified`, which this module derives as
+   * `Boolean(user?.email_confirmed_at)` - see resolveSessionAccess's own
+   * comment. Optional and omitted by every test that does not care about
+   * the break-glass, so those keep reading as unverified (`Boolean(undefined)
+   * === false`), which is harmless for a non-allowlisted email.
+   */
+  email_confirmed_at?: string;
+} | null;
 
 function makeFakeAuthClient(opts: {
   user?: FakeAuthUser;
@@ -209,7 +221,9 @@ describe("requireUser", () => {
   it("authorizes an allowlisted email through the break-glass path even with no app_users row", async () => {
     process.env.OWNER_EMAILS = "boss@example.com";
     vi.mocked(createClient).mockResolvedValue(
-      makeFakeAuthClient({ user: { id: "u1", email: "boss@example.com" } }) as never
+      makeFakeAuthClient({
+        user: { id: "u1", email: "boss@example.com", email_confirmed_at: "2026-01-01T00:00:00.000Z" },
+      }) as never
     );
     vi.mocked(getAppUser).mockResolvedValue(null);
 
@@ -222,6 +236,24 @@ describe("requireUser", () => {
     // (e.g. the admin surface, or display_name lookups) even though this
     // request's own authorization never depended on it.
     expect(ensureAppUser).toHaveBeenCalledWith({ id: "u1" });
+  });
+
+  it("BUG 1 FIX: does NOT authorize an allowlisted-but-UNVERIFIED email through the break-glass path - it falls through to the normal stored-row path and is denied like anyone else with no row", async () => {
+    process.env.OWNER_EMAILS = "boss@example.com";
+    vi.mocked(createClient).mockResolvedValue(
+      // No email_confirmed_at at all - Supabase has not confirmed this
+      // address belongs to whoever created this account.
+      makeFakeAuthClient({ user: { id: "u1", email: "boss@example.com" } }) as never
+    );
+    vi.mocked(getAppUser).mockResolvedValue(null);
+
+    await expect(requireUser()).rejects.toThrow("Not authorized");
+
+    // Denied via the ordinary no-row path (pending), not granted ownership -
+    // and the insert-only recovery still runs (BUG 3), never the promoting
+    // ensureAppUser.
+    expect(ensureAppUserRowExists).toHaveBeenCalledWith("u1");
+    expect(ensureAppUser).not.toHaveBeenCalled();
   });
 
   it("reconciles the caller's own app_users row via ensureAppUser once authorized", async () => {
@@ -277,7 +309,9 @@ describe("requireUser", () => {
   it("still calls ensureAppUser for an allowlisted email whose row is not yet owner/active, even though a row exists", async () => {
     process.env.OWNER_EMAILS = "boss@example.com";
     vi.mocked(createClient).mockResolvedValue(
-      makeFakeAuthClient({ user: { id: "u1", email: "boss@example.com" } }) as never
+      makeFakeAuthClient({
+        user: { id: "u1", email: "boss@example.com", email_confirmed_at: "2026-01-01T00:00:00.000Z" },
+      }) as never
     );
     vi.mocked(getAppUser).mockResolvedValue(
       fakeAppUserRow({ status: "pending", role: "instructor", displayName: "Boss" })
@@ -291,7 +325,9 @@ describe("requireUser", () => {
   it("skips ensureAppUser for an allowlisted email whose row is ALREADY owner/active with a display name", async () => {
     process.env.OWNER_EMAILS = "boss@example.com";
     vi.mocked(createClient).mockResolvedValue(
-      makeFakeAuthClient({ user: { id: "u1", email: "boss@example.com" } }) as never
+      makeFakeAuthClient({
+        user: { id: "u1", email: "boss@example.com", email_confirmed_at: "2026-01-01T00:00:00.000Z" },
+      }) as never
     );
     vi.mocked(getAppUser).mockResolvedValue(
       // BUG 7: email must match the verified auth email too - see the
@@ -422,13 +458,25 @@ describe("requireAppOwner", () => {
   it("authorizes the OWNER_EMAILS break-glass path even with a stale suspended row", async () => {
     process.env.OWNER_EMAILS = "boss@example.com";
     vi.mocked(createClient).mockResolvedValue(
-      makeFakeAuthClient({ user: { id: "u1", email: "boss@example.com" } }) as never
+      makeFakeAuthClient({
+        user: { id: "u1", email: "boss@example.com", email_confirmed_at: "2026-01-01T00:00:00.000Z" },
+      }) as never
     );
     vi.mocked(getAppUser).mockResolvedValue(fakeAppUserRow({ status: "suspended", role: "instructor" }));
 
     const result = await requireAppOwner();
 
     expect(result.role).toBe("owner");
+  });
+
+  it("BUG 1 FIX: does NOT authorize the OWNER_EMAILS break-glass path for an unverified email, even with a stale suspended row", async () => {
+    process.env.OWNER_EMAILS = "boss@example.com";
+    vi.mocked(createClient).mockResolvedValue(
+      makeFakeAuthClient({ user: { id: "u1", email: "boss@example.com" } }) as never
+    );
+    vi.mocked(getAppUser).mockResolvedValue(fakeAppUserRow({ status: "suspended", role: "instructor" }));
+
+    await expect(requireAppOwner()).rejects.toThrow("Not authorized");
   });
 
   // CANARY - the exact privilege escalation owner-context.ts's fix closes:

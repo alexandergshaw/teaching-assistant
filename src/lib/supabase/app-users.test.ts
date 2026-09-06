@@ -87,9 +87,9 @@ interface FakeClientConfig {
   count?: { count: number | null; error: FakeError };
   /** Response for `auth.admin.updateUserById(...)` - BUG 4's ban/unban call. Defaults to success. */
   updateUserById?: { error: FakeError };
-  /** Response for `auth.admin.getUserById(...)` - ensureAppUser's own verified-email read. Defaults to a generic found user. */
+  /** Response for `auth.admin.getUserById(...)` - ensureAppUser's own verified-email read. Defaults to a generic found user. `email_confirmed_at` gates ensureAppUser's owner PROMOTION (app-users.ts); omit it to simulate an unconfirmed address. */
   getUserById?: {
-    data: { user: { id: string; email: string | null; user_metadata?: Record<string, unknown> } | null };
+    data: { user: { id: string; email: string | null; user_metadata?: Record<string, unknown>; email_confirmed_at?: string } | null };
     error: FakeError;
   };
 }
@@ -275,7 +275,11 @@ describe("app-users: ensureAppUser", () => {
     process.env.OWNER_EMAILS = "owner@example.com";
 
     const fake = makeFakeServiceClient({
-      getUserById: { data: { user: { id: "owner-id", email: "owner@example.com" } }, error: null },
+      // email_confirmed_at REQUIRED to promote (ensureAppUser's emailVerified gate) - BUG 1.
+      getUserById: {
+        data: { user: { id: "owner-id", email: "owner@example.com", email_confirmed_at: "2026-01-01T00:00:00.000Z" } },
+        error: null,
+      },
       upsert: { error: null },
       maybeSingle: {
         data: makeRow({ id: "owner-id", email: "owner@example.com", role: "instructor", status: "pending" }),
@@ -330,14 +334,9 @@ describe("app-users: ensureAppUser", () => {
     process.env.OWNER_EMAILS = "new-owner@example.com";
 
     const fake = makeFakeServiceClient({
+      // email_confirmed_at REQUIRED to promote (ensureAppUser's emailVerified gate) - see note above.
       getUserById: {
-        data: {
-          user: {
-            id: "brand-new-id",
-            email: "new-owner@example.com",
-            user_metadata: { full_name: "New Owner" },
-          },
-        },
+        data: { user: { id: "brand-new-id", email: "new-owner@example.com", user_metadata: { full_name: "New Owner" }, email_confirmed_at: "2026-01-01T00:00:00.000Z" } },
         error: null,
       },
       upsert: { error: null },
@@ -759,7 +758,12 @@ describe("app-users: appUserNeedsReconciliation (differential against ensureAppU
 
       const id = "differential-id";
       const fake = makeFakeServiceClient({
-        getUserById: { data: { user: { id, email: c.email, user_metadata: c.metadata } }, error: null },
+        // email_confirmed_at REQUIRED for the "stale row" promotion case below;
+        // set for every case - the demotion/no-op cases don't depend on it.
+        getUserById: {
+          data: { user: { id, email: c.email, user_metadata: c.metadata, email_confirmed_at: "2026-01-01T00:00:00.000Z" } },
+          error: null,
+        },
         upsert: { error: null },
         ...(c.row
           ? { maybeSingle: { data: makeRow({ id, email: c.email, ...c.row }), error: null } }

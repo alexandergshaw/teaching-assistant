@@ -65,7 +65,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     if (error || !userRes?.user) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
-    const identity = await resolveImpersonationIdentity(userRes.user.id, userRes.user.email);
+    const identity = await resolveImpersonationIdentity(
+      userRes.user.id,
+      userRes.user.email,
+      Boolean(userRes.user.email_confirmed_at)
+    );
     if (!identity) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }

@@ -146,7 +146,18 @@ async function resolveSessionAccess() {
   }
 
   const profile: AccessProfile | null = row ? { role: row.role, status: row.status } : null;
-  const decision = resolveAccess({ email: user?.email, profile, lookupFailed, authFailed });
+  const decision = resolveAccess({
+    email: user?.email,
+    profile,
+    lookupFailed,
+    authFailed,
+    // BUG 1 FIX: see resolveAccess's ResolveAccessInput.emailVerified doc
+    // comment, and the matching wiring in src/lib/supabase/proxy.ts - the
+    // request gate and this server-action guard must supply the SAME
+    // signal from the SAME field so they can never disagree about who is
+    // let into the OWNER_EMAILS break-glass (AC A4).
+    emailVerified: Boolean(user?.email_confirmed_at),
+  });
   return { supabase, user, decision, row };
 }
 

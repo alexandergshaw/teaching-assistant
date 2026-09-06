@@ -1,3 +1,20 @@
+// This module reads bare (non-NEXT_PUBLIC_) environment variables
+// (SIGNUP_MODE, SIGNUP_ALLOWED_DOMAINS). Per Next's own docs
+// (node_modules/next/dist/docs/01-app/02-guides/environment-variables.md),
+// those are stripped from any bundle a Client Component pulls in, so both
+// reads silently become `undefined` if this module is ever imported from
+// client code. That failure is invisible on purpose-defeating: signupMode()
+// falls back to "approval" (so SIGNUP_MODE=closed would silently close
+// nothing) and the domain allowlist becomes empty, which this module
+// deliberately treats as "no restriction" (so SIGNUP_ALLOWED_DOMAINS would
+// become a no-op). No test run in Node, no `tsc`, and no `next build` catches
+// either failure - only opening the app in a browser with the wrong bundle
+// would. `import "server-only"` turns that silent client-side fallback into a
+// build-time error instead, so a future client-side caller (e.g. a form that
+// "validates on the client") fails loudly at build time rather than shipping
+// a signup gate that quietly does nothing.
+import "server-only";
+
 /**
  * The sign-up rules: what mode the deployment is in, which email domains
  * (if any) are allowed to sign up, what a submitted form is checked against,

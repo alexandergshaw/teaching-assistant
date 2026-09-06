@@ -34,12 +34,21 @@ import { resolveAccess, canUseApp, type AccessProfile } from "../access";
  *     verifies the HMAC signature over the raw body (X-Hub-Signature-256)
  *     against the GITHUB_WEBHOOK_SECRET env var - and (b) resolving the
  *     target user via the Supabase service-role admin API and passing the
- *     result through resolveImpersonationIdentity (below), which re-checks
- *     the account's LIVE role/status via app_users using the SAME
- *     resolveAccess() decision the request gate and the server-action guard
- *     use (AC A4) - never a hand-rolled copy of that rule, and never simply
- *     "is this the owner" (see the AM3 note below). All four also gate the
- *     workflow through isHeadlessSafeWorkflow before running it.
+ *     result - including that SAME admin-API user's `email_confirmed_at`,
+ *     as `resolveImpersonationIdentity`'s required `emailVerified` argument -
+ *     through resolveImpersonationIdentity (below), which re-checks the
+ *     account's LIVE role/status via app_users using the SAME resolveAccess()
+ *     decision the request gate and the server-action guard use (AC A4) -
+ *     never a hand-rolled copy of that rule, and never simply "is this the
+ *     owner" (see the AM3 note below). All four also gate the workflow
+ *     through isHeadlessSafeWorkflow before running it. SECURITY: an
+ *     UNVERIFIED address must never be impersonated as owner - `emailVerified`
+ *     is what stands between "this address is on OWNER_EMAILS" and "Supabase
+ *     has actually confirmed this account owns that address"; a caller that
+ *     passes anything other than the real `Boolean(user.email_confirmed_at)`
+ *     (in particular, a hard-coded `true`) reopens BUG 1 (see
+ *     src/lib/access.ts's own `emailVerified` doc comment) for whichever of
+ *     the four unattended entry points it is.
  *   - This module exports nothing that a client component could import: it
  *     has no "use client" directive and is never imported by one. Grep
  *     `runAsOwner(` before changing that invariant - it must stay imported
@@ -124,14 +133,17 @@ export function getImpersonatedOwner(): OwnerIdentity | null {
 
 /**
  * Resolves the impersonation identity for an unattended run's target user,
- * given their id and their VERIFIED auth email (from
+ * given their id, their VERIFIED auth email (from
  * `supabase.auth.admin.getUserById` - never a caller-supplied value; see
  * app-users.ts's ensureAppUser for the same rule applied to account
- * creation). Returns null when the account may not be impersonated at all -
- * this covers both a profile-lookup failure (fails closed via
- * resolveAccess's `unavailable` decision, which never falls through to
- * allowed) and an account that is not currently usable (pending, suspended,
- * or deleted since the schedule/trigger/webhook subscription was created).
+ * creation), and whether that address is itself confirmed
+ * (`Boolean(user.email_confirmed_at)` from that SAME admin-API user - see
+ * `emailVerified`'s own parameter doc below). Returns null when the account
+ * may not be impersonated at all - this covers both a profile-lookup failure
+ * (fails closed via resolveAccess's `unavailable` decision, which never
+ * falls through to allowed) and an account that is not currently usable
+ * (pending, suspended, or deleted since the schedule/trigger/webhook
+ * subscription was created).
  *
  * This is the ONE place all four runAsOwner callers (see this file's header)
  * compute the identity to impersonate, so the live-status re-check they each
@@ -139,13 +151,26 @@ export function getImpersonatedOwner(): OwnerIdentity | null {
  * (AC A4) rather than four independently hand-maintained copies of it - the
  * exact kind of drift that let one of the four skip the re-check entirely in
  * an earlier draft of this design. Each caller already holds the target
- * user's id/email from its own `auth.admin.getUserById` call; this function
- * only adds the app_users lookup (via getAppUser, which uses its own
- * service-role client - see app-users.ts) and the decision on top of that.
+ * user's full auth user (id/email/`email_confirmed_at`) from its own
+ * `auth.admin.getUserById` call; this function only adds the app_users
+ * lookup (via getAppUser, which uses its own service-role client - see
+ * app-users.ts) and the decision on top of that.
+ *
+ * SECURITY: an unverified address cannot be impersonated as owner. `email`
+ * alone is a self-reported claim as far as the `OWNER_EMAILS` break-glass is
+ * concerned - `resolveAccess`'s `emailVerified` gate (src/lib/access.ts) is
+ * the ONLY thing standing between "an address that happens to be on
+ * OWNER_EMAILS" and "an account Supabase has actually confirmed owns that
+ * address". Passing anything other than the caller's real
+ * `email_confirmed_at` (in particular, hard-coding `true`) would reopen BUG 1
+ * for every one of the four unattended entry points this function serves:
+ * cron schedules, the per-trigger webhook token route, the GitHub push
+ * webhook, and the unattended event-trigger loop.
  */
 export async function resolveImpersonationIdentity(
   userId: string,
-  email: string | null | undefined
+  email: string | null | undefined,
+  emailVerified: boolean
 ): Promise<OwnerIdentity | null> {
   let profile: AccessProfile | null = null;
   let lookupFailed = false;
@@ -156,7 +181,7 @@ export async function resolveImpersonationIdentity(
     lookupFailed = true;
   }
 
-  const decision = resolveAccess({ email, profile, lookupFailed });
+  const decision = resolveAccess({ email, profile, lookupFailed, emailVerified });
   if (!canUseApp(decision)) {
     return null;
   }

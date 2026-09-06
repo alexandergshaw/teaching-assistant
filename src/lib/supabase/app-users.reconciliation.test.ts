@@ -63,7 +63,24 @@ interface FakeClientConfig {
   updateSingle?: { data: FakeRow | null; error: FakeError };
   upsert?: { error: FakeError };
   getUserById?: {
-    data: { user: { id: string; email: string | null; user_metadata?: Record<string, unknown> } | null };
+    data: {
+      user:
+        | {
+            id: string;
+            email: string | null;
+            user_metadata?: Record<string, unknown>;
+            /**
+             * UNVERIFIED-EMAIL FIX coverage: ensureAppUser's owner-promotion
+             * branch now requires this (mirrors resolveAccess's own
+             * ResolveAccessInput.emailVerified gate in src/lib/access.ts).
+             * Omitted by every test that does not exercise promotion, which
+             * is harmless there - demotion and the display_name/email fills
+             * are unaffected by this field.
+             */
+            email_confirmed_at?: string;
+          }
+        | null;
+    };
     error: FakeError;
   };
 }
@@ -198,7 +215,12 @@ describe("app-users: BUG 6 - ensureAppUser's own writes stamp attribution", () =
     process.env.OWNER_EMAILS = "owner@example.com";
 
     const fake = makeFakeServiceClient({
-      getUserById: { data: { user: { id: "owner-id", email: "owner@example.com" } }, error: null },
+      getUserById: {
+        data: {
+          user: { id: "owner-id", email: "owner@example.com", email_confirmed_at: "2026-01-01T00:00:00.000Z" },
+        },
+        error: null,
+      },
       maybeSingle: {
         data: makeRow({ id: "owner-id", email: "owner@example.com", role: "instructor", status: "pending" }),
         error: null,
@@ -222,7 +244,12 @@ describe("app-users: BUG 6 - ensureAppUser's own writes stamp attribution", () =
     process.env.OWNER_EMAILS = "owner2@example.com";
 
     const fake = makeFakeServiceClient({
-      getUserById: { data: { user: { id: "owner-id-2", email: "owner2@example.com" } }, error: null },
+      getUserById: {
+        data: {
+          user: { id: "owner-id-2", email: "owner2@example.com", email_confirmed_at: "2026-01-01T00:00:00.000Z" },
+        },
+        error: null,
+      },
       maybeSingle: {
         data: makeRow({
           id: "owner-id-2",
@@ -272,6 +299,121 @@ describe("app-users: BUG 6 - ensureAppUser's own writes stamp attribution", () =
     const payload = fake.captured.updates[0];
     expect("status_changed_at" in payload).toBe(false);
     expect("status_changed_by" in payload).toBe(false);
+  });
+});
+
+describe("app-users: BUG 1 (rival-model threat model) - owner promotion requires a VERIFIED email", () => {
+  const OWNER_EMAILS_BEFORE = process.env.OWNER_EMAILS;
+  beforeEach(() => vi.mocked(createServiceClient).mockReset());
+  afterEach(() => {
+    process.env.OWNER_EMAILS = OWNER_EMAILS_BEFORE;
+  });
+
+  it("does NOT promote an allowlisted address with no email_confirmed_at - the row is left exactly as it was, and no update call is issued at all", async () => {
+    process.env.OWNER_EMAILS = "unverified-owner@example.com";
+
+    const fake = makeFakeServiceClient({
+      // No email_confirmed_at: Supabase has not confirmed this address.
+      getUserById: {
+        data: { user: { id: "unverified-owner-id", email: "unverified-owner@example.com" } },
+        error: null,
+      },
+      maybeSingle: {
+        data: makeRow({
+          id: "unverified-owner-id",
+          email: "unverified-owner@example.com",
+          role: "instructor",
+          status: "pending",
+        }),
+        error: null,
+      },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(fake.client);
+
+    const result = await ensureAppUser({ id: "unverified-owner-id" });
+
+    expect(result.role).toBe("instructor");
+    expect(result.status).toBe("pending");
+    // Nothing to promote to, nothing to demote from (isOwner is still true,
+    // so the demotion branch's own !isOwner check does not fire either), no
+    // display_name to fill, and the email already matches - so the whole
+    // update object is empty and ensureAppUser never issues a write at all.
+    expect(fake.captured.updates).toHaveLength(0);
+  });
+
+  it("promotes the SAME address once it is verified - the only difference between this and the previous test is email_confirmed_at", async () => {
+    process.env.OWNER_EMAILS = "unverified-owner@example.com";
+
+    const fake = makeFakeServiceClient({
+      getUserById: {
+        data: {
+          user: {
+            id: "unverified-owner-id",
+            email: "unverified-owner@example.com",
+            email_confirmed_at: "2026-01-01T00:00:00.000Z",
+          },
+        },
+        error: null,
+      },
+      maybeSingle: {
+        data: makeRow({
+          id: "unverified-owner-id",
+          email: "unverified-owner@example.com",
+          role: "instructor",
+          status: "pending",
+        }),
+        error: null,
+      },
+      updateSingle: {
+        data: makeRow({
+          id: "unverified-owner-id",
+          email: "unverified-owner@example.com",
+          role: "owner",
+          status: "active",
+        }),
+        error: null,
+      },
+    });
+    vi.mocked(createServiceClient).mockReturnValue(fake.client);
+
+    const result = await ensureAppUser({ id: "unverified-owner-id" });
+
+    expect(result.role).toBe("owner");
+    expect(fake.captured.updates).toHaveLength(1);
+    expect(fake.captured.updates[0]).toMatchObject({ role: "owner", status: "active" });
+  });
+
+  it("does not let an unverified allowlisted address escalate an EXISTING owner row it does not already hold, even across repeated calls", async () => {
+    // Same fixture as the first test in this block, called twice, to pin
+    // that repeated reconciliation attempts against an unverified address
+    // never eventually succeed by some other path (e.g. a second branch that
+    // ignores emailVerified). Uses a fresh fake client per call since this
+    // fake is not stateful across calls.
+    process.env.OWNER_EMAILS = "unverified-owner@example.com";
+    const buildFake = () =>
+      makeFakeServiceClient({
+        getUserById: {
+          data: { user: { id: "repeat-id", email: "unverified-owner@example.com" } },
+          error: null,
+        },
+        maybeSingle: {
+          data: makeRow({
+            id: "repeat-id",
+            email: "unverified-owner@example.com",
+            role: "instructor",
+            status: "pending",
+          }),
+          error: null,
+        },
+      });
+
+    for (let i = 0; i < 2; i += 1) {
+      const fake = buildFake();
+      vi.mocked(createServiceClient).mockReturnValue(fake.client);
+      const result = await ensureAppUser({ id: "repeat-id" });
+      expect(result.role).toBe("instructor");
+      expect(fake.captured.updates).toHaveLength(0);
+    }
   });
 });
 

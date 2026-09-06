@@ -142,12 +142,25 @@ build on it wastes the whole wave.
 Fold what you learn back into the AC, then re-read it. Iterate until it stops
 changing.
 
-## 4. Four concurrent pre-code passes: architect, UX, data engineer, aesthetics
+## 4. Seven concurrent pre-code passes
 
-**Spawn all four in one message, on the highest model available, before any
+Architect, UX, data engineer, aesthetics, admin capability, cybersecurity,
+site reliability.
+
+**Spawn all seven in one message, on the highest model available, before any
 code.** They are independent, they read the same documents, and they find
 different classes of problem - running them in sequence wastes a round trip and
 lets the first one's framing contaminate the others.
+
+**ONE ROLE PER AGENT. Never combine two of these into a single brief**, however
+adjacent they look. This was corrected explicitly on 2026-09-05 after the
+orchestrator twice folded three roles into one agent to save a dispatch. The
+reason it is a rule and not a preference: separate agents genuinely DISAGREE
+with each other, and step 4's closing instruction - "where two of them
+disagree, that disagreement is the finding" - only produces anything if there
+are two of them. One agent wearing three hats writes a single reconciled
+narrative and silently drops whichever concern it found least interesting,
+which is exactly the concern nobody else was going to raise.
 
 - **4a. The architect** - module and data-flow design, the disjoint file split,
   the order of work, and the trade-offs it rejects.
@@ -175,7 +188,29 @@ lets the first one's framing contaminate the others.
   as binding as the architect's: a requirement it writes is a line an
   implementer is held to at 8b, not advice.
 
-Reconcile all four into the AC before planning goes further. Where two of them
+- **4e. The admin-capability pass** - added 2026-09-05. Whether an
+  administrator has proper CRUD over everything the feature creates, and the
+  other responsibilities that come with the role: who can see it, who can
+  undo it, what happens to it when an account is suspended or deleted, and
+  what the admin surface must show for the feature to be operable at all. It
+  asks the question nobody else in the loop asks - "and then who cleans this
+  up?" - which is the question whose absence leaves data nobody can reach.
+
+- **4f. The cybersecurity pass** - added 2026-09-05. A threat model against
+  the REAL code, not against the design. Trust boundaries, what an
+  authenticated non-owner can reach, what an unauthenticated request can
+  reach, what a server action accepts that it should not, secrets in logs and
+  error messages, and the injection and SSRF surface. It is explicitly not a
+  checklist review: it names an attacker, a goal, and the concrete path.
+
+- **4g. The site-reliability pass** - added 2026-09-05. Failure modes, blast
+  radius, rollback, and observability. What breaks when a dependency is slow
+  rather than down; what the operator sees when it does; whether the feature
+  can be undone after deploy and by whom; and whether any alert it adds would
+  survive contact with a legitimately persistent state rather than firing
+  every fifteen minutes until people stop reading it.
+
+Reconcile all seven into the AC before planning goes further. Where two of them
 disagree, that disagreement is the finding.
 
 What these have caught in this repo that nothing else did: a frame width that
@@ -302,13 +337,21 @@ not get a follow-up ticket; the wave is not verified until it is split. Size an
 extraction against the feature's ADDITIONS, not against the headroom - the
 headroom is what a later group will need.
 
-## 8b. Follow-up architect, UX, data and aesthetics passes against the REAL diff
+## 8b. Follow-up passes against the REAL diff
 
-The step 4 quartet designed against documents. Run all four again, concurrently,
-against what actually landed. This is not a repeat: a design is a prediction,
-and the diff is the outcome. The follow-up pass is where you learn that the
-split held but the props are unstable, that the flow is right but a control is
-unreachable, or that the measured payload is nothing like the estimate.
+The step 4 passes designed against documents. Run them all again,
+concurrently, against what actually landed - architect, UX, data engineer and
+aesthetics, plus the admin-capability, cybersecurity and site-reliability
+passes added on 2026-09-05 (8c-8f). Still one role per agent. This is not a
+repeat: a design is a prediction, and the diff is the outcome. The follow-up
+pass is where you learn that the split held but the props are unstable, that
+the flow is right but a control is unreachable, or that the measured payload
+is nothing like the estimate.
+
+The security and reliability follow-ups earn their place here more than
+anywhere: at step 4 they reason about a design, and a design has no bugs. Only
+the diff has the unguarded action, the sequential read that blows the platform
+timeout, and the header the gate forgot to overwrite on its early-return path.
 
 **The aesthetics pass here is a CONFORMANCE check against the requirements it
 wrote at 4d**, and it is the same agent class, never the same context - an
@@ -542,11 +585,12 @@ coverage that does not exist.
   run; never instruct a manual apply.
 - `gh` is not installed. Verify Actions runs via the web UI or `curl`.
 
-**Model roles:** every step 4 pass - architect, UX, data engineer, aesthetics -
-and all four step 10 agents - reviewer, researcher, aesthetics, fixer - take the
-**highest** model available. Sonnet implements and Opus verifies, and those two
-pin the **lowest** available version. Every role pins a version explicitly -
-never a bare family alias.
+**Model roles:** every step 4 pass - architect, UX, data engineer, aesthetics,
+admin capability, cybersecurity, site reliability - and all four step 10 agents
+- reviewer, researcher, aesthetics, fixer - take the **highest** model
+available. Sonnet implements and Opus verifies, and those two pin the
+**lowest** available version. Every role pins a version explicitly - never a
+bare family alias.
 
 ---
 

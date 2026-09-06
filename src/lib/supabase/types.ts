@@ -70,6 +70,11 @@ import type {
   KnowledgeEntriesUpdate,
 } from "./types.tables-a";
 import type {
+  LmsCredentialsRow,
+  LmsCredentialsInsert,
+  LmsCredentialsUpdate,
+} from "./types.tables-c";
+import type {
   AppUsersRow,
   AppUsersInsert,
   AppUsersUpdate,
@@ -324,6 +329,12 @@ export interface Database {
         Row: Expand<KnowledgeEntriesRow>;
         Insert: Expand<KnowledgeEntriesInsert>;
         Update: Expand<KnowledgeEntriesUpdate>;
+        Relationships: [];
+      };
+      lms_credentials: {
+        Row: Expand<LmsCredentialsRow>;
+        Insert: Expand<LmsCredentialsInsert>;
+        Update: Expand<LmsCredentialsUpdate>;
         Relationships: [];
       };
       message_drafts: {

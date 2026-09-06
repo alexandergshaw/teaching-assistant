@@ -16,14 +16,18 @@ import { encryptSecret, decryptSecret } from "./crypto";
 
 const TEST_KEY = randomBytes(32).toString("base64");
 const ORIGINAL_KEY = process.env.GOOGLE_TOKEN_ENC_KEY;
+const ORIGINAL_PREVIOUS_KEY = process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS;
 
 beforeEach(() => {
   process.env.GOOGLE_TOKEN_ENC_KEY = TEST_KEY;
+  delete process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS;
 });
 
 afterEach(() => {
   if (ORIGINAL_KEY === undefined) delete process.env.GOOGLE_TOKEN_ENC_KEY;
   else process.env.GOOGLE_TOKEN_ENC_KEY = ORIGINAL_KEY;
+  if (ORIGINAL_PREVIOUS_KEY === undefined) delete process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS;
+  else process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS = ORIGINAL_PREVIOUS_KEY;
 });
 
 /**
@@ -137,6 +141,96 @@ describe("decryptSecret - wrong key", () => {
     const payload = encryptSecret("token encrypted under the original key");
     process.env.GOOGLE_TOKEN_ENC_KEY = randomBytes(32).toString("base64");
     expect(() => decryptSecret(payload)).toThrow();
+  });
+});
+
+describe("decryptSecret - previous-key rotation (SEC8 / E-REL5)", () => {
+  it("decrypts a row written under the OLD key once it is set as GOOGLE_TOKEN_ENC_KEY_PREVIOUS and a new key is current", () => {
+    const oldKey = TEST_KEY;
+    const payload = encryptSecret("token encrypted before rotation");
+
+    // Simulate the rotation runbook: a new key becomes current, the old one
+    // moves to the PREVIOUS var - in the same step, per the module header.
+    const newKey = randomBytes(32).toString("base64");
+    process.env.GOOGLE_TOKEN_ENC_KEY = newKey;
+    process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS = oldKey;
+
+    expect(decryptSecret(payload)).toBe("token encrypted before rotation");
+  });
+
+  it("still decrypts a row written under the CURRENT key even when a previous key is also configured", () => {
+    process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS = randomBytes(32).toString("base64");
+    const payload = encryptSecret("fresh token, current key");
+    expect(decryptSecret(payload)).toBe("fresh token, current key");
+  });
+
+  it("never encrypts under the previous key - a fresh write always targets the current key", () => {
+    const oldKey = TEST_KEY;
+    const newKey = randomBytes(32).toString("base64");
+    process.env.GOOGLE_TOKEN_ENC_KEY = newKey;
+    process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS = oldKey;
+
+    const payload = encryptSecret("written mid-rotation");
+
+    // Decrypts fine under the current key with no previous-key var at all.
+    delete process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS;
+    expect(decryptSecret(payload)).toBe("written mid-rotation");
+  });
+
+  it("throws when the payload matches neither the current nor the previous key", () => {
+    const payload = encryptSecret("token under a since-discarded key");
+    process.env.GOOGLE_TOKEN_ENC_KEY = randomBytes(32).toString("base64");
+    process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS = randomBytes(32).toString("base64");
+    expect(() => decryptSecret(payload)).toThrow();
+  });
+
+  it("throws (does not silently succeed) when GOOGLE_TOKEN_ENC_KEY_PREVIOUS is set but malformed", () => {
+    const payload = encryptSecret("whatever");
+    process.env.GOOGLE_TOKEN_ENC_KEY = randomBytes(32).toString("base64"); // current key now wrong on purpose
+    process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS = "not-32-bytes";
+    expect(() => decryptSecret(payload)).toThrow(/GOOGLE_TOKEN_ENC_KEY_PREVIOUS must decode to 32 bytes/);
+  });
+});
+
+describe("encryptSecret / decryptSecret - aad (SEC7 row binding)", () => {
+  it("round-trips when the same aad is supplied on both ends", () => {
+    const payload = encryptSecret("bound to a row", "user-1:MCC");
+    expect(decryptSecret(payload, "user-1:MCC")).toBe("bound to a row");
+  });
+
+  it("fails to authenticate when decrypted with a DIFFERENT aad than it was encrypted with", () => {
+    const payload = encryptSecret("bound to a row", "user-1:MCC");
+    expect(() => decryptSecret(payload, "user-2:MCC")).toThrow();
+  });
+
+  it("fails to authenticate when the aad is dropped on decrypt", () => {
+    const payload = encryptSecret("bound to a row", "user-1:MCC");
+    expect(() => decryptSecret(payload)).toThrow();
+  });
+
+  it("fails to authenticate when an aad is supplied on decrypt but none was used on encrypt", () => {
+    const payload = encryptSecret("no aad at encrypt time");
+    expect(() => decryptSecret(payload, "user-1:MCC")).toThrow();
+  });
+
+  it("is optional and defaults to today's no-aad behavior, so existing callers are unaffected", () => {
+    // google-credentials.ts and microsoft-credentials.ts call these two
+    // functions with no third argument at all - this pins that shape keeps
+    // working exactly as before aad existed.
+    const payload = encryptSecret("legacy caller, no aad");
+    expect(decryptSecret(payload)).toBe("legacy caller, no aad");
+  });
+
+  it("combines with previous-key rotation: the retried decrypt under the previous key also honors aad", () => {
+    const oldKey = TEST_KEY;
+    const payload = encryptSecret("bound and rotated", "user-3:UNL");
+
+    const newKey = randomBytes(32).toString("base64");
+    process.env.GOOGLE_TOKEN_ENC_KEY = newKey;
+    process.env.GOOGLE_TOKEN_ENC_KEY_PREVIOUS = oldKey;
+
+    expect(decryptSecret(payload, "user-3:UNL")).toBe("bound and rotated");
+    expect(() => decryptSecret(payload, "user-4:UNL")).toThrow();
   });
 });
 

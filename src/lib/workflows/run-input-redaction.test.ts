@@ -3,6 +3,7 @@ import {
   redactRunInputs,
   isCredentialKeyName,
   isCredentialShapedValue,
+  redactEmbeddedSecrets,
   MAX_VALUE_CHARS,
   MAX_TOTAL_CHARS,
 } from "./run-input-redaction";
@@ -246,5 +247,155 @@ describe("redactRunInputs", () => {
   it("preserves the input object's key order", () => {
     const inputs = { z: "1", a: "2", m: "3" };
     expect(Object.keys(redactRunInputs(inputs)!)).toEqual(["z", "a", "m"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEC4 - redactEmbeddedSecrets: the UNANCHORED scrubber for free text (a
+// step's error/summary/progress), as opposed to isCredentialShapedValue's
+// anchored whole-value check used by redactRunInputs above.
+// ---------------------------------------------------------------------------
+
+describe("redactEmbeddedSecrets", () => {
+  // -------------------------------------------------------------------
+  // THE test that proves the fix: a token embedded in a sentence, not
+  // standing alone as a whole value, must still be caught. This is exactly
+  // the shape isCredentialShapedValue (anchored `^...$`) can never match -
+  // see the sabotage check below, which proves this test would fail against
+  // that anchored pattern.
+  // -------------------------------------------------------------------
+
+  it("scrubs a Canvas-style token EMBEDDED IN A SENTENCE, unlike the anchored value check", () => {
+    const token = "1234~AbCdEfGh1234567890abcdefghijklmnopqrstuvwxyz";
+    const message = `Canvas rejected ${token}: 401 Unauthorized`;
+
+    // Sanity: the anchored whole-value check (used for a resolved input that
+    // IS a token) does not fire on a sentence that merely contains one - this
+    // is precisely the gap SEC4 named.
+    expect(isCredentialShapedValue(message)).toBe(false);
+
+    const scrubbed = redactEmbeddedSecrets(message);
+    expect(scrubbed).not.toContain(token);
+    expect(scrubbed).not.toContain("AbCdEfGh1234567890abcdefghijklmnopqrstuvwxyz");
+  });
+
+  // -------------------------------------------------------------------
+  // Preserve the outcome CLASS - the diagnosis survives, only the value goes.
+  // -------------------------------------------------------------------
+
+  it("keeps the surrounding diagnostic wording intact - only the token substring is removed", () => {
+    const token = "1234~AbCdEfGh1234567890abcdefghijklmnopqrstuvwxyz";
+    const scrubbed = redactEmbeddedSecrets(`Canvas rejected ${token}: 401 Unauthorized`);
+    expect(scrubbed).toContain("Canvas rejected");
+    expect(scrubbed).toContain("401 Unauthorized");
+    expect(scrubbed).toContain("[REDACTED]");
+  });
+
+  it("does the same for a 'host unreachable' style message with no token in it at all - wording untouched", () => {
+    const message = "Could not reach https://canvas.example.edu: connection timed out";
+    // No credential-shaped substring here, but the URL pattern from this
+    // module's whole-value list must not be misapplied unanchored either -
+    // this message must survive completely unless it embeds a real secret.
+    expect(redactEmbeddedSecrets(message)).toBe(message);
+  });
+
+  // -------------------------------------------------------------------
+  // A message that merely MENTIONS a token, without containing one, keeps
+  // its exact wording.
+  // -------------------------------------------------------------------
+
+  it("does not touch a message that only talks ABOUT a token, without containing one", () => {
+    const message = "Your Canvas token could not be read. Please reconnect your account in Settings.";
+    expect(redactEmbeddedSecrets(message)).toBe(message);
+  });
+
+  it("does not touch an ordinary success/progress message", () => {
+    const message = "Posted 3 announcements to CS 101.";
+    expect(redactEmbeddedSecrets(message)).toBe(message);
+  });
+
+  // -------------------------------------------------------------------
+  // Other credential shapes realistically embedded in upstream text.
+  // -------------------------------------------------------------------
+
+  it("scrubs a 'Bearer <token>' header fragment embedded in an error, keeping the scheme name", () => {
+    const scrubbed = redactEmbeddedSecrets("Request failed: Authorization: Bearer abc123.def456.ghi789 was rejected");
+    expect(scrubbed).not.toContain("abc123.def456.ghi789");
+    expect(scrubbed).toContain("Bearer [REDACTED]");
+    expect(scrubbed).toContain("Request failed");
+    expect(scrubbed).toContain("was rejected");
+  });
+
+  it("scrubs a GitHub token embedded in an error body", () => {
+    const scrubbed = redactEmbeddedSecrets(
+      "fatal: could not read Username for 'https://github.com': ghp_abcdefghijklmnopqrstuvwxyz0123456789 is invalid"
+    );
+    expect(scrubbed).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(scrubbed).toContain("fatal: could not read Username");
+  });
+
+  it("scrubs a JWT (e.g. a Supabase key) embedded in an error", () => {
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dQw4w9WgXcQ_examplesignature123";
+    const scrubbed = redactEmbeddedSecrets(`PostgREST rejected the request: invalid apikey ${jwt} supplied`);
+    expect(scrubbed).not.toContain(jwt);
+    expect(scrubbed).toContain("PostgREST rejected the request");
+  });
+
+  it("scrubs a token passed as a URL query parameter, preserving the rest of the URL", () => {
+    const scrubbed = redactEmbeddedSecrets(
+      "GET https://mit.instructure.com/api/v1/users/self?access_token=1234567890abcdef failed with 401"
+    );
+    expect(scrubbed).not.toContain("1234567890abcdef");
+    expect(scrubbed).toContain("access_token=[REDACTED]");
+    expect(scrubbed).toContain("https://mit.instructure.com/api/v1/users/self");
+  });
+
+  it("scrubs an AWS access key id embedded in an error", () => {
+    const scrubbed = redactEmbeddedSecrets("Rejected credential AKIAIOSFODNN7EXAMPLE for this request");
+    expect(scrubbed).not.toContain("AKIAIOSFODNN7EXAMPLE");
+  });
+
+  it("scrubs more than one embedded secret in the same message", () => {
+    const scrubbed = redactEmbeddedSecrets(
+      "First attempt used ghp_abcdefghijklmnopqrstuvwxyz0123456789, retry used ghp_zyxwvutsrqponmlkjihgfedcba9876543210"
+    );
+    expect(scrubbed).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(scrubbed).not.toContain("ghp_zyxwvutsrqponmlkjihgfedcba9876543210");
+    expect(scrubbed.match(/\[REDACTED\]/g)).toHaveLength(2);
+  });
+
+  // -------------------------------------------------------------------
+  // Totality
+  // -------------------------------------------------------------------
+
+  describe("totality", () => {
+    it("returns an empty string unchanged", () => {
+      expect(redactEmbeddedSecrets("")).toBe("");
+    });
+
+    it("never throws on a non-string input, and returns a safe empty string", () => {
+      expect(redactEmbeddedSecrets(null as unknown as string)).toBe("");
+      expect(redactEmbeddedSecrets(undefined as unknown as string)).toBe("");
+      expect(redactEmbeddedSecrets(12345 as unknown as string)).toBe("");
+      expect(redactEmbeddedSecrets({ message: "x" } as unknown as string)).toBe("");
+    });
+
+    it("handles a very long input without hanging, and still finds a secret buried in the middle of it", () => {
+      const filler = "the quick brown fox jumps over the lazy dog. ".repeat(4000); // ~184,000 chars
+      const token = "1234~AbCdEfGh1234567890abcdefghijklmnopqrstuvwxyz";
+      const huge = filler + `Canvas rejected ${token}: 401` + filler;
+
+      const start = Date.now();
+      const scrubbed = redactEmbeddedSecrets(huge);
+      const elapsedMs = Date.now() - start;
+
+      expect(scrubbed).not.toContain(token);
+      expect(elapsedMs).toBeLessThan(1000);
+    });
+
+    it("returns a very long input with no secret in it completely unchanged", () => {
+      const long = "the quick brown fox jumps over the lazy dog. ".repeat(4000);
+      expect(redactEmbeddedSecrets(long)).toBe(long);
+    });
   });
 });

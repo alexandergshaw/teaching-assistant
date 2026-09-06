@@ -906,3 +906,48 @@ Whether the mask's 12px monospace is legible enough for the four revealed
 characters at typical zoom, and the actual painted height delta in AES-D3
 (derived from the two token values, not measured). Both are stated as
 token-level facts so they remain checkable by reading.
+
+
+## Wave 1 delivery notes (2026-09-06)
+
+**E-CRIT1's guard: USE THE RETURNED STRING, NOT THE CANDIDATE.**
+`assertCanvasSuppliedUrlIsSameOrigin` accepts a RELATIVE candidate (a Link
+header may legitimately carry one) and resolves it against the base before
+checking. For a relative candidate the returned string and the input therefore
+DIFFER, and the resolved absolute form is the one that is safe to dial. Every
+one of the 26 call sites in the later wave must fetch what the guard RETURNED.
+Dialling the original candidate would pass the check and then request
+something else - the exact checker-and-fetcher-disagree shape this whole
+boundary exists to prevent.
+
+**Why an empty string is refused before parsing.** `new URL("", base)`
+resolves successfully to the base itself. Accepting it would silently turn a
+caller bug into an apparently-safe pagination link back to page one, looping
+forever on the first page instead of failing.
+
+**The redirect rule went beyond SEC2, deliberately.** `canvasFetch` follows a
+redirect only when its origin equals the ORIGINAL request's origin - not
+merely when the target re-validates as a public host. SEC2's literal wording
+("re-validate before following") would still permit a validated-but-different
+host to receive the bearer token. Same class of bug as E-CRIT1, closed at the
+redirect layer too.
+
+**A mixed DNS answer is refused whole.** If any address returned for a host is
+special-purpose, the request is refused and `https.request` is never called.
+A partially-private answer is exactly the shape a rebinding attack produces,
+so it is never partially trusted.
+
+**What the DNS-pinning test can and cannot prove.** It captures the `lookup`
+function actually handed to `https.request`, calls it with an
+attacker-supplied hostname, and asserts it still returns the vetted address -
+proving the function structurally ignores its hostname argument. It CANNOT
+prove Node's socket layer honours `lookup` end to end; that rests on Node's
+documented contract and is not exercisable without a real network call, which
+these tests deliberately avoid.
+
+**The failure-kind enum is THREE values, not four.** The operator's diagnostic
+vocabulary has four states, but the fourth - no credential for this
+institution - is ROW ABSENCE. There is no row to stamp it on, so permitting it
+in the column's domain would leave a value the application cannot produce and
+somebody eventually writes by hand. The CHECK constraint and the TypeScript
+type agree on three.

@@ -3,6 +3,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabase/types";
+import { redactEmbeddedSecrets } from "./workflows/run-input-redaction";
 
 export type WorkflowRunStatus = "started" | "ok" | "error" | "skipped";
 
@@ -25,7 +26,16 @@ export async function updateScheduleRunOutcome(
   status: WorkflowRunStatus,
   detail: string
 ): Promise<void> {
-  const capped = detail.slice(0, 500);
+  // SCRUB BEFORE STORING, and scrub before the slice - this column is a
+  // SECOND durable path for the same raw error text the run log carries,
+  // written here and rendered straight to the operator in the Automate
+  // panel (AutomationRow.tsx). The run-log chokepoint (logStepOutcome)
+  // does not cover it: this is a different write path with its own
+  // caller, so a token embedded in an upstream error message would reach
+  // a user's screen and persist in the row. Order matters - slicing
+  // first could cut a secret in half and leave a fragment the pattern no
+  // longer recognises.
+  const capped = redactEmbeddedSecrets(detail).slice(0, 500);
   const patch: Record<string, unknown> = { last_run_status: status, last_run_detail: capped };
   // A successful completion clears any pending stale-claim recovery count, so
   // a later interrupted run gets its one retry again.
@@ -48,7 +58,16 @@ export async function updateTriggerRunOutcome(
   status: WorkflowRunStatus,
   detail: string
 ): Promise<void> {
-  const capped = detail.slice(0, 500);
+  // SCRUB BEFORE STORING, and scrub before the slice - this column is a
+  // SECOND durable path for the same raw error text the run log carries,
+  // written here and rendered straight to the operator in the Automate
+  // panel (AutomationRow.tsx). The run-log chokepoint (logStepOutcome)
+  // does not cover it: this is a different write path with its own
+  // caller, so a token embedded in an upstream error message would reach
+  // a user's screen and persist in the row. Order matters - slicing
+  // first could cut a secret in half and leave a fragment the pattern no
+  // longer recognises.
+  const capped = redactEmbeddedSecrets(detail).slice(0, 500);
   const patch: Record<string, unknown> = { last_run_status: status, last_run_detail: capped };
   if (status === "ok") patch.recovery_attempts = 0;
   const { error } = await triggerTable(supabase)

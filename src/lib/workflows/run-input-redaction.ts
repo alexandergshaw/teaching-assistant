@@ -150,6 +150,120 @@ export function isCredentialShapedValue(value: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Embedded-secret scrubbing (unanchored) - for FREE TEXT, not whole values
+// ---------------------------------------------------------------------------
+
+// isCredentialShapedValue above is ANCHORED (`^...$`): it only fires when an
+// entire value IS a token. That is the right rule for a resolved input,
+// which is either a token or it is not. It is the WRONG rule for a step's
+// `error`/`summary` string or an onProgress message, because that is exactly
+// where a token reaches this system embedded in a sentence rather than
+// standing alone - e.g. an upstream Canvas rejection quoting the value it
+// rejected ("Canvas rejected 1234~abcdef...: 401") or a fetch error quoting
+// the URL it dialled (which can itself carry a token/key as a query
+// parameter). A whole-string match against that sentence never fires, so the
+// token survives into workflow_run_steps.error and then verbatim into the
+// downloadable run log (buildRunLogText's renderStep) - the exact path this
+// module's own header warns is "already too late" once anything sensitive
+// reaches storage.
+//
+// redactEmbeddedSecrets below is the unanchored counterpart, modelled on
+// src/lib/lms-generation/generation-diag.ts's redactSensitiveText: several
+// independent, narrow, global patterns, each applied with .replace() so only
+// the MATCHED SUBSTRING is removed and everything around it survives -
+// deliberately NOT swapping the whole string for CREDENTIAL_MARKER the way
+// isCredentialKeyName/isCredentialShapedValue do. Flattening the whole
+// message would destroy the one thing a user needs to act on a Canvas
+// failure: whether their token was unreadable, rejected, or the host was
+// unreachable is a STATUS, not a secret, and this feature's diagnostic work
+// elsewhere exists specifically to keep those three distinguishable. So
+// "Canvas rejected your token: [REDACTED]" is the target shape, never
+// "[REDACTED]".
+//
+// Every pattern below is a straight sequence of bounded, non-overlapping
+// character classes with a fixed literal or `\b` boundary between them - no
+// nested quantifiers (`(a+)+`), no ambiguous alternation inside a repeated
+// group - so matching is linear in the input length regardless of content.
+// This runs on every step of every workflow run, against attacker-reachable
+// text (an upstream host's own error body), so a catastrophically
+// backtracking pattern here would be a self-inflicted denial of service;
+// see run-input-redaction.test.ts's "very long input" case for a check that
+// this stays fast against a large adversarial string.
+const EMBEDDED_SECRET_MARKER = "[REDACTED]";
+
+// Whole-match patterns: the entire match IS the secret, so the whole match is
+// replaced. Same provider shapes as CREDENTIAL_VALUE_PATTERNS above, minus
+// the `^`/`$` anchors and plus a `g` flag (global - the same message can
+// quote a token more than once, e.g. once in a URL and once in a body) and
+// `\b` word boundaries (so, e.g., the GitHub-token pattern cannot match the
+// tail end of a longer unrelated identifier that merely contains "ghp_").
+const EMBEDDED_SECRET_PATTERNS: RegExp[] = [
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,255}\b/g, // GitHub personal/app tokens
+  /\bgithub_pat_[A-Za-z0-9_]{20,255}\b/g, // GitHub fine-grained PAT
+  /\bsk-(?:ant-)?[A-Za-z0-9_-]{16,255}\b/gi, // OpenAI/Anthropic-style secret keys
+  /\b(?:pk|rk)_[A-Za-z0-9]{16,255}\b/gi, // Stripe-style publishable/restricted keys
+  /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
+  /\b[A-Za-z0-9_-]{10,255}\.[A-Za-z0-9_-]{10,255}\.[A-Za-z0-9_-]{10,255}\b/g, // JWT (e.g. a Supabase service-role/anon key)
+  // Canvas-style "<id>~<opaque>" access token - THE pattern SEC4 named: the
+  // anchored version above can never match this shape once it is quoted
+  // inside a sentence, which is exactly how it reaches an error message.
+  //
+  // NO LEADING \b, deliberately. A word boundary on the left requires the
+  // character before the token to be a NON-word character, so a token
+  // butted straight against preceding text (`...id=abc70000000012345~xyz`,
+  // or any error that concatenates without a separator) would not match at
+  // all and would be stored verbatim. A scrubber for a secret must not
+  // depend on the secret being politely delimited. Found 2026-09-06 by a
+  // test that placed a token directly after a run of letters; it survived
+  // scrubbing entirely.
+  //
+  // Dropping the left boundary can only make this match MORE, never less,
+  // and the shape is specific enough that over-matching is not a real
+  // risk: it still requires digits, a tilde, and at least ten
+  // alphanumerics. Starting mid-number redacts the same secret, just from
+  // one character later.
+  /\d+~[A-Za-z0-9]{10,255}\b/g,
+];
+
+// "Authorization: Bearer <token>" (or a bare "Bearer <token>" fragment) -
+// captures the "Bearer " prefix so it survives the replace, since the scheme
+// name itself carries no secret and is useful context ("this failure came
+// from an authenticated call"). Bounded to one non-whitespace run so it
+// cannot run away across an entire multi-line body.
+const EMBEDDED_BEARER_PATTERN = /\b(bearer\s+)\S{1,255}/gi;
+
+// A token/key handed as a URL query parameter - e.g. an upstream error that
+// echoes the request it rejected. Mirrors generation-diag.ts's
+// KEY_PARAM_PATTERN shape exactly (capture the delimiter, replace only the
+// value), extended with the parameter names Canvas/Supabase URLs actually
+// use ("access_token" is Canvas's own OAuth query param name; "apikey" is
+// PostgREST/Supabase's).
+const EMBEDDED_KEY_PARAM_PATTERN = /([?&](?:access_token|api[-_]?key|token|secret)=)[^&\s"'<>]{1,500}/gi;
+
+/** Scrub every recognizable secret SUBSTRING out of a free-text string,
+ * leaving everything else untouched - the counterpart to
+ * isCredentialShapedValue for text that is a SENTENCE which might quote a
+ * token, not a value that IS one. Used at the run-logging chokepoint
+ * (run-logging.ts) for a step's error/summary/progress text, never for
+ * `redactRunInputs`'s own resolved-input values (those already get the
+ * stronger whole-value treatment above).
+ *
+ * Defensive like the rest of this module's public surface: a non-string
+ * input (should not happen given this repo's types, but this function must
+ * never be the thing that turns a logging bug into a thrown error) renders
+ * as "" rather than throwing; an empty string is returned unchanged. */
+export function redactEmbeddedSecrets(text: unknown): string {
+  if (typeof text !== "string" || text.length === 0) return typeof text === "string" ? text : "";
+  let out = text;
+  for (const pattern of EMBEDDED_SECRET_PATTERNS) {
+    out = out.replace(pattern, EMBEDDED_SECRET_MARKER);
+  }
+  out = out.replace(EMBEDDED_BEARER_PATTERN, `$1${EMBEDDED_SECRET_MARKER}`);
+  out = out.replace(EMBEDDED_KEY_PARAM_PATTERN, `$1${EMBEDDED_SECRET_MARKER}`);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // File / binary payloads
 // ---------------------------------------------------------------------------
 

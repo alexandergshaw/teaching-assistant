@@ -14,6 +14,8 @@ import {
 } from "./run-logging";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
+import { buildRunLogText } from "../workflow-run-log-text";
+import type { WorkflowRunRecord, WorkflowRunStep } from "../workflow-runs";
 
 // Hand-rolled fake Supabase client, following the inline-fake approach used
 // in workflow-runs.test.ts: each test builds exactly the chain the function
@@ -391,5 +393,171 @@ describe("logStepOutcome", () => {
     const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
     await logStepOutcome(runLog, { index: 0, type: "t", status: "disabled", error: null, summary: null }, timing, []);
     expect(inserts[0].row.inputs).toBeNull();
+  });
+
+  // -------------------------------------------------------------------
+  // SEC4 - a token embedded in a step's error/summary/progress text must
+  // never reach the write, and (proven below, at buildRunLogText) never
+  // reach the downloadable run log either. The redactRunInputs-based tests
+  // above already prove a resolved INPUT that IS a token is caught; these
+  // prove the separate leak the security pass traced: a token quoted INSIDE
+  // a sentence, in a field redactRunInputs never touches at all.
+  // -------------------------------------------------------------------
+
+  describe("SEC4: embedded-secret scrubbing on error/summary/progress", () => {
+    const canvasToken = "1234~AbCdEfGh1234567890abcdefghijklmnopqrstuvwxyz";
+
+    it("scrubs a token embedded in the step error, while keeping the outcome class (the diagnosis) readable", async () => {
+      const { client, inserts } = makeSupabase();
+      const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+      await logStepOutcome(
+        runLog,
+        {
+          index: 0,
+          type: "post-announcement",
+          status: "error",
+          error: `Canvas rejected ${canvasToken}: 401 Unauthorized`,
+          summary: null,
+        },
+        timing,
+        []
+      );
+      const written = inserts[0].row.error as string;
+      expect(written).not.toContain(canvasToken);
+      // The status the user needs to act on survives - this is not flattened
+      // into an opaque "[REDACTED]" the way a whole-value credential match
+      // would flatten it.
+      expect(written).toContain("Canvas rejected");
+      expect(written).toContain("401 Unauthorized");
+    });
+
+    it("leaves an error with no embedded secret completely unchanged", async () => {
+      const { client, inserts } = makeSupabase();
+      const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+      const message = "Could not reach https://canvas.example.edu: connection timed out";
+      await logStepOutcome(runLog, { index: 0, type: "t", status: "error", error: message, summary: null }, timing, []);
+      expect(inserts[0].row.error).toBe(message);
+    });
+
+    it("keeps a null error as null, never coercing it to an empty string", async () => {
+      const { client, inserts } = makeSupabase();
+      const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+      await logStepOutcome(runLog, { index: 0, type: "t", status: "done", error: null, summary: null }, timing, []);
+      expect(inserts[0].row.error).toBeNull();
+    });
+
+    it("scrubs a token embedded in the rendered summary text", async () => {
+      const { client, inserts } = makeSupabase();
+      const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+      await logStepOutcome(
+        runLog,
+        {
+          index: 0,
+          type: "t",
+          status: "done",
+          error: null,
+          summary: { kind: "text", text: `Reconnected using token ghp_abcdefghijklmnopqrstuvwxyz0123456789` },
+        },
+        timing,
+        []
+      );
+      const written = inserts[0].row.summary as string;
+      expect(written).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+      expect(written).toContain("Reconnected using token");
+    });
+
+    it("scrubs a token embedded in a progress message, message by message", async () => {
+      const { client, inserts } = makeSupabase();
+      const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+      await logStepOutcome(
+        runLog,
+        { index: 0, type: "t", status: "done", error: null, summary: null },
+        timing,
+        ["Starting sync", `Retrying with ${canvasToken} after first failure`, "Done"]
+      );
+      const written = inserts[0].row.progress as string[];
+      expect(written[0]).toBe("Starting sync");
+      expect(written[1]).not.toContain(canvasToken);
+      expect(written[1]).toContain("Retrying with");
+      expect(written[2]).toBe("Done");
+    });
+
+    it("passes the FULL scrubbed error text through untruncated (does not regress the existing no-truncation contract)", async () => {
+      const { client, inserts } = makeSupabase();
+      const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+      const longError = "x".repeat(2000);
+      await logStepOutcome(runLog, { index: 0, type: "t", status: "error", error: longError, summary: null }, timing, []);
+      expect((inserts[0].row.error as string).length).toBe(2000);
+    });
+
+    // THE test that proves the leak is closed at the END OF THE PIPE, not
+    // merely inside the scrubber in isolation - built by feeding the row
+    // logStepOutcome actually wrote into buildRunLogText, exactly as the real
+    // download path (workflow-runs.ts's listRunSteps -> buildRunLogText)
+    // would.
+    it("closes the leak end-to-end: a token planted in a step error never survives into buildRunLogText's rendered output", async () => {
+      const { client, inserts } = makeSupabase();
+      const runLog: RunLogContext = { supabase: client, userId: "u1", runId: "run-1" };
+      await logStepOutcome(
+        runLog,
+        {
+          index: 0,
+          type: "post-announcement",
+          status: "error",
+          error: `Canvas rejected ${canvasToken}: 401 Unauthorized`,
+          summary: null,
+        },
+        timing,
+        [`Attempting with ${canvasToken}`]
+      );
+      const row = inserts[0].row;
+
+      const step: WorkflowRunStep = {
+        id: "step-1",
+        runId: "run-1",
+        userId: "u1",
+        stepIndex: row.step_index as number,
+        stepType: row.step_type as string,
+        status: row.status as WorkflowRunStep["status"],
+        error: row.error as string | null,
+        summary: row.summary as string | null,
+        progress: row.progress as string[],
+        startedAt: row.started_at as string | null,
+        finishedAt: row.finished_at as string | null,
+        durationMs: null,
+        institution: (row.institution as string | null) ?? null,
+        courseId: (row.course_id as string | null) ?? null,
+        courseName: (row.course_name as string | null) ?? null,
+        inputs: row.inputs as Record<string, string> | null,
+        createdAt: timing.startedAt,
+      };
+
+      const run: WorkflowRunRecord = {
+        id: "run-1",
+        userId: "u1",
+        workflowId: "wf-1",
+        workflowName: "Weekly Announcement",
+        status: "error",
+        triggerSource: "manual",
+        triggerRef: null,
+        createdAt: timing.startedAt,
+        startedAt: timing.startedAt,
+        finishedAt: timing.finishedAt,
+        durationMs: 1000,
+        stepCount: 1,
+        errorCount: 1,
+        detail: null,
+        fieldValues: null,
+      };
+
+      const renderedLog = buildRunLogText(run, [step]);
+      expect(renderedLog).not.toContain(canvasToken);
+      // The formatter itself still writes the step's error/progress
+      // sections - this proves the token was scrubbed, not that the whole
+      // step silently vanished from the log.
+      expect(renderedLog).toContain("Canvas rejected");
+      expect(renderedLog).toContain("401 Unauthorized");
+      expect(renderedLog).toContain("Attempting with");
+    });
   });
 });

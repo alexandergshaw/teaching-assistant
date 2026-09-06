@@ -21,7 +21,7 @@ import {
   type WorkflowRunStepStatus,
 } from "@/lib/workflow-runs";
 import type { StepRunSummary } from "@/lib/workflows/registry-helpers";
-import { redactRunInputs } from "@/lib/workflows/run-input-redaction";
+import { redactRunInputs, redactEmbeddedSecrets } from "@/lib/workflows/run-input-redaction";
 
 // U7-AC2: a step can gracefully degrade internally (RCA19 - some of its own
 // units of work failed, but the step itself did not throw, so dependents
@@ -285,6 +285,17 @@ export interface LoggableStepOutcome {
   courseName?: string;
 }
 
+/** Applies redactEmbeddedSecrets to a nullable free-text field - `error`/
+ * `summary`/each `progress` message all share this shape (a string the
+ * runner did not author, that may quote upstream text verbatim). `null`
+ * passes through as `null` (never coerced to "" - see redactEmbeddedSecrets'
+ * own doc comment for why a non-string is defensively "" there, which would
+ * be the WRONG behavior here: a step with no error must keep logging no
+ * error, not an empty one). */
+function scrubOptionalText(value: string | null): string | null {
+  return typeof value === "string" ? redactEmbeddedSecrets(value) : value;
+}
+
 /** Insert one step's log row, as the run proceeds (never batched at the
  * end, so a run killed mid-flight still keeps the steps it already
  * completed). recordRunStep itself never throws (see workflow-runs.ts); this
@@ -303,7 +314,23 @@ export interface LoggableStepOutcome {
  * this function, called by both runners - rather than depending on every
  * future reader of StepRunOutcome to remember never to serialize it
  * unredacted. redactRunInputs is called HERE, unconditionally, before
- * recordRunStep ever sees the value (AC2). */
+ * recordRunStep ever sees the value (AC2).
+ *
+ * SEC4: `error`, the rendered `summary`, and every `progress` message are
+ * ALSO free text a runner never fully controls (an upstream Canvas/Supabase
+ * failure body, echoed verbatim) - and unlike a resolved input, a value here
+ * is a SENTENCE, not a value that IS a credential, so redactRunInputs'
+ * whole-value anchored check can never fire on it. redactEmbeddedSecrets is
+ * the unanchored counterpart that scrubs a credential-shaped SUBSTRING out of
+ * that sentence while leaving the rest - the outcome CLASS ("token
+ * rejected" vs "host unreachable") - intact, since that distinction is the
+ * entire point of this feature's diagnostics and a whole-string
+ * CREDENTIAL_MARKER would destroy it. Applied HERE, unconditionally, so
+ * every caller of this shared chokepoint (both runners) is covered by the
+ * one change, exactly like redactRunInputs already is for inputs/
+ * fieldValues. `institution`/`courseId`/`courseName` are not free text an
+ * upstream host composes - they are short identifiers this app itself
+ * resolved - so they are not run through this scrubber. */
 export async function logStepOutcome(
   runLog: RunLogContext | undefined,
   outcome: LoggableStepOutcome,
@@ -318,9 +345,9 @@ export async function logStepOutcome(
       stepIndex: outcome.index,
       stepType: outcome.type,
       status: outcome.status,
-      error: outcome.error,
-      summary: summaryToLogText(outcome.summary),
-      progress,
+      error: scrubOptionalText(outcome.error),
+      summary: scrubOptionalText(summaryToLogText(outcome.summary)),
+      progress: progress.map((message) => redactEmbeddedSecrets(message)),
       startedAt: timing.startedAt,
       finishedAt: timing.finishedAt,
       institution: outcome.institution,

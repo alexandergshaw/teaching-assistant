@@ -10,18 +10,11 @@
 // fetch failure surfaced via `error` instead of silently reading as "no
 // rubrics" (AC1-AC4).
 //
-// Mirrors bulk.test.ts's pattern: only globalThis.fetch is stubbed,
-// resolveCourse/fetchAll run for real, so assertions are about the actual
-// request/response shape. No rubrics.test.ts existed before this change
-// (checked via Glob before writing this file).
-
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-
 // resolveCourse (via resolveInstitutionByCode) now delegates credential
 // resolution to canvas-credentials.ts, which resolves the calling identity
 // server-side before ever reading an env var (E-ARCH4). Mocking the identity
 // to role: "owner" (E-ARCH6's uniform convention across every one of this
-// repo's 22 Canvas test files) keeps the env-var branch this suite's
+// repo's Canvas test files) keeps the env-var branch this suite's
 // vi.stubEnv calls rely on reachable, without a real Supabase call - the
 // stored-credential branch is mocked to "no row" (null) so it falls through
 // to that owner env branch instead of attempting a real DB read.
@@ -38,7 +31,34 @@ vi.mock("../lms-credentials", () => ({
   recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
 }));
 
+// listCourseRubrics is the ONLY thing in this file that reads through
+// fetchAll (fetch-helpers.ts), which now dials Canvas via canvasFetch (real
+// DNS resolution + connection pinning) instead of the platform fetch -
+// stubbing globalThis.fetch alone no longer intercepts it, which is why the
+// course-rubrics-path tests below used to hang until timeout.
+// resolveAccountId (GET /courses/:id) and listAccountRubrics's own manual
+// pagination (GET /accounts/:id/rubrics) are UNCHANGED - rubrics.ts calls
+// `fetch` directly for both, never through fetch-helpers - so every
+// account-level test (the merge tests' account half, AC6's silent-403/404
+// tests, the badJson tests, and the 429-is-not-silent test) keeps working
+// against the existing globalThis.fetch stub with no changes at all.
+//
+// Mocked at the fetch-helpers boundary (fetchAll itself) rather than at
+// canvasFetch: this suite is about the MERGE logic between the course-level
+// and account-level sources (AC1/AC2/AC4) and about which failures are
+// silent vs real (AC3/AC6) - none of that lives inside fetch-helpers.ts, and
+// no fixture here spans multiple course-rubrics pages (fetchAll's own
+// pagination is already covered by fetch-helpers.canvas-fetch.test.ts).
+vi.mock("./fetch-helpers", async () => {
+  const actual = await vi.importActual<typeof import("./fetch-helpers")>("./fetch-helpers");
+  return { ...actual, fetchAll: vi.fn() };
+});
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { listRubrics } from "./rubrics";
+import { fetchAll } from "./fetch-helpers";
+
+const mockFetchAll = vi.mocked(fetchAll);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -79,6 +99,8 @@ type Handlers = {
 };
 
 function stubCanvas(handlers: Handlers) {
+  // resolveAccountId and listAccountRubrics's own pagination - raw fetch,
+  // untouched by the migration.
   const fetchMock = vi.fn(async (url: string | URL) => {
     const href = String(url);
     if (handlers.throwOn && href.includes(handlers.throwOn)) {
@@ -89,10 +111,6 @@ function stubCanvas(handlers: Handlers) {
       if (h.badJson) return brokenJsonResponse(h.status);
       return jsonResponse(h.status, h.body ?? []);
     }
-    if (href.includes("/courses/123/rubrics")) {
-      const h = handlers.courseRubrics ?? { status: 200, body: [] };
-      return jsonResponse(h.status, h.body ?? []);
-    }
     if (href.endsWith("/courses/123")) {
       const h = handlers.course ?? { status: 200, account_id: 55 };
       if (h.badJson) return brokenJsonResponse(h.status);
@@ -101,11 +119,28 @@ function stubCanvas(handlers: Handlers) {
     throw new Error(`unexpected request: ${href}`);
   });
   vi.stubGlobal("fetch", fetchMock);
+
+  // listCourseRubrics's one GET (/courses/:id/rubrics) - now behind fetchAll,
+  // mocked directly (see this file's header comment for why).
+  mockFetchAll.mockImplementation(async (url: string) => {
+    const href = String(url);
+    if (handlers.throwOn && href.includes(handlers.throwOn)) {
+      throw new Error("network down");
+    }
+    if (href.includes("/courses/123/rubrics")) {
+      const h = handlers.courseRubrics ?? { status: 200, body: [] };
+      if (h.status >= 200 && h.status < 300) return h.body ?? [];
+      throw new Error(`Canvas request failed (HTTP ${h.status}).`);
+    }
+    throw new Error(`unexpected fetchAll request: ${href}`);
+  });
+
   return fetchMock;
 }
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+  mockFetchAll.mockReset();
 });
 
 afterEach(() => {

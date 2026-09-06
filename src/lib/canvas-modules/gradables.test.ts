@@ -2,30 +2,17 @@
 // (docs/llm-command-interface-acceptance-criteria.md section 10, errata
 // G4 and G6).
 //
-// @/lib/canvas-modules is left UNMOCKED and only globalThis.fetch is
-// stubbed, so resolveCourse runs for real - the "stub fetch, let
-// resolveCourse run for real" idiom this repo uses for Canvas write helpers
-// (see module-content.test.ts's own header comment, and bulk.test.ts /
-// graded-discussion.test.ts for the same pattern applied to sibling write
-// helpers in this same directory).
-//
 // canvas.mccneb.edu is the hardcoded host for the "MCC" institution code in
 // src/lib/canvas-core.ts.
-//
-// No gradables.test.ts existed before this change (checked via Glob before
-// writing this file).
 //
 // resolveCourse now calls resolveCanvasCredential (src/lib/canvas-credentials.ts),
 // which asks getEffectiveIdentity() who the caller is and only falls back to
 // the env-configured pair below for an identity whose role is literally
-// "owner" (SEC13, docs/lms-credentials-acceptance-criteria.md). Stubbing
-// globalThis.fetch alone no longer keeps resolveCourse running for real: it
-// would hit getEffectiveIdentity's real cookie-session path and throw
-// "cookies was called outside a request scope" outside of Next's request
-// context. Mocked at the identity/credential-store boundary exactly like
-// canvas-credentials.test.ts mocks it, with role "owner" and no stored row,
-// so resolveCanvasCredential's real env-fallback logic still runs for real -
-// only the ambient-identity lookup and the credential store are faked.
+// "owner" (SEC13, docs/lms-credentials-acceptance-criteria.md). Mocked at the
+// identity/credential-store boundary exactly like canvas-credentials.test.ts
+// mocks it, with role "owner" and no stored row, so resolveCanvasCredential's
+// real env-fallback logic still runs for real - only the ambient-identity
+// lookup and the credential store are faked.
 vi.mock("../supabase/effective-identity", () => ({
   getEffectiveIdentity: vi.fn().mockResolvedValue({
     id: "owner-1",
@@ -39,35 +26,39 @@ vi.mock("../lms-credentials", () => ({
   recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
 }));
 
+// fetch-helpers.ts's writeJson now dials Canvas through canvasFetch
+// (src/lib/canvas-fetch.ts, real DNS resolution + connection pinning), not
+// the platform fetch - stubbing globalThis.fetch (this file's previous
+// approach) no longer intercepts anything updateGradable does, which is why
+// every test below used to hang until timeout.
+//
+// Mocked at the fetch-helpers boundary (writeJson itself) rather than at
+// canvasFetch: this suite is entirely about the request PARAMS updateGradable
+// builds (the quiz[notify_of_update] asymmetry) and about returning Canvas's
+// parsed response verbatim - neither lives inside fetch-helpers.ts, and no
+// test here exercises pagination or a 429 retry (both already covered by
+// fetch-helpers.canvas-fetch.test.ts / fetch-helpers.throttle.test.ts).
+vi.mock("./fetch-helpers", () => ({ writeJson: vi.fn() }));
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { updateGradable, descriptionToHtml } from "./gradables";
+import { writeJson } from "./fetch-helpers";
+
+const mockWriteJson = vi.mocked(writeJson);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
-interface Recorded {
-  url: string;
-  method: string;
-  body: string | undefined;
-}
-
-let recorded: Recorded[] = [];
-
-function stubCanvas(responseBody: unknown = { id: 1 }) {
-  recorded = [];
-  const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
-    recorded.push({ url: String(url), method: init?.method ?? "GET", body: init?.body as string | undefined });
-    return {
-      ok: true,
-      status: 200,
-      json: async () => responseBody,
-    } as unknown as Response;
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+/** writeJson's real signature is (url, method, ctx, params) - params is the
+ * live URLSearchParams instance updateGradable built, captured as-is by the
+ * mock (never re-encoded to a string and back), so assertions below read it
+ * directly instead of re-parsing a recorded body string. */
+function writeJsonCall(index = 0): [string, string, unknown, URLSearchParams | undefined] {
+  return mockWriteJson.mock.calls[index] as unknown as [string, string, unknown, URLSearchParams | undefined];
 }
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+  mockWriteJson.mockReset();
 });
 
 afterEach(() => {
@@ -77,24 +68,24 @@ afterEach(() => {
 
 describe("updateGradable: G6 - quiz PUTs carry notify_of_update=false, no sibling kind does (asymmetry pin)", () => {
   it("a quiz description-only PUT includes quiz[notify_of_update]=false", async () => {
-    const fetchMock = stubCanvas();
+    mockWriteJson.mockResolvedValueOnce({ id: 1 });
 
     await updateGradable(COURSE_URL, "Quiz", 901, { description: "New quiz description." }, "MCC");
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const params = new URLSearchParams(recorded[0].body);
-    expect(params.get("quiz[notify_of_update]")).toBe("false");
-    expect(params.get("quiz[description]")).toBe("New quiz description.");
+    expect(mockWriteJson).toHaveBeenCalledTimes(1);
+    const [, , , params] = writeJsonCall();
+    expect(params?.get("quiz[notify_of_update]")).toBe("false");
+    expect(params?.get("quiz[description]")).toBe("New quiz description.");
   });
 
   it("a quiz title-only PUT also includes quiz[notify_of_update]=false", async () => {
-    const fetchMock = stubCanvas();
+    mockWriteJson.mockResolvedValueOnce({ id: 1 });
 
     await updateGradable(COURSE_URL, "Quiz", 901, { title: "Renamed Quiz" }, "MCC");
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const params = new URLSearchParams(recorded[0].body);
-    expect(params.get("quiz[notify_of_update]")).toBe("false");
+    expect(mockWriteJson).toHaveBeenCalledTimes(1);
+    const [, , , params] = writeJsonCall();
+    expect(params?.get("quiz[notify_of_update]")).toBe("false");
   });
 
   // The paired positive above proves the parameter can appear at all; these
@@ -102,39 +93,37 @@ describe("updateGradable: G6 - quiz PUTs carry notify_of_update=false, no siblin
   // vacuously without (a broken "always append" implementation would fail
   // BOTH of these).
   it("an assignment description-only PUT does NOT include notify_of_update", async () => {
-    const fetchMock = stubCanvas();
+    mockWriteJson.mockResolvedValueOnce({ id: 1 });
 
     await updateGradable(COURSE_URL, "Assignment", 42, { description: "New assignment description." }, "MCC");
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const params = new URLSearchParams(recorded[0].body);
-    expect(params.has("notify_of_update")).toBe(false);
-    expect(params.has("assignment[notify_of_update]")).toBe(false);
-    expect([...params.keys()].some((k) => k.includes("notify_of_update"))).toBe(false);
+    expect(mockWriteJson).toHaveBeenCalledTimes(1);
+    const [, , , params] = writeJsonCall();
+    expect(params?.has("notify_of_update")).toBe(false);
+    expect(params?.has("assignment[notify_of_update]")).toBe(false);
+    expect([...(params?.keys() ?? [])].some((k) => k.includes("notify_of_update"))).toBe(false);
   });
 
   it("a discussion description-only PUT does NOT include notify_of_update", async () => {
-    const fetchMock = stubCanvas();
+    mockWriteJson.mockResolvedValueOnce({ id: 1 });
 
     await updateGradable(COURSE_URL, "Discussion", 77, { description: "New discussion message." }, "MCC");
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const params = new URLSearchParams(recorded[0].body);
-    expect([...params.keys()].some((k) => k.includes("notify_of_update"))).toBe(false);
+    expect(mockWriteJson).toHaveBeenCalledTimes(1);
+    const [, , , params] = writeJsonCall();
+    expect([...(params?.keys() ?? [])].some((k) => k.includes("notify_of_update"))).toBe(false);
   });
 
   it("does not send notify_of_update on a no-op quiz call (no fields supplied, no write at all)", async () => {
-    const fetchMock = stubCanvas();
-
     await updateGradable(COURSE_URL, "Quiz", 901, {}, "MCC");
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockWriteJson).not.toHaveBeenCalled();
   });
 });
 
 describe("updateGradable: G4 - returns Canvas's parsed response (additive, callers may still discard it)", () => {
   it("returns the parsed JSON body for an assignment PUT", async () => {
-    stubCanvas({ id: 42, name: "Essay 1", updated_at: "2026-08-24T00:00:00Z" });
+    mockWriteJson.mockResolvedValueOnce({ id: 42, name: "Essay 1", updated_at: "2026-08-24T00:00:00Z" });
 
     const result = await updateGradable(COURSE_URL, "Assignment", 42, { title: "Essay 1" }, "MCC");
 
@@ -142,7 +131,7 @@ describe("updateGradable: G4 - returns Canvas's parsed response (additive, calle
   });
 
   it("returns the parsed JSON body for a quiz PUT", async () => {
-    stubCanvas({ id: 901, title: "Chapter 3 Quiz" });
+    mockWriteJson.mockResolvedValueOnce({ id: 901, title: "Chapter 3 Quiz" });
 
     const result = await updateGradable(COURSE_URL, "Quiz", 901, { title: "Chapter 3 Quiz" }, "MCC");
 
@@ -150,7 +139,7 @@ describe("updateGradable: G4 - returns Canvas's parsed response (additive, calle
   });
 
   it("returns the parsed JSON body for a discussion PUT", async () => {
-    stubCanvas({ id: 77, title: "Week 3 Discussion" });
+    mockWriteJson.mockResolvedValueOnce({ id: 77, title: "Week 3 Discussion" });
 
     const result = await updateGradable(COURSE_URL, "Discussion", 77, { title: "Week 3 Discussion" }, "MCC");
 
@@ -158,19 +147,17 @@ describe("updateGradable: G4 - returns Canvas's parsed response (additive, calle
   });
 
   it("returns undefined (no write, nothing to read back) when no field is supplied", async () => {
-    const fetchMock = stubCanvas();
-
     const result = await updateGradable(COURSE_URL, "Assignment", 42, {}, "MCC");
 
     expect(result).toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockWriteJson).not.toHaveBeenCalled();
   });
 
   it("existing discard-the-return-value call shape still compiles and behaves identically (await, no assignment)", async () => {
-    const fetchMock = stubCanvas({ id: 42 });
+    mockWriteJson.mockResolvedValueOnce({ id: 42 });
 
     await expect(updateGradable(COURSE_URL, "Assignment", 42, { title: "Essay 1" }, "MCC")).resolves.not.toThrow();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockWriteJson).toHaveBeenCalledTimes(1);
   });
 });
 

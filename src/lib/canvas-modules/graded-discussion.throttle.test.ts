@@ -16,6 +16,21 @@
 // createThrottleBudget at all - the classic fallback's writeJson call always
 // got unbounded per-call retry, independent of whatever the GraphQL attempt
 // had already spent.
+//
+// canvasGraphql still dials `/api/graphql` via the platform `fetch` directly
+// (graphql.ts was not part of the fetch-helpers/canvasFetch migration), so
+// its 429-then-success sequence below keeps working against a stubbed global
+// fetch unchanged. The classic REST fallback (createClassicDiscussion ->
+// writeJson, fetch-helpers.ts) now dials Canvas via canvasFetch (real DNS
+// resolution + connection pinning) instead of the platform fetch, so its own
+// 429-then-success sequence is mocked at that boundary instead - NOT at
+// fetch-helpers itself, because this test's entire point is that writeJson's
+// real throttle-retry loop (fetchWithThrottleRetry) actually runs and draws
+// down the SAME shared budget canvasGraphql's retry already spent from.
+// Mocking fetch-helpers directly would replace that retry loop with a single
+// resolved value and make the "exactly one shared budget, split 500ms +
+// 500ms across both legs" assertion below pass vacuously regardless of
+// whether the real sharing behaviour works at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../canvas-throttle", async () => {
@@ -43,9 +58,11 @@ vi.mock("../lms-credentials", () => ({
   getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
   recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
 
 import { createGradedDiscussion, type NewGradedDiscussion } from "./graded-discussion";
 import { createThrottleBudget, CANVAS_BULK_THROTTLE_BUDGET_MS } from "../canvas-throttle";
+import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -63,10 +80,16 @@ const BASE_FIELDS: NewGradedDiscussion = {
 };
 
 const createThrottleBudgetSpy = vi.mocked(createThrottleBudget);
+const mockCanvasFetch = vi.mocked(canvasFetch);
+
+function canvasFetchStatus(status: number): CanvasFetchResult {
+  return { ok: true, status, headers: {}, body: Buffer.from("{}") };
+}
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
   createThrottleBudgetSpy.mockClear();
+  mockCanvasFetch.mockReset();
 });
 
 afterEach(() => {
@@ -96,16 +119,21 @@ describe("createGradedDiscussion: shared throttle budget across GraphQL + classi
           }),
         } as unknown as Response;
       }
-      if (href.includes("/discussion_topics")) {
-        restAttempts += 1;
-        if (restAttempts === 1) {
-          return { ok: false, status: 429, json: async () => ({}) } as unknown as Response;
-        }
-        return { ok: true, status: 200, json: async () => ({ id: 555 }) } as unknown as Response;
-      }
       throw new Error(`Unexpected fetch to ${href}`);
     });
     vi.stubGlobal("fetch", fetchMock);
+
+    mockCanvasFetch.mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes("/discussion_topics")) {
+        restAttempts += 1;
+        if (restAttempts === 1) {
+          return canvasFetchStatus(429);
+        }
+        return { ok: true, status: 200, headers: {}, body: Buffer.from(JSON.stringify({ id: 555 })) };
+      }
+      throw new Error(`Unexpected canvasFetch to ${href}`);
+    });
 
     const pending = createGradedDiscussion(COURSE_URL, BASE_FIELDS);
     // Two sequential single retries at the 500ms base delay - the GraphQL

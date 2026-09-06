@@ -1,18 +1,16 @@
 // TDD suite for the Canvas jobs diagnostics lib layer
 // (docs/canvas-jobs-diagnostics-acceptance-criteria.md section B, AC1-AC4,
-// AC19). Only globalThis.fetch is stubbed - resolveCourse/canvas-core run
-// for real, matching the pattern in module-content.test.ts, so these tests
-// also pin the real request shape (URLs, headers) and not just a mock's
-// idea of it.
+// AC19).
 //
 // The AC2/AC3 SSRF guard is the point of several tests here: progress_url is
 // remote-supplied JSON, and a foreign-origin value must be refused BEFORE
 // any fetch is issued - not caught after the fact by a failed request. The
-// guard itself is now the shared `assertCanvasSuppliedUrlIsSameOrigin`
-// (src/lib/canvas-remote-url.ts), promoted out of this file's own
-// hand-rolled `assertProgressUrlIsSameOrigin` - see this change's own report
-// for the semantics comparison. The refusal message text below matches that
-// shared module's `refuse()` wording, not the retired local wording.
+// guard itself is the shared `assertCanvasSuppliedUrlIsSameOrigin`
+// (src/lib/canvas-remote-url.ts). getMigrationProgress and the GET halves of
+// cancelMigrationJob dial Canvas via the platform `fetch` directly (they were
+// not part of the fetch-helpers/canvasFetch migration - see the note below),
+// so those tests are unaffected and still stub globalThis.fetch exactly as
+// before.
 //
 // resolveCourse now calls resolveCanvasCredential (src/lib/canvas-credentials.ts),
 // which asks getEffectiveIdentity() who the caller is and only falls back to
@@ -35,6 +33,29 @@ vi.mock("../lms-credentials", () => ({
   recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
 }));
 
+// listContentMigrations reads through fetchAll, and cancelMigrationJob's
+// final POST /cancel goes through writeJson - both (fetch-helpers.ts) now
+// dial Canvas via canvasFetch (real DNS resolution + connection pinning)
+// instead of the platform fetch, so stubbing globalThis.fetch alone no longer
+// intercepts either. fetchProgress (used by getMigrationProgress and by
+// cancelMigrationJob's own progress check) and cancelMigrationJob's initial
+// GET of the migration itself are UNCHANGED - both still call `fetch`
+// directly (migrations.ts never routed them through fetch-helpers) - so they
+// keep working against the existing globalThis.fetch stub with no changes at
+// all.
+//
+// Mocked at the fetch-helpers boundary (fetchAll/writeJson) rather than at
+// canvasFetch: no fixture here spans multiple pages (listContentMigrations
+// pagination is already covered by fetch-helpers.canvas-fetch.test.ts), and
+// the SSRF guard under test (assertCanvasSuppliedUrlIsSameOrigin) runs in
+// migrations.ts itself, entirely before any fetchAll/writeJson call - mocking
+// either boundary leaves that guard's own tests exercising the real guard
+// either way.
+vi.mock("./fetch-helpers", async () => {
+  const actual = await vi.importActual<typeof import("./fetch-helpers")>("./fetch-helpers");
+  return { ...actual, fetchAll: vi.fn(), writeJson: vi.fn() };
+});
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   listContentMigrations,
@@ -42,6 +63,10 @@ import {
   cancelMigrationJob,
   classifyMigration,
 } from "./migrations";
+import { fetchAll, writeJson } from "./fetch-helpers";
+
+const mockFetchAll = vi.mocked(fetchAll);
+const mockWriteJson = vi.mocked(writeJson);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 const BASE = "https://canvas.mccneb.edu";
@@ -55,6 +80,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+  mockFetchAll.mockReset();
+  mockWriteJson.mockReset();
 });
 
 afterEach(() => {
@@ -117,31 +144,28 @@ describe("classifyMigration (AC4) - pure, exhaustive over documented states", ()
 
 describe("listContentMigrations (AC1)", () => {
   it("maps fields, drops rows with no numeric id, and sorts newest first", async () => {
-    const fetchMock = vi.fn(async () =>
-      jsonResponse([
-        {
-          id: 1,
-          migration_type: "course_copy_importer",
-          workflow_state: "completed",
-          created_at: "2026-01-01T00:00:00Z",
-          finished_at: "2026-01-01T00:05:00Z",
-          progress_url: `${BASE}/api/v1/progress/501`,
-          migration_issues_count: 2,
-          migration_issues_url: `${BASE}/api/v1/courses/123/content_migrations/1/migration_issues`,
-        },
-        {
-          // No numeric id - must be dropped entirely.
-          migration_type: "zip_file_importer",
-          workflow_state: "pre_processing",
-        },
-        {
-          id: 3,
-          workflow_state: "running",
-          created_at: "2026-03-01T00:00:00Z",
-        },
-      ])
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    mockFetchAll.mockResolvedValueOnce([
+      {
+        id: 1,
+        migration_type: "course_copy_importer",
+        workflow_state: "completed",
+        created_at: "2026-01-01T00:00:00Z",
+        finished_at: "2026-01-01T00:05:00Z",
+        progress_url: `${BASE}/api/v1/progress/501`,
+        migration_issues_count: 2,
+        migration_issues_url: `${BASE}/api/v1/courses/123/content_migrations/1/migration_issues`,
+      },
+      {
+        // No numeric id - must be dropped entirely.
+        migration_type: "zip_file_importer",
+        workflow_state: "pre_processing",
+      },
+      {
+        id: 3,
+        workflow_state: "running",
+        created_at: "2026-03-01T00:00:00Z",
+      },
+    ]);
 
     const rows = await listContentMigrations(COURSE_URL);
 
@@ -171,13 +195,10 @@ describe("listContentMigrations (AC1)", () => {
   });
 
   it("treats a missing createdAt as oldest, not newest", async () => {
-    const fetchMock = vi.fn(async () =>
-      jsonResponse([
-        { id: 1, workflow_state: "completed", created_at: null },
-        { id: 2, workflow_state: "completed", created_at: "2026-01-01T00:00:00Z" },
-      ])
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    mockFetchAll.mockResolvedValueOnce([
+      { id: 1, workflow_state: "completed", created_at: null },
+      { id: 2, workflow_state: "completed", created_at: "2026-01-01T00:00:00Z" },
+    ]);
 
     const rows = await listContentMigrations(COURSE_URL);
 
@@ -185,15 +206,18 @@ describe("listContentMigrations (AC1)", () => {
   });
 
   it("requests the expected endpoint with a bearer token", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse([]));
-    vi.stubGlobal("fetch", fetchMock);
+    mockFetchAll.mockResolvedValueOnce([]);
 
     await listContentMigrations(COURSE_URL);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string | URL, RequestInit | undefined];
-    expect(String(url)).toBe(`${BASE}/api/v1/courses/123/content_migrations?per_page=100`);
-    expect(init?.headers).toMatchObject({ Authorization: "Bearer test-token" });
+    expect(mockFetchAll).toHaveBeenCalledTimes(1);
+    const [url, ctx] = mockFetchAll.mock.calls[0] as unknown as [string, { token: string }];
+    expect(url).toBe(`${BASE}/api/v1/courses/123/content_migrations?per_page=100`);
+    // The bearer credential resolveCourse resolved really did reach fetchAll -
+    // canvasFetch (not this test) owns turning it into an Authorization
+    // header, and that plumbing is fully covered by
+    // fetch-helpers.canvas-fetch.test.ts.
+    expect(ctx.token).toBe("test-token");
   });
 });
 
@@ -280,8 +304,10 @@ describe("cancelMigrationJob (AC3)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(cancelMigrationJob(COURSE_URL, 1)).rejects.toThrow(/already finished/);
-    // GET migration + GET progress, but never a third call (the POST cancel).
+    // GET migration + GET progress, but never a third call (the POST cancel,
+    // which would go through the mocked writeJson - asserted below).
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mockWriteJson).not.toHaveBeenCalled();
   });
 
   it("refuses a foreign-origin progress_url and issues no progress or cancel fetch", async () => {
@@ -304,6 +330,7 @@ describe("cancelMigrationJob (AC3)", () => {
     // Only the trusted GET of the migration itself - never a fetch to the
     // foreign host, for the state check OR the cancel POST.
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockWriteJson).not.toHaveBeenCalled();
   });
 
   it("POSTs /cancel with a message and returns the resulting progress state", async () => {
@@ -319,17 +346,27 @@ describe("cancelMigrationJob (AC3)", () => {
       if (href.includes("/progress/501") && (!init || !init.method)) {
         return jsonResponse({ id: 501, workflow_state: "queued" });
       }
-      if (href === `${BASE}/api/v1/progress/501/cancel` && init?.method === "POST") {
-        expect(init.body).toBe("message=Cancelled+from+the+diagnostics+screen");
-        return jsonResponse({ id: 501, workflow_state: "failed" });
-      }
       throw new Error(`unexpected fetch: ${href} ${init?.method}`);
     });
     vi.stubGlobal("fetch", fetchMock);
+    mockWriteJson.mockResolvedValueOnce({ id: 501, workflow_state: "failed" });
 
     const result = await cancelMigrationJob(COURSE_URL, 1);
 
     expect(result).toEqual({ progressState: "failed" });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // The two trusted GETs (migration, then its progress) still went through
+    // raw fetch, unaffected by the migration.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The actual cancel POST now goes through the mocked writeJson.
+    expect(mockWriteJson).toHaveBeenCalledTimes(1);
+    const [url, method, , params] = mockWriteJson.mock.calls[0] as unknown as [
+      string,
+      string,
+      unknown,
+      URLSearchParams | undefined,
+    ];
+    expect(url).toBe(`${BASE}/api/v1/progress/501/cancel`);
+    expect(method).toBe("POST");
+    expect(params?.toString()).toBe("message=Cancelled+from+the+diagnostics+screen");
   });
 });

@@ -9,6 +9,7 @@ import {
   disconnectOutlookAction,
 } from "../../actions";
 import { useInstitutions } from "@/lib/institutions";
+import LmsCredentialSection from "./LmsCredentialSection";
 import styles from "../security/security.module.css";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -114,11 +115,14 @@ export default function IntegrationsPage() {
         <section className={styles.card}>
           <h1 className={styles.title}>Integrations</h1>
           <p className={styles.subtitle}>
-            Connect Google Calendar for scheduling, and each school&apos;s Outlook mailbox to work with its inbox.
+            Connect your own Canvas account for each school, Google Calendar for scheduling, and each
+            school&apos;s Outlook mailbox to work with its inbox.
           </p>
 
           {error && <p role="alert" className={styles.error}>{error}</p>}
           {notice && <p className={styles.notice}>{notice}</p>}
+
+          <LmsCredentialSection />
 
           <div className={styles.section}>
             <p className={styles.sectionTitle}>Google Calendar</p>

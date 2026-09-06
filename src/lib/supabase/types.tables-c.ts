@@ -60,3 +60,24 @@ export interface LmsCredentialsUpdate {
   created_at?: string;
   updated_at?: string;
 }
+
+// supabase/migrations/20261016000000_lms_credential_save_attempts.sql
+// SEC9's rate-limit log - see that migration's header for why the PK is a
+// bare surrogate id and why this table never upserts.
+export interface LmsCredentialSaveAttemptsRow {
+  id: string;
+  user_id: string;
+  attempted_at: string;
+}
+
+export interface LmsCredentialSaveAttemptsInsert {
+  id?: string;
+  user_id: string;
+  attempted_at?: string;
+}
+
+export interface LmsCredentialSaveAttemptsUpdate {
+  id?: string;
+  user_id?: string;
+  attempted_at?: string;
+}

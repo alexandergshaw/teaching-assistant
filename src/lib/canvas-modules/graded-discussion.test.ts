@@ -4,10 +4,15 @@
 // checkpoints are now explicit opt-in via `useCheckpoints`, and a missing
 // deadline diverts to the classic path before ever calling GraphQL).
 //
-// @/lib/canvas-modules is left UNMOCKED and only globalThis.fetch is
-// stubbed, so resolveCourse runs for real - the "stub fetch, let resolveCourse
-// run for real" idiom this repo uses for Canvas write helpers (see
-// module-content.test.ts's own header comment).
+// canvasGraphql (graphql.ts) still dials `/api/graphql` via the platform
+// `fetch` directly - it was not part of the fetch-helpers/canvasFetch
+// migration - so stubbing globalThis.fetch keeps intercepting the GraphQL
+// leg exactly as before. The classic REST fallback
+// (createClassicDiscussion -> writeJson, fetch-helpers.ts) now dials Canvas
+// via canvasFetch (real DNS resolution + connection pinning) instead of the
+// platform fetch, so that leg needed its own mock at that boundary - see the
+// note by the canvasFetch mock below for why canvasFetch (not fetch-helpers)
+// is the right level here.
 //
 // canvas.mccneb.edu is the hardcoded host for the "MCC" institution code in
 // src/lib/canvas-core.ts.
@@ -34,8 +39,17 @@ vi.mock("../lms-credentials", () => ({
   getLmsCredentialSecret: vi.fn().mockResolvedValue(null),
   recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
 }));
+// Mocked at the canvasFetch boundary (not fetch-helpers) so writeJson's own
+// throttle-retry logic stays real - this file's own sibling,
+// graded-discussion.throttle.test.ts, depends on that same real logic to pin
+// the shared-budget behaviour, and using the same boundary in both files
+// keeps one consistent testing strategy for this module.
+vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
 
 import { createGradedDiscussion, checkpointDate, type NewGradedDiscussion } from "./graded-discussion";
+import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
+
+const mockCanvasFetch = vi.mocked(canvasFetch);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -64,11 +78,16 @@ interface Recorded {
 
 let recorded: Recorded[] = [];
 
+function canvasFetchOk(body: unknown): CanvasFetchResult {
+  return { ok: true, status: 200, headers: {}, body: Buffer.from(JSON.stringify(body)) };
+}
+
 /** GraphQL response variant: "flag" (checkpoints unavailable, the ONE message
  * that triggers a fallback), "other-error" (a different top-level error -
  * must throw, never fall back), or "success" (checkpoints created). */
 function stubCanvas(graphqlVariant: "flag" | "other-error" | "success") {
   recorded = [];
+
   const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
     const href = String(url);
     recorded.push({ url: href, method: init?.method ?? "GET", body: init?.body as string | undefined });
@@ -104,17 +123,21 @@ function stubCanvas(graphqlVariant: "flag" | "other-error" | "success") {
       } as unknown as Response;
     }
 
-    if (href.includes("/discussion_topics")) {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ id: 555 }),
-      } as unknown as Response;
-    }
-
     throw new Error(`Unexpected fetch to ${href}`);
   });
   vi.stubGlobal("fetch", fetchMock);
+
+  mockCanvasFetch.mockImplementation(async (url, init) => {
+    const href = String(url);
+    recorded.push({ url: href, method: init?.method ?? "GET", body: init?.body as string | undefined });
+
+    if (href.includes("/discussion_topics")) {
+      return canvasFetchOk({ id: 555 });
+    }
+
+    throw new Error(`Unexpected canvasFetch to ${href}`);
+  });
+
   return fetchMock;
 }
 
@@ -132,6 +155,7 @@ function restCall(): Recorded {
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+  mockCanvasFetch.mockReset();
 });
 
 afterEach(() => {
@@ -349,6 +373,7 @@ describe("createGradedDiscussion: both paths post the SAME total, always (M3 ant
       createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, pointsPossible: 20, initialPostPoints: 10, repliesPoints: 9 })
     ).rejects.toThrow(/initialPostPoints.*repliesPoints.*must equal pointsPossible/);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockCanvasFetch).not.toHaveBeenCalled();
   });
 });
 
@@ -432,6 +457,7 @@ describe("createGradedDiscussion: requiredReplyCount validation", () => {
       createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, requiredReplyCount: 11 })
     ).rejects.toThrow(/requiredReplyCount/);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockCanvasFetch).not.toHaveBeenCalled();
   });
 
   it("rejects a negative value before ever calling Canvas", async () => {
@@ -441,5 +467,6 @@ describe("createGradedDiscussion: requiredReplyCount validation", () => {
       createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, requiredReplyCount: -1 })
     ).rejects.toThrow(/requiredReplyCount/);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockCanvasFetch).not.toHaveBeenCalled();
   });
 });

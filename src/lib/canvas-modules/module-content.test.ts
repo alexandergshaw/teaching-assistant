@@ -2,11 +2,10 @@
 // (docs/weekly-announcement-module-content-acceptance-criteria.md AC1 items
 // 2, 3, 5).
 //
-// Written BEFORE the implementation exists. @/lib/canvas-modules is left
-// UNMOCKED and only globalThis.fetch is stubbed, so the REAL transport runs and
-// the assertions are about the actual HTTP shape - which is the whole point:
 // AC1 item 5's cost model is what keeps a whole term's gathering inside the
-// 60-second Vercel cap, and no amount of module-level mocking can prove it.
+// 60-second Vercel cap - the request-COUNT assertions below (one modules
+// list, items only for the modules actually needed, one bulk list per
+// content type) are what pin it.
 //
 // canvas.mccneb.edu is the hardcoded host for the "MCC" institution code in
 // src/lib/canvas-core.ts, matching src/lib/canvas/announcements.test.ts and
@@ -17,7 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // resolution to canvas-credentials.ts, which resolves the calling identity
 // server-side before ever reading an env var (E-ARCH4). Mocking the identity
 // to role: "owner" (E-ARCH6's uniform convention across every one of this
-// repo's 22 Canvas test files) keeps the env-var branch this suite's
+// repo's Canvas test files) keeps the env-var branch this suite's
 // vi.stubEnv calls rely on reachable, without a real Supabase call - the
 // stored-credential branch is mocked to "no row" (null) so it falls through
 // to that owner env branch instead of attempting a real DB read.
@@ -34,7 +33,33 @@ vi.mock("../lms-credentials", () => ({
   recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
 }));
 
+// fetchModuleContentForWeeks reads modules/module-items via fetchAll and
+// assignments/quizzes/discussion_topics via safeFetchAll - both
+// (fetch-helpers.ts) now dial Canvas via canvasFetch (real DNS resolution +
+// connection pinning) instead of the platform fetch, so stubbing
+// globalThis.fetch alone no longer intercepts either, which is why every test
+// below used to hang until timeout. Page bodies (getPage, pages.ts) are
+// UNCHANGED - that call was never routed through fetch-helpers - so they keep
+// working against the existing globalThis.fetch stub with no changes at all.
+//
+// Mocked at the fetch-helpers boundary (fetchAll/safeFetchAll) rather than at
+// canvasFetch: this suite is about the ORCHESTRATION (which lists get
+// fetched, how many times, at what concurrency, joined to which items) - not
+// about fetchAll's own pagination/retry mechanics, which are already covered
+// by fetch-helpers.canvas-fetch.test.ts / fetch-helpers.throttle.test.ts and
+// are not exercised by any fixture here (every list below is a single page).
+// mapWithConcurrency is left real (imported via vi.importActual) since the
+// concurrency bound itself is part of what this suite pins.
+vi.mock("./fetch-helpers", async () => {
+  const actual = await vi.importActual<typeof import("./fetch-helpers")>("./fetch-helpers");
+  return { ...actual, fetchAll: vi.fn(), safeFetchAll: vi.fn() };
+});
+
 import { fetchModuleContentForWeeks } from "./module-content";
+import { fetchAll, safeFetchAll } from "./fetch-helpers";
+
+const mockFetchAll = vi.mocked(fetchAll);
+const mockSafeFetchAll = vi.mocked(safeFetchAll);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -89,15 +114,28 @@ function jsonResponse(body: unknown) {
 
 let requested: string[] = [];
 
+/** Shared routing for both transport boundaries under test: getPage's raw
+ * `fetch` (page bodies) and the mocked fetchAll/safeFetchAll (everything
+ * else). Kept as one function so the two boundaries can never silently drift
+ * apart on what a given URL should return. */
+function listFixtureFor(href: string): unknown[] {
+  if (href.includes("/modules?")) return MODULES;
+  if (href.includes("/modules/13/items")) return MODULE_13_ITEMS;
+  if (href.includes("/items")) return [];
+  if (href.includes("/assignments?")) return [{ id: 901, name: "Lab 2", description: "<p>Write three loops.</p>" }];
+  if (href.includes("/quizzes?")) return [];
+  if (href.includes("/discussion_topics?")) return [];
+  return [];
+}
+
 function stubCanvas() {
   requested = [];
+  // getPage (pages.ts) still dials Canvas via raw `fetch` directly - it was
+  // never routed through fetch-helpers, so it is untouched by the
+  // canvasFetch migration and keeps working against a stubbed global fetch.
   const fetchMock = vi.fn(async (url: string | URL) => {
     const href = String(url);
     requested.push(href);
-
-    if (href.includes("/modules?")) return jsonResponse(MODULES);
-    if (href.includes("/modules/13/items")) return jsonResponse(MODULE_13_ITEMS);
-    if (href.includes("/items")) return jsonResponse([]);
     if (href.includes("/pages/loops-in-theory")) {
       return jsonResponse({
         page_id: 1,
@@ -107,14 +145,18 @@ function stubCanvas() {
         published: true,
       });
     }
-    if (href.includes("/assignments?")) {
-      return jsonResponse([{ id: 901, name: "Lab 2", description: "<p>Write three loops.</p>" }]);
-    }
-    if (href.includes("/quizzes?")) return jsonResponse([]);
-    if (href.includes("/discussion_topics?")) return jsonResponse([]);
-    return jsonResponse([]);
+    throw new Error(`unexpected raw fetch: ${href}`);
   });
   vi.stubGlobal("fetch", fetchMock);
+
+  const listHandler = async (url: string | URL) => {
+    const href = String(url);
+    requested.push(href);
+    return listFixtureFor(href);
+  };
+  mockFetchAll.mockImplementation(listHandler);
+  mockSafeFetchAll.mockImplementation(listHandler);
+
   return fetchMock;
 }
 
@@ -122,6 +164,8 @@ const countMatching = (pattern: RegExp) => requested.filter((u) => pattern.test(
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
+  mockFetchAll.mockReset();
+  mockSafeFetchAll.mockReset();
 });
 
 afterEach(() => {
@@ -169,6 +213,8 @@ describe("fetchModuleContentForWeeks: the request shape (AC1 item 5)", () => {
     const out = await fetchModuleContentForWeeks(COURSE_URL, [], 15, "MCC");
 
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockFetchAll).not.toHaveBeenCalled();
+    expect(mockSafeFetchAll).not.toHaveBeenCalled();
     expect(out.size).toBe(0);
   });
 });

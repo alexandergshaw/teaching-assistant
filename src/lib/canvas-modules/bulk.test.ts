@@ -1,18 +1,21 @@
 // Tests for listBulkItems's Assignment/Quiz split and New Quiz routing
 // (docs/assignments-quizzes-tabs-acceptance-criteria.md Contract 1, AC C, E1,
-// E3, E4). Mirrors module-content.test.ts's pattern: only globalThis.fetch is
-// stubbed, resolveCourse/fetchAll run for real, so the assertions are about
-// the actual request/response shape.
+// E3, E4).
 //
-// No bulk.test.ts existed before this change (checked via Glob before
-// writing this file).
-
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-
-// canvas-core's resolvers now delegate to resolveCanvasCredential
+// bulk.ts's fetchAll/writeJson calls (fetch-helpers.ts) now dial Canvas via
+// canvasFetch (src/lib/canvas-fetch.ts, real DNS resolution + connection
+// pinning) instead of the platform fetch, so stubbing globalThis.fetch (this
+// file's previous approach) no longer intercepts anything - every test below
+// used to hang until timeout.
+//
+// Mocked at the canvasFetch boundary (not fetch-helpers itself): this suite
+// explicitly exercises fetchAll's own pagination (the Link-header-following
+// "pagination still works" describe block below) - mocking fetch-helpers
+// directly would bypass that loop entirely and turn those tests into a
+// tautology. canvas-core's resolvers now delegate to resolveCanvasCredential
 // (docs/lms-credentials-acceptance-criteria.md E-ARCH6), which reads the
 // caller's identity and any stored row before falling back to the owner's
-// env vars. Mocked at the same two-module boundary canvas-credentials.test.ts
+// env vars - mocked at the same two-module boundary canvas-credentials.test.ts
 // already uses, with the identity fixed to role: "owner" and no stored row,
 // so the env-var-driven fetch stubbing below keeps exercising the exact path
 // these assertions were written against.
@@ -23,24 +26,30 @@ vi.mock("../lms-credentials", () => ({
   getLmsCredentialSecret: vi.fn(),
   recordLmsCredentialFailure: vi.fn(),
 }));
+vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
 
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { listBulkItems, bulkUpdate } from "./bulk";
 import { getEffectiveIdentity } from "../supabase/effective-identity";
 import { getLmsCredentialSecret, recordLmsCredentialFailure } from "../lms-credentials";
+import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
 
 const mockGetEffectiveIdentity = vi.mocked(getEffectiveIdentity);
 const mockGetLmsCredentialSecret = vi.mocked(getLmsCredentialSecret);
 const mockRecordLmsCredentialFailure = vi.mocked(recordLmsCredentialFailure);
+const mockCanvasFetch = vi.mocked(canvasFetch);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
-function jsonResponse(body: unknown, linkHeader: string | null = null) {
+/** Builds an `ok: true` CanvasFetchResult from a JS value, JSON-encoded -
+ * same helper shape as fetch-helpers.canvas-fetch.test.ts's own okResult. */
+function canvasFetchOk(body: unknown, linkHeader: string | null = null): CanvasFetchResult {
   return {
     ok: true,
     status: 200,
-    json: async () => body,
-    headers: { get: (name: string) => (name.toLowerCase() === "link" ? linkHeader : null) },
-  } as unknown as Response;
+    headers: linkHeader ? { link: linkHeader } : {},
+    body: Buffer.from(JSON.stringify(body)),
+  };
 }
 
 let requested: string[] = [];
@@ -48,7 +57,7 @@ let requested: string[] = [];
 function stubCanvas(handlers: { assignments?: unknown[][]; quizzes?: unknown[] }) {
   requested = [];
   const assignmentPages = handlers.assignments ?? [[]];
-  const fetchMock = vi.fn(async (url: string | URL) => {
+  mockCanvasFetch.mockImplementation(async (url) => {
     const href = String(url);
     requested.push(href);
 
@@ -60,15 +69,14 @@ function stubCanvas(handlers: { assignments?: unknown[][]; quizzes?: unknown[] }
       const page = assignmentPages[priorAssignmentCalls] ?? [];
       const isLastPage = priorAssignmentCalls >= assignmentPages.length - 1;
       const link = isLastPage ? null : `<${href}&page_marker=${priorAssignmentCalls + 1}>; rel="next"`;
-      return jsonResponse(page, link);
+      return canvasFetchOk(page, link);
     }
     if (href.includes("/quizzes")) {
-      return jsonResponse(handlers.quizzes ?? []);
+      return canvasFetchOk(handlers.quizzes ?? []);
     }
-    return jsonResponse([]);
+    return canvasFetchOk([]);
   });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  return mockCanvasFetch;
 }
 
 beforeEach(() => {
@@ -81,6 +89,7 @@ beforeEach(() => {
   });
   mockGetLmsCredentialSecret.mockResolvedValue(null);
   mockRecordLmsCredentialFailure.mockResolvedValue(undefined);
+  mockCanvasFetch.mockReset();
 });
 
 afterEach(() => {
@@ -380,27 +389,26 @@ describe("pagination still works for both kinds after the Assignment-branch bug 
   it("Quiz: multi-page assignments AND multi-page quizzes both fully resolve", async () => {
     // Two assignment pages (page 2 carries a New Quiz that must still be
     // picked up even though exclusion removed rows from page 1).
-    const fetchMock = vi.fn(async (url: string | URL) => {
+    requested = [];
+    mockCanvasFetch.mockImplementation(async (url) => {
       const href = String(url);
       requested.push(href);
       if (href.includes("/assignments")) {
         const priorAssignmentCalls = requested.filter((u) => u.includes("/assignments")).length - 1;
         if (priorAssignmentCalls === 0) {
-          return jsonResponse([ORDINARY_ASSIGNMENT], `<${href}&page=2>; rel="next"`);
+          return canvasFetchOk([ORDINARY_ASSIGNMENT], `<${href}&page=2>; rel="next"`);
         }
-        return jsonResponse([NEW_QUIZ_ASSIGNMENT], null);
+        return canvasFetchOk([NEW_QUIZ_ASSIGNMENT], null);
       }
       if (href.includes("/quizzes")) {
         const priorQuizCalls = requested.filter((u) => u.includes("/quizzes")).length - 1;
         if (priorQuizCalls === 0) {
-          return jsonResponse([CLASSIC_QUIZ], `<${href}&page=2>; rel="next"`);
+          return canvasFetchOk([CLASSIC_QUIZ], `<${href}&page=2>; rel="next"`);
         }
-        return jsonResponse([{ ...CLASSIC_QUIZ, id: 56, title: "Classic Quiz 2 (page 2)" }], null);
+        return canvasFetchOk([{ ...CLASSIC_QUIZ, id: 56, title: "Classic Quiz 2 (page 2)" }], null);
       }
-      return jsonResponse([]);
+      return canvasFetchOk([]);
     });
-    requested = [];
-    vi.stubGlobal("fetch", fetchMock);
 
     const items = await listBulkItems(COURSE_URL, "Quiz", "MCC");
 
@@ -414,13 +422,10 @@ describe("pagination still works for both kinds after the Assignment-branch bug 
 describe("bulkUpdate's assignment[published]/quiz[published] request shape (B2, E4)", () => {
   it("PUTs assignment[published] for kind Assignment", async () => {
     const calls: { url: string; method: string; body: string }[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL, init?: RequestInit) => {
-        calls.push({ url: String(url), method: String(init?.method), body: String(init?.body ?? "") });
-        return jsonResponse({});
-      })
-    );
+    mockCanvasFetch.mockImplementation(async (url, init) => {
+      calls.push({ url: String(url), method: String(init?.method), body: String(init?.body ?? "") });
+      return canvasFetchOk({});
+    });
 
     await bulkUpdate(COURSE_URL, "Assignment", ["42"], { published: true }, "MCC");
 
@@ -432,13 +437,10 @@ describe("bulkUpdate's assignment[published]/quiz[published] request shape (B2, 
 
   it("PUTs quiz[published] for kind Quiz - the path B2 says has never been exercised by the UI", async () => {
     const calls: { url: string; method: string; body: string }[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL, init?: RequestInit) => {
-        calls.push({ url: String(url), method: String(init?.method), body: String(init?.body ?? "") });
-        return jsonResponse({});
-      })
-    );
+    mockCanvasFetch.mockImplementation(async (url, init) => {
+      calls.push({ url: String(url), method: String(init?.method), body: String(init?.body ?? "") });
+      return canvasFetchOk({});
+    });
 
     await bulkUpdate(COURSE_URL, "Quiz", ["901"], { published: false }, "MCC");
 

@@ -40301,3 +40301,150 @@ agents inventing five conventions would have been worse than the bug.
 - The `parseNextLink` guard is applied where a loop exists TODAY. A future
   loop added without it is caught by no test; only the two client-boundary
   guards are automated.
+
+
+## 404. An instructor can finally register their own Canvas token (Group E wave 5, plus the 4b pilot)
+
+The point of the whole effort. `/account/integrations` gains a Canvas section
+above Google and Outlook, where a signed-in user pastes their own base URL and
+access token, has it verified against Canvas before anything is stored, and
+sees it listed afterwards.
+
+**404a - the probe, and why it is not a formality.** `probeLmsCredential`
+dials `/api/v1/users/self` through `canvasFetch` with a 10-second bound and no
+retry (E-REL2: retrying a hung host hangs again, and retrying a rejected token
+gets rejected again). **Nothing is stored unless the probe succeeds.** It
+returns the Canvas identity, because E4 requires telling the user WHICH Canvas
+account the token belongs to - a token pasted from the wrong browser tab is
+caught now rather than three screens later.
+
+**404b - placement was settled by measurement, not preference.** The architect
+pass wanted a new `/account/lms` page; the UX pass wanted the existing
+integrations page. That page is 234 lines (ample headroom) and already renders
+a per-school connect/disconnect list - and after DAT1 the credential row IS
+the institution record, so Outlook's per-school list depends on Canvas being
+connected first. On one page with Canvas first that ordering is visible;
+across two pages it is inferred from a dead end. It joined the existing page.
+
+**404c - two deliberate rule violations, both correct.**
+- **The token field does NOT persist**, against the standing "every new
+  textbox persists across reloads" rule. Persisting a live plaintext Canvas
+  token would directly contradict E2. The institution code and base URL do
+  persist; the secret does not.
+- **Delete uses `window.confirm`**, not the ModalShell dialog the account
+  surface uses, because the two sibling sections on this same page already do.
+  Verified against the modal-adoption scanner that this moves no ratchet pin.
+  Consistency with the page you are standing on beat consistency with a
+  different page.
+
+**404d - the rate limiter shipped in-memory and was replaced, because a
+documented condition depended on it.** The first version used a
+`Map<userId, number[]>` inside the action file. On serverless that is
+effectively no limit: cold starts reset it and concurrent instances do not
+share it. The agent flagged this in its own header rather than hiding it.
+
+It mattered because E-UX3 made a specific trade CONDITIONAL on it: the probe
+reports four distinguishable outcomes, and the fourth - "that host answered
+but is not Canvas" - is what stops a user who pasted their school's marketing
+site from going off and generating a second token. The cost of that precision
+is a host-reachability oracle, and the rate limit was the agreed price.
+
+Replaced with `lms_credential_save_attempts` (migration 20261016000000) plus a
+store. The DECISION still lives in the pure `lms-credential-save-limit.ts`;
+the store only supplies the data it judges.
+
+**It fails CLOSED in both directions, and the second one is the non-obvious
+half:**
+- The history read fails - refuse, because a limiter that cannot see its own
+  history has no basis to allow anything. A failed read returns `null`, never
+  conflated with a legitimately empty history.
+- The attempt was allowed but could not be RECORDED - refuse that attempt too,
+  because letting it through unrecorded makes every future check undercount
+  and progressively weakens the limit every time a write happens to fail.
+
+Bounded at 5s with `.retry(false)`, copied from `getLmsCredentialSecret` for
+E-REL1's reasoning: this read sits in series behind the guard's own and ahead
+of the Canvas probe. Sabotage-checked four ways (bound removed, `null`
+conflated with empty, wiring treating `null` as empty, insert swallowing its
+error) - each turned the matching tests red and was reverted.
+
+Cleanup is on write: recording an attempt deletes that user's rows older than
+the retention cutoff. Named gap, stated in the migration: an account that
+stops attempting entirely leaves its last few rows unswept forever, because
+nothing triggers another cleanup for it. Bounded, tiny, and it stores only who
+and when - no token, no URL.
+
+**404e - the 4b transport pilot, and the hidden cost it existed to find.**
+`fetch-helpers.ts` moved onto `canvasFetch` alone, as a pilot, because
+`canvasFetch` returns a discriminated union rather than a `Response` - no
+`.ok`, no `.json()`, no `.headers.get()` - so all 73 remaining sites need
+their response handling REWRITTEN, not renamed.
+
+The pilot found what a pilot is for: **migrating one shared file broke 9 test
+files / 69 tests in other directories.** Those tests stub `global.fetch`, and
+`canvasFetch` uses `node:https` with a real DNS lookup, so the stub no longer
+intercepts and every affected test died on a timeout. The production code and
+every exported signature were unchanged - the test doubles simply sat one
+layer too low.
+
+The adapter pattern that came out of it: convert a success result into a REAL
+`Response` so call sites below the adapter are untouched. Two gotchas worth
+keeping - Node's `Response` constructor throws on a non-null body for
+null-body statuses (204/205/304), and `BodyInit` rejects a raw `Buffer`.
+Both `host-not-allowed` and `unreachable` become throws rather than values, so
+they behave exactly like the old rejected `fetch()` and reuse the existing
+"never retry a rejected attempt" guarantee instead of inventing a new one.
+
+**Sabotaging the page cap did not fail a test - it HUNG.** Stronger evidence
+the guard is load-bearing than a red assertion would have been.
+
+**404f - the recipe for the six remaining transport groups**, which is the
+pilot's real deliverable. Before migrating a shared file, grep its importers'
+test files for `stubGlobal("fetch"` or `global.fetch =` and pull every hit
+into the SAME wave. That triage would have flagged all nine. It does not,
+however, tell you WHERE to put the new double - so also check, per function,
+whether the production file goes through `fetch-helpers` or calls `fetch`
+directly, and whether the test's value depends on pagination or the 429 retry
+surviving. If it does, mock `canvasFetch`; otherwise mocking `fetch-helpers`
+is simpler and sufficient. Mocking too high in the throttle test would have
+made its "one shared budget" assertion pass vacuously.
+
+**404g - one assertion class had to move, unavoidably.** Five test files
+asserted on an `Authorization: Bearer <token>` header. That header is now
+attached INSIDE `canvasFetch`, below either possible mock boundary, so those
+assertions now check the credential threaded through instead. The fact
+asserted is unchanged; only where it is observed moved.
+
+**404h - gates.**
+- `npx vitest run`: 938 files, 18865 tests, all passing.
+- `npx tsc --noEmit`: exit 0.
+- `npx eslint .`: 0 errors (6 pre-existing warnings).
+- `npx next build`: "Compiled successfully" AND "Finished TypeScript". The
+  static-prerender tail fails on a missing Supabase URL/key - no `.env*` file
+  on this machine - and names a different page per run as parallel workers
+  race.
+- Byte-scan across every changed path: two files carry non-ASCII, both PROVEN
+  pre-existing by diffing their non-ASCII lines against HEAD. Zero introduced.
+
+**404i - LIMITS.**
+
+- **The transport swap is 1 of 24 files done.** The other 73 bearer-carrying
+  fetch sites still use plain `fetch`, so for them the same-origin guard
+  remains a hostname-level check: it does not resolve DNS, and redirects are
+  still followed by default. DNS rebinding is closed only for what goes
+  through `fetch-helpers`.
+- **Nothing here has ever been rendered.** vitest is node-env and collects no
+  `.test.tsx`, so every visual and accessibility property of the credential
+  section - the 6px control-height discipline, the spinner and banner
+  placement, focus on deep-link arrival, how the mask is announced - is
+  verified by READING only.
+- **No credential has been stored against a real Canvas.** The probe has never
+  run against a live instance; every test uses fakes. The S3-hosted-export
+  case in wave 4 is likewise modelled, not observed.
+- **The rate limit is per user, not per host.** One user cannot hammer the
+  endpoint; a hundred accounts still could. Whether that matters depends on
+  how open signup is.
+- The result banner sits at the top of the Canvas section rather than
+  co-located with the submit spinner as the aesthetics pass specified,
+  matching this page's own existing convention for its two sibling sections.
+  Disclosed, not silent.

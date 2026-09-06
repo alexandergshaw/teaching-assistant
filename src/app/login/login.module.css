@@ -182,3 +182,13 @@
 .linkButton:hover {
   text-decoration: underline;
 }
+
+/* Field-level help text stated up front (e.g. password requirements), never
+   discovered only after a failed submit - distinct from .footnote, which is
+   a card-level secondary action separated by a rule, not inline field
+   help. */
+.hint {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  line-height: var(--line-normal);
+}

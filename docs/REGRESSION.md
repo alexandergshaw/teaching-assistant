@@ -41144,3 +41144,88 @@ The pattern worth recording: BOTH errors came from briefing an implementer off
 a design document rather than off the tree. A design doc is a record of what
 was decided, not of what exists, and the gap between them widens the moment the
 first wave lands.
+
+## 410. The Canvas token stopped riding on an unpinned, redirect-following transport
+
+Twelve modules in `src/lib/canvas-modules/` still called the platform `fetch`
+with `Authorization: Bearer ${ctx.token}`. Platform fetch FOLLOWS REDIRECTS and
+does no DNS pinning.
+
+`canvasFetch` (src/lib/canvas-fetch.ts) exists for exactly this: it pins DNS to
+close rebinding, and refuses a cross-host redirect on the stated principle that
+the stored credential is only ever sent to the host the instructor registered.
+`fetch-helpers.ts` had already migrated and its header calls itself "the pattern
+the rest of this migration follows" - the rest had not happened.
+
+### 410a - the existing guard was real, and was not enough
+
+Every Canvas-SUPPLIED url was already passed through
+`assertCanvasSuppliedUrlIsSameOrigin` before being dialled, dialling the guard's
+RETURN value rather than the raw candidate. Those guards are correct, and were
+preserved untouched.
+
+But that guard checks the INITIAL url only. It cannot stop a redirect issued
+mid-flight, and it does nothing about DNS rebinding. That is precisely why
+canvas-fetch.ts's own header says a one-line `redirect: "manual"` at each call
+site would not have closed this.
+
+An early reading of this suggested office.ts had skipped the guard entirely.
+That was wrong - a truncated grep - and is recorded because the correct
+conclusion (the guard is present everywhere and still insufficient) is a
+sharper finding than the incorrect one.
+
+### 410b - CANVAS IS THE SPECIAL CASE BECAUSE ITS HOST IS USER-SUPPLIED
+
+A tree-wide survey found the only remaining authenticated platform-fetch calls
+are GitHub, Google Calendar and Microsoft Graph. Those stay: fixed, well-known
+hosts with their own credentials, outside this transport's remit.
+
+Canvas differs because the instructor REGISTERS the host. Rebinding and
+cross-host redirect are live threats against a user-supplied host in a way they
+are not against api.github.com. That is the whole reason this transport exists,
+and it bounds the migration exactly.
+
+28 call sites moved to the single `canvasGet`/`canvasRequest` adapter. No second
+adapter: `canvasFetch` returns a discriminated union rather than a `Response`,
+and one adapter owning that mapping is what makes every caller fail alike.
+
+### 410c - three calls deliberately NOT migrated
+
+The second leg of every upload POSTs bytes to `ticket.upload_url` - Canvas's
+pre-signed storage endpoint. A different host, carrying NO Authorization header,
+because the credential is in the ticket's own params. Forcing those through this
+transport would BREAK them, and `canvas-fetch-response.ts`'s header already
+names that exclusion.
+
+Checked individually rather than assumed, which is the argument for doing this
+per call site instead of by search-and-replace.
+
+### 410d - a sabotage check stayed green because the network answered
+
+The finding worth more than the migration.
+
+A sabotage reverted one call to the platform `fetch`. That escaped a mock
+installed on `canvasFetch`, made a REAL request to the institution's live Canvas
+host, and got back a 401 whose message was IDENTICAL to the one the test
+asserted. The test could not distinguish a correct implementation from a broken
+one plus a working internet connection.
+
+vitest.config.ts already declared "Tests must be hermetic" and enforced it only
+for Supabase config. So the suite could silently reach the network - which is an
+oracle nobody declared, and which defeats the single technique this project
+relies on to prove a test can fail at all. It also means running the tests sent
+unsolicited requests to a real institution's Canvas.
+
+Measured rather than assumed: guarded, an unmocked call fails in 4ms; unguarded,
+the same call takes 306ms, because it reaches the host.
+
+`vitest.setup.ts` now replaces `fetch` with a stub that throws, naming the url
+and the fix. It throws SYNCHRONOUSLY on purpose - a rejected promise can be
+swallowed by a `.catch()` in the code under test, which is the silent pass this
+exists to prevent. All 1005 files and 20052 tests passed unchanged, so nothing
+depended on a real call: this locks in what was already true.
+
+NOT total, and said so in the file: `canvasFetch` dials through `node:https`
+rather than `fetch`, so a test mocking neither could still reach the network
+that way. Closing that needs a module mock rather than a global. This closes the
+hole that was observed.

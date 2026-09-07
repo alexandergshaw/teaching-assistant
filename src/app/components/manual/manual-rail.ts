@@ -18,8 +18,7 @@ export type ManualViewType =
   | "recording"
   | "ppt-design"
   | "artifact-design"
-  | "repo-grades"
-  | "course-intel";
+  | "repo-grades";
 export type BuildViewType = "new" | "prebuilt";
 
 // Compile-time exhaustiveness check: ensure all non-version-control ContentView members are present
@@ -89,12 +88,6 @@ export const destinations: DestinationGroup[] = [
       { id: "repo-grades", label: "Repo Grades", description: "Grade student GitHub repos and post the results to Canvas" },
     ],
   },
-  {
-    name: null,
-    destinations: [
-      { id: "course-intel", label: "Course Intel", description: "Ask AI about a course's discussion posts, messages, and grades" },
-    ],
-  },
 ];
 
 export function getDestinationById(id: string): Destination | undefined {
@@ -114,7 +107,6 @@ export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "ppt-design",
   "artifact-design",
   "repo-grades",
-  "course-intel",
 ];
 
 export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
@@ -125,7 +117,6 @@ export const MANUAL_VIEW_LABELS: Record<ManualViewType, string> = {
   "ppt-design": "PowerPoint Design",
   "artifact-design": "Artifact Templates",
   "repo-grades": "Repo Grades",
-  "course-intel": "Course Intel",
 };
 
 // Single source of truth for "is this a valid persisted/restored Manual
@@ -173,8 +164,6 @@ export function getActiveDestinationId(
     return "artifact-design";
   } else if (manualView === "repo-grades") {
     return "repo-grades";
-  } else if (manualView === "course-intel") {
-    return "course-intel";
   }
   return "build-new";
 }
@@ -193,7 +182,6 @@ export function resolveStateFromDestinationId(
     if (id === "ppt-design") return "ppt-design";
     if (id === "artifact-design") return "artifact-design";
     if (id === "repo-grades") return "repo-grades";
-    if (id === "course-intel") return "course-intel";
     return currentManualView;
   })();
 

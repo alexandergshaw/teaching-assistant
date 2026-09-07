@@ -91,3 +91,51 @@ describe("normalizeContentView accepts every LMS_VIEWS member (D6r / E2) - deriv
     expect(normalizeContentView("version-control")).toBe("modules");
   });
 });
+
+// D25c: each merged tab's section switch is a persisted control, so it obeys
+// the same standing rule every other control in this app does - it survives a
+// reload, under a "ta-" key. Source-text again, and for the same reason as the
+// block above: these live in useState initializers and localStorage effects
+// inside a hook, and this suite cannot render one.
+describe("the merged tabs' section switches persist under their own ta- keys", () => {
+  const KEYS = [
+    { constant: "COURSES_SECTION_KEY", value: "ta-courses-section" },
+    { constant: "TOOLS_SECTION_KEY", value: "ta-tools-section" },
+    { constant: "LIBRARY_SECTION_KEY", value: "ta-library-section" },
+  ];
+
+  it("declares one ta- key per merged tab", () => {
+    for (const { constant, value } of KEYS) {
+      expect(source, `expected a ${constant} constant`).toContain(`const ${constant} = "${value}"`);
+    }
+  });
+
+  it("writes each key back whenever its section changes", () => {
+    for (const { constant } of KEYS) {
+      expect(
+        source,
+        `${constant} is declared but never written, so the section resets on every reload`
+      ).toMatch(new RegExp(`localStorage\\.setItem\\(${constant},`));
+    }
+  });
+
+  it("reads each key back on restore, through the shared guard rather than a restated literal list", () => {
+    // The same derived-not-restated discipline the contentView guard above
+    // documents: a hand-written `saved === "tasks" || ...` here is how a
+    // section added later silently stops restoring.
+    for (const { constant } of KEYS) {
+      expect(source).toMatch(new RegExp(`localStorage\\.getItem\\(${constant}\\)`));
+    }
+    expect(source).toMatch(/isCoursesSection\(saved\)/);
+    expect(source).toMatch(/isToolsSection\(saved\)/);
+    expect(source).toMatch(/isLibrarySection\(saved\)/);
+  });
+
+  it("resolves the starting location through resolveTabDestination, so a stored retired tab value keeps its section", () => {
+    // Every user who was here before the merge has "tasks", "workflows" or
+    // "knowledge" sitting in ta-active-tab. Restoring only the tab from it
+    // would drop them on the other half of the merged tab.
+    expect(source).toContain("resolveTabDestination(source)");
+    expect(source).toContain('localStorage.getItem("ta-active-tab")');
+  });
+});

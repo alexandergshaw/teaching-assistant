@@ -182,7 +182,9 @@ describe("manual-rail", () => {
   });
 
   describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (row 1)", () => {
-    it("should list the eight subtabs in display order", () => {
+    it("should list the seven subtabs in display order", () => {
+      // Seven, not eight: "course-intel" left this rail entirely when it was
+      // promoted to a top-level tab (D24a). See the removal block below.
       expect(MANUAL_VIEW_ORDER).toEqual([
         "course-planning",
         "content",
@@ -191,7 +193,6 @@ describe("manual-rail", () => {
         "ppt-design",
         "artifact-design",
         "repo-grades",
-        "course-intel",
       ]);
     });
 
@@ -317,55 +318,49 @@ describe("repo-grades subtab", () => {
   });
 });
 
-// New top-level Manual subtab (D13-D17 of
-// docs/course-student-intelligence-acceptance-criteria.md): navigation-shell
-// wave only, modeled directly on the repo-grades subtab block above. tsc
-// enforces two of the six registration points for free (MANUAL_VIEW_LABELS
-// is a Record<ManualViewType, string>, and useAppNavigation.ts's restated
-// ManualView union) - it enforces NONE of the other four, and each fails
-// silently and differently (D10 of the acceptance-criteria doc): a missing
-// MANUAL_VIEW_ORDER entry makes isManualViewType reject the value, so both
-// the rail chip and the URL/saved-view restore silently bounce elsewhere;
-// a missing destinations entry leaves the rail row empty; a missing
-// getActiveDestinationId branch highlights the wrong chip; a missing
-// resolveStateFromDestinationId branch makes clicking the chip do nothing.
-// This block asserts all four in one place, deliberately duplicating the
-// repo-grades block's shape rather than sharing it, so that removing any ONE
-// of the four registration points turns exactly this block red - sabotaged
-// and confirmed one at a time while building this feature (see the wave
-// report for the result of each).
-describe("course-intel subtab", () => {
-  it("is reachable from its destination id and reports itself as active", () => {
-    const resolved = resolveStateFromDestinationId("course-intel", "content", "new", "modules");
-    expect(resolved.manualView).toBe("course-intel");
-    expect(getActiveDestinationId("course-intel", "new", "modules")).toBe("course-intel");
+// Course Intel MOVED OUT of this rail and became a top-level tab (D24a of
+// docs/course-student-intelligence-acceptance-criteria.md). Registering it
+// took six points here; removing it has to be just as complete, and each
+// leftover fails differently and silently: a leftover MANUAL_VIEW_ORDER entry
+// or destinations entry leaves a dead chip in the rail that resolves to a
+// view page.tsx no longer renders (a blank pane); a leftover
+// getActiveDestinationId branch highlights a chip that is not there; a
+// leftover resolveStateFromDestinationId branch lets a stale persisted
+// destination id put manualView into a value nothing can display.
+//
+// Modeled deliberately on the live-class removal block below - this project
+// has removed a subtab before, and that block is the shape that caught the
+// leftovers last time. The reachability half (that the new top-level tab
+// actually renders) lives in
+// src/app/components/tabs/topLevelTabs.wiring.test.ts.
+describe("course-intel subtab removal (promoted to a top-level tab)", () => {
+  it("is gone from the rail destinations", () => {
+    expect(getDestinationById("course-intel")).toBeUndefined();
+    const allDests = destinations.flatMap((g) => g.destinations).map((d) => d.id);
+    expect(allDests).not.toContain("course-intel");
   });
 
-  it("has a rail destination with a label and description", () => {
-    const dest = getDestinationById("course-intel");
-    expect(dest).toBeDefined();
-    expect(dest!.label).toBe("Course Intel");
-    expect(dest!.description).toBeTruthy();
+  it("is gone from MANUAL_VIEW_ORDER and MANUAL_VIEW_LABELS", () => {
+    expect(MANUAL_VIEW_ORDER).not.toContain("course-intel");
+    expect(Object.keys(MANUAL_VIEW_LABELS)).not.toContain("course-intel");
   });
 
-  it("has no inner destinations (it is a single-destination subtab)", () => {
-    expect(getInnerDestinations("course-intel")).toBeNull();
+  it("is rejected by isManualViewType, so a persisted 'course-intel' manualView cannot restore into it", () => {
+    expect(isManualViewType("course-intel")).toBe(false);
   });
 
-  it("is in MANUAL_VIEW_ORDER with a matching label", () => {
-    expect(MANUAL_VIEW_ORDER).toContain("course-intel");
-    expect(MANUAL_VIEW_LABELS["course-intel"]).toBe("Course Intel");
-  });
-
-  it("is accepted by isManualViewType", () => {
-    expect(isManualViewType("course-intel")).toBe(true);
-  });
-
-  it("a non-matching manualView never resolves getActiveDestinationId to 'course-intel' (proves the branch is scoped, not a fallthrough)", () => {
+  it("is gone from getActiveDestinationId's resolvable ids", () => {
+    // "course-intel" is no longer a member of ManualViewType, so every
+    // remaining subtab must resolve to an id other than "course-intel".
     for (const view of MANUAL_VIEW_ORDER) {
-      if (view === "course-intel") continue;
       expect(getActiveDestinationId(view, "new", "modules")).not.toBe("course-intel");
     }
+  });
+
+  it("a persisted/legacy 'course-intel' destination id falls back to the current subtab rather than resolving to a dead view", () => {
+    const state = resolveStateFromDestinationId("course-intel", "recording", "new", "modules");
+    expect(state.manualView).toBe("recording");
+    expect(state.manualView).not.toBe("course-intel");
   });
 });
 

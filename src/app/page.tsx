@@ -35,10 +35,21 @@ import { useDraftedGradesInbox } from "./components/DraftedGradesInbox";
 import styles from "./page.module.css";
 import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
+import { TabSectionSwitch } from "./components/tabs/TabSectionSwitch";
+import {
+  COURSES_SECTION_LABELS,
+  COURSES_SECTION_ORDER,
+  LIBRARY_SECTION_LABELS,
+  LIBRARY_SECTION_ORDER,
+  TAB_LABELS,
+  TAB_ORDER,
+  TOOLS_SECTION_LABELS,
+  TOOLS_SECTION_ORDER,
+  type ActiveTab,
+} from "./components/tabs/tab-sections";
 import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
 import { KNOWLEDGE_RETURN_EVENT } from "@/lib/knowledge-return";
 import { MESSAGE_DRAFTS_NAV_EVENT } from "@/lib/drafts-nav";
-import { type ActiveTab } from "./url-state";
 
 const initialState: GradeActionState = { run: null, error: null };
 const initialTestState: TestGeminiState = { result: null, error: null };
@@ -54,7 +65,7 @@ export default function Home() {
   // Everything about "where in the app am I", including the URL two-way bind
   // and Back/Forward restore. See useAppNavigation.ts.
   const nav = useAppNavigation();
-  const { activeTab, setActiveTab, manualView, setManualView, buildView, setBuildView, contentView, setContentView, workflowsView, setWorkflowsView, draftsView, setDraftsView, tasksView, setTasksView } = nav;
+  const { activeTab, setActiveTab, coursesSection, setCoursesSection, toolsSection, setToolsSection, librarySection, setLibrarySection, manualView, setManualView, buildView, setBuildView, contentView, setContentView, workflowsView, setWorkflowsView, draftsView, setDraftsView, tasksView, setTasksView } = nav;
 
   // The whole Manual > Build Courses > Pre Built flow. See useLessonPlanner.ts.
   const lesson = useLessonPlanner();
@@ -102,11 +113,15 @@ export default function Home() {
   const { setFocusCourseId } = nav;
   const handleFocusHandled = useCallback(() => setFocusCourseId(null), [setFocusCourseId]);
 
+  // The Files inbox is marked seen when its own SECTION is showing, not
+  // merely when the tab it now shares with Knowledge is - landing on Library
+  // > Knowledge must not silently clear a Files badge the user never looked
+  // at.
   useEffect(() => {
-    if (activeTab === "files") {
+    if (activeTab === "files" && librarySection === "files") {
       markFilesSeen();
     }
-  }, [activeTab, markFilesSeen]);
+  }, [activeTab, librarySection, markFilesSeen]);
 
   // Launch seam: this is the ONLY place that can call setActiveTab/
   // setManualView (see useAppNavigation.ts - setActiveTab is never a prop
@@ -124,11 +139,12 @@ export default function Home() {
       const detail = e instanceof CustomEvent ? parseRecordingLaunch(e.detail) : null;
       if (!detail) return;
       setManualView("recording");
+      setToolsSection("manual");
       setActiveTab("manual");
     };
     window.addEventListener(RECORDING_LAUNCH_EVENT, handler);
     return () => window.removeEventListener(RECORDING_LAUNCH_EVENT, handler);
-  }, [setManualView, setActiveTab]);
+  }, [setManualView, setToolsSection, setActiveTab]);
 
   // "Back to Knowledge" (docs/knowledge-recording-handoff-acceptance-criteria.md,
   // AC4): the other half of the same "this is the ONLY place that can call
@@ -144,10 +160,16 @@ export default function Home() {
   // KnowledgeTab.tsx's mount effect once it exists to read it - this
   // listener's only job is the tab switch that makes that mount happen.
   useEffect(() => {
-    const handler = () => setActiveTab("knowledge");
+    const handler = () => {
+      // Knowledge is a SECTION of the Library tab since the merge, so the
+      // return trip sets both halves - setting only the tab lands on Library
+      // > Files, which is not where the user was.
+      setLibrarySection("knowledge");
+      setActiveTab("files");
+    };
     window.addEventListener(KNOWLEDGE_RETURN_EVENT, handler);
     return () => window.removeEventListener(KNOWLEDGE_RETURN_EVENT, handler);
-  }, [setActiveTab]);
+  }, [setActiveTab, setLibrarySection]);
 
   // "Jump to the Message Drafts tab" (docs/message-replies-acceptance-
   // criteria.md M16): the Saved-to-drafts link on a message-replies row
@@ -163,17 +185,18 @@ export default function Home() {
     const handler = () => {
       setWorkflowsView("drafts");
       setDraftsView("messages");
-      setActiveTab("workflows");
+      setToolsSection("workflows");
+      setActiveTab("manual");
     };
     window.addEventListener(MESSAGE_DRAFTS_NAV_EVENT, handler);
     return () => window.removeEventListener(MESSAGE_DRAFTS_NAV_EVENT, handler);
-  }, [setActiveTab, setWorkflowsView, setDraftsView]);
+  }, [setActiveTab, setToolsSection, setWorkflowsView, setDraftsView]);
 
   useEffect(() => {
-    if (activeTab === "workflows" && workflowsView === "drafts") {
+    if (activeTab === "manual" && toolsSection === "workflows" && workflowsView === "drafts") {
       refreshDrafts();
     }
-  }, [activeTab, workflowsView, refreshDrafts]);
+  }, [activeTab, toolsSection, workflowsView, refreshDrafts]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -256,17 +279,43 @@ export default function Home() {
     }, 1600);
   };
 
+  // Every programmatic jump to Workflows now names the Tools tab AND its
+  // Workflows section - "workflows" is no longer a tab value at all, and a
+  // jump that set only one of the two would land on Tools > Manual.
   const openWorkflow = (id: string, panel?: "automate") => {
     if (typeof window !== "undefined") localStorage.setItem("ta-workflows-selected", id);
     if (panel === "automate" && typeof window !== "undefined") localStorage.setItem("ta-workflows-panel", "automate");
     setWorkflowsView("workflows");
-    setActiveTab("workflows");
+    setToolsSection("workflows");
+    setActiveTab("manual");
   };
 
   const handleWorkflowScheduled = () => {
     setWorkflowsView("workflows");
-    setActiveTab("workflows");
+    setToolsSection("workflows");
+    setActiveTab("manual");
   };
+
+  // Each merged tab's section switch, derived from tab-sections.ts's ordered
+  // lists rather than hand-written per section, so a section registered there
+  // cannot be missing from the control that reaches it. The counts are the
+  // same two the top strip badges - shown again here because after the merge
+  // the strip badge only says WHICH TAB has attention waiting, and the switch
+  // is what says which half of it.
+  const coursesSectionOptions = COURSES_SECTION_ORDER.map((id) => ({
+    id,
+    label: COURSES_SECTION_LABELS[id],
+  }));
+  const toolsSectionOptions = TOOLS_SECTION_ORDER.map((id) => ({
+    id,
+    label: TOOLS_SECTION_LABELS[id],
+    count: id === "workflows" ? draftsInbox : 0,
+  }));
+  const librarySectionOptions = LIBRARY_SECTION_ORDER.map((id) => ({
+    id,
+    label: LIBRARY_SECTION_LABELS[id],
+    count: id === "files" ? filesInbox : 0,
+  }));
 
   return (
     <>
@@ -280,6 +329,7 @@ export default function Home() {
         // which useAppNavigation picks up as the same pending focus.
         onSelectCourse={(course) => {
           setFocusCourseId(course.id);
+          setCoursesSection("courses");
           setActiveTab("courses");
         }}
       />
@@ -337,162 +387,225 @@ export default function Home() {
             minHeight: 44,
           }}
         >
-          <Tab label="Courses" value="courses" disableRipple />
-          <Tab label="Tasks" value="tasks" disableRipple />
-          <Tab label="Manual" value="manual" disableRipple />
-          <Tab label={<NavTabLabel text="Workflows" count={draftsInbox} />} value="workflows" disableRipple />
-          <Tab label={<NavTabLabel text="Files" count={filesInbox} />} value="files" disableRipple />
-          <Tab label="Knowledge" value="knowledge" disableRipple />
+          {/* Mapped from TAB_ORDER rather than hand-written one <Tab> per
+              value: a tab registered in tab-sections.ts but missing from the
+              strip is not a state this file can be in. Each merged tab
+              carries the attention count of the half that had one before the
+              merge (drafts under Tools, the files inbox under Library), so
+              neither badge disappears just because its tab did. NavTabLabel
+              renders the text alone at count 0. */}
+          {TAB_ORDER.map((tab) => (
+            <Tab
+              key={tab}
+              value={tab}
+              label={
+                <NavTabLabel
+                  text={TAB_LABELS[tab]}
+                  count={tab === "manual" ? draftsInbox : tab === "files" ? filesInbox : 0}
+                />
+              }
+              disableRipple
+            />
+          ))}
         </Tabs>
 
         {activeTab === "courses" && (
-          <CoursesTab
-            focusCourseId={nav.focusCourseId}
-            onFocusHandled={handleFocusHandled}
-            onNavigate={(tab) => {
-              if (tab === "course-planning") {
-                // Course handoffs (syllabus prefill) live in the New Build flow.
-                setBuildView("new");
-                setManualView("course-planning");
-                setActiveTab("manual");
-              } else if (tab === "version-control") {
-                setManualView("version-control");
-                setActiveTab("manual");
-              } else {
-                setActiveTab(tab as ActiveTab);
-              }
-            }}
-          />
-        )}
+          <>
+            <TabSectionSwitch
+              ariaLabel="Courses sections"
+              options={coursesSectionOptions}
+              value={coursesSection}
+              onChange={setCoursesSection}
+            />
 
-        {activeTab === "tasks" && (
-          <TasksTab view={tasksView} onViewChange={setTasksView} />
+            {coursesSection === "courses" && (
+              <CoursesTab
+                focusCourseId={nav.focusCourseId}
+                onFocusHandled={handleFocusHandled}
+                onNavigate={(tab) => {
+                  if (tab === "course-planning") {
+                    // Course handoffs (syllabus prefill) live in the New Build flow.
+                    setBuildView("new");
+                    setManualView("course-planning");
+                    setToolsSection("manual");
+                    setActiveTab("manual");
+                  } else if (tab === "version-control") {
+                    setManualView("version-control");
+                    setToolsSection("manual");
+                    setActiveTab("manual");
+                  } else {
+                    // "workflows" - a section of the Tools tab now, not a tab.
+                    setToolsSection("workflows");
+                    setActiveTab("manual");
+                  }
+                }}
+              />
+            )}
+
+            {coursesSection === "tasks" && <TasksTab view={tasksView} onViewChange={setTasksView} />}
+          </>
         )}
 
         {activeTab === "manual" && (
           <>
-            <ManualRail
-              manualView={manualView}
-              buildView={buildView}
-              contentView={contentView}
-              onManualViewClick={setManualView}
-              onDestinationClick={(destId) => {
-                const resolved = resolveStateFromDestinationId(destId, manualView, buildView, contentView);
-                if (resolved.manualView !== manualView) setManualView(resolved.manualView);
-                if (resolved.buildView !== buildView) setBuildView(resolved.buildView);
-                if (resolved.contentView !== contentView) setContentView(resolved.contentView);
-              }}
+            <TabSectionSwitch
+              ariaLabel="Tools sections"
+              options={toolsSectionOptions}
+              value={toolsSection}
+              onChange={setToolsSection}
             />
 
-            {manualView === "course-planning" && (
-              <TabShell>
-                {buildView === "new" ? (
-                  <CoursePlanningTab />
-                ) : (
-                  <LessonPlanningForm
-                    moduleObjectives={lesson.moduleObjectives}
-                    onModuleObjectivesChange={lesson.setModuleObjectives}
-                    moduleTitle={lesson.moduleTitle}
-                    onModuleTitleChange={lesson.setModuleTitle}
-                    isCourseEngine={lesson.provider === "other"}
-                    lessonContext={lesson.lessonContext}
-                    onLessonContextChange={lesson.setLessonContext}
-                    contextFileRef={lesson.lessonContextFileRef}
-                    homeworkText={lesson.homeworkText}
-                    onHomeworkTextChange={lesson.setHomeworkText}
-                    homeworkFileRef={lesson.homeworkFileRef}
-                    lessonError={lesson.lessonError}
-                    isGeneratingLesson={lesson.isGeneratingLesson}
-                    onGenerate={lesson.handleGenerateLesson}
-                  />
-                )}
-              </TabShell>
-            )}
-
-            {manualView === "content" && (
-              <TabShell>
-                <ContentTab
-                  view={contentView}
-                  grading={
-                    <GradingTab
-                      formAction={formAction}
-                      pending={pending}
-                      state={state}
-                      testState={testState}
-                      copiedKey={copiedKey}
-                      onCopy={handleCopy}
-                      onOpenPreview={handleOpenPreview}
-                      resultsSectionFallbackRef={resultsSectionFallbackRef}
-                    />
-                  }
-                  announcements={<CanvasTab view="announcements" />}
-                  inbox={<CanvasTab view="inbox" />}
+            {toolsSection === "manual" && (
+              <>
+                <ManualRail
+                  manualView={manualView}
+                  buildView={buildView}
+                  contentView={contentView}
+                  onManualViewClick={setManualView}
+                  onDestinationClick={(destId) => {
+                    const resolved = resolveStateFromDestinationId(destId, manualView, buildView, contentView);
+                    if (resolved.manualView !== manualView) setManualView(resolved.manualView);
+                    if (resolved.buildView !== buildView) setBuildView(resolved.buildView);
+                    if (resolved.contentView !== contentView) setContentView(resolved.contentView);
+                  }}
                 />
-              </TabShell>
+
+                {manualView === "course-planning" && (
+                  <TabShell>
+                    {buildView === "new" ? (
+                      <CoursePlanningTab />
+                    ) : (
+                      <LessonPlanningForm
+                        moduleObjectives={lesson.moduleObjectives}
+                        onModuleObjectivesChange={lesson.setModuleObjectives}
+                        moduleTitle={lesson.moduleTitle}
+                        onModuleTitleChange={lesson.setModuleTitle}
+                        isCourseEngine={lesson.provider === "other"}
+                        lessonContext={lesson.lessonContext}
+                        onLessonContextChange={lesson.setLessonContext}
+                        contextFileRef={lesson.lessonContextFileRef}
+                        homeworkText={lesson.homeworkText}
+                        onHomeworkTextChange={lesson.setHomeworkText}
+                        homeworkFileRef={lesson.homeworkFileRef}
+                        lessonError={lesson.lessonError}
+                        isGeneratingLesson={lesson.isGeneratingLesson}
+                        onGenerate={lesson.handleGenerateLesson}
+                      />
+                    )}
+                  </TabShell>
+                )}
+
+                {manualView === "content" && (
+                  <TabShell>
+                    <ContentTab
+                      view={contentView}
+                      grading={
+                        <GradingTab
+                          formAction={formAction}
+                          pending={pending}
+                          state={state}
+                          testState={testState}
+                          copiedKey={copiedKey}
+                          onCopy={handleCopy}
+                          onOpenPreview={handleOpenPreview}
+                          resultsSectionFallbackRef={resultsSectionFallbackRef}
+                        />
+                      }
+                      announcements={<CanvasTab view="announcements" />}
+                      inbox={<CanvasTab view="inbox" />}
+                    />
+                  </TabShell>
+                )}
+
+                {manualView === "version-control" && (
+                  <TabShell>
+                    <VersionControlTab />
+                  </TabShell>
+                )}
+
+                {manualView === "ppt-design" && (
+                  <TabShell>
+                    <PowerPointDesignTab />
+                  </TabShell>
+                )}
+
+                {manualView === "artifact-design" && (
+                  <TabShell>
+                    <ArtifactDesignTab />
+                  </TabShell>
+                )}
+
+                {manualView === "repo-grades" && (
+                  <TabShell>
+                    <RepoGradesTab />
+                  </TabShell>
+                )}
+              </>
             )}
 
-            {manualView === "version-control" && (
-              <TabShell>
-                <VersionControlTab />
-              </TabShell>
-            )}
-
-            {manualView === "ppt-design" && (
-              <TabShell>
-                <PowerPointDesignTab />
-              </TabShell>
-            )}
-
-            {manualView === "artifact-design" && (
-              <TabShell>
-                <ArtifactDesignTab />
-              </TabShell>
-            )}
-
-            {manualView === "repo-grades" && (
-              <TabShell>
-                <RepoGradesTab />
-              </TabShell>
-            )}
-
-            {manualView === "course-intel" && (
-              <TabShell>
-                <CourseIntelTab />
-              </TabShell>
+            {toolsSection === "workflows" && (
+              <WorkflowsPanel
+                workflowsView={workflowsView}
+                onWorkflowsViewChange={setWorkflowsView}
+                draftsView={draftsView}
+                onDraftsViewChange={setDraftsView}
+                draftsInbox={draftsInbox}
+                draftsGradesCount={draftsGradesCount}
+                draftsMessagesCount={draftsMessagesCount}
+                onOpenWorkflow={openWorkflow}
+              />
             )}
           </>
         )}
 
         {/* Kept mounted at all times so an in-progress recording survives switching
-            subtabs or top-level tabs; only shown on Manual > Recording. */}
-        <div style={{ display: activeTab === "manual" && manualView === "recording" ? undefined : "none" }}>
-          <RecordingTab active={activeTab === "manual" && manualView === "recording"} />
+            subtabs or top-level tabs; only shown on Tools > Manual > Recording.
+            The guard gained the toolsSection term with the merge and NOTHING
+            else changed: this stays a display toggle on an always-rendered
+            element, never a conditional render. Turning it into one would
+            unmount a running screen capture the moment the user looked at
+            another tab, which is a lost recording rather than a blank pane. */}
+        <div
+          style={{
+            display:
+              activeTab === "manual" && toolsSection === "manual" && manualView === "recording" ? undefined : "none",
+          }}
+        >
+          <RecordingTab active={activeTab === "manual" && toolsSection === "manual" && manualView === "recording"} />
         </div>
 
-        {activeTab === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}
+        {activeTab === "files" && (
+          <>
+            <TabSectionSwitch
+              ariaLabel="Library sections"
+              options={librarySectionOptions}
+              value={librarySection}
+              onChange={setLibrarySection}
+            />
 
-        {activeTab === "knowledge" && (
-          <KnowledgeTab
-            institutions={nav.kbInstitutions}
-            active={nav.kbInstitution}
-            onActiveChange={nav.handleKbActiveChange}
-            requestedPageId={nav.kbPageId}
-            onSelectedPageIdChange={nav.setKbPageId}
-            onDirtyChange={nav.handleKbDirtyChange}
-          />
+            {librarySection === "files" && <FilesTab onOpenWorkflow={openWorkflow} />}
+
+            {librarySection === "knowledge" && (
+              <KnowledgeTab
+                institutions={nav.kbInstitutions}
+                active={nav.kbInstitution}
+                onActiveChange={nav.handleKbActiveChange}
+                requestedPageId={nav.kbPageId}
+                onSelectedPageIdChange={nav.setKbPageId}
+                onDirtyChange={nav.handleKbDirtyChange}
+              />
+            )}
+          </>
         )}
 
-        {activeTab === "workflows" && (
-          <WorkflowsPanel
-            workflowsView={workflowsView}
-            onWorkflowsViewChange={setWorkflowsView}
-            draftsView={draftsView}
-            onDraftsViewChange={setDraftsView}
-            draftsInbox={draftsInbox}
-            draftsGradesCount={draftsGradesCount}
-            draftsMessagesCount={draftsMessagesCount}
-            onOpenWorkflow={openWorkflow}
-          />
+        {/* Course Intel is a top-level tab of its own (D24a), no longer a
+            Manual sub-view. It asks questions across every course rather than
+            living inside one tool, which is the whole argument for promoting
+            it. It has no section switch because it absorbed nothing. */}
+        {activeTab === "course-intel" && (
+          <TabShell>
+            <CourseIntelTab />
+          </TabShell>
         )}
 
       </div>

@@ -6,10 +6,15 @@ import { isManualViewType } from "../manual/manual-rail";
 import { useKbInstitutionSelection, KB_DISCARD_MESSAGE } from "../knowledge/knowledge-helpers";
 import {
   type ActiveTab,
+  type CoursesSection,
+  type ToolsSection,
+  type LibrarySection,
   type WorkflowsView,
   type DraftsView,
   type TasksView,
-  normalizeActiveTab,
+  isCoursesSection,
+  isToolsSection,
+  isLibrarySection,
   normalizeManualView,
   normalizeWorkflowsView,
   normalizeBuildView,
@@ -20,7 +25,9 @@ import {
   normalizeKbPageId,
   parseUrlState,
   buildUrlSearch,
+  resolveTabDestination,
 } from "../../url-state";
+import { DEFAULT_DESTINATION, type TabDestination } from "../tabs/tab-sections";
 
 // ActiveTab, WorkflowsView, and DraftsView live in ../../url-state since that
 // module is also the single source of truth for validating/normalizing them
@@ -35,8 +42,7 @@ export type ManualView =
   | "recording"
   | "ppt-design"
   | "artifact-design"
-  | "repo-grades"
-  | "course-intel";
+  | "repo-grades";
 const MANUAL_VIEW_KEY = "ta-manual-view";
 // The Build Courses tab hosts both flows: "new" (New Build) and "prebuilt" (Pre Built).
 export type BuildView = "new" | "prebuilt";
@@ -47,6 +53,39 @@ const WORKFLOWS_VIEW_KEY = "ta-workflows-view";
 const DRAFTS_VIEW_KEY = "ta-drafts-view";
 // The Tasks tab groups Term and Recurring as subtabs.
 const TASKS_VIEW_KEY = "ta-tasks-view";
+// Which half of each merged top-level tab is showing (D25). New keys, and
+// they follow the same "ta-" convention and the same "persist every control
+// so a reload lands where the user left off" rule as every key above.
+const COURSES_SECTION_KEY = "ta-courses-section";
+const TOOLS_SECTION_KEY = "ta-tools-section";
+const LIBRARY_SECTION_KEY = "ta-library-section";
+
+/**
+ * Resolves the whole starting location once, from the URL when it names a
+ * tab and from localStorage otherwise, so every useState initializer below
+ * reads the SAME answer instead of re-deriving it from a raw param.
+ *
+ * That matters more than it looks. A retired tab value carries a section with
+ * it - "?tab=tasks" means Courses with its Tasks section showing, and a
+ * stored "ta-active-tab" of "knowledge" (written by every build before the
+ * merge, so every returning user has one) means Library with its Knowledge
+ * section. An initializer that compared the raw param against a literal
+ * (`params.get("tab") === "manual"`, as each of these did before the merge)
+ * would see "workflows" and conclude "not my branch", silently dropping the
+ * user's sub-view. Comparing against the RESOLVED destination is what keeps
+ * a legacy link landing on the screen it names.
+ *
+ * Only called from lazy initializers, so it runs once per state, never on a
+ * re-render, and never on the server (each caller guards on `window`).
+ */
+function readNavSource(): { params: URLSearchParams; urlHasTab: boolean; destination: TabDestination } {
+  const params = new URLSearchParams(window.location.search);
+  const urlTab = params.get("tab");
+  // The URL wins over localStorage when it names a tab (AC3) - a shared link,
+  // a bookmark, or a reload after navigating.
+  const source = urlTab !== null ? urlTab : localStorage.getItem("ta-active-tab");
+  return { params, urlHasTab: urlTab !== null, destination: resolveTabDestination(source) };
+}
 
 /**
  * Owns every piece of "where in the app am I" state for the Home route: the
@@ -64,14 +103,55 @@ const TASKS_VIEW_KEY = "ta-tasks-view";
 export function useAppNavigation() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window === "undefined") return "manual";
-    // The URL wins over localStorage when it names a tab (AC3) - a shared
-    // link, a bookmark, or a reload after navigating. normalizeActiveTab is
-    // the single validator shared by the URL and localStorage paths, so an
-    // unknown/malformed value in either falls back to the same "manual"
-    // default rather than a second hand-copied check.
-    const urlTab = new URLSearchParams(window.location.search).get("tab");
-    if (urlTab !== null) return normalizeActiveTab(urlTab);
-    return normalizeActiveTab(localStorage.getItem("ta-active-tab"));
+    // resolveTabDestination is the single validator shared by the URL and
+    // localStorage paths, so an unknown/malformed value in either falls back
+    // to the same "manual" default rather than a second hand-copied check -
+    // and a RETIRED value ("tasks"/"workflows"/"knowledge", still sitting in
+    // the localStorage of every user who was here before the merge) resolves
+    // to its new home instead of silently bouncing to that default.
+    return readNavSource().destination.tab;
+  });
+  // Which half of each merged tab is showing. Resolution order, and it is the
+  // same for all three: an explicit VALID section param when the URL named a
+  // tab; otherwise the destination the tab value itself implies (this is the
+  // branch a legacy "?tab=knowledge" or a stored "ta-active-tab=workflows"
+  // takes); otherwise the persisted section key; otherwise the default. The
+  // persisted key is consulted only when the resolved tab value was NOT a
+  // retired alias - an alias names its section explicitly, and letting a
+  // stored value override it would throw away the one thing the old link
+  // actually said.
+  const [coursesSection, setCoursesSection] = useState<CoursesSection>(() => {
+    if (typeof window === "undefined") return "courses";
+    const { params, urlHasTab, destination } = readNavSource();
+    if (urlHasTab) {
+      const raw = params.get("coursesSection");
+      return isCoursesSection(raw) ? raw : destination.coursesSection;
+    }
+    if (destination.coursesSection !== DEFAULT_DESTINATION.coursesSection) return destination.coursesSection;
+    const saved = localStorage.getItem(COURSES_SECTION_KEY);
+    return isCoursesSection(saved) ? saved : destination.coursesSection;
+  });
+  const [toolsSection, setToolsSection] = useState<ToolsSection>(() => {
+    if (typeof window === "undefined") return "manual";
+    const { params, urlHasTab, destination } = readNavSource();
+    if (urlHasTab) {
+      const raw = params.get("toolsSection");
+      return isToolsSection(raw) ? raw : destination.toolsSection;
+    }
+    if (destination.toolsSection !== DEFAULT_DESTINATION.toolsSection) return destination.toolsSection;
+    const saved = localStorage.getItem(TOOLS_SECTION_KEY);
+    return isToolsSection(saved) ? saved : destination.toolsSection;
+  });
+  const [librarySection, setLibrarySection] = useState<LibrarySection>(() => {
+    if (typeof window === "undefined") return "files";
+    const { params, urlHasTab, destination } = readNavSource();
+    if (urlHasTab) {
+      const raw = params.get("librarySection");
+      return isLibrarySection(raw) ? raw : destination.librarySection;
+    }
+    if (destination.librarySection !== DEFAULT_DESTINATION.librarySection) return destination.librarySection;
+    const saved = localStorage.getItem(LIBRARY_SECTION_KEY);
+    return isLibrarySection(saved) ? saved : destination.librarySection;
   });
   const [manualView, setManualView] = useState<ManualView>(() => {
     if (typeof window === "undefined") return "course-planning";
@@ -83,11 +163,13 @@ export function useAppNavigation() {
       return "version-control";
     }
     // The URL wins over localStorage, but only when it actually names the
-    // Manual tab - a manualView param is meaningless (and ignored) on a
-    // "?tab=courses" URL. Reuses isManualViewType via normalizeManualView,
-    // the same validator the MANUAL_VIEW_KEY branch below already applies.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "manual") {
+    // Tools tab's Manual section - a manualView param is meaningless (and
+    // ignored) on a "?tab=courses" URL, and equally so on a "?tab=manual&
+    // toolsSection=workflows" one. Reuses isManualViewType via
+    // normalizeManualView, the same validator the MANUAL_VIEW_KEY branch
+    // below already applies.
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "manual") {
       return normalizeManualView(urlParams.get("manualView"));
     }
     const savedManual = localStorage.getItem(MANUAL_VIEW_KEY);
@@ -108,14 +190,15 @@ export function useAppNavigation() {
   });
   const [buildView, setBuildViewState] = useState<BuildView>(() => {
     if (typeof window === "undefined") return "prebuilt";
-    // The URL wins over localStorage, but only when it actually named Manual
-    // > Build Courses as the branch being restored into - a buildView param
-    // is meaningless outside that branch. `manualView` above has already
-    // resolved the true branch (URL-derived or localStorage-derived), so
-    // checking it here is enough to keep the whole chain consistent without
-    // re-deriving manualView from the URL a second time.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "manual" && manualView === "course-planning") {
+    // The URL wins over localStorage, but only when it actually named Tools >
+    // Manual > Build Courses as the branch being restored into - a buildView
+    // param is meaningless outside that branch. `toolsSection` and
+    // `manualView` above have already resolved the true branch (URL-derived
+    // or localStorage-derived), so checking them here is enough to keep the
+    // whole chain consistent without re-deriving either from the URL a second
+    // time.
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "manual" && manualView === "course-planning") {
       return normalizeBuildView(urlParams.get("buildView"));
     }
     // Users who last used the old Pre Built Courses tab land on that subtab.
@@ -128,11 +211,11 @@ export function useAppNavigation() {
   };
   const [contentView, setContentViewState] = useState<ContentView>(() => {
     if (typeof window === "undefined") return "modules";
-    // The URL wins over localStorage, but only when it actually named Manual
-    // > LMS as the branch being restored into - see the matching comment on
-    // buildView above.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "manual" && manualView === "content") {
+    // The URL wins over localStorage, but only when it actually named Tools >
+    // Manual > LMS as the branch being restored into - see the matching
+    // comment on buildView above.
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "manual" && manualView === "content") {
       return normalizeContentView(urlParams.get("contentView"));
     }
     // Validated through normalizeContentView - the SAME validator the URL
@@ -168,9 +251,11 @@ export function useAppNavigation() {
   const [workflowsView, setWorkflowsView] = useState<WorkflowsView>(() => {
     if (typeof window === "undefined") return "workflows";
     // The URL wins over localStorage, but only when it actually names the
-    // Workflows tab - see the matching comment on manualView above.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "workflows") {
+    // Tools tab's Workflows section - see the matching comment on manualView
+    // above. A legacy "?tab=workflows&workflowsView=drafts" link resolves to
+    // exactly that branch, which is what keeps the deep link working.
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "workflows") {
       return normalizeWorkflowsView(urlParams.get("workflowsView"));
     }
     // Migrate legacy "grade-drafts" or stored "drafts" to "drafts" view.
@@ -180,11 +265,11 @@ export function useAppNavigation() {
   });
   const [draftsView, setDraftsView] = useState<DraftsView>(() => {
     if (typeof window === "undefined") return "grades";
-    // The URL wins over localStorage, but only when it actually named
-    // Workflows > Drafts as the branch being restored into - see the
-    // matching comment on buildView above.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "workflows" && workflowsView === "drafts") {
+    // The URL wins over localStorage, but only when it actually named Tools >
+    // Workflows > Drafts as the branch being restored into - see the matching
+    // comment on buildView above.
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "manual" && toolsSection === "workflows" && workflowsView === "drafts") {
       return normalizeDraftsView(urlParams.get("draftsView"));
     }
     const saved = localStorage.getItem(DRAFTS_VIEW_KEY);
@@ -196,9 +281,11 @@ export function useAppNavigation() {
   const [tasksView, setTasksView] = useState<TasksView>(() => {
     if (typeof window === "undefined") return "term";
     // The URL wins over localStorage, but only when it actually names the
-    // Tasks tab - see the matching comment on manualView above.
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") === "tasks") {
+    // Courses tab's Tasks section - see the matching comment on manualView
+    // above. A legacy "?tab=tasks&tasksView=recurring" link resolves to
+    // exactly that branch, which is what keeps the deep link working.
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (urlHasTab && destination.tab === "courses" && coursesSection === "tasks") {
       return normalizeTasksView(urlParams.get("tasksView"));
     }
     return normalizeTasksView(localStorage.getItem(TASKS_VIEW_KEY));
@@ -218,8 +305,8 @@ export function useAppNavigation() {
   // or into null if it names nothing).
   const [focusCourseId, setFocusCourseId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") !== "courses") return null;
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (!urlHasTab || destination.tab !== "courses") return null;
     return urlParams.get("focusCourse");
   });
   // Knowledge's institution + selected page (AC1-AC3): unlike every other
@@ -243,8 +330,8 @@ export function useAppNavigation() {
     // nothing reads again. Matches how the kbPageId state below does it.
     useState(() => {
       if (typeof window === "undefined") return null;
-      const params = new URLSearchParams(window.location.search);
-      return params.get("tab") === "knowledge"
+      const { params, urlHasTab, destination } = readNavSource();
+      return urlHasTab && destination.tab === "files" && librarySection === "knowledge"
         ? normalizeKbInstitution(params.get("kbInstitution"))
         : null;
     })[0]
@@ -261,8 +348,8 @@ export function useAppNavigation() {
   // the result back up.
   const [kbPageId, setKbPageId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("tab") !== "knowledge") return null;
+    const { params: urlParams, urlHasTab, destination } = readNavSource();
+    if (!urlHasTab || destination.tab !== "files" || librarySection !== "knowledge") return null;
     return normalizeKbPageId(urlParams.get("kbPage"));
   });
   // Whether the Knowledge tab currently has an unsaved page edit (AC5) -
@@ -321,6 +408,18 @@ export function useAppNavigation() {
     localStorage.setItem(TASKS_VIEW_KEY, tasksView);
   }, [tasksView]);
 
+  useEffect(() => {
+    localStorage.setItem(COURSES_SECTION_KEY, coursesSection);
+  }, [coursesSection]);
+
+  useEffect(() => {
+    localStorage.setItem(TOOLS_SECTION_KEY, toolsSection);
+  }, [toolsSection]);
+
+  useEffect(() => {
+    localStorage.setItem(LIBRARY_SECTION_KEY, librarySection);
+  }, [librarySection]);
+
   // lastKnownSearchRef tracks the query string the browser is currently at,
   // as best we know it. It is updated both when we push/replace it
   // ourselves and when a popstate event tells us the browser already moved
@@ -335,11 +434,17 @@ export function useAppNavigation() {
   // localStorage, so lastKnownSearchRef still holds the tab-less URL. The
   // first sync run needs to stamp the URL with replaceState (no history
   // entry) rather than pushState, so Back from a bare "/" load behaves
-  // predictably (AC3). When the URL already named a tab, the initializers
-  // above derived state FROM it, so the first run is expected to be a no-op.
-  const urlHadTabOnLoadRef = useRef<boolean>(
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("tab")
-  );
+  // predictably (AC3).
+  //
+  // It is ALSO what retires a legacy tab value. D25b: an alias is a redirect,
+  // not a synonym - "?tab=knowledge" must converge on the canonical
+  // "?tab=files&librarySection=knowledge" rather than staying legacy forever.
+  // The test for "did the URL actually name a tab" is therefore not enough on
+  // its own: a legacy URL names one, and skipping the write on that basis
+  // would leave the old shape in the address bar and in whatever the user
+  // re-bookmarks from it. Comparing the freshly-built canonical target
+  // against the CURRENT search string covers both cases in one rule and is a
+  // no-op when the URL was already canonical - the common case.
   const isFirstUrlSyncRef = useRef(true);
 
   // The popstate listener below is registered once (mount-only effect, `[]`
@@ -355,17 +460,22 @@ export function useAppNavigation() {
   // it is as stable as a plain useState setter and can be depended on
   // directly.
   const activeTabRef = useRef(activeTab);
+  const librarySectionRef = useRef(librarySection);
   const kbInstitutionRef = useRef(kbInstitution);
   const kbPageIdRef = useRef(kbPageId);
   useEffect(() => {
     activeTabRef.current = activeTab;
+    librarySectionRef.current = librarySection;
     kbInstitutionRef.current = kbInstitution;
     kbPageIdRef.current = kbPageId;
-  }, [activeTab, kbInstitution, kbPageId]);
+  }, [activeTab, librarySection, kbInstitution, kbPageId]);
 
   useEffect(() => {
     const target = buildUrlSearch({
       tab: activeTab,
+      coursesSection,
+      toolsSection,
+      librarySection,
       manualView,
       workflowsView,
       buildView,
@@ -378,7 +488,11 @@ export function useAppNavigation() {
 
     if (isFirstUrlSyncRef.current) {
       isFirstUrlSyncRef.current = false;
-      if (!urlHadTabOnLoadRef.current) {
+      // replaceState, never pushState: this is the load itself, not a
+      // navigation, so it must not leave a history entry the user can go Back
+      // to. Fires whenever the address bar is not already showing the
+      // canonical string - a bare "/" load, and a legacy "?tab=tasks" one.
+      if (target !== window.location.search) {
         window.history.replaceState(null, "", target);
       }
       lastKnownSearchRef.current = target;
@@ -393,7 +507,20 @@ export function useAppNavigation() {
 
     window.history.pushState(null, "", target);
     lastKnownSearchRef.current = target;
-  }, [activeTab, manualView, workflowsView, buildView, contentView, draftsView, tasksView, kbInstitution, kbPageId]);
+  }, [
+    activeTab,
+    coursesSection,
+    toolsSection,
+    librarySection,
+    manualView,
+    workflowsView,
+    buildView,
+    contentView,
+    draftsView,
+    tasksView,
+    kbInstitution,
+    kbPageId,
+  ]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -408,8 +535,14 @@ export function useAppNavigation() {
       // guards today (switching to a different top-level tab already
       // unmounts KnowledgeTab without confirmation via the plain Tabs
       // onChange handler below, so guarding that path here too would be new,
-      // inconsistent behavior rather than closing a gap in existing behavior).
-      if (activeTabRef.current === "knowledge" && parsed.tab === "knowledge") {
+      // inconsistent behavior rather than closing a gap in existing
+      // behavior). Since the merge, "the Knowledge tab" is the Library tab
+      // with its Knowledge section showing, so both halves of the test check
+      // the pair - checking only the tab would fire the prompt on a Back that
+      // lands on Library > Files, where no page is open to lose.
+      const onKnowledgeNow = activeTabRef.current === "files" && librarySectionRef.current === "knowledge";
+      const restoringToKnowledge = parsed.tab === "files" && parsed.librarySection === "knowledge";
+      if (onKnowledgeNow && restoringToKnowledge) {
         const currentKbInstitution = kbInstitutionRef.current;
         const currentKbPageId = kbPageIdRef.current;
         const changingSelection =
@@ -433,24 +566,36 @@ export function useAppNavigation() {
       // url-state.ts) must not reset the sub-view the user had set up the
       // last time they were on that branch. Each level is gated on its own
       // immediate parent, walking the chain one step at a time, so a deep
-      // restore sets the whole chain rather than just the leaf.
+      // restore sets the whole chain rather than just the leaf. Since the
+      // merge that chain is one level longer: tab -> section -> view ->
+      // inner view, and the section is gated on the tab exactly as the views
+      // are gated on the section.
+      if (parsed.tab === "courses") {
+        setCoursesSection(parsed.coursesSection);
+        if (parsed.coursesSection === "tasks") setTasksView(parsed.tasksView);
+      }
       if (parsed.tab === "manual") {
-        setManualView(parsed.manualView);
-        if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
-        if (parsed.manualView === "content") setContentView(parsed.contentView);
+        setToolsSection(parsed.toolsSection);
+        if (parsed.toolsSection === "manual") {
+          setManualView(parsed.manualView);
+          if (parsed.manualView === "course-planning") setBuildView(parsed.buildView);
+          if (parsed.manualView === "content") setContentView(parsed.contentView);
+        }
+        if (parsed.toolsSection === "workflows") {
+          setWorkflowsView(parsed.workflowsView);
+          if (parsed.workflowsView === "drafts") setDraftsView(parsed.draftsView);
+        }
       }
-      if (parsed.tab === "knowledge") {
-        // A null URL institution (no institutions registered at push-time)
-        // means "let the hook keep resolving its own fallback" rather than
-        // forcing it to an empty string.
-        if (parsed.kbInstitution) setKbInstitution(parsed.kbInstitution);
-        setKbPageId(parsed.kbPageId);
+      if (parsed.tab === "files") {
+        setLibrarySection(parsed.librarySection);
+        if (parsed.librarySection === "knowledge") {
+          // A null URL institution (no institutions registered at push-time)
+          // means "let the hook keep resolving its own fallback" rather than
+          // forcing it to an empty string.
+          if (parsed.kbInstitution) setKbInstitution(parsed.kbInstitution);
+          setKbPageId(parsed.kbPageId);
+        }
       }
-      if (parsed.tab === "workflows") {
-        setWorkflowsView(parsed.workflowsView);
-        if (parsed.workflowsView === "drafts") setDraftsView(parsed.draftsView);
-      }
-      if (parsed.tab === "tasks") setTasksView(parsed.tasksView);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -462,6 +607,12 @@ export function useAppNavigation() {
   return {
     activeTab,
     setActiveTab,
+    coursesSection,
+    setCoursesSection,
+    toolsSection,
+    setToolsSection,
+    librarySection,
+    setLibrarySection,
     manualView,
     setManualView,
     buildView,

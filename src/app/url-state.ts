@@ -12,6 +12,11 @@
 // gets them back to where they were. Full coverage is the intended design;
 // do not narrow this scope again without asking.
 //
+// Since D25 (six top-level tabs merged into four) there is one more level in
+// that nesting: three of the four tabs hold two former tabs each, and which
+// half is showing is the "section" (coursesSection/toolsSection/
+// librarySection). The chain is tab -> section -> view -> inner view.
+//
 // No window/history access happens in this file - it stays a pure string
 // <-> state mapping so it can be unit tested directly. page.tsx owns the
 // actual window.history.pushState/replaceState calls and the popstate
@@ -21,40 +26,112 @@ import { isManualViewType, type ManualViewType, type BuildViewType } from "./com
 import { LMS_VIEWS } from "./components/manual/manual-rail";
 import type { ContentView } from "./components/content-tab/constants";
 import { normalizeInstitution } from "@/lib/knowledge-base";
+import {
+  COURSES_SECTION_ORDER,
+  DEFAULT_COURSES_SECTION,
+  DEFAULT_DESTINATION,
+  DEFAULT_LIBRARY_SECTION,
+  DEFAULT_TOOLS_SECTION,
+  LIBRARY_SECTION_ORDER,
+  RETIRED_TAB_DESTINATIONS,
+  TAB_ORDER,
+  TOOLS_SECTION_ORDER,
+  isRetiredTabValue,
+  type ActiveTab,
+  type CoursesSection,
+  type LibrarySection,
+  type TabDestination,
+  type ToolsSection,
+} from "./components/tabs/tab-sections";
 
-export type ActiveTab = "courses" | "manual" | "tasks" | "workflows" | "files" | "knowledge";
+// Re-exported so every existing import site (page.tsx, useAppNavigation.ts,
+// WorkflowsPanel.tsx) keeps resolving these types from this module, which is
+// where the URL contract has always lived. The VALUES themselves - the
+// ordered member lists - are owned by components/tabs/tab-sections.ts; this
+// module owns validation and the query-string mapping, exactly as it already
+// does for ManualViewType/ContentView.
+export type { ActiveTab, CoursesSection, ToolsSection, LibrarySection, TabDestination };
 export type WorkflowsView = "workflows" | "automations" | "drafts";
 export type TasksView = "term" | "recurring";
-// No canonical home elsewhere (unlike ManualViewType/ContentView, which are
-// owned by manual-rail.ts and content-tab/constants.ts respectively) - this
-// module is the single source of truth for it, the same as ActiveTab and
-// WorkflowsView.
+// No canonical home elsewhere (unlike ManualViewType/ContentView/ActiveTab,
+// which are owned by manual-rail.ts, content-tab/constants.ts and
+// tabs/tab-sections.ts respectively) - this module is the single source of
+// truth for it, the same as WorkflowsView.
 export type DraftsView = "grades" | "messages";
 
-const ACTIVE_TAB_VALUES: ReadonlySet<string> = new Set<ActiveTab>([
-  "courses",
-  "manual",
-  "tasks",
-  "workflows",
-  "files",
-  "knowledge",
-]);
+// Derived from TAB_ORDER rather than restating the four members, so a tab
+// added to the strip is accepted by the URL and the localStorage restore
+// automatically. A second hand-maintained list is precisely how a registered
+// view ends up rejected by its own restore guard (see manual-rail.ts's
+// isManualViewType comment for that story).
+const ACTIVE_TAB_VALUES: ReadonlySet<string> = new Set<string>(TAB_ORDER);
 
 export function isActiveTab(value: unknown): value is ActiveTab {
   return typeof value === "string" && ACTIVE_TAB_VALUES.has(value);
 }
 
-// Single source of truth for "what tab do we land on when the stored/URL
-// value is missing or unrecognized" - reused for both the localStorage
-// restore (unchanged legacy migrations included) and URL parsing, so an
-// unknown or malformed tab in the URL falls back to the exact same default
-// as today rather than a second, possibly-drifting copy of this list.
+// Single source of truth for "where do we land, in full, given this stored or
+// URL tab value" - reused for both the localStorage restore (legacy
+// migrations included) and URL parsing, so an unknown or malformed tab falls
+// back to the exact same default in both rather than through a second,
+// possibly-drifting copy of this logic.
+//
+// It returns a whole TabDestination, not just a tab, because a retired value
+// names a SECTION as well: "?tab=tasks" is Courses-with-Tasks-showing, and a
+// caller that only learned "courses" from it would drop the user on the
+// Courses section and lose exactly the screen the link asked for. That is the
+// silent bounce D25b is about, one level deeper.
+export function resolveTabDestination(value: string | null): TabDestination {
+  // Legacy "grade-drafts"/"drafts" named the pre-merge Workflows tab, so they
+  // land where "workflows" now lands: Tools, Workflows section.
+  if (value === "grade-drafts" || value === "drafts") return { ...RETIRED_TAB_DESTINATIONS.workflows };
+  // Legacy "ppt-design" named a Manual subtab that briefly lived at top
+  // level; it has always resolved to the Manual tab and still does.
+  if (value === "ppt-design") return { ...DEFAULT_DESTINATION };
+  if (isRetiredTabValue(value)) return { ...RETIRED_TAB_DESTINATIONS[value] };
+  return isActiveTab(value) ? { ...DEFAULT_DESTINATION, tab: value } : { ...DEFAULT_DESTINATION };
+}
+
+// The tab half of resolveTabDestination, kept as its own export because most
+// call sites only need the tab. Anything restoring a whole location (the
+// nav hook's initializers) must use resolveTabDestination instead, or a
+// legacy value silently loses its section.
 export function normalizeActiveTab(value: string | null): ActiveTab {
-  // Migrate legacy "grade-drafts" or "drafts" to "workflows".
-  if (value === "grade-drafts" || value === "drafts") return "workflows";
-  // Migrate legacy "ppt-design" to "manual".
-  if (value === "ppt-design") return "manual";
-  return isActiveTab(value) ? value : "manual";
+  return resolveTabDestination(value).tab;
+}
+
+// --- The merged tabs' section switches ------------------------------------
+//
+// Each of these validates one merged tab's section against the ordered list
+// tab-sections.ts owns, the same derived-not-restated shape as isContentView
+// below.
+
+const COURSES_SECTION_VALUES: ReadonlySet<string> = new Set<string>(COURSES_SECTION_ORDER);
+const TOOLS_SECTION_VALUES: ReadonlySet<string> = new Set<string>(TOOLS_SECTION_ORDER);
+const LIBRARY_SECTION_VALUES: ReadonlySet<string> = new Set<string>(LIBRARY_SECTION_ORDER);
+
+export function isCoursesSection(value: unknown): value is CoursesSection {
+  return typeof value === "string" && COURSES_SECTION_VALUES.has(value);
+}
+
+export function isToolsSection(value: unknown): value is ToolsSection {
+  return typeof value === "string" && TOOLS_SECTION_VALUES.has(value);
+}
+
+export function isLibrarySection(value: unknown): value is LibrarySection {
+  return typeof value === "string" && LIBRARY_SECTION_VALUES.has(value);
+}
+
+export function normalizeCoursesSection(value: string | null): CoursesSection {
+  return isCoursesSection(value) ? value : DEFAULT_COURSES_SECTION;
+}
+
+export function normalizeToolsSection(value: string | null): ToolsSection {
+  return isToolsSection(value) ? value : DEFAULT_TOOLS_SECTION;
+}
+
+export function normalizeLibrarySection(value: string | null): LibrarySection {
+  return isLibrarySection(value) ? value : DEFAULT_LIBRARY_SECTION;
 }
 
 const WORKFLOWS_VIEW_VALUES: ReadonlySet<string> = new Set<WorkflowsView>([
@@ -164,6 +241,16 @@ const DEFAULT_DRAFTS_VIEW = normalizeDraftsView(null);
 const DEFAULT_TASKS_VIEW = normalizeTasksView(null);
 
 const TAB_PARAM = "tab";
+// The three merged tabs' section params are NEW; every param below them is
+// unchanged in name and meaning (D25c: "No view param is renamed" - renaming
+// one would break the same class of URL D25b exists to protect, for no
+// benefit, since the params are already unique across tabs). "Section" rather
+// than "View" so the merged tab's own switch reads distinctly from the
+// pre-existing sub-view params it now nests above: "toolsSection=workflows&
+// workflowsView=drafts" says which level is which at a glance.
+const COURSES_SECTION_PARAM = "coursesSection";
+const TOOLS_SECTION_PARAM = "toolsSection";
+const LIBRARY_SECTION_PARAM = "librarySection";
 const MANUAL_VIEW_PARAM = "manualView";
 const WORKFLOWS_VIEW_PARAM = "workflowsView";
 const BUILD_VIEW_PARAM = "buildView";
@@ -175,6 +262,13 @@ const KB_PAGE_PARAM = "kbPage";
 
 export interface UrlNavState {
   tab: ActiveTab;
+  // Which half of each merged tab is showing. Present for every tab, not
+  // only the active one, for the same reason every sub-view field already is:
+  // the caller decides which one is "in effect", and a section the user set
+  // up on another tab must survive a trip through a different tab's URL.
+  coursesSection: CoursesSection;
+  toolsSection: ToolsSection;
+  librarySection: LibrarySection;
   manualView: ManualViewType;
   workflowsView: WorkflowsView;
   buildView: BuildViewType;
@@ -201,8 +295,23 @@ export interface UrlNavState {
 // returns for it.
 export function parseUrlState(search: string): UrlNavState {
   const params = new URLSearchParams(search);
+  // The tab value resolves to a whole destination first, because a RETIRED
+  // value carries a section with it ("?tab=tasks" means Courses AND its Tasks
+  // section). An explicit, VALID section param still wins over that implied
+  // one - an old link never carries a section param, so the two can only
+  // disagree on a hand-edited URL, and "the param you actually wrote wins" is
+  // the rule that is easiest to reason about. An INVALID section param falls
+  // back to the destination rather than to the tab's plain default, so
+  // "?tab=tasks&coursesSection=garbage" still lands on Tasks.
+  const destination = resolveTabDestination(params.get(TAB_PARAM));
+  const rawCoursesSection = params.get(COURSES_SECTION_PARAM);
+  const rawToolsSection = params.get(TOOLS_SECTION_PARAM);
+  const rawLibrarySection = params.get(LIBRARY_SECTION_PARAM);
   return {
-    tab: normalizeActiveTab(params.get(TAB_PARAM)),
+    tab: destination.tab,
+    coursesSection: isCoursesSection(rawCoursesSection) ? rawCoursesSection : destination.coursesSection,
+    toolsSection: isToolsSection(rawToolsSection) ? rawToolsSection : destination.toolsSection,
+    librarySection: isLibrarySection(rawLibrarySection) ? rawLibrarySection : destination.librarySection,
     manualView: normalizeManualView(params.get(MANUAL_VIEW_PARAM)),
     workflowsView: normalizeWorkflowsView(params.get(WORKFLOWS_VIEW_PARAM)),
     buildView: normalizeBuildView(params.get(BUILD_VIEW_PARAM)),
@@ -214,47 +323,67 @@ export function parseUrlState(search: string): UrlNavState {
   };
 }
 
-// Builds the canonical query string for a full tab/sub-view/sub-sub-view
-// combination. Only params that both (a) belong to the given branch and (b)
-// differ from that field's default are included - so switching to Courses/
-// Files/Knowledge never leaks a stale manualView/workflowsView/etc. from
-// whatever tab was active before, and landing on the default sub-view of a
-// tab (e.g. Manual > Build Courses > Pre Built) never carries a redundant
-// param. Omitting a default is safe because parseUrlState's normalizeX
-// fallback reconstructs that exact same default when the param is absent.
+// Builds the canonical query string for a full tab/section/sub-view/
+// sub-sub-view combination. Only params that both (a) belong to the given
+// branch and (b) differ from that field's default are included - so switching
+// to Courses/Library never leaks a stale manualView/workflowsView/etc. from
+// whatever tab was active before, and landing on the default section or
+// sub-view of a tab (e.g. Tools > Manual > Build Courses > Pre Built) never
+// carries a redundant param. Omitting a default is safe because
+// parseUrlState's normalizeX fallback reconstructs that exact same default
+// when the param is absent.
+//
+// This is also the function that RETIRES a legacy tab value: nothing here can
+// emit "tab=tasks", "tab=workflows" or "tab=knowledge", so the first sync
+// after an old link is opened rewrites the address bar to the canonical
+// shape (D25b - an alias is a redirect, not a synonym).
 export function buildUrlSearch(state: UrlNavState): string {
   const params = new URLSearchParams();
   params.set(TAB_PARAM, state.tab);
 
+  if (state.tab === "courses") {
+    if (state.coursesSection !== DEFAULT_COURSES_SECTION) {
+      params.set(COURSES_SECTION_PARAM, state.coursesSection);
+    }
+    if (state.coursesSection === "tasks" && state.tasksView !== DEFAULT_TASKS_VIEW) {
+      params.set(TASKS_VIEW_PARAM, state.tasksView);
+    }
+  }
+
   if (state.tab === "manual") {
-    if (state.manualView !== DEFAULT_MANUAL_VIEW) params.set(MANUAL_VIEW_PARAM, state.manualView);
-    if (state.manualView === "course-planning" && state.buildView !== DEFAULT_BUILD_VIEW) {
-      params.set(BUILD_VIEW_PARAM, state.buildView);
+    if (state.toolsSection !== DEFAULT_TOOLS_SECTION) {
+      params.set(TOOLS_SECTION_PARAM, state.toolsSection);
     }
-    if (state.manualView === "content" && state.contentView !== DEFAULT_CONTENT_VIEW) {
-      params.set(CONTENT_VIEW_PARAM, state.contentView);
+    if (state.toolsSection === "manual") {
+      if (state.manualView !== DEFAULT_MANUAL_VIEW) params.set(MANUAL_VIEW_PARAM, state.manualView);
+      if (state.manualView === "course-planning" && state.buildView !== DEFAULT_BUILD_VIEW) {
+        params.set(BUILD_VIEW_PARAM, state.buildView);
+      }
+      if (state.manualView === "content" && state.contentView !== DEFAULT_CONTENT_VIEW) {
+        params.set(CONTENT_VIEW_PARAM, state.contentView);
+      }
+    }
+    if (state.toolsSection === "workflows") {
+      if (state.workflowsView !== DEFAULT_WORKFLOWS_VIEW) params.set(WORKFLOWS_VIEW_PARAM, state.workflowsView);
+      if (state.workflowsView === "drafts" && state.draftsView !== DEFAULT_DRAFTS_VIEW) {
+        params.set(DRAFTS_VIEW_PARAM, state.draftsView);
+      }
     }
   }
 
-  if (state.tab === "workflows") {
-    if (state.workflowsView !== DEFAULT_WORKFLOWS_VIEW) params.set(WORKFLOWS_VIEW_PARAM, state.workflowsView);
-    if (state.workflowsView === "drafts" && state.draftsView !== DEFAULT_DRAFTS_VIEW) {
-      params.set(DRAFTS_VIEW_PARAM, state.draftsView);
+  if (state.tab === "files") {
+    if (state.librarySection !== DEFAULT_LIBRARY_SECTION) {
+      params.set(LIBRARY_SECTION_PARAM, state.librarySection);
     }
-  }
-
-  if (state.tab === "tasks") {
-    if (state.tasksView !== DEFAULT_TASKS_VIEW) params.set(TASKS_VIEW_PARAM, state.tasksView);
-  }
-
-  // AC2: kbPageId is meaningless (and ambiguous - the same id can exist under
-  // a different institution) without an institution alongside it, so it is
-  // gated on kbInstitution being present the same way e.g. contentView is
-  // gated on manualView === "content" above, rather than being able to
-  // appear on its own.
-  if (state.tab === "knowledge" && state.kbInstitution) {
-    params.set(KB_INSTITUTION_PARAM, state.kbInstitution);
-    if (state.kbPageId) params.set(KB_PAGE_PARAM, state.kbPageId);
+    // AC2: kbPageId is meaningless (and ambiguous - the same id can exist
+    // under a different institution) without an institution alongside it, so
+    // it is gated on kbInstitution being present the same way e.g.
+    // contentView is gated on manualView === "content" above, rather than
+    // being able to appear on its own.
+    if (state.librarySection === "knowledge" && state.kbInstitution) {
+      params.set(KB_INSTITUTION_PARAM, state.kbInstitution);
+      if (state.kbPageId) params.set(KB_PAGE_PARAM, state.kbPageId);
+    }
   }
 
   return `?${params.toString()}`;

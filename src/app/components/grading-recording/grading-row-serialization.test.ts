@@ -74,6 +74,12 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     overallComment: "",
     error: "",
     userEdited: false,
+    // D23c: the round-trip-stable default (deserializeGradingRows normalizes
+    // an absent status to exactly this) - a test that needs the genuinely
+    // ABSENT case explicitly overrides this to `undefined` rather than
+    // relying on omission, which would just re-apply this same default.
+    submissionTimeStatus: "unknown",
+    submittedAt: "",
     ...overrides,
   };
 }
@@ -118,6 +124,18 @@ describe("serializeGradingRows / deserializeGradingRows round trip", () => {
     expect(raw.rows[0].error).toBe("");
   });
 
+  it("D23c: clears a stale submittedAt on WRITE for a row whose submissionTimeStatus is not 'known', checked on the raw output directly - mirrors the error/state === failed discipline just above (and grading-row-serialization.test.ts's own log entry 2 on why checking raw output matters, not just the round trip)", () => {
+    const rows = [makeRow({ id: "a", submissionTimeStatus: "unknown", submittedAt: "stale timestamp from a previous known state" })];
+    const raw = JSON.parse(serializeGradingRows(rows)) as { rows: Array<{ submittedAt: string }> };
+    expect(raw.rows[0].submittedAt).toBe("");
+  });
+
+  it("D23c: normalizes an absent submissionTimeStatus to the explicit string 'unknown' on write", () => {
+    const rows = [makeRow({ id: "a" })];
+    const raw = JSON.parse(serializeGradingRows(rows)) as { rows: Array<{ submissionTimeStatus: string }> };
+    expect(raw.rows[0].submissionTimeStatus).toBe("unknown");
+  });
+
   it("item 3: userEdited survives the round trip when true", () => {
     const rows = [makeRow({ id: "a", userEdited: true })];
     const restored = deserializeGradingRows(serializeGradingRows(rows));
@@ -135,6 +153,31 @@ describe("serializeGradingRows / deserializeGradingRows round trip", () => {
     const restored = deserializeGradingRows(serializeGradingRows(rows));
     expect(restored[0].nameMatch).toBe("ambiguous");
     expect(restored[0].rosterCandidates).toEqual(["Sam Lee", "Samuel Lee"]);
+  });
+
+  // D22b/D23e/D23c: the silent-drop trap - a new field compiles fine and
+  // vanishes on reload unless it is also added to buildWireRow AND
+  // deserializeGradingRows's own explicit field lists (grading-row-
+  // serialization.ts's own header). Each of the three new D23 fields gets
+  // its own round trip here, independent of the dedicated "assessment
+  // (D22b/D23e)" / "submission timing (D23c)" describe blocks below, so a
+  // regression in the ROUND TRIP specifically (as opposed to a coercion
+  // rule) is caught by the most obvious possible test.
+  it("SABOTAGE TARGET: every new D23 field survives the round trip together on one row", () => {
+    const rows = [
+      makeRow({
+        id: "a",
+        course: "course-A",
+        assessment: "essay-2",
+        submissionTimeStatus: "known",
+        submittedAt: "2026-09-01T23:59:00Z",
+      }),
+    ];
+    const restored = deserializeGradingRows(serializeGradingRows(rows));
+    expect(restored[0].course).toBe("course-A");
+    expect(restored[0].assessment).toBe("essay-2");
+    expect(restored[0].submissionTimeStatus).toBe("known");
+    expect(restored[0].submittedAt).toBe("2026-09-01T23:59:00Z");
   });
 });
 
@@ -242,6 +285,51 @@ describe("deserializeGradingRows: coercion", () => {
     expect(deserializeGradingRows('"a string"')).toEqual([]);
     expect(deserializeGradingRows("true")).toEqual([]);
   });
+
+  it("a missing `submissionTimeStatus` coerces to 'unknown', never 'known' or 'marked-late'", () => {
+    const raw = JSON.stringify({ v: GRADING_TABLE_VERSION, rows: [{ id: "a" }] });
+    expect(deserializeGradingRows(raw)[0].submissionTimeStatus).toBe("unknown");
+  });
+
+  it("a `submissionTimeStatus` outside its three values coerces to 'unknown', never a false assertion of known or marked-late", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "a", submissionTimeStatus: "definitely-on-time-trust-me" }],
+    });
+    expect(deserializeGradingRows(raw)[0].submissionTimeStatus).toBe("unknown");
+  });
+
+  it("a `submittedAt` value stored under a non-'known' status is dropped to empty string, never resurrected", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "a", submissionTimeStatus: "unknown", submittedAt: "2026-09-01T23:59:00Z" }],
+    });
+    expect(deserializeGradingRows(raw)[0].submittedAt).toBe("");
+  });
+
+  it("a `submittedAt` value stored under 'marked-late' is also dropped - that state carries no timestamp", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "a", submissionTimeStatus: "marked-late", submittedAt: "2026-09-01T23:59:00Z" }],
+    });
+    expect(deserializeGradingRows(raw)[0].submittedAt).toBe("");
+  });
+
+  it("a `submittedAt` value stored under 'known' survives", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "a", submissionTimeStatus: "known", submittedAt: "2026-09-01T23:59:00Z" }],
+    });
+    expect(deserializeGradingRows(raw)[0].submittedAt).toBe("2026-09-01T23:59:00Z");
+  });
+
+  it("a non-string `assessment` coerces to absent rather than a default", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "a", studentName: "Maria", submissionText: "x", assessment: 12345 }],
+    });
+    expect(deserializeGradingRows(raw)[0].assessment).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -312,6 +400,9 @@ describe("frozen serialization oracle", () => {
         "Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.",
       error: "",
       userEdited: false,
+      assessment: "essay-2",
+      submissionTimeStatus: "known",
+      submittedAt: "2026-09-01T23:59:00Z",
     },
     {
       id: "grade-1-1",
@@ -326,6 +417,15 @@ describe("frozen serialization oracle", () => {
       overallComment: "",
       error: "Gemini rejected the request (400).",
       userEdited: false,
+      // D23c: explicit here (rather than left absent, like course/assessment
+      // above) because deserializeGradingRows always normalizes an absent
+      // status to the literal string "unknown" on read (see that function's
+      // own comment on why this field does not get the same "absent stays
+      // absent" treatment) - so the "still round-trips" test below, which
+      // compares oracleRows to itself after a round trip, needs the fixture
+      // to already carry the value the round trip will produce.
+      submissionTimeStatus: "unknown",
+      submittedAt: "",
     },
     {
       id: "grade-1-2",
@@ -340,6 +440,11 @@ describe("frozen serialization oracle", () => {
       overallComment: "My own hand-typed comment.",
       error: "",
       userEdited: true,
+      // D23c: "marked-late" carries no timestamp - submittedAt stays "" (the
+      // round-trip-stable form), same reasoning as grade-1-1/grade-1-3's own
+      // comment above.
+      submissionTimeStatus: "marked-late",
+      submittedAt: "",
     },
     {
       id: "grade-1-3",
@@ -354,18 +459,25 @@ describe("frozen serialization oracle", () => {
       overallComment: "",
       error: "",
       userEdited: false,
+      // D23c: see grade-1-1's own identical comment above.
+      submissionTimeStatus: "unknown",
+      submittedAt: "",
     },
   ];
 
   // Captured verbatim from a real run of serializeGradingRows against
-  // oracleRows above.
+  // oracleRows above (regenerated for D22b/D23e/D23c: assessment/
+  // submissionTimeStatus/submittedAt are now part of the wire format -
+  // grade-1-0 carries a real assessment + a "known" submission time,
+  // grade-1-2 carries a "marked-late" verdict with no timestamp, and
+  // grade-1-1/grade-1-3 exercise the all-absent/default case).
   const FROZEN_FULL =
-    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"Utilitarian calculus applied to the trolley problem shows that pulling the lever minimizes total harm, though quantifying happiness across people remains genuinely hard.","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"I could not read this submission clearly off the screen.","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"Consequentialism is the view that only outcomes matter morally.","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"No strong opinion either way on the reading.","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false}]}';
+    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"Utilitarian calculus applied to the trolley problem shows that pulling the lever minimizes total harm, though quantifying happiness across people remains genuinely hard.","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z"},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"I could not read this submission clearly off the screen.","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":""},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"Consequentialism is the view that only outcomes matter morally.","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":""},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"No strong opinion either way on the reading.","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":""}]}';
 
   // Captured verbatim from a real run of serializeGradingRowsWithoutSubmissionText
   // against the same oracleRows - identical except every submissionText is "".
   const FROZEN_NOTEXT =
-    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false}]}';
+    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z"},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":""},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":""},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":""}]}';
 
   it("matches the frozen literal byte-for-byte (full write)", () => {
     expect(serializeGradingRows(oracleRows)).toBe(FROZEN_FULL);
@@ -426,5 +538,48 @@ describe("course (D21d)", () => {
     const rows = [makeRow({ id: "a", course: "course-A" })];
     const restored = deserializeGradingRows(serializeGradingRowsWithoutSubmissionText(rows));
     expect(restored[0].course).toBe("course-A");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D22b/D23e:
+// assessment's own read/write round trip - byte-for-byte mirror of the
+// "course (D21d)" block above, since `assessment` is deliberately given the
+// identical treatment `course` already got.
+// ---------------------------------------------------------------------------
+
+describe("assessment (D22b/D23e)", () => {
+  it("round-trips a real assessment tag", () => {
+    const rows = [makeRow({ id: "a", assessment: "essay-2" })];
+    const restored = deserializeGradingRows(serializeGradingRows(rows));
+    expect(restored[0].assessment).toBe("essay-2");
+  });
+
+  it("a row that never had an assessment round-trips with it still absent, and the written JSON carries no assessment key", () => {
+    const rows = [makeRow({ id: "a" })];
+    const restored = deserializeGradingRows(serializeGradingRows(rows));
+    expect(restored[0].assessment).toBeUndefined();
+    expect(JSON.parse(serializeGradingRows(rows)).rows[0]).not.toHaveProperty("assessment");
+  });
+
+  it("a pre-existing row (no assessment key at all in the raw JSON) deserializes as UNATTRIBUTED, not adopted into any assessment", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "legacy-1", studentName: "Maria Alvarez", submissionText: "An old submission." }],
+    });
+    expect(deserializeGradingRows(raw)[0].assessment).toBeUndefined();
+  });
+
+  it("the quota-fallback write also round-trips a real assessment tag (dropping submissionText does not drop assessment)", () => {
+    const rows = [makeRow({ id: "a", assessment: "essay-2" })];
+    const restored = deserializeGradingRows(serializeGradingRowsWithoutSubmissionText(rows));
+    expect(restored[0].assessment).toBe("essay-2");
+  });
+
+  it("course and assessment round-trip together on the same row, independently", () => {
+    const rows = [makeRow({ id: "a", course: "course-A", assessment: "essay-2" })];
+    const restored = deserializeGradingRows(serializeGradingRows(rows));
+    expect(restored[0].course).toBe("course-A");
+    expect(restored[0].assessment).toBe("essay-2");
   });
 });

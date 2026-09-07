@@ -26,8 +26,9 @@
 // R0-2 (grading-row.ts's own header): GradingRow carries no student id and
 // never will - "posting one is a COMPILE ERROR, not a discipline." This file
 // honours that the same way: every function below builds its output by
-// EXPLICITLY enumerating GradingRow's twelve known fields, never by
-// spreading `...row` into the write path. A runtime value typed as
+// EXPLICITLY enumerating GradingRow's known fields (sixteen as of D23 -
+// course/assessment/submissionTimeStatus/submittedAt included; see below),
+// never by spreading `...row` into the write path. A runtime value typed as
 // `GradingRow` that somehow carried an extra property (TypeScript's
 // structural typing does not forbid this at the object-literal call sites
 // that build one) still could not leak that property into localStorage
@@ -52,13 +53,22 @@
 // data loss D21d exists to prevent. See grading-row.ts's own D21d comment on
 // `course` for why this is not the same boundary as the no-userId rule this
 // file's header describes, and does not touch it.
+//
+// docs/course-student-intelligence-acceptance-criteria.md D22b/D23e/D23c:
+// same story again for `assessment` (an assessment id, same UNATTRIBUTED-by-
+// default treatment as `course`) and `submissionTimeStatus`/`submittedAt`
+// (D23c's three-valued submission timing). Same reasoning, same place these
+// fields' round trip lives, same "not the no-userId boundary" caveat - see
+// grading-row.ts's own doc comments on those three fields.
 
-import type { GradingRow, GradingRowNameMatch, GradingRowState } from "./grading-row";
+import type { GradingRow, GradingRowNameMatch, GradingRowState, GradingRowSubmissionTimeStatus } from "./grading-row";
 
 export const GRADING_TABLE_VERSION = 1;
 
 const VALID_STATES = new Set<string>(["pending", "grading", "ready", "failed"]);
 const VALID_NAME_MATCHES = new Set<string>(["matched", "ambiguous", "unmatched", "no-roster"]);
+// docs/course-student-intelligence-acceptance-criteria.md D23c.
+const VALID_SUBMISSION_TIME_STATUSES = new Set<string>(["known", "marked-late", "unknown"]);
 
 // ---------------------------------------------------------------------------
 // Write side.
@@ -95,6 +105,14 @@ const VALID_NAME_MATCHES = new Set<string>(["matched", "ambiguous", "unmatched",
  */
 function buildWireRow(row: GradingRow, dropSubmissionText: boolean) {
   const state: GradingRowState = row.state === "grading" ? "pending" : row.state;
+  // D23c: normalized the same way `gradingRowSubmissionTimeStatus`
+  // (grading-row.ts) normalizes it for any other reader - absent reads as
+  // the explicit "unknown" member, so the persisted blob always carries a
+  // real value rather than leaving "was this row ever checked" ambiguous in
+  // storage. Inlined here (rather than importing that function) to keep
+  // this file's only dependency on grading-row.ts a type-only one, matching
+  // its own header ("Pure and DOM-free... no React, no hooks").
+  const submissionTimeStatus: GradingRowSubmissionTimeStatus = row.submissionTimeStatus ?? "unknown";
   return {
     id: row.id,
     studentName: row.studentName,
@@ -116,6 +134,19 @@ function buildWireRow(row: GradingRow, dropSubmissionText: boolean) {
     // does not change that boundary, but it is still enumerated by hand
     // rather than spread, like everything else in this function.
     course: row.course,
+    // D22b/D23e: the assessment id this row was captured under, or absent
+    // (UNATTRIBUTED) - see grading-row.ts's own doc comment on `assessment`
+    // for the honest finding on why this is absent for every row today.
+    // Named explicitly, same discipline as `course` immediately above.
+    assessment: row.assessment,
+    submissionTimeStatus,
+    // D23c: meaningful ONLY when submissionTimeStatus is "known" - cleared
+    // to "" on write otherwise (the same discipline `error` runs above,
+    // relative to `state === "failed"`), so a row that later loses its
+    // known timestamp (an instructor correction, or a re-extraction that
+    // could not find one this time) never resurrects a stale one after a
+    // reload.
+    submittedAt: submissionTimeStatus === "known" ? row.submittedAt ?? "" : "",
   };
 }
 
@@ -222,6 +253,36 @@ export function deserializeGradingRows(raw: string | null): GradingRow[] {
       // than being defaulted or guessed at.
       const course = typeof r.course === "string" && r.course ? r.course : undefined;
 
+      // D22b/D23e: same absent-stays-absent discipline as `course`
+      // immediately above - a pre-existing row (or one captured before this
+      // axis existed) has no assessment key at all in its raw JSON and
+      // stays UNATTRIBUTED (undefined) rather than being defaulted or
+      // guessed at.
+      const assessment = typeof r.assessment === "string" && r.assessment ? r.assessment : undefined;
+
+      // D23c: NOT the same "absent-stays-absent" shape as course/assessment
+      // above - a submission's timing status is always given a real,
+      // explicit member of the three-value set on read (mirrors how
+      // `nameMatch` is always given a real member, never left absent),
+      // because "we never checked this axis" and "we checked and do not
+      // know" are the SAME fact for this field - there is no third,
+      // separate "not applicable" case to preserve. A missing or
+      // unrecognized value falls back to "unknown" - the one member that
+      // already means "we do not actually know", never "known" or
+      // "marked-late", either of which would assert something the stored
+      // data never actually claimed.
+      const submissionTimeStatusRaw = typeof r.submissionTimeStatus === "string" ? r.submissionTimeStatus : "";
+      const submissionTimeStatus: GradingRowSubmissionTimeStatus = VALID_SUBMISSION_TIME_STATUSES.has(
+        submissionTimeStatusRaw
+      )
+        ? (submissionTimeStatusRaw as GradingRowSubmissionTimeStatus)
+        : "unknown";
+      // Same write-side rule, enforced again on read (mirrors `error`'s own
+      // identical read-side re-enforcement above): a stale `submittedAt`
+      // surviving in storage under a status that is not "known" must not
+      // resurrect itself.
+      const submittedAt = submissionTimeStatus === "known" && typeof r.submittedAt === "string" ? r.submittedAt : "";
+
       rows.push({
         id,
         studentName,
@@ -236,6 +297,9 @@ export function deserializeGradingRows(raw: string | null): GradingRow[] {
         error,
         userEdited,
         course,
+        assessment,
+        submissionTimeStatus,
+        submittedAt,
       });
     });
 

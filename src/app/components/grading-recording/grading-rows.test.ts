@@ -447,6 +447,13 @@ describe("gradingClearTableSignature (\"Clear table\" confirm-arm signature - AC
 // filter/sort) was added by useGradingRows.ts, which also already lives in
 // this same directory - same story, only the two expectation lists below
 // needed updating, again with no change to the scan itself.
+//
+// "ta-rec-grade-declarations" (docs/course-student-intelligence-
+// acceptance-criteria.md D23a/D23b - the per-course, per-assessment deadline
+// and authoritative-tool declaration store) was added by
+// useGradingAssessmentDeclarations.ts, a NEW file in this same directory -
+// same story again: the scan itself needed no change, only the two
+// expectation lists below.
 // ---------------------------------------------------------------------------
 
 describe("grading-recording persisted key canary (self-contained - recording-split.structure.test.ts cannot see this directory)", () => {
@@ -459,9 +466,15 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("has exactly the expected set of persisted keys (filter, sort, course, table)", () => {
+  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations)", () => {
     const keys = Array.from(new Set(combined.match(/ta-rec-grade-[a-z-]*/g) ?? [])).sort();
-    expect(keys).toEqual(["ta-rec-grade-course", "ta-rec-grade-filter", "ta-rec-grade-sort", "ta-rec-grade-table"]);
+    expect(keys).toEqual([
+      "ta-rec-grade-course",
+      "ta-rec-grade-declarations",
+      "ta-rec-grade-filter",
+      "ta-rec-grade-sort",
+      "ta-rec-grade-table",
+    ]);
   });
 
   // Mirrors recording-split.structure.test.ts's own isWired helper: a key
@@ -492,7 +505,13 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     });
   }
 
-  it.each(["ta-rec-grade-filter", "ta-rec-grade-sort", "ta-rec-grade-course", "ta-rec-grade-table"])(
+  it.each([
+    "ta-rec-grade-filter",
+    "ta-rec-grade-sort",
+    "ta-rec-grade-course",
+    "ta-rec-grade-table",
+    "ta-rec-grade-declarations",
+  ])(
     '"%s" has both a localStorage read and a localStorage write call wired to that key (directly, or via a const STORAGE_KEY_* binding)',
     (key) => {
       expect(isWired(key, "read"), `expected a localStorage read call wired to "${key}"`).toBe(true);

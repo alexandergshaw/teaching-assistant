@@ -47,6 +47,41 @@ export type GradingRowNameMatch = "matched" | "ambiguous" | "unmatched" | "no-ro
 export type GradingRowState = "pending" | "grading" | "ready" | "failed";
 
 /**
+ * docs/course-student-intelligence-acceptance-criteria.md D23c: how much is
+ * actually known about WHEN THE STUDENT SUBMITTED - never when the
+ * instructor happened to grade the row. Three states, not two, the same
+ * "no-roster is not unmatched" discipline `GradingRowNameMatch` above
+ * already runs (a genuine "we do not know" must never collapse into a
+ * definite-looking answer):
+ *
+ *   - "known"       : a real timestamp exists in `GradingRow.submittedAt` -
+ *                      read off the screen at extraction time, or typed in
+ *                      by the instructor. D23c's source (1).
+ *   - "marked-late"  : the instructor asserted while grading that this
+ *                      submission was late, without giving an exact time -
+ *                      D23c's cheap fallback source (2). `submittedAt` stays
+ *                      unset for this state; there is no timestamp to carry,
+ *                      only a verdict, and nothing that needs an actual
+ *                      instant (ordering resubmissions, an exact "how late")
+ *                      may treat this as though it had one.
+ *   - "unknown"      : neither is available - the default for every row this
+ *                      wave's extraction path produces (the extraction
+ *                      prompt is NOT changed by this work) and for every
+ *                      pre-existing row. NEVER counted as on time by
+ *                      anything that reads this field.
+ *
+ * D23c's rejected third source, spelled out because it is the mistake this
+ * type exists to make impossible: the CAPTURE time (when the instructor's
+ * screen recording happened to read the row) is never used as a stand-in
+ * for this. That is a fact about the instructor's own grading cadence, not
+ * the student's submission - grading a week after a deadline would then mark
+ * an entire class late. Nothing in this file ever reads a clock to populate
+ * this field; it is set only from a value a caller supplies from outside
+ * (an extracted timestamp, or one typed by a person), or left "unknown".
+ */
+export type GradingRowSubmissionTimeStatus = "known" | "marked-late" | "unknown";
+
+/**
  * One submission read off the recording.
  *
  * `studentName` is what was READ, verbatim - never corrected against the roster,
@@ -102,6 +137,62 @@ export interface GradingRow {
    *  useGradingRows.ts's setAllRows stamps it onto every row it does not
    *  already recognize by id) and otherwise carried forward untouched. */
   course?: string;
+  /** docs/course-student-intelligence-acceptance-criteria.md D22b/D23e: the
+   *  assessment this submission belongs to - an instructor-facing
+   *  identifier, not a foreign key into anything else in this app (nothing
+   *  else in this app has an assessment id to borrow - see below). Same
+   *  treatment `course` immediately above already got: set once at mint
+   *  time, absent means UNATTRIBUTED, and a row already carrying one is
+   *  never silently re-adopted into whichever assessment a caller later
+   *  happens to be working with - `stampGradingRowsWithAssessment` below is
+   *  the one place that discipline lives, mirroring
+   *  `stampGradingRowsWithCourse`'s own.
+   *
+   *  HONEST FINDING, verified directly against GradingRecordingPanel.tsx
+   *  before this field was added: the panel has no assessment selector of
+   *  any kind today - only a course picker and a free-text rubric box with
+   *  no name or id attached to it. So nothing currently calls
+   *  `stampGradingRowsWithAssessment` with a real value, and every row -
+   *  old and new alike - reads UNATTRIBUTED on this axis until a future
+   *  wave adds a real capture-time source (an assessment picker, or a name
+   *  typed alongside the rubric) and wires it through useGradingRows.ts the
+   *  same way `courseId` is wired today. This field and its helpers exist
+   *  now so that future wiring is a small, additive change rather than a
+   *  second course-scoping effort from scratch - not because a value is
+   *  available yet. Never populate this with a guess (the rubric text, the
+   *  course name, a hash of anything) to make it look wired; an honest
+   *  UNATTRIBUTED default is the correct value until a real source exists.
+   *
+   *  Optional (unlike `nameMatch`/`state`, which are required) for the same
+   *  reason `course` above is optional and not the reason `nameMatch` isn't:
+   *  this field was added to an ALREADY-SHIPPED type, and every existing
+   *  constructor of a `GradingRow` literal (blankGradingRow in
+   *  grading-capture-sync.ts, and this directory's own test fixtures) must
+   *  keep compiling unchanged. Not a student identity - see this file's own
+   *  header (R0-2) before assuming any new field on this row weakens it. */
+  assessment?: string;
+  /** docs/course-student-intelligence-acceptance-criteria.md D23c: how much
+   *  is actually known about when the STUDENT submitted - see
+   *  `GradingRowSubmissionTimeStatus`'s own doc comment for the three
+   *  states and why capture time is never used as a proxy.
+   *
+   *  Optional for the identical reason `assessment` above is optional
+   *  (an already-shipped type; existing constructors must keep compiling),
+   *  NOT because "unknown" is any less of a real fact about a row. Absent
+   *  reads IDENTICALLY to the explicit "unknown" member, never as "known" -
+   *  `gradingRowSubmissionTimeStatus` below is the one place that
+   *  normalization happens, so no caller has to re-derive it inline. */
+  submissionTimeStatus?: GradingRowSubmissionTimeStatus;
+  /** An ISO-ish timestamp string, meaningful ONLY when
+   *  `gradingRowSubmissionTimeStatus(row)` is "known" - ignore this value
+   *  otherwise, even if some caller left something in it (the same
+   *  discipline `error` already runs relative to `state === "failed"`,
+   *  enforced on write in grading-row-serialization.ts's buildWireRow).
+   *  NEVER the time the instructor captured/graded the row - see
+   *  `GradingRowSubmissionTimeStatus`'s own doc comment and D23c: that is
+   *  when the INSTRUCTOR worked, not when the STUDENT submitted. Nothing in
+   *  this file ever reads a clock to populate this field. */
+  submittedAt?: string;
 }
 
 /**
@@ -198,4 +289,89 @@ export function stampGradingRowsWithCourse(
  */
 export function countUnattributedGradingRows(rows: ReadonlyArray<GradingRow>): number {
   return rows.filter((r) => r.course === undefined).length;
+}
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D22b/D23e:
+// assessment scoping. Mirrors the D21d course-scoping section above in
+// shape and reasoning - see `assessment`'s own doc comment on `GradingRow`
+// for the honest finding on why nothing calls `stampGradingRowsWithAssessment`
+// with a real value today (GradingRecordingPanel.tsx has no assessment
+// selector), and why that is the correct current state rather than a gap to
+// paper over with a guess.
+// ---------------------------------------------------------------------------
+
+/**
+ * D22b/D23e: does `row` belong to the given assessment scope? `undefined`
+ * means the UNATTRIBUTED scope - a row with no assessment tag matches only
+ * that scope, never a real assessment id. Exact equality only, deliberately
+ * never `??`/a fallback - identical discipline to `gradingRowMatchesCourse`
+ * above, for the identical reason: coalescing an unattributed row into
+ * "whichever assessment happens to be selected" is exactly the
+ * misattribution this exists to prevent.
+ */
+export function gradingRowMatchesAssessment(row: GradingRow, assessmentScope: string | undefined): boolean {
+  return row.assessment === assessmentScope;
+}
+
+/**
+ * D22b/D23e: stamps `assessmentScope` onto every row in `next` whose id was
+ * NOT present in `previous` (a brand-new row this call is introducing). A
+ * row whose id WAS already present in `previous` keeps `previous`'s own
+ * assessment value exactly, regardless of what `next` happens to carry for
+ * it - identical shape and reasoning to `stampGradingRowsWithCourse` above;
+ * see that function's own doc comment. SABOTAGE TARGET (see this
+ * directory's test files): unconditionally stamping every row in `next`
+ * with `assessmentScope`, rather than checking `previousById` first, is
+ * exactly the "adopt an already-attributed row into whichever scope is
+ * selected now" defect this function exists to prevent.
+ */
+export function stampGradingRowsWithAssessment(
+  next: ReadonlyArray<GradingRow>,
+  previous: ReadonlyArray<GradingRow>,
+  assessmentScope: string | undefined
+): GradingRow[] {
+  const previousById = new Map(previous.map((r) => [r.id, r] as const));
+  return next.map((r) => {
+    const prior = previousById.get(r.id);
+    return { ...r, assessment: prior ? prior.assessment : assessmentScope };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D23c: submission
+// timing. Two small pure helpers so the "unknown never counts as known/on
+// time" rule lives in exactly one place, rather than every future caller
+// (a late/on-time computation, a resubmission-ordering pass) re-testing
+// `submissionTimeStatus` inline and risking a slightly different, slightly
+// wrong version of the same check.
+// ---------------------------------------------------------------------------
+
+/**
+ * D23c: normalizes `row.submissionTimeStatus` - absent (a row from before
+ * this axis existed, or built by a constructor this repo has not updated)
+ * reads IDENTICALLY to the explicit "unknown" member. Every other reader in
+ * this file, and every future reader elsewhere, should call this rather
+ * than reading `row.submissionTimeStatus` directly, so "absent" and
+ * "explicitly unknown" can never quietly drift into being treated
+ * differently by two different call sites.
+ */
+export function gradingRowSubmissionTimeStatus(row: GradingRow): GradingRowSubmissionTimeStatus {
+  return row.submissionTimeStatus ?? "unknown";
+}
+
+/**
+ * D23c: does `row` actually carry a known submission instant? True only for
+ * "known" WITH a non-empty `submittedAt` - "marked-late" deliberately reads
+ * as NOT known here even though it lets a caller conclude lateness some
+ * other way, because it carries no timestamp value, and "unknown" (whether
+ * explicit or merely absent, per `gradingRowSubmissionTimeStatus` above)
+ * must never be treated as though a time were available. SABOTAGE TARGET:
+ * loosening this to `gradingRowSubmissionTimeStatus(row) !== "unknown"` (or
+ * dropping the `submittedAt` check) would let "marked-late" or a
+ * missing-but-truthy `submittedAt` masquerade as a real timestamp - exactly
+ * the collapse D23c forbids.
+ */
+export function gradingRowHasKnownSubmissionTime(row: GradingRow): boolean {
+  return gradingRowSubmissionTimeStatus(row) === "known" && !!row.submittedAt;
 }

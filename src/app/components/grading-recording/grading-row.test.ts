@@ -26,6 +26,10 @@ import {
   gradingRowMatchesCourse,
   stampGradingRowsWithCourse,
   countUnattributedGradingRows,
+  gradingRowMatchesAssessment,
+  stampGradingRowsWithAssessment,
+  gradingRowSubmissionTimeStatus,
+  gradingRowHasKnownSubmissionTime,
   type GradingRow,
 } from "./grading-row";
 
@@ -43,6 +47,13 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     overallComment: "",
     error: "",
     userEdited: false,
+    // D23c: the round-trip-stable default (mirrors deserializeGradingRows's
+    // own normalization of absent -> "unknown") - a test that needs to
+    // exercise the genuinely ABSENT case explicitly overrides this to
+    // `undefined` rather than relying on omission, since omission here
+    // would just re-apply this same default.
+    submissionTimeStatus: "unknown",
+    submittedAt: "",
     ...overrides,
   };
 }
@@ -149,6 +160,135 @@ describe("course scoping (D21d)", () => {
       expect(countUnattributedGradingRows([])).toBe(0);
       expect(countUnattributedGradingRows([makeRow({ id: "a", course: "course-A" })])).toBe(0);
       expect(countUnattributedGradingRows([makeRow({ id: "a" })])).toBe(1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D22b/D23e:
+// assessment scoping. An assessment id is not a student id and does not
+// touch R0-2's no-userId boundary - see grading-row.ts's own header and
+// this field's own doc comment. Deliberately structured as a byte-for-byte
+// mirror of the "course scoping (D21d)" block above, since
+// stampGradingRowsWithAssessment/gradingRowMatchesAssessment are themselves
+// deliberate mirrors of their course-scoped counterparts.
+// ---------------------------------------------------------------------------
+
+describe("assessment scoping (D22b/D23e)", () => {
+  describe("gradingRowMatchesAssessment", () => {
+    it("a row with a real assessment tag matches only that exact assessment", () => {
+      const row = makeRow({ id: "a", assessment: "essay-2" });
+      expect(gradingRowMatchesAssessment(row, "essay-2")).toBe(true);
+      expect(gradingRowMatchesAssessment(row, "essay-3")).toBe(false);
+    });
+
+    it("SABOTAGE TARGET: an unattributed row (no assessment tag) matches ONLY the unattributed scope, never a real assessment id", () => {
+      const row = makeRow({ id: "a" }); // assessment left undefined
+      expect(gradingRowMatchesAssessment(row, undefined)).toBe(true);
+      expect(gradingRowMatchesAssessment(row, "essay-2")).toBe(false);
+    });
+
+    it("rows for assessment A are not visible when assessment B is selected", () => {
+      const rows = [makeRow({ id: "a", assessment: "essay-2" }), makeRow({ id: "b", assessment: "essay-3" })];
+      expect(rows.filter((r) => gradingRowMatchesAssessment(r, "essay-3")).map((r) => r.id)).toEqual(["b"]);
+    });
+  });
+
+  describe("stampGradingRowsWithAssessment", () => {
+    it("stamps a brand-new row (id not in `previous`) with the current scope", () => {
+      const next = [makeRow({ id: "new" })];
+      const result = stampGradingRowsWithAssessment(next, [], "essay-2");
+      expect(result[0].assessment).toBe("essay-2");
+    });
+
+    it("SABOTAGE TARGET: preserves an EXISTING row's own prior assessment exactly, even if `next` carries something else for it - a whole-table replace must never adopt a row that was already attributed elsewhere into the currently selected assessment", () => {
+      const previous = [makeRow({ id: "existing", assessment: "essay-2" })];
+      // `next` (as if built by an external merge that forgot to carry the
+      // assessment forward) has no assessment tag at all on the same id.
+      const next = [makeRow({ id: "existing" })];
+      const result = stampGradingRowsWithAssessment(next, previous, "essay-3");
+      expect(result[0].assessment).toBe("essay-2"); // NOT "essay-3" - the prior attribution wins
+    });
+
+    it("stamps with `undefined` (unattributed) when the current scope itself is unattributed", () => {
+      const result = stampGradingRowsWithAssessment([makeRow({ id: "new" })], [], undefined);
+      expect(result[0].assessment).toBeUndefined();
+    });
+
+    it("stamping course and assessment together preserves both axes independently - a row keeps its own prior value on EACH axis even when the other axis's scope changes", () => {
+      const previous = [makeRow({ id: "existing", course: "course-A", assessment: "essay-2" })];
+      const next = [makeRow({ id: "existing" })];
+      const withCourse = stampGradingRowsWithCourse(next, previous, "course-B");
+      const withBoth = stampGradingRowsWithAssessment(withCourse, previous, "essay-3");
+      expect(withBoth[0].course).toBe("course-A");
+      expect(withBoth[0].assessment).toBe("essay-2");
+    });
+  });
+
+  describe("an existing (pre-D22b) row stays unattributed on BOTH axes", () => {
+    it("a row built before this axis existed has neither course nor assessment", () => {
+      const row = makeRow({ id: "legacy" });
+      expect(row.course).toBeUndefined();
+      expect(row.assessment).toBeUndefined();
+      expect(gradingRowMatchesCourse(row, undefined)).toBe(true);
+      expect(gradingRowMatchesAssessment(row, undefined)).toBe(true);
+    });
+
+    it("stamping such a row with real scopes on both axes at once attributes it correctly on each", () => {
+      const stampedCourse = stampGradingRowsWithCourse([makeRow({ id: "a" })], [], "course-A");
+      const stampedBoth = stampGradingRowsWithAssessment(stampedCourse, [], "essay-2");
+      expect(stampedBoth[0].course).toBe("course-A");
+      expect(stampedBoth[0].assessment).toBe("essay-2");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D23c: submission
+// timing is honestly three-valued, and "unknown" must never read as "known"
+// (which is what a future late/on-time computation would otherwise mistake
+// for a real, on-time-or-late-comparable instant).
+// ---------------------------------------------------------------------------
+
+describe("submission timing (D23c)", () => {
+  describe("gradingRowSubmissionTimeStatus", () => {
+    it("returns the explicit status when one was set", () => {
+      expect(gradingRowSubmissionTimeStatus(makeRow({ submissionTimeStatus: "known", submittedAt: "2026-09-01T12:00:00Z" }))).toBe(
+        "known"
+      );
+      expect(gradingRowSubmissionTimeStatus(makeRow({ submissionTimeStatus: "marked-late" }))).toBe("marked-late");
+    });
+
+    it("normalizes an absent status (a row built before this axis existed) to 'unknown', never 'known'", () => {
+      // Explicit `undefined` override, not omission - makeRow's own default
+      // for this field is already "unknown" (its round-trip-stable form),
+      // so relying on omission here would not actually exercise the
+      // genuinely-absent case this test is named for.
+      expect(gradingRowSubmissionTimeStatus(makeRow({ id: "legacy", submissionTimeStatus: undefined }))).toBe("unknown");
+    });
+  });
+
+  describe("gradingRowHasKnownSubmissionTime", () => {
+    it("true only for 'known' with a real submittedAt value", () => {
+      expect(
+        gradingRowHasKnownSubmissionTime(makeRow({ submissionTimeStatus: "known", submittedAt: "2026-09-01T12:00:00Z" }))
+      ).toBe(true);
+    });
+
+    it("SABOTAGE TARGET: 'unknown' (explicit or absent) is never treated as a known submission time", () => {
+      expect(gradingRowHasKnownSubmissionTime(makeRow({ submissionTimeStatus: "unknown" }))).toBe(false);
+      // Explicit `undefined` override - see the identical note on
+      // gradingRowSubmissionTimeStatus's own "normalizes an absent status" test
+      // above for why omission alone would not exercise true absence here.
+      expect(gradingRowHasKnownSubmissionTime(makeRow({ id: "legacy", submissionTimeStatus: undefined }))).toBe(false);
+    });
+
+    it("'marked-late' is a real verdict but is NOT a known timestamp - it carries no submittedAt value to be known", () => {
+      expect(gradingRowHasKnownSubmissionTime(makeRow({ submissionTimeStatus: "marked-late" }))).toBe(false);
+    });
+
+    it("a 'known' status with no actual submittedAt value (a malformed row) is not treated as known either", () => {
+      expect(gradingRowHasKnownSubmissionTime(makeRow({ submissionTimeStatus: "known", submittedAt: "" }))).toBe(false);
     });
   });
 });

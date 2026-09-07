@@ -1847,6 +1847,46 @@ Three things make it work:
   single-course fetch already does, with courses that did not fit reported
   rather than dropped.
 
+## D24d-AS-BUILT. SEQUENTIAL WAS TOO SLOW, AND "unreachable" WAS TOO VAGUE
+
+Two things changed between this decision and what shipped, both discovered by
+running the budget rather than reasoning about it.
+
+**Live courses read three at a time, not one.** The per-course soft deadline
+above is intact, but strictly sequential reads meant the 30s/12s budget landed
+only two or three live courses - the rest were cut by serialization alone,
+before the deadline was the real constraint. They now run through a fixed-size
+pull-worker pool, `CROSS_COURSE_LIVE_CONCURRENCY = 3`.
+
+Bounded rather than unbounded, and that is not caution for its own sake: this
+fans out against ONE instructor's Canvas token, and spending someone else's
+rate limit to make our answer look fast is not a trade this repo gets to make.
+Each worker re-checks the deadline before starting its own course, so the
+budget still governs; completion order is never observed, and the final
+ordering is rebuilt from the task list.
+
+**A cut course now has its own reason.** D24d said courses that did not fit are
+"reported rather than dropped", and they were - as `unreachable`, which was
+wrong in a way worth naming. `unreachable` means Canvas was asked and did not
+answer: a real fault, worth investigating. A course the deadline never reached
+is not faulty and was never contacted. Reporting one as the other sends an
+instructor to debug a connection that is working perfectly.
+
+`LmsUnavailableReason` gained `"budget-cut"`. Its sentence names the shared
+time budget as the cause and ends with the actionable half - a single-course
+question has the whole budget to itself, so asking about that course alone
+genuinely will read it. Without that clause the reader is told a course was
+skipped and given no way to see it.
+
+Note `unreachable` is untouched. It deliberately carries no detail, because
+flattening it is what stops the timing of a failure revealing whether a host
+and port exist; `"budget-cut"` says nothing about the remote host at all, so it
+carries detail without weakening that.
+
+D24e's rule holds across both changes: a budget-cut course makes
+`superlativeBasis` partial, so a ranking over an incomplete set still refuses
+to present a superlative.
+
 ## D24e. A RANKING THAT SILENTLY OMITS COURSES IS WORSE THAN A LIST THAT DOES
 
 This is the sharpest new risk and it deserves its own decision.
@@ -1871,8 +1911,11 @@ late work" is not.
 answer. A cross-course answer mixes live and offline courses in one response,
 so the mode belongs per course.
 
-That is an additive contract change, and it is blocked while a concurrent agent
-holds the contract file - recorded here, made once that lands, not raced.
+That is an additive contract change, and it was blocked while a concurrent
+agent held the contract file - recorded here, made once that landed, not raced.
+
+**AS BUILT:** landed. `LmsConnection` is per course throughout the cross-course
+path, and the same contract file later took `"budget-cut"` (see D24d-AS-BUILT).
 
 ## D24g. WHAT DOES NOT CHANGE
 

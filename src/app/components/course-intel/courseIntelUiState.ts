@@ -2,52 +2,28 @@
 
 // localStorage persistence for the Course Intel view's controls - the
 // standing project rule that every new textbox/select/checkbox persists
-// across reload under a ta- key. Modeled directly on
-// src/app/components/repo-grades/repoGradesUiState.ts: a plain top-level key
-// for the course picker (D13 of docs/course-student-intelligence-acceptance-
-// criteria.md - "Persist the course_hub uuid under ta-course-intel-course -
-// never a Canvas URL, never the Canvas numeric id"), and a per-COURSE blob
-// for the draft question, the same shape repoGradesUiState.ts's
-// loadFolderSelection/persistFolderSelection use for that view's per-course
-// folder choice - one course's half-typed question means nothing under
-// another course, so switching courses must never show course A's draft
-// under course B's picker.
+// across reload under a ta- key.
+//
+// THE COURSE PICKER IS GONE (D24), and with it `ta-course-intel-course`. The
+// tab is one textbox: the question itself names the course, or names none and
+// is answered across all of them, so there is no selection left to persist.
+// The key and its load/persist pair were removed rather than left dormant -
+// dead persistence reads as a control that still exists.
+//
+// The draft question keeps its per-scope blob shape, which now holds exactly
+// one entry. That is deliberately not simplified to a flat key: the shape
+// change would orphan any draft already stored in a reader's browser, to save
+// nothing. useCourseIntel.ts writes it under a single constant scope.
 //
 // Every read/write here is guarded by `typeof window` so this module is safe
 // to import from server-rendered code paths, matching every other UI-state
 // module in this codebase.
 
-const COURSE_KEY = "ta-course-intel-course";
 const QUESTION_KEY = "ta-course-intel-question";
 
-/** The course_hub row id (a uuid) the picker last had selected - "" when
- * nothing has ever been chosen. NEVER a Canvas URL and NEVER the Canvas
- * numeric course id (D13/S18 of the acceptance-criteria doc): those two ids
- * are easy to cross precisely because this derivation is copy-pasted per
- * feature rather than centralised, so this module only ever touches the
- * course_hub uuid - useCourseIntel.ts derives the Canvas numeric id fresh,
- * on every render, via parseCanvasCourseId(course.canvasUrl), and never
- * stores it here or anywhere else. */
-export function loadCourseIntelCourseId(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return localStorage.getItem(COURSE_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function persistCourseIntelCourseId(courseId: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(COURSE_KEY, courseId);
-  } catch {
-    // localStorage can throw (private browsing, quota) - losing persistence
-    // for one change is acceptable, crashing the tab is not. Matches
-    // repoGradesUiState.ts's persistRepoGradesUiState.
-  }
-}
-
+/** Reads the question blob, tolerating anything that is not the shape this
+ * module writes - a hand-edited value, a half-written entry, or a blob from an
+ * older version. A malformed store yields an empty draft, never a throw. */
 function parseQuestionByCourse(raw: string | null): Record<string, string> {
   if (!raw) return {};
   try {
@@ -84,6 +60,8 @@ export function persistCourseIntelQuestion(courseId: string, question: string): 
     byCourse[courseId] = question;
     localStorage.setItem(QUESTION_KEY, JSON.stringify(byCourse));
   } catch {
-    // best-effort persistence only, matching persistCourseIntelCourseId above.
+    // best-effort persistence only: localStorage can throw (private
+    // browsing, quota) and losing one draft is acceptable where crashing
+    // the tab is not.
   }
 }

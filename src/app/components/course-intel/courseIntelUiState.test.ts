@@ -6,12 +6,7 @@
 // header for why: it confirmed live that typeof window/localStorage are both
 // "undefined" under plain Node here).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  loadCourseIntelCourseId,
-  loadCourseIntelQuestion,
-  persistCourseIntelCourseId,
-  persistCourseIntelQuestion,
-} from "./courseIntelUiState";
+import { loadCourseIntelQuestion, persistCourseIntelQuestion } from "./courseIntelUiState";
 
 class FakeStorage {
   private store = new Map<string, string>();
@@ -55,55 +50,23 @@ afterEach(() => {
 
 // Ordinal canary (this directory's own version of repoGradesUiState.test.ts's
 // "persists ... under N distinct ta- keys" test) - every persisted control in
-// this view is accounted for here under its exact ta- key, so a future
-// control added to this module without a matching persist call, or a key
-// renamed without updating every read site, turns this test red.
-describe("courseIntelUiState - ordinal canary (two persisted controls, two ta- keys)", () => {
-  it("persists the selected course id and the per-course draft question under exactly their two named ta- keys", () => {
-    persistCourseIntelCourseId("course-9");
-    persistCourseIntelQuestion("course-9", "How is Jamie doing?");
-    expect(fakeStorage.getItem("ta-course-intel-course")).toBe("course-9");
-    expect(fakeStorage.getItem("ta-course-intel-question")).toBe(JSON.stringify({ "course-9": "How is Jamie doing?" }));
-  });
-});
-
-describe("loadCourseIntelCourseId / persistCourseIntelCourseId", () => {
-  it("returns \"\" when nothing is stored", () => {
-    expect(loadCourseIntelCourseId()).toBe("");
-  });
-
-  it("round-trips a course id through persist then load", () => {
-    persistCourseIntelCourseId("course-1");
-    expect(loadCourseIntelCourseId()).toBe("course-1");
-  });
-
-  // D13: this key holds the course_hub uuid ONLY. This module has no
-  // knowledge of what a "valid" value looks like (that is the caller's job,
-  // matching institution/canvasUrl validation), so it round-trips a
-  // uuid-shaped string as plainly as any other - the guarantee this test
-  // actually pins is narrower and more important: this module never derives
-  // or stores a Canvas numeric id anywhere, which the ta-course-intel-course
-  // ordinal canary above already proves by construction (there is no second
-  // key here to hold one).
-  it("round-trips a uuid-shaped course id unchanged", () => {
-    persistCourseIntelCourseId("3fa85f64-5717-4562-b3fc-2c963f66afa6");
-    expect(loadCourseIntelCourseId()).toBe("3fa85f64-5717-4562-b3fc-2c963f66afa6");
-  });
-
-  it("returns \"\" when window is undefined (SSR-safe read)", () => {
-    delete (globalThis as { window?: unknown }).window;
-    expect(loadCourseIntelCourseId()).toBe("");
-  });
-
-  it("does nothing when persisting with window undefined", () => {
-    delete (globalThis as { window?: unknown }).window;
-    expect(() => persistCourseIntelCourseId("course-1")).not.toThrow();
+// this view is accounted for here under its exact ta- key, so a control added
+// to this module without a matching persist call, or a key renamed without
+// updating every read site, turns this test red.
+//
+// IT WAS TWO KEYS AND IS NOW ONE. D24 removed the course picker, so
+// `ta-course-intel-course` and its load/persist pair are gone. The second
+// assertion below is the one that matters: the retired key must not be written
+// again. Deleting a persisted control is easy to do by half - leaving the
+// writer in place stores a value nothing ever reads, which looks exactly like
+// a control that still works.
+describe("courseIntelUiState - ordinal canary (one persisted control, one ta- key)", () => {
+  it("persists the draft question under its named ta- key, and writes no other", () => {
+    persistCourseIntelQuestion("all-courses", "How is Jamie doing?");
+    expect(fakeStorage.getItem("ta-course-intel-question")).toBe(
+      JSON.stringify({ "all-courses": "How is Jamie doing?" })
+    );
     expect(fakeStorage.getItem("ta-course-intel-course")).toBeNull();
-  });
-
-  it("swallows a localStorage write failure (quota/private mode) rather than throwing", () => {
-    fakeStorage.throwOnSet = true;
-    expect(() => persistCourseIntelCourseId("course-1")).not.toThrow();
   });
 });
 

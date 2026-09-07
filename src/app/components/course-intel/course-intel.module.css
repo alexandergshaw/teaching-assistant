@@ -119,3 +119,15 @@
   flex-direction: column;
   gap: var(--space-1);
 }
+
+/* D20e's permanent mode line - shown above an answer that was NOT built from
+   a live LMS. Deliberately NOT an alert: it is a fact about the answer, not a
+   problem with it, so it inherits the muted .fieldHint colour from
+   page.module.css and adds only a quiet left rule to separate it from the
+   prose it describes. No dismiss affordance exists anywhere for it, by
+   design - it is equally true on the hundredth question as the first. */
+.modeLine {
+  margin: 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--border-soft);
+}

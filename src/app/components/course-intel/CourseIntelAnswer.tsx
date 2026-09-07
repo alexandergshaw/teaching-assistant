@@ -66,10 +66,17 @@ function signalBadgeClass(kind: ConcernSignalKind): string {
 
 export interface CourseIntelAnswerProps {
   asking: boolean;
-  /** "" when not asking; one of D17's two phase strings ("Gathering Canvas
+  /** "" when not asking; one of D17's two phase strings ("Gathering course
    * data..." / "Asking the AI...") otherwise. */
   statusText: string;
   askError: string | null;
+  /**
+   * A REFUSAL, not a failure: the question named a student who matches two
+   * roster entries, or named more than one student. Nothing was sent to the
+   * model and nothing went wrong, so it renders in the muted hint style
+   * rather than the error style - and the question is still in the box.
+   */
+  askRefusal: string | null;
   answer: ResolvedCourseIntelAnswer | null;
 }
 
@@ -86,7 +93,7 @@ export interface CourseIntelAnswerProps {
  * region) so a screen reader announces only what actually changed on each
  * update, not the whole block every time.
  */
-export default function CourseIntelAnswer({ asking, statusText, askError, answer }: CourseIntelAnswerProps) {
+export default function CourseIntelAnswer({ asking, statusText, askError, askRefusal, answer }: CourseIntelAnswerProps) {
   return (
     <div role="status" aria-live="polite" aria-atomic="false" className={styles.status}>
       {asking && <span className={pageStyles.fieldHint}>{statusText}</span>}
@@ -97,8 +104,32 @@ export default function CourseIntelAnswer({ asking, statusText, askError, answer
         </p>
       )}
 
-      {!asking && !askError && answer && (
+      {!asking && !askError && askRefusal && <p className={pageStyles.fieldHint}>{askRefusal}</p>}
+
+      {!asking && !askError && !askRefusal && answer && (
         <div className={styles.answerBlock}>
+          {/* D20e: THE MODE LINE. Rendered above the prose, always, whenever
+              this answer was not built from a live LMS - and it carries WHICH
+              of the three unavailable states applies plus what that means for
+              the answer, because "Canvas is not connected for this course, so
+              this answer uses only the work you recorded here" is actionable
+              and "offline mode" is not.
+
+              PERMANENT AND NON-DISMISSIBLE, copying the content tab's own
+              live-then-export note (ContentTab.tsx, a bare <p> with no close
+              control and no timer): it is equally true on the hundredth
+              question as on the first, and it is re-derived from the server's
+              own `connection` on every answer rather than remembered.
+
+              NOT an alert style. This is a FACT about the answer, not a
+              problem with it - an export-only course is a normal kind of
+              course here - so it uses the same muted hint style as the
+              disclosure line above the Ask box. The string itself is composed
+              server-side by describeLmsConnection, so the browser and the
+              server can never disagree about which state applied. */}
+          {answer.connectionNote && (
+            <p className={`${pageStyles.fieldHint} ${styles.modeLine}`}>{answer.connectionNote}</p>
+          )}
           {/* markdownToHtml, never markdown-lite (S13) - this text quotes or
               summarises student-authored content, and this function is the
               only renderer in this codebase that escapes before emitting and
@@ -129,30 +160,51 @@ export default function CourseIntelAnswer({ asking, statusText, askError, answer
                   ))}
                 </div>
                 <p className={pageStyles.fieldHint}>
-                  These figures come straight from Canvas grades and submissions, not from the AI&apos;s own judgment. This is
-                  not a diagnosis - it never explains why a number looks the way it does.
+                  {answer.connection.state === "live"
+                    ? "These figures come straight from Canvas grades and submissions, not from the AI's own judgment."
+                    : "These figures were computed from the work you recorded for this course, not from the AI's own judgment."}{" "}
+                  This is not a diagnosis - it never explains why a number looks the way it does.
                 </p>
               </>
             ) : (
               // D15's exact empty-case prose, no strip, no list.
               <p className={pageStyles.fieldHint}>
-                Based on the available Canvas data, no student in this course currently shows a concern signal - missing or
-                late work, a low course score, or an ungraded backlog.
+                {answer.connection.state === "live"
+                  ? "Based on the available Canvas data, no student in this course currently shows a concern signal - missing or late work, a low course score, or an ungraded backlog."
+                  : "Based on the work you recorded for this course, no student currently shows a concern signal. This checked only what is recorded here, not an LMS gradebook."}
               </p>
             ))}
 
           {/* AC6/D6: what was left out is stated, never silently dropped.
-              Each omission's own `.detail` string is already the full
-              sentence (server-authored, per-source or per-student per D6) -
-              this list only renders it, it never composes one. */}
-          {answer.omissions.length > 0 && (
+              Each string is already the full sentence - server-authored, from
+              a live assembly's own omissions or from the offline path's
+              coverage notes, merged into ONE list by useCourseIntel.ts so
+              this component has no branch that could render one kind and
+              forget the other. It only renders them; it never composes one. */}
+          {answer.notes.length > 0 && (
             <ul className={styles.omissionsList}>
-              {answer.omissions.map((omission, i) => (
+              {answer.notes.map((note, i) => (
                 <li key={i} className={pageStyles.fieldHint}>
-                  {omission.detail}
+                  {note}
                 </li>
               ))}
             </ul>
+          )}
+
+          {/* D1's receipt, made visible. The model was told to explain every
+              row it was handed; a row it dropped is still on screen above,
+              and this says so outright rather than leaving a shorter list to
+              look entirely normal. */}
+          {answer.unexplainedStudentIndices.length > 0 && (
+            <p className={pageStyles.fieldHint}>
+              The AI did not write about every student listed above. Their figures are still shown here.
+            </p>
+          )}
+
+          {answer.persistError && (
+            <p className={pageStyles.fieldHint}>
+              This answer is on screen but was not saved to your history: {answer.persistError}
+            </p>
           )}
 
           {/* D2/D9: every answer is rebuilt from Canvas fresh, per question -
@@ -160,7 +212,11 @@ export default function CourseIntelAnswer({ asking, statusText, askError, answer
               (see useCourseIntel.ts's own header). Stating that plainly here
               is what makes the absence of a "generated N minutes ago" badge
               a deliberate choice rather than an omission. */}
-          <span className={pageStyles.ghMeta}>Canvas data gathered fresh for this question - nothing here is cached.</span>
+          <span className={pageStyles.ghMeta}>
+            {answer.connection.state === "live"
+              ? "Canvas data gathered fresh for this question - nothing here is cached."
+              : "Built fresh from your recorded work for this question - nothing here is cached."}
+          </span>
         </div>
       )}
     </div>

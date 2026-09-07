@@ -1,17 +1,22 @@
 "use client";
 
-// Course Intel - a Manual subtab that answers questions about one course's
-// students by joining their discussion replies, messages, and grades
+// Course Intel - the view that answers questions about one course's students
+// by joining their discussion replies, messages and grades
 // (docs/course-student-intelligence-acceptance-criteria.md, decisions
-// D13-D17). A per-course tool with its own internal course picker, modeled
-// directly on src/app/components/repo-grades/index.tsx - see
-// useCourseIntel.ts for every piece of state and the (not-yet-existing)
-// POST /api/course-intel/ask call this view drives.
+// D13-D17 and D20-D23). A per-course tool with its own internal course
+// picker, modeled directly on src/app/components/repo-grades/index.tsx - see
+// useCourseIntel.ts for every piece of state and the POST
+// /api/course-intel/ask call this view drives.
 //
-// This wave is the navigation-shell + client UI only: the assembly and the
-// model call are a wave 2 Route Handler (D3) that does not exist yet.
-// Nothing in this file imports from it - useCourseIntel.ts calls it as a
-// plain URL string and documents the wire contract it expects.
+// A COURSE WITH NO CANVAS LINK STILL ASKS AND STILL ANSWERS (D20a/D20e).
+// Export-only courses are a normal kind of course in this app: they carry a
+// roster, cached repo bindings, and everything the instructor recorded
+// against them. So `courseNotConfiguredReason` renders as a muted note about
+// what a Canvas link would ADD, and the Ask box below is NOT gated on it -
+// gating it would refuse the answer the instructor can actually have, which
+// is the failure D20e's "one path that degrades" exists to prevent. The
+// answer itself carries the mode line saying which of the four states it was
+// built in (CourseIntelAnswer.tsx).
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Button from "@mui/material/Button";
@@ -37,14 +42,14 @@ export default function CourseIntelTab() {
     asking,
     statusText,
     askError,
+    askRefusal,
     lastAnswer,
     ask,
   } = useCourseIntel();
 
-  // The Ask section only makes sense once a real, configured course is
-  // selected - matches repo-grades' own showRowDependentFields gate on its
-  // sibling controls (RepoGradesControls.tsx).
-  const canAsk = !!course && !courseNotConfiguredReason;
+  // A SELECTED COURSE IS THE ONLY PRECONDITION. Not a Canvas URL, not an
+  // institution, not a successful roster read - see this file's header.
+  const canAsk = !!course;
 
   return (
     <>
@@ -79,16 +84,20 @@ export default function CourseIntelTab() {
         )}
       </div>
 
+      {/* NOT role="alert", and not the error style: this course is not broken,
+          it simply has no live LMS to read. Stating it before the question is
+          asked is what makes the mode line on the answer a confirmation
+          rather than a surprise. */}
       {course && courseNotConfiguredReason && (
-        <p className={pageStyles.error} role="alert">
-          {courseNotConfiguredReason}
-        </p>
+        <p className={pageStyles.fieldHint}>{courseNotConfiguredReason}</p>
       )}
 
+      {/* A roster read that failed is worth saying - it is how names are
+          resolved on the live path - but it does not stop the question:
+          the route degrades to the recorded work and resolves names from the
+          course roster instead. */}
       {course && !courseNotConfiguredReason && rosterError && (
-        <p className={pageStyles.error} role="alert">
-          {rosterError}
-        </p>
+        <p className={pageStyles.fieldHint}>{rosterError}</p>
       )}
 
       {canAsk && (
@@ -103,8 +112,8 @@ export default function CourseIntelTab() {
               Equally true on the hundredth question as the first, so it is
               rendered every time this section renders, unconditionally. */}
           <p className={pageStyles.fieldHint} style={{ margin: 0 }}>
-            Asking a question here sends this course&apos;s discussion posts, messages, and grades to a third-party AI
-            provider to generate the answer.
+            Asking a question here sends this course&apos;s discussion posts, messages, and grades - or, when there is no
+            Canvas connection, the work you recorded in this browser - to a third-party AI provider to generate the answer.
           </p>
 
           <div className={styles.askRow}>
@@ -147,7 +156,13 @@ export default function CourseIntelTab() {
             </p>
           )}
 
-          <CourseIntelAnswer asking={asking} statusText={statusText} askError={askError} answer={lastAnswer} />
+          <CourseIntelAnswer
+            asking={asking}
+            statusText={statusText}
+            askError={askError}
+            askRefusal={askRefusal}
+            answer={lastAnswer}
+          />
         </div>
       )}
     </>

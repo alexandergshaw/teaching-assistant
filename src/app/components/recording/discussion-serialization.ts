@@ -144,6 +144,17 @@ export interface ReplyRow {
   // them is a reply REPLACEMENT (a redraft, or an edited-during-dispatch
   // discard), since answers quoting a discarded draft describe nothing.
   questions?: PostQuestion[];
+  // docs/course-student-intelligence-acceptance-criteria.md D21d: the
+  // course_hub row id (a uuid) this row was captured under. Absent for a row
+  // that predates course-scoping (a pre-existing global table's row) or was
+  // captured with no course selected - both read as UNATTRIBUTED, never
+  // adopted into whichever course happens to be open later. Set once, at
+  // mint time (mergeCapturedPosts in discussion-capture.ts never sets it;
+  // useReplyRows.ts's mergeIncoming stamps it onto exactly the ids that call
+  // reports as newly added) and otherwise carried forward untouched by every
+  // row-preserving spread in this file and in discussion-capture.ts's own
+  // merge - see the COURSE SCOPING section below for the read side.
+  course?: string;
 }
 
 const VALID_RESOURCE_QUERY_SOURCES: ReadonlySet<string> = new Set(["concepts", "post", "post-reply"]);
@@ -297,6 +308,68 @@ export function nextRowAfterRemoveQuestion(row: ReplyRow, question: string): Rep
 }
 
 // ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D21d: course
+// scoping. The table stays ONE localStorage value under ONE literal storage
+// key (useReplyRows.ts's own table-key constant) rather than gaining a
+// second key per course - a per-course key would have to be assembled from a
+// runtime course id at the call site, and this directory's own key-inventory
+// canary (recording-split.structure.test.ts) can only ever see a FIXED set
+// of literal keys spelled out in source, never a computed one (see
+// useReplyRows.ts's own header comment on why a template literal breaks
+// that scan). So scoping is a property of each ROW (the `course` field
+// above), not of the storage location, and useReplyRows.ts filters the one
+// shared table down to a single course's own rows at read time.
+// ---------------------------------------------------------------------------
+
+/**
+ * D21d: does `row` belong to the given course scope? `undefined` means the
+ * UNATTRIBUTED scope - a row with no course tag matches only that scope,
+ * never a real course id, and a row carrying a real course id matches only
+ * that exact id. Exact equality only, deliberately never `??`/a fallback:
+ * coalescing an unattributed row into "whichever course happens to be open"
+ * is exactly the misattribution D21d exists to prevent, so there is no
+ * lenient path here to reach for by accident.
+ */
+export function replyRowMatchesCourse(row: ReplyRow, courseScope: string | undefined): boolean {
+  return row.course === courseScope;
+}
+
+/**
+ * D21d: stamps `courseScope` onto every row in `rows` whose id is in
+ * `addedIds` - the ids `mergeCapturedPosts` (discussion-capture.ts) itself
+ * reports as brand new on this call. A row NOT in `addedIds` (an existing
+ * row, whether touched or untouched by this merge) is returned with the
+ * SAME object reference, never re-stamped - its own course attribution,
+ * whatever it already is, must survive every later merge unchanged. Pure,
+ * so useReplyRows.ts's mergeIncoming has a test surface this repo's
+ * node-env vitest can actually reach for the stamping itself - the same
+ * reason nextRowAfterRemoveQuestion above exists as its own function rather
+ * than inline in a useCallback body.
+ */
+export function stampNewRowsWithCourse(
+  rows: ReadonlyArray<ReplyRow>,
+  addedIds: ReadonlyArray<string>,
+  courseScope: string | undefined
+): ReplyRow[] {
+  if (addedIds.length === 0) return rows as ReplyRow[];
+  const added = new Set(addedIds);
+  return rows.map((r) => (added.has(r.id) ? { ...r, course: courseScope } : r));
+}
+
+/**
+ * D21d: counts rows carrying no course tag at all - a pre-existing global
+ * table's rows (migrated forward with nothing guessed at, per D21d) plus any
+ * row captured with no course selected. Exposed so a caller can tell "this
+ * browser has N rows waiting to be assigned to a course" apart from "the
+ * current course has no rows" - the two are never the same fact, and
+ * collapsing them would hide exactly the data D21d says must not be
+ * dropped.
+ */
+export function countUnattributedReplyRows(rows: ReadonlyArray<ReplyRow>): number {
+  return rows.filter((r) => r.course === undefined).length;
+}
+
+// ---------------------------------------------------------------------------
 // AC22: serialization. `deserializeReplyTable` must NEVER throw, following
 // `coerceMessageDraftPayload`'s discipline (src/lib/message-drafts.ts:54):
 // drop what is malformed rather than fail the whole load.
@@ -443,6 +516,12 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
       // thrown on.
       const questions = coercePostQuestions(r.questions);
 
+      // D21d: absent-stays-absent, exactly like handledAt/skipped above - a
+      // row from before this feature (or one captured with no course
+      // selected) has no course key at all in its raw JSON and stays
+      // UNATTRIBUTED (undefined) rather than being defaulted or guessed at.
+      const course = typeof r.course === "string" && r.course ? r.course : undefined;
+
       rows.push({
         id,
         author,
@@ -466,6 +545,7 @@ export function deserializeReplyTable(raw: string | null): ReplyRow[] {
         resourceQuerySource,
         resourceSearchOutcome,
         questions,
+        course,
       });
     });
 

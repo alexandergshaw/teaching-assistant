@@ -8,6 +8,9 @@ import {
   serializeMessageTable,
   deserializeMessageTable,
   coerceThreadMessages,
+  messageRowMatchesCourse,
+  stampNewMessageRowsWithCourse,
+  countUnattributedMessageRows,
   type MessageThreadRow,
   type ThreadMessage,
 } from "./message-serialization";
@@ -291,5 +294,97 @@ describe("MAX_TABLE_BYTES trimming", () => {
     const oldest = restored.find((r) => r.id === "oldest");
     expect(oldest?.messagesTrimmed).toBe(true);
     expect(oldest?.messages).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D21d: course
+// scoping - mirrors discussion-serialization.test.ts's own D21d block.
+// ---------------------------------------------------------------------------
+
+describe("course scoping (D21d)", () => {
+  describe("messageRowMatchesCourse", () => {
+    it("a row with a real course tag matches only that exact course", () => {
+      const row = makeRow({ id: "a", course: "course-A" });
+      expect(messageRowMatchesCourse(row, "course-A")).toBe(true);
+      expect(messageRowMatchesCourse(row, "course-B")).toBe(false);
+    });
+
+    it("SABOTAGE TARGET: an unattributed row (no course tag) matches ONLY the unattributed scope, never a real course id", () => {
+      const row = makeRow({ id: "a" });
+      expect(messageRowMatchesCourse(row, undefined)).toBe(true);
+      expect(messageRowMatchesCourse(row, "course-A")).toBe(false);
+    });
+
+    it("rows for course A are not visible when course B is selected", () => {
+      const rows = [makeRow({ id: "a", course: "course-A" }), makeRow({ id: "b", course: "course-B" })];
+      expect(rows.filter((r) => messageRowMatchesCourse(r, "course-B")).map((r) => r.id)).toEqual(["b"]);
+    });
+  });
+
+  describe("stampNewMessageRowsWithCourse", () => {
+    it("tags only the rows in addedIds, leaving every other row's course untouched (same reference)", () => {
+      const untouched = makeRow({ id: "old", course: "course-A" });
+      const added = makeRow({ id: "new" });
+      const result = stampNewMessageRowsWithCourse([untouched, added], ["new"], "course-B");
+      expect(result[0]).toBe(untouched);
+      expect(result[1].course).toBe("course-B");
+    });
+
+    it("an empty addedIds list returns the SAME array reference", () => {
+      const rows = [makeRow({ id: "a" })];
+      expect(stampNewMessageRowsWithCourse(rows, [], "course-A")).toBe(rows);
+    });
+  });
+
+  describe("countUnattributedMessageRows", () => {
+    it("distinguishes 'no rows' from 'rows exist but none unattributed' from 'unattributed rows are waiting'", () => {
+      expect(countUnattributedMessageRows([])).toBe(0);
+      expect(countUnattributedMessageRows([makeRow({ id: "a", course: "course-A" })])).toBe(0);
+      expect(countUnattributedMessageRows([makeRow({ id: "a" })])).toBe(1);
+    });
+  });
+
+  describe("deserializeMessageTable migration (D21d)", () => {
+    it("a pre-existing global-table row (no course key at all) deserializes as UNATTRIBUTED, not adopted into any course", () => {
+      const raw = JSON.stringify({
+        v: MESSAGE_TABLE_VERSION,
+        rows: [
+          {
+            id: "legacy-1",
+            subject: "Question",
+            student: "Devon",
+            messages: [{ sender: "Devon", text: "hi", fromMe: false, precision: "none" }],
+            omittedMessages: 0,
+            answered: false,
+            reply: "",
+            state: "pending",
+            userEdited: false,
+            firstSeenAt: 1,
+            order: 0,
+          },
+        ],
+      });
+      expect(deserializeMessageTable(raw)[0].course).toBeUndefined();
+    });
+
+    it("round-trips a real course tag", () => {
+      const rows = [makeRow({ id: "a", course: "course-A" })];
+      const restored = deserializeMessageTable(serializeMessageTable(rows));
+      expect(restored[0].course).toBe("course-A");
+    });
+
+    it("a row that never had a course round-trips with it still absent, and the written JSON carries no course key", () => {
+      const rows = [makeRow({ id: "a" })];
+      const restored = deserializeMessageTable(serializeMessageTable(rows));
+      expect(restored[0].course).toBeUndefined();
+      expect(JSON.parse(serializeMessageTable(rows)).rows[0]).not.toHaveProperty("course");
+    });
+
+    it("a non-string persisted course coerces to absent rather than a default", () => {
+      const raw = JSON.parse(serializeMessageTable([makeRow({ id: "a" })]));
+      raw.rows[0].course = 12345;
+      expect(deserializeMessageTable(JSON.stringify(raw))[0].course).toBeUndefined();
+    });
   });
 });

@@ -21,7 +21,13 @@
 //      matched). Reverted.
 
 import { describe, it, expect } from "vitest";
-import { joinFeedback, type GradingRow } from "./grading-row";
+import {
+  joinFeedback,
+  gradingRowMatchesCourse,
+  stampGradingRowsWithCourse,
+  countUnattributedGradingRows,
+  type GradingRow,
+} from "./grading-row";
 
 function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
   return {
@@ -86,5 +92,63 @@ describe("joinFeedback (CC14 - the Copy feedback button's payload)", () => {
 
   it("a single populated field copies as itself, with no separator", () => {
     expect(joinFeedback(makeRow({ overallComment: "Only this." }))).toBe("Only this.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D21d: course
+// scoping. A course id is not a student id and does not touch R0-2's
+// no-userId boundary (see grading-row.ts's own header and this field's own
+// doc comment) - these tests exercise only the course-scoping behaviour.
+// ---------------------------------------------------------------------------
+
+describe("course scoping (D21d)", () => {
+  describe("gradingRowMatchesCourse", () => {
+    it("a row with a real course tag matches only that exact course", () => {
+      const row = makeRow({ id: "a", course: "course-A" });
+      expect(gradingRowMatchesCourse(row, "course-A")).toBe(true);
+      expect(gradingRowMatchesCourse(row, "course-B")).toBe(false);
+    });
+
+    it("SABOTAGE TARGET: an unattributed row (no course tag) matches ONLY the unattributed scope, never a real course id", () => {
+      const row = makeRow({ id: "a" }); // course left undefined
+      expect(gradingRowMatchesCourse(row, undefined)).toBe(true);
+      expect(gradingRowMatchesCourse(row, "course-A")).toBe(false);
+    });
+
+    it("rows for course A are not visible when course B is selected", () => {
+      const rows = [makeRow({ id: "a", course: "course-A" }), makeRow({ id: "b", course: "course-B" })];
+      expect(rows.filter((r) => gradingRowMatchesCourse(r, "course-B")).map((r) => r.id)).toEqual(["b"]);
+    });
+  });
+
+  describe("stampGradingRowsWithCourse", () => {
+    it("stamps a brand-new row (id not in `previous`) with the current scope", () => {
+      const next = [makeRow({ id: "new" })];
+      const result = stampGradingRowsWithCourse(next, [], "course-A");
+      expect(result[0].course).toBe("course-A");
+    });
+
+    it("SABOTAGE TARGET: preserves an EXISTING row's own prior course exactly, even if `next` carries something else for it - a whole-table replace must never adopt a row that was already attributed elsewhere into the current scope", () => {
+      const previous = [makeRow({ id: "existing", course: "course-A" })];
+      // `next` (as if built by an external merge that forgot to carry the
+      // course forward) has no course tag at all on the same id.
+      const next = [makeRow({ id: "existing" })];
+      const result = stampGradingRowsWithCourse(next, previous, "course-B");
+      expect(result[0].course).toBe("course-A"); // NOT "course-B" - the prior attribution wins
+    });
+
+    it("stamps with `undefined` (unattributed) when the current scope itself is unattributed", () => {
+      const result = stampGradingRowsWithCourse([makeRow({ id: "new" })], [], undefined);
+      expect(result[0].course).toBeUndefined();
+    });
+  });
+
+  describe("countUnattributedGradingRows", () => {
+    it("distinguishes 'no rows' from 'rows exist but none unattributed' from 'unattributed rows are waiting'", () => {
+      expect(countUnattributedGradingRows([])).toBe(0);
+      expect(countUnattributedGradingRows([makeRow({ id: "a", course: "course-A" })])).toBe(0);
+      expect(countUnattributedGradingRows([makeRow({ id: "a" })])).toBe(1);
+    });
   });
 });

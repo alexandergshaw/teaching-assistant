@@ -40,6 +40,18 @@
 // hook (useGradingRows.ts) is the only caller and is the only place that
 // touches `window.localStorage`, exactly like discussion-serialization.ts /
 // useReplyRows.ts's own division of labour.
+//
+// docs/course-student-intelligence-acceptance-criteria.md D21d: this file is
+// touched by that group's course-scoping work even though it is not one of
+// the three files that group was handed by name - GradingRow's own `course`
+// field (added to grading-row.ts) round-trips through the explicit field
+// list in buildWireRow/deserializeGradingRows below, and this is the ONLY
+// place that list lives. Leaving it unedited would compile fine (both
+// functions build their own object shape, not `GradingRow` itself) but would
+// silently drop `course` on every reload - the exact per-course-attribution
+// data loss D21d exists to prevent. See grading-row.ts's own D21d comment on
+// `course` for why this is not the same boundary as the no-userId rule this
+// file's header describes, and does not touch it.
 
 import type { GradingRow, GradingRowNameMatch, GradingRowState } from "./grading-row";
 
@@ -96,6 +108,14 @@ function buildWireRow(row: GradingRow, dropSubmissionText: boolean) {
     overallComment: row.overallComment,
     error: state === "failed" ? row.error : "",
     userEdited: row.userEdited,
+    // docs/course-student-intelligence-acceptance-criteria.md D21d: the
+    // course_hub row id this row was captured under, or absent
+    // (UNATTRIBUTED) - see grading-row.ts's own doc comment on this field.
+    // Named explicitly, same as every field above (this file's own header:
+    // never `...row`) - a course id is not a student id and adding it here
+    // does not change that boundary, but it is still enumerated by hand
+    // rather than spread, like everything else in this function.
+    course: row.course,
   };
 }
 
@@ -195,6 +215,13 @@ export function deserializeGradingRows(raw: string | null): GradingRow[] {
       // must never grant a protection the stored data did not actually earn.
       const userEdited = typeof r.userEdited === "boolean" ? r.userEdited : false;
 
+      // D21d: absent-stays-absent, exactly like every other optional field
+      // in this repo's persisted-row coercers - a row from before this
+      // feature (or one captured with no course selected) has no course key
+      // at all in its raw JSON and stays UNATTRIBUTED (undefined) rather
+      // than being defaulted or guessed at.
+      const course = typeof r.course === "string" && r.course ? r.course : undefined;
+
       rows.push({
         id,
         studentName,
@@ -208,6 +235,7 @@ export function deserializeGradingRows(raw: string | null): GradingRow[] {
         overallComment,
         error,
         userEdited,
+        course,
       });
     });
 

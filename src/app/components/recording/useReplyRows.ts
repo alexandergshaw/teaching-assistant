@@ -41,6 +41,14 @@
 // This synchronous-read guarantee is why `mergeIncoming` can return
 // `addedIds` (and `capped`) directly, instead of forcing the caller to
 // learn about a merge's outcome from a later render.
+//
+// COURSE SCOPING (docs/course-student-intelligence-acceptance-criteria.md
+// D21d): optional `courseId` (a course_hub uuid). Storage stays one array
+// under one literal key; `rows`/`rawRows`/`totalCount` are FILTERED to rows
+// whose `course` (discussion-serialization.ts's D21d section) matches it.
+// Defaults to "" -> the same `undefined` scope an untagged row carries, so
+// every caller keeps today's behaviour until a later wave threads a real id
+// through useDiscussionReplies.ts. `clearTable`/`moveRow` are scope-aware.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
@@ -65,7 +73,13 @@ import { filterRowsByQuery, sortReplyRowsForTable, moveVisibleRow, REPLY_ROW_HAY
 // via the discussion-capture.ts re-export - that file's own re-export list
 // is a different, concurrently-owned surface this migration has no reason
 // to touch.
-import { mergeLegacyReplyFlags, nextRowAfterRemoveQuestion } from "./discussion-serialization";
+import {
+  mergeLegacyReplyFlags,
+  nextRowAfterRemoveQuestion,
+  replyRowMatchesCourse,
+  stampNewRowsWithCourse,
+  countUnattributedReplyRows,
+} from "./discussion-serialization";
 // docs/post-questions-acceptance-criteria.md Q1: type-only, imported ONLY
 // from the leaf - never re-exported from discussion-serialization.ts or
 // discussion-capture.ts (see that leaf's own comment on `questions`).
@@ -161,7 +175,7 @@ export interface UseReplyRowsReturn {
    *  what lets Set D's `React.memo` rows skip re-rendering. This is a
    *  SUBSET of the table when a filter is active - see `totalCount` below
    *  and F0-2/F11: nothing that arms a destructive action or reports a
-   *  whole-table count may read `rows.length` any more. */
+   *  whole-table count may read `rows.length` any more. D21d: also narrowed by scope. */
   rows: ReplyRow[];
   sort: ReplySort;
   setSort: (next: ReplySort) => void;
@@ -181,7 +195,8 @@ export interface UseReplyRowsReturn {
    *  `Delete table` is armed would silently re-arm it against a different
    *  number, and the confirmation would name a count that does not match
    *  what it deletes - REGRESSION entry 258's exact defect, already hit
-   *  twice in this feature. Do not remove this in favour of `rows.length`. */
+   *  twice in this feature. Do not remove this in favour of `rows.length`.
+   *  D21d: also scoped by course. */
   totalCount: number;
 
   /** F0-2/F11 fixer pass (sort-filter review B1-B5): the UNFILTERED row
@@ -198,8 +213,13 @@ export interface UseReplyRowsReturn {
    *  mid-dispatch and get quietly dropped - never drafted, never marked
    *  failed, never retried. REGRESSION entry 258's class, one level below
    *  the counts F11 already covers. Route every whole-table row read
-   *  through this field; `rows` is for what is RENDERED only. */
+   *  through this field; `rows` is for what is RENDERED only. D21d: also
+   *  scoped by course. */
   rawRows: ReplyRow[];
+
+  /** D21d: rows in the WHOLE table (every course) with no course tag - "N
+   *  await assignment", a fact distinct from THIS course's totalCount. */
+  unattributedCount: number;
 
   /** AC12 (set A's pure `mergeCapturedPosts`, which itself enforces the
    *  AC23b row ceiling and reports `capped` - see BL5) wrapped with the
@@ -381,10 +401,19 @@ export interface UseReplyRowsReturn {
   resourcesUnchangedSince: (id: string, snapshot: Map<string, number>) => boolean;
 }
 
-export function useReplyRows(): UseReplyRowsReturn {
+/** REQUIRED, not defaulted - it shipped defaulted for one wave only because
+ * the call sites were then outside the implementing group's file set. Omitting
+ * it COMPILES and silently mints every row unattributed: nothing fails, nothing
+ * warns, and the per-course scoping this function exists for is absent. This
+ * repo shipped that shape twice this week. Required makes it error TS2554.
+ * Pass the course_hub uuid; "" still legally means "no course selected". */
+export function useReplyRows(courseId: string): UseReplyRowsReturn {
+  // D21d: "" -> the same `undefined` scope an untagged row carries.
+  const courseScope = courseId.length > 0 ? courseId : undefined;
+
   // AC24: read once, in the initializer, guarded by `typeof window`. The
   // table is not owned by a capture session - it renders before, during and
-  // after one.
+  // after one. D21d: reads the WHOLE table - scoped below, in `scopedRawRows`.
   const [rawRows, setRawRows] = useState<ReplyRow[]>(() => {
     if (typeof window === "undefined") return [];
     return deserializeReplyTable(window.localStorage.getItem(STORAGE_KEY_TABLE));
@@ -587,7 +616,8 @@ export function useReplyRows(): UseReplyRowsReturn {
       // MAX_TABLE_ROWS in the first place. See discussion-capture.ts's
       // mergeCapturedPosts doc comment.
       const merged = mergeCapturedPosts(rowsRef.current, incoming, now);
-      const finalRows = merged.rows;
+      // D21d: mergeCapturedPosts never sets `course` - stamp only the new ids.
+      const finalRows = stampNewRowsWithCourse(merged.rows, merged.addedIds, courseScope);
 
       // Skip the write entirely when nothing actually changed (every row
       // came back the same object reference) - a still-scrolling session
@@ -603,7 +633,7 @@ export function useReplyRows(): UseReplyRowsReturn {
 
       return { addedIds: merged.addedIds, capped: merged.capped };
     },
-    [commitRows, scheduleSave]
+    [commitRows, scheduleSave, courseScope]
   );
 
   // BL4: delegates to a tested pure `moveRow`-shaped helper rather than an
@@ -617,7 +647,9 @@ export function useReplyRows(): UseReplyRowsReturn {
   const moveRow = useCallback(
     (id: string, dir: "up" | "down") => {
       const curSort = sortRef.current;
-      const displayed = sortReplyRowsForTable(rowsRef.current, curSort);
+      // D21d: move only operates on THIS scope - never a swap neighbour from another.
+      const scopedRows = rowsRef.current.filter((r) => replyRowMatchesCourse(r, courseScope));
+      const displayed = sortReplyRowsForTable(scopedRows, curSort);
       if (!displayed.some((r) => r.id === id)) return; // AC40: the row is gone under us - intentional no-op
 
       // F15: swap against adjacency in the VISIBLE (filtered) list, not the
@@ -639,7 +671,9 @@ export function useReplyRows(): UseReplyRowsReturn {
       const result = moveVisibleRow(displayed, visibleIds, curSort, id, dir);
       if (result.atBoundary) return; // boundary - D announces this locally, see AC14
 
-      commitRows(result.rows);
+      // D21d: splice back in among every row moveVisibleRow never saw.
+      const otherRows = rowsRef.current.filter((r) => !replyRowMatchesCourse(r, courseScope));
+      commitRows([...otherRows, ...result.rows]);
       scheduleSave(STRUCTURAL_DEBOUNCE_MS);
 
       // AC53: sort moves to "custom" in the same tick as the reorder (two
@@ -655,7 +689,7 @@ export function useReplyRows(): UseReplyRowsReturn {
         }
       }
     },
-    [commitRows, scheduleSave]
+    [commitRows, scheduleSave, courseScope]
   );
 
   const editReply = useCallback(
@@ -720,12 +754,17 @@ export function useReplyRows(): UseReplyRowsReturn {
   );
 
   const clearTable = useCallback(() => {
-    editSeqRef.current.clear();
-    resourceSeqRef.current.clear();
+    // D21d: clears only THIS scope. Drops editSeq/resourceSeq only for the
+    // ids removed, never a blanket `.clear()` that would hit another scope.
+    const idsInScope = rowsRef.current.filter((r) => replyRowMatchesCourse(r, courseScope)).map((r) => r.id);
+    idsInScope.forEach((id) => {
+      editSeqRef.current.delete(id);
+      resourceSeqRef.current.delete(id);
+    });
     tableEpochRef.current += 1; // AC45 - handler body, not inside a setState updater (AC42)
-    commitRows([]);
+    commitRows(rowsRef.current.filter((r) => !replyRowMatchesCourse(r, courseScope)));
     scheduleSave(STRUCTURAL_DEBOUNCE_MS);
-  }, [commitRows, scheduleSave]);
+  }, [commitRows, scheduleSave, courseScope]);
 
   const markDrafting = useCallback(
     (ids: string[]) => {
@@ -917,10 +956,18 @@ export function useReplyRows(): UseReplyRowsReturn {
   // not re-sort/re-filter and hand Set D's memoized rows a new array for
   // nothing. F0-2: this is the DISPLAY array only - `totalCount` below is
   // what every count/signature/empty-state site must read instead.
+  // D21d: the course-scoped slice - every field below reads this, not `rawRows`.
+  const scopedRawRows = useMemo(
+    () => rawRows.filter((r) => replyRowMatchesCourse(r, courseScope)),
+    [rawRows, courseScope]
+  );
+  // D21d: independent of `courseScope` on purpose - see the return type.
+  const unattributedCount = useMemo(() => countUnattributedReplyRows(rawRows), [rawRows]);
+
   const rows = useMemo(() => {
-    const sorted = sortReplyRowsForTable(rawRows, sort);
+    const sorted = sortReplyRowsForTable(scopedRawRows, sort);
     return filterRowsByQuery(sorted, filterText, REPLY_ROW_HAYSTACK);
-  }, [rawRows, sort, filterText]);
+  }, [scopedRawRows, sort, filterText]);
 
   return {
     rows,
@@ -928,8 +975,9 @@ export function useReplyRows(): UseReplyRowsReturn {
     setSort,
     filterText,
     setFilterText,
-    totalCount: rawRows.length,
-    rawRows,
+    totalCount: scopedRawRows.length,
+    rawRows: scopedRawRows,
+    unattributedCount,
     mergeIncoming,
     moveRow,
     editReply,

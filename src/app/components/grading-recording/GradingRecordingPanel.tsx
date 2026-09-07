@@ -234,7 +234,10 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   const selectedCourse = (courses ?? []).find((c) => c.id === courseId) ?? null;
   const selectedRosterText = selectedCourse?.roster ?? null;
 
-  const gradingRows = useGradingRows();
+  // COURSE-SCOPED - see the note in useDiscussionReplies. This one matters
+  // most: recorded grades are the offline gradebook, and an unattributed
+  // grade cannot be counted against any course's assessments.
+  const gradingRows = useGradingRows(courseId);
   const rawRowsRef = useRef(gradingRows.rawRows);
   useEffect(() => {
     rawRowsRef.current = gradingRows.rawRows;

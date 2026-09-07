@@ -383,3 +383,48 @@ describe("frozen serialization oracle", () => {
     expect(FROZEN_FULL).not.toMatch(/userId|canvasSubmissionId|"studentId"/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D21d: course
+// scoping's read/write round trip. Mirrors discussion-serialization.test.ts's
+// own D21d migration block - a course id is not a student id (the test just
+// above pins that boundary) and is enumerated explicitly here, same as every
+// other field (see grading-row-serialization.ts's own D21d header note).
+// ---------------------------------------------------------------------------
+
+describe("course (D21d)", () => {
+  it("round-trips a real course tag", () => {
+    const rows = [makeRow({ id: "a", course: "course-A" })];
+    const restored = deserializeGradingRows(serializeGradingRows(rows));
+    expect(restored[0].course).toBe("course-A");
+  });
+
+  it("a row that never had a course round-trips with it still absent, and the written JSON carries no course key", () => {
+    const rows = [makeRow({ id: "a" })];
+    const restored = deserializeGradingRows(serializeGradingRows(rows));
+    expect(restored[0].course).toBeUndefined();
+    expect(JSON.parse(serializeGradingRows(rows)).rows[0]).not.toHaveProperty("course");
+  });
+
+  it("a pre-existing global-table row (no course key at all in the raw JSON) deserializes as UNATTRIBUTED, not adopted into any course", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "legacy-1", studentName: "Maria Alvarez", submissionText: "An old submission." }],
+    });
+    expect(deserializeGradingRows(raw)[0].course).toBeUndefined();
+  });
+
+  it("a non-string persisted course coerces to absent rather than a default", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "a", studentName: "Maria", submissionText: "x", course: 12345 }],
+    });
+    expect(deserializeGradingRows(raw)[0].course).toBeUndefined();
+  });
+
+  it("the quota-fallback write also round-trips a real course tag (dropping submissionText does not drop course)", () => {
+    const rows = [makeRow({ id: "a", course: "course-A" })];
+    const restored = deserializeGradingRows(serializeGradingRowsWithoutSubmissionText(rows));
+    expect(restored[0].course).toBe("course-A");
+  });
+});

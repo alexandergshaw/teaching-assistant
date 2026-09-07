@@ -192,7 +192,12 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
 
   // --- Compose C1 and C2. ---
   const capture = useDiscussionCapture();
-  const rowsApi = useReplyRows();
+  // COURSE-SCOPED. Without this argument the whole per-course table scoping
+  // is inert: rows mint unattributed, every course sees every other course's
+  // captures, and the offline identity key (name, course) has no course half.
+  // courseId here is the course_hub uuid, the same id every other per-course
+  // control in this app persists.
+  const rowsApi = useReplyRows(courseId);
 
   // --- notices (AC38): a capped list, not a slot, so an extraction failure,
   // a drafting failure, a recorder failure and a storage failure never erase

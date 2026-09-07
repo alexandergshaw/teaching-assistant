@@ -77,6 +77,17 @@ export interface MessageThreadRow {
   // M17 failure text, set on a failed send and cleared the same two ways.
   sendAttempt?: { at: number; conversationId: number };
   sendError?: string;
+  // docs/course-student-intelligence-acceptance-criteria.md D21d: the
+  // course_hub row id (a uuid) this row was captured under. Absent for a row
+  // that predates course-scoping (a pre-existing global table's row) or was
+  // captured with no course selected - both read as UNATTRIBUTED, never
+  // adopted into whichever course happens to be open later. Set once, at
+  // mint time (mergeCapturedMessages in message-thread.ts never sets it;
+  // useMessageRows.ts's mergeIncoming stamps it onto exactly the ids that
+  // call reports as newly added) and otherwise carried forward untouched by
+  // every row-preserving spread in message-thread.ts's own merge - see the
+  // COURSE SCOPING section below for the read side.
+  course?: string;
 }
 
 // M17: the exact failure text a failed send (or an attempt whose outcome
@@ -190,6 +201,62 @@ function coerceSendAttempt(raw: unknown): MessageThreadRow["sendAttempt"] {
   if (typeof a.at !== "number" || !Number.isFinite(a.at)) return undefined;
   if (typeof a.conversationId !== "number" || !Number.isFinite(a.conversationId)) return undefined;
   return { at: a.at, conversationId: a.conversationId };
+}
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D21d: course
+// scoping. Mirrors discussion-serialization.ts's own D21d section exactly -
+// the table stays ONE localStorage value under ONE literal storage key
+// (useMessageRows.ts's own table-key constant) rather than gaining a second
+// key per course, because this directory's own key-inventory canary
+// (message-replies.structure.test.ts) can only ever see a FIXED set of
+// literal keys spelled out in source, never one computed from a runtime
+// course id. So scoping is a property of each ROW (the `course` field
+// above), not of the storage location, and useMessageRows.ts filters the one
+// shared table down to a single course's own rows at read time.
+// ---------------------------------------------------------------------------
+
+/**
+ * D21d: does `row` belong to the given course scope? `undefined` means the
+ * UNATTRIBUTED scope - a row with no course tag matches only that scope,
+ * never a real course id, and a row carrying a real course id matches only
+ * that exact id. Exact equality only, deliberately never `??`/a fallback:
+ * coalescing an unattributed row into "whichever course happens to be open"
+ * is exactly the misattribution D21d exists to prevent.
+ */
+export function messageRowMatchesCourse(row: MessageThreadRow, courseScope: string | undefined): boolean {
+  return row.course === courseScope;
+}
+
+/**
+ * D21d: stamps `courseScope` onto every row in `rows` whose id is in
+ * `addedIds` - the ids `mergeCapturedMessages` (message-thread.ts) itself
+ * reports as brand new on this call. A row NOT in `addedIds` (existing,
+ * whether touched or untouched by this merge) is returned with the SAME
+ * object reference, never re-stamped - its own course attribution, whatever
+ * it already is, must survive every later merge unchanged. Pure, so
+ * useMessageRows.ts's mergeIncoming has a test surface this repo's node-env
+ * vitest can actually reach for the stamping itself.
+ */
+export function stampNewMessageRowsWithCourse(
+  rows: ReadonlyArray<MessageThreadRow>,
+  addedIds: ReadonlyArray<string>,
+  courseScope: string | undefined
+): MessageThreadRow[] {
+  if (addedIds.length === 0) return rows as MessageThreadRow[];
+  const added = new Set(addedIds);
+  return rows.map((r) => (added.has(r.id) ? { ...r, course: courseScope } : r));
+}
+
+/**
+ * D21d: counts rows carrying no course tag at all - a pre-existing global
+ * table's rows (migrated forward with nothing guessed at, per D21d) plus any
+ * row captured with no course selected. Exposed so a caller can tell "this
+ * browser has N threads waiting to be assigned to a course" apart from "the
+ * current course has no threads" - the two are never the same fact.
+ */
+export function countUnattributedMessageRows(rows: ReadonlyArray<MessageThreadRow>): number {
+  return rows.filter((r) => r.course === undefined).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +399,12 @@ export function deserializeMessageTable(raw: string | null): MessageThreadRow[] 
       const storedSendError = typeof r.sendError === "string" && r.sendError ? r.sendError : undefined;
       const sendError = !sent && sendAttempt ? storedSendError ?? SEND_FAILURE_TEXT : undefined;
 
+      // D21d: absent-stays-absent, exactly like every other optional field
+      // above - a row from before this feature (or one captured with no
+      // course selected) has no course key at all in its raw JSON and stays
+      // UNATTRIBUTED (undefined) rather than being defaulted or guessed at.
+      const course = typeof r.course === "string" && r.course ? r.course : undefined;
+
       rows.push({
         id,
         subject,
@@ -355,6 +428,7 @@ export function deserializeMessageTable(raw: string | null): MessageThreadRow[] 
         matchOutcome,
         sendAttempt: sent ? undefined : sendAttempt,
         sendError,
+        course,
       });
     });
 

@@ -31,6 +31,9 @@ import {
   mergeLegacyReplyFlags,
   coercePostQuestions,
   nextRowAfterRemoveQuestion,
+  replyRowMatchesCourse,
+  stampNewRowsWithCourse,
+  countUnattributedReplyRows,
   type ReplyRow,
 } from "./discussion-serialization";
 import type { PostQuestion } from "@/lib/discussion-reply-prompt";
@@ -574,6 +577,99 @@ describe("mergeLegacyReplyFlags (D1/D9 migration)", () => {
     const merged = mergeLegacyReplyFlags(rows, legacy);
     expect(merged[0].handledAt).toBe(1);
     expect(merged[0].skipped).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D21d: course
+// scoping - replyRowMatchesCourse / stampNewRowsWithCourse /
+// countUnattributedReplyRows, plus deserializeReplyTable's own `course`
+// coercion (the migration path: a row with no `course` key at all - a
+// pre-existing global table's row - must deserialize as UNATTRIBUTED,
+// never adopted into any course).
+// ---------------------------------------------------------------------------
+
+describe("course scoping (D21d)", () => {
+  describe("replyRowMatchesCourse", () => {
+    it("a row with a real course tag matches only that exact course, never another", () => {
+      const row = makeRow({ id: "a", course: "course-A" });
+      expect(replyRowMatchesCourse(row, "course-A")).toBe(true);
+      expect(replyRowMatchesCourse(row, "course-B")).toBe(false);
+    });
+
+    it("SABOTAGE TARGET: an unattributed row (no course tag) matches ONLY the unattributed scope - it must never satisfy a real course id", () => {
+      const row = makeRow({ id: "a" }); // course left undefined - unattributed
+      expect(replyRowMatchesCourse(row, undefined)).toBe(true);
+      expect(replyRowMatchesCourse(row, "course-A")).toBe(false);
+      expect(replyRowMatchesCourse(row, "course-B")).toBe(false);
+    });
+
+    it("rows for course A are not visible when course B is selected - filtering directly with the predicate", () => {
+      const rows = [makeRow({ id: "a", course: "course-A" }), makeRow({ id: "b", course: "course-B" })];
+      expect(rows.filter((r) => replyRowMatchesCourse(r, "course-B")).map((r) => r.id)).toEqual(["b"]);
+      expect(rows.filter((r) => replyRowMatchesCourse(r, "course-A")).map((r) => r.id)).toEqual(["a"]);
+    });
+  });
+
+  describe("stampNewRowsWithCourse", () => {
+    it("tags only the rows in addedIds, leaving every other row's course untouched (same reference)", () => {
+      const untouched = makeRow({ id: "old", course: "course-A" });
+      const added = makeRow({ id: "new" });
+      const result = stampNewRowsWithCourse([untouched, added], ["new"], "course-B");
+      expect(result[0]).toBe(untouched); // same reference - never re-stamped
+      expect(result[1].course).toBe("course-B");
+    });
+
+    it("stamps with `undefined` (unattributed) when the current scope itself is unattributed", () => {
+      const added = makeRow({ id: "new" });
+      const result = stampNewRowsWithCourse([added], ["new"], undefined);
+      expect(result[0].course).toBeUndefined();
+    });
+
+    it("an empty addedIds list returns the SAME array reference (nothing to stamp)", () => {
+      const rows = [makeRow({ id: "a" })];
+      expect(stampNewRowsWithCourse(rows, [], "course-A")).toBe(rows);
+    });
+  });
+
+  describe("countUnattributedReplyRows", () => {
+    it("distinguishes 'no rows at all' from 'rows exist but none are unattributed' from 'unattributed rows are waiting'", () => {
+      expect(countUnattributedReplyRows([])).toBe(0); // no rows at all
+      expect(countUnattributedReplyRows([makeRow({ id: "a", course: "course-A" })])).toBe(0); // rows exist, none unattributed
+      expect(countUnattributedReplyRows([makeRow({ id: "a" })])).toBe(1); // unattributed rows waiting
+    });
+  });
+
+  describe("deserializeReplyTable migration (D21d)", () => {
+    it("a pre-existing global-table row (no course key at all in the raw JSON) deserializes as UNATTRIBUTED, not adopted into any course", () => {
+      const raw = JSON.stringify({
+        v: DISCUSSION_TABLE_VERSION,
+        rows: [{ id: "legacy-1", author: "Maria", post: "hello" }],
+      });
+      const restored = deserializeReplyTable(raw);
+      expect(restored[0].course).toBeUndefined();
+    });
+
+    it("round-trips a real course tag", () => {
+      const rows = [makeRow({ id: "a", course: "course-A" })];
+      const restored = deserializeReplyTable(serializeReplyTable(rows));
+      expect(restored[0].course).toBe("course-A");
+    });
+
+    it("a row that never had a course round-trips with it still absent (absent-stays-absent), and the written JSON carries no course key", () => {
+      const rows = [makeRow({ id: "a" })];
+      const restored = deserializeReplyTable(serializeReplyTable(rows));
+      expect(restored[0].course).toBeUndefined();
+      expect(JSON.parse(serializeReplyTable(rows)).rows[0]).not.toHaveProperty("course");
+    });
+
+    it("a non-string persisted course coerces to absent rather than a default", () => {
+      const raw = JSON.stringify({
+        v: DISCUSSION_TABLE_VERSION,
+        rows: [{ id: "a", author: "Maria", post: "hello", course: 12345 }],
+      });
+      expect(deserializeReplyTable(raw)[0].course).toBeUndefined();
+    });
   });
 });
 

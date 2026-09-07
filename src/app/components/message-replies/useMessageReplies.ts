@@ -255,7 +255,9 @@ export function useMessageReplies(active: boolean): UseMessageRepliesReturn {
   const { active: acronym } = useInstitutionSelection();
 
   const capture = useDiscussionCapture();
-  const rowsApi = useMessageRows();
+  // COURSE-SCOPED - see the note in useDiscussionReplies. Omitting the
+  // argument compiles and silently leaves every captured row unattributed.
+  const rowsApi = useMessageRows(courseId);
 
   const { notices, dismissNotice, pushNotice, logAllNotices } = useDiscussionNotices({
     recordingError: capture.recordingError,

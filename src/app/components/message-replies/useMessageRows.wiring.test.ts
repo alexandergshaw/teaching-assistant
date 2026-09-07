@@ -47,3 +47,37 @@ describe("useMessageRows.ts wiring", () => {
     expect(SOURCE).not.toMatch(/const resourceSeqRef/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D21d: course
+// scoping. useMessageRows itself is a hook - these are source-text checks
+// for the wiring a pure-function unit test (message-serialization.test.ts's
+// own "course scoping (D21d)" block) cannot reach: that clearTable actually
+// FILTERS rather than resetting the whole table, and that mergeIncoming
+// actually stamps through stampNewMessageRowsWithCourse rather than
+// committing mergeCapturedMessages's raw output.
+// ---------------------------------------------------------------------------
+
+describe("useMessageRows.ts D21d course-scoping wiring", () => {
+  it("takes an optional courseId defaulting to \"\", collapsed to the undefined scope", () => {
+    expect(SOURCE).toMatch(/export function useMessageRows\(courseId: string\): UseMessageRowsReturn \{/);
+    expect(SOURCE).toMatch(/const courseScope = courseId\.length > 0 \? courseId : undefined;/);
+  });
+
+  it("mergeIncoming stamps the merge's own output through stampNewMessageRowsWithCourse before computing `changed`, never committing mergeCapturedMessages's raw rows directly", () => {
+    expect(SOURCE).toMatch(
+      /const merged = mergeCapturedMessages\(before, entries, opts\);[\s\S]{0,400}const finalRows = stampNewMessageRowsWithCourse\(merged\.rows, merged\.addedIds, courseScope\);/
+    );
+  });
+
+  it("clearTable FILTERS the table down to rows outside the current scope - it never resets to an empty array, which would erase every other course's threads", () => {
+    expect(SOURCE).not.toMatch(/const clearTable = useCallback\(\(\) => \{\s*editSeqRef\.current\.clear\(\);\s*tableEpochRef\.current \+= 1;\s*commitRows\(\[\]\);/);
+    expect(SOURCE).toMatch(/commitRows\(rowsRef\.current\.filter\(\(r\) => !messageRowMatchesCourse\(r, courseScope\)\)\);/);
+  });
+
+  it("the returned rawRows/totalCount/rows are built from scopedRawRows, never the whole-table rawRows state, and unattributedCount is exposed", () => {
+    expect(SOURCE).toMatch(/totalCount: scopedRawRows\.length,/);
+    expect(SOURCE).toMatch(/rawRows: scopedRawRows,/);
+    expect(SOURCE).toMatch(/unattributedCount,/);
+  });
+});

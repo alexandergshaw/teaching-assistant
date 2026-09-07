@@ -63,6 +63,24 @@
 // recording-split.structure.test.ts's AC55 discipline for the same reason:
 // see useReplyRows.ts's STORAGE_KEY_TABLE comment for the exact footgun
 // (writing the bare prefix in prose gets harvested as a fake key).
+//
+// COURSE SCOPING (docs/course-student-intelligence-acceptance-criteria.md
+// D21d): this hook takes an optional `courseId` (the app's own course_hub
+// row id - a uuid), mirroring useReplyRows.ts's own D21d section. The
+// underlying table is unchanged - one array under one literal storage key -
+// but `rows`/`rawRows`/`totalCount` on the return are FILTERED to the rows
+// whose `course` field (grading-row.ts's own D21d section) matches
+// `courseId`. `courseId` defaults to "" (the same `undefined` scope a row
+// with no course tag carries), so every EXISTING caller - until a later wave
+// threads a real course_hub id through GradingRecordingPanel.tsx - keeps
+// seeing exactly what it always has. `setAllRows` and `clearTable` are
+// scope-aware for the same reason useReplyRows.ts's own mergeIncoming/
+// clearTable are: `setAllRows` REPLACES the table wholesale (this file's own
+// REACHABILITY note above), so it must replace only this course's own slice,
+// stamping every row it does not already recognize by id with the current
+// scope - otherwise the very first extraction sync after a course switch
+// would silently erase every other course's (and the unattributed bucket's)
+// rows.
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -78,7 +96,13 @@ import {
   type GradingFeedbackField,
   type GradingResultInput,
 } from "./grading-rows";
-import type { GradingRow, GradingRowNameMatch } from "./grading-row";
+import {
+  gradingRowMatchesCourse,
+  stampGradingRowsWithCourse,
+  countUnattributedGradingRows,
+  type GradingRow,
+  type GradingRowNameMatch,
+} from "./grading-row";
 import {
   serializeGradingRows,
   serializeGradingRowsWithoutSubmissionText,
@@ -108,11 +132,18 @@ export interface UseGradingRowsReturn {
   rows: GradingRow[];
   /** The UNFILTERED row count - read this, never `rows.length`, for any
    *  count/empty-state/arming decision that must describe the whole table
-   *  regardless of the search box (useReplyRows.ts's own F0-2/F11 rule). */
+   *  regardless of the search box (useReplyRows.ts's own F0-2/F11 rule).
+   *  D21d: also scoped by course - see the file header. */
   totalCount: number;
   /** The UNFILTERED rows themselves, for a caller that needs to act on the
-   *  whole table rather than what is currently visible. */
+   *  whole table rather than what is currently visible. D21d: also scoped
+   *  by course. */
   rawRows: GradingRow[];
+  /** D21d: the number of rows in this browser's WHOLE table (every course,
+   *  ignoring the `courseId` this hook was called with) that carry no course
+   *  tag at all - see useReplyRows.ts's own `unattributedCount` doc comment
+   *  for the exact rule this mirrors. */
+  unattributedCount: number;
 
   sort: GradingSort;
   setSort: (next: GradingSort) => void;
@@ -148,7 +179,32 @@ export interface UseGradingRowsReturn {
   persistError: string | null;
 }
 
-export function useGradingRows(): UseGradingRowsReturn {
+/**
+ * REQUIRED, not defaulted, and it shipped defaulted for exactly one wave.
+ *
+ * The default existed for a good reason at the time - the call sites were
+ * outside the implementing group's file set, so a required parameter would
+ * have broken the build. They are wired now, and the default has to go with
+ * them, because of what it does when it is wrong: omitting the argument
+ * COMPILES, and every captured row silently mints unattributed. Nothing
+ * fails, nothing warns, and the per-course scoping this function exists for
+ * is simply absent.
+ *
+ * This repo has shipped that exact shape twice this week - an optional prop
+ * with a no-op default that rendered correctly and wrote nothing, and an
+ * optional field whose undefined case could only ever come from a fixture.
+ * Both had to be come back for. A required parameter makes the omission
+ * error TS2554 instead of a silent behaviour change.
+ *
+ * Pass the course_hub uuid. An empty string is still legal and still means
+ * "no course selected" - what is no longer legal is forgetting to say.
+ */
+export function useGradingRows(courseId: string): UseGradingRowsReturn {
+  // D21d: "" collapses to the same `undefined` scope a row with no course
+  // tag carries - see the file header and useReplyRows.ts's own identical
+  // comment on its courseScope.
+  const courseScope = courseId.length > 0 ? courseId : undefined;
+
   // Read-once-in-the-initializer, guarded by `typeof window` - mirrors
   // useReplyRows.ts's own `rawRows` initializer (STORAGE_KEY_TABLE).
   const [rawRows, setRawRows] = useState<GradingRow[]>(() => {
@@ -233,9 +289,21 @@ export function useGradingRows(): UseGradingRowsReturn {
 
   const setAllRows = useCallback(
     (next: GradingRow[]) => {
-      commitRows(next);
+      // D21d: `next` is a WHOLE replacement for this course's own slice
+      // (grading-capture-sync.ts's syncGradingRowsFromExtracted builds it
+      // from THIS hook's own scoped `rawRows` fed back in - see the file
+      // header) - it must never replace rows belonging to a different
+      // course or the unattributed bucket. `stampGradingRowsWithCourse`
+      // tags every row `next` introduces that this scope's own previous
+      // slice did not already have (a brand-new submission) with the
+      // current scope; a row that WAS already present keeps its own prior
+      // course value exactly.
+      const previousScoped = rowsRef.current.filter((r) => gradingRowMatchesCourse(r, courseScope));
+      const stamped = stampGradingRowsWithCourse(next, previousScoped, courseScope);
+      const otherScopes = rowsRef.current.filter((r) => !gradingRowMatchesCourse(r, courseScope));
+      commitRows([...otherScopes, ...stamped]);
     },
-    [commitRows]
+    [commitRows, courseScope]
   );
 
   const editField = useCallback(
@@ -282,18 +350,34 @@ export function useGradingRows(): UseGradingRowsReturn {
   );
 
   const clearTable = useCallback(() => {
-    commitRows([]);
-  }, [commitRows]);
+    // D21d: clears only THIS course's own rows - mirrors useReplyRows.ts's
+    // own clearTable exactly. An instructor clearing one class's table must
+    // never destroy another class's (or the unattributed bucket's) data,
+    // now that they can share one underlying table.
+    commitRows(rowsRef.current.filter((r) => !gradingRowMatchesCourse(r, courseScope)));
+  }, [commitRows, courseScope]);
+
+  // D21d: the course-scoped slice of the full table - every display/count
+  // field below reads from this, never from `rawRows` (the whole table)
+  // directly.
+  const scopedRawRows = useMemo(
+    () => rawRows.filter((r) => gradingRowMatchesCourse(r, courseScope)),
+    [rawRows, courseScope]
+  );
+  // D21d: independent of `courseScope` on purpose - see this field's own
+  // doc comment on the return type.
+  const unattributedCount = useMemo(() => countUnattributedGradingRows(rawRows), [rawRows]);
 
   const rows = useMemo(() => {
-    const sorted = sortGradingRowsForTable(rawRows, sort);
+    const sorted = sortGradingRowsForTable(scopedRawRows, sort);
     return filterGradingRowsForTable(sorted, filterText);
-  }, [rawRows, sort, filterText]);
+  }, [scopedRawRows, sort, filterText]);
 
   return {
     rows,
-    totalCount: rawRows.length,
-    rawRows,
+    totalCount: scopedRawRows.length,
+    rawRows: scopedRawRows,
+    unattributedCount,
     sort,
     setSort,
     filterText,

@@ -25,6 +25,19 @@
 // canary (M3) derives its key set with a regex over the literal source, the
 // same AC55 discipline useReplyRows.ts's own STORAGE_KEY_TABLE comment
 // records: spelling the bare prefix out in prose gets harvested as a fake key.
+//
+// COURSE SCOPING (docs/course-student-intelligence-acceptance-criteria.md
+// D21d): this hook takes an optional `courseId` (the app's own course_hub
+// row id - a uuid), mirroring useReplyRows.ts's own D21d section exactly.
+// The underlying table is unchanged - one array under one literal storage
+// key - but `rows`/`rawRows`/`totalCount` on the return are FILTERED to the
+// rows whose `course` field (message-serialization.ts's own D21d section)
+// matches `courseId`. `courseId` defaults to "" (the same `undefined` scope
+// a row with no course tag carries), so every EXISTING caller - until a
+// later wave threads a real course_hub id through useMessageReplies.ts -
+// keeps seeing exactly what it always has. `clearTable` is scope-aware for
+// the same reason useReplyRows.ts's own is: it must never erase another
+// course's threads just because they share one table.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { filterRowsByQuery } from "../recording/discussion-table-view";
@@ -36,6 +49,9 @@ import {
 import {
   serializeMessageTable,
   deserializeMessageTable,
+  messageRowMatchesCourse,
+  stampNewMessageRowsWithCourse,
+  countUnattributedMessageRows,
   type MessageThreadRow,
   type MessageRowState,
 } from "./message-serialization";
@@ -78,18 +94,23 @@ const MESSAGE_ROW_HAYSTACK = (row: MessageThreadRow): string[] => [
 export interface UseMessageRowsReturn {
   /** Sorted AND filtered for display; a fresh array reference whenever
    *  `rawRows`/`sort`/`filterText` changes, individual rows keep identity
-   *  when untouched. */
+   *  when untouched. D21d: also scoped by course - see the file header. */
   rows: MessageThreadRow[];
   sort: MessageSort;
   setSort: (next: MessageSort) => void;
   filterText: string;
   setFilterText: (next: string) => void;
   /** UNFILTERED row count - every count/progress-string/arming-signature
-   *  site must read this, never `rows.length`. */
+   *  site must read this, never `rows.length`. D21d: also scoped by course. */
   totalCount: number;
   /** UNFILTERED row objects - a whole-table dispatch must read this, never
-   *  the filtered `rows`. */
+   *  the filtered `rows`. D21d: also scoped by course. */
   rawRows: MessageThreadRow[];
+  /** D21d: the number of threads in this browser's WHOLE table (every
+   *  course, ignoring the `courseId` this hook was called with) that carry
+   *  no course tag at all - see useReplyRows.ts's own `unattributedCount`
+   *  doc comment for the exact rule this mirrors. */
+  unattributedCount: number;
 
   /** M9's `mergeCapturedMessages` wrapped with debounced persistence. `rows`
    *  on the return is the FULL post-merge table, synchronously current (the
@@ -185,7 +206,32 @@ export interface UseMessageRowsReturn {
   setSendError: (id: string, error: string) => void;
 }
 
-export function useMessageRows(): UseMessageRowsReturn {
+/**
+ * REQUIRED, not defaulted, and it shipped defaulted for exactly one wave.
+ *
+ * The default existed for a good reason at the time - the call sites were
+ * outside the implementing group's file set, so a required parameter would
+ * have broken the build. They are wired now, and the default has to go with
+ * them, because of what it does when it is wrong: omitting the argument
+ * COMPILES, and every captured row silently mints unattributed. Nothing
+ * fails, nothing warns, and the per-course scoping this function exists for
+ * is simply absent.
+ *
+ * This repo has shipped that exact shape twice this week - an optional prop
+ * with a no-op default that rendered correctly and wrote nothing, and an
+ * optional field whose undefined case could only ever come from a fixture.
+ * Both had to be come back for. A required parameter makes the omission
+ * error TS2554 instead of a silent behaviour change.
+ *
+ * Pass the course_hub uuid. An empty string is still legal and still means
+ * "no course selected" - what is no longer legal is forgetting to say.
+ */
+export function useMessageRows(courseId: string): UseMessageRowsReturn {
+  // D21d: "" collapses to the same `undefined` scope a row with no course
+  // tag carries - see the file header and useReplyRows.ts's own identical
+  // comment on its courseScope.
+  const courseScope = courseId.length > 0 ? courseId : undefined;
+
   const [rawRows, setRawRows] = useState<MessageThreadRow[]>(() => {
     if (typeof window === "undefined") return [];
     return deserializeMessageTable(window.localStorage.getItem(STORAGE_KEY_TABLE));
@@ -301,7 +347,11 @@ export function useMessageRows(): UseMessageRowsReturn {
     ) => {
       const before = rowsRef.current;
       const merged = mergeCapturedMessages(before, entries, opts);
-      const finalRows = merged.rows;
+      // D21d: mergeCapturedMessages never sets `course` - stamp it here,
+      // onto exactly the ids it reports as brand new. An existing row
+      // (updated or untouched by this merge) keeps whatever course it
+      // already carries, unchanged.
+      const finalRows = stampNewMessageRowsWithCourse(merged.rows, merged.addedIds, courseScope);
       const changed = finalRows.length !== before.length || finalRows.some((r, i) => r !== before[i]);
       if (changed) {
         commitRows(finalRows);
@@ -309,13 +359,16 @@ export function useMessageRows(): UseMessageRowsReturn {
       }
       return { addedIds: merged.addedIds, capped: merged.capped, rows: finalRows, changed };
     },
-    [commitRows, scheduleSave]
+    [commitRows, scheduleSave, courseScope]
   );
 
   const moveRow = useCallback(
     (id: string, dir: "up" | "down") => {
       const curSort = sortRef.current;
-      const displayed = sortMessageRows(rowsRef.current, curSort);
+      // D21d: sort/move only ever operate on THIS course's own threads -
+      // mirrors useReplyRows.ts's own moveRow exactly.
+      const scopedRows = rowsRef.current.filter((r) => messageRowMatchesCourse(r, courseScope));
+      const displayed = sortMessageRows(scopedRows, curSort);
       if (!displayed.some((r) => r.id === id)) return;
 
       const visibleIds = filterRowsByQuery(displayed, filterTextRef.current, MESSAGE_ROW_HAYSTACK).map((r) => r.id);
@@ -327,7 +380,11 @@ export function useMessageRows(): UseMessageRowsReturn {
       const result = swapAdjacentThreads(displayed, curSort, id, visibleIds[targetIndex]);
       if (result.atBoundary) return;
 
-      commitRows(result.rows);
+      // D21d: splice the reordered scoped rows back in among every row
+      // swapAdjacentThreads never saw (every other course, plus
+      // unattributed) - mirrors useReplyRows.ts's own moveRow exactly.
+      const otherRows = rowsRef.current.filter((r) => !messageRowMatchesCourse(r, courseScope));
+      commitRows([...otherRows, ...result.rows]);
       scheduleSave(STRUCTURAL_DEBOUNCE_MS);
 
       if (result.sort !== curSort) {
@@ -341,7 +398,7 @@ export function useMessageRows(): UseMessageRowsReturn {
         }
       }
     },
-    [commitRows, scheduleSave]
+    [commitRows, scheduleSave, courseScope]
   );
 
   const editReply = useCallback(
@@ -374,11 +431,16 @@ export function useMessageRows(): UseMessageRowsReturn {
   );
 
   const clearTable = useCallback(() => {
-    editSeqRef.current.clear();
+    // D21d: clears only THIS course's own threads - mirrors useReplyRows.ts's
+    // own clearTable exactly. editSeq entries are dropped only for the ids
+    // actually being removed, not blanket-cleared, so another course's
+    // generation guard is never disturbed.
+    const idsInScope = rowsRef.current.filter((r) => messageRowMatchesCourse(r, courseScope)).map((r) => r.id);
+    idsInScope.forEach((id) => editSeqRef.current.delete(id));
     tableEpochRef.current += 1;
-    commitRows([]);
+    commitRows(rowsRef.current.filter((r) => !messageRowMatchesCourse(r, courseScope)));
     scheduleSave(STRUCTURAL_DEBOUNCE_MS);
-  }, [commitRows, scheduleSave]);
+  }, [commitRows, scheduleSave, courseScope]);
 
   const markDrafting = useCallback(
     (ids: string[]) => {
@@ -543,10 +605,21 @@ export function useMessageRows(): UseMessageRowsReturn {
     return (editSeqRef.current.get(id) ?? 0) === (snapshot.get(id) ?? 0);
   }, []);
 
+  // D21d: the course-scoped slice of the full table - every display/count
+  // field below reads from this, never from `rawRows` (the whole table)
+  // directly.
+  const scopedRawRows = useMemo(
+    () => rawRows.filter((r) => messageRowMatchesCourse(r, courseScope)),
+    [rawRows, courseScope]
+  );
+  // D21d: independent of `courseScope` on purpose - see this field's own
+  // doc comment on the return type.
+  const unattributedCount = useMemo(() => countUnattributedMessageRows(rawRows), [rawRows]);
+
   const rows = useMemo(() => {
-    const sorted = sortMessageRows(rawRows, sort);
+    const sorted = sortMessageRows(scopedRawRows, sort);
     return filterRowsByQuery(sorted, filterText, MESSAGE_ROW_HAYSTACK);
-  }, [rawRows, sort, filterText]);
+  }, [scopedRawRows, sort, filterText]);
 
   return {
     rows,
@@ -554,8 +627,9 @@ export function useMessageRows(): UseMessageRowsReturn {
     setSort,
     filterText,
     setFilterText,
-    totalCount: rawRows.length,
-    rawRows,
+    totalCount: scopedRawRows.length,
+    rawRows: scopedRawRows,
+    unattributedCount,
     mergeIncoming,
     moveRow,
     editReply,

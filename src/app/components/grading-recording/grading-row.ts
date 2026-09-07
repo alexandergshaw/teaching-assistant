@@ -88,6 +88,20 @@ export interface GradingRow {
    *  can refuse to overwrite their words (the reply table's own AC18/AC44 rule,
    *  which this surface inherits rather than reinvents). */
   userEdited: boolean;
+  /** docs/course-student-intelligence-acceptance-criteria.md D21d: the
+   *  course_hub row id (a uuid) this row was captured under. Absent for a
+   *  row that predates course-scoping (a pre-existing global table's row) or
+   *  was captured with no course selected - both read as UNATTRIBUTED, never
+   *  adopted into whichever course happens to be open later. This is the
+   *  app's own internal course identifier, an entirely different thing from
+   *  the student identity this file's header forbids - see that header: a
+   *  course id does not weaken the no-userId rule, and does not touch the
+   *  machinery (grading-row-serialization.ts's explicit, no-spread field
+   *  enumeration) that enforces it. Set once, at mint time
+   *  (grading-capture-sync.ts's blankGradingRow never sets it;
+   *  useGradingRows.ts's setAllRows stamps it onto every row it does not
+   *  already recognize by id) and otherwise carried forward untouched. */
+  course?: string;
 }
 
 /**
@@ -122,4 +136,66 @@ export const GRADING_ROW_HAYSTACK = (row: GradingRow): readonly string[] => [
  */
 export function joinFeedback(row: GradingRow): string {
   return [row.strengths, row.improvements, row.overallComment].filter((field) => field.trim() !== "").join("\n\n");
+}
+
+// ---------------------------------------------------------------------------
+// docs/course-student-intelligence-acceptance-criteria.md D21d: course
+// scoping. Mirrors discussion-serialization.ts's own D21d section - the
+// table stays ONE localStorage value under ONE literal storage key
+// (useGradingRows.ts's own table-key constant) rather than gaining a second
+// key per course, because this directory's own key-inventory canary
+// (grading-rows.test.ts) can only ever see a FIXED set of literal keys
+// spelled out in source, never one computed from a runtime course id. So
+// scoping is a property of each ROW (the `course` field above), not of the
+// storage location, and useGradingRows.ts filters the one shared table down
+// to a single course's own rows at read time.
+// ---------------------------------------------------------------------------
+
+/**
+ * D21d: does `row` belong to the given course scope? `undefined` means the
+ * UNATTRIBUTED scope - a row with no course tag matches only that scope,
+ * never a real course id, and a row carrying a real course id matches only
+ * that exact id. Exact equality only, deliberately never `??`/a fallback:
+ * coalescing an unattributed row into "whichever course happens to be open"
+ * is exactly the misattribution D21d exists to prevent.
+ */
+export function gradingRowMatchesCourse(row: GradingRow, courseScope: string | undefined): boolean {
+  return row.course === courseScope;
+}
+
+/**
+ * D21d: stamps `courseScope` onto every row in `next` whose id was NOT
+ * present in `previous` (a brand-new row this call is introducing). A row
+ * whose id WAS already present in `previous` keeps `previous`'s own course
+ * value exactly, regardless of what `next` happens to carry for it - useful
+ * because `setAllRows` (useGradingRows.ts) receives a WHOLE replacement
+ * array from an external merge (grading-capture-sync.ts's
+ * syncGradingRowsFromExtracted) that this file never inspects, so an
+ * already-attributed row's course can never be silently rewritten by
+ * whatever that caller happened to build. Pure, so useGradingRows.ts's
+ * setAllRows has a test surface this repo's node-env vitest can actually
+ * reach for the stamping itself.
+ */
+export function stampGradingRowsWithCourse(
+  next: ReadonlyArray<GradingRow>,
+  previous: ReadonlyArray<GradingRow>,
+  courseScope: string | undefined
+): GradingRow[] {
+  const previousById = new Map(previous.map((r) => [r.id, r] as const));
+  return next.map((r) => {
+    const prior = previousById.get(r.id);
+    return { ...r, course: prior ? prior.course : courseScope };
+  });
+}
+
+/**
+ * D21d: counts rows carrying no course tag at all - a pre-existing global
+ * table's rows (migrated forward with nothing guessed at, per D21d) plus any
+ * row captured with no course selected. Exposed so a caller can tell "this
+ * browser has N submissions waiting to be assigned to a course" apart from
+ * "the current course has no submissions" - the two are never the same
+ * fact.
+ */
+export function countUnattributedGradingRows(rows: ReadonlyArray<GradingRow>): number {
+  return rows.filter((r) => r.course === undefined).length;
 }

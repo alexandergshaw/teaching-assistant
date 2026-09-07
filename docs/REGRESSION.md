@@ -41062,3 +41062,85 @@ unclosed dollar-quoted body, which the apostrophe rule does not.
 production bug restored verbatim, an unclosed `$$` body, and an emptied file
 list. Fixed and applied in d69c411, Action run confirmed green rather than
 assumed.
+
+## 409. The walkthrough announcement feature becomes reachable
+
+Wave 1 (ad3c035) shipped 2711 lines of prompt composers, outline types,
+exemplar storage and bounds - all correct, all tested, and called by nothing.
+No action, no surface. Every gate was green because every gate measures code
+that exists, not code that runs.
+
+That is the second instance of this exact shape found in one session (see 408d,
+the Course Intel history store with no reader). Both were found by tracing a
+path from a control the user can click, not by any test.
+
+### 409a - a new Recording sub-tab has THREE registration points
+
+The view union, the localStorage restore guard, and the tab strip. Miss one and
+the tab type-checks, the panel exists, and it either never renders or silently
+bounces on reload - the same silent-registration trap D24a hit for a top-level
+tab and that module-deck-capture's own structure test already names.
+
+All three are wired and pinned by a reachability test that walks every hop:
+import, render, prop, view-union membership, restore guard, strip entry. Two
+pre-existing ordinal canaries counting tabs and tabpanels were correctly
+tripped by the addition and bumped in the same change.
+
+Known limitation of the idiom, reported rather than papered over: removing only
+a JSX COMMENT does not fail these source-text checks. The sibling structure
+test it was modelled on shares that gap.
+
+### 409b - the feature as specified would have posted literal markdown
+
+Peer finding P1, and the one that would have shipped it visibly broken. An LMS
+announcement body is HTML. The exemplar premise (AC2) exists to reproduce
+structure - headings, lists - and the shipped `draftAnnouncementAction` prompt
+explicitly forbids all of it, which is why this got a new drafting path rather
+than a conditional flag on the old one.
+
+The new post path converts through `markdownToHtml`. `createAnnouncement` and
+its `textToHtml` are untouched, so every announcement already in the app is
+unaffected. Verified directly: the new function uses markdownToHtml, the old
+one still uses textToHtml, and a sabotage swapping them turns a test red.
+
+The output budget is outline-sized rather than inheriting
+`draftAnnouncementAction`'s fixed 1024, which silently truncates anything past
+roughly 750 words - the same defect `lectureScriptMaxOutputTokens` was written
+to fix for scripts. An empty-but-ok model response becomes a visible error
+rather than a blank draft (P7: a budget failure otherwise looks like nothing).
+
+### 409c - a dead barrel that was not merely dead
+
+`src/lib/canvas/index.ts` re-exported 45 names, every one of which also exists
+in `src/lib/canvas.ts`, and it was imported by nothing. `@/lib/canvas` resolves
+to the FILE - a file wins over a directory's index for the same specifier - so
+all 41 such imports went to canvas.ts and the barrel was unreachable.
+
+It cost this session an edit to the wrong file, caught only because tsc
+happened to notice the export was missing where it was actually needed. A dead
+file that looks like the live one is worse than dead code: it is a trap that
+reads as the obvious place to make a change.
+
+Deleted. tsc, eslint and 998 test files stayed green, which is what confirms it
+was unreachable rather than merely believed to be.
+
+### 409d - LIMITS, and two briefing errors
+
+Deliberate cuts: no downloadable run log for this panel, unlike sibling
+recording surfaces. No "Save to drafts" for the markdown body - the shared
+drafts table's post path still uses the plain-text poster, so routing markdown
+through it would reopen P1 through a side door; Copy is the manual alternative
+AC7 allows. P2's model page-boundary marker skipped, with AC6 instead satisfied
+by a pure per-heading coverage fold that needs no extraction-prompt change.
+
+Two things in the brief I wrote were wrong, both caught by the implementer
+checking rather than complying. It said to choose a fifth materials cap - wave
+1 had already chosen and reasoned two (32,000 and 48,000); the instruction came
+from the acceptance-criteria doc, which predates the code that implements it.
+And in the previous group, it described the Knowledge history surface as having
+an export control, which it does not (see 408d).
+
+The pattern worth recording: BOTH errors came from briefing an implementer off
+a design document rather than off the tree. A design doc is a record of what
+was decided, not of what exists, and the gap between them widens the moment the
+first wave lands.

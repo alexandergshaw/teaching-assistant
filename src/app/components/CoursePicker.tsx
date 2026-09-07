@@ -101,6 +101,26 @@ export default function CoursePicker({
   const [coursesState, setCoursesState] = useState<"idle" | "loading" | "error">(
     activeInstitution ? "loading" : "idle"
   );
+  /**
+   * WHY the listing failed, in the action's own words.
+   *
+   * This used to be thrown away. The effect below caught `{ error }`, set the
+   * state to "error", and the UI rendered a fixed "Could not list courses for
+   * this school." - so the one thing the reader needed was the one thing
+   * discarded.
+   *
+   * It became a real problem when Canvas credentials went per-user. Before
+   * that, a failure here was rare and usually the owner's own misconfigured
+   * environment. Now the COMMON case is an instructor who simply has not
+   * connected this institution yet, and the resolver returns a message that
+   * says exactly that and what to do about it. Replacing it with a generic
+   * sentence turns a solvable setup step into a dead end.
+   *
+   * Safe to render: every message that reaches here is composed by this app -
+   * the credential prompt, or canvasError's own token/not-found/HTTP-status
+   * wording - never a raw upstream response body.
+   */
+  const [coursesError, setCoursesError] = useState<string>("");
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>(() => readSavedCourses());
   // Raw course_hub rows, NOT pre-filtered - describeExportSectionState needs
   // every row (not just the ones that qualify) to tell "no course has any
@@ -135,10 +155,12 @@ export default function CoursePicker({
       if (cancelled) return;
       if ("error" in result) {
         setCourses([]);
+        setCoursesError(result.error.trim());
         setCoursesState("error");
         return;
       }
       setCourses(result.courses);
+      setCoursesError("");
       setCoursesState("idle");
       // The list just loaded with real names - cache all of them (not just
       // whatever happens to be selected right now) so a course id restored
@@ -327,7 +349,9 @@ export default function CoursePicker({
           <p className={styles.fieldHint}>{describeNoInstitutionSelected()}</p>
         )}
         {coursesState === "error" && (
-          <p className={styles.fieldHint}>Could not list courses for this school.</p>
+          <p className={styles.error} role="alert">
+            {coursesError || "Could not list courses for this school."}
+          </p>
         )}
         {loadError && <p className={styles.error}>{loadError}</p>}
       </div>

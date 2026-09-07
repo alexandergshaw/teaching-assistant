@@ -9,8 +9,7 @@
 // deliberately does not reimplement any decision course-tasks.ts/
 // course-tasks-view.ts already makes (filtering, sorting, progress, CSV,
 // catalog resolution) - see those modules for the actual logic.
-import type React from "react";
-import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -95,11 +94,13 @@ const SORT_FIELD_ANNOUNCE_LABELS: Record<"name" | "institution" | "term" | "prog
 };
 
 export interface TasksTabProps {
+  /** Which sub-view is showing. Chosen by the Courses tab's flattened rail
+   *  (D26), not by anything in this file - see the note where the old subnav
+   *  used to be built, below. */
   view: TasksView;
-  onViewChange: (view: TasksView) => void;
 }
 
-export default function TasksTab({ view, onViewChange }: TasksTabProps) {
+export default function TasksTab({ view }: TasksTabProps) {
   const data = useCourseTasksData();
   const { setCell, setCourseCells, setInstruction, saveDef, saveDefs, reload } = data;
 
@@ -569,81 +570,38 @@ export default function TasksTab({ view, onViewChange }: TasksTabProps) {
   } = useTaskAttachmentsDialog({ allRows, resolvedCatalog });
 
   // -----------------------------------------------------------------------
-  // Sub-view tabs (AC1 item 3, AC12 item 65): role="tablist"/"tab" with
-  // aria-selected and arrow-key movement between the two, matching
-  // WorkflowsPanel's existing inner-tab treatment (styles.lessonInnerTab).
-  // S12: aria-controls on each tab plus a single role="tabpanel" wrapping
-  // the content below (aria-labelledby the currently-active tab's id) - only
-  // one sub-view is ever rendered at a time, so both tabs point at the same
-  // panel id rather than each getting its own.
-  const tabRefs = useRef<Record<TasksView, HTMLButtonElement | null>>({ term: null, recurring: null });
-  const idBase = useId();
-  const termTabId = `${idBase}-term-tab`;
-  const recurringTabId = `${idBase}-recurring-tab`;
-  const panelId = `${idBase}-panel`;
-  const handleTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
-    let next: TasksView | null = null;
-    if (e.key === "ArrowLeft" || e.key === "ArrowRight") next = view === "term" ? "recurring" : "term";
-    else if (e.key === "Home") next = "term";
-    else if (e.key === "End") next = "recurring";
-    else return;
-    e.preventDefault();
-    if (next !== view) onViewChange(next);
-    tabRefs.current[next]?.focus();
-  };
-
-  const subnav = (
-    <div className={pageStyles.manualSubnav}>
-      <div className={pageStyles.lessonInnerTabs} role="tablist" aria-label="Tasks view">
-        <button
-          type="button"
-          role="tab"
-          id={termTabId}
-          aria-controls={panelId}
-          ref={(el) => {
-            tabRefs.current.term = el;
-          }}
-          aria-selected={view === "term"}
-          tabIndex={view === "term" ? 0 : -1}
-          className={`${pageStyles.lessonInnerTab}${view === "term" ? ` ${pageStyles.lessonInnerTabActive}` : ""}`}
-          onClick={() => onViewChange("term")}
-          onKeyDown={handleTabKeyDown}
-        >
-          Term Setup
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id={recurringTabId}
-          aria-controls={panelId}
-          ref={(el) => {
-            tabRefs.current.recurring = el;
-          }}
-          aria-selected={view === "recurring"}
-          tabIndex={view === "recurring" ? 0 : -1}
-          className={`${pageStyles.lessonInnerTab}${view === "recurring" ? ` ${pageStyles.lessonInnerTabActive}` : ""}`}
-          onClick={() => onViewChange("recurring")}
-          onKeyDown={handleTabKeyDown}
-        >
-          Daily / Weekly
-        </button>
-      </div>
-    </div>
-  );
+  // THIS TAB NO LONGER RENDERS A SUB-VIEW TABLIST. It used to (AC1 item 3,
+  // AC12 item 65, S12): a two-chip Term Setup / Daily-Weekly row with
+  // aria-selected, arrow-key movement and a role="tabpanel" wrapping the
+  // content below. D26 flattened the Courses tab's navigation to a single
+  // level, so those two chips are now items in that one rail (Courses, Term
+  // Setup, Daily / Weekly) alongside the Courses section itself, rendered by
+  // page.tsx through components/tabs/TabRail.tsx.
+  //
+  // Nothing was lost in the move except one link this file cannot rebuild:
+  // the rail lives in a different component from this panel, so the tabs can
+  // no longer point at it with aria-controls, and the panel below is a plain
+  // wrapper rather than a role="tabpanel" naming a tab id that is not in this
+  // subtree. A dangling aria-labelledby would be worse than no panel role.
+  // Arrow-key movement between the chips did survive: TabRail implements the
+  // same roving-tabindex pattern this tablist did, for every rail in the app.
+  //
+  // The `view` prop is now read-only here - tasksView is written by the rail,
+  // through the same param it always used.
 
   return (
     <TabShell
-      subnav={subnav}
       eyebrow="Tasks"
       title={view === "term" ? "Term setup" : "Daily / weekly"}
       subtitle="Track once-per-term setup work and day-to-day upkeep across every course, in one matrix."
     >
-      {/* S12: the tablist above had no tabpanel at all - aria-controls
-          pointed nowhere, and this content was never marked as the thing
-          the selected tab actually controls. Only one sub-view is ever
-          rendered at a time, so a single panel (labelled by whichever tab
-          is currently active) is correct here, not one per tab. */}
-      <div role="tabpanel" id={panelId} aria-labelledby={view === "term" ? termTabId : recurringTabId} tabIndex={-1}>
+      {/* S12 made this a role="tabpanel" labelled by whichever of this file's
+          own two tabs was active. Those tabs moved into the Courses tab's
+          flattened rail with D26 and are no longer in this subtree, so the
+          panel role and its aria-labelledby went with them rather than being
+          left pointing at ids that no longer render. `tabIndex={-1}` stays:
+          it is what lets the grid's own focus handling target this wrapper. */}
+      <div tabIndex={-1}>
         <div role="status" aria-live="polite" className={styles.srOnly}>
           {announcement}
         </div>

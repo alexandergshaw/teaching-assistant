@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as tabSections from "./tab-sections";
 import {
   COURSES_SECTION_LABELS,
   COURSES_SECTION_ORDER,
@@ -12,8 +13,11 @@ import {
   RETIRED_TAB_DESTINATIONS,
   TAB_LABELS,
   TAB_ORDER,
-  TOOLS_SECTION_LABELS,
+  TASKS_VIEW_LABELS,
+  TASKS_VIEW_ORDER,
   TOOLS_SECTION_ORDER,
+  WORKFLOWS_VIEW_LABELS,
+  WORKFLOWS_VIEW_ORDER,
   isRetiredTabValue,
 } from "./tab-sections";
 
@@ -46,10 +50,22 @@ describe("each merged tab's sections", () => {
     expect([...LIBRARY_SECTION_ORDER]).toEqual(["files", "knowledge"]);
   });
 
-  it("labels every section", () => {
+  it("labels every section that is still its own rail item", () => {
     for (const section of COURSES_SECTION_ORDER) expect(COURSES_SECTION_LABELS[section]).toBeTruthy();
-    for (const section of TOOLS_SECTION_ORDER) expect(TOOLS_SECTION_LABELS[section]).toBeTruthy();
     for (const section of LIBRARY_SECTION_ORDER) expect(LIBRARY_SECTION_LABELS[section]).toBeTruthy();
+  });
+
+  it("has no label map for the Tools sections, whose switch D26 deleted", () => {
+    // "Manual" and "Workflows" were the two halves of a control the user no
+    // longer sees: both families are represented in the flattened rail by
+    // their own views instead. A label map left behind for a deleted control
+    // is a registration describing a screen that does not exist, which this
+    // repo has already been bitten by once (see topLevelTabs.wiring.test.ts's
+    // own header on the canary that had to move).
+    const registry = tabSections as Record<string, unknown>;
+    expect(Object.keys(registry)).not.toContain("TOOLS_SECTION_LABELS");
+    // The ORDER survives - it is what still validates the toolsSection param.
+    expect([...TOOLS_SECTION_ORDER]).toEqual(["manual", "workflows"]);
   });
 
   it("defaults each merged tab to the half whose tab value survived the merge", () => {
@@ -71,6 +87,24 @@ describe("each merged tab's sections", () => {
       toolsSection: "manual",
       librarySection: "files",
     });
+  });
+});
+
+// D26. These two ordered lists moved here from url-state.ts so the flattened
+// rails could be BUILT from them rather than restating their members. Both the
+// rail and url-state's own validator now derive from these, so anything wrong
+// here is wrong in two places at once - which is exactly why they are pinned.
+describe("the view families the flattened rails are built from", () => {
+  it("lists the Workflows views in rail order, with a label each", () => {
+    expect([...WORKFLOWS_VIEW_ORDER]).toEqual(["workflows", "automations", "drafts"]);
+    for (const view of WORKFLOWS_VIEW_ORDER) expect(WORKFLOWS_VIEW_LABELS[view]).toBeTruthy();
+    expect(WORKFLOWS_VIEW_LABELS.drafts).toBe("Drafts");
+  });
+
+  it("lists the Tasks views in rail order, keeping the wording the deleted subnav used", () => {
+    expect([...TASKS_VIEW_ORDER]).toEqual(["term", "recurring"]);
+    expect(TASKS_VIEW_LABELS.term).toBe("Term Setup");
+    expect(TASKS_VIEW_LABELS.recurring).toBe("Daily / Weekly");
   });
 });
 

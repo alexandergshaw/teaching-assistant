@@ -35,16 +35,21 @@ import { useDraftedGradesInbox } from "./components/DraftedGradesInbox";
 import styles from "./page.module.css";
 import { ManualRail } from "./components/manual/ManualRail";
 import { resolveStateFromDestinationId } from "./components/manual/manual-rail";
-import { TabSectionSwitch } from "./components/tabs/TabSectionSwitch";
+import { TabRail } from "./components/tabs/TabRail";
 import {
-  COURSES_SECTION_LABELS,
-  COURSES_SECTION_ORDER,
+  COURSES_RAIL_ITEMS,
+  TOOLS_RAIL_DRAFTS_ID,
+  TOOLS_RAIL_ITEMS,
+  coursesRailItemFor,
+  coursesStateFromRailItem,
+  toolsRailItemFor,
+  toolsStateFromRailItem,
+} from "./components/tabs/tab-rails";
+import {
   LIBRARY_SECTION_LABELS,
   LIBRARY_SECTION_ORDER,
   TAB_LABELS,
   TAB_ORDER,
-  TOOLS_SECTION_LABELS,
-  TOOLS_SECTION_ORDER,
   type ActiveTab,
 } from "./components/tabs/tab-sections";
 import { RECORDING_LAUNCH_EVENT, parseRecordingLaunch } from "@/lib/recording-launch";
@@ -296,26 +301,45 @@ export default function Home() {
     setActiveTab("manual");
   };
 
-  // Each merged tab's section switch, derived from tab-sections.ts's ordered
-  // lists rather than hand-written per section, so a section registered there
-  // cannot be missing from the control that reaches it. The counts are the
-  // same two the top strip badges - shown again here because after the merge
-  // the strip badge only says WHICH TAB has attention waiting, and the switch
-  // is what says which half of it.
-  const coursesSectionOptions = COURSES_SECTION_ORDER.map((id) => ({
-    id,
-    label: COURSES_SECTION_LABELS[id],
+  // Each merged tab's ONE navigation rail (D26), derived from the ordered
+  // lists in tab-rails.ts/tab-sections.ts rather than hand-written per item,
+  // so a view registered there cannot be missing from the control that reaches
+  // it. The counts are the same two the top strip badges - shown again here
+  // because the strip badge only says WHICH TAB has attention waiting, and the
+  // rail is what says which item of it.
+  const coursesRailOptions = COURSES_RAIL_ITEMS.map((item) => ({ id: item.id, label: item.label }));
+  // The Drafts chip inherits the unread badge that used to sit on the deleted
+  // section switch's "Workflows" half, named through tab-rails' own builder so
+  // this cannot drift from the id the rail actually renders.
+  const toolsRailOptions = TOOLS_RAIL_ITEMS.map((item) => ({
+    id: item.id,
+    label: item.label,
+    count: item.id === TOOLS_RAIL_DRAFTS_ID ? draftsInbox : 0,
   }));
-  const toolsSectionOptions = TOOLS_SECTION_ORDER.map((id) => ({
-    id,
-    label: TOOLS_SECTION_LABELS[id],
-    count: id === "workflows" ? draftsInbox : 0,
-  }));
-  const librarySectionOptions = LIBRARY_SECTION_ORDER.map((id) => ({
+  // Library was already flat before D26 - its two halves have no sub-views to
+  // pull up, so its rail is still exactly its two sections, unchanged in
+  // items, params and default.
+  const libraryRailOptions = LIBRARY_SECTION_ORDER.map((id) => ({
     id,
     label: LIBRARY_SECTION_LABELS[id],
     count: id === "files" ? filesInbox : 0,
   }));
+
+  // Picking a rail item writes the param that ALREADY owned that view, plus
+  // the section its family implies - together, in one handler, so the two can
+  // never be set apart from each other. The section is the derived half of
+  // that pair: it is never chosen on its own by anything the user can click.
+  const handleCoursesRailChange = (id: string) => {
+    const next = coursesStateFromRailItem(id, coursesSection, tasksView);
+    if (next.coursesSection !== coursesSection) setCoursesSection(next.coursesSection);
+    if (next.tasksView !== tasksView) setTasksView(next.tasksView);
+  };
+  const handleToolsRailChange = (id: string) => {
+    const next = toolsStateFromRailItem(id, toolsSection, manualView, workflowsView);
+    if (next.toolsSection !== toolsSection) setToolsSection(next.toolsSection);
+    if (next.manualView !== manualView) setManualView(next.manualView);
+    if (next.workflowsView !== workflowsView) setWorkflowsView(next.workflowsView);
+  };
 
   return (
     <>
@@ -411,11 +435,14 @@ export default function Home() {
 
         {activeTab === "courses" && (
           <>
-            <TabSectionSwitch
-              ariaLabel="Courses sections"
-              options={coursesSectionOptions}
-              value={coursesSection}
-              onChange={setCoursesSection}
+            {/* ONE nav level (D26): Courses plus the two Tasks views, rather
+                than a Courses/Tasks switch with the Tasks views hidden a level
+                below it inside TasksTab. */}
+            <TabRail
+              ariaLabel="Courses views"
+              options={coursesRailOptions}
+              value={coursesRailItemFor(coursesSection, tasksView)}
+              onChange={handleCoursesRailChange}
             />
 
             {coursesSection === "courses" && (
@@ -442,26 +469,39 @@ export default function Home() {
               />
             )}
 
-            {coursesSection === "tasks" && <TasksTab view={tasksView} onViewChange={setTasksView} />}
+            {/* The Term/Daily-Weekly switch TasksTab used to render is gone -
+                both of its views are chips in the rail above, writing the
+                same tasksView param they always did, so this pane no longer
+                needs a way to change it. */}
+            {coursesSection === "tasks" && <TasksTab view={tasksView} />}
           </>
         )}
 
         {activeTab === "manual" && (
           <>
-            <TabSectionSwitch
-              ariaLabel="Tools sections"
-              options={toolsSectionOptions}
-              value={toolsSection}
-              onChange={setToolsSection}
+            {/* ONE nav level (D26): the seven Manual views and the three
+                Workflows views in a single rail of ten, in place of the
+                Manual/Workflows switch that used to sit above a separate
+                seven-item Manual rail and a separate three-item Workflows
+                subnav. */}
+            <TabRail
+              ariaLabel="Tools views"
+              options={toolsRailOptions}
+              value={toolsRailItemFor(toolsSection, manualView, workflowsView)}
+              onChange={handleToolsRailChange}
             />
 
             {toolsSection === "manual" && (
               <>
+                {/* Row 2 only: the inner destinations of whichever Manual view
+                    is showing (Build Courses' two modes, LMS's eight views).
+                    That is the INNERMOST level, not the one D26 removed - it
+                    is what the rail item leads into, not a second way to
+                    choose the rail item. */}
                 <ManualRail
                   manualView={manualView}
                   buildView={buildView}
                   contentView={contentView}
-                  onManualViewClick={setManualView}
                   onDestinationClick={(destId) => {
                     const resolved = resolveStateFromDestinationId(destId, manualView, buildView, contentView);
                     if (resolved.manualView !== manualView) setManualView(resolved.manualView);
@@ -543,13 +583,16 @@ export default function Home() {
               </>
             )}
 
+            {/* WorkflowsPanel's own Workflows/Automations/Drafts subnav is
+                gone with D26 - those three are chips in the rail above now,
+                writing the same workflowsView param, and the Drafts badge
+                moved up with them. What stays is the Grades/Messages subnav
+                INSIDE Drafts, which is the innermost level. */}
             {toolsSection === "workflows" && (
               <WorkflowsPanel
                 workflowsView={workflowsView}
-                onWorkflowsViewChange={setWorkflowsView}
                 draftsView={draftsView}
                 onDraftsViewChange={setDraftsView}
-                draftsInbox={draftsInbox}
                 draftsGradesCount={draftsGradesCount}
                 draftsMessagesCount={draftsMessagesCount}
                 onOpenWorkflow={openWorkflow}
@@ -559,12 +602,22 @@ export default function Home() {
         )}
 
         {/* Kept mounted at all times so an in-progress recording survives switching
-            subtabs or top-level tabs; only shown on Tools > Manual > Recording.
-            The guard gained the toolsSection term with the merge and NOTHING
-            else changed: this stays a display toggle on an always-rendered
-            element, never a conditional render. Turning it into one would
-            unmount a running screen capture the moment the user looked at
-            another tab, which is a lost recording rather than a blank pane. */}
+            subtabs or top-level tabs; only shown on the Tools tab's Recording
+            rail item. The guard gained the toolsSection term with the merge and
+            NOTHING else changed: this stays a display toggle on an
+            always-rendered element, never a conditional render. Turning it into
+            one would unmount a running screen capture the moment the user
+            looked at another tab, which is a lost recording rather than a
+            blank pane.
+
+            D26 CHANGED THIS GUARD BY EXACTLY NOTHING, on purpose. Flattening
+            removed the section SWITCH, not the section VALUE - toolsSection is
+            still what says which family is showing, it is just written now as
+            part of picking a rail item. So the three terms below still mean
+            precisely what they meant before: Tools tab, Manual family,
+            Recording view. Rewriting them in terms of the rail item id would
+            have been the same predicate spelled a new way, with a live screen
+            capture riding on getting the rewrite right. */}
         <div
           style={{
             display:
@@ -576,9 +629,13 @@ export default function Home() {
 
         {activeTab === "files" && (
           <>
-            <TabSectionSwitch
-              ariaLabel="Library sections"
-              options={librarySectionOptions}
+            {/* Library was already one level deep before D26 and still is:
+                neither half has a sub-rail, so its two sections ARE its two
+                rail items. Flattening it further would have renamed things
+                and changed nothing, so it was left alone. */}
+            <TabRail
+              ariaLabel="Library views"
+              options={libraryRailOptions}
               value={librarySection}
               onChange={setLibrarySection}
             />

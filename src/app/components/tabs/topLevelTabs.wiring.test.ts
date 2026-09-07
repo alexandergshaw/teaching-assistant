@@ -5,10 +5,13 @@ import {
   RETIRED_TAB_DESTINATIONS,
   TAB_LABELS,
   TAB_ORDER,
+  WORKFLOWS_VIEW_ORDER,
   isRetiredTabValue,
   type ActiveTab,
 } from "./tab-sections";
-import { isActiveTab, resolveTabDestination } from "../../url-state";
+import { TOOLS_RAIL_ITEMS, coursesRailItemFor, toolsRailItemFor } from "./tab-rails";
+import { MANUAL_VIEW_ORDER } from "../manual/manual-rail";
+import { isActiveTab, parseUrlState, resolveTabDestination } from "../../url-state";
 
 /**
  * The reachability canary, and it exists because everything else missed.
@@ -48,6 +51,14 @@ import { isActiveTab, resolveTabDestination } from "../../url-state";
  *    conditional render (D25d). Getting that one wrong unmounts an in-progress
  *    screen capture, which to the person losing it is not a rendering bug.
  *
+ * 6. D26: each merged tab having exactly ONE navigation level, and each of the
+ *    flattened rail's items having somewhere to land. The flattening deleted
+ *    three controls that lived a level below the tab strip - the Manual rail's
+ *    first row, the Workflows subnav, and TasksTab's own two-item switch - and
+ *    a flattening that leaves any one of them behind has not flattened
+ *    anything; it has added a tenth chip above a control that still exists.
+ *    Nothing else in this repo can see a second nav row: no test renders one.
+ *
  * A source-text assertion is a blunt instrument and it is the only instrument
  * available here: vitest in this repo is node-env and collects only
  * `src/**\/*.test.ts`, so no component is ever rendered and no test can
@@ -63,9 +74,35 @@ import { isActiveTab, resolveTabDestination } from "../../url-state";
 
 const PAGE = join(process.cwd(), "src", "app", "page.tsx");
 const NAV_HOOK = join(process.cwd(), "src", "app", "components", "home", "useAppNavigation.ts");
+// The three files that used to render the level D26 removed. Each is read to
+// prove the row is really gone rather than merely duplicated by the new rail.
+const MANUAL_RAIL = join(process.cwd(), "src", "app", "components", "manual", "ManualRail.tsx");
+const WORKFLOWS_PANEL = join(process.cwd(), "src", "app", "components", "home", "WorkflowsPanel.tsx");
+const TASKS_TAB = join(process.cwd(), "src", "app", "components", "TasksTab.tsx");
 
 function read(path: string): string {
   return readFileSync(path, "utf8");
+}
+
+/**
+ * Source with comments removed, for the D26 assertions that a deleted control
+ * is really gone.
+ *
+ * Necessary, not tidiness: every one of those three files now carries a note
+ * saying which prop it stopped taking and why, and a bare `not.toContain` sees
+ * the prose and reports the row as still present. This repo has already learned
+ * that lesson once in the CSS-class guards, whose own stripSourceComments
+ * docstring records two failures that were both accurate prose - "a guard that
+ * goes red on an accurate comment teaches people to delete comments".
+ *
+ * Same conservative rule as those guards: block comments anywhere (which covers
+ * JSX `{/* ... *\/}` too), line comments only when `//` opens the line, so a
+ * trailing comment after real code cannot hide a real reference.
+ */
+function readWithoutComments(path: string): string {
+  return read(path)
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "");
 }
 
 /** The JSX render-branch opener for one tab, as page.tsx spells it. */
@@ -169,18 +206,33 @@ describe("the four top-level tabs are registered, in the strip, and rendered", (
     ).toContain("CourseIntelTab");
   });
 
-  it("gives each merged tab a section switch reached from its own branch", () => {
+  it("gives each merged tab exactly one navigation rail, reached from its own branch (D26)", () => {
     const source = read(PAGE);
-    // Course Intel absorbed nothing, so it has no section switch; the other
-    // three each need one or half the tab is unreachable by click.
+    // Course Intel absorbed nothing, so it has no rail; the other three each
+    // need one or part of the tab is unreachable by click. EXACTLY one, not at
+    // least one: a second <TabRail inside a branch is the middle level back
+    // again under a new component name.
     const mergedTabs: ActiveTab[] = ["courses", "manual", "files"];
     for (const tab of mergedTabs) {
+      const slice = branchSlice(source, tab);
+      const rails = slice.split("<TabRail").length - 1;
       expect(
-        branchSlice(source, tab),
-        `the "${tab}" branch renders no TabSectionSwitch, so the half of the tab that ` +
-          "is not the default section cannot be reached by clicking anything."
-      ).toContain("<TabSectionSwitch");
+        rails,
+        `the "${tab}" branch renders ${rails} TabRail elements. One is the flattened ` +
+          "rail; zero leaves part of the tab unreachable by click, and two is the " +
+          "intermediate nav level D26 removed, rebuilt under a new name."
+      ).toBe(1);
     }
+  });
+
+  it("has retired TabSectionSwitch entirely - a section is no longer something anyone picks", () => {
+    const source = read(PAGE);
+    expect(
+      source,
+      "page.tsx still renders a TabSectionSwitch. D26 replaced the section switch with " +
+        "a rail over the individual views; a switch left anywhere means that tab still " +
+        "has two levels."
+    ).not.toContain("TabSectionSwitch");
   });
 
   it("renders both halves of every merged tab, each behind its own section id", () => {
@@ -201,6 +253,103 @@ describe("the four top-level tabs are registered, in the strip, and rendered", (
   });
 });
 
+// D26. The flattening itself: one level, and every chip in it landing
+// somewhere. Source-text again, for the reason the header gives - nothing
+// renders here, so a second nav row is invisible to every other gate.
+describe("the merged tabs are one navigation level deep", () => {
+  it("no longer lets page.tsx hand any of the three deleted controls a change handler", () => {
+    // The most direct evidence a row is gone: the prop that made it a CONTROL
+    // rather than a display is no longer passed. Each of these was the single
+    // wire between page.tsx and one deleted row.
+    const source = readWithoutComments(PAGE);
+    for (const prop of ["onManualViewClick", "onWorkflowsViewChange", "onViewChange"]) {
+      expect(
+        source,
+        `page.tsx still passes ${prop}, which only the nav row D26 deleted ever consumed. ` +
+          "That row is still rendering, one level below the flattened rail."
+      ).not.toContain(prop);
+    }
+  });
+
+  it("has taken the seven-item first row out of ManualRail, leaving only the inner destinations", () => {
+    const source = readWithoutComments(MANUAL_RAIL);
+    expect(source.length, "ManualRail.tsx could not be read").toBeGreaterThan(200);
+    expect(
+      source,
+      "ManualRail.tsx still maps MANUAL_VIEW_ORDER, so the Tools tab renders the seven " +
+        "Manual chips twice: once in the flattened rail and once in the row below it."
+    ).not.toContain("MANUAL_VIEW_ORDER");
+    // Exactly one tablist left - the inner destinations row, which is the
+    // level BELOW a rail item and was never in scope to remove.
+    expect(source.split('role="tablist"').length - 1).toBe(1);
+  });
+
+  it("has taken the Workflows/Automations/Drafts subnav out of WorkflowsPanel, leaving only the Drafts subnav", () => {
+    const source = readWithoutComments(WORKFLOWS_PANEL);
+    expect(source.length, "WorkflowsPanel.tsx could not be read").toBeGreaterThan(200);
+    expect(
+      source,
+      "WorkflowsPanel.tsx still takes onWorkflowsViewChange, so its own three-chip subnav " +
+        "is still rendering below the flattened rail that already contains those three."
+    ).not.toContain("onWorkflowsViewChange");
+    expect(source.split('role="tablist"').length - 1).toBe(1);
+  });
+
+  it("has taken the Term/Daily-Weekly tablist out of TasksTab entirely", () => {
+    const source = readWithoutComments(TASKS_TAB);
+    expect(source.length, "TasksTab.tsx could not be read").toBeGreaterThan(1000);
+    expect(
+      source,
+      "TasksTab.tsx still renders a tablist. Its two views are chips in the Courses rail " +
+        "now; leaving the old switch in place makes Courses two levels deep again."
+    ).not.toContain('role="tablist"');
+    expect(source).not.toContain("onViewChange");
+  });
+
+  it("gives every Manual chip in the Tools rail its own render branch in page.tsx", () => {
+    // The blank-pane failure, one level down from the tab: a chip that
+    // highlights, restores from the URL, and paints nothing.
+    const slice = branchSlice(read(PAGE), "manual");
+    for (const view of MANUAL_VIEW_ORDER) {
+      expect(
+        slice,
+        `the Tools branch has no 'manualView === "${view}"' render branch, so that rail ` +
+          "chip leads to an empty pane while every other gate stays green."
+      ).toContain(`manualView === "${view}"`);
+    }
+  });
+
+  it("gives every Workflows chip in the Tools rail its own render branch in WorkflowsPanel", () => {
+    const source = read(WORKFLOWS_PANEL);
+    for (const view of WORKFLOWS_VIEW_ORDER) {
+      expect(
+        source,
+        `WorkflowsPanel.tsx has no 'workflowsView === "${view}"' render branch, so that ` +
+          "rail chip leads to an empty pane."
+      ).toContain(`workflowsView === "${view}"`);
+    }
+  });
+
+  it("passes the rail the derived chip rather than a section the user picked", () => {
+    // The whole design in one line each: the VALUE handed to the rail is
+    // computed from the params that already existed, so a chip cannot be
+    // stored anywhere or drift from them.
+    const source = read(PAGE);
+    expect(branchSlice(source, "courses")).toContain("coursesRailItemFor(coursesSection, tasksView)");
+    expect(branchSlice(source, "manual")).toContain(
+      "toolsRailItemFor(toolsSection, manualView, workflowsView)"
+    );
+  });
+
+  it("builds each rail from the registries rather than a hand-written list of chips", () => {
+    const source = read(PAGE);
+    expect(source).toContain("COURSES_RAIL_ITEMS.map(");
+    expect(source).toContain("TOOLS_RAIL_ITEMS.map(");
+    // Ten chips is a lot; a hand-written list is how one of them goes missing.
+    expect(TOOLS_RAIL_ITEMS).toHaveLength(10);
+  });
+});
+
 // D25b. This block is the whole reason the change is risky, and it is the only
 // automated thing standing between a returning user and the wrong screen.
 describe("every retired tab value still resolves to its new home", () => {
@@ -213,6 +362,49 @@ describe("every retired tab value still resolves to its new home", () => {
 
     expect(resolveTabDestination("knowledge").tab).toBe("files");
     expect(resolveTabDestination("knowledge").librarySection).toBe("knowledge");
+  });
+
+  // D26 raised the bar on this: resolving to the right TAB is no longer
+  // enough, because the tab now opens on a specific rail item. A legacy link
+  // that lands on Tools with the Manual chip selected has lost exactly as much
+  // as one that landed on the wrong tab before - the user asked for Workflows.
+  it("lands each retired link on the right CHIP, not merely the right tab", () => {
+    const tasks = parseUrlState("?tab=tasks");
+    expect(tasks.tab).toBe("courses");
+    expect(coursesRailItemFor(tasks.coursesSection, tasks.tasksView)).toBe("tasks:term");
+
+    const workflows = parseUrlState("?tab=workflows");
+    expect(workflows.tab).toBe("manual");
+    expect(toolsRailItemFor(workflows.toolsSection, workflows.manualView, workflows.workflowsView)).toBe(
+      "workflows:workflows"
+    );
+
+    const knowledge = parseUrlState("?tab=knowledge");
+    expect(knowledge.tab).toBe("files");
+    // Library's rail items ARE its sections - it was already flat, so the chip
+    // and the section are the same value.
+    expect(knowledge.librarySection).toBe("knowledge");
+  });
+
+  it("carries a legacy DEEP link all the way to its chip, sub-view and all", () => {
+    // The case a "right tab, wrong chip" bug hides behind: these URLs name a
+    // sub-view too, and the flattened rail is where that sub-view is now
+    // chosen. If the chip were derived from anything other than the params the
+    // link carries, these would silently fall back to the family default.
+    const recurring = parseUrlState("?tab=tasks&tasksView=recurring");
+    expect(coursesRailItemFor(recurring.coursesSection, recurring.tasksView)).toBe("tasks:recurring");
+
+    const drafts = parseUrlState("?tab=workflows&workflowsView=drafts");
+    expect(toolsRailItemFor(drafts.toolsSection, drafts.manualView, drafts.workflowsView)).toBe(
+      "workflows:drafts"
+    );
+
+    // And the Manual family through the param this whole design exists to
+    // protect: an old "?manualView=" link still names its own chip.
+    const recording = parseUrlState("?tab=manual&manualView=recording");
+    expect(toolsRailItemFor(recording.toolsSection, recording.manualView, recording.workflowsView)).toBe(
+      "manual:recording"
+    );
   });
 
   it("never lets a retired value fall through to the unrecognised-value default", () => {

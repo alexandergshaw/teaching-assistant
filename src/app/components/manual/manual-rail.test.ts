@@ -181,7 +181,7 @@ describe("manual-rail", () => {
     });
   });
 
-  describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (row 1)", () => {
+  describe("MANUAL_VIEW_ORDER / MANUAL_VIEW_LABELS (the Manual half of the Tools rail)", () => {
     it("should list the seven subtabs in display order", () => {
       // Seven, not eight: "course-intel" left this rail entirely when it was
       // promoted to a top-level tab (D24a). See the removal block below.
@@ -208,7 +208,7 @@ describe("manual-rail", () => {
     });
   });
 
-  describe("getInnerDestinations (row 2)", () => {
+  describe("getInnerDestinations (the level below a rail chip)", () => {
     it("should return the Build destinations for course-planning", () => {
       const inner = getInnerDestinations("course-planning");
       expect(inner?.map((d) => d.id)).toEqual(["build-new", "build-prebuilt"]);

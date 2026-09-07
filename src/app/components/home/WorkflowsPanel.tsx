@@ -9,70 +9,38 @@ import styles from "../../page.module.css";
 
 export interface WorkflowsPanelProps {
   workflowsView: WorkflowsView;
-  onWorkflowsViewChange: (v: WorkflowsView) => void;
   draftsView: DraftsView;
   onDraftsViewChange: (v: DraftsView) => void;
-  /** Total unread drafts, badged on the Drafts subtab. */
-  draftsInbox: number;
   draftsGradesCount: number;
   draftsMessagesCount: number;
   onOpenWorkflow: (id: string, panel?: "automate") => void;
 }
 
 /**
- * The Workflows top-level tab: its Workflows/Automations/Drafts subnav, the
- * nested Grades/Messages subnav under Drafts, and whichever view those two
- * select. Split out of page.tsx as presentation only - every piece of state it
- * reads is owned by useAppNavigation and passed in, so this file has no
- * behaviour of its own to get wrong.
+ * The Workflows half of the Tools tab: the nested Grades/Messages subnav under
+ * Drafts, and whichever view `workflowsView` selects. Split out of page.tsx as
+ * presentation only - every piece of state it reads is owned by
+ * useAppNavigation and passed in, so this file has no behaviour of its own to
+ * get wrong.
+ *
+ * IT USED TO RENDER ITS OWN Workflows/Automations/Drafts SUBNAV. D26 deleted
+ * that row: those three are chips in the Tools tab's single flattened rail now
+ * (components/tabs/tab-rails.ts), writing the same workflowsView param they
+ * always did, and the unread-drafts badge moved up with them - which is why
+ * `onWorkflowsViewChange` and `draftsInbox` are no longer props. The
+ * Grades/Messages subnav below stays: it is the innermost level, inside the
+ * Drafts view rather than beside it.
  */
 export default function WorkflowsPanel({
   workflowsView,
-  onWorkflowsViewChange,
   draftsView,
   onDraftsViewChange,
-  draftsInbox,
   draftsGradesCount,
   draftsMessagesCount,
   onOpenWorkflow,
 }: WorkflowsPanelProps) {
   return (
     <>
-      <div className={styles.manualSubnav}>
-        <div className={styles.lessonInnerTabs} role="tablist" aria-label="Workflows">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workflowsView === "workflows"}
-            className={`${styles.lessonInnerTab}${workflowsView === "workflows" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => onWorkflowsViewChange("workflows")}
-          >
-            Workflows
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workflowsView === "automations"}
-            className={`${styles.lessonInnerTab}${workflowsView === "automations" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => onWorkflowsViewChange("automations")}
-          >
-            Automations
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workflowsView === "drafts"}
-            className={`${styles.lessonInnerTab}${workflowsView === "drafts" ? ` ${styles.lessonInnerTabActive}` : ""}`}
-            onClick={() => onWorkflowsViewChange("drafts")}
-          >
-            <span className={styles.tabLabelWrap}>
-              Drafts
-              {draftsInbox > 0 && <span className={styles.navBadge}>{draftsInbox}</span>}
-            </span>
-          </button>
-        </div>
-      </div>
-
       {workflowsView === "workflows" && <WorkflowsTab />}
       {workflowsView === "automations" && <AutomationsTabView onOpenWorkflow={onOpenWorkflow} />}
       {workflowsView === "drafts" && (

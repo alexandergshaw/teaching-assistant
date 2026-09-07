@@ -139,3 +139,43 @@ describe("the merged tabs' section switches persist under their own ta- keys", (
     expect(source).toContain('localStorage.getItem("ta-active-tab")');
   });
 });
+
+// D26: the flattened rail's selected chip is the PAIR (section, view), so a
+// reload only lands back on the same chip if BOTH halves persist. The block
+// above already pins the section keys; this pins the view keys that the rail's
+// chips now write directly, under the same standing "every control survives a
+// reload" rule. Source-text for the same reason as every block above: these
+// live in useState initializers and localStorage effects inside a hook, and
+// this suite cannot render one.
+describe("the view each rail chip writes persists under its own ta- key", () => {
+  const KEYS = [
+    { constant: "MANUAL_VIEW_KEY", value: "ta-manual-view" },
+    { constant: "WORKFLOWS_VIEW_KEY", value: "ta-workflows-view" },
+    { constant: "TASKS_VIEW_KEY", value: "ta-tasks-view" },
+  ];
+
+  it("declares one ta- key per view family in the rails", () => {
+    for (const { constant, value } of KEYS) {
+      expect(source, `expected a ${constant} constant`).toContain(`const ${constant} = "${value}"`);
+    }
+  });
+
+  it("writes each key back whenever its view changes", () => {
+    for (const { constant } of KEYS) {
+      expect(
+        source,
+        `${constant} is declared but never written, so picking that rail chip is forgotten ` +
+          "on reload and the user lands on a different chip than the one they left on"
+      ).toMatch(new RegExp(`localStorage\\.setItem\\(${constant},`));
+    }
+  });
+
+  it("keeps the view params the rails write named exactly as they were", () => {
+    // The constraint the whole flattening was built around. A rail chip writes
+    // the param that ALREADY owned its view, so these three reads must still
+    // name manualView/workflowsView/tasksView - not a new rail-item param.
+    expect(source).toContain('urlParams.get("manualView")');
+    expect(source).toContain('urlParams.get("workflowsView")');
+    expect(source).toContain('urlParams.get("tasksView")');
+  });
+});

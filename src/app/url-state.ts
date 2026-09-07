@@ -17,6 +17,16 @@
 // half is showing is the "section" (coursesSection/toolsSection/
 // librarySection). The chain is tab -> section -> view -> inner view.
 //
+// D26 FLATTENED THE NAVIGATION BUT NOT THIS FILE. The section is no longer
+// something the user picks - one rail per merged tab now lists both families'
+// views directly and the section is derived from whichever family the chosen
+// item belongs to (components/tabs/tab-rails.ts). The URL contract is
+// deliberately unchanged by that: every param below keeps its name and its
+// values, and the parse/build chain still walks tab -> section -> view ->
+// inner view, because the alternative - one new param with aliases for the
+// old ones - would break every existing "?manualView=" link for a purely
+// cosmetic gain.
+//
 // No window/history access happens in this file - it stays a pure string
 // <-> state mapping so it can be unit tested directly. page.tsx owns the
 // actual window.history.pushState/replaceState calls and the popstate
@@ -35,13 +45,17 @@ import {
   LIBRARY_SECTION_ORDER,
   RETIRED_TAB_DESTINATIONS,
   TAB_ORDER,
+  TASKS_VIEW_ORDER,
   TOOLS_SECTION_ORDER,
+  WORKFLOWS_VIEW_ORDER,
   isRetiredTabValue,
   type ActiveTab,
   type CoursesSection,
   type LibrarySection,
   type TabDestination,
+  type TasksView,
   type ToolsSection,
+  type WorkflowsView,
 } from "./components/tabs/tab-sections";
 
 // Re-exported so every existing import site (page.tsx, useAppNavigation.ts,
@@ -50,13 +64,19 @@ import {
 // ordered member lists - are owned by components/tabs/tab-sections.ts; this
 // module owns validation and the query-string mapping, exactly as it already
 // does for ManualViewType/ContentView.
-export type { ActiveTab, CoursesSection, ToolsSection, LibrarySection, TabDestination };
-export type WorkflowsView = "workflows" | "automations" | "drafts";
-export type TasksView = "term" | "recurring";
-// No canonical home elsewhere (unlike ManualViewType/ContentView/ActiveTab,
-// which are owned by manual-rail.ts, content-tab/constants.ts and
-// tabs/tab-sections.ts respectively) - this module is the single source of
-// truth for it, the same as WorkflowsView.
+// WorkflowsView and TasksView joined this list in D26: the flattened rails are
+// built from their ORDERED member lists, so those lists had to move to the
+// leaf module that owns every other ordered nav list (declaring them here and
+// importing them back would be a cycle). Re-exported so every existing import
+// site keeps resolving them from this module, and so the "workflowsView" and
+// "tasksView" params they validate are untouched.
+export type { ActiveTab, CoursesSection, ToolsSection, LibrarySection, TabDestination, WorkflowsView, TasksView };
+// No canonical home elsewhere (unlike ManualViewType/ContentView/ActiveTab/
+// WorkflowsView, which are owned by manual-rail.ts, content-tab/constants.ts
+// and tabs/tab-sections.ts respectively) - this module is the single source of
+// truth for it. DraftsView is a level BELOW the flattened rail (it lives
+// inside the Drafts view, not beside it), so unlike its two siblings above it
+// had no reason to move.
 export type DraftsView = "grades" | "messages";
 
 // Derived from TAB_ORDER rather than restating the four members, so a tab
@@ -134,11 +154,12 @@ export function normalizeLibrarySection(value: string | null): LibrarySection {
   return isLibrarySection(value) ? value : DEFAULT_LIBRARY_SECTION;
 }
 
-const WORKFLOWS_VIEW_VALUES: ReadonlySet<string> = new Set<WorkflowsView>([
-  "workflows",
-  "automations",
-  "drafts",
-]);
+// Derived from the same ordered list the Tools rail renders (D26), not
+// restated: a Workflows sub-view added to that list is accepted by the URL
+// automatically. Restating it is precisely how a registered view ends up
+// rejected by its own restore guard - see manual-rail.ts's isManualViewType
+// comment for the time this project actually paid for that.
+const WORKFLOWS_VIEW_VALUES: ReadonlySet<string> = new Set<string>(WORKFLOWS_VIEW_ORDER);
 
 export function isWorkflowsView(value: unknown): value is WorkflowsView {
   return typeof value === "string" && WORKFLOWS_VIEW_VALUES.has(value);
@@ -148,7 +169,9 @@ export function normalizeWorkflowsView(value: string | null): WorkflowsView {
   return isWorkflowsView(value) ? value : "workflows";
 }
 
-const TASKS_VIEW_VALUES: ReadonlySet<string> = new Set<TasksView>(["term", "recurring"]);
+// Derived from the rail's own ordered list for the same reason as
+// WORKFLOWS_VIEW_VALUES above.
+const TASKS_VIEW_VALUES: ReadonlySet<string> = new Set<string>(TASKS_VIEW_ORDER);
 
 export function isTasksView(value: unknown): value is TasksView {
   return typeof value === "string" && TASKS_VIEW_VALUES.has(value);
@@ -241,13 +264,17 @@ const DEFAULT_DRAFTS_VIEW = normalizeDraftsView(null);
 const DEFAULT_TASKS_VIEW = normalizeTasksView(null);
 
 const TAB_PARAM = "tab";
-// The three merged tabs' section params are NEW; every param below them is
-// unchanged in name and meaning (D25c: "No view param is renamed" - renaming
-// one would break the same class of URL D25b exists to protect, for no
-// benefit, since the params are already unique across tabs). "Section" rather
-// than "View" so the merged tab's own switch reads distinctly from the
-// pre-existing sub-view params it now nests above: "toolsSection=workflows&
+// The three merged tabs' section params were NEW at D25; every param below
+// them is unchanged in name and meaning (D25c: "No view param is renamed" -
+// renaming one would break the same class of URL D25b exists to protect, for
+// no benefit, since the params are already unique across tabs). "Section"
+// rather than "View" so a merged tab's family reads distinctly from the
+// pre-existing sub-view params nested under it: "toolsSection=workflows&
 // workflowsView=drafts" says which level is which at a glance.
+//
+// D26 left all eleven names alone. The section params are now WRITTEN as a
+// consequence of picking a rail item rather than picked directly, which
+// changes who sets them, not what they are called or what they accept.
 const COURSES_SECTION_PARAM = "coursesSection";
 const TOOLS_SECTION_PARAM = "toolsSection";
 const LIBRARY_SECTION_PARAM = "librarySection";

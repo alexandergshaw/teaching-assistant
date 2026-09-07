@@ -98,7 +98,15 @@ export function getDestinationById(id: string): Destination | undefined {
   return undefined;
 }
 
-// Row 1 of the Manual subnav: one chip per top-level subtab, in display order.
+// The seven Manual views, in display order.
+//
+// This used to be "row 1 of the Manual subnav" - its own rail, sitting below a
+// Manual/Workflows section switch. D26 flattened that away: these seven are
+// now the first seven chips of the Tools tab's single rail, followed by the
+// three Workflows views, built from this very list by
+// components/tabs/tab-rails.ts. The list itself did not change - the order it
+// declares is still the order the chips appear in, and "manualView" is still
+// the param each one writes.
 export const MANUAL_VIEW_ORDER: ManualViewType[] = [
   "course-planning",
   "content",
@@ -131,10 +139,14 @@ export function isManualViewType(value: unknown): value is ManualViewType {
   return typeof value === "string" && MANUAL_VIEW_TYPE_SET.has(value);
 }
 
-// Row 2 of the Manual subnav: the active subtab's inner destinations, or null
-// when that subtab has no inner views (Version Control, Recording, PowerPoint
-// Design, Artifact Templates, and Repo Grades are each a single destination
-// with nothing to switch between).
+// The active Manual view's inner destinations, or null when that view has no
+// inner views (Version Control, Recording, PowerPoint Design, Artifact
+// Templates, and Repo Grades are each a single destination with nothing to
+// switch between).
+//
+// This is the level BELOW a rail chip and D26 deliberately kept it: it is
+// where a chip leads, not a second way to choose one. It is the only row
+// ManualRail.tsx still renders.
 export function getInnerDestinations(manualView: ManualViewType): Destination[] | null {
   if (manualView === "course-planning") {
     return destinations.find((g) => g.name === "Build")?.destinations ?? null;

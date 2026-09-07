@@ -130,6 +130,41 @@ export default function CourseIntelAnswer({ asking, statusText, askError, askRef
           {answer.connectionNote && (
             <p className={`${pageStyles.fieldHint} ${styles.modeLine}`}>{answer.connectionNote}</p>
           )}
+
+          {/* D24e: THE COVERAGE BLOCK. Rendered WHENEVER there is an answer,
+              not only when something failed, and code-authored on the server
+              rather than left to the model to mention.
+
+              Two jobs, and both are load-bearing. With the course picker gone
+              (index.tsx) this is the only thing that tells the instructor
+              WHICH course a question resolved to. And a ranking asserts by its
+              grammar that everything was considered, so a five-course question
+              that reached three courses must show that on the face of the
+              answer - the model is also instructed not to write a bare
+              superlative in that case, but an instruction is not a guarantee
+              and this is rendered from typed server data either way. */}
+          {answer.coverageLines.length > 0 && (
+            <div className={styles.coverageBlock}>
+              <p className={pageStyles.ghMeta}>
+                {answer.courses.length > 1
+                  ? `This answer covers ${answer.courses.length} courses:`
+                  : "This answer covers:"}
+              </p>
+              <ul className={styles.omissionsList}>
+                {answer.coverageLines.map((line, i) => (
+                  <li key={i} className={pageStyles.fieldHint}>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              {!answer.coverageComplete && (
+                <p className={pageStyles.fieldHint}>
+                  These courses were not all read the same way, so they cannot be ranked against each other. Treat any
+                  comparison as covering only the courses listed above with the same source.
+                </p>
+              )}
+            </div>
+          )}
           {/* markdownToHtml, never markdown-lite (S13) - this text quotes or
               summarises student-authored content, and this function is the
               only renderer in this codebase that escapes before emitting and
@@ -144,6 +179,11 @@ export default function CourseIntelAnswer({ asking, statusText, askError, askRef
                 <div className={styles.signalStrip}>
                   {answer.concernRows.map((row) => (
                     <div key={row.studentIndex} className={styles.signalRow}>
+                      {/* The course is ALREADY IN `displayName` when the
+                          answer spans more than one (useCourseIntel.ts's
+                          buildNameByIndex appends it there, because the prose
+                          above has no column to put it in). A second chip here
+                          would print it twice on every row. */}
                       <span className={styles.signalName}>{row.displayName}</span>
                       <div className={styles.signalBadges}>
                         {/* Real text nodes, never colour or an icon alone
@@ -160,18 +200,22 @@ export default function CourseIntelAnswer({ asking, statusText, askError, askRef
                   ))}
                 </div>
                 <p className={pageStyles.fieldHint}>
-                  {answer.connection.state === "live"
-                    ? "These figures come straight from Canvas grades and submissions, not from the AI's own judgment."
-                    : "These figures were computed from the work you recorded for this course, not from the AI's own judgment."}{" "}
+                  {answer.courses.length > 1
+                    ? "These figures were computed from each course's own records, as listed above, not from the AI's own judgment."
+                    : answer.connection.state === "live"
+                      ? "These figures come straight from Canvas grades and submissions, not from the AI's own judgment."
+                      : "These figures were computed from the work you recorded for this course, not from the AI's own judgment."}{" "}
                   This is not a diagnosis - it never explains why a number looks the way it does.
                 </p>
               </>
             ) : (
               // D15's exact empty-case prose, no strip, no list.
               <p className={pageStyles.fieldHint}>
-                {answer.connection.state === "live"
-                  ? "Based on the available Canvas data, no student in this course currently shows a concern signal - missing or late work, a low course score, or an ungraded backlog."
-                  : "Based on the work you recorded for this course, no student currently shows a concern signal. This checked only what is recorded here, not an LMS gradebook."}
+                {answer.courses.length > 1
+                  ? "No student in the courses listed above currently shows a concern signal - missing or late work, a low course score, or an ungraded backlog."
+                  : answer.connection.state === "live"
+                    ? "Based on the available Canvas data, no student in this course currently shows a concern signal - missing or late work, a low course score, or an ungraded backlog."
+                    : "Based on the work you recorded for this course, no student currently shows a concern signal. This checked only what is recorded here, not an LMS gradebook."}
               </p>
             ))}
 
@@ -215,7 +259,7 @@ export default function CourseIntelAnswer({ asking, statusText, askError, askRef
           <span className={pageStyles.ghMeta}>
             {answer.connection.state === "live"
               ? "Canvas data gathered fresh for this question - nothing here is cached."
-              : "Built fresh from your recorded work for this question - nothing here is cached."}
+              : "Built fresh for this question from each course's own source - nothing here is cached."}
           </span>
         </div>
       )}

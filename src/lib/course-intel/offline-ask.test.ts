@@ -246,10 +246,20 @@ describe("prepareOfflineAsk - a question about writing is answered as one it can
 describe("the offline chain is actually reachable from the ask route", () => {
   const read = (rel: string) => fs.readFileSync(path.resolve(process.cwd(), rel), "utf-8");
 
-  it("the route imports prepareOfflineAsk and calls it", () => {
+  it("the route reaches prepareOfflineAsk, now through ./offline-answer", () => {
+    // D24 moved the single-course offline answer out of the route handler,
+    // which had gone past this repo's 1000-line ceiling. The chain got one
+    // link longer, so this canary follows it one link further: a check that
+    // still asserted "route.ts mentions prepareOfflineAsk" would fail on a
+    // correct split and, worse, would have passed for a route that imported
+    // the builder and never called it.
     const route = read("src/app/api/course-intel/ask/route.ts");
-    expect(route).toContain('from "@/lib/course-intel/offline-ask"');
-    expect(route).toMatch(/prepareOfflineAsk\(\{/);
+    expect(route).toContain('from "@/lib/course-intel/offline-answer"');
+    expect(route).toMatch(/answerOfflineAsk\(\{/);
+
+    const offlineAnswer = read("src/lib/course-intel/offline-answer.ts");
+    expect(offlineAnswer).toContain('from "./offline-ask"');
+    expect(offlineAnswer).toMatch(/prepareOfflineAsk\(\{/);
   });
 
   it("this module imports assembleOfflineCourseIntel and calls it", () => {
@@ -306,10 +316,28 @@ describe("the offline chain is actually reachable from the ask route", () => {
     // The exact defect this pair caught once already: the hook posted
     // `courseHubId` and the route read `courseId`, so every ask answered
     // "Pick a course first" with every gate green.
+    //
+    // D24 removed the course id from the wire entirely - there is no picker,
+    // so the question carries its own scope - which leaves ONE field to agree
+    // about and makes a mismatch cheaper to spot and no less fatal.
     const hook = read("src/app/components/course-intel/useCourseIntel.ts");
     const route = read("src/app/api/course-intel/ask/route.ts");
-    expect(hook).toMatch(/courseId: courseHubId/);
-    expect(route).toMatch(/asString\(body\.courseId\)/);
-    expect(hook).not.toMatch(/courseHubId: courseHubId/);
+    expect(hook).toMatch(/question: trimmed/);
+    expect(route).toMatch(/asString\(body\.question\)/);
+    // No course id in either direction. A hook that still posted one would be
+    // choosing a course the route no longer consults, and the answer would
+    // silently be about whatever the QUESTION named instead - the same class
+    // of invisible disagreement the pair above exists for.
+    //
+    // The REQUEST INTERFACE is sliced out rather than searching the whole
+    // file: `courseId` legitimately appears in this hook on the recorded
+    // declaration rows it forwards, so a whole-file search would be a check
+    // that can never pass rather than one that can never fail.
+    const wireStart = hook.indexOf("interface CourseIntelAskRequestBody {");
+    expect(wireStart, "the request interface was renamed - re-point this check").toBeGreaterThan(-1);
+    const wire = hook.slice(wireStart, wireStart + hook.slice(wireStart).indexOf("}"));
+    expect(wire).toMatch(/question: string/);
+    expect(wire).not.toMatch(/courseId/);
+    expect(route).not.toMatch(/body\.courseId/);
   });
 });

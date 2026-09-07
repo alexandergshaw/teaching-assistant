@@ -3,23 +3,12 @@ import { randomUUID } from "node:crypto";
 
 import { requireUser } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
-import { getCourse } from "@/lib/supabase/courses";
+import { listCourses } from "@/lib/supabase/courses";
+import { coursesInSession } from "@/lib/courses-in-session";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
-import { resolveInstitutionByCode } from "@/lib/canvas-core";
 import { CANVAS_CREDENTIAL_REQUIRED_MESSAGE } from "@/lib/canvas-credentials";
 import { parseRosterNames } from "@/app/components/grading-recording/grading-course-roster";
-import {
-  fetchDiscussion,
-  getConversation,
-  listAnnouncements,
-  listAssignmentBriefsWithDue,
-  listConversations,
-  listCourseRoster,
-  listCourseSubmissionGrid,
-  listDiscussionTopicBriefs,
-  listStudentGradeSummaries,
-} from "@/lib/canvas";
-import { callLlm, describeLlmFailure, normalizeProvider } from "@/lib/llm";
+import { callLlm, describeLlmFailure, normalizeProvider, type LlmContent } from "@/lib/llm";
 import { redactSensitiveText } from "@/lib/lms-generation/generation-diag";
 import { buildCourseIntelAssembly } from "@/lib/course-intel/join";
 import { computeConcernSet, DEFAULT_CONCERN_THRESHOLDS } from "@/lib/course-intel/concern";
@@ -31,22 +20,24 @@ import {
 } from "@/lib/course-intel/prompt";
 import { scopeCourseIntelQuestion, shapeNeedsStudentText } from "@/lib/course-intel/question-scope";
 import {
+  renderCourseMarker,
+  scopeCourseIntelCourses,
+  type ScopeCourseEntry,
+} from "@/lib/course-intel/course-scope";
+import { courseReadMode, describeCourseCoverage } from "@/lib/course-intel/cross-course";
+import { crossCourseAskResponse } from "@/lib/course-intel/cross-course-answer";
+import {
   fetchCourseIntelSignals,
   fetchCourseIntelText,
   notFetchedTextBundle,
   withDeadline,
-  type CourseIntelSignalReaders,
   type CourseIntelTextReaders,
 } from "@/lib/course-intel/fetch";
+import { buildCourseIntelReaders } from "@/lib/course-intel/canvas-readers";
 import { appendCourseIntelAnswer } from "@/lib/course-intel/history";
-import {
-  classifyLmsFailure,
-  describeLmsConnection,
-  LIVE_LMS_CONNECTION,
-  lmsCourseNotLinked,
-} from "@/lib/course-intel/connection";
+import { classifyLmsFailure, LIVE_LMS_CONNECTION, lmsCourseNotLinked } from "@/lib/course-intel/connection";
 import { parseOfflinePayload } from "@/lib/course-intel/offline-payload";
-import { offlineAskUserIdForIndex, prepareOfflineAsk } from "@/lib/course-intel/offline-ask";
+import { answerOfflineAsk } from "@/lib/course-intel/offline-answer";
 import { DEFAULT_ENGAGEMENT_THRESHOLDS, type EngagementThresholds } from "@/lib/course-intel/engagement";
 import type { ConcernThresholds, LmsConnection } from "@/lib/course-intel/types";
 
@@ -119,22 +110,25 @@ import type { ConcernThresholds, LmsConnection } from "@/lib/course-intel/types"
 //   live           - the signals tier came back.
 //
 // WHAT AN OFFLINE ANSWER IS BUILT FROM (D21). The recorded grading rows ARE
-// the gradebook when there is no LMS - not a partial sample of one that lives
-// elsewhere - because with no connection there is no other way to grade. They
-// live in the instructor's own browser (localStorage), so the browser posts
-// them in `offline` and src/lib/course-intel/offline-payload.ts is the
-// untrusted boundary that reads them. The ROSTER and the cached repo bindings
-// are read HERE from the course row, never trusted from the request.
+// the gradebook when there is no LMS. They live in the instructor's own
+// browser, so the browser posts them in `offline` and
+// src/lib/course-intel/offline-payload.ts is the untrusted boundary that reads
+// them; src/lib/course-intel/offline-answer.ts builds the answer and carries
+// the three rules that do not relax offline. The ROSTER and the cached repo
+// bindings are read HERE from the course row, never trusted from the request.
 //
-// THREE THINGS THAT DO NOT CHANGE OFFLINE, and the reasons get stronger:
-//   - the model still sees INDICES, never names. Offline the identity is a
-//     name matched against the roster, so a name in the prompt would be both a
-//     disclosure and a false precision.
-//   - the concern set is still computed in TYPESCRIPT. Thinner data gives a
-//     model MORE room to invent, not less.
-//   - a student with no recorded work is `insufficient-data`, never "missing
-//     everything". `OfflineRecordedRollup`'s `never-recorded` variant has no
-//     per-student count to render one from.
+// ---------------------------------------------------------------------------
+// NO PICKER: THE QUESTION CHOOSES ITS OWN SCOPE (D24).
+// ---------------------------------------------------------------------------
+//
+// There is no course id on the request. The question is resolved against the
+// instructor's own course list by src/lib/course-intel/course-scope.ts, which
+// also rewrites every course name out of it before any prompt exists - the
+// course-level twin of the student rewrite ./question-scope already owed.
+// Three outcomes reach this handler: ONE course (everything below), MORE THAN
+// ONE or NONE NAMED (src/lib/course-intel/cross-course-answer.ts), and a
+// collision no in-session row settled, which is REFUSED with the terms shown
+// because the term is the only thing telling two rows of the same course apart.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -156,6 +150,20 @@ const SIGNALS_WAIT_MS = 20_000;
  * this point. See TEXT_ITEM_RESERVE_MS in the fetch module for the other half
  * of the arithmetic. */
 const TEXT_DEADLINE_OFFSET_MS = 32_000;
+/**
+ * A cross-course answer stops STARTING live course reads here (D24d).
+ *
+ * Tighter than the single-course text deadline because the work behind it is
+ * N times larger and the failure it prevents is worse: a platform kill returns
+ * no response at all, while stopping early returns an answer that NAMES the
+ * courses it did not reach. Offline courses are assembled before this clock
+ * matters at all, so what this cuts is only ever live work.
+ */
+const CROSS_COURSE_LIVE_DEADLINE_OFFSET_MS = 30_000;
+/** The longest any ONE course may hold a cross-course answer up. Well under
+ *  the single-course SIGNALS_WAIT_MS: a course that is merely slow must not
+ *  spend the budget every other course still needs. */
+const CROSS_COURSE_PER_COURSE_WAIT_MS = 12_000;
 const PERSIST_WAIT_MS = 4_000;
 const MODEL_WAIT_MIN_MS = 8_000;
 const MODEL_WAIT_MAX_MS = 24_000;
@@ -189,10 +197,13 @@ const MODEL_PHASE_ERROR = "The AI did not return an answer. Try again - your que
 // ---------------------------------------------------------------------------
 
 interface AskRequestBody {
-  /** The course_hub row id - the uuid the UI selector holds. NOT the Canvas
-   * numeric course id; crossing the two is the silent mistake S18 names, and
-   * it is easy precisely because the derivation is copy-pasted per feature. */
-  courseId?: unknown;
+  /**
+   * THE ONLY THING THE CLIENT CHOOSES (D24b). There is no course id on this
+   * request and there is no picker to produce one: the question carries its
+   * own scope, resolved HERE against the instructor's own course list. A
+   * client-supplied course id would also be a second, weaker answer to a
+   * question this handler has to settle anyway.
+   */
   question?: unknown;
   /** D7: a "how is Y doing" question sends no prose unless the instructor
    * asked for it. A "what areas has Y asked about" question ignores this - the
@@ -302,21 +313,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "error", error: "Could not read the request." }, { status: 400 });
   }
 
-  const courseHubId = asString(body.courseId);
   const question = asString(body.question);
-  if (!courseHubId) {
-    return NextResponse.json({ status: "error", error: "Pick a course first." }, { status: 400 });
-  }
   if (!question) {
     return NextResponse.json({ status: "error", error: "Type a question first." }, { status: 400 });
   }
-
-  const course = await getCourse(userId, courseHubId);
-  if (!course) {
-    return NextResponse.json({ status: "error", error: "That course could not be found." }, { status: 404 });
-  }
-  const institutionCode = (course.institution ?? "").trim();
-  const canvasCourseId = parseCanvasCourseId(course.canvasUrl ?? "");
   const provider = normalizeProvider(asString(body.provider) || undefined);
   const thresholds = resolveThresholds(body.thresholds);
   const engagementThresholds = resolveEngagementThresholds(body.engagementThresholds);
@@ -329,191 +329,233 @@ export async function POST(req: NextRequest) {
   // only a header carrying this request's own token is a real one.
   const nonce = randomUUID();
 
+  // -------------------------------------------------------------------------
+  // WHICH COURSE, RESOLVED FROM THE QUESTION (D24b). The picker is gone, so
+  // this is the only thing that decides scope - and the same call rewrites
+  // every course name out of the question before any prompt exists, which is
+  // the half ./course-scope owes and ./prompt cannot verify.
+  //
+  // THE COLLISION IS THE NORMAL CASE HERE, not the exception: the same course
+  // runs every term, so two "Ethical Hacking" rows are routine. The in-session
+  // flag comes from `coursesInSession`, the app's own frozen start/end/breaks
+  // rule - reused rather than re-derived, because a second answer to "is this
+  // course running" would eventually disagree with the banner at the top of
+  // the page.
+  // -------------------------------------------------------------------------
+  const courses = await listCourses(userId);
+  if (courses.length === 0) {
+    // WORDED TO BE TRUE OF BOTH READINGS. `listCourses` logs and returns [] on
+    // a failed read, so this handler genuinely cannot tell "you have no
+    // courses" from "the course list could not be read" - and asserting the
+    // first when the second is true is the same confidently-wrong shape this
+    // whole feature is built to avoid.
+    return NextResponse.json(
+      {
+        status: "error",
+        error:
+          "No courses came back for your account, so there is nothing to ask about. If you have courses on the Courses tab, try again in a moment.",
+      },
+      { status: 400 }
+    );
+  }
+  const inSession = new Set(coursesInSession(courses, new Date()).map((row) => row.id));
+  const scopeEntries: ScopeCourseEntry[] = courses.map((row) => ({
+    courseId: row.id,
+    name: row.name,
+    courseCode: row.courseCode,
+    term: row.term,
+    active: inSession.has(row.id),
+  }));
+  const courseById = new Map(courses.map((row) => [row.id, row]));
+  const courseScope = scopeCourseIntelCourses({ question, courses: scopeEntries });
+
+  if (courseScope.status === "ambiguous") {
+    // REFUSED, not guessed - and the refusal SHOWS THE TERMS, because on this
+    // collision the term is the only thing telling the rows apart and a list of
+    // two identical names would be unanswerable.
+    const candidates = courseScope.candidates.map((candidate) => ({
+      courseId: candidate.courseId,
+      name: courseById.get(candidate.courseId)?.name ?? "",
+      term: candidate.term,
+    }));
+    const labels = candidates.map((c) => `${c.name || "a course"} (${c.term || "no term set"})`);
+    return NextResponse.json({
+      status: "needs-course-disambiguation",
+      matchedText: courseScope.matchedText,
+      courseCandidates: candidates,
+      message: `More than one of your courses matches "${courseScope.matchedText}", and none of them is the one currently in session. Ask again naming the term: ${labels.join("; ")}.`,
+    });
+  }
+
+  // Every student name is rewritten downstream; every COURSE name is already
+  // rewritten here. Only this string is ever composed into a prompt - the raw
+  // question is persisted to history, where it is the instructor's own record.
+  const questionForModel = courseScope.questionForModel;
+
+  /** Said when a collision was settled by the in-session rule rather than
+   *  refused, so the instructor can see the row that was set aside. */
+  const activeTermNotes = courseScope.activeTermPicks.map((pick) => {
+    const chosen = courseById.get(pick.courseId)?.name ?? "a course";
+    const others = pick.setAside
+      .map((c) => `${courseById.get(c.courseId)?.name ?? "a course"} (${c.term || "no term set"})`)
+      .join("; ");
+    return `More than one of your courses matches "${pick.matchedText}". This answer used ${chosen}, the one currently in session. Not included: ${others}.`;
+  });
+
+
   /**
-   * The whole offline answer, from recorded work.
+   * One model call, bounded by whatever is left of this request's budget.
    *
-   * Reached from three places - a course with no Canvas link, a credential
-   * that does not resolve, and a live read that failed - and it behaves
-   * identically for all three. Only `connection` differs, which is exactly
-   * D20e's shape: one code path, and the state travels as data.
+   * Both answer builders take this as a function, so neither of them knows the
+   * provider, the client or the clock - which is what makes them testable at
+   * all. A failure THROWS rather than returning a flag: each builder turns it
+   * into its own phase-2 response, and D17's "nothing was sent to the AI"
+   * distinction is decided there rather than here.
+   */
+  const askTheModel = async (
+    turns: readonly LlmContent[],
+    generationConfig: { temperature: number; maxOutputTokens: number },
+    label: string
+  ): Promise<string> => {
+    const remainingMs = startedAtMs + TOTAL_BUDGET_MS - Date.now();
+    const waitMs = Math.min(
+      MODEL_WAIT_MAX_MS,
+      Math.max(MODEL_WAIT_MIN_MS, remainingMs - MODEL_WAIT_RESERVE_MS)
+    );
+    const result = await withDeadline(
+      callLlm({ contents: [...turns], generationConfig }, provider),
+      waitMs,
+      "The AI"
+    );
+    // Logged by the caller, never returned: describeLlmFailure redacts secrets
+    // out of the upstream body, but the body is still an upstream body and the
+    // copy an instructor sees must not echo one.
+    if (!result.ok) throw new Error(describeLlmFailure(result, label));
+    if (!result.text.trim()) {
+      throw new Error(`${label}: the model returned no text (finishReason: ${result.finishReason ?? "none"})`);
+    }
+    return result.text;
+  };
+
+  /**
+   * The answer that spans courses. Every decision behind it lives in
+   * ./cross-course-answer, which owns the ordering rule D24d turns on -
+   * recorded courses first, live courses one at a time, none STARTED past the
+   * deadline - because behaviour that exists only inside a Next handler cannot
+   * be tested for the promise it makes.
+   */
+  const answerAcrossCourses = async (courseIds: readonly string[]): Promise<NextResponse> => {
+    const result = await crossCourseAskResponse({
+      courseRows: courseIds.flatMap((id) => {
+        const row = courseById.get(id);
+        return row ? [row] : [];
+      }),
+      payload: parseOfflinePayload(body.offline),
+      questionForModel,
+      scopeKind: courseScope.kind,
+      extraNotes: activeTermNotes,
+      concernThresholds: thresholds,
+      engagementThresholds,
+      assembledAt,
+      nonce,
+      deadlineAtMs: startedAtMs + CROSS_COURSE_LIVE_DEADLINE_OFFSET_MS,
+      perCourseWaitMs: CROSS_COURSE_PER_COURSE_WAIT_MS,
+      now: () => Date.now(),
+      withDeadline,
+      makeSignalReaders: async (row, institutionCode, canvasCourseId) =>
+        (await buildCourseIntelReaders(institutionCode, canvasCourseId, row.canvasUrl ?? "")).signals,
+      classifyLiveFailure: (err) =>
+        classifyLmsFailure({
+          error: err,
+          credentialRequiredMessage: CANVAS_CREDENTIAL_REQUIRED_MESSAGE,
+          scrubbedDetail: describeError(err),
+        }),
+      askModel: (turns) => askTheModel(turns, CONCERN_GENERATION_CONFIG, "course-intel ask across courses"),
+      stripSentinel: stripCitationSentinel,
+      describeError,
+    });
+    return NextResponse.json(result.body, { status: result.status });
+  };
+
+  // -------------------------------------------------------------------------
+  // THE THIRD SCOPE (D24c). A question that named no course, or named more
+  // than one, is answered across courses - signals tier only, offline courses
+  // first, and with the coverage stated whether or not anything failed.
+  // -------------------------------------------------------------------------
+  if (courseScope.kind !== "one-course") {
+    return await answerAcrossCourses(courseScope.courseIds);
+  }
+
+  const course = courseById.get(courseScope.courseIds[0]);
+  if (!course) {
+    return NextResponse.json({ status: "error", error: "That course could not be found." }, { status: 404 });
+  }
+  const courseHubId = course.id;
+  const institutionCode = (course.institution ?? "").trim();
+  const canvasCourseId = parseCanvasCourseId(course.canvasUrl ?? "");
+  /** One course means one marker. See ./course-scope: a course name in a
+   *  prompt is a disclosure and a false precision at once, and the assembly's
+   *  own `courseName` is rendered straight into the block the model reads. */
+  const promptCourseLabel = renderCourseMarker(1);
+
+  /**
+   * The whole offline answer, from recorded work - built in
+   * ./offline-answer, which is the same code this handler used to hold
+   * inline. Reached from three places (a course with no Canvas link, a
+   * credential that does not resolve, and a live read that failed) and
+   * identical for all three: one code path, and the state travels as data
+   * (D20e).
    */
   const answerOffline = async (connection: LmsConnection): Promise<NextResponse> => {
-    const payload = parseOfflinePayload(body.offline);
-    const prepared = prepareOfflineAsk({
-      courseHubId,
-      courseName: course.name,
+    const result = await answerOfflineAsk({
+      courseId: courseHubId,
+      courseDisplayName: course.name,
+      promptLabel: promptCourseLabel,
       // The roster and the cached bindings are read from the COURSE ROW here,
       // never taken from the request body. A client-supplied roster would let
       // a caller invent students to attribute recorded work to.
       rosterNames: parseRosterNames(course.roster),
       studentRepos: course.studentRepos ?? [],
-      payload,
+      payload: parseOfflinePayload(body.offline),
       question,
+      questionForModel,
       concernThresholds: thresholds,
       engagementThresholds,
       connection,
-      now: assembledAt,
-      nonce,
-    });
-
-    const connectionNote = describeLmsConnection(connection);
-
-    if (prepared.status === "ambiguous") {
-      // REFUSED, not guessed - the same rule as live, and the reason is
-      // stronger offline: the identity IS a name match, so picking one would
-      // attribute one student's recorded work to another with nothing on
-      // screen to show it happened.
-      return NextResponse.json({
-        status: "needs-disambiguation",
-        connection,
-        connectionNote,
-        matchedText: prepared.matchedText,
-        candidates: prepared.candidates.map((index) => ({ index, userId: null })),
-        offlineStudents: prepared.students,
-        message: `More than one student in this course matches "${prepared.matchedText}". Ask again using that student's full name.`,
-      });
-    }
-    if (prepared.status === "multiple-students") {
-      return NextResponse.json({
-        status: "too-many-students",
-        connection,
-        connectionNote,
-        subjects: prepared.subjects.map((index) => ({ index, userId: null })),
-        offlineStudents: prepared.students,
-        message: "That question names more than one student. Ask about one student at a time.",
-      });
-    }
-
-    const remainingForModelMs = startedAtMs + TOTAL_BUDGET_MS - Date.now();
-    const offlineModelWaitMs = Math.min(
-      MODEL_WAIT_MAX_MS,
-      Math.max(MODEL_WAIT_MIN_MS, remainingForModelMs - MODEL_WAIT_RESERVE_MS)
-    );
-
-    let offlineAnswerText: string;
-    try {
-      const result = await withDeadline(
-        callLlm(
-          {
-            contents: [...prepared.turns],
-            generationConfig:
-              prepared.subjectIndex === null ? CONCERN_GENERATION_CONFIG : STUDENT_GENERATION_CONFIG,
-          },
-          provider
-        ),
-        offlineModelWaitMs,
-        "The AI"
-      );
-      if (!result.ok || !result.text.trim()) {
-        console.error(
-          "[course-intel] offline model call failed:",
-          result.ok ? `no text (finishReason: ${result.finishReason ?? "none"})` : describeLlmFailure(result, "course-intel ask offline")
-        );
-        return NextResponse.json(
-          { status: "error", phase: "model", connection, connectionNote, error: MODEL_PHASE_ERROR },
-          { status: 502 }
-        );
-      }
-      offlineAnswerText = result.text;
-    } catch (err) {
-      console.error("[course-intel] offline model call did not complete:", describeError(err));
-      return NextResponse.json(
-        { status: "error", phase: "model", connection, connectionNote, error: MODEL_PHASE_ERROR },
-        { status: 504 }
-      );
-    }
-
-    const citedStudents = parseCitedStudentMarkers(offlineAnswerText, prepared.markedStudents);
-    const answerMarkdown = stripCitationSentinel(offlineAnswerText);
-
-    // THE RECEIPT (D1), unchanged offline: every row the model was handed must
-    // appear in the answer, and a row it dropped is still rendered beside the
-    // prose by the view.
-    const rowsForReceipt =
-      prepared.subjectIndex === null
-        ? prepared.intel.concerns.rows.map((row) => row.studentIndex)
-        : [prepared.subjectIndex];
-    const unexplainedStudentIndices = rowsForReceipt.filter(
-      (index) => !new RegExp(`\\bS${index}\\b`).test(answerMarkdown)
-    );
-
-    const subjectUserId =
-      prepared.subjectIndex === null ? null : offlineAskUserIdForIndex(prepared.intel, prepared.subjectIndex);
-
-    let entryId: string | null = null;
-    let persistError: string | null = null;
-    try {
-      const entry = await withDeadline(
-        appendCourseIntelAnswer(createServiceClient(), userId, {
-          courseId: courseHubId,
-          // "" WHENEVER THERE IS NO CACHED CANVAS ID, which offline is most of
-          // the time. The column holds a Canvas user id as text and there is
-          // none to hold - storing a borrowed or synthesised one would launder
-          // a screen-read name into an id field (D22e). The cost is that such
-          // an entry reads as whole-course in history; that is a known gap,
-          // and it is the honest one.
-          scopeStudent: subjectUserId === null ? "" : String(subjectUserId),
-          question,
-          answerMarkdown,
-          citedStudents: citedStudents.map((student) => ({
-            index: student.index,
-            userId: student.userId,
-            identitySource: student.identitySource,
-          })),
-          omissions: [],
-          tier: "signals",
-          assembledAt,
-        }),
-        PERSIST_WAIT_MS,
-        "Saving the answer"
-      );
-      entryId = entry.id;
-    } catch (err) {
-      persistError = describeError(err);
-      console.error("[course-intel] could not persist the offline answer:", persistError);
-    }
-
-    return NextResponse.json({
-      status: "ok",
-      connection,
-      connectionNote,
-      answerMarkdown,
-      citedStudents,
-      markedStudents: prepared.markedStudents,
-      markedTexts: [],
-      /** Index-to-name for this course's students, resolved from the roster on
-       * the course row. The MODEL never saw a name; the browser needs one to
-       * render the answer, and offline it has no Canvas roster to look one up
-       * in. */
-      offlineStudents: prepared.students,
-      tier: "signals",
       assembledAt,
-      omissions: [],
-      coverageNotes: prepared.coverageNotes,
-      /** D7/D15: the code-authored strip applies to every question shape that
-       * has a per-student signal check behind it - which is every shape
-       * except "what areas has X asked about", whose whole payload is that
-       * student's own writing. Decided HERE, where the shape is known, so the
-       * view never re-reads the question to guess. */
-      showConcernStrip: !prepared.asksAboutWriting,
-      concern: {
-        rows:
-          prepared.subjectIndex === null
-            ? prepared.intel.concerns.rows
-            : prepared.intel.concerns.rows.filter((row) => row.studentIndex === prepared.subjectIndex),
-        clearCount: prepared.intel.concerns.clearCount,
-        thresholds: prepared.intel.concerns.thresholds,
-        unexplainedStudentIndices,
+      nonce,
+      extraNotes: activeTermNotes,
+      askModel: (turns, wholeClass) =>
+        askTheModel(
+          turns,
+          wholeClass ? CONCERN_GENERATION_CONFIG : STUDENT_GENERATION_CONFIG,
+          "course-intel ask offline"
+        ),
+      persist: async (input) => {
+        const entry = await withDeadline(
+          appendCourseIntelAnswer(createServiceClient(), userId, {
+            courseId: courseHubId,
+            scopeStudent: input.scopeStudent,
+            question,
+            answerMarkdown: input.answerMarkdown,
+            citedStudents: input.citedStudents.map((student) => ({
+              index: student.index,
+              userId: student.userId,
+              identitySource: student.identitySource,
+            })),
+            omissions: [],
+            tier: "signals",
+            assembledAt,
+          }),
+          PERSIST_WAIT_MS,
+          "Saving the answer"
+        );
+        return entry.id;
       },
-      engagement: {
-        needsOutreach: prepared.intel.engagement.needsOutreach,
-        recovering: prepared.intel.engagement.recovering,
-        insufficientData: prepared.intel.engagement.insufficientData,
-        thresholds: prepared.intel.engagement.thresholds,
-      },
-      entryId,
-      persistError,
+      stripSentinel: stripCitationSentinel,
+      describeError,
     });
+    return NextResponse.json(result.body, { status: result.status });
   };
 
   // NOT A 400 ANY MORE. An export-only course is a normal kind of course here
@@ -544,28 +586,10 @@ export async function POST(req: NextRequest) {
   let signals: Awaited<ReturnType<typeof fetchCourseIntelSignals>>;
   let textReaders: CourseIntelTextReaders;
   try {
-    const { institution, token, baseUrl } = await resolveInstitutionByCode(institutionCode);
-    const signalReaders: CourseIntelSignalReaders = {
-      listAssignmentBriefs: () => listAssignmentBriefsWithDue(baseUrl, token, institution, canvasCourseId),
-      listRoster: () => listCourseRoster(institutionCode, canvasCourseId),
-      listGradeSummaries: () => listStudentGradeSummaries(institutionCode, canvasCourseId),
-      listSubmissionGrid: (assignmentIds) =>
-        listCourseSubmissionGrid(baseUrl, token, institution, canvasCourseId, assignmentIds),
-      listTopicBriefs: () => listDiscussionTopicBriefs(baseUrl, token, institution, canvasCourseId),
-      listAnnouncements: () => listAnnouncements(course.canvasUrl ?? "", institutionCode),
-      // The course filter trusts Canvas's OWN context tagging, which is why
-      // every assembly carries the course-filter-best-effort caveat: a message
-      // about this course started from the general inbox has no course context
-      // and is absent in a way that cannot even be counted.
-      listConversationIndex: () => listConversations(institutionCode, { courseId: canvasCourseId }),
-    };
-    textReaders = {
-      fetchDiscussionTopic: async (topicId) =>
-        await fetchDiscussion(baseUrl, token, institution, canvasCourseId, topicId),
-      getConversationDetail: (conversationId) => getConversation(conversationId, institutionCode),
-    };
+    const readers = await buildCourseIntelReaders(institutionCode, canvasCourseId, course.canvasUrl ?? "");
+    textReaders = readers.text;
     signals = await withDeadline(
-      fetchCourseIntelSignals({ readers: signalReaders }),
+      fetchCourseIntelSignals({ readers: readers.signals }),
       SIGNALS_WAIT_MS,
       "Reading this course from Canvas"
     );
@@ -589,7 +613,10 @@ export async function POST(req: NextRequest) {
     courseHubId,
     institution: institutionCode,
     canvasCourseId,
-    courseName: course.name,
+    // A MARKER, NEVER THE NAME. The assembly's `courseName` has exactly one
+    // consumer - ./context-block - which renders it straight into the signals
+    // block the model reads.
+    courseName: promptCourseLabel,
     assembledAt,
     tier: "signals",
     roster: signals.roster,
@@ -610,7 +637,11 @@ export async function POST(req: NextRequest) {
   // by design and cannot verify it.
   // -------------------------------------------------------------------------
   const firstPass = scopeCourseIntelQuestion({
-    question,
+    // The COURSE-REWRITTEN question, so the two scopers compose: this call
+    // rewrites student names out of a string that already has every course
+    // name rewritten out of it. Doing it the other way round would let a
+    // student marker land inside a course name.
+    question: questionForModel,
     roster: signalsAssembly.students,
     includeStudentTextForStatus: includeStudentText,
   });
@@ -626,7 +657,7 @@ export async function POST(req: NextRequest) {
       connectionNote: "",
       matchedText: firstPass.matchedText,
       candidates: firstPass.candidates,
-      message: `More than one student in this course matches "${firstPass.matchedText}". Ask again using that student's full name.`,
+      message: `More than one student in "${course.name}" matches "${firstPass.matchedText}". Ask again using that student's full name.`,
     });
   }
   if (firstPass.status === "multiple-students") {
@@ -668,7 +699,7 @@ export async function POST(req: NextRequest) {
       courseHubId,
       institution: institutionCode,
       canvasCourseId,
-      courseName: course.name,
+      courseName: promptCourseLabel,
       assembledAt,
       tier: "signals+text",
       roster: signals.roster,
@@ -692,7 +723,7 @@ export async function POST(req: NextRequest) {
   // possibility of an answer whose S-number points at somebody else.
   const scope = shapeNeedsStudentText(firstPass.shape)
     ? scopeCourseIntelQuestion({
-        question,
+        question: questionForModel,
         roster: assembly.students,
         includeStudentTextForStatus: includeStudentText,
       })
@@ -702,7 +733,7 @@ export async function POST(req: NextRequest) {
       status: "needs-disambiguation",
       connection: LIVE_LMS_CONNECTION,
       connectionNote: "",
-      matchedText: scope.status === "ambiguous" ? scope.matchedText : question,
+      matchedText: scope.status === "ambiguous" ? scope.matchedText : questionForModel,
       candidates: scope.status === "ambiguous" ? scope.candidates : scope.subjects,
       message: "That question could not be narrowed to one student. Ask again using that student's full name.",
     });
@@ -742,7 +773,8 @@ export async function POST(req: NextRequest) {
           contextBlock: context.text,
           nonce,
           concernSet,
-          courseLabel: course.name,
+          // A MARKER, never the name - see promptCourseLabel above.
+          courseLabel: promptCourseLabel,
         })
       : buildStudentQuestionTurns({
           contextBlock: context.text,
@@ -868,8 +900,33 @@ export async function POST(req: NextRequest) {
     /** Empty on the live path: every coverage statement there is already an
      *  AssemblyOmission carrying its own sentence. The field exists on both
      *  paths so the view has ONE list to render rather than a branch. */
-    coverageNotes: [],
+    coverageNotes: activeTermNotes,
     offlineStudents: [],
+    /** The SAME field on every path (see the offline branch's own note): the
+     *  browser resolves an S marker from here rather than fetching a Canvas
+     *  roster of its own, which it no longer can - with the picker gone there
+     *  is no selected course to fetch one for. Sending the instructor their
+     *  own roster back is not a disclosure; the boundary this feature protects
+     *  is the MODEL, which saw indices only. */
+    students: assembly.students.map((student) => ({
+      index: student.index,
+      name: student.name,
+      userId: student.userId,
+    })),
+    /** D24e applied to one course, and with no picker on screen it is also the
+     *  only thing telling the instructor which course the question resolved
+     *  to. Stated always, not only when something failed. */
+    courses: [
+      {
+        index: 1,
+        courseId: courseHubId,
+        name: course.name,
+        mode: courseReadMode(LIVE_LMS_CONNECTION),
+        connection: LIVE_LMS_CONNECTION,
+      },
+    ],
+    coverageLines: describeCourseCoverage([{ name: course.name, connection: LIVE_LMS_CONNECTION }]),
+    coverageComplete: true,
     submissionGridSource: signals.submissionGridSource,
     concern: {
       // The deterministic strip. For a per-student question it is filtered to

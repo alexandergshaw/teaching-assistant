@@ -1,66 +1,47 @@
 "use client";
 
-// Course Intel - state and data flow for the Course Intel view (D13-D17 and
-// D20-D23 of docs/course-student-intelligence-acceptance-criteria.md). A
-// per-course tool with its own internal course picker, modeled on
-// src/app/components/repo-grades/useRepoGradesData.ts - see that file's own
-// header for the effect idiom this hook follows throughout: a useEffect with
-// a `let cancelled = false`, an async IIFE that AWAITS FIRST, an `if
-// (cancelled) return` guard, and cleanup setting `cancelled = true`, with
-// loading state DERIVED by comparing "the key of the request in flight"
-// against "the key the last completed result belongs to" - never a
-// synchronous setLoading(true), which react-hooks/set-state-in-effect
-// forbids.
+// Course Intel - state and data flow for a view that is ONE TEXTBOX (D24 of
+// docs/course-student-intelligence-acceptance-criteria.md).
 //
-// THE WIRE CONTRACT BELOW IS NOW THE ROUTE'S OWN, not this file's guess at
-// it. An earlier wave wrote these shapes ahead of POST
-// /api/course-intel/ask existing, and the two ended up disagreeing about
-// every field name: this hook posted `courseHubId` and the route reads
-// `courseId`, so every ask answered "Pick a course first", and the response
-// shapes never overlapped at all. They are aligned here against the shipped
-// handler, which is the half with the implementation.
+// WHAT LEFT THIS FILE, and why it is a deletion rather than a move. There is
+// no course picker any more, so there is no selected course, so:
+//   - the course list loader is gone. Nothing here picks a course; the server
+//     resolves it from the question against the instructor's own list, which
+//     is the only place that can also refuse a collision and say which terms
+//     collided.
+//   - THE CANVAS ROSTER FETCH IS GONE. It existed to turn a cited index back
+//     into a name, and it could only be issued because a course was selected.
+//     The server now returns `students` (index to name) on EVERY path, the way
+//     the offline path already did - so the resolution is one implementation
+//     instead of two, and an answer spanning five courses resolves the same
+//     way a single-course one does. Sending the instructor their own roster
+//     back to their own browser is not a disclosure: the boundary this feature
+//     protects is the MODEL, which is shown indices and nothing else.
+//   - the per-course draft question is gone with the per-course state it hung
+//     off. One box, one draft.
+//
+// TWO MARKER VOCABULARIES NOW, NOT ONE. The model writes `S3` for a student
+// and `C2` for a course, and this hook resolves both locally. A course name in
+// a prompt is a disclosure and a false precision at once (see
+// src/lib/course-intel/course-scope.ts), so the server rewrites course names
+// out of the question before it is sent and passes markers where a name would
+// have gone - which means the prose can come back carrying markers this file
+// has to put names back into.
+//
+// AN ANSWER MAY SPAN COURSES, so a student index is unique within the ANSWER
+// and not within one course, and a display name may collide ACROSS courses as
+// easily as within one. `buildNameByIndex` disambiguates by the student's own
+// course first, because that is what actually distinguishes them, and falls
+// back to the Canvas id or the roster position only when it does not.
 //
 // ONE PATH THAT DEGRADES (D20e). This hook does not ask whether Canvas is
-// reachable and does not offer a mode switch. It sends the question AND the
+// reachable and offers no mode switch. It sends the question and the
 // instructor's own recorded work on every request; the route answers live
-// when it can and from the recorded work when it cannot, and says which of
-// the four states applies in `connectionNote`. A course with no Canvas link
-// at all is a NORMAL course here (D20a) and is no longer blocked from
-// asking - `courseNotConfiguredReason` below is now informational, never a
-// gate.
-//
-// STUDENT IDENTITY (D13): the model is never shown a name or a login id - it
-// sees indices only, and its prose refers to a student by writing the bare
-// marker text "S<index>" (mirroring the existing page-citation convention in
-// src/lib/knowledge-overview-prompt.ts, which asks the model to write "P1"
-// without brackets). This hook is what turns that back into a real,
-// disambiguated name, ENTIRELY LOCALLY. There are two sources for it and
-// they are not interchangeable:
-//   - LIVE: `citedStudents[].userId` is a real Canvas id, resolved against
-//     the Canvas roster this hook already loaded for the picker. `loginId`
-//     comes along on that same roster row and is used ONLY as a local
-//     disambiguator for two students who genuinely share a display name - it
-//     is never read into the request body, never stored, and never sent.
-//   - OFFLINE: there is no Canvas roster and most students have no Canvas id
-//     at all, so the route returns `offlineStudents`: index-to-name resolved
-//     from the free-text roster on the course row. Sending that back to the
-//     browser that typed it is not a disclosure - the boundary this feature
-//     protects is the MODEL - and it is safer than re-deriving the mapping
-//     here, which would be a second implementation that could drift by one
-//     and put an answer about S4 beside S5's name.
-//
-// The resolved, human-readable markdown is what this hook hands back
-// (`ResolvedCourseIntelAnswer.answerMarkdown`) - CourseIntelAnswer.tsx renders
-// it through markdownToHtml AT RENDER TIME, exactly like
-// useKnowledgeOverview.ts keeps raw markdown and KnowledgeOverviewPanel.tsx
-// calls renderOverviewMarkdown itself, rather than this hook storing
-// pre-rendered HTML.
+// where it can and from the recorded work where it cannot, and says which per
+// COURSE (D24f) in `courses`, rendered as the coverage block the view always
+// shows.
 
-import { useEffect, useRef, useState } from "react";
-import { listCourseHubAction, listCourseRosterAction } from "@/app/actions";
-import type { Course } from "@/lib/supabase/courses";
-import { parseCanvasCourseId } from "@/lib/canvas-url";
-import type { CanvasRosterEntry } from "@/lib/canvas";
+import { useEffect, useState } from "react";
 import { deserializeGradingRows } from "@/app/components/grading-recording/grading-row-serialization";
 import { deserializeGradingDeclarations } from "@/app/components/grading-recording/useGradingAssessmentDeclarations";
 import { deserializeReplyTable } from "@/app/components/recording/discussion-serialization";
@@ -71,9 +52,18 @@ import type {
   ConcernSignal,
   LmsConnection,
   StudentIndex,
-  StudentIdentitySource,
 } from "@/lib/course-intel/types";
-import { loadCourseIntelCourseId, loadCourseIntelQuestion, persistCourseIntelCourseId, persistCourseIntelQuestion } from "./courseIntelUiState";
+import { loadCourseIntelQuestion, persistCourseIntelQuestion } from "./courseIntelUiState";
+
+/**
+ * The scope key the single draft question is stored under.
+ *
+ * `courseIntelUiState`'s question helpers are keyed by a string because they
+ * were written for a per-course draft, and a blank key is a deliberate no-op
+ * there. With one box there is one draft, so it gets one constant key rather
+ * than a new pair of functions in a module this change does not own.
+ */
+const QUESTION_SCOPE = "all-courses";
 
 // ---------------------------------------------------------------------------
 // The recorded tables this browser holds (D21d).
@@ -137,48 +127,43 @@ interface OfflineRecordedWire {
 }
 
 /**
- * Which rows travel: this course's own, PLUS the ones tagged with no course
- * at all.
+ * EVERY ROW TRAVELS NOW, tagged with the course it was recorded against.
  *
- * Rows belonging to a DIFFERENT course are withheld - they can never join
- * here and sending them would be disclosure for no purpose. Untagged rows
- * ARE sent even though they cannot join either, and that is the point: the
- * route counts them and the answer says "N grading rows in this browser are
- * not tagged with this course and were not used", which is the sentence that
- * tells an instructor there is work to go and attribute. Filtering them out
- * here would make that notice permanently silent.
+ * The old filter kept rows belonging to a DIFFERENT course at home, which was
+ * right when a picker had already chosen one course: a row that could never
+ * join was disclosure for no purpose. With the picker gone this browser does
+ * not know which course the question is about - that is the server's decision,
+ * made from the question - and a question about all of them needs all of them.
+ *
+ * The rows are still only ever adopted by EXACT course id, by
+ * `assembleOfflineCourseIntel`, with no fallback: a row tagged with another
+ * course, or with none, attaches to nothing. So an untagged row still travels
+ * and is still counted as work that has not been attributed yet, which is the
+ * sentence that tells an instructor there is something to go and tag.
  */
-function belongsToOfflineScope(rowCourse: string | undefined, courseHubId: string): boolean {
-  return !rowCourse || rowCourse === courseHubId;
-}
-
-export function readOfflineRecordedTables(courseHubId: string): OfflineRecordedWire {
+export function readOfflineRecordedTables(): OfflineRecordedWire {
   const empty: OfflineRecordedWire = { gradingRows: [], replyRows: [], assessmentDeclarations: [], toolDeclarations: [] };
-  if (typeof window === "undefined" || !courseHubId) return empty;
+  if (typeof window === "undefined") return empty;
 
   const declarations = deserializeGradingDeclarations(readLocalStorage(OFFLINE_DECLARATIONS_KEY));
 
   return {
-    gradingRows: deserializeGradingRows(readLocalStorage(OFFLINE_GRADING_TABLE_KEY))
-      .filter((row) => belongsToOfflineScope(row.course, courseHubId))
-      .map((row) => ({
-        course: row.course,
-        studentName: row.studentName,
-        assessment: row.assessment,
-        totalScore: row.totalScore,
-        submissionTimeStatus: row.submissionTimeStatus,
-        submittedAt: row.submittedAt,
-      })),
-    replyRows: deserializeReplyTable(readLocalStorage(OFFLINE_REPLY_TABLE_KEY))
-      .filter((row) => belongsToOfflineScope(row.course, courseHubId))
-      .map((row) => ({
-        course: row.course,
-        author: row.author,
-        threadPosition: row.threadPosition,
-        postedAt: row.postedAt,
-      })),
-    assessmentDeclarations: declarations.assessments.filter((a) => a.courseId === courseHubId),
-    toolDeclarations: declarations.tools.filter((t) => t.courseId === courseHubId),
+    gradingRows: deserializeGradingRows(readLocalStorage(OFFLINE_GRADING_TABLE_KEY)).map((row) => ({
+      course: row.course,
+      studentName: row.studentName,
+      assessment: row.assessment,
+      totalScore: row.totalScore,
+      submissionTimeStatus: row.submissionTimeStatus,
+      submittedAt: row.submittedAt,
+    })),
+    replyRows: deserializeReplyTable(readLocalStorage(OFFLINE_REPLY_TABLE_KEY)).map((row) => ({
+      course: row.course,
+      author: row.author,
+      threadPosition: row.threadPosition,
+      postedAt: row.postedAt,
+    })),
+    assessmentDeclarations: declarations.assessments,
+    toolDeclarations: declarations.tools,
   };
 }
 
@@ -187,9 +172,8 @@ export function readOfflineRecordedTables(courseHubId: string): OfflineRecordedW
 // ---------------------------------------------------------------------------
 
 interface CourseIntelAskRequestBody {
-  /** The course_hub row id - never the Canvas numeric id (D13/S18). Spelled
-   *  `courseId` because that is what the route reads. */
-  courseId: string;
+  /** THE ONLY THING THIS BROWSER CHOOSES. No course id: the question carries
+   *  its own scope and the server resolves it (D24b). */
   question: string;
   offline: OfflineRecordedWire;
 }
@@ -202,26 +186,40 @@ interface CourseIntelAskRequestBody {
 interface AskConcernRow {
   studentIndex: StudentIndex;
   userId: CanvasUserId | null;
-  identitySource: StudentIdentitySource;
   signals: readonly ConcernSignal[];
 }
 
-interface AskOfflineStudent {
+/** Index-to-name for one student, at the ANSWER's own index. `courseIndex` is
+ *  present when the answer spans courses, and is what tells two same-named
+ *  students in different courses apart. */
+interface AskStudent {
   index: StudentIndex;
   name: string;
   userId: CanvasUserId | null;
+  courseIndex?: number;
+}
+
+/** One course in the answer, and how it was read (D24f). */
+export interface AskCourse {
+  index: number;
+  courseId: string;
+  name: string;
+  mode: "live" | "recorded" | "lms-unavailable";
+  connection: LmsConnection;
 }
 
 interface CourseIntelAskResponseBody {
   status?: unknown;
+  scope?: unknown;
   answerMarkdown?: unknown;
   citedStudents?: { index: StudentIndex; userId: CanvasUserId | null }[];
-  offlineStudents?: AskOfflineStudent[];
+  students?: AskStudent[];
+  offlineStudents?: AskStudent[];
+  courses?: AskCourse[];
+  coverageLines?: string[];
+  coverageComplete?: unknown;
   tier?: unknown;
   assembledAt?: unknown;
-  /** Which of the four states this answer was built in. `describeLmsConnection`
-   *  already rendered the sentence into `connectionNote`; the structured value
-   *  travels beside it so the view never re-derives the copy. */
   connection?: LmsConnection;
   connectionNote?: unknown;
   omissions?: AssemblyOmission[];
@@ -237,7 +235,6 @@ interface CourseIntelAskResponseBody {
     clearCount?: number;
     unexplainedStudentIndices?: StudentIndex[];
   };
-  /** The persisted history row's id, or null when persistence failed. */
   entryId?: unknown;
   /** The refusal branches. */
   message?: unknown;
@@ -255,10 +252,10 @@ async function readJsonSafely(response: Response): Promise<unknown> {
 }
 
 /** D17's two per-phase error sentences. `phase: "model"` is set only when the
- * request actually reached the model - the one case where "nothing was sent
- * to the AI" would be false. Absent, or any other value, is treated as a
- * pre-model failure: both the more common cause and the safer default to
- * claim when the server gives no signal either way. */
+ * request actually reached the model - the one case where "nothing was sent to
+ * the AI" would be false. Absent, or any other value, is treated as a
+ * pre-model failure: both the more common cause and the safer default to claim
+ * when the server gives no signal either way. */
 function describeAskFailure(body: unknown, fallbackMessage: string): string {
   const record = body && typeof body === "object" ? (body as CourseIntelAskResponseBody) : null;
   if (record?.phase === "model") {
@@ -269,94 +266,93 @@ function describeAskFailure(body: unknown, fallbackMessage: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Student identity resolution (D13) - entirely local, never sent anywhere.
+// Marker resolution (D13/D24g) - entirely local, never sent anywhere.
 // ---------------------------------------------------------------------------
 
-/** Computed once per roster (D13: "computed once from the roster"). Reads
- * `.name` (Canvas's own `user.name`, "First Last") - CourseStudentRecord's
- * own doc comment in types.ts marks that field "Display only", sourced from
- * the same roster/enrollments call as `.sortableName`; both are safe, unlike
- * a discussion participant record's self-supplied display_name, which this
- * roster never touches at all (listCourseRosterAction hits the course's
- * `/users` roster endpoint, not a discussion thread). */
-function computeCollidingNames(names: readonly string[]): ReadonlySet<string> {
+function countNames(names: readonly string[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const raw of names) {
     const name = raw.trim();
     if (!name) continue;
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
-  const colliding = new Set<string>();
-  for (const [name, count] of counts) {
-    if (count > 1) colliding.add(name);
-  }
-  return colliding;
-}
-
-/** Resolves one Canvas user id to a display name, appending a disambiguator
- * ONLY when that name collides with another student in this course (D13).
- * `loginId` is used here PURELY as a local string - it is read from the
- * roster row this hook already loaded for the picker and never leaves this
- * function's return value, never enters a request body, and is never
- * stored. A user id not found on the roster is a real, nameable case
- * (types.ts's `onRoster` doc comment: a dropped student, a TA, an observer -
- * never silently merged into somebody else and never silently discarded). */
-function resolveLiveStudentName(
-  userId: CanvasUserId | null,
-  roster: readonly CanvasRosterEntry[],
-  collidingNames: ReadonlySet<string>
-): string {
-  if (userId === null) return "";
-  const entry = roster.find((r) => Number(r.id) === userId);
-  if (!entry) return `Student ${userId} (not on the current roster)`;
-  const name = entry.name.trim() || `Student ${userId}`;
-  if (!collidingNames.has(name)) return name;
-  return entry.loginId.trim() ? `${name} (${entry.loginId.trim()})` : `${name} (Canvas user ${userId})`;
+  return counts;
 }
 
 /**
- * Index-to-name for an OFFLINE answer, from the roster the route resolved.
+ * Index-to-display-name for every student the answer could refer to.
  *
- * Two students who share a name are a real and uncommon case that the offline
- * identity index already reports rather than merges (D21c) - they carry no
- * join key and attribute nothing - so a bare shared name on screen would
- * suggest the tool had picked one of them. The roster position is appended
- * instead: it is the only thing that actually distinguishes the two entries,
- * and it is the instructor's own list.
+ * THE DISAMBIGUATOR IS CHOSEN BY WHAT ACTUALLY DISTINGUISHES THEM, in this
+ * order:
+ *   1. the COURSE, when the answer spans more than one and the two students
+ *      are in different ones. Two Alex Chens in two courses are two ordinary
+ *      students, not a collision to apologise for, and the course is the thing
+ *      the instructor is already thinking in.
+ *   2. the Canvas user id, when there is one - a real, verified id.
+ *   3. the roster position, which offline is the only thing left and is the
+ *      instructor's own list.
+ * A bare shared name is never rendered: it would suggest the tool had picked
+ * one of them.
  */
-function buildOfflineNameByIndex(students: readonly AskOfflineStudent[]): Map<StudentIndex, string> {
-  const colliding = computeCollidingNames(students.map((s) => s.name));
+export function buildNameByIndex(
+  students: readonly AskStudent[],
+  courses: readonly AskCourse[]
+): Map<StudentIndex, string> {
+  const courseNameByIndex = new Map(courses.map((course) => [course.index, course.name.trim()]));
+  const multiCourse = courses.length > 1;
+  const nameCounts = countNames(students.map((student) => student.name));
+  const nameAndCourseCounts = countNames(
+    students.map((student) => `${student.name.trim()} ${student.courseIndex ?? 0}`)
+  );
+
   const byIndex = new Map<StudentIndex, string>();
   for (const student of students) {
     const name = student.name.trim();
     if (!name) continue;
-    byIndex.set(student.index, colliding.has(name) ? `${name} (roster entry ${student.index})` : name);
+    if ((nameCounts.get(name) ?? 0) <= 1) {
+      byIndex.set(student.index, multiCourse && courseNameByIndex.get(student.courseIndex ?? 0) ? `${name} (${courseNameByIndex.get(student.courseIndex ?? 0)})` : name);
+      continue;
+    }
+    const course = courseNameByIndex.get(student.courseIndex ?? 0) ?? "";
+    const uniqueInCourse = (nameAndCourseCounts.get(`${name} ${student.courseIndex ?? 0}`) ?? 0) <= 1;
+    if (multiCourse && course && uniqueInCourse) {
+      byIndex.set(student.index, `${name} (${course})`);
+      continue;
+    }
+    const tail = student.userId !== null ? `Canvas user ${student.userId}` : `roster entry ${student.index}`;
+    byIndex.set(student.index, course ? `${name} (${course}, ${tail})` : `${name} (${tail})`);
   }
   return byIndex;
 }
 
 /**
- * Replaces every bare "S<digits>" marker the model was instructed to write
- * (mirroring the page-citation convention's bracket-free "P1" - see this
- * file's header) with the locally-resolved display name for that index.
+ * Replace every bare marker the model was instructed to write with the
+ * locally-resolved label for it.
+ *
  * `\b` word boundaries mean a token like "CS3110" is never touched (the
- * character before "S" there is a word character, so `\bS` cannot match
- * there) - but this is a plain text substitution, not a parser, so a
- * genuinely ambiguous adjacent token is a known limitation (see this
- * feature's wave report). A marker whose index resolved to nothing is left
- * as literal text rather than replaced with an empty string, which would
- * delete the reference the sentence is built around.
+ * character before "S" there is a word character, so `\bS` cannot match) - but
+ * this is a plain text substitution, not a parser, so a genuinely ambiguous
+ * adjacent token is a known limitation. A marker whose index resolved to
+ * nothing is left as literal text rather than replaced with an empty string,
+ * which would delete the reference the sentence is built around.
  */
-function substituteStudentMarkers(markdown: string, nameByIndex: ReadonlyMap<StudentIndex, string>): string {
-  if (nameByIndex.size === 0) return markdown;
-  return markdown.replace(/\bS(\d+)\b/g, (whole: string, digits: string) => {
-    const name = nameByIndex.get(Number(digits));
-    return name && name.trim() ? name : whole;
+function substituteMarkers(
+  markdown: string,
+  letter: "S" | "C",
+  labelByIndex: ReadonlyMap<number, string>
+): string {
+  if (labelByIndex.size === 0) return markdown;
+  return markdown.replace(new RegExp(`\\b${letter}(\\d+)\\b`, "g"), (whole: string, digits: string) => {
+    const label = labelByIndex.get(Number(digits));
+    return label && label.trim() ? label : whole;
   });
 }
 
 export interface ResolvedConcernRow {
   studentIndex: StudentIndex;
+  /** Already carries the course when the answer spans more than one - see
+   *  buildNameByIndex. The signal strip renders this and nothing else, so the
+   *  course cannot be printed twice on one row. */
   displayName: string;
   /** Code-authored, typed data straight from the server (D15) - rendered as
    * the badge row, never parsed out of the model's prose. */
@@ -364,21 +360,28 @@ export interface ResolvedConcernRow {
 }
 
 export interface ResolvedCourseIntelAnswer {
-  /** The persisted history row's id, or "" when persistence failed. */
+  /** The persisted history row's id, or "" when persistence failed OR when the
+   *  answer spans courses and was deliberately not stored. */
   id: string;
-  /** Raw markdown, student markers already resolved to display names - render
-   * through markdownToHtml at the call site (see file header). */
+  /** Raw markdown, every student and course marker already resolved to a real
+   *  label - render through markdownToHtml at the call site. */
   answerMarkdown: string;
   tier: AssemblyTier;
   assembledAt: string;
-  /**
-   * D20e's permanent line. "" for a live answer, and the view renders
-   * nothing then; otherwise the one sentence naming WHICH of the three
-   * unavailable states applies and what it means for this answer. Never
-   * dismissible, and re-derived on every answer rather than remembered.
-   */
+  /** D20e's permanent line, for a single-course answer that was not live. ""
+   *  otherwise - across courses the per-course coverage block below is the
+   *  honest form of it, and one summary line would be wrong for a mixture. */
   connectionNote: string;
   connection: LmsConnection;
+  /** D24e: WHICH courses this answer covered and how each was read. Rendered
+   *  ALWAYS, not only when something failed - with no picker on screen it is
+   *  also the only thing telling the instructor which course a question
+   *  resolved to. */
+  courses: readonly AskCourse[];
+  coverageLines: readonly string[];
+  /** False when the courses were not all read the same way, or one produced no
+   *  numbers. The view says so rather than letting a ranking read as complete. */
+  coverageComplete: boolean;
   /** Every "what this answer could not see" sentence, from both paths, as one
    *  list. AC6: what was left out is stated, never silently dropped. */
   notes: readonly string[];
@@ -392,29 +395,11 @@ export interface ResolvedCourseIntelAnswer {
 
 const LIVE_CONNECTION: LmsConnection = { state: "live" };
 
-function resolveCourseIntelAnswer(
-  body: CourseIntelAskResponseBody,
-  roster: readonly CanvasRosterEntry[]
-): ResolvedCourseIntelAnswer {
-  const offlineStudents = body.offlineStudents ?? [];
-  const offlineNames = buildOfflineNameByIndex(offlineStudents);
-  const liveColliding = computeCollidingNames(roster.map((entry) => entry.name));
-
-  // Offline first, and never both: an offline answer's `userId` is null for
-  // most students, so a live lookup would resolve nothing and blank the
-  // marker. The two sources are alternatives, not a fallback chain.
-  const nameFor = (index: StudentIndex, userId: CanvasUserId | null): string =>
-    offlineNames.size > 0 ? (offlineNames.get(index) ?? "") : resolveLiveStudentName(userId, roster, liveColliding);
-
-  const nameByIndex = new Map<StudentIndex, string>();
-  // OFFLINE, SEED EVERY STUDENT, not only the cited ones. The sentinel line
-  // the citation contract asks for is the model's to write and it sometimes
-  // is not there (truncated, or simply skipped) - live that costs a citation
-  // chip, but offline it would leave bare "S3" markers in the prose, because
-  // the prose is the only place an offline student is ever named. The browser
-  // already holds this whole mapping, so resolving all of it costs nothing.
-  for (const student of offlineStudents) nameByIndex.set(student.index, offlineNames.get(student.index) ?? "");
-  for (const cited of body.citedStudents ?? []) nameByIndex.set(cited.index, nameFor(cited.index, cited.userId));
+function resolveCourseIntelAnswer(body: CourseIntelAskResponseBody): ResolvedCourseIntelAnswer {
+  const students = body.students ?? body.offlineStudents ?? [];
+  const courses = body.courses ?? [];
+  const nameByIndex = buildNameByIndex(students, courses);
+  const courseLabelByIndex = new Map(courses.map((course) => [course.index, course.name.trim()]));
 
   const concernRows = body.concern?.rows ?? [];
   const notes = [
@@ -422,13 +407,22 @@ function resolveCourseIntelAnswer(
     ...(body.coverageNotes ?? []),
   ].filter((note) => typeof note === "string" && note.trim());
 
+  const withNames = substituteMarkers(
+    typeof body.answerMarkdown === "string" ? body.answerMarkdown : "",
+    "S",
+    nameByIndex
+  );
+
   return {
     id: typeof body.entryId === "string" ? body.entryId : "",
-    answerMarkdown: substituteStudentMarkers(typeof body.answerMarkdown === "string" ? body.answerMarkdown : "", nameByIndex),
+    answerMarkdown: substituteMarkers(withNames, "C", courseLabelByIndex),
     tier: body.tier === "signals+text" ? "signals+text" : "signals",
     assembledAt: typeof body.assembledAt === "string" ? body.assembledAt : "",
     connection: body.connection ?? LIVE_CONNECTION,
-    connectionNote: typeof body.connectionNote === "string" ? body.connectionNote : "",
+    connectionNote: courses.length > 1 ? "" : typeof body.connectionNote === "string" ? body.connectionNote : "",
+    courses,
+    coverageLines: body.coverageLines ?? [],
+    coverageComplete: body.coverageComplete !== false,
     notes,
     // The SERVER decides this, because the server knows the question's shape.
     // Defaulting to false when the field is absent is the safer half: a
@@ -437,7 +431,7 @@ function resolveCourseIntelAnswer(
     showConcernStrip: body.showConcernStrip === true,
     concernRows: concernRows.map((row) => ({
       studentIndex: row.studentIndex,
-      displayName: nameFor(row.studentIndex, row.userId),
+      displayName: nameByIndex.get(row.studentIndex) ?? "",
       signals: row.signals,
     })),
     unexplainedStudentIndices: body.concern?.unexplainedStudentIndices ?? [],
@@ -445,65 +439,7 @@ function resolveCourseIntelAnswer(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Course list - a private, minimal copy of the same
-// listCourseHubAction-backed loader useRepoGradesData.ts's own useCourses()
-// uses. Each per-course feature in this codebase keeps its own copy of this
-// small loader rather than sharing one (see e.g. useCoursesData.ts's own,
-// much heavier, Courses-tab-specific version) - duplicated here rather than
-// imported from repo-grades, which is a private, unexported local hook.
-// ---------------------------------------------------------------------------
-
-function useCourses(): { courses: Course[]; loading: boolean; error: string | null } {
-  const [result, setResult] = useState<{ data: Course[]; error: string | null } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const res = await listCourseHubAction();
-      if (cancelled) return;
-      if ("error" in res) {
-        setResult({ data: [], error: res.error });
-      } else {
-        setResult({ data: res.courses, error: null });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return { courses: result?.data ?? [], loading: result === null, error: result?.error ?? null };
-}
-
-interface KeyedResult<T> {
-  key: string;
-  data: T;
-  error: string | null;
-}
-
 export interface UseCourseIntelReturn {
-  courses: Course[];
-  coursesLoading: boolean;
-  coursesError: string | null;
-  courseId: string;
-  setCourseId: (id: string) => void;
-  course: Course | null;
-
-  /**
-   * Why this course cannot be read from Canvas, or null.
-   *
-   * INFORMATIONAL, NEVER A GATE (D20a/D20e). An export-only course is a
-   * normal kind of course in this app - it still carries a roster, cached
-   * repo bindings and everything the instructor recorded against it - so it
-   * asks and answers like any other. This string tells the instructor what
-   * a Canvas link would ADD; it never withholds the answer they can have.
-   */
-  courseNotConfiguredReason: string | null;
-  roster: CanvasRosterEntry[];
-  rosterLoading: boolean;
-  rosterError: string | null;
-
   question: string;
   setQuestion: (value: string) => void;
   asking: boolean;
@@ -511,9 +447,10 @@ export interface UseCourseIntelReturn {
    * inside the single role="status" region - see CourseIntelAnswer.tsx. */
   statusText: string;
   askError: string | null;
-  /** A refusal rather than a failure: the question named a student who
-   *  matches two roster entries, or named more than one student. Nothing was
-   *  sent to the model. */
+  /** A refusal rather than a failure: the question named a student who matches
+   *  two roster entries, named more than one student, or named a course that
+   *  runs in more than one term with none of them currently in session.
+   *  Nothing was sent to the model. */
   askRefusal: string | null;
   lastAnswer: ResolvedCourseIntelAnswer | null;
   ask: () => void;
@@ -521,114 +458,45 @@ export interface UseCourseIntelReturn {
 
 /** How long the "Gathering course data..." phase text shows before this hook
  * switches it to "Asking the AI..." (D17). This is a WALL-CLOCK HEURISTIC,
- * not a real signal: POST /api/course-intel/ask is one request/response
- * (D3), so nothing tells this hook when the server's own assembly phase
- * actually finished and the model call actually started. Documented as a
- * known limitation in this feature's wave report - a true two-phase signal
- * would need the route to stream, which is outside this wave's scope. */
+ * not a real signal: POST /api/course-intel/ask is one request/response (D3),
+ * so nothing tells this hook when the server's own assembly phase actually
+ * finished and the model call actually started. */
 const GATHER_PHASE_HEURISTIC_MS = 1200;
 
 export function useCourseIntel(): UseCourseIntelReturn {
-  const { courses, loading: coursesLoading, error: coursesError } = useCourses();
-
-  const [courseId, setCourseIdState] = useState<string>(() => loadCourseIntelCourseId());
-  const setCourseId = (id: string) => {
-    setCourseIdState(id);
-    persistCourseIntelCourseId(id);
-  };
-  const course = courses.find((c) => c.id === courseId) ?? null;
-
-  const institution = (course?.institution ?? "").trim();
-  const canvasUrl = (course?.canvasUrl ?? "").trim();
-  const canvasCourseId = course?.canvasUrl ? parseCanvasCourseId(course.canvasUrl) : null;
-
-  const courseNotConfiguredReason: string | null = !course
-    ? null
-    : !institution
-      ? `"${course.name}" has no institution set, so it cannot be read from Canvas. Answers will use only the work you recorded in this browser.`
-      : !canvasUrl
-        ? `"${course.name}" has no Canvas course URL set, so it cannot be read from Canvas. Answers will use only the work you recorded in this browser.`
-        : !canvasCourseId
-          ? `"${course.name}"'s Canvas course URL does not contain a Canvas course id ("/courses/<number>"), so it cannot be read from Canvas. Answers will use only the work you recorded in this browser.`
-          : null;
-
-  // ---- roster (D13's live identity resolution needs this; composite key
-  // copied verbatim from useRepoGradesData.ts's own rosterKey - see that
-  // file's comment for why re-reading institution/canvasCourseId inside the
-  // effect, rather than parsing the key back apart, is safe). It is loaded
-  // only when there IS a Canvas course to load it from, and its failure
-  // never blocks asking: an offline answer resolves its own names from
-  // `offlineStudents`. --------------------------------------------------
-  const rosterKey = course && institution && canvasCourseId ? `${course.id}:${institution}:${canvasCourseId}` : null;
-  const [rosterResult, setRosterResult] = useState<KeyedResult<CanvasRosterEntry[]> | null>(null);
-
-  useEffect(() => {
-    if (rosterKey === null) return;
-    let cancelled = false;
-    (async () => {
-      const result = await listCourseRosterAction(institution, canvasCourseId!);
-      if (cancelled) return;
-      if ("error" in result) {
-        setRosterResult({ key: rosterKey, data: [], error: result.error });
-      } else {
-        setRosterResult({ key: rosterKey, data: result.students, error: null });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [rosterKey, institution, canvasCourseId]);
-
-  const rosterMatches = rosterKey !== null && rosterResult?.key === rosterKey;
-  const roster = rosterMatches ? rosterResult!.data : [];
-  const rosterError = rosterMatches ? rosterResult!.error : null;
-  const rosterLoading = rosterKey !== null && !rosterMatches;
-
-  // ---- per-course draft question + ask state, reset together whenever the
-  // selected course changes - the same render-phase compare-and-adjust
-  // idiom repo-grades' index.tsx uses for its own per-course reset block
-  // (cellStateResetForCourse), rather than an effect: setting state
-  // synchronously inside an effect is what react-hooks/set-state-in-effect
-  // forbids, and this runs during render instead. ------------------------
   const [question, setQuestionState] = useState("");
   const [asking, setAsking] = useState(false);
   const [phase, setPhase] = useState<"gathering" | "asking">("gathering");
   const [askError, setAskError] = useState<string | null>(null);
   const [askRefusal, setAskRefusal] = useState<string | null>(null);
   const [lastAnswer, setLastAnswer] = useState<ResolvedCourseIntelAnswer | null>(null);
-  const [resetForCourseId, setResetForCourseId] = useState<string | null>(null);
-  if (courseId !== resetForCourseId) {
-    setResetForCourseId(courseId);
-    setQuestionState(loadCourseIntelQuestion(courseId));
-    setAsking(false);
-    setAskError(null);
-    setAskRefusal(null);
-    setLastAnswer(null);
-  }
+
+  // The persisted draft is read AFTER mount, never in a useState initializer:
+  // this subtree is server-rendered, the initializer would return "" there,
+  // and React would then keep the server's empty value through hydration with
+  // only a warning - so the box would silently come back blank on reload. The
+  // await is what keeps the setState out of the effect's synchronous body,
+  // which react-hooks/set-state-in-effect forbids.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await Promise.resolve(loadCourseIntelQuestion(QUESTION_SCOPE));
+      if (cancelled || !stored) return;
+      setQuestionState((current) => (current ? current : stored));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setQuestion = (value: string) => {
     setQuestionState(value);
-    persistCourseIntelQuestion(courseId, value);
+    persistCourseIntelQuestion(QUESTION_SCOPE, value);
   };
-
-  // Guards a stale in-flight request's callback from clobbering a DIFFERENT
-  // course's display after the instructor has already switched courses -
-  // the fetch itself is not cancelled (no AbortController plumbing exists
-  // yet for this brand-new route), so this ref is what keeps a late answer
-  // for course A from ever painting over course B.
-  const courseIdRef = useRef(courseId);
-  useEffect(() => {
-    courseIdRef.current = courseId;
-  }, [courseId]);
 
   const ask = () => {
     const trimmed = question.trim();
-    // NO CANVAS PRECONDITION. A course with no institution and no Canvas URL
-    // asks and answers - see courseNotConfiguredReason above.
-    if (!trimmed || asking || rosterLoading || !course) return;
-
-    const courseHubId = course.id;
-    const rosterAtCall = roster;
+    if (!trimmed || asking) return;
 
     setAskError(null);
     setAskRefusal(null);
@@ -640,12 +508,12 @@ export function useCourseIntel(): UseCourseIntelReturn {
     }, GATHER_PHASE_HEURISTIC_MS);
 
     const requestBody: CourseIntelAskRequestBody = {
-      courseId: courseHubId,
       question: trimmed,
       // Sent on EVERY request, live or not. This hook cannot know whether
-      // Canvas is reachable, and asking it to find out first would be a
-      // second round trip for the exact question the route answers anyway.
-      offline: readOfflineRecordedTables(courseHubId),
+      // Canvas is reachable for any course, and asking it to find out first
+      // would be a second round trip for the exact question the route answers
+      // anyway.
+      offline: readOfflineRecordedTables(),
     };
 
     void (async () => {
@@ -657,7 +525,6 @@ export function useCourseIntel(): UseCourseIntelReturn {
         });
         settled = true;
         clearTimeout(phaseTimer);
-        if (courseIdRef.current !== courseHubId) return;
         setAsking(false);
 
         const body = (await readJsonSafely(response)) as CourseIntelAskResponseBody | null;
@@ -666,14 +533,18 @@ export function useCourseIntel(): UseCourseIntelReturn {
           setAskError(describeAskFailure(body, response.statusText));
           return;
         }
-        // The two refusals are 200s, not errors: nothing failed, the question
-        // was not answerable as asked. The question STAYS in the box so
-        // rewording it costs one edit rather than retyping.
-        if (body?.status === "needs-disambiguation" || body?.status === "too-many-students") {
+        // The refusals are 200s, not errors: nothing failed, the question was
+        // not answerable as asked. The question STAYS in the box so rewording
+        // it costs one edit rather than retyping.
+        if (
+          body?.status === "needs-disambiguation" ||
+          body?.status === "too-many-students" ||
+          body?.status === "needs-course-disambiguation"
+        ) {
           setAskRefusal(
             typeof body.message === "string" && body.message.trim()
               ? body.message
-              : "That question could not be narrowed to one student."
+              : "That question could not be narrowed down as asked."
           );
           return;
         }
@@ -682,17 +553,15 @@ export function useCourseIntel(): UseCourseIntelReturn {
           return;
         }
 
-        setLastAnswer(resolveCourseIntelAnswer(body, rosterAtCall));
+        setLastAnswer(resolveCourseIntelAnswer(body));
         // Never clear the question on error or on a refusal - only here, in
         // the success branch, after every other branch above has already
-        // returned (D17), copying useKnowledgeOverview.ts's ask() placement
-        // exactly: a retry costs one click, not retyping.
+        // returned (D17): a retry costs one click, not retyping.
         setQuestionState("");
-        persistCourseIntelQuestion(courseHubId, "");
+        persistCourseIntelQuestion(QUESTION_SCOPE, "");
       } catch (err) {
         settled = true;
         clearTimeout(phaseTimer);
-        if (courseIdRef.current !== courseHubId) return;
         setAsking(false);
         setAskError(describeAskFailure(null, err instanceof Error ? err.message : "network error"));
       }
@@ -701,24 +570,5 @@ export function useCourseIntel(): UseCourseIntelReturn {
 
   const statusText = asking ? (phase === "gathering" ? "Gathering course data..." : "Asking the AI...") : "";
 
-  return {
-    courses,
-    coursesLoading,
-    coursesError,
-    courseId,
-    setCourseId,
-    course,
-    courseNotConfiguredReason,
-    roster,
-    rosterLoading,
-    rosterError,
-    question,
-    setQuestion,
-    asking,
-    statusText,
-    askError,
-    askRefusal,
-    lastAnswer,
-    ask,
-  };
+  return { question, setQuestion, asking, statusText, askError, askRefusal, lastAnswer, ask };
 }

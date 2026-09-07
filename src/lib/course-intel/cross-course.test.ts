@@ -23,6 +23,7 @@ import path from "node:path";
 import { describe, it, expect, vi } from "vitest";
 
 import {
+  CROSS_COURSE_LIVE_CONCURRENCY,
   LIVE_NOT_IN_BUDGET_DETAIL,
   assembleCrossCourseSlices,
   courseReadMode,
@@ -54,6 +55,7 @@ const THRESHOLDS: ConcernThresholds = { lowScorePercent: 65, minMissingCount: 2,
 const LIVE: LmsConnection = { state: "live" };
 const NO_LINK: LmsConnection = { state: "unavailable", reason: "no-lms-course", detail: "No Canvas URL." };
 const DOWN: LmsConnection = { state: "unavailable", reason: "unreachable", detail: "Canvas returned 503." };
+const CUT: LmsConnection = { state: "unavailable", reason: "budget-cut", detail: LIVE_NOT_IN_BUDGET_DETAIL };
 
 function missingRollup(over: Partial<MissingRollup> = {}): MissingRollup {
   return {
@@ -285,9 +287,12 @@ describe("assembleCrossCourseSlices", () => {
     expect(slices.map((s) => s.courseId)).toEqual(["a", "b"]);
     expect(courseReadMode(slices[0].connection)).toBe("live");
     expect(courseReadMode(slices[1].connection)).toBe("lms-unavailable");
+    // `budget-cut`, NEVER `unreachable` - the deadline stopped this course's
+    // read from starting at all, which is a different claim from "an attempt
+    // was made and Canvas could not be reached".
     expect(slices[1].connection).toEqual({
       state: "unavailable",
-      reason: "unreachable",
+      reason: "budget-cut",
       detail: LIVE_NOT_IN_BUDGET_DETAIL,
     });
     // The recorded data is still there. A cut course loses its Canvas read,
@@ -335,6 +340,108 @@ describe("assembleCrossCourseSlices", () => {
       classifyLiveFailure: () => DOWN,
     });
     expect(waits).toEqual([1_500]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Bounded concurrency: several live courses at once, never unbounded.
+  // -------------------------------------------------------------------------
+
+  /** A promise this test controls the resolution of, so a live read can be
+   *  held open long enough to observe how many others start alongside it. */
+  function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  /** Flushes every pending microtask. A macrotask (`setTimeout`) is scheduled
+   *  only after Node drains the microtask queue, so awaiting one is a reliable
+   *  way to let an in-progress worker chain (resolve -> then -> await ->
+   *  resume) fully settle before the next assertion, with no fixed timer to
+   *  tune or race. */
+  function flushMicrotasks(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("never runs more than CROSS_COURSE_LIVE_CONCURRENCY live reads at once", async () => {
+    const COURSE_COUNT = 5;
+    expect(COURSE_COUNT).toBeGreaterThan(CROSS_COURSE_LIVE_CONCURRENCY);
+
+    let active = 0;
+    let maxActive = 0;
+    const gates: { promise: Promise<CrossCourseSlice>; resolve: (value: CrossCourseSlice) => void }[] = [];
+
+    const tasks: CrossCourseTask[] = Array.from({ length: COURSE_COUNT }, (_, i) => {
+      const courseId = `course-${i}`;
+      const gate = deferred<CrossCourseSlice>();
+      gates.push(gate);
+      return {
+        courseId,
+        readRecorded: () => slice({ courseId }),
+        readLive: () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          return gate.promise.then((result) => {
+            active -= 1;
+            return result;
+          });
+        },
+      };
+    });
+
+    const runPromise = assembleCrossCourseSlices({
+      tasks,
+      deadlineAtMs: 1_000_000,
+      perCourseWaitMs: 100_000,
+      now: () => 0,
+      withDeadline: <T,>(work: Promise<T>) => work,
+      classifyLiveFailure: () => DOWN,
+    });
+
+    // Every worker in the pool reaches its own readLive call synchronously
+    // before any of them can await a real result, so by this point exactly
+    // the cap - never all five - should have started.
+    expect(active).toBe(CROSS_COURSE_LIVE_CONCURRENCY);
+
+    // Releasing one course frees a worker, which immediately pulls the next
+    // QUEUED course rather than leaving the freed slot idle - the pool stays
+    // saturated at the cap until the queue itself runs out.
+    gates[0].resolve(slice({ courseId: "course-0" }));
+    await flushMicrotasks();
+    expect(active).toBe(CROSS_COURSE_LIVE_CONCURRENCY);
+    expect(maxActive).toBe(CROSS_COURSE_LIVE_CONCURRENCY);
+
+    for (let i = 1; i < COURSE_COUNT; i += 1) {
+      gates[i].resolve(slice({ courseId: `course-${i}` }));
+    }
+    const slices = await runPromise;
+
+    expect(active).toBe(0);
+    expect(maxActive).toBe(CROSS_COURSE_LIVE_CONCURRENCY);
+    expect(slices.map((s) => s.courseId)).toEqual(tasks.map((t) => t.courseId));
+    for (const s of slices) expect(s.connection).toEqual(LIVE);
+  });
+
+  it("still bounds concurrency when there are fewer live courses than the cap", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const log: string[] = [];
+    const tasks = [task("a", log), task("b", log)].map((t) => ({
+      ...t,
+      readLive: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        const result = await t.readLive!();
+        active -= 1;
+        return result;
+      },
+    }));
+
+    await assembleCrossCourseSlices({ tasks, ...neverCut });
+    expect(maxActive).toBeLessThanOrEqual(CROSS_COURSE_LIVE_CONCURRENCY);
+    expect(maxActive).toBe(2);
   });
 });
 
@@ -505,6 +612,15 @@ describe("superlativeBasis", () => {
     ).toBe("partial");
   });
 
+  it("is partial when one course was cut by the budget, never complete", () => {
+    // A budget cut is a different REASON from an unreachable LMS, but the same
+    // consequence for a ranking: this course's numbers do not exist, so no
+    // superlative may be offered over the set.
+    expect(superlativeBasis([slice({ courseId: "a" }), slice({ courseId: "b", connection: CUT })])).toBe(
+      "partial"
+    );
+  });
+
   it("is partial when the courses were read DIFFERENT ways", () => {
     // A live late count and a recorded late count measure different things
     // over different denominators. Ranking one against the other produces a
@@ -565,6 +681,17 @@ describe("describeCourseCoverage", () => {
     expect(noLink).toContain("nothing was missed");
     expect(notRead).toContain("NOT read");
     expect(notRead).toContain("Canvas returned 503.");
+  });
+
+  it("says plainly that a budget-cut course ran out of time, never that it was unreachable", () => {
+    const [cut] = describeCourseCoverage([{ name: "Databases", connection: CUT }]);
+    expect(cut).toContain("NOT read");
+    expect(cut).toContain(LIVE_NOT_IN_BUDGET_DETAIL);
+    expect(cut).toContain("ran out of its time budget");
+    // The whole point of the new reason: this sentence must never read as a
+    // network fault that never happened.
+    expect(cut).not.toMatch(/unreachable/i);
+    expect(cut).not.toContain("could not be read");
   });
 });
 

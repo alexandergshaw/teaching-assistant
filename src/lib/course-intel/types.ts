@@ -290,14 +290,22 @@ export interface CourseAnnouncementBrief {
 /**
  * WHY THE APP COULD NOT REACH AN LMS, when it could not.
  *
- * There is no single "offline" state in this app - there are four, and they
- * already fail differently, so collapsing them would mean telling an
- * instructor to connect Canvas when they already have and it is merely down.
+ * There is no single "offline" state in this app - there are five, and they
+ * already fail differently, so collapsing any of them would mean telling an
+ * instructor to go investigate a fault that was never there.
  *
  * `no-credential` deliberately does NOT distinguish "no such institution",
  * "half-configured" and "you never connected" - that indistinguishability is a
  * security property of the credential resolver and must not be unpicked here
  * to produce a friendlier message.
+ *
+ * `unreachable` deliberately carries no more than a scrubbed, generic detail -
+ * flattening what actually went wrong (DNS failure, refused connection,
+ * timeout, HTTP status) is what keeps this state from becoming a probe of a
+ * third party's network reachable to anyone who can ask this app a question.
+ * `budget-cut` is NOT that state and must never be folded into it: it says
+ * nothing about the remote host at all, so it carries no comparable risk and
+ * may describe itself plainly.
  */
 export type LmsUnavailableReason =
   /** No stored credential for this user and institution. */
@@ -306,7 +314,20 @@ export type LmsUnavailableReason =
    * normal kind of course here rather than a broken one. */
   | "no-lms-course"
   /** Configured and reachable in principle, but this attempt failed. */
-  | "unreachable";
+  | "unreachable"
+  /**
+   * Configured and never attempted, because a shared request deadline ran out
+   * before this course's turn came up.
+   *
+   * NOT `unreachable`. The two are opposite claims: `unreachable` says an
+   * attempt was made and something about reaching Canvas went wrong, which is
+   * a real, investigable fault. `budget-cut` says no attempt was made at all -
+   * the course itself is fine, this request simply ran out of time for it.
+   * Telling an instructor to go debug their Canvas connection over a course
+   * that was never even asked about is the exact confusion this member exists
+   * to stop.
+   */
+  | "budget-cut";
 
 /**
  * Whether this assembly was built against a live LMS, and if not, why.

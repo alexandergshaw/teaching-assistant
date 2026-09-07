@@ -133,6 +133,36 @@ describe("describeLmsConnection - the mode line says WHICH state applies", () =>
     expect(unreachableLine).not.toContain("no Canvas course link");
   });
 
+  it("a budget cut does not read as a fault, and is not the unreachable sentence", () => {
+    // THE REASON THIS MEMBER EXISTS. Before it, a cross-course question that
+    // ran out of time reported `unreachable` - which means Canvas was asked and
+    // did not answer. That sends an instructor to investigate a connection that
+    // is working perfectly. The two states must not share wording.
+    //
+    // Produced by cross-course.ts rather than classify(), which is why the
+    // "three distinct values" canary above is still correct at three.
+    // An empty detail on purpose: what is under test is the LEAD sentence this
+    // module owns. cross-course.ts supplies the real detail and covers the
+    // composed line in its own suite.
+    const budgetCut: LmsConnection = { state: "unavailable", reason: "budget-cut", detail: "" };
+    const line = describeLmsConnection(budgetCut);
+
+    expect(line.length).toBeGreaterThan(0);
+    expect(line).not.toBe(describeLmsConnection(unreachable));
+
+    // None of the three fault-or-setup phrasings may appear: nothing is
+    // misconfigured and nothing failed.
+    expect(line).not.toContain("could not be read");
+    expect(line).not.toContain("not connected");
+    expect(line).not.toContain("no Canvas course link");
+
+    // And it must carry the actionable half. A single-course question has the
+    // whole budget to itself, so this is a real next step rather than a
+    // consolation - without it the reader is told a course was skipped and
+    // given no way to see it.
+    expect(line).toContain("on its own");
+  });
+
   it("every line states the CONSEQUENCE, not only the cause", () => {
     for (const connection of [noCredential, unreachable, noCourse]) {
       expect(describeLmsConnection(connection)).toContain("recorded in this browser");

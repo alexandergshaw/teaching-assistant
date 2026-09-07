@@ -52,7 +52,7 @@ export const LIVE_LMS_CONNECTION: LmsConnection = Object.freeze({ state: "live" 
  * EACH ONE NAMES ITS OWN STATE AND THE CONSEQUENCE, which is D20e's actual
  * requirement: "Canvas is not connected for this course, so this answer uses
  * only the work you recorded here" is actionable; "offline mode" is not. The
- * consequence half is repeated in all three rather than factored out, because
+ * consequence half is repeated in all four rather than factored out, because
  * a reader sees exactly one of these and a sentence that only makes sense
  * beside its siblings is not a sentence.
  *
@@ -67,6 +67,17 @@ const UNAVAILABLE_LEAD: Readonly<Record<LmsUnavailableReason, string>> = Object.
     "This course has no Canvas course link, so there is no LMS to read. This answer is built only from the work you recorded in this browser.",
   unreachable:
     "Canvas is connected for this course but could not be read just now, so this answer is built only from the work you recorded in this browser.",
+  // NOT A FAULT, and the copy has to carry that difference or it is worse than
+  // useless. `unreachable` means Canvas was tried and did not answer - a real
+  // condition worth investigating. This means Canvas was never tried, because a
+  // cross-course question spends one shared time budget across every course and
+  // this one did not fit. Sending a reader to debug a connection that is fine
+  // is the exact failure this member was added to stop.
+  //
+  // The second sentence is the actionable half: a single-course question has
+  // the entire budget to itself, so it genuinely will read this course.
+  "budget-cut":
+    "This course was not read from Canvas this time - a question spanning several courses shares one time budget, and this one did not fit. Asking about this course on its own will read it.",
 });
 
 /**

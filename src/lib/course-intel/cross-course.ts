@@ -24,10 +24,13 @@
 //     read at all. Whatever the deadline cuts is therefore live work, and the
 //     recorded half of a mixed answer is always complete - which inverts the
 //     usual expectation that offline is the degraded path.
-//   - A PER-COURSE SOFT DEADLINE. Live courses are read one at a time and a
-//     course is not STARTED once the budget is spent. A course that did not
-//     fit keeps the recorded slice it already had and is REPORTED, never
-//     dropped.
+//   - A PER-COURSE SOFT DEADLINE, and BOUNDED CONCURRENCY across live courses
+//     (see `CROSS_COURSE_LIVE_CONCURRENCY`) rather than one at a time - strict
+//     serialization let the deadline cut courses purely because of the order
+//     they happened to be read in, which defeats the point of having a budget
+//     at all. A course is not STARTED once the budget is spent. A course that
+//     did not fit keeps the recorded slice it already had and is REPORTED,
+//     never dropped.
 //
 // -------------------------------------------------------------------------
 // A RANKING THAT SILENTLY OMITS COURSES IS WORSE THAN A LIST THAT DOES (D24e)
@@ -385,20 +388,21 @@ export function readRecordedCourseSlice(args: ReadRecordedCourseSliceArgs): Cros
 /**
  * The detail carried by a course whose live read the budget cut.
  *
- * Reported as `unreachable` rather than as its own reason because
- * `LmsUnavailableReason` has three members and adding a fourth is a change to
- * the shared contract file, which this work does not own. The lead sentence
- * that reason renders ("Canvas is connected for this course but could not be
- * read just now") is true of a budget cut, and this detail says which kind of
- * "just now" it was rather than leaving the instructor to imagine a network
- * fault that never happened.
+ * Reported as `budget-cut`, NOT `unreachable`. `unreachable` means an attempt
+ * was made and something about reaching Canvas went wrong - a real,
+ * investigable fault. A course the deadline stopped this request from even
+ * starting is neither faulty nor unreachable, and reporting it as the former
+ * sends an instructor to debug a network problem that was never there.
+ * `budget-cut` says nothing about the remote host, so unlike `unreachable` it
+ * is free to carry a plain, specific detail (see types.ts's header on that
+ * member).
  */
 export const LIVE_NOT_IN_BUDGET_DETAIL =
   "This course was not read from Canvas because the request ran out of its time budget first.";
 
 const BUDGET_CUT_CONNECTION: LmsConnection = Object.freeze({
   state: "unavailable",
-  reason: "unreachable",
+  reason: "budget-cut",
   detail: LIVE_NOT_IN_BUDGET_DETAIL,
 });
 
@@ -431,21 +435,110 @@ export interface AssembleCrossCourseArgs {
 }
 
 /**
+ * How many live courses may be read from Canvas at once.
+ *
+ * BOUNDED, NOT UNBOUNDED. Fanning every live course out simultaneously would
+ * make this feature's burst load on one instructor's Canvas token scale with
+ * however many courses they happen to teach, which is not a cost this app may
+ * impose on somebody else's rate limit merely because it can. Three is chosen
+ * over a lower number because the live budget is normally several multiples of
+ * one course's own per-course wait: three in flight lets a second wave of
+ * courses start as soon as the first finishes, inside the same window that
+ * strict sequencing would have spent reading only the first two or three
+ * courses in the list. Three over four or five for the same reason the cap
+ * exists at all - it is meant to stay a small, fixed number, not creep upward
+ * every time this file is revisited.
+ */
+export const CROSS_COURSE_LIVE_CONCURRENCY = 3;
+
+/** One course's live read, queued for the bounded worker pool below. Only
+ *  courses that HAVE a live read at all are ever queued - a course with none
+ *  keeps the connection `assembleCrossCourseSlices` already gave it in step 1
+ *  and is never touched by this pool. */
+interface QueuedLiveRead {
+  readonly courseId: string;
+  readonly run: () => Promise<CrossCourseSlice>;
+}
+
+/**
+ * Run every queued live read, at most `CROSS_COURSE_LIVE_CONCURRENCY` at a
+ * time, writing each result (or classified failure) into `slices` as it lands.
+ *
+ * A FIXED-SIZE POOL OF PULL WORKERS, not a fixed batch size. A worker that
+ * finishes early immediately pulls the next queued course rather than waiting
+ * for its batch-mates, so a slow course never idles a slot that a faster one
+ * could have used - and the deadline check happens fresh, per course, right
+ * before that course's own read starts, exactly as it did when this ran one
+ * course at a time.
+ *
+ * COMPLETION ORDER IS NEVER OBSERVED HERE. `slices` is a map keyed by course
+ * id and the caller re-reads it in the answer's own list order once every
+ * worker is done, so which course happens to finish first changes nothing
+ * about what the instructor sees.
+ */
+async function runLiveReads(
+  queue: readonly QueuedLiveRead[],
+  slices: Map<string, CrossCourseSlice>,
+  args: Pick<AssembleCrossCourseArgs, "deadlineAtMs" | "perCourseWaitMs" | "now" | "withDeadline" | "classifyLiveFailure">
+): Promise<void> {
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    while (cursor < queue.length) {
+      const job = queue[cursor];
+      cursor += 1;
+
+      const fallback = slices.get(job.courseId);
+      if (!fallback) continue;
+
+      const remainingMs = args.deadlineAtMs - args.now();
+      if (remainingMs <= 0) continue;
+
+      try {
+        const live = await args.withDeadline(
+          job.run(),
+          Math.min(args.perCourseWaitMs, remainingMs),
+          "Reading a course from Canvas"
+        );
+        slices.set(job.courseId, live);
+      } catch (err) {
+        slices.set(job.courseId, { ...fallback, connection: args.classifyLiveFailure(err) });
+      }
+    }
+  }
+
+  const workerCount = Math.min(CROSS_COURSE_LIVE_CONCURRENCY, queue.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+}
+
+/**
  * Build every course's slice for one answer.
  *
  * THE ORDER IS THE DESIGN, not an implementation detail:
  *
  *   1. EVERY recorded slice, first, for every course. Free, local, and
- *      complete, so the answer already holds everything that costs nothing
- *      before a single Canvas call is made.
- *   2. Then each live course IN LIST ORDER, one at a time, each bounded by
- *      `perCourseWaitMs`, and none STARTED past `deadlineAtMs`.
+ *      synchronous, so the answer already holds everything that costs nothing
+ *      before a single Canvas call is made - concurrency below only ever
+ *      applies to step 2, and cannot reorder step 1 ahead of it.
+ *   2. Then the live courses, up to `CROSS_COURSE_LIVE_CONCURRENCY` at a time,
+ *      each still bounded by `perCourseWaitMs` and none STARTED past
+ *      `deadlineAtMs`.
  *
- * Sequential rather than concurrent on purpose. Fanning N courses out at once
- * would multiply this feature's Canvas call rate by N and would make the
- * deadline meaningless - every course would be half-read when it fired,
- * instead of the first courses being wholly read and the last ones wholly
- * reported as cut. A half-read course is the shape D24e says must not exist.
+ * BOUNDED CONCURRENCY, NOT SEQUENTIAL AND NOT UNBOUNDED. Reading live courses
+ * one at a time made the deadline bite far too early - with a handful of live
+ * courses, serialization alone cut most of them before their turn ever came
+ * up, which is a self-inflicted version of the exact problem D24d exists to
+ * survive. Fanning all of them out at once would remove that cost but replace
+ * it with a burst against one instructor's Canvas token sized to however many
+ * courses they teach, which is not this app's rate limit to spend. A small
+ * fixed pool (see `runLiveReads`) is the middle path: several courses make
+ * real progress at once, and the pool's SIZE never depends on how many courses
+ * are in this answer.
+ *
+ * A course is still never half-read by this. Each course's own read is one
+ * call to `readLive`, awaited whole; concurrency is across DIFFERENT courses,
+ * never within one, so a course that completes is completely read and a course
+ * that does not fit is still wholly reported as cut, exactly as D24e requires.
  *
  * A COURSE IS NEVER DROPPED. A live read that fails or that does not fit keeps
  * the recorded slice built in step 1 and carries the connection saying why -
@@ -466,25 +559,11 @@ export async function assembleCrossCourseSlices(
     slices.set(task.courseId, task.readLive ? { ...recorded, connection: BUDGET_CUT_CONNECTION } : recorded);
   }
 
+  const queue: QueuedLiveRead[] = [];
   for (const task of args.tasks) {
-    if (!task.readLive) continue;
-    const fallback = slices.get(task.courseId);
-    if (!fallback) continue;
-
-    const remainingMs = args.deadlineAtMs - args.now();
-    if (remainingMs <= 0) continue;
-
-    try {
-      const live = await args.withDeadline(
-        task.readLive(),
-        Math.min(args.perCourseWaitMs, remainingMs),
-        "Reading a course from Canvas"
-      );
-      slices.set(task.courseId, live);
-    } catch (err) {
-      slices.set(task.courseId, { ...fallback, connection: args.classifyLiveFailure(err) });
-    }
+    if (task.readLive) queue.push({ courseId: task.courseId, run: task.readLive });
   }
+  await runLiveReads(queue, slices, args);
 
   const ordered: CrossCourseSlice[] = [];
   for (const task of args.tasks) {

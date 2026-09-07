@@ -559,7 +559,12 @@ export interface ConcernSignal {
  */
 export interface ConcernRow {
   readonly studentIndex: StudentIndex;
-  readonly userId: CanvasUserId;
+  /** Null offline, where a student is identified by name against the course
+   * roster and has no Canvas id. See CourseIntelAnswerRecord.citedStudents
+   * for why fabricating one is the worst option and why identitySource
+   * travels alongside. */
+  readonly userId: CanvasUserId | null;
+  readonly identitySource: StudentIdentitySource;
   readonly signals: readonly ConcernSignal[];
   /** Ordering only. Never shown as a score, never described to the model as a
    * ranking - a number an instructor could read as "how bad this student is"
@@ -608,7 +613,28 @@ export interface CourseIntelAnswerRecord {
   readonly answerMarkdown: string;
   /** Resolved student markers, so a chip can be rendered without re-running
    * anything. Indices, plus the ids needed to resolve them locally. */
-  readonly citedStudents: readonly { readonly index: StudentIndex; readonly userId: CanvasUserId }[];
+  /**
+   * The students an answer cited, by index.
+   *
+   * `userId` IS NULLABLE, and that is the whole point. An offline answer is
+   * built from recorded work identified by name against the course roster,
+   * and most of those students have no Canvas id at all - so the shipped
+   * non-nullable shape could not express an offline citation, and the
+   * engagement work had to define a parallel type rather than fabricate one.
+   *
+   * Fabricating one would have been the worst outcome available: it would
+   * launder a screen-read name into the one field this design treats as
+   * ground truth, and every consumer downstream would stop distinguishing a
+   * verified identity from a matched one.
+   *
+   * `identitySource` travels with it so a reader can tell which is which.
+   * Never drop it to "simplify" the shape - the pair IS the meaning.
+   */
+  readonly citedStudents: readonly {
+    readonly index: StudentIndex;
+    readonly userId: CanvasUserId | null;
+    readonly identitySource: StudentIdentitySource;
+  }[];
   readonly assembledAt: string;
   readonly createdAt: string;
   readonly tier: AssemblyTier;

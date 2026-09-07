@@ -510,7 +510,11 @@ export async function POST(req: NextRequest) {
         scopeStudent: scope.subject ? String(scope.subject.userId) : "",
         question,
         answerMarkdown,
-        citedStudents: citedStudents.map((student) => ({ index: student.index, userId: student.userId })),
+        citedStudents: citedStudents.map((student) => ({
+          index: student.index,
+          userId: student.userId,
+          identitySource: student.identitySource,
+        })),
         omissions: context.omissions,
         tier: assembly.tier,
         assembledAt: assembly.assembledAt,

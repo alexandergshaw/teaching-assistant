@@ -48,14 +48,55 @@ import {
 
 /** Load a course's name + recent announcements for the announcements panel. */
 /** List the active teacher courses for an institution (announcements picker). */
+/**
+ * WHY THIS RETURNS `attemptedHost` ON FAILURE.
+ *
+ * A real diagnostic log from this surface read, in full: "List courses, MU,
+ * failure, Canvas did not respond." That message is a fixed literal on
+ * purpose - canvasFetch flattens every network outcome to one indistinguishable
+ * result so a signed-in user's credential form cannot become a port scanner
+ * (SEC9/E-UX4), and it carries no upstream text so a token cannot ride out in
+ * an error (SEC4). Both of those stay exactly as they are.
+ *
+ * But they left the instructor with no way to tell a mistyped institution URL
+ * from a genuine outage, which are the two overwhelmingly likely causes and
+ * have opposite fixes. The host is the ONE safe thing to add: it is the
+ * instructor's OWN configuration, not a fact about a third party, so naming it
+ * reveals nothing the flattening protects - and it is usually the answer.
+ *
+ * Only the host, never the path or query - a path can carry ids, and a query
+ * is where credentials live. Resolved on the error branch only, so the happy
+ * path costs nothing.
+ */
 export async function listCoursesAction(
   acronym: string
-): Promise<{ courses: CanvasCourse[] } | { error: string }> {
+): Promise<{ courses: CanvasCourse[] } | { error: string; attemptedHost?: string }> {
   try {
     await requireOwner();
     return { courses: await listCourses(acronym) };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not load courses." };
+    return {
+      error: err instanceof Error ? err.message : "Could not load courses.",
+      attemptedHost: await describeAttemptedCanvasHost(acronym),
+    };
+  }
+}
+
+/**
+ * The host this institution is configured to dial, for a diagnostic message.
+ *
+ * Returns undefined rather than throwing for every failure mode, including the
+ * one where there is no credential at all: this runs on an error path whose
+ * job is to explain a failure, and a diagnostic helper that can fail the
+ * request it is describing would be worse than no diagnostic.
+ */
+async function describeAttemptedCanvasHost(acronym: string): Promise<string | undefined> {
+  try {
+    const { baseUrl } = await resolveInstitutionByCode(acronym);
+    const host = new URL(baseUrl).host;
+    return host || undefined;
+  } catch {
+    return undefined;
   }
 }
 

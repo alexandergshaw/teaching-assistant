@@ -340,15 +340,36 @@ describe("the text budget is per student, not global", () => {
 });
 
 describe("markers and omissions", () => {
-  it("marks every student in the assembly with index and user id, and nothing else", () => {
+  // The "and nothing else" half is the point of this test and it survives the
+  // addition of identitySource: the marked list is the app's OWN handle on who
+  // is in the assembly, and every field on it is one more thing that could
+  // accidentally be rendered into a prompt. identitySource earned its place
+  // because an offline student has no userId at all and a reader has to be able
+  // to tell a matched identity from a verified one - but the second assertion
+  // below is what keeps the guarantee that matters: none of it reaches the
+  // model, which sees only the index.
+  it("marks every student with index, user id and identity source, and nothing else", () => {
     const block = buildCourseIntelContext({
       assembly: assembly({ students: [student({ index: 1, userId: 10 }), student({ index: 2, userId: 20 })] }),
       nonce: NONCE,
     });
     expect(block.markedStudents).toEqual([
-      { index: 1, userId: 10 },
-      { index: 2, userId: 20 },
+      { index: 1, userId: 10, identitySource: "lms-roster" },
+      { index: 2, userId: 20, identitySource: "lms-roster" },
     ]);
+  });
+
+  it("never renders a marked student's id or identity source into the prompt text", () => {
+    // The model is shown indices and nothing else. A field added to
+    // MarkedStudent for the UI must not start appearing in the block just
+    // because it exists - this is the assertion that makes the shape test
+    // above safe to widen.
+    const block = buildCourseIntelContext({
+      assembly: assembly({ students: [student({ index: 1, userId: 987654 })] }),
+      nonce: NONCE,
+    });
+    expect(block.text).not.toContain("987654");
+    expect(block.text).not.toContain("lms-roster");
   });
 
   it("only marks text that actually survived the budget", () => {

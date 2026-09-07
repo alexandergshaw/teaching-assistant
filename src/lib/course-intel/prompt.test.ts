@@ -93,18 +93,21 @@ const CONCERN_SET: ConcernSet = {
     {
       studentIndex: 2,
       userId: 20,
+      identitySource: "lms-roster" as const,
       signals: [{ kind: "missing-work", label: "5 of 7 assignments missing", value: 5 }],
       sortWeight: 5000,
     },
     {
       studentIndex: 1,
       userId: 10,
+      identitySource: "lms-roster" as const,
       signals: [{ kind: "low-score", label: "Course score: 61%", value: 61 }],
       sortWeight: 40,
     },
     {
       studentIndex: 3,
       userId: 30,
+      identitySource: "lms-roster" as const,
       signals: [{ kind: "insufficient-data", label: "Not enough information about this student in this course", value: null }],
       sortWeight: -1,
     },
@@ -143,7 +146,7 @@ describe("the three-turn shape", () => {
 describe("containment: the framing precedes the untrusted material", () => {
   function composed() {
     const record: CourseStudentRecord = {
-      ...student({ index: 1, userId: 10 }),
+      ...student({ index: 1, userId: 10, identitySource: "lms-roster" }),
       discussion: {
         state: "loaded",
         value: { posts: [text({ id: "t1", text: INJECTION })], replies: [], repliedTo: [], repliedToBy: [] },
@@ -210,7 +213,7 @@ describe("containment: the framing precedes the untrusted material", () => {
 describe("no name and no login id reaches a composed prompt", () => {
   it("carries indices only, even when the records hold names", () => {
     const named: CourseStudentRecord = {
-      ...student({ index: 1, userId: 10 }),
+      ...student({ index: 1, userId: 10, identitySource: "lms-roster" }),
       name: "Zebediah Quorthon",
       sortableName: "Quorthon, Zebediah",
       discussion: {
@@ -351,21 +354,21 @@ describe("D9: no prior question or answer is ever placed in a prompt", () => {
 
 describe("resolveStudentMarkers", () => {
   const marked: MarkedStudent[] = [
-    { index: 1, userId: 10 },
-    { index: 4, userId: 40 },
-    { index: 7, userId: 70 },
+    { index: 1, userId: 10, identitySource: "lms-roster" },
+    { index: 4, userId: 40, identitySource: "lms-roster" },
+    { index: 7, userId: 70, identitySource: "lms-roster" },
   ];
 
   it("resolves by the student's own index, not by position in the array it is given", () => {
     // A subset of the students still resolves S7 to student 7.
-    expect(resolveStudentMarkers(["S7"], marked)).toEqual([{ index: 7, userId: 70 }]);
+    expect(resolveStudentMarkers(["S7"], marked)).toEqual([{ index: 7, userId: 70, identitySource: "lms-roster" }]);
     expect(resolveStudentMarkers(["S2"], marked)).toEqual([]);
   });
 
   it("accepts the bracketed form a model may echo", () => {
     expect(resolveStudentMarkers(["[S4]", "s1"], marked)).toEqual([
-      { index: 4, userId: 40 },
-      { index: 1, userId: 10 },
+      { index: 4, userId: 40, identitySource: "lms-roster" },
+      { index: 1, userId: 10, identitySource: "lms-roster" },
     ]);
   });
 
@@ -375,23 +378,23 @@ describe("resolveStudentMarkers", () => {
 
   it("dedupes to first-seen order", () => {
     expect(resolveStudentMarkers(["S4", "S1", "S4"], marked)).toEqual([
-      { index: 4, userId: 40 },
-      { index: 1, userId: 10 },
+      { index: 4, userId: 40, identitySource: "lms-roster" },
+      { index: 1, userId: 10, identitySource: "lms-roster" },
     ]);
   });
 });
 
 describe("parseCitedStudentMarkers", () => {
   const marked: MarkedStudent[] = [
-    { index: 1, userId: 10 },
-    { index: 4, userId: 40 },
+    { index: 1, userId: 10, identitySource: "lms-roster" },
+    { index: 4, userId: 40, identitySource: "lms-roster" },
   ];
 
   it("reads the sentinel from the last line only", () => {
     const answer = "S1 is missing work.\n\nSTUDENTS CITED: S1; S4";
     expect(parseCitedStudentMarkers(answer, marked)).toEqual([
-      { index: 1, userId: 10 },
-      { index: 4, userId: 40 },
+      { index: 1, userId: 10, identitySource: "lms-roster" },
+      { index: 4, userId: 40, identitySource: "lms-roster" },
     ]);
   });
 

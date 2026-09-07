@@ -20,7 +20,7 @@ function row(overrides: Partial<Row> = {}): Row {
     scope_student: "",
     question: "Who is at risk?",
     answer_markdown: "S1 is missing 3 of 7 assignments.",
-    cited_students: [{ index: 1, userId: 5001 }] as unknown as Json,
+    cited_students: [{ index: 1, userId: 5001, identitySource: "lms-roster" }] as unknown as Json,
     omissions: [{ kind: "topic-over-cap", detail: "3 topics skipped" }] as unknown as Json,
     tier: "signals",
     assembled_at: "2026-09-01T00:00:00Z",
@@ -42,7 +42,7 @@ describe("mapCourseIntelAnswer", () => {
     expect(entry.scopeStudent).toBe("");
     expect(entry.question).toBe("Who is at risk?");
     expect(entry.answerMarkdown).toBe("S1 is missing 3 of 7 assignments.");
-    expect(entry.citedStudents).toEqual([{ index: 1, userId: 5001 }]);
+    expect(entry.citedStudents).toEqual([{ index: 1, userId: 5001, identitySource: "lms-roster" }]);
     expect(entry.omissions).toEqual([{ kind: "topic-over-cap", detail: "3 topics skipped" }]);
     expect(entry.tier).toBe("signals");
     expect(entry.assembledAt).toBe("2026-09-01T00:00:00Z");
@@ -65,7 +65,7 @@ describe("mapCourseIntelAnswer", () => {
 
   it("drops a malformed cited_students entry instead of throwing", () => {
     const malformed = [
-      { index: 1, userId: 5001 },
+      { index: 1, userId: 5001, identitySource: "lms-roster" },
       { index: "not-a-number", userId: 5002 },
       { userId: 5003 },
       "not-an-object",
@@ -74,7 +74,7 @@ describe("mapCourseIntelAnswer", () => {
 
     expect(() => mapCourseIntelAnswer(row({ cited_students: malformed }))).not.toThrow();
     const entry = mapCourseIntelAnswer(row({ cited_students: malformed }));
-    expect(entry.citedStudents).toEqual([{ index: 1, userId: 5001 }]);
+    expect(entry.citedStudents).toEqual([{ index: 1, userId: 5001, identitySource: "lms-roster" }]);
   });
 
   it("drops a malformed omissions entry instead of throwing, and keeps optional fields", () => {
@@ -223,7 +223,7 @@ describe("appendCourseIntelAnswer - tenant boundary and no upsert", () => {
     courseId: "course-1",
     question: "How is S1 doing?",
     answerMarkdown: "S1 is on track.",
-    citedStudents: [{ index: 1, userId: 5001 }],
+    citedStudents: [{ index: 1, userId: 5001, identitySource: "lms-roster" as const }],
     omissions: [],
     tier: "signals" as const,
     assembledAt: "2026-09-01T00:00:00Z",

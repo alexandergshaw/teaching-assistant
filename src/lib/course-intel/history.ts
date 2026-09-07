@@ -46,6 +46,7 @@ import type {
   AssemblyTier,
   CanvasUserId,
   CourseIntelAnswerRecord,
+  StudentIdentitySource,
   StudentIndex,
 } from "./types";
 
@@ -83,14 +84,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** The identity sources a stored row may legally name. Anything else is a row
+ * from a future or corrupted writer and falls back rather than throwing. */
+const IDENTITY_SOURCES: ReadonlySet<string> = new Set<StudentIdentitySource>([
+  "lms-roster",
+  "cached-canvas-id",
+  "course-roster-name",
+  "ambiguous-name",
+  "instructor-attached",
+]);
 function parseCitedStudents(value: Json): CourseIntelAnswerRecord["citedStudents"] {
   if (!Array.isArray(value)) return [];
-  const students: { index: StudentIndex; userId: CanvasUserId }[] = [];
+  const students: {
+    index: StudentIndex;
+    userId: CanvasUserId | null;
+    identitySource: StudentIdentitySource;
+  }[] = [];
   for (const entry of value) {
     if (!isRecord(entry)) continue;
-    const { index, userId } = entry;
-    if (typeof index !== "number" || typeof userId !== "number") continue;
-    students.push({ index, userId });
+    const { index, userId, identitySource } = entry;
+    if (typeof index !== "number") continue;
+    // A null userId is VALID, not malformed - an offline answer identifies a
+    // student by name against the course roster and has no Canvas id. Only a
+    // non-null value that is not a number is rejected.
+    if (userId !== null && userId !== undefined && typeof userId !== "number") continue;
+    // An older row written before identity sources existed is read as
+    // lms-roster, which is what every row at that time actually was. Guessing
+    // anything weaker would misreport a verified identity as a matched one.
+    const source: StudentIdentitySource =
+      typeof identitySource === "string" && IDENTITY_SOURCES.has(identitySource)
+        ? (identitySource as StudentIdentitySource)
+        : "lms-roster";
+    students.push({ index, userId: typeof userId === "number" ? userId : null, identitySource: source });
   }
   return students;
 }

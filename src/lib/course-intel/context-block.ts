@@ -32,6 +32,7 @@ import type {
   CourseStudentRecord,
   Presence,
   StudentIndex,
+  StudentIdentitySource,
   StudentTextRef,
 } from "./types";
 
@@ -40,7 +41,12 @@ import type {
  * No name, no sortable name, and above all no login id - see D13. */
 export interface MarkedStudent {
   readonly index: StudentIndex;
-  readonly userId: CanvasUserId;
+  /** Null for an offline assembly, where a student is matched by name against
+   * the course roster and has no Canvas id. The MODEL never sees either field -
+   * it sees the index - so a null here costs the prompt nothing; it only means
+   * the UI resolves the display name from the roster rather than by id. */
+  readonly userId: CanvasUserId | null;
+  readonly identitySource: StudentIdentitySource;
 }
 
 /** One citable piece of student writing, addressed by marker. The model sees
@@ -347,7 +353,11 @@ export function buildCourseIntelContext(args: BuildCourseIntelContextArgs): Cour
 
   const maxTextChars = args.maxTextChars ?? DEFAULT_STUDENT_TEXT_MAX_CHARS;
   const wanted = new Set(args.textStudentIndices ?? []);
-  const markedStudents: MarkedStudent[] = assembly.students.map((s) => ({ index: s.index, userId: s.userId }));
+  const markedStudents: MarkedStudent[] = assembly.students.map((s) => ({
+    index: s.index,
+    userId: s.userId,
+    identitySource: s.identitySource,
+  }));
   const indexByUserId = new Map<CanvasUserId, StudentIndex>(assembly.students.map((s) => [s.userId, s.index]));
 
   const blocks: string[] = [renderSignalsBlock(assembly, nonce)];

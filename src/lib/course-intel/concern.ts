@@ -228,6 +228,10 @@ export function computeConcernSet(args: ComputeConcernSetArgs): ConcernSet {
     rows.push({
       studentIndex: student.index,
       userId: student.userId,
+      // Carried, never re-derived: how a student was identified is a fact
+      // about the assembly, and a consumer that guessed it would be guessing
+      // exactly the thing the nullable id exists to make explicit.
+      identitySource: student.identitySource,
       signals,
       sortWeight: computeSortWeight({ rollup, score, staleDays, thresholds, signals }),
     });

@@ -159,7 +159,18 @@ function computeCollidingNames(roster: readonly CanvasRosterEntry[]): ReadonlySe
  * stored. A user id not found on the roster is a real, nameable case
  * (types.ts's `onRoster` doc comment: a dropped student, a TA, an observer -
  * never silently merged into somebody else and never silently discarded). */
-function resolveStudentDisplayName(userId: CanvasUserId, roster: readonly CanvasRosterEntry[], collidingNames: ReadonlySet<string>): string {
+function resolveStudentDisplayName(
+  userId: CanvasUserId | null,
+  roster: readonly CanvasRosterEntry[],
+  collidingNames: ReadonlySet<string>
+): string {
+  // A null id means the answer came from an OFFLINE assembly, where a
+  // student is matched by name against the course roster and has no Canvas
+  // id at all. There is nothing to look up, and inventing a lookup key
+  // would be the fabrication the nullable type exists to prevent. The
+  // server already resolved a display name for these; the marker stays as
+  // written rather than being replaced with a wrong name.
+  if (userId === null) return "";
   const entry = roster.find((r) => Number(r.id) === userId);
   if (!entry) return `Student ${userId} (not on the current roster)`;
   const name = entry.name.trim() || `Student ${userId}`;

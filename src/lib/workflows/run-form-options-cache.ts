@@ -53,7 +53,12 @@
 //    page reload always sees fresh data regardless of TTL, since this Map
 //    does not survive one.
 
-import { sweepClientState } from "@/lib/client-state-sweep";
+import {
+  sweepClientState,
+  ownerMarkerFor,
+  readSweepOwnerMarker,
+  writeSweepOwnerMarker,
+} from "@/lib/client-state-sweep";
 
 /** How long a cached list is trusted before a getCachedList() call treats it
  *  as a miss. Two minutes comfortably covers "switched tabs and came right
@@ -156,7 +161,37 @@ export function registerOwnerScopedCache(clear: () => void): void {
  * auth-state event, and most of those (e.g. a token refresh) do not change
  * who is signed in.
  */
+/**
+ * Whether this module has yet reconciled its in-memory owner with the browser's
+ * own record of who was last swept for.
+ *
+ * THE BUG THIS CLOSES. `currentOwner` is module state, so a page load resets it
+ * to null. SupabaseProvider then declares the already-signed-in user on first
+ * mount - the common case, as its own comment says - and the check below saw
+ * null becoming a real id, called that an owner change, and swept the whole of
+ * localStorage. EVERY REFRESH wiped every persisted control in the app:
+ * registered institutions, course selections, every ta- key. The sweep was
+ * working exactly as written; what it could not see was that nothing had
+ * actually changed.
+ *
+ * One reconciliation, on the first call only. After that the in-memory value is
+ * authoritative and a genuine switch is caught by the ordinary comparison.
+ */
+let ownerReconciled = false;
+
 export function setCacheOwner(userId: string | null): void {
+  if (!ownerReconciled) {
+    ownerReconciled = true;
+    const marker = ownerMarkerFor(userId);
+    // Only a POSITIVE match short-circuits. An absent or unreadable marker
+    // proves nothing, and every "cannot prove it is the same person" case has
+    // to fall through and sweep - failing open here would be the cross-user
+    // leak this whole chokepoint exists to prevent.
+    if (marker !== null && readSweepOwnerMarker() === marker) {
+      currentOwner = userId;
+      return;
+    }
+  }
   if (userId === currentOwner) return;
   clearAllCachedLists();
   for (const clear of ownerScopedClearers) clear();
@@ -170,6 +205,10 @@ export function setCacheOwner(userId: string | null): void {
   // either.
   sweepClientState();
   currentOwner = userId;
+  // Written AFTER the sweep, never before: a sweep that throws part-way must
+  // not leave a marker claiming this browser is clean for the new owner.
+  // Passing null on sign-out clears it, so the next sign-in by anyone sweeps.
+  writeSweepOwnerMarker(ownerMarkerFor(userId));
 }
 
 /**

@@ -45,6 +45,77 @@
 export const DEVICE_PREFERENCE_KEYS: readonly string[] = ["ta-theme"];
 
 /**
+ * The key recording WHO this browser last swept for, so an ordinary page
+ * refresh can be told apart from a real change of owner.
+ *
+ * THE BUG THIS EXISTS TO FIX, because it is not obvious from either side.
+ * setCacheOwner sweeps whenever the declared owner differs from the one it
+ * has in memory - and it holds that in a MODULE-LEVEL variable, which a page
+ * load resets to null. So for an already-signed-in user (the common case, as
+ * SupabaseProvider's own comment notes) EVERY REFRESH looked like a fresh
+ * sign-in and swept the whole of localStorage. Every persisted control in the
+ * app silently reset on reload - registered institutions, course selections,
+ * every ta- key - against a standing project rule that they must persist.
+ *
+ * It holds a HASH of the user id, never the id. The marker only has to answer
+ * "is this the same person as last time", which equality of hashes does, and
+ * storing the id itself would leave identity residue in a browser after that
+ * person walks away - the exact class of thing this module's own header says
+ * the sweep exists to remove.
+ *
+ * It has to survive the sweep or it would erase its own marker and the next
+ * refresh would sweep again, which is why it is kept here rather than being
+ * ordinary state.
+ */
+export const SWEEP_OWNER_MARKER_KEY = "ta-sweep-owner";
+
+/** Non-cryptographic, dependency-free, and only ever compared for equality -
+ * this is an identity check, not a security boundary. Mirrors fnv1aHash in
+ * lms-generation/generation-diag.ts rather than importing it, so this module
+ * keeps its no-imports property. */
+function hashOwnerId(userId: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < userId.length; i += 1) {
+    hash ^= userId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/** The marker value for a user id, or null for "nobody signed in". */
+export function ownerMarkerFor(userId: string | null): string | null {
+  return userId === null || userId === "" ? null : hashOwnerId(userId);
+}
+
+/** What this browser last swept for. null when unknown, unreadable, or
+ * nobody - all three mean "cannot prove this is the same user", and every
+ * caller must treat them the same way: sweep. Failing open here would be a
+ * cross-user leak. */
+export function readSweepOwnerMarker(): string | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(SWEEP_OWNER_MARKER_KEY);
+    return raw === null || raw.trim() === "" ? null : raw.trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Records who was just swept for. Passing null clears it, which is what
+ * sign-out wants: the next sign-in, by anyone, must sweep. */
+export function writeSweepOwnerMarker(marker: string | null): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (marker === null) localStorage.removeItem(SWEEP_OWNER_MARKER_KEY);
+    else localStorage.setItem(SWEEP_OWNER_MARKER_KEY, marker);
+  } catch {
+    // Storage unavailable. The marker is an optimisation against a spurious
+    // sweep, never a correctness requirement - without it the old behaviour
+    // returns, which is over-sweeping rather than under-sweeping.
+  }
+}
+
+/**
  * IndexedDB database names that must be deleted outright on a sweep, rather
  * than filtered key-by-key the way localStorage is. Both hold data with the
  * same shape of privacy problem localStorage's unprefixed keys do:
@@ -73,7 +144,13 @@ export const INDEXED_DB_NAMES: ReadonlySet<string> = new Set(["ta-backup", "teac
  * exemption just by sharing its prefix.
  */
 export function shouldKeepLocalStorageKey(key: unknown): boolean {
-  return typeof key === "string" && DEVICE_PREFERENCE_KEYS.includes(key);
+  if (typeof key !== "string") return false;
+  // The sweep must not delete the record of what it swept for - see
+  // SWEEP_OWNER_MARKER_KEY. Kept separately from DEVICE_PREFERENCE_KEYS
+  // because it is not a device preference: it is this module's own
+  // bookkeeping, and folding it into that list would misdescribe both.
+  if (key === SWEEP_OWNER_MARKER_KEY) return true;
+  return DEVICE_PREFERENCE_KEYS.includes(key);
 }
 
 /**

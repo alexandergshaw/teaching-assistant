@@ -246,7 +246,8 @@ best-effort by construction, and **AC6's "say what was omitted" applies to a
 gap we cannot even measure.** The honest UI wording is that messages are
 included when Canvas associated them with the course - not "all messages".
 
-## S2. OPEN QUESTION 4, ANSWERED: announcement replies are not reachable
+## S2. SUPERSEDED BY S16 - this conclusion was wrong. Announcement replies
+## ARE reachable with existing code; see S16 for the verification.
 
 `toAnnouncement` maps id, title, message, posted-at, delayed-post-at, author
 and html url. No reply data at all, and nothing anywhere calls the `/view`
@@ -505,3 +506,182 @@ What does NOT transfer: the scope model (a course has no page tree - it is a
 flat aggregate of four content types), and the context-block layout, which
 orders everything by source. A person-shaped question needs content grouped and
 attributed BY STUDENT across all four sources, which is a new renderer.
+
+# SURVEY RESULT 3 of 3: placement, prior art, and what actually leaves the machine
+
+## S16. THE TWO SURVEYS CONTRADICTED EACH OTHER, AND I CHECKED RATHER THAN
+## PICKING ONE
+
+Survey 1 (S2) reported that announcement replies are NOT reachable. Survey 3
+reported that they ARE, with existing code. Both agents read the same tree.
+
+**Verified directly. Survey 3 is right, and S2 above is WRONG and should be
+read as corrected.**
+
+- `listAnnouncements` fetches
+  `/courses/{id}/discussion_topics?only_announcements=true` - so a Canvas
+  announcement IS a discussion topic and its id IS a discussion-topic id.
+- `fetchDiscussion(baseUrl, token, institution, courseId, topicId)` hits
+  `/courses/{courseId}/discussion_topics/{topicId}/view` and takes ANY topic
+  id.
+
+Pointing the existing function at an announcement's id therefore reaches that
+announcement's replies with no new integration.
+
+**What survey 1 got right, buried under a wrong conclusion:** no code path does
+this today, and `toAnnouncement` maps no reply data. That is a statement about
+what is wired, not about what is reachable, and the two got conflated.
+
+**So AC2's conditional fires:** replies to announcements are per-student, are
+reachable, and belong with discussion replies rather than with announcements.
+The announcement BODY remains class context attributable to nobody.
+
+**Unverified, and it matters:** whether a given announcement has replies at all
+depends on Canvas settings - announcements can be locked for comment - and the
+`/view` response shape for an announcement topic has not been observed against
+a live instance. Reachable in principle, unproven in practice.
+
+## S17. WHERE IT GOES: the Manual sub-rail, not Knowledge and not Recording
+
+- **Knowledge is INSTITUTION-scoped**, not course-scoped. Its scope model is a
+  page tree. Reusing it directly would be wrong, and "similar to the knowledge
+  page" refers to the Ask AI shape, not to where it lives.
+- **Recording is the wrong home** - its sub-tabs are screen-capture and OCR
+  tools, not a query surface, and that file is at 892 of 1000 lines.
+- **Manual's sub-rail is the right home**, and `repo-grades` is the exact
+  template: a per-course tool registered as a `ManualViewType` with its OWN
+  internal course picker.
+
+Registration is four edits plus a render branch, and one of them is
+type-enforced: `MANUAL_VIEW_LABELS` is a `Record<ManualViewType, string>`, so
+`tsc` itself fails if the new view is added to the union and not to the labels.
+That is a wiring guarantee this project has repeatedly wished for - three
+features have shipped dead because a hand-maintained list was missed - and here
+the compiler covers part of it for free.
+
+Headroom is ample everywhere it touches: `manual-rail.ts` 222, `ManualRail.tsx`
+73, `page.tsx` 526, `url-state.ts` 261, all against 1000. The canary to add is
+the equivalent of the existing repo-grades sub-tab test block; the destinations
+array has no exact-count assertion, so this is lower risk than the Recording
+strip's position pinning.
+
+## S18. THERE IS NO APP-WIDE "CURRENT COURSE", AND TWO COURSE IDS TO CONFUSE
+
+Every course-scoped tool keeps its own persisted selection. There is no shared
+context to plug into, and the in-session banner is a click-to-focus affordance,
+not a selection.
+
+Two identities, and crossing them is an easy, silent mistake precisely because
+the pattern is copy-pasted per feature rather than centralised:
+
+- the `course_hub` row id (a uuid), which is what the UI selector holds;
+- the Canvas numeric course id, which is DERIVED on demand from
+  `course.canvasUrl` via `parseCanvasCourseId` and is never stored as its own
+  column.
+
+The established idiom to copy composes the effect key as
+`${course.id}:${institution}:${canvasCourseId}`. Follow it exactly.
+
+## S19. OPEN QUESTION 3, ANSWERED: PARTIALLY, AND THE MISSING PIECE IS SMALL
+
+`listAssignmentNonSubmitters` already reports, per assignment, which students
+have not submitted past the due date. `listStudentGradeSummaries` already
+reports current and final score per student.
+
+What does NOT exist is the ROLLUP - "student X is missing 4 of 7 assignments".
+That is new, but it is composition of two already-shipped calls over an
+endpoint this app already hits, not a new Canvas surface.
+
+Combined with survey 1's finding that `score`, `workflow_state`,
+`submitted_at`, `late` and `missing` are already in payloads being discarded,
+AC3's grounding is genuinely affordable.
+
+## S20. WHAT ACTUALLY LEAVES THE MACHINE TODAY, TRACED END TO END
+
+The finding I most wanted and least wanted to be true.
+
+**`buildReplyDraftingPrompt` takes each post as `{author, text}` - the
+student's real display name and their own writing - and embeds both directly
+into a prompt with NO redaction.** That prompt goes to Google's public Gemini
+endpoint carrying this app's key. Message-reply drafting follows the same shape
+for PRIVATE student messages.
+
+The only redaction machinery in the codebase,
+`redactAuthorNameFromText`/`redactAuthorNameFromPost`, belongs to a different
+feature and strips names before a third-party WEB SEARCH - never before the
+model call.
+
+**Instructor-facing disclosure that any of this happens: none, anywhere in the
+app.** A repo-wide search for such copy returned exactly one hit, and it is a
+code comment.
+
+**Retention: no concept of it exists in the schema.** A search across every
+migration for retention, expiry, ttl or purge found nothing relevant. Student-
+derived content is already persisted indefinitely in at least three tables -
+knowledge questions and answers, class-session transcripts including every
+question the class-mode assistant answered, and grading and message drafts
+carrying per-student AI-produced content.
+
+**No concept of an educational record, consent, or data minimisation exists
+anywhere in this codebase.**
+
+## S21. THE PROPORTIONATE BAR, AND THE ONE THING NOT TO BUILD
+
+The survey's judgement, and I agree with it: **do NOT build a consent or
+records-compliance mechanism before building the feature.** No such
+infrastructure exists anywhere in the app, and inventing it here would be scope
+creep wearing diligence as a disguise.
+
+The reasoning is worth keeping because it is the part that is easy to get
+wrong in either direction: **the risk this feature adds is the AGGREGATION and
+the third-party disclosure, not the underlying access.** The instructor already
+has legitimate access to every one of these four sources, and already sees them
+spread across three separate tools in this same app. What is new is joining
+them into a per-student picture and sending that to a model.
+
+So the proportionate response addresses exactly that added risk:
+
+- **MUST disclose, once, before the first question**, where the instructor is
+  already reading - not on a settings page - that this sends student posts,
+  messages and grades to a third-party AI provider. This is the surface where
+  the omission is least defensible, because the data is most identifiable and
+  is about people who did not choose to be in it.
+- **MUST frame all student-authored text as data**, names included.
+- **MUST ground "students of concern" in the two existing quantifiable
+  signals**, with sparse-data students reported as "not enough information"
+  rather than silently dropped or inferred about from the tone of their
+  writing.
+- **MUST NOT persist the assembled corpus.** Every other place this app
+  persists AI-touched content about people, it does so forever with no
+  retention story. Repeating that for a full cross-source per-student dossier
+  is a materially larger blast radius than a knowledge summary or one grading
+  draft. Rebuild from Canvas per question.
+- **SHOULD cite by index, never by name**, and state omissions explicitly.
+- **NO consent gate, NO compliance program, NO new redaction layer for the
+  model call** beyond the framing - the first two do not exist to build on, and
+  the third would break the feature, since answering "how is student Y doing"
+  requires knowing which student Y is.
+
+## S22. THE Q&A HISTORY DECISION, NOW INFORMED
+
+Survey 2 raised it; survey 3's retention finding sharpens it. Three existing
+tables hold student-derived AI output forever with no purge path, and this app
+has no retention concept at all.
+
+**My recommendation, for the owner to overrule: persist the Q&A history, and
+nothing else.** It mirrors an existing table, it is small, it is deletable, and
+it is the difference between a usable tool and one that forgets everything on
+reload. But it must land WITH a delete control and a stated retention answer -
+not inherited silently from a schema that never had to have one, which is
+exactly how the other three got where they are.
+
+The corpus stays unpersisted regardless.
+
+## S23. LIMITS ON THIS SURVEY
+
+Nothing was run. Canvas call counts and latency for a real assembly (open
+question 5) remain unmeasured and need live credentials. The survey traced ONE
+LLM path end to end rather than auditing all of them, so there may be further
+unredacted student-data-to-model paths - repo grading is the obvious candidate
+to check next. And the announcement-reply reachability in S16 is verified as
+code shape, not as an observed Canvas response.

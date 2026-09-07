@@ -50,6 +50,16 @@ function signalBadgeClass(kind: ConcernSignalKind): string {
     case "low-score":
     case "ungraded-backlog":
     case "insufficient-data":
+    // The four D23 additions are all neutral, and that is a judgement rather
+    // than a default. None of them is a verdict about the student's own
+    // failure: a resubmission is MORE work, an unknown submission time is our
+    // gap and not theirs, the ungraded gap is the instructor's own backlog,
+    // and activity after a gap is outright positive. Colouring any of them as
+    // a warning would read as an accusation for doing the right thing.
+    case "resubmission":
+    case "unknown-submission-time":
+    case "ungraded-gap":
+    case "recent-activity-after-gap":
       return pageStyles.ghBadgeNeutral;
   }
 }

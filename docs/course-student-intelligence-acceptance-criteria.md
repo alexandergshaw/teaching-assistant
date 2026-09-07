@@ -1886,3 +1886,117 @@ Students are still indices, still never named to the model. Across courses that
 needs care: an index must be unambiguous within the ANSWER, not merely within
 one course's assembly, or S3 in one course and S3 in another collide in the
 same response.
+
+---
+
+# D25. SIX TOP-LEVEL TABS BECOME FOUR
+
+**The request, verbatim (2026-09-07):** "courses and tasks tab should be
+collapsed into 1 tab, same with manual and workflows, and same with files and
+knowledge"
+
+Combined with D24's promotion of Course Intel, the strip goes from six tabs to
+four.
+
+## D25a. THE PAIRINGS, AND WHAT EACH MERGED TAB IS CALLED
+
+| merged tab | absorbs | why the pairing holds |
+| --- | --- | --- |
+| **Courses** | Courses + Tasks | tasks in this app are course work. They were already about the same objects, split by verb rather than by subject. |
+| **Tools** | Manual + Workflows | the same jobs, done by hand or automated. Manual already has a sub-rail, so it is the half that dictates the pattern. |
+| **Library** | Files + Knowledge | stored artifacts and reference pages - both things you go and look at rather than run. |
+| **Course Intel** | new (D24) | asks questions ACROSS the other three rather than living inside one, which is the argument for it being top-level at all. |
+
+Names are a judgement call and reversible. "Tools" over "Work" because Manual is
+hands-on and Workflows is automation, and "tools" covers both without implying
+one is the real one. "Library" over "Files" because Knowledge is not files.
+
+## D25b. THE CORRECTNESS ISSUE IS URL COMPATIBILITY, and it fails SILENTLY
+
+`normalizeActiveTab` consults a runtime `Set` and falls back to a default for
+anything it does not recognise. So the moment `tasks`, `workflows` and
+`knowledge` leave that set, **every existing bookmark, saved link and restored
+session carrying one lands on the wrong tab with no error** - the exact silent
+bounce D24a flagged, except here it hits URLs that already exist rather than one
+that never worked.
+
+**DECIDED: the three retired values are ALIASED, never removed.** `?tab=tasks`
+resolves to the Courses tab with its section set to tasks; `?tab=workflows` to
+Tools with its section set to workflows; `?tab=knowledge` to Library with its
+section set to knowledge. An alias is a redirect, not a synonym - the canonical
+value is written back so the URL converges rather than staying legacy forever.
+
+This must be TESTED, and the test is the point: a normaliser that quietly
+returns a default for a legacy value is indistinguishable from one that handles
+it, until someone opens an old link.
+
+## D25c. EACH MERGED TAB NEEDS A SECTION SWITCH, and one already exists
+
+Manual's sub-rail is the established pattern and Tools inherits it directly -
+both halves already have view params (`manualView`, `workflowsView`), so the
+merge is a rail that spans both rather than new machinery.
+
+Courses and Library each gain the same kind of switch. Their existing view
+params (`tasksView`, `kbInstitution`/`kbPage`) keep working and are simply
+scoped under the merged tab.
+
+**No view param is renamed.** Renaming one would break the same class of URL
+that D25b exists to protect, for no benefit - the params are already unique
+across tabs.
+
+## D25d. THE RENDER BRANCHES ARE WHERE THIS SHIPS BROKEN
+
+`page.tsx` keys several branches on tab-plus-subview combinations, including one
+that toggles `display: none` rather than unmounting - a deliberate choice for
+the recording surface, which must not lose its capture state when the user
+navigates away.
+
+**That branch must keep working across the merge**, and it is the one most
+likely to break silently: getting it wrong unmounts an in-progress screen
+recording, which is not a rendering bug to the person losing their capture.
+
+Every branch is rewritten against the new tab plus section, and the
+already-mounted-but-hidden one keeps its exact semantics.
+
+## D25e. THE CANARY MOVES, AND WIDENS
+
+D24a already required the reachability canary to move with Course Intel. It now
+also has to cover a strip that changed shape underneath every other tab. A
+canary that still asserts six tabs would pass while describing a layout that no
+longer exists.
+
+It should assert, at minimum: each of the four tabs is in the runtime value set,
+is rendered in the strip, and has a render branch - plus that each retired value
+still resolves to its new home. That last one is the only automated protection
+against the silent bounce, since nothing else in the app reads an old URL.
+
+## D25f. AN INTEGRATION HAZARD FOUND BY THE AGENT THAT CAUSED HALF OF IT
+
+Two modules built concurrently ended up with different vocabularies for the same
+idea, and the failure mode is silent:
+
+- the grading declarations store spells it `"discussion"`;
+- the engagement computation spells it `"discussion-post"`.
+
+**A mapper that passes the string through lands every discussion assessment in
+`not-declared`, and its missing count then disappears** - and the answer reads
+as "no missing work" rather than as an error. That is the exact shape of
+confidently-wrong output this whole feature has been built to avoid, arriving
+through an internal seam rather than a model.
+
+The collision is only half real: `StudentTextKind`'s `"discussion-post"`
+describes a piece of TEXT, while `WorkKind` describes a KIND OF WORK being
+graded. Those are genuinely different concepts, so the answer is not to force
+one spelling everywhere.
+
+**DECIDED: an explicit, total, TESTED mapping at the boundary - never a
+pass-through.** A translation that is visible in the code is safe; one that
+happens to work because two strings match today is not.
+
+**And it must be settled before anything ships to a user**, because the
+declaration value is PERSISTED. Right now nothing has been stored and changing
+a spelling costs nothing; after the first save it costs a migration.
+
+The same pair also both export a type named `GradingToolDeclaration` with
+different shapes. No compile conflict today, and a collision the moment one file
+imports both.

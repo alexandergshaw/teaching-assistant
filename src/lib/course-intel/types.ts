@@ -382,7 +382,27 @@ export interface CourseIntelAssembly {
   readonly omissions: readonly AssemblyOmission[];
 }
 
-/** A named, deterministic reason a student is on the concern list. */
+/**
+ * A named, deterministic reason a student is on the concern list.
+ *
+ * D23 CHANGED WHAT TWO OF THESE MEAN, and widened the union rather than
+ * bending more words. D22d recorded four bends forced by a closed union with
+ * no offline members. Two of them are gone:
+ *
+ * - `missing-work` can now mean what it says. Given a DECLARED authoritative
+ *   grading tool for a kind of work (D23a) and an instructor-entered deadline
+ *   (D23b), absence of a row is not "we did not see it" - it is "it is not
+ *   there", measured against the roster, which is the same basis Canvas's own
+ *   `missing` flag uses. The relative, weaker offline reading ("no recorded
+ *   work on an assessment others were graded on") is still what
+ *   offline-signals.ts emits, and its label still says so.
+ * - `late-work` becomes emittable. D22d said lateness had no offline analogue
+ *   because no recorded row carries a due date; that treated a missing field
+ *   as a permanent property rather than a gap the instructor can fill.
+ *
+ * The members below `insufficient-data` are the D23 additions. They are
+ * ADDITIVE: nothing above them was removed or renamed.
+ */
 export type ConcernSignalKind =
   | "missing-work"
   | "late-work"
@@ -392,7 +412,122 @@ export type ConcernSignalKind =
   /** Not a concern - the honest answer when there is too little to judge. It is
    * a first-class row so such a student is REPORTED rather than omitted, which
    * is the difference between "nothing to worry about" and "we do not know". */
+  | "insufficient-data"
+  /**
+   * More than one row for the same student and assessment (D23b).
+   *
+   * Detectable with NO timestamp at all - it is a multiplicity fact. Ordering
+   * is not: with unknown submission times we can say a resubmission happened
+   * and cannot say which came first, and the label says exactly that rather
+   * than picking one.
+   */
+  | "resubmission"
+  /**
+   * A submission whose time is unknown (D23c).
+   *
+   * The third value of a three-valued lateness, and a first-class signal so it
+   * is REPORTED rather than rounded. An unknown-time submission is NOT on time
+   * and NOT late. It is never filled in from a capture time - that is when the
+   * INSTRUCTOR graded, and using it would mark a whole class late.
+   */
+  | "unknown-submission-time"
+  /**
+   * D23f, and the one place this design can call an honest student missing.
+   *
+   * The tool sees only what was GRADED, so a student who submitted and is
+   * waiting on the instructor is indistinguishable from one who did not
+   * submit. The deadline makes absence meaningful; it does not make ungraded
+   * work visible. Carried as DATA on every row that reports missing work, so
+   * the answer states it rather than leaving the instructor to remember it.
+   */
+  | "ungraded-gap"
+  /**
+   * Dated activity after a measured gap of silence (D23d).
+   *
+   * Behavioural evidence of recovery, not of concern. It exists because
+   * "actively working to remedy their grade" is a genuinely different state
+   * from "doing poorly", and needs its own evidence rather than a softer
+   * reading of the same numbers.
+   */
+  | "recent-activity-after-gap";
+
+/**
+ * Which of D23d's three states a student is in - plus the honest fourth.
+ *
+ * THE THIRD IS THE VALUABLE ONE AND IS NOT A MILDER SECOND. A student with
+ * three late submissions and two resubmissions this week is RECOVERING. A
+ * student with three missing and silence is DISENGAGED. A concern computation
+ * that flags both similarly is actively wrong about the first: it sends an
+ * outreach message to someone already doing the thing the outreach would ask
+ * for, which is worse than saying nothing. So `recovering` is its own outcome
+ * with its own behavioural evidence and is NEVER folded into the concern list
+ * as a weaker concern.
+ *
+ * `insufficient-data` is not a fourth judgement, it is the refusal to judge -
+ * the same first-class "we do not know" row the rest of this feature already
+ * treats as more important than a confident guess. A student who cannot be
+ * joined is reported here, never quietly counted as doing well.
+ */
+export type EngagementOutcome =
+  /** No qualifying concern signal. */
+  | "doing-well"
+  /** Qualifying concern signals and no recent, dated remediation. */
+  | "needs-outreach"
+  /** Qualifying concern signals AND recent, dated remediation. */
+  | "recovering"
+  /** Nothing about this student could be computed soundly. */
   | "insufficient-data";
+
+/**
+ * Why an engagement computation is narrower than it looks.
+ *
+ * Every one of these is stated to the instructor. A missing count computed
+ * over five of eight assessments, presented as though it covered all eight, is
+ * worse than no count at all - the same rule AssemblyOmissionKind exists for.
+ */
+export type EngagementCaveatKind =
+  /** D23f. Present whenever ANY missing count is reported. */
+  | "ungraded-gap"
+  /** No authoritative grading tool was declared for that kind of work, so
+   *  absence of a row means nothing and missing was NOT computed. */
+  | "assumption-not-declared"
+  /** Rows for that assessment came from a tool other than the declared one, so
+   *  its missing count would be WRONG. Detected and stated, never averaged
+   *  over: a half-migrated assessment producing a confident missing list is the
+   *  worst outcome available here. */
+  | "assumption-violated"
+  /** No instructor-entered deadline, so neither missing nor late is computable
+   *  for that assessment. */
+  | "no-deadline"
+  /** The deadline has not passed. An assessment nobody could have submitted
+   *  yet is not missing work for anyone. */
+  | "deadline-not-passed"
+  /** The reference instant could not be parsed, so nothing time-dependent was
+   *  computed. */
+  | "no-reference-time"
+  /** Rows that attributed to no single student. Real work that belongs to
+   *  somebody, and one of them could belong to a student about to be called
+   *  missing. */
+  | "unattributed-rows"
+  /** Rows naming an assessment that is not in the assessment list. Used for
+   *  nothing, counted rather than silently dropped. */
+  | "orphan-rows"
+  /** Submissions with no known time, which are neither late nor on time. */
+  | "unknown-submission-times"
+  /** Students whose name matches more than one roster entry. Excluded from
+   *  every missing count, because a student who cannot be joined would look
+   *  absent from work they actually did. */
+  | "ambiguous-name";
+
+export interface EngagementCaveat {
+  readonly kind: EngagementCaveatKind;
+  /** Built in code from typed numbers - never a sentence a model produced. */
+  readonly detail: string;
+  readonly count?: number;
+  /** Which assessments this caveat is about, when it is about some of them
+   *  rather than the whole computation. */
+  readonly assessmentIds?: readonly string[];
+}
 
 export interface ConcernSignal {
   readonly kind: ConcernSignalKind;

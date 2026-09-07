@@ -189,6 +189,61 @@ export interface AnnouncementExemplarsUpdate {
   created_at?: string;
 }
 
+// supabase/migrations/20261018000000_course_intel_answers.sql
+//
+// Defined directly in this file, rather than added to
+// ./types.tables-a.ts / ./types.tables-b.ts / ./types.tables-c.ts as this
+// repo's usual hand-maintained-row-types convention would put it - mirrors
+// AnnouncementExemplarsRow/Insert/Update just above, added the same way for
+// the same reason: this table's migration, module and tests were built by
+// one agent in a batch of concurrent agents each scoped to a disjoint file
+// set, and this file was the only types file in that agent's set.
+// scope_student is NOT NULLABLE (default '') - see the migration's own
+// header for why this table does not need the coalesce-to-nil-uuid
+// generated-column technique institution_knowledge_questions.scope_key
+// uses.
+export interface CourseIntelAnswersRow {
+  id: string;
+  user_id: string;
+  course_id: string;
+  scope_student: string;
+  question: string;
+  answer_markdown: string;
+  cited_students: Json;
+  omissions: Json;
+  tier: string;
+  assembled_at: string;
+  created_at: string;
+}
+
+export interface CourseIntelAnswersInsert {
+  id?: string;
+  user_id: string;
+  course_id: string;
+  scope_student?: string;
+  question: string;
+  answer_markdown: string;
+  cited_students?: Json;
+  omissions?: Json;
+  tier: string;
+  assembled_at: string;
+  created_at?: string;
+}
+
+export interface CourseIntelAnswersUpdate {
+  id?: string;
+  user_id?: string;
+  course_id?: string;
+  scope_student?: string;
+  question?: string;
+  answer_markdown?: string;
+  cited_students?: Json;
+  omissions?: Json;
+  tier?: string;
+  assembled_at?: string;
+  created_at?: string;
+}
+
 // @supabase/postgrest-js's generic client requires each table entry to
 // satisfy `GenericTable` (Row/Insert/Update assignable to Record<string,
 // unknown>, plus a `Relationships` array) or the whole schema silently
@@ -274,6 +329,12 @@ export interface Database {
         Row: Expand<CourseHubRow>;
         Insert: Expand<CourseHubInsert>;
         Update: Expand<CourseHubUpdate>;
+        Relationships: [];
+      };
+      course_intel_answers: {
+        Row: Expand<CourseIntelAnswersRow>;
+        Insert: Expand<CourseIntelAnswersInsert>;
+        Update: Expand<CourseIntelAnswersUpdate>;
         Relationships: [];
       };
       course_syllabi: {

@@ -38,6 +38,45 @@ export interface CanvasConversationSummary {
   subject: string;
   lastMessage: string;
   participants: string[];
+  /**
+   * The numeric Canvas user id of every participant that has one.
+   *
+   * docs/course-student-intelligence-acceptance-criteria.md: `participants`
+   * above collapses each participant to a bare display name via
+   * `participantName`, discarding the numeric id `CanvasParticipant` already
+   * declares. A shipped feature in this repo had to match message senders to
+   * students by Levenshtein-distance name similarity for exactly this reason
+   * - the id was in the payload the whole time. Purely additive: every
+   * existing consumer of `participants` is unaffected, and this array is
+   * simply shorter than `participants` whenever a participant record carries
+   * no id.
+   *
+   * Optional, not just empty-when-none: several out-of-scope consumers
+   * (src/app/components/message-replies/*.test.ts) build literal
+   * `CanvasConversationSummary` fixtures that predate this field. A required
+   * array would make every one of those fixtures a compile error for a field
+   * they have no reason to know about - exactly the kind of break "purely
+   * additive" is supposed to rule out. Every real caller of
+   * mapConversationList still populates it (as an array, possibly empty);
+   * only a hand-built test fixture can omit it.
+   */
+  /**
+   * The numeric Canvas ids of the participants, alongside their names.
+   *
+   * REQUIRED, not optional, because mapConversationList always populates it -
+   * so `undefined` could only ever originate in a hand-built test fixture,
+   * which is the least useful place for the bug to appear. This repo shipped
+   * exactly that debt one commit earlier this week with a different field and
+   * had to come back for it.
+   *
+   * These ids were always on the wire. The list response carries
+   * CanvasParticipant objects with an `id`, and this mapper used to collapse
+   * each one to a bare name string - which led a survey to conclude the list
+   * endpoint "returns names only", and led a shipped feature elsewhere in this
+   * app to match message senders to students by Levenshtein distance. Joining
+   * people on a fuzzy name match is exactly what a numeric id prevents.
+   */
+  participantIds: number[];
   messageCount: number;
   workflowState: string;
   lastMessageAt: string | null;
@@ -160,6 +199,9 @@ function mapConversationList(items: CanvasConversationListItem[]): CanvasConvers
       subject: (c.subject ?? "").trim() || "(no subject)",
       lastMessage: (c.last_message ?? "").trim(),
       participants: (c.participants ?? []).map(participantName).filter(Boolean),
+      participantIds: (c.participants ?? [])
+        .map((p) => p.id)
+        .filter((id): id is number => typeof id === "number"),
       messageCount: typeof c.message_count === "number" ? c.message_count : 0,
       workflowState: c.workflow_state ?? "",
       lastMessageAt: c.last_message_at ?? null,

@@ -72,7 +72,7 @@ function fakeRowsApi(
 }
 
 const CONVERSATIONS: CanvasConversationSummary[] = [
-  { id: 501, subject: "Question about homework", lastMessage: "", participants: ["Sam Osei"], messageCount: 2, workflowState: "read", lastMessageAt: null },
+  { id: 501, subject: "Question about homework", lastMessage: "", participants: ["Sam Osei"], participantIds: [], messageCount: 2, workflowState: "read", lastMessageAt: null },
 ];
 
 describe("applyCanvasMatches", () => {
@@ -115,8 +115,8 @@ describe("applyCanvasMatches", () => {
 
   it("writes matchOutcome 'ambiguous' on an examined row with several candidates", () => {
     const twoConversations: CanvasConversationSummary[] = [
-      { id: 501, subject: "Question about homework", lastMessage: "", participants: ["Sam Osei"], messageCount: 2, workflowState: "read", lastMessageAt: null },
-      { id: 502, subject: "Question about homework", lastMessage: "", participants: ["Sam Osei"], messageCount: 5, workflowState: "read", lastMessageAt: null },
+      { id: 501, subject: "Question about homework", lastMessage: "", participants: ["Sam Osei"], participantIds: [], messageCount: 2, workflowState: "read", lastMessageAt: null },
+      { id: 502, subject: "Question about homework", lastMessage: "", participants: ["Sam Osei"], participantIds: [], messageCount: 5, workflowState: "read", lastMessageAt: null },
     ];
     const { ref, setCanvasMatchCalls, setMatchOutcomeCalls } = fakeRowsApi([makeRow({ id: "m1" })]);
     applyCanvasMatches(ref, twoConversations, 12345);

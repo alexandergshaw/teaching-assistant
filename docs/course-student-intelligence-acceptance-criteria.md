@@ -1335,7 +1335,8 @@ same reason.
 **Explicitly NOT decided as "refuse to attribute anything offline".** That would
 throw away the one sound anchor this app has, and it is over-strict.
 
-## D20c. THE CONCERN QUESTION CANNOT BE ANSWERED OFFLINE. It refuses.
+## D20c. SUPERSEDED BY D21 - this conclusion was WRONG. The concern question
+## IS answerable offline; see D21 for the correction and why I got it wrong.
 
 D1 requires the concern set to be computed from missing work, per-assignment
 scores, late flags and days since activity. **None of that exists in any offline
@@ -1415,3 +1416,127 @@ outage is distinguishable from an HTTP error anywhere in the UI today was not
 found in this pass. The real mix of export-only versus Canvas-connected courses
 in this owner's data is unknown, which matters because it decides whether
 offline mode is an edge case or the common one.
+
+---
+
+# D21. D20c WAS WRONG. The concern question IS answerable offline.
+
+**The owner's correction, verbatim (2026-09-06):** "sure the students of concern
+can be answered offline. if there is no lms connection, then I'm already using
+all offline tools (i.e. the recording suite) to grade students' work and respond
+to discussion posts. students' names and course can form a unique key".
+
+They are right on both counts, and D20c is superseded.
+
+## D21a. WHERE MY REASONING WENT WRONG, precisely
+
+The offline survey said recorded grading rows "cover only assignments an
+instructor happened to grade via screen-recording, not the general case", and I
+took that as decisive.
+
+**That sentence is true in LIVE mode and false in OFFLINE mode, and I
+generalised from the wrong one.** With no LMS connection there is no other way
+to grade - the recording suite is not a supplementary capture of a few
+assignments, it is where the grading happens. So the recorded rows are not a
+partial sample of a gradebook that lives elsewhere. **They are the gradebook.**
+
+The same holds for discussion replies and messages: offline, the recording suite
+is not a worse substitute for an API read, because there is no API read. D19c's
+"strictly worse substitute" finding was scoped to the live case and stays scoped
+there.
+
+**The general lesson, worth keeping:** a source's value cannot be judged
+independently of what else is available. Every "recording is weaker than the
+API" conclusion in D19 was conditioned on the API existing, and none of them
+survives its absence.
+
+## D21b. (STUDENT NAME, COURSE) IS THE OFFLINE KEY, and AC1 does not forbid it
+
+AC1 forbids joining on a display name. That rule was written for the live case,
+where a sound numeric id exists and using a name instead would be strictly
+worse for no gain. **Offline there is no id to prefer.** The choice is not
+"name versus id", it is "name or no feature", and AC1 was never an argument for
+the second.
+
+Within a single course a name is a far better key than it is across an
+institution, and the instructor knows their own students - which is the fact
+that makes this workable rather than merely necessary.
+
+**DECIDED: offline, identity is `(normalised name, course)`, anchored to that
+course's own roster.**
+
+## D21c. WHAT SURVIVES FROM THE SAFETY ARGUMENT, and it is not my rule - it is
+## the owner's own tool's
+
+The collision risk does not vanish because the key is scoped to a course. Two
+students called Alex Chen in one section is uncommon and entirely real, and a
+silent merge would report one of them on the other's work.
+
+The answer is already built and shipped in this app. `matchNameAgainstRoster`
+canonicalises case, whitespace and "Last, First" order, then matches EXACTLY,
+and reports four honest outcomes - **matched, ambiguous, unmatched,
+no-roster** - rather than collapsing to a boolean. It reports `ambiguous`
+instead of guessing, and `no-roster` instead of misreporting `unmatched` when
+there is no list to match against.
+
+**DECIDED: that function's discipline is the offline join.** Not a new rule, and
+not caution imported from the live design - the same four-outcome contract the
+grading tool already applies to this exact problem, reused rather than
+reinvented. An `ambiguous` name asks which student; it never picks one.
+
+Where a cached `student_repos[].canvasUserId` exists it is still preferred over
+the name, because it is a fact from a real prior call rather than a match. But
+its absence is now an ordinary case, not a degradation.
+
+## D21d. THE REAL BLOCKER, and it is not identity
+
+Verified directly: **none of the three recorded row types carries a course.**
+`ReplyRow`, `MessageThreadRow` and `GradingRow` have no course field of any
+kind, and all three persist to a single global key - `ta-rec-disc-table`,
+`ta-rec-msg-table`, `ta-rec-grade-table` - one table per browser, shared across
+every course.
+
+So the owner's key is `(name, course)` and **the data currently has no course
+half.** That, not the name, is what stands between this design and working
+offline.
+
+**DECIDED: recorded rows become course-scoped.** New rows carry the course they
+were captured under; existing rows in a global table are unattributed and are
+offered to the instructor to assign rather than guessed at. A row with no course
+never silently joins to whichever course is open.
+
+This also fixes a bug that exists today independently of this feature: two
+courses graded in the same browser share one table, so a name that appears in
+both is already ambiguous in a way nothing surfaces.
+
+## D21e. WHAT AN OFFLINE CONCERN ANSWER IS MADE OF
+
+The signals become what the recording suite actually holds:
+
+- **Recorded scores** per student per assignment, from the grading table.
+- **Absence of a recorded row** for a student on an assignment the instructor
+  recorded for others - which offline is the closest honest analogue of
+  "missing", and must be labelled as what it is rather than borrowed from
+  Canvas's own `missing` flag, which is not available and means something
+  slightly different.
+- **Discussion participation** from the reply table.
+
+`ConcernSignalKind` gains offline-specific members rather than reusing the live
+ones with different meanings behind the same words. `insufficient-data` still
+applies to a student the recording suite has never seen, and now means something
+useful: the instructor has not graded them yet.
+
+**The mode line stays**, and its job changes from explaining a refusal to naming
+the basis: this answer is built from what was recorded in this browser for this
+course, not from an LMS.
+
+## D21f. WHAT IS NOT REOPENED
+
+D1 stands unchanged and matters more here, not less: the concern set is computed
+in TypeScript from typed numbers, and the model explains rows it is given rather
+than choosing them. The source of those numbers changed; nothing about who
+decides membership did.
+
+The corpus is still never persisted. Recorded rows already live in the
+instructor's own browser, and copying them into this app's database would create
+the second copy D8 refuses, for no gain.

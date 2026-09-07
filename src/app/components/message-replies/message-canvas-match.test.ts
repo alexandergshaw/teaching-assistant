@@ -30,6 +30,7 @@ function makeConv(overrides: Partial<CanvasConversationSummary> & { id: number }
     subject: "Question about homework 3",
     lastMessage: "",
     participants: ["Ana Ruiz"],
+    participantIds: [],
     messageCount: 2,
     workflowState: "read",
     lastMessageAt: null,

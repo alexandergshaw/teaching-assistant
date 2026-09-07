@@ -104,5 +104,19 @@ export {
   listAssignmentBriefsWithDue,
 } from "./auto-zero";
 
+// Course-wide submission grid (course-student-intelligence Stratum A)
+export {
+  type CanvasSubmissionGridRow,
+  type CanvasSubmissionGridSource,
+  type CanvasSubmissionGridResult,
+  listCourseSubmissionGrid,
+} from "./submissions-grid";
+
+// Discussion topic inventory (course-student-intelligence Stratum A)
+export {
+  type CanvasDiscussionTopicBrief,
+  listDiscussionTopicBriefs,
+} from "./discussion-topics";
+
 // Main work fetching entry point
 export { fetchCanvasWork } from "./work";

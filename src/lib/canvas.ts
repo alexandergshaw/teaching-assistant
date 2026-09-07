@@ -107,4 +107,16 @@ export {
   listAssignmentBriefsWithDue,
 } from "./canvas/auto-zero";
 
+export {
+  type CanvasSubmissionGridRow,
+  type CanvasSubmissionGridSource,
+  type CanvasSubmissionGridResult,
+  listCourseSubmissionGrid,
+} from "./canvas/submissions-grid";
+
+export {
+  type CanvasDiscussionTopicBrief,
+  listDiscussionTopicBriefs,
+} from "./canvas/discussion-topics";
+
 export { fetchCanvasWork } from "./canvas/work";

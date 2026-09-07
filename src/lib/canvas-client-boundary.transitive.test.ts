@@ -129,11 +129,25 @@ function collectSourceFiles(): string[] {
 function makeReachesTarget() {
   const memo = new Map<string, boolean>();
   const walk = (path: string, stack: Set<string>): boolean => {
-    if (path === TARGET) return true;
-    const source = readOrEmpty(path);
-    if (hasDirective(source, "use server")) return false; // a wall, see rule 2
+    // THE MEMO CHECK COMES FIRST, and it used to come third - after a
+    // readFileSync. That ordering re-read every file once per EDGE that
+    // reached it rather than once per node, so the walk cost grew with the
+    // repo and this test eventually blew its own 5-second timeout: not a
+    // failure anyone could act on, just a red suite. Hoisting the memo above
+    // the read makes it one read per node. The `use server` wall and the
+    // TARGET hit are memoised too, for the same reason - both were previously
+    // recomputed on every visit.
     const cached = memo.get(path);
     if (cached !== undefined) return cached;
+    if (path === TARGET) {
+      memo.set(path, true);
+      return true;
+    }
+    const source = readOrEmpty(path);
+    if (hasDirective(source, "use server")) {
+      memo.set(path, false); // a wall, see rule 2
+      return false;
+    }
     if (stack.has(path)) return false; // rule 3
     memo.set(path, false);
     stack.add(path);
@@ -175,7 +189,16 @@ describe("no browser bundle can reach canvas-core.ts", () => {
     ).toEqual(["@/lib/canvas-modules"]);
   });
 
-  it("no client-reachable module value-imports its way to canvas-core", () => {
+  // AN EXPLICIT, GENEROUS TIMEOUT, and it is not papering over a slow test.
+  // This walks the whole repo's import graph, so its cost grows with the
+  // repo - it silently drifted past vitest's 5-second default and failed as a
+  // TIMEOUT, which reads like a broken test rather than a boundary violation
+  // and tells a reader nothing about what to fix. The memo hoist above bought
+  // most of the headroom back; this bound is what stops a slower machine or
+  // another few directories turning a correct guard into a red suite again.
+  // If it ever approaches this number, make the walk cheaper - do not raise
+  // it a second time.
+  it("no client-reachable module value-imports its way to canvas-core", { timeout: 30000 }, () => {
     const reachesTarget = makeReachesTarget();
 
     const reachable = new Set<string>();

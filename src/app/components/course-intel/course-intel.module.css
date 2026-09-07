@@ -1,0 +1,121 @@
+/* Course Intel (D13-D17 of
+   docs/course-student-intelligence-acceptance-criteria.md). Every value
+   below resolves to a token from src/app/globals.css, per this repo's
+   aesthetics standard (docs/aesthetics-pass-acceptance-criteria.md) - this
+   is a brand-new stylesheet, so it starts tokenized rather than needing a
+   later pass. Section/prose shapes are modeled directly on the matching
+   rules in KnowledgeTab.module.css (.kbOverviewSection, .kbOverviewStatus,
+   .kbOverviewAnswer, .kbOverviewAskRow) - same visual language, new class
+   names because this is a different feature's own stylesheet. */
+
+.askSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.askRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+/* Always-mounted role="status" region - zero height at rest so an empty
+   status never inserts visible flow (matches .kbOverviewStatus). */
+.status {
+  margin: 0;
+  min-height: 0;
+}
+
+.answerBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.answerProse,
+.answerProse :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--text-primary);
+}
+
+.answerProse {
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+}
+
+.answerProse :is(h1, h2, h3, h4, h5, h6) {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+
+.answerProse p {
+  margin: 0 0 var(--space-2);
+}
+
+.answerProse ul,
+.answerProse ol {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-5);
+}
+
+.answerProse li {
+  margin-bottom: var(--space-1);
+}
+
+.answerProse a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.answerProse code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--surface-muted);
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-xs);
+}
+
+/* D15: the code-authored signal strip - visually its own block, distinct
+   from the model's prose above, so the split reads as structural rather
+   than incidental. A hairline border, never a shadow (AC4 of the aesthetics
+   doc: shadows are reserved for things that float above the page). */
+.signalStrip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.signalRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.signalName {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.signalBadges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* AC6/D6 - what was omitted, stated rather than dropped silently. */
+.omissionsList {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}

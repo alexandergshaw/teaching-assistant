@@ -141,11 +141,32 @@ describe("listConversations", () => {
           subject: "Grades",
           lastMessage: "See you then",
           participants: ["Priya Patel", "User 12"],
+          participantIds: [12],
           messageCount: 3,
           workflowState: "read",
           lastMessageAt: "2026-09-01T00:00:00Z",
         },
       ]);
+    });
+
+    // docs/course-student-intelligence-acceptance-criteria.md: the numeric
+    // ids were always in the payload (CanvasParticipant already declares
+    // `id?: number`) but mapConversationList threw them away, collapsing
+    // every participant to a bare name. A prior feature in this repo had to
+    // resort to Levenshtein-distance name matching for exactly this reason.
+    it("populates participantIds from every participant that has a numeric id, in order, dropping those that do not", async () => {
+      mockCanvasFetch.mockResolvedValue(
+        okResult([
+          {
+            id: 9,
+            subject: "Office hours",
+            participants: [{ id: 101, name: "Jordan Lee" }, { name: "No id here" }, { id: 202 }],
+          },
+        ])
+      );
+
+      const result = await listConversations();
+      expect(result[0].participantIds).toEqual([101, 202]);
     });
 
     it("throws canvasError on a non-ok response", async () => {

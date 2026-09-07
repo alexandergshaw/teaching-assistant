@@ -79,6 +79,24 @@ interface CoursePickerProps {
    * all, which is the entire reason this section exists). Required when
    * `showExportCourses` is true. */
   onSelectExport?: (courseId: string) => void;
+  /** Reports each course-listing attempt's outcome, for ContentTab.tsx's
+   * Content Diagnostic Log (content-tab/contentDiagnosticLog.ts) - the
+   * motivating case for that log is this exact component: an institution
+   * with no working credential used to render the fixed sentence "Could
+   * not list courses for this school" with the real reason thrown away
+   * (see this file's own `coursesError` comment and
+   * coursePickerError.wiring.test.ts). Optional: every OTHER caller of
+   * this shared picker (Communications tab, workflow entity pickers, etc.)
+   * omits it and renders exactly as before. This component only reports
+   * WHAT happened - the operation, whether it succeeded, and the action's
+   * own error message when it did not; scrubbing and storage both happen
+   * centrally in ContentTab.tsx (the log's owner), so this file needs no
+   * knowledge of redaction or the entry cap. */
+  onDiagnostic?: (event: {
+    operation: "list_courses" | "list_export_courses";
+    outcome: "success" | "failure";
+    error?: string;
+  }) => void;
 }
 
 /**
@@ -96,6 +114,7 @@ export default function CoursePicker({
   showExportCourses = false,
   selectedExportCourseId = null,
   onSelectExport,
+  onDiagnostic,
 }: CoursePickerProps) {
   const [courses, setCourses] = useState<CanvasCourse[]>([]);
   const [coursesState, setCoursesState] = useState<"idle" | "loading" | "error">(
@@ -157,11 +176,13 @@ export default function CoursePicker({
         setCourses([]);
         setCoursesError(result.error.trim());
         setCoursesState("error");
+        onDiagnostic?.({ operation: "list_courses", outcome: "failure", error: result.error });
         return;
       }
       setCourses(result.courses);
       setCoursesError("");
       setCoursesState("idle");
+      onDiagnostic?.({ operation: "list_courses", outcome: "success" });
       // The list just loaded with real names - cache all of them (not just
       // whatever happens to be selected right now) so a course id restored
       // from localStorage elsewhere has a name ready before its own list
@@ -173,6 +194,11 @@ export default function CoursePicker({
     return () => {
       cancelled = true;
     };
+    // onDiagnostic omitted on purpose: it only reports a side channel and
+    // must not re-trigger this fetch when the parent re-renders with a new
+    // function identity - the same posture the mount-only effects in
+    // ContentTab.tsx already take for their own reporting callbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeInstitution]);
 
   // Export-only (or export-and-live) course_hub rows the export section
@@ -192,14 +218,24 @@ export default function CoursePicker({
       if ("error" in result) {
         setExportCourses([]);
         setExportCoursesState("error");
+        // AC5's error branch below only ever renders a fixed sentence
+        // ("Could not list your saved courses." - describeExportSectionState)
+        // - the SAME shape of bug the live list above used to have. The
+        // diagnostic log gets the real reason even though the screen does
+        // not, so it is at least recoverable from a download.
+        onDiagnostic?.({ operation: "list_export_courses", outcome: "failure", error: result.error });
         return;
       }
       setExportCourses(result.courses);
       setExportCoursesState("idle");
+      onDiagnostic?.({ operation: "list_export_courses", outcome: "success" });
     })();
     return () => {
       cancelled = true;
     };
+    // onDiagnostic omitted on purpose - see the identical comment on the
+    // live course-list effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showExportCourses, exportCoursesRefreshVersion]);
 
   // Persist pinned courses to localStorage whenever they change (external sync).

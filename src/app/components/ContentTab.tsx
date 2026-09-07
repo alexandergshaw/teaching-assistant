@@ -44,6 +44,13 @@ import { FilesView } from "./content-tab/FilesView";
 import { ModulesView } from "./content-tab/ModulesView";
 import { CourseItemsView } from "./content-tab/CourseItemsView";
 import { AnnouncementsExportSection } from "./content-tab/AnnouncementsExportSection";
+import ContentDiagnosticLogSection from "./content-tab/ContentDiagnosticLogSection";
+import {
+  contentDiagnosticLogView,
+  recordContentDiagnosticEntry,
+  type ContentDiagnosticLogState,
+  type ContentDiagnosticOperation,
+} from "./content-tab/contentDiagnosticLog";
 // EXPORT_COURSES_SELECTABLE and the two load-recovery helpers below used to
 // live here as module-level code with no React state of their own; moved to
 // their own leaf module once this file was pressing on the repo's 1000-line
@@ -135,13 +142,47 @@ export default function ContentTab({
   const [targets, setTargets] = useState<CanvasAddableContent | null>(null);
   const targetsLoadingRef = useRef(false);
 
+  // Content Diagnostic Log (content-tab/contentDiagnosticLog.ts). That module
+  // no longer owns a store: it records into, and reads back from, the ONE
+  // app-wide session log (src/lib/session-diagnostic-log.ts) that Settings >
+  // Diagnostics downloads - so nothing this tab records can be missing from a
+  // file offered as "everything that happened this session". In memory for
+  // the page session only, never persisted (see that module's header).
+  //
+  // `diagLog` is a derived SNAPSHOT, not the state itself, which is why the
+  // record and the re-read below are two separate statements: the write must
+  // happen exactly once per call, and a setState updater can be invoked twice
+  // under StrictMode. `recordDiag` stays the sole write path every call site
+  // goes through, and still owns nothing itself (scrubbing, capping and
+  // ordering all live in the session log), so each call site stays a
+  // one-liner.
+  const [diagLog, setDiagLog] = useState<ContentDiagnosticLogState>(() => contentDiagnosticLogView());
+  const recordDiag = (
+    operation: ContentDiagnosticOperation,
+    course: string,
+    outcome: "success" | "failure",
+    error?: string
+  ) => {
+    recordContentDiagnosticEntry({ at: new Date().toISOString(), operation, institution: activeInstitution || "", course, outcome, error });
+    setDiagLog(contentDiagnosticLogView());
+  };
+
   // Lazily fetch the existing-content lists the first time a picker needs them.
   const ensureTargets = async () => {
     if (targets || targetsLoadingRef.current || !courseUrl) return;
     targetsLoadingRef.current = true;
     const result = await listAddableContentAction(courseUrl, activeInstitution || undefined);
     targetsLoadingRef.current = false;
-    if (!("error" in result)) setTargets(result.content);
+    // Previously silent on failure: `targets` just stayed null forever with
+    // no note anywhere - exactly the "explains itself badly" case this log
+    // exists for (see contentDiagnosticLog.ts's own header on why
+    // "list_addable_content" is one of the four instrumented operations).
+    if (!("error" in result)) {
+      setTargets(result.content);
+      recordDiag("list_addable_content", courseName || courseUrl, "success");
+    } else {
+      recordDiag("list_addable_content", courseName || courseUrl, "failure", result.error);
+    }
   };
   const [loadState, setLoadState] = useState<LoadState>(() => {
     if (typeof window === "undefined") return { status: "idle", message: "" };
@@ -303,6 +344,7 @@ export default function ContentTab({
     if (sel.source === "export") {
       const result = await readExportCourseContentById(supabase, sel.courseId);
       if ("error" in result) {
+        recordDiag("load_course_content", sel.courseId, "failure", result.error);
         if (silent) {
           setNote({ kind: "error", text: result.error });
           return;
@@ -312,6 +354,7 @@ export default function ContentTab({
         setLoadState({ status: "error", message: result.error });
         return;
       }
+      recordDiag("load_course_content", result.courseName || sel.courseId, "success");
       setCourseName(result.courseName);
       setExportContent(result);
       setModules([]);
@@ -327,6 +370,7 @@ export default function ContentTab({
     if (!id) return;
     const result = await listCourseContentAction(sel.courseUrl, activeInstitution || undefined);
     if ("error" in result) {
+      recordDiag("load_course_content", sel.courseUrl, "failure", result.error);
       // Recovery path (see tryExportFallbackForFailedLiveRead's own comment):
       // the live read failed, but this same course may have a stored
       // instructor-provided export that reads fine. Only ever adds a
@@ -338,6 +382,7 @@ export default function ContentTab({
         const nextSelection: ContentSelection = { source: "export", courseId: fallback.courseId };
         setSelection(nextSelection);
         if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, serializeContentSelection(nextSelection));
+        recordDiag("load_course_content", fallback.content.courseName || fallback.courseId, "success");
         setCourseName(fallback.content.courseName);
         setExportContent(fallback.content);
         setModules([]);
@@ -357,6 +402,7 @@ export default function ContentTab({
       setLoadState({ status: "error", message: result.error });
       return;
     }
+    recordDiag("load_course_content", result.courseName || sel.courseUrl, "success");
     setCourseName(result.courseName);
     setModules(result.modules);
     setPages(result.pages);
@@ -392,9 +438,11 @@ export default function ContentTab({
         const result = await readExportCourseContentById(supabase, sel.courseId);
         if (cancelled) return;
         if ("error" in result) {
+          recordDiag("load_course_content", sel.courseId, "failure", result.error);
           setLoadState({ status: "error", message: result.error });
           return;
         }
+        recordDiag("load_course_content", result.courseName || sel.courseId, "success");
         setCourseName(result.courseName);
         setExportContent(result);
         setModules([]);
@@ -419,6 +467,7 @@ export default function ContentTab({
       const result = await listCourseContentAction(sel.courseUrl, activeInstitution || undefined);
       if (cancelled) return;
       if ("error" in result) {
+        recordDiag("load_course_content", sel.courseUrl, "failure", result.error);
         // Same recovery path as loadContent's live branch above (see
         // tryExportFallbackForFailedLiveRead's own comment) - a second await,
         // so `cancelled` is checked again before any setState it reaches.
@@ -428,6 +477,7 @@ export default function ContentTab({
           const nextSelection: ContentSelection = { source: "export", courseId: fallback.courseId };
           setSelection(nextSelection);
           if (typeof window !== "undefined") localStorage.setItem(CONTENT_URL_KEY, serializeContentSelection(nextSelection));
+          recordDiag("load_course_content", fallback.content.courseName || fallback.courseId, "success");
           setCourseName(fallback.content.courseName);
           setExportContent(fallback.content);
           setModules([]);
@@ -439,6 +489,7 @@ export default function ContentTab({
         setLoadState({ status: "error", message: result.error });
         return;
       }
+      recordDiag("load_course_content", result.courseName || sel.courseUrl, "success");
       setCourseName(result.courseName);
       setModules(result.modules);
       setPages(result.pages);
@@ -589,6 +640,20 @@ export default function ContentTab({
        * docs/export-only-course-content-acceptance-criteria.md.
        */}
       <>
+          {/* DEV_LOOP.md's downloadable-log rule: "displayed in a prominent
+              location". Placed above the course picker itself - never gated
+              on the log having any entries yet (contentDiagnosticLog.ts's own
+              summary line always states that recording is active), so a
+              failure on the very first course-listing attempt is still
+              covered. */}
+          {courseTab && (
+            <ContentDiagnosticLogSection
+              log={diagLog}
+              currentInstitution={activeInstitution || ""}
+              currentCourse={courseName || courseUrl || (selection.source === "export" ? selection.courseId : "")}
+            />
+          )}
+
           {courseTab && (
             <CoursePicker
               activeInstitution={activeInstitution}
@@ -599,6 +664,7 @@ export default function ContentTab({
               showExportCourses={EXPORT_COURSES_SELECTABLE}
               selectedExportCourseId={selection.source === "export" ? selection.courseId : null}
               onSelectExport={handleSelectExportCourse}
+              onDiagnostic={(event) => recordDiag(event.operation, "", event.outcome, event.error)}
             />
           )}
 

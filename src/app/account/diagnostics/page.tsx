@@ -16,6 +16,8 @@ import {
 // Component's bundle on a path to next/headers and node:async_hooks.
 import { classifyMigration } from "@/lib/canvas-modules/migration-verdict";
 import type { ContentMigrationRow, MigrationProgress } from "@/lib/canvas-modules";
+import SessionLogSection from "./SessionLogSection";
+import { recordSessionDiagnosticEntry } from "@/lib/session-diagnostic-log";
 import styles from "../security/security.module.css";
 
 /**
@@ -33,6 +35,76 @@ import styles from "../security/security.module.css";
 const COURSE_URL_KEY = "ta-diagnostics-course-url";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+
+/**
+ * This screen's own entries in the app-wide session log
+ * (src/lib/session-diagnostic-log.ts), which SessionLogSection below hands to
+ * the owner as a file. Four operations, chosen because each one currently
+ * loses information a later reader would want:
+ *
+ * - "list_courses" / "list_export_courses": CoursePicker reports every course
+ *   listing attempt through its optional onDiagnostic prop, and this page was
+ *   simply not passing one - so a failure here rendered its fixed sentence and
+ *   left no trace at all, the exact defect that motivated the Course Content
+ *   tab's log.
+ * - "list_migrations": the surfaced error survives only until the next course
+ *   change clears it (see the render-phase reset above), so the reason a
+ *   lookup failed is gone the moment the instructor tries something else.
+ * - "load_migration_progress": recorded for the whole-lookup failure AND for
+ *   a PARTIAL one. The partial case is the valuable one and the easiest to
+ *   miss: the rows still render, each carrying its own reason in small text,
+ *   and one of those reasons is the SSRF guard refusing a progress_url that
+ *   pointed at another host - a finding in its own right (describeProgress's
+ *   own comment says so) which nothing outside this screen would ever hear
+ *   about.
+ * - "cancel_migration_job": the only state-changing action on this screen.
+ *   Both outcomes are recorded, so "did I actually cancel it, and what did
+ *   Canvas say" is answerable afterwards rather than from memory.
+ *
+ * Deliberately NOT recorded: individual render decisions, classifyMigration's
+ * verdicts, and the Refresh button itself. None of them can fail, and a log
+ * padded with events that cannot go wrong buries the ones that did.
+ */
+type DiagnosticsOperation =
+  | "list_courses"
+  | "list_export_courses"
+  | "list_migrations"
+  | "load_migration_progress"
+  | "cancel_migration_job";
+
+const DIAGNOSTICS_OPERATION_LABELS: Readonly<Record<DiagnosticsOperation, string>> = {
+  list_courses: "List courses",
+  list_export_courses: "List courses with a saved export",
+  list_migrations: "List Canvas import jobs",
+  load_migration_progress: "Load import job progress",
+  cancel_migration_job: "Cancel import job",
+};
+
+/**
+ * Module scope, not a closure inside the component, for one concrete reason:
+ * the migrations effect below must NOT list this among its dependencies (a
+ * new function identity each render would re-fire the fetch on every render),
+ * and a module-level function has no identity to depend on in the first
+ * place. It holds no state - the one store is session-diagnostic-log.ts.
+ */
+function recordDiag(
+  operation: DiagnosticsOperation,
+  institution: string,
+  course: string,
+  outcome: "success" | "failure",
+  error?: string
+): void {
+  recordSessionDiagnosticEntry({
+    at: new Date().toISOString(),
+    surface: "diagnostics",
+    operation,
+    label: DIAGNOSTICS_OPERATION_LABELS[operation],
+    institution,
+    course,
+    outcome,
+    error,
+  });
+}
 
 function readStoredCourseUrl(): string {
   if (typeof window === "undefined") return "";
@@ -108,6 +180,14 @@ export default function DiagnosticsPage() {
     let cancelled = false;
     (async () => {
       const migResult = await listContentMigrationsAction(courseUrl, activeInstitution || undefined);
+      // Recorded BEFORE the cancelled check, on purpose: the call was made
+      // and its outcome is a fact about this session whether or not this
+      // screen is still interested in the answer. Recording after the check
+      // would silently lose exactly the attempts an impatient user made while
+      // switching courses - which are the ones they are most likely to be
+      // asking about later.
+      if ("error" in migResult) recordDiag("list_migrations", activeInstitution || "", courseUrl, "failure", migResult.error);
+      else recordDiag("list_migrations", activeInstitution || "", courseUrl, "success");
       if (cancelled) return;
       if ("error" in migResult) {
         setMigrations([]);
@@ -129,6 +209,28 @@ export default function DiagnosticsPage() {
         return;
       }
       const progResult = await listMigrationProgressAction(courseUrl, progressUrls, activeInstitution || undefined);
+      if ("error" in progResult) {
+        recordDiag("load_migration_progress", activeInstitution || "", courseUrl, "failure", progResult.error);
+      } else {
+        // The PARTIAL failure, which the whole-call error branch below never
+        // sees: the action succeeded, some individual progress_urls did not,
+        // and each row quietly renders its own reason in small text. One of
+        // those reasons is the SSRF guard refusing a progress_url pointing at
+        // another host. The first reason is carried verbatim (and scrubbed by
+        // the log itself) rather than flattened to a count.
+        const failedUrls = Object.keys(progResult.progressErrors);
+        if (failedUrls.length > 0) {
+          recordDiag(
+            "load_migration_progress",
+            activeInstitution || "",
+            courseUrl,
+            "failure",
+            `${failedUrls.length} of ${progressUrls.length} progress lookup(s) failed. First reason: ${progResult.progressErrors[failedUrls[0]]}`
+          );
+        } else {
+          recordDiag("load_migration_progress", activeInstitution || "", courseUrl, "success");
+        }
+      }
       if (cancelled) return;
       if ("error" in progResult) {
         // The whole progress lookup failed (auth, or the course URL itself no
@@ -165,9 +267,11 @@ export default function DiagnosticsPage() {
     setCancelBusyId(null);
     setConfirmCancelId(null);
     if ("error" in result) {
+      recordDiag("cancel_migration_job", activeInstitution || "", courseUrl, "failure", `Migration ${migrationId}: ${result.error}`);
       setError(result.error);
       return;
     }
+    recordDiag("cancel_migration_job", activeInstitution || "", courseUrl, "success");
     setNotice(
       `Migration ${migrationId}: job is now "${result.progressState}". The migration row still remains in ` +
         `Canvas's list - Canvas has no way to delete a content migration, only to cancel its job.`
@@ -202,6 +306,16 @@ export default function DiagnosticsPage() {
 
           {notice && <p className={styles.notice}>{notice}</p>}
 
+          {/* Placed FIRST, above the Canvas-import-jobs tool: the owner asked
+              for a download of "everything that has happened on the app in
+              that session" from the admin tools in settings, and burying it
+              under an unrelated tool would repeat the mistake this repo has
+              already shipped four times - a capability that exists and cannot
+              be found. Never gated on the log having entries; see
+              SessionLogSection.tsx's own header on why an empty log still has
+              to render, and say so. */}
+          <SessionLogSection currentInstitution={activeInstitution || ""} currentCourse={courseUrl} />
+
           <div className={styles.section}>
             <p className={styles.sectionTitle}>Canvas import jobs</p>
 
@@ -211,7 +325,19 @@ export default function DiagnosticsPage() {
               </p>
             ) : (
               <>
-                <CoursePicker activeInstitution={activeInstitution} courseUrl={courseUrl} onSelect={setCourseUrl} />
+                {/* onDiagnostic was simply not being passed here, so a course
+                    listing that failed on THIS screen rendered CoursePicker's
+                    fixed sentence and left no trace anywhere - the same defect
+                    the Course Content tab's log was built to fix, still open
+                    on the one screen actually called "Diagnostics". */}
+                <CoursePicker
+                  activeInstitution={activeInstitution}
+                  courseUrl={courseUrl}
+                  onSelect={setCourseUrl}
+                  onDiagnostic={(event) =>
+                    recordDiag(event.operation, activeInstitution || "", "", event.outcome, event.error)
+                  }
+                />
 
                 <div className={styles.row}>
                   <button

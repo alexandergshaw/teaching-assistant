@@ -324,6 +324,91 @@ export async function exportCourseIntelAnswers(
 }
 
 // ---------------------------------------------------------------------------
+// All-scopes read and clear (no course id) - the surface this tab's actual
+// control needs. See this module's header for `courseId`/`courseIds`; this
+// pair exists because THE TAB HAS NO COURSE ID TO GIVE listCourseIntelAnswers
+// / exportCourseIntelAnswers / clearCourseIntelAnswers ABOVE. Acceptance-
+// criteria decision D24 (docs/course-student-intelligence-acceptance-
+// criteria.md) removed the course picker: the view is one textbox whose
+// question resolves its own scope, so there is no selected course to narrow
+// a history read to, and there never will be again while this tab has this
+// shape. REGRESSION.md entry 408d found the actual consequence: every
+// history action existed and NOTHING CALLED ANY OF THEM, because the
+// per-course functions above no longer fit any caller this tab can build.
+//
+// The per-course functions above are UNTOUCHED - "what did I ask about
+// COURSE X" is a different, still-valid question a future per-course
+// drill-down could still want, and their own tests are real. This pair
+// answers the question this tab's single textbox actually asks: "everything
+// I have ever asked here, regardless of what it covered."
+// ---------------------------------------------------------------------------
+
+/**
+ * Every Q&A entry this user has EVER produced in this tab, across every
+ * scope - single-course and cross-course alike - newest first.
+ *
+ * ONE QUERY, not the two-query merge fetchCourseIntelAnswerRows above uses:
+ * there is no courseId to narrow by, so there is nothing to reconcile - every
+ * row this user owns already belongs in this reader's result by definition.
+ * The database does the ordering; there is no need for the JS-side re-sort
+ * listCourseIntelAnswers/exportCourseIntelAnswers need to merge two result
+ * sets. Still uncapped, for the same reason listCourseIntelAnswers is (see
+ * that function's own comment): a stored assessment about a named person
+ * must never be dropped just because a later, unrelated question was asked.
+ *
+ * `.eq("user_id", userId)` is the ONLY filter, and it is the whole tenant
+ * boundary on this function - see this module's header. Losing it turns this
+ * into "every answer every instructor has ever asked", which is exactly the
+ * failure mode this function's own tests sabotage-check for.
+ */
+export async function listAllCourseIntelAnswers(
+  supabase: SupabaseClient<Database>,
+  userId: string
+): Promise<CourseIntelHistoryEntry[]> {
+  const { data, error } = await supabase
+    .from("course_intel_answers")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as unknown as CourseIntelAnswerRawRow[]).map(mapCourseIntelAnswer);
+}
+
+/**
+ * Delete EVERY Q&A entry this user has ever produced, across every scope -
+ * the bulk destructive action this tab's "Clear history" control actually
+ * needs, now that there is no course left to scope a clear to. Mirrors
+ * clearCourseIntelAnswers's count-then-delete shape (a head-only exact count
+ * first, so the confirm step can state the real blast radius before the
+ * instructor commits to an irreversible action), filtered on user_id alone.
+ *
+ * UNLIKE clearCourseIntelAnswers above, there is no "leave a cross-course
+ * row's visibility under every OTHER course it covered alone" concern to
+ * preserve here - this IS the surface with no narrower scope than
+ * "everything I have ever asked", so deleting everything is the whole and
+ * correct meaning of the action, not a side effect to guard against.
+ */
+export async function clearAllCourseIntelAnswers(
+  supabase: SupabaseClient<Database>,
+  userId: string
+): Promise<number> {
+  const { count, error: countError } = await supabase
+    .from("course_intel_answers")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  if (countError) throw new Error(countError.message);
+  const total = count ?? 0;
+  if (total === 0) return 0;
+
+  const { error } = await supabase.from("course_intel_answers").delete().eq("user_id", userId);
+
+  if (error) throw new Error(error.message);
+  return total;
+}
+
+// ---------------------------------------------------------------------------
 // Write
 // ---------------------------------------------------------------------------
 

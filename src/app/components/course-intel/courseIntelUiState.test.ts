@@ -6,6 +6,10 @@
 // header for why: it confirmed live that typeof window/localStorage are both
 // "undefined" under plain Node here).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const DIR = join(process.cwd(), "src", "app", "components", "course-intel");
 import { loadCourseIntelQuestion, persistCourseIntelQuestion } from "./courseIntelUiState";
 
 class FakeStorage {
@@ -54,19 +58,71 @@ afterEach(() => {
 // to this module without a matching persist call, or a key renamed without
 // updating every read site, turns this test red.
 //
-// IT WAS TWO KEYS AND IS NOW ONE. D24 removed the course picker, so
-// `ta-course-intel-course` and its load/persist pair are gone. The second
-// assertion below is the one that matters: the retired key must not be written
-// again. Deleting a persisted control is easy to do by half - leaving the
-// writer in place stores a value nothing ever reads, which looks exactly like
-// a control that still works.
-describe("courseIntelUiState - ordinal canary (one persisted control, one ta- key)", () => {
+// IT WAS TWO KEYS, THEN ONE, AND IS NOW TWO AGAIN - and only one of them lives
+// in this module. D24 removed the course picker, retiring
+// `ta-course-intel-course`; the history surface then added
+// `ta-course-intel-history-open`, which useCourseIntel.ts owns and reads
+// through its own helper rather than importing one from here.
+//
+// THAT SPLIT IS WHY THIS COMMENT EXISTS. A canary that silently kept saying
+// "one persisted control" while the view had two would read as coverage of the
+// whole view while checking half of it - the same stale-canary failure this
+// file's own history already shows. The count below is this MODULE's, not the
+// view's, and the key owned elsewhere is named so the next reader can find it,
+// following courseIntelOfflineTables.test.ts's idiom for keys owned by another
+// module.
+//
+// The retired-key assertion is the one that matters most: deleting a persisted
+// control is easy to do by half, and a leftover writer stores a value nothing
+// reads while looking exactly like a working control.
+
+/** Every ta- key this VIEW persists, and which module owns each. Only the
+ *  first is this module's to write. */
+const VIEW_KEYS = [
+  { key: "ta-course-intel-question", owner: "courseIntelUiState.ts (this module)" },
+  { key: "ta-course-intel-history-open", owner: "useCourseIntel.ts" },
+] as const;
+
+describe("courseIntelUiState - ordinal canary (this module owns one of the view's two ta- keys)", () => {
   it("persists the draft question under its named ta- key, and writes no other", () => {
     persistCourseIntelQuestion("all-courses", "How is Jamie doing?");
     expect(fakeStorage.getItem("ta-course-intel-question")).toBe(
       JSON.stringify({ "all-courses": "How is Jamie doing?" })
     );
+
+    // The retired picker key must never come back.
     expect(fakeStorage.getItem("ta-course-intel-course")).toBeNull();
+
+    // And this module must not have written the key another module owns -
+    // two writers for one key is how a control starts disagreeing with itself.
+    expect(fakeStorage.getItem("ta-course-intel-history-open")).toBeNull();
+  });
+
+  it("names every key the view persists, so a new one cannot be added unnoticed", () => {
+    // Not a behavioural assertion - a registry. If a control is added to this
+    // view under a new key, this list is where it has to be declared, and the
+    // source scan below is what makes forgetting fail rather than pass.
+    const source = readFileSync(join(DIR, "useCourseIntel.ts"), "utf8");
+    const declaredElsewhere = VIEW_KEYS.filter((entry) => entry.owner !== "courseIntelUiState.ts (this module)");
+    for (const entry of declaredElsewhere) {
+      expect(
+        source,
+        `${entry.key} is listed here as owned by ${entry.owner}, but that file does not mention it`
+      ).toContain(entry.key);
+    }
+
+    // Every whole-string ta- literal in that file is either a key it owns for
+    // this view, or one it reads from another view - both are declared. A new,
+    // undeclared key turns this red.
+    const found = source.match(/"ta-[a-z0-9-]+"/g) ?? [];
+    const known = new Set([
+      ...VIEW_KEYS.map((entry) => `"${entry.key}"`),
+      // Read, not owned - the recorded offline tables, per that file's header.
+      '"ta-rec-grade-table"',
+      '"ta-rec-disc-table"',
+      '"ta-rec-grade-declarations"',
+    ]);
+    expect(found.filter((key) => !known.has(key))).toEqual([]);
   });
 });
 

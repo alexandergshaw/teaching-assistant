@@ -53,6 +53,12 @@ import type {
   LmsConnection,
   StudentIndex,
 } from "@/lib/course-intel/types";
+import type { CourseIntelHistoryEntry } from "@/lib/course-intel/history";
+import {
+  getAllCourseIntelHistoryAction,
+  deleteCourseIntelAnswerAction,
+  clearAllCourseIntelHistoryAction,
+} from "../../actions/course-intel";
 import { loadCourseIntelQuestion, persistCourseIntelQuestion } from "./courseIntelUiState";
 
 /**
@@ -93,6 +99,36 @@ function readLocalStorage(key: string): string | null {
     // deliberately a different sentence from "this course has nothing
     // recorded in it".
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The history reader (REGRESSION.md entry 408d, D8 of
+// docs/course-student-intelligence-acceptance-criteria.md) - persistence
+// already worked (the ask route calls src/lib/course-intel/history.ts
+// directly), and nothing ever read it back. `ta-course-intel-history-open`
+// is a NEW persisted control (the standing "every new textbox/select/
+// checkbox persists across reload under a ta- key" rule), kept HERE rather
+// than in ./courseIntelUiState.ts so this change's file set stays exactly
+// what it was assigned - courseIntelUiState.ts's own ordinal canary asserts
+// that module's own key count and is unaffected, because that module never
+// gains a key: this one does, directly, through this file's own
+// readLocalStorage helper above, the same way OFFLINE_GRADING_TABLE_KEY etc.
+// already are read.
+// ---------------------------------------------------------------------------
+
+const HISTORY_OPEN_KEY = "ta-course-intel-history-open";
+
+function loadHistoryOpen(): boolean {
+  return readLocalStorage(HISTORY_OPEN_KEY) === "true";
+}
+
+function persistHistoryOpen(open: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(HISTORY_OPEN_KEY, open ? "true" : "false");
+  } catch {
+    // Best-effort only, matching every other persistence call in this file.
   }
 }
 
@@ -360,8 +396,12 @@ export interface ResolvedConcernRow {
 }
 
 export interface ResolvedCourseIntelAnswer {
-  /** The persisted history row's id, or "" when persistence failed OR when the
-   *  answer spans courses and was deliberately not stored. */
+  /** The persisted history row's id, or "" when persistence failed. A
+   *  cross-course answer IS persisted (course_ids holds the covered set -
+   *  see src/lib/course-intel/history.ts and REGRESSION.md entry 408c) and
+   *  gets a real id here just like a single-course one; the id is what lets
+   *  ask() below refresh the history list without a second unconditional
+   *  round trip when persistence failed and there is nothing new to show. */
   id: string;
   /** Raw markdown, every student and course marker already resolved to a real
    *  label - render through markdownToHtml at the call site. */
@@ -454,6 +494,22 @@ export interface UseCourseIntelReturn {
   askRefusal: string | null;
   lastAnswer: ResolvedCourseIntelAnswer | null;
   ask: () => void;
+
+  // ── History (REGRESSION.md entry 408d, D8) ───────────────────────────────
+  /** Every Q&A entry this user has ever produced in this tab, newest first,
+   *  across every scope - see getAllCourseIntelHistoryAction. */
+  historyEntries: CourseIntelHistoryEntry[];
+  /** course_hub id -> name, for every course this user currently has - see
+   *  that same action's own doc comment for why the full list travels. */
+  courseNames: Record<string, string>;
+  historyLoading: boolean;
+  historyError: string | null;
+  historyOpen: boolean;
+  toggleHistoryOpen: () => void;
+  deletingHistoryId: string | null;
+  deleteHistoryEntry: (id: string) => void;
+  clearingHistory: boolean;
+  clearHistory: () => void;
 }
 
 /** How long the "Gathering course data..." phase text shows before this hook
@@ -492,6 +548,105 @@ export function useCourseIntel(): UseCourseIntelReturn {
   const setQuestion = (value: string) => {
     setQuestionState(value);
     persistCourseIntelQuestion(QUESTION_SCOPE, value);
+  };
+
+  // ── History (REGRESSION.md entry 408d, D8) ─────────────────────────────
+  //
+  // Persistence already worked before this: the ask route calls
+  // src/lib/course-intel/history.ts directly, so answers accumulate
+  // correctly with or without this block. What was missing is the READ -
+  // getAllCourseIntelHistoryAction is the all-scopes pair
+  // src/app/actions/course-intel.ts gained specifically because D24 left
+  // the ORIGINAL per-course actions (getCourseIntelHistoryAction etc.) with
+  // no courseId any caller in this tab can supply.
+  const [historyOpen, setHistoryOpenState] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<CourseIntelHistoryEntry[]>([]);
+  const [courseNames, setCourseNames] = useState<Record<string, string>>({});
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+  const [clearingHistory, setClearingHistory] = useState(false);
+
+  // Mirrors the question-load effect above: the persisted disclosure flag
+  // AND the initial history fetch both read after mount, inside the same
+  // async IIFE + cancelled-flag idiom, so every setState below is reached
+  // only after an await - react-hooks/set-state-in-effect forbids a
+  // synchronous setState reached directly from an effect's own body, and a
+  // useState initializer here would show the wrong thing through hydration
+  // (this subtree is server-rendered, where localStorage does not exist).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const openStored = await Promise.resolve(loadHistoryOpen());
+      if (!cancelled) setHistoryOpenState(openStored);
+
+      const result = await getAllCourseIntelHistoryAction();
+      if (cancelled) return;
+      if ("error" in result) {
+        setHistoryError(result.error);
+        setHistoryLoading(false);
+        return;
+      }
+      setHistoryEntries(result.entries);
+      setCourseNames(result.courseNames);
+      setHistoryLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Re-fetches the history list - called after ask() persists a new answer,
+   *  so a fresh question shows up in the list without a manual reload.
+   *  Not an effect (no cancelled-flag guard needed, matching deleteHistoryEntry/
+   *  clearHistory below): a plain event-driven async call, like ask() itself. */
+  const refreshHistory = () => {
+    setHistoryError(null);
+    void (async () => {
+      const result = await getAllCourseIntelHistoryAction();
+      if ("error" in result) {
+        setHistoryError(result.error);
+        return;
+      }
+      setHistoryEntries(result.entries);
+      setCourseNames(result.courseNames);
+    })();
+  };
+
+  const toggleHistoryOpen = () => {
+    const next = !historyOpen;
+    setHistoryOpenState(next);
+    persistHistoryOpen(next);
+  };
+
+  const deleteHistoryEntry = (id: string) => {
+    if (deletingHistoryId) return;
+    setHistoryError(null);
+    setDeletingHistoryId(id);
+    void (async () => {
+      const result = await deleteCourseIntelAnswerAction(id);
+      setDeletingHistoryId(null);
+      if ("error" in result) {
+        setHistoryError(result.error);
+        return;
+      }
+      setHistoryEntries((prev) => prev.filter((entry) => entry.id !== id));
+    })();
+  };
+
+  const clearHistory = () => {
+    if (clearingHistory || historyEntries.length === 0) return;
+    setHistoryError(null);
+    setClearingHistory(true);
+    void (async () => {
+      const result = await clearAllCourseIntelHistoryAction();
+      setClearingHistory(false);
+      if ("error" in result) {
+        setHistoryError(result.error);
+        return;
+      }
+      setHistoryEntries([]);
+    })();
   };
 
   const ask = () => {
@@ -553,7 +708,13 @@ export function useCourseIntel(): UseCourseIntelReturn {
           return;
         }
 
-        setLastAnswer(resolveCourseIntelAnswer(body));
+        const resolved = resolveCourseIntelAnswer(body);
+        setLastAnswer(resolved);
+        // Refresh the history list only when something was actually
+        // persisted (a truthy id) - a persistError'd answer is shown above
+        // via CourseIntelAnswer.tsx but never wrote a row, so refetching
+        // would be a wasted round trip for no new entry to show.
+        if (resolved.id) refreshHistory();
         // Never clear the question on error or on a refusal - only here, in
         // the success branch, after every other branch above has already
         // returned (D17): a retry costs one click, not retyping.
@@ -570,5 +731,25 @@ export function useCourseIntel(): UseCourseIntelReturn {
 
   const statusText = asking ? (phase === "gathering" ? "Gathering course data..." : "Asking the AI...") : "";
 
-  return { question, setQuestion, asking, statusText, askError, askRefusal, lastAnswer, ask };
+  return {
+    question,
+    setQuestion,
+    asking,
+    statusText,
+    askError,
+    askRefusal,
+    lastAnswer,
+    ask,
+
+    historyEntries,
+    courseNames,
+    historyLoading,
+    historyError,
+    historyOpen,
+    toggleHistoryOpen,
+    deletingHistoryId,
+    deleteHistoryEntry,
+    clearingHistory,
+    clearHistory,
+  };
 }

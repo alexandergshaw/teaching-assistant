@@ -4,6 +4,8 @@ import {
   mapCourseIntelAnswer,
   listCourseIntelAnswers,
   exportCourseIntelAnswers,
+  listAllCourseIntelAnswers,
+  clearAllCourseIntelAnswers,
   appendCourseIntelAnswer,
   deleteCourseIntelAnswer,
   clearCourseIntelAnswers,
@@ -322,6 +324,114 @@ describe("exportCourseIntelAnswers - tenant boundary and cross-course inclusion"
     const entries = await exportCourseIntelAnswers(client, "user-a", "course-1");
 
     expect(entries.map((entry) => entry.id)).toEqual(["new-id", "cross-1"]);
+  });
+});
+
+// ============================================================================
+// All-scopes read and clear - the surface REGRESSION.md entry 408d found
+// nothing calling: no courseId exists on this tab any more (D24), so
+// listCourseIntelAnswers/clearCourseIntelAnswers above cannot serve it. One
+// test per function's tenant filter, as the project's own standing
+// discipline requires; each was run against a deliberately sabotaged
+// implementation (the user_id filter removed) to confirm it goes red - see
+// the report for the exact results.
+// ============================================================================
+
+describe("listAllCourseIntelAnswers - tenant boundary, no course filter", () => {
+  it("issues exactly one query, filtered on user_id alone", async () => {
+    const { client, calls } = fakeSupabase([{ data: [SAVED_ROW], error: null }]);
+
+    await listAllCourseIntelAnswers(client, "user-a");
+
+    expect(calls).toHaveLength(1);
+    // toEqual on the exact array (not arrayContaining) - a sabotage that
+    // drops the user_id filter must leave this array empty, not merely
+    // missing an entry a looser assertion would tolerate.
+    expect(eqFilters(calls[0])).toEqual([["user_id", "user-a"]]);
+  });
+
+  it("never narrows by course_id or course_ids - this reader has no course to narrow by", async () => {
+    const { client, calls } = fakeSupabase([{ data: [], error: null }]);
+
+    await listAllCourseIntelAnswers(client, "user-a");
+
+    expect(opNames(calls[0])).not.toContain("contains");
+    expect(eqFilters(calls[0]).map(([column]) => column)).not.toContain("course_id");
+  });
+
+  it("orders by created_at descending (newest first)", async () => {
+    const { client, calls } = fakeSupabase([{ data: [], error: null }]);
+
+    await listAllCourseIntelAnswers(client, "user-a");
+
+    const orderOp = calls[0].ops.find((op) => op.method === "order");
+    expect(orderOp?.args).toEqual(["created_at", { ascending: false }]);
+  });
+
+  it("maps a single-course row and a cross-course row alike, in the order the query returned them", async () => {
+    const { client } = fakeSupabase([
+      { data: [SAVED_ROW, CROSS_COURSE_SAVED_ROW], error: null },
+    ]);
+
+    const entries = await listAllCourseIntelAnswers(client, "user-a");
+
+    expect(entries.map((entry) => entry.id)).toEqual(["new-id", "cross-1"]);
+    expect(entries[0].courseId).toBe("c1");
+    expect(entries[1].courseId).toBeNull();
+    expect(entries[1].courseIds).toEqual(["course-1", "course-9"]);
+  });
+
+  it("returns an empty array rather than throwing when there are no rows", async () => {
+    const { client } = fakeSupabase([{ data: null, error: null }]);
+
+    const entries = await listAllCourseIntelAnswers(client, "user-a");
+
+    expect(entries).toEqual([]);
+  });
+});
+
+describe("clearAllCourseIntelAnswers - tenant boundary, no course filter", () => {
+  it("filters the count read on user_id alone", async () => {
+    const { client, calls } = fakeSupabase([
+      { count: 2, error: null },
+      { error: null },
+    ]);
+
+    await clearAllCourseIntelAnswers(client, "user-a");
+
+    expect(eqFilters(calls[0])).toEqual([["user_id", "user-a"]]);
+  });
+
+  it("filters the delete on user_id alone", async () => {
+    const { client, calls } = fakeSupabase([
+      { count: 2, error: null },
+      { error: null },
+    ]);
+
+    await clearAllCourseIntelAnswers(client, "user-a");
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1].ops[0].method).toBe("delete");
+    expect(eqFilters(calls[1])).toEqual([["user_id", "user-a"]]);
+  });
+
+  it("returns the real row count", async () => {
+    const { client } = fakeSupabase([
+      { count: 11, error: null },
+      { error: null },
+    ]);
+
+    const deleted = await clearAllCourseIntelAnswers(client, "user-a");
+    expect(deleted).toBe(11);
+  });
+
+  it("skips the delete call entirely when the count is zero", async () => {
+    const { client, calls } = fakeSupabase([{ count: 0, error: null }]);
+
+    const deleted = await clearAllCourseIntelAnswers(client, "user-a");
+
+    expect(deleted).toBe(0);
+    expect(calls).toHaveLength(1);
   });
 });
 

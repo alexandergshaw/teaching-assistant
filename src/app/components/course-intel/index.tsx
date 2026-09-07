@@ -27,12 +27,32 @@ import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import TabHeader from "../TabHeader";
 import CourseIntelAnswer from "./CourseIntelAnswer";
+import CourseIntelHistory from "./CourseIntelHistory";
 import { useCourseIntel } from "./useCourseIntel";
 import pageStyles from "../../page.module.css";
 import styles from "./course-intel.module.css";
 
 export default function CourseIntelTab() {
-  const { question, setQuestion, asking, statusText, askError, askRefusal, lastAnswer, ask } = useCourseIntel();
+  const {
+    question,
+    setQuestion,
+    asking,
+    statusText,
+    askError,
+    askRefusal,
+    lastAnswer,
+    ask,
+    historyEntries,
+    courseNames,
+    historyLoading,
+    historyError,
+    historyOpen,
+    toggleHistoryOpen,
+    deletingHistoryId,
+    deleteHistoryEntry,
+    clearingHistory,
+    clearHistory,
+  } = useCourseIntel();
 
   return (
     <>
@@ -99,6 +119,24 @@ export default function CourseIntelTab() {
           answer={lastAnswer}
         />
       </div>
+
+      {/* REGRESSION.md entry 408d: every answer this tab produces is
+          persisted, and until this component existed nothing ever read it
+          back. See CourseIntelHistory.tsx's own header for what this reuses
+          from KnowledgeOverviewHistory.tsx and what it deliberately does
+          not. */}
+      <CourseIntelHistory
+        entries={historyEntries}
+        courseNames={courseNames}
+        loading={historyLoading}
+        open={historyOpen}
+        onToggleOpen={toggleHistoryOpen}
+        deletingId={deletingHistoryId}
+        onDelete={deleteHistoryEntry}
+        clearing={clearingHistory}
+        onClearAll={clearHistory}
+        error={historyError}
+      />
     </>
   );
 }

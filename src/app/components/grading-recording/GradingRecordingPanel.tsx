@@ -101,6 +101,12 @@ import GradingTable from "./GradingTable";
 import { RubricInputModal } from "./RubricInputModal";
 import { useGradingCourses } from "./useGradingCourses";
 import { parseRosterNames } from "./grading-course-roster";
+// docs/course-student-intelligence-acceptance-criteria.md D23a/D23b: the
+// deadline + authoritative-tool declaration store, and the one component
+// that gives it a UI - see that component's own header for the full
+// reasoning (the key-matching trap in particular).
+import { useGradingAssessmentDeclarations } from "./useGradingAssessmentDeclarations";
+import GradingAssessmentDeclarationControls from "./GradingAssessmentDeclarationControls";
 import { syncGradingRowsFromExtracted } from "./grading-capture-sync";
 import { checkGradingReadiness } from "./grading-dispatch";
 import { describeExtractionOutcome, isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
@@ -273,6 +279,12 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   // stray trailing space would silently split one assessment's rows across
   // two scopes.
   const assessmentId = assessmentLabel.trim();
+
+  // D23a/D23b: the declaration store itself - GradingAssessmentDeclarationControls
+  // below is its only caller anywhere in this app. See that component's own
+  // header for why this is a NEW component file rather than more inline
+  // JSX here (this file's own 1000-line ceiling).
+  const declarations = useGradingAssessmentDeclarations();
 
   // COURSE-SCOPED - see the note in useDiscussionReplies. This one matters
   // most: recorded grades are the offline gradebook, and an unattributed
@@ -770,6 +782,14 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
           </p>
         )}
       </fieldset>
+
+      <GradingAssessmentDeclarationControls
+        courseId={courseId}
+        assessmentId={assessmentId}
+        assessmentLabel={assessmentLabel}
+        hasRows={gradingRows.totalCount > 0}
+        declarations={declarations}
+      />
 
       <fieldset className={controls.section}>
         <legend className={controls.sectionLegend}>Grading</legend>

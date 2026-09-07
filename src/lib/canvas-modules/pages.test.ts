@@ -39,11 +39,27 @@ vi.mock("../lms-credentials", () => ({
 // / fetch-helpers.throttle.test.ts).
 vi.mock("./fetch-helpers", () => ({ writeJson: vi.fn() }));
 
+// getPage, unlike updatePage, never went through fetch-helpers.ts - it
+// dialled the platform `fetch` directly. It now dials Canvas through
+// canvasGet (src/lib/canvas-fetch-response.ts), which itself goes through
+// canvasFetch - mocked at that module boundary, same as
+// fetch-helpers.canvas-fetch.test.ts, so canvasGet's own
+// result-to-Response/throw mapping still runs for real.
+vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { updatePage, codeFileToPageHtml } from "./pages";
+import { updatePage, getPage, codeFileToPageHtml } from "./pages";
 import { writeJson } from "./fetch-helpers";
+import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
 
 const mockWriteJson = vi.mocked(writeJson);
+const mockCanvasFetch = vi.mocked(canvasFetch);
+
+/** Builds an `ok: true` CanvasFetchResult carrying a JSON body - the shape
+ * canvasGet's underlying canvasFetch returns for a completed exchange. */
+function okResult(body: unknown, status = 200): CanvasFetchResult {
+  return { ok: true, status, headers: {}, body: Buffer.from(JSON.stringify(body)) };
+}
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -54,11 +70,69 @@ function writeJsonCall(index = 0): [string, string, unknown, URLSearchParams | u
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
   mockWriteJson.mockReset();
+  mockCanvasFetch.mockReset();
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+describe("getPage - migrated to canvasGet (the shared adapter), never platform fetch", () => {
+  it("fetches the page by slug and maps its body/publish state", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(
+      okResult({
+        page_id: 501,
+        url: "week-3-notes",
+        title: "Week 3 Notes",
+        body: "<p>hi</p>",
+        published: true,
+        updated_at: "2026-08-24T00:00:00Z",
+      })
+    );
+
+    const result = await getPage(COURSE_URL, "week-3-notes", "MCC");
+
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(1);
+    expect(mockCanvasFetch.mock.calls[0][0]).toBe(
+      "https://canvas.mccneb.edu/api/v1/courses/123/pages/week-3-notes"
+    );
+    // The credential is passed to canvasFetch itself, never as a
+    // caller-built Authorization header.
+    expect(mockCanvasFetch.mock.calls[0][2]).toEqual({ token: "test-token" });
+    expect(result).toEqual({
+      pageId: 501,
+      url: "week-3-notes",
+      title: "Week 3 Notes",
+      body: "<p>hi</p>",
+      published: true,
+      updatedAt: "2026-08-24T00:00:00Z",
+    });
+  });
+
+  it("URL-encodes the slug when addressing the page", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(
+      okResult({ page_id: 1, url: "a page", title: "A Page", body: "", published: false })
+    );
+
+    await getPage(COURSE_URL, "a page", "MCC");
+
+    expect(mockCanvasFetch.mock.calls[0][0]).toBe("https://canvas.mccneb.edu/api/v1/courses/123/pages/a%20page");
+  });
+
+  it("throws canvasError's mapped message on a non-ok status, unchanged from before the migration", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult({}, 404));
+
+    await expect(getPage(COURSE_URL, "missing-page", "MCC")).rejects.toThrow(
+      "Canvas could not find that resource. Check the URL and that the token's account can see it."
+    );
+  });
+
+  it("throws a fixed literal - never anything derived from the underlying failure - when Canvas is unreachable", async () => {
+    mockCanvasFetch.mockResolvedValueOnce({ ok: false, kind: "unreachable" });
+
+    await expect(getPage(COURSE_URL, "week-3-notes", "MCC")).rejects.toThrow("Canvas did not respond.");
+  });
 });
 
 describe("updatePage: G5 - addressing", () => {

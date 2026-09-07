@@ -31,61 +31,60 @@ vi.mock("../lms-credentials", () => ({
   recordLmsCredentialFailure: vi.fn().mockResolvedValue(undefined),
 }));
 
+// resolveAccountId (GET /courses/:id), listAccountRubrics's own manual
+// pagination (GET /accounts/:id/rubrics), and getRubric now dial Canvas
+// through canvasGet (src/lib/canvas-fetch-response.ts), which itself goes
+// through canvasFetch (src/lib/canvas-fetch.ts, real DNS resolution +
+// connection pinning) instead of the platform fetch - stubbing
+// globalThis.fetch (this file's previous approach) no longer intercepts any
+// of them, which is why every account-level test below used to hang until
+// timeout. Mocked at the canvasFetch module boundary, same as
+// fetch-helpers.canvas-fetch.test.ts, so canvasGet's own
+// result-to-Response/throw mapping still runs for real - only the actual
+// network dial is faked.
+vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
+
 // listCourseRubrics is the ONLY thing in this file that reads through
-// fetchAll (fetch-helpers.ts), which now dials Canvas via canvasFetch (real
-// DNS resolution + connection pinning) instead of the platform fetch -
-// stubbing globalThis.fetch alone no longer intercepts it, which is why the
-// course-rubrics-path tests below used to hang until timeout.
-// resolveAccountId (GET /courses/:id) and listAccountRubrics's own manual
-// pagination (GET /accounts/:id/rubrics) are UNCHANGED - rubrics.ts calls
-// `fetch` directly for both, never through fetch-helpers - so every
-// account-level test (the merge tests' account half, AC6's silent-403/404
-// tests, the badJson tests, and the 429-is-not-silent test) keeps working
-// against the existing globalThis.fetch stub with no changes at all.
-//
-// Mocked at the fetch-helpers boundary (fetchAll itself) rather than at
-// canvasFetch: this suite is about the MERGE logic between the course-level
-// and account-level sources (AC1/AC2/AC4) and about which failures are
-// silent vs real (AC3/AC6) - none of that lives inside fetch-helpers.ts, and
-// no fixture here spans multiple course-rubrics pages (fetchAll's own
-// pagination is already covered by fetch-helpers.canvas-fetch.test.ts).
+// fetchAll (fetch-helpers.ts). Mocked at the fetch-helpers boundary
+// (fetchAll itself) rather than at canvasFetch: this suite is about the
+// MERGE logic between the course-level and account-level sources
+// (AC1/AC2/AC4) and about which failures are silent vs real (AC3/AC6) -
+// none of that lives inside fetch-helpers.ts, and no fixture here spans
+// multiple course-rubrics pages (fetchAll's own pagination is already
+// covered by fetch-helpers.canvas-fetch.test.ts).
 vi.mock("./fetch-helpers", async () => {
   const actual = await vi.importActual<typeof import("./fetch-helpers")>("./fetch-helpers");
   return { ...actual, fetchAll: vi.fn() };
 });
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { listRubrics } from "./rubrics";
+import { listRubrics, getRubric } from "./rubrics";
 import { fetchAll } from "./fetch-helpers";
+import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
+import { CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 
 const mockFetchAll = vi.mocked(fetchAll);
+const mockCanvasFetch = vi.mocked(canvasFetch);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
-function jsonResponse(status: number, body: unknown, linkHeader: string | null = null) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-    headers: { get: (name: string) => (name.toLowerCase() === "link" ? linkHeader : null) },
-  } as unknown as Response;
+/** Builds an `ok: true` CanvasFetchResult carrying a JSON body - the shape
+ * canvasGet's underlying canvasFetch returns for a completed exchange. */
+function okResult(body: unknown, status = 200, headers: Record<string, string> = {}): CanvasFetchResult {
+  return { ok: true, status, headers, body: Buffer.from(JSON.stringify(body)) };
 }
 
 /** A 200 whose body is NOT valid JSON (an institution login page, a
- * Cloudflare interstitial, a truncated body) - `.json()` rejects the same
- * way `Response.json()` does against a non-JSON body. Pins finding 2: this
- * used to sit outside the surrounding try/catch and would throw out of
- * listRubrics entirely. */
-function brokenJsonResponse(status: number, linkHeader: string | null = null) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => {
-      throw new SyntaxError("Unexpected token < in JSON at position 0");
-    },
-    headers: { get: (name: string) => (name.toLowerCase() === "link" ? linkHeader : null) },
-  } as unknown as Response;
+ * Cloudflare interstitial, a truncated body). canvasGet hands the caller a
+ * REAL Response built from this body, so its `.json()` rejects the same way
+ * a genuine non-JSON body would - no stubbed `.json()` needed. Pins finding
+ * 2: this used to sit outside the surrounding try/catch and would throw out
+ * of listRubrics entirely. */
+function badJsonResult(status: number, headers: Record<string, string> = {}): CanvasFetchResult {
+  return { ok: true, status, headers, body: Buffer.from("<html>not json</html>") };
 }
+
+const UNREACHABLE: CanvasFetchResult = { ok: false, kind: "unreachable" };
 
 type Handlers = {
   /** GET /courses/:id - just needs an account_id (or a status to fail with). */
@@ -94,31 +93,32 @@ type Handlers = {
   courseRubrics?: { status: number; body?: unknown[] };
   /** GET /accounts/:id/rubrics */
   accountRubrics?: { status: number; body?: unknown[]; badJson?: boolean };
-  /** Force a network-level throw instead of a response, keyed by URL substring. */
+  /** Force a network-layer "unreachable" canvasFetch result instead of a
+   * completed exchange, keyed by URL substring - the canvasFetch-mock
+   * equivalent of the old raw-fetch "throw" fixture. */
   throwOn?: string;
 };
 
 function stubCanvas(handlers: Handlers) {
-  // resolveAccountId and listAccountRubrics's own pagination - raw fetch,
-  // untouched by the migration.
-  const fetchMock = vi.fn(async (url: string | URL) => {
+  // resolveAccountId and listAccountRubrics's own pagination - now dialled
+  // through canvasGet -> canvasFetch, mocked at the canvasFetch boundary.
+  mockCanvasFetch.mockImplementation(async (url: string): Promise<CanvasFetchResult> => {
     const href = String(url);
     if (handlers.throwOn && href.includes(handlers.throwOn)) {
-      throw new Error("network down");
+      return UNREACHABLE;
     }
     if (href.includes("/accounts/") && href.includes("/rubrics")) {
       const h = handlers.accountRubrics ?? { status: 200, body: [] };
-      if (h.badJson) return brokenJsonResponse(h.status);
-      return jsonResponse(h.status, h.body ?? []);
+      if (h.badJson) return badJsonResult(h.status);
+      return okResult(h.body ?? [], h.status);
     }
     if (href.endsWith("/courses/123")) {
       const h = handlers.course ?? { status: 200, account_id: 55 };
-      if (h.badJson) return brokenJsonResponse(h.status);
-      return jsonResponse(h.status, h.status >= 200 && h.status < 300 ? { account_id: h.account_id } : {});
+      if (h.badJson) return badJsonResult(h.status);
+      return okResult(h.status >= 200 && h.status < 300 ? { account_id: h.account_id } : {}, h.status);
     }
-    throw new Error(`unexpected request: ${href}`);
+    throw new Error(`unexpected canvasFetch request: ${href}`);
   });
-  vi.stubGlobal("fetch", fetchMock);
 
   // listCourseRubrics's one GET (/courses/:id/rubrics) - now behind fetchAll,
   // mocked directly (see this file's header comment for why).
@@ -134,13 +134,12 @@ function stubCanvas(handlers: Handlers) {
     }
     throw new Error(`unexpected fetchAll request: ${href}`);
   });
-
-  return fetchMock;
 }
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
   mockFetchAll.mockReset();
+  mockCanvasFetch.mockReset();
 });
 
 afterEach(() => {
@@ -372,5 +371,131 @@ describe("listRubrics - a 404 on the account path is the everyday case, not an e
     const result = await listRubrics(COURSE_URL);
     expect(result.error).toBeTruthy();
     expect(result.rubrics).toEqual([{ id: 1, title: "Course Rubric", source: "course" }]);
+  });
+});
+
+// E-CRIT1: listAccountRubrics's manual pagination is a SEPARATE guarded loop
+// from fetchAll's (fetch-helpers.ts already proves fetchAll's own guard in
+// fetch-helpers.canvas-fetch.test.ts) - this loop needs its own coverage.
+// Every candidate is verified same-origin against ctx.baseUrl BEFORE it is
+// ever dialled, and the DIALLED string is the guard's return value, never
+// the raw header candidate.
+describe("listAccountRubrics pagination - the same-origin guard on its own manual Link-header loop", () => {
+  it("follows a same-origin Link header across pages and dials the guard's resolved string, not the raw relative header", async () => {
+    const rawNext = "/api/v1/accounts/55/rubrics?per_page=100&page=2";
+    const resolvedNext = "https://canvas.mccneb.edu/api/v1/accounts/55/rubrics?per_page=100&page=2";
+
+    mockCanvasFetch.mockImplementation(async (url: string): Promise<CanvasFetchResult> => {
+      const href = String(url);
+      if (href.endsWith("/courses/123")) return okResult({ account_id: 55 });
+      if (href === "https://canvas.mccneb.edu/api/v1/accounts/55/rubrics?per_page=100") {
+        return okResult([{ id: 1, title: "Page 1 Rubric" }], 200, { link: `<${rawNext}>; rel="next"` });
+      }
+      if (href === resolvedNext) {
+        return okResult([{ id: 2, title: "Page 2 Rubric" }], 200, {});
+      }
+      throw new Error(`unexpected canvasFetch request: ${href}`);
+    });
+    mockFetchAll.mockResolvedValue([]);
+
+    const result = await listRubrics(COURSE_URL);
+
+    expect(result.error).toBeUndefined();
+    expect(result.rubrics).toEqual([
+      { id: 1, title: "Page 1 Rubric", source: "account" },
+      { id: 2, title: "Page 2 Rubric", source: "account" },
+    ]);
+  });
+
+  it("refuses a cross-origin Link header instead of ever dialling it, surfacing a real error (never a silent empty list)", async () => {
+    mockCanvasFetch.mockImplementation(async (url: string): Promise<CanvasFetchResult> => {
+      const href = String(url);
+      if (href.endsWith("/courses/123")) return okResult({ account_id: 55 });
+      if (href.includes("/accounts/55/rubrics")) {
+        return okResult([{ id: 1, title: "Page 1 Rubric" }], 200, {
+          link: '<https://evil.example.com/api/v1/accounts/55/rubrics?page=2>; rel="next"',
+        });
+      }
+      throw new Error(`unexpected canvasFetch request: ${href}`);
+    });
+    mockFetchAll.mockResolvedValue([]);
+
+    const result = await listRubrics(COURSE_URL);
+
+    expect(result.error).toMatch(/different origin/);
+    // The refusal never dialled a second page, so nothing from that page
+    // (real or otherwise) can appear.
+    expect(result.rubrics).toEqual([]);
+    // /courses/123 (resolveAccountId) + the one account-rubrics page - never
+    // a call to the evil host.
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(2);
+    expect(mockCanvasFetch.mock.calls.map((c) => String(c[0]))).not.toContain(
+      "https://evil.example.com/api/v1/accounts/55/rubrics?page=2"
+    );
+  });
+
+  it("caps its own loop at CANVAS_PAGINATION_PAGE_CAP pages even if the remote host keeps paginating forever", async () => {
+    mockCanvasFetch.mockImplementation(async (url: string): Promise<CanvasFetchResult> => {
+      const href = String(url);
+      if (href.endsWith("/courses/123")) return okResult({ account_id: 55 });
+      return okResult([{ id: 1, title: "Rubric" }], 200, {
+        link: '<https://canvas.mccneb.edu/api/v1/accounts/55/rubrics?per_page=100>; rel="next"',
+      });
+    });
+    mockFetchAll.mockResolvedValue([]);
+
+    const result = await listRubrics(COURSE_URL);
+
+    expect(result.error).toMatch(/exceeded/);
+    // The one /courses/123 call, plus exactly CANVAS_PAGINATION_PAGE_CAP
+    // account-rubrics pages - never one more.
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(CANVAS_PAGINATION_PAGE_CAP + 1);
+  });
+});
+
+describe("getRubric - migrated to canvasGet (the shared adapter), never platform fetch", () => {
+  it("fetches the rubric and maps its criteria/ratings", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(
+      okResult({
+        id: 9,
+        title: "Essay Rubric",
+        data: [
+          {
+            description: "Thesis",
+            points: 10,
+            ratings: [
+              { description: "Strong", points: 10 },
+              { description: "Weak", points: 0 },
+            ],
+          },
+        ],
+      })
+    );
+
+    const result = await getRubric(COURSE_URL, 9);
+
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(1);
+    expect(mockCanvasFetch.mock.calls[0][0]).toBe("https://canvas.mccneb.edu/api/v1/courses/123/rubrics/9");
+    // The credential goes to canvasFetch itself, never a caller-built
+    // Authorization header.
+    expect(mockCanvasFetch.mock.calls[0][2]).toEqual({ token: "test-token" });
+    expect(result.id).toBe(9);
+    expect(result.title).toBe("Essay Rubric");
+    expect(result.criteria[0].description).toBe("Thesis");
+    expect(result.criteria[0].ratings.map((r) => r.description)).toEqual(["Strong", "Weak"]);
+  });
+
+  it("throws canvasError's mapped message on a non-ok status, unchanged from before the migration", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult({}, 404));
+
+    await expect(getRubric(COURSE_URL, 9)).rejects.toThrow(
+      "Canvas could not find that resource. Check the URL and that the token's account can see it."
+    );
+  });
+
+  it("throws a fixed literal - never anything derived from the underlying failure - when Canvas is unreachable", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(UNREACHABLE);
+
+    await expect(getRubric(COURSE_URL, 9)).rejects.toThrow("Canvas did not respond.");
   });
 });

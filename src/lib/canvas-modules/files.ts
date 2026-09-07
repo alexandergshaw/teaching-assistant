@@ -1,4 +1,5 @@
 import { canvasError, resolveCourse } from "../canvas-core";
+import { canvasRequest } from "../canvas-fetch-response";
 import { fetchAll } from "./fetch-helpers";
 import { createModuleItem } from "./module-items";
 import type { CanvasModuleItem, CourseFile, FileUploadTicket } from "./types";
@@ -23,14 +24,15 @@ export async function requestFileUpload(
   params.append("parent_folder_path", file.folderPath?.trim() || "uploads");
   params.append("on_duplicate", "rename");
 
-  const response = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${ctx.token}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+  const response = await canvasRequest(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
     },
-    body: params.toString(),
-  });
+    ctx.token
+  );
   if (!response.ok) {
     throw canvasError(response.status, ctx.institution);
   }
@@ -76,11 +78,15 @@ export async function renameCourseFile(
   const ctx = await resolveCourse(courseUrl, code);
   const params = new URLSearchParams();
   params.append("name", name.trim());
-  const response = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${ctx.token}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
+  const response = await canvasRequest(
+    `${ctx.baseUrl}/api/v1/files/${fileId}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    },
+    ctx.token
+  );
   if (!response.ok) {
     throw canvasError(response.status, ctx.institution);
   }
@@ -89,10 +95,7 @@ export async function renameCourseFile(
 /** Delete a course file. */
 export async function deleteCourseFile(courseUrl: string, fileId: number, code?: string): Promise<void> {
   const ctx = await resolveCourse(courseUrl, code);
-  const response = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${ctx.token}` },
-  });
+  const response = await canvasRequest(`${ctx.baseUrl}/api/v1/files/${fileId}`, { method: "DELETE" }, ctx.token);
   if (!response.ok) {
     throw canvasError(response.status, ctx.institution);
   }
@@ -121,15 +124,28 @@ export async function uploadFileToModule(
   params.append("content_type", contentType);
   params.append("parent_folder_path", "uploads");
   params.append("on_duplicate", "rename");
-  const presign = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${ctx.token}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
+  const presign = await canvasRequest(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    },
+    ctx.token
+  );
   if (!presign.ok) throw canvasError(presign.status, ctx.institution);
   const ticket = (await presign.json()) as { upload_url?: string; upload_params?: Record<string, string> };
   if (!ticket.upload_url || !ticket.upload_params) throw new Error("Canvas did not return an upload URL.");
 
+  // ticket.upload_url is Canvas's pre-signed storage endpoint (not
+  // ctx.baseUrl - it is typically a separate object-storage host) and this
+  // request carries no Authorization header: the credential for this upload
+  // is entirely inside ticket.upload_params, not the bearer token. It does
+  // not carry this app's Canvas credential and does not target the
+  // registered Canvas host, so it deliberately stays on the platform fetch
+  // rather than being routed through canvasFetch (see canvas-fetch-response.ts's
+  // header: "a pre-signed upload URL that supplies its own credential in its
+  // params" is exactly the case that stays off this transport).
   const form = new FormData();
   for (const [key, value] of Object.entries(ticket.upload_params)) form.append(key, value);
   form.append("file", new Blob([new Uint8Array(buffer)], { type: contentType }), fileName);

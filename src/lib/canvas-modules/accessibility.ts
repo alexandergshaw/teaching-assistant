@@ -1,4 +1,5 @@
 import { canvasError, resolveCourse } from "../canvas-core";
+import { canvasGet, canvasRequest } from "../canvas-fetch-response";
 import { safeFetchAll, writeJson, fetchJson, mapWithConcurrency } from "./fetch-helpers";
 import { contentHash } from "./mappers";
 import { listPages, getPage } from "./pages";
@@ -157,9 +158,7 @@ function parseLinkRef(type: string, contentUrl: string): { itemType: AccessibleI
 /** Get the status + results of the course's last link-validation run. */
 export async function getLinkValidation(courseUrl: string, code?: string): Promise<{ state: string; links: BrokenLink[] }> {
   const ctx = await resolveCourse(courseUrl, code);
-  const res = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/link_validation`, {
-    headers: { Authorization: `Bearer ${ctx.token}` },
-  });
+  const res = await canvasGet(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/link_validation`, ctx.token);
   if (!res.ok) return { state: "none", links: [] };
   const data = (await res.json()) as {
     workflow_state?: string;
@@ -182,10 +181,11 @@ export async function getLinkValidation(courseUrl: string, code?: string): Promi
 /** Kick off a fresh course link-validation run. */
 export async function startLinkValidation(courseUrl: string, code?: string): Promise<void> {
   const ctx = await resolveCourse(courseUrl, code);
-  const res = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/link_validation`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${ctx.token}` },
-  });
+  const res = await canvasRequest(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/link_validation`,
+    { method: "POST" },
+    ctx.token
+  );
   if (!res.ok) throw canvasError(res.status, ctx.institution);
 }
 

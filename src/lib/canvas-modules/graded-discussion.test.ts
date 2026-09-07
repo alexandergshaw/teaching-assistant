@@ -4,15 +4,13 @@
 // checkpoints are now explicit opt-in via `useCheckpoints`, and a missing
 // deadline diverts to the classic path before ever calling GraphQL).
 //
-// canvasGraphql (graphql.ts) still dials `/api/graphql` via the platform
-// `fetch` directly - it was not part of the fetch-helpers/canvasFetch
-// migration - so stubbing globalThis.fetch keeps intercepting the GraphQL
-// leg exactly as before. The classic REST fallback
-// (createClassicDiscussion -> writeJson, fetch-helpers.ts) now dials Canvas
-// via canvasFetch (real DNS resolution + connection pinning) instead of the
-// platform fetch, so that leg needed its own mock at that boundary - see the
-// note by the canvasFetch mock below for why canvasFetch (not fetch-helpers)
-// is the right level here.
+// canvasGraphql (graphql.ts) now dials `/api/graphql` through canvasRequest
+// (src/lib/canvas-fetch-response.ts), which itself goes through canvasFetch
+// - the SAME boundary the classic REST fallback (createClassicDiscussion ->
+// writeJson, fetch-helpers.ts) already dials through. Both legs are mocked
+// at that one canvasFetch boundary, keyed by URL - see the note by the
+// canvasFetch mock below for why canvasFetch (not fetch-helpers/graphql.ts
+// themselves) is the right level here.
 //
 // canvas.mccneb.edu is the hardcoded host for the "MCC" institution code in
 // src/lib/canvas-core.ts.
@@ -84,52 +82,34 @@ function canvasFetchOk(body: unknown): CanvasFetchResult {
 
 /** GraphQL response variant: "flag" (checkpoints unavailable, the ONE message
  * that triggers a fallback), "other-error" (a different top-level error -
- * must throw, never fall back), or "success" (checkpoints created). */
+ * must throw, never fall back), or "success" (checkpoints created). Both the
+ * GraphQL leg and the classic REST fallback now dial Canvas through the same
+ * canvasFetch boundary, so both are handled in this one mock, keyed by URL. */
 function stubCanvas(graphqlVariant: "flag" | "other-error" | "success") {
   recorded = [];
 
-  const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+  mockCanvasFetch.mockImplementation(async (url, init) => {
     const href = String(url);
     recorded.push({ url: href, method: init?.method ?? "GET", body: init?.body as string | undefined });
 
     if (href.endsWith("/api/graphql")) {
       if (graphqlVariant === "flag") {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            errors: [{ message: "discussion_checkpoints feature flag must be enabled" }],
-          }),
-        } as unknown as Response;
+        return canvasFetchOk({
+          errors: [{ message: "discussion_checkpoints feature flag must be enabled" }],
+        });
       }
       if (graphqlVariant === "other-error") {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ errors: [{ message: "Some other unrelated GraphQL failure" }] }),
-        } as unknown as Response;
+        return canvasFetchOk({ errors: [{ message: "Some other unrelated GraphQL failure" }] });
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            createDiscussionTopic: {
-              discussionTopic: { _id: "9001", title: BASE_FIELDS.title, assignment: { _id: "500", hasSubAssignments: true } },
-              errors: [],
-            },
+      return canvasFetchOk({
+        data: {
+          createDiscussionTopic: {
+            discussionTopic: { _id: "9001", title: BASE_FIELDS.title, assignment: { _id: "500", hasSubAssignments: true } },
+            errors: [],
           },
-        }),
-      } as unknown as Response;
+        },
+      });
     }
-
-    throw new Error(`Unexpected fetch to ${href}`);
-  });
-  vi.stubGlobal("fetch", fetchMock);
-
-  mockCanvasFetch.mockImplementation(async (url, init) => {
-    const href = String(url);
-    recorded.push({ url: href, method: init?.method ?? "GET", body: init?.body as string | undefined });
 
     if (href.includes("/discussion_topics")) {
       return canvasFetchOk({ id: 555 });
@@ -137,8 +117,6 @@ function stubCanvas(graphqlVariant: "flag" | "other-error" | "success") {
 
     throw new Error(`Unexpected canvasFetch to ${href}`);
   });
-
-  return fetchMock;
 }
 
 function graphqlBody(): { query: string; variables: { input: Record<string, unknown> } } {
@@ -165,13 +143,13 @@ afterEach(() => {
 
 describe("createGradedDiscussion: useCheckpoints opt-in (H1)", () => {
   it("useCheckpoints: false never calls GraphQL at all - classic path only, no fallbackReason", async () => {
-    const fetchMock = stubCanvas("success"); // would return a checkpoints success if ever called
+    stubCanvas("success"); // would return a checkpoints success if ever called
 
     const result = await createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, useCheckpoints: false });
 
     expect(result).toEqual({ id: 555, path: "classic" });
     expect(result.fallbackReason).toBeUndefined();
-    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/api/graphql"))).toBe(false);
+    expect(mockCanvasFetch.mock.calls.some((c) => String(c[0]).endsWith("/api/graphql"))).toBe(false);
     expect(recorded.some((r) => r.url.includes("/discussion_topics") && r.method === "POST")).toBe(true);
   });
 
@@ -202,23 +180,23 @@ describe("createGradedDiscussion: useCheckpoints opt-in (H1)", () => {
 
 describe("createGradedDiscussion: missing-date safety (reviewer #7)", () => {
   it("diverts to classic, without ever calling GraphQL, when initialPostAt is missing", async () => {
-    const fetchMock = stubCanvas("success");
+    stubCanvas("success");
 
     const result = await createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, initialPostAt: "" });
 
     expect(result.path).toBe("classic");
     expect(result.fallbackReason).toBeTruthy();
-    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/api/graphql"))).toBe(false);
+    expect(mockCanvasFetch.mock.calls.some((c) => String(c[0]).endsWith("/api/graphql"))).toBe(false);
   });
 
   it("diverts to classic, without ever calling GraphQL, when repliesDueAt is missing", async () => {
-    const fetchMock = stubCanvas("success");
+    stubCanvas("success");
 
     const result = await createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, repliesDueAt: "" });
 
     expect(result.path).toBe("classic");
     expect(result.fallbackReason).toBeTruthy();
-    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/api/graphql"))).toBe(false);
+    expect(mockCanvasFetch.mock.calls.some((c) => String(c[0]).endsWith("/api/graphql"))).toBe(false);
   });
 
   it("still creates the classic discussion with no dates set when both are missing (AC21)", async () => {
@@ -367,12 +345,11 @@ describe("createGradedDiscussion: both paths post the SAME total, always (M3 ant
   );
 
   it("throws loudly, before calling Canvas at all, when initialPostPoints + repliesPoints does not equal pointsPossible", async () => {
-    const fetchMock = stubCanvas("success");
+    stubCanvas("success");
 
     await expect(
       createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, pointsPossible: 20, initialPostPoints: 10, repliesPoints: 9 })
     ).rejects.toThrow(/initialPostPoints.*repliesPoints.*must equal pointsPossible/);
-    expect(fetchMock).not.toHaveBeenCalled();
     expect(mockCanvasFetch).not.toHaveBeenCalled();
   });
 });
@@ -451,22 +428,20 @@ describe("createGradedDiscussion: classic REST fallback shape (AC14h, corrected 
 
 describe("createGradedDiscussion: requiredReplyCount validation", () => {
   it("rejects a value above 10 before ever calling Canvas", async () => {
-    const fetchMock = stubCanvas("success");
+    stubCanvas("success");
 
     await expect(
       createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, requiredReplyCount: 11 })
     ).rejects.toThrow(/requiredReplyCount/);
-    expect(fetchMock).not.toHaveBeenCalled();
     expect(mockCanvasFetch).not.toHaveBeenCalled();
   });
 
   it("rejects a negative value before ever calling Canvas", async () => {
-    const fetchMock = stubCanvas("success");
+    stubCanvas("success");
 
     await expect(
       createGradedDiscussion(COURSE_URL, { ...BASE_FIELDS, requiredReplyCount: -1 })
     ).rejects.toThrow(/requiredReplyCount/);
-    expect(fetchMock).not.toHaveBeenCalled();
     expect(mockCanvasFetch).not.toHaveBeenCalled();
   });
 });

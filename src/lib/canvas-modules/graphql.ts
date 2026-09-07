@@ -41,6 +41,7 @@
 // `canvasError` mapping every other Canvas write in this codebase uses.
 
 import { canvasError, type CanvasInstitution } from "../canvas-core";
+import { canvasRequest } from "../canvas-fetch-response";
 import { fetchWithThrottleRetry, isCanvasRateLimitStatus, type ThrottleBudget } from "../canvas-throttle";
 
 /** One entry of a GraphQL response's TOP-LEVEL `errors` array (the
@@ -81,14 +82,15 @@ export async function canvasGraphql<T>(
 ): Promise<CanvasGraphqlResult<T>> {
   const res = await fetchWithThrottleRetry(
     () =>
-      fetch(`${ctx.baseUrl}/api/graphql`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${ctx.token}`,
-          "Content-Type": "application/json",
+      canvasRequest(
+        `${ctx.baseUrl}/api/graphql`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, variables }),
         },
-        body: JSON.stringify({ query, variables }),
-      }),
+        ctx.token
+      ),
     { budget: ctx.throttleBudget, retryOn: isCanvasRateLimitStatus }
   );
   if (!res.ok) {

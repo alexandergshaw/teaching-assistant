@@ -1,5 +1,6 @@
 import { canvasError, resolveCourse } from "../canvas-core";
 import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
+import { canvasGet, canvasRequest } from "../canvas-fetch-response";
 import {
   parseOfficeParagraphs,
   applyOfficeSections,
@@ -29,9 +30,7 @@ async function fetchCanvasFile(
   ctx: { baseUrl: string; token: string; institution: CanvasInstitution },
   fileId: number
 ): Promise<{ meta: CanvasFileMeta; buffer: Buffer }> {
-  const metaResponse = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
-    headers: { Authorization: `Bearer ${ctx.token}` },
-  });
+  const metaResponse = await canvasGet(`${ctx.baseUrl}/api/v1/files/${fileId}`, ctx.token);
   if (!metaResponse.ok) {
     throw canvasError(metaResponse.status, ctx.institution);
   }
@@ -56,7 +55,7 @@ async function fetchCanvasFile(
   // constructed - dial the guard's own return value, never the raw candidate
   // (see src/lib/canvas-remote-url.ts's header for why the two can differ).
   const fileDownloadUrl = assertCanvasSuppliedUrlIsSameOrigin(raw.url, ctx.baseUrl);
-  const fileResponse = await fetch(fileDownloadUrl, { headers: { Authorization: `Bearer ${ctx.token}` } });
+  const fileResponse = await canvasGet(fileDownloadUrl, ctx.token);
   if (!fileResponse.ok) {
     throw canvasError(fileResponse.status, ctx.institution);
   }
@@ -82,11 +81,15 @@ async function overwriteCanvasFile(
   params.append("on_duplicate", "overwrite");
   params.append("size", String(buffer.byteLength));
 
-  const presign = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${ctx.token}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
+  const presign = await canvasRequest(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    },
+    ctx.token
+  );
   if (!presign.ok) {
     throw canvasError(presign.status, ctx.institution);
   }
@@ -95,6 +98,12 @@ async function overwriteCanvasFile(
     throw new Error("Canvas did not return an upload URL.");
   }
 
+  // ticket.upload_url is Canvas's pre-signed storage endpoint, not
+  // ctx.baseUrl, and this request carries no Authorization header - the
+  // upload's own credential is entirely inside ticket.upload_params. It
+  // neither carries this app's Canvas bearer token nor targets the
+  // registered Canvas host, so it stays on the platform fetch rather than
+  // being routed through canvasFetch (see canvas-fetch-response.ts's header).
   const form = new FormData();
   for (const [key, value] of Object.entries(ticket.upload_params)) form.append(key, value);
   form.append("file", new Blob([new Uint8Array(buffer)], { type: meta.contentType }), meta.name);

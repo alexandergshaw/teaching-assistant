@@ -1,5 +1,6 @@
 import { canvasError, resolveCourse } from "../canvas-core";
 import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
+import { canvasGet } from "../canvas-fetch-response";
 import { extractTextFromBuffer } from "../office-extract";
 import type { FilePreview } from "./types";
 
@@ -13,9 +14,7 @@ export async function getFilePreview(
   code?: string
 ): Promise<FilePreview> {
   const ctx = await resolveCourse(courseUrl, code);
-  const metaResponse = await fetch(`${ctx.baseUrl}/api/v1/files/${fileId}`, {
-    headers: { Authorization: `Bearer ${ctx.token}` },
-  });
+  const metaResponse = await canvasGet(`${ctx.baseUrl}/api/v1/files/${fileId}`, ctx.token);
   if (!metaResponse.ok) {
     throw canvasError(metaResponse.status, ctx.institution);
   }
@@ -44,7 +43,7 @@ export async function getFilePreview(
   // relative candidate resolves against the base inside the guard, so only
   // the returned string is safe - see src/lib/canvas-remote-url.ts).
   const fileUrl = assertCanvasSuppliedUrlIsSameOrigin(meta.url, ctx.baseUrl);
-  const fileResponse = await fetch(fileUrl, { headers: { Authorization: `Bearer ${ctx.token}` } });
+  const fileResponse = await canvasGet(fileUrl, ctx.token);
   if (!fileResponse.ok) {
     throw canvasError(fileResponse.status, ctx.institution);
   }

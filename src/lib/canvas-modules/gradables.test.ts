@@ -40,11 +40,27 @@ vi.mock("../lms-credentials", () => ({
 // fetch-helpers.canvas-fetch.test.ts / fetch-helpers.throttle.test.ts).
 vi.mock("./fetch-helpers", () => ({ writeJson: vi.fn() }));
 
+// getGradable, unlike updateGradable, never went through fetch-helpers.ts -
+// it dialled the platform `fetch` directly. It now dials Canvas through
+// canvasGet (src/lib/canvas-fetch-response.ts), which itself goes through
+// canvasFetch - mocked at that module boundary, same as
+// fetch-helpers.canvas-fetch.test.ts, so canvasGet's own
+// result-to-Response/throw mapping still runs for real.
+vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { updateGradable, descriptionToHtml } from "./gradables";
+import { updateGradable, getGradable, descriptionToHtml } from "./gradables";
 import { writeJson } from "./fetch-helpers";
+import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
 
 const mockWriteJson = vi.mocked(writeJson);
+const mockCanvasFetch = vi.mocked(canvasFetch);
+
+/** Builds an `ok: true` CanvasFetchResult carrying a JSON body - the shape
+ * canvasGet's underlying canvasFetch returns for a completed exchange. */
+function okResult(body: unknown, status = 200): CanvasFetchResult {
+  return { ok: true, status, headers: {}, body: Buffer.from(JSON.stringify(body)) };
+}
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -59,11 +75,66 @@ function writeJsonCall(index = 0): [string, string, unknown, URLSearchParams | u
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
   mockWriteJson.mockReset();
+  mockCanvasFetch.mockReset();
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+describe("getGradable - migrated to canvasGet (the shared adapter), never platform fetch", () => {
+  it("fetches an assignment and maps its title/description/rubric/submission types", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(
+      okResult({
+        name: "Essay 1",
+        description: "<p>Write an essay.</p>",
+        rubric_settings: { id: 77 },
+        submission_types: ["online_text_entry"],
+      })
+    );
+
+    const result = await getGradable(COURSE_URL, "Assignment", 42, "MCC");
+
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(1);
+    expect(mockCanvasFetch.mock.calls[0][0]).toBe("https://canvas.mccneb.edu/api/v1/courses/123/assignments/42");
+    // The credential is passed to canvasFetch itself, never as a
+    // caller-built Authorization header.
+    expect(mockCanvasFetch.mock.calls[0][2]).toEqual({ token: "test-token" });
+    expect(result).toEqual({
+      title: "Essay 1",
+      description: "<p>Write an essay.</p>",
+      rubricId: 77,
+      submissionTypes: ["online_text_entry"],
+    });
+  });
+
+  it("fetches a discussion's message as its description, from the discussion_topics endpoint", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(
+      okResult({ title: "Week 3 Discussion", message: "<p>Discuss.</p>" })
+    );
+
+    const result = await getGradable(COURSE_URL, "Discussion", 77, "MCC");
+
+    expect(mockCanvasFetch.mock.calls[0][0]).toBe(
+      "https://canvas.mccneb.edu/api/v1/courses/123/discussion_topics/77"
+    );
+    expect(result.description).toBe("<p>Discuss.</p>");
+  });
+
+  it("throws canvasError's mapped message on a non-ok status, unchanged from before the migration", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(okResult({}, 404));
+
+    await expect(getGradable(COURSE_URL, "Quiz", 901, "MCC")).rejects.toThrow(
+      "Canvas could not find that resource. Check the URL and that the token's account can see it."
+    );
+  });
+
+  it("throws a fixed literal - never anything derived from the underlying failure - when Canvas is unreachable", async () => {
+    mockCanvasFetch.mockResolvedValueOnce({ ok: false, kind: "unreachable" });
+
+    await expect(getGradable(COURSE_URL, "Assignment", 42, "MCC")).rejects.toThrow("Canvas did not respond.");
+  });
 });
 
 describe("updateGradable: G6 - quiz PUTs carry notify_of_update=false, no sibling kind does (asymmetry pin)", () => {

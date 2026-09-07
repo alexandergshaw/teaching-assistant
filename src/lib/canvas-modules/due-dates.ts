@@ -1,4 +1,5 @@
 import { canvasError, resolveCourse } from "../canvas-core";
+import { canvasGet } from "../canvas-fetch-response";
 import { writeJson, type CourseContext } from "./fetch-helpers";
 import { createThrottleBudget } from "../canvas-throttle";
 import type { DueDateUpdate } from "./types";
@@ -24,9 +25,9 @@ async function setOneDueDate(
     return;
   }
   if (type === "Discussion") {
-    const response = await fetch(
+    const response = await canvasGet(
       `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/discussion_topics/${contentId}`,
-      { headers: { Authorization: `Bearer ${ctx.token}` } }
+      ctx.token
     );
     if (!response.ok) throw canvasError(response.status, ctx.institution);
     const topic = (await response.json()) as { assignment_id?: number | null };

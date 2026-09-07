@@ -1,4 +1,5 @@
 import { canvasError, resolveCourse } from "../canvas-core";
+import { canvasGet } from "../canvas-fetch-response";
 import { writeJson } from "./fetch-helpers";
 import type { GradableKind, GradableDetail } from "./types";
 
@@ -35,7 +36,7 @@ export async function getGradable(
       : kind === "Quiz"
         ? `${base}/quizzes/${contentId}`
         : `${base}/discussion_topics/${contentId}`;
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${ctx.token}` } });
+  const response = await canvasGet(url, ctx.token);
   if (!response.ok) {
     throw canvasError(response.status, ctx.institution);
   }

@@ -17,20 +17,19 @@
 // got unbounded per-call retry, independent of whatever the GraphQL attempt
 // had already spent.
 //
-// canvasGraphql still dials `/api/graphql` via the platform `fetch` directly
-// (graphql.ts was not part of the fetch-helpers/canvasFetch migration), so
-// its 429-then-success sequence below keeps working against a stubbed global
-// fetch unchanged. The classic REST fallback (createClassicDiscussion ->
-// writeJson, fetch-helpers.ts) now dials Canvas via canvasFetch (real DNS
-// resolution + connection pinning) instead of the platform fetch, so its own
-// 429-then-success sequence is mocked at that boundary instead - NOT at
-// fetch-helpers itself, because this test's entire point is that writeJson's
-// real throttle-retry loop (fetchWithThrottleRetry) actually runs and draws
-// down the SAME shared budget canvasGraphql's retry already spent from.
-// Mocking fetch-helpers directly would replace that retry loop with a single
-// resolved value and make the "exactly one shared budget, split 500ms +
-// 500ms across both legs" assertion below pass vacuously regardless of
-// whether the real sharing behaviour works at all.
+// canvasGraphql now dials `/api/graphql` through canvasRequest
+// (src/lib/canvas-fetch-response.ts), which itself goes through canvasFetch
+// - the SAME boundary the classic REST fallback (createClassicDiscussion ->
+// writeJson, fetch-helpers.ts) already dials through, so both legs' 429-then-
+// success sequences below are mocked at that one canvasFetch boundary,
+// keyed by URL, rather than one at globalThis.fetch and one at canvasFetch.
+// NOT mocked at fetch-helpers/graphql.ts themselves, because this test's
+// entire point is that both legs' real throttle-retry loops
+// (fetchWithThrottleRetry) actually run and draw down the SAME shared budget
+// from each other. Mocking either module directly would replace its retry
+// loop with a single resolved value and make the "exactly one shared budget,
+// split 500ms + 500ms across both legs" assertion below pass vacuously
+// regardless of whether the real sharing behaviour works at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../canvas-throttle", async () => {
@@ -104,27 +103,25 @@ describe("createGradedDiscussion: shared throttle budget across GraphQL + classi
 
     let graphqlAttempts = 0;
     let restAttempts = 0;
-    const fetchMock = vi.fn(async (url: string | URL) => {
+    // Both legs - the GraphQL checkpoints mutation and the classic REST
+    // fallback - now dial Canvas through canvasFetch, so both are mocked at
+    // that one boundary, keyed by URL.
+    mockCanvasFetch.mockImplementation(async (url) => {
       const href = String(url);
       if (href.endsWith("/api/graphql")) {
         graphqlAttempts += 1;
         if (graphqlAttempts === 1) {
-          return { ok: false, status: 429, json: async () => ({}) } as unknown as Response;
+          return canvasFetchStatus(429);
         }
         return {
           ok: true,
           status: 200,
-          json: async () => ({
-            errors: [{ message: "discussion_checkpoints feature flag must be enabled" }],
-          }),
-        } as unknown as Response;
+          headers: {},
+          body: Buffer.from(
+            JSON.stringify({ errors: [{ message: "discussion_checkpoints feature flag must be enabled" }] })
+          ),
+        };
       }
-      throw new Error(`Unexpected fetch to ${href}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    mockCanvasFetch.mockImplementation(async (url) => {
-      const href = String(url);
       if (href.includes("/discussion_topics")) {
         restAttempts += 1;
         if (restAttempts === 1) {

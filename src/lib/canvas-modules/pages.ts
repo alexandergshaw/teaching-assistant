@@ -15,6 +15,7 @@
 // might repeat (retries, bulk apply) should address the page by id, via
 // `updatePage`'s `opts.pageId`, not by slug.
 import { canvasError, resolveCourse } from "../canvas-core";
+import { canvasGet } from "../canvas-fetch-response";
 import { fetchAll, writeJson } from "./fetch-helpers";
 import { mapPageSummary, mapPage } from "./mappers";
 import type { CanvasPage, CanvasPageSummary } from "./types";
@@ -42,9 +43,9 @@ export async function getPage(
   code?: string
 ): Promise<CanvasPage> {
   const ctx = await resolveCourse(courseUrl, code);
-  const response = await fetch(
+  const response = await canvasGet(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/pages/${encodeURIComponent(pageUrl)}`,
-    { headers: { Authorization: `Bearer ${ctx.token}` } }
+    ctx.token
   );
   if (!response.ok) {
     throw canvasError(response.status, ctx.institution);

@@ -1,4 +1,5 @@
 import { canvasError, parseNextLink, resolveCourse } from "../canvas-core";
+import { canvasGet } from "../canvas-fetch-response";
 import { fetchAll, writeJson, type CourseContext } from "./fetch-helpers";
 import { createThrottleBudget } from "../canvas-throttle";
 import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
@@ -46,9 +47,7 @@ async function listCourseRubrics(ctx: CourseContext): Promise<SourceOutcome> {
 async function resolveAccountId(ctx: CourseContext): Promise<{ accountId: number | null; error?: string }> {
   let response: Response;
   try {
-    response = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`, {
-      headers: { Authorization: `Bearer ${ctx.token}` },
-    });
+    response = await canvasGet(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}`, ctx.token);
   } catch (err) {
     return {
       accountId: null,
@@ -140,7 +139,7 @@ async function listAccountRubrics(ctx: CourseContext): Promise<SourceOutcome> {
     }
     let response: Response;
     try {
-      response = await fetch(next, { headers: { Authorization: `Bearer ${ctx.token}` } });
+      response = await canvasGet(next, ctx.token);
     } catch (err) {
       return {
         ok: false,
@@ -243,9 +242,7 @@ function appendRubricFields(params: URLSearchParams, title: string, criteria: Ru
 /** Fetch one rubric with its criteria + rating tiers, for the editor. */
 export async function getRubric(courseUrl: string, rubricId: number, code?: string): Promise<RubricDetail> {
   const ctx = await resolveCourse(courseUrl, code);
-  const response = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubrics/${rubricId}`, {
-    headers: { Authorization: `Bearer ${ctx.token}` },
-  });
+  const response = await canvasGet(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/rubrics/${rubricId}`, ctx.token);
   if (!response.ok) throw canvasError(response.status, ctx.institution);
   const data = (await response.json()) as { id?: number; title?: string; data?: RawRubricCriterion[] };
   return {

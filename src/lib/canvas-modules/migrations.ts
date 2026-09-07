@@ -28,6 +28,7 @@
 
 import { canvasError, resolveCourse } from "../canvas-core";
 import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
+import { canvasGet } from "../canvas-fetch-response";
 import { fetchAll, writeJson, type CourseContext } from "./fetch-helpers";
 import type { RawMigration } from "./raw-types";
 // Re-exported from a client-safe leaf. Both are pure, and a Client Component
@@ -143,9 +144,7 @@ export async function listContentMigrations(
  * fetches the value IT RETURNS, never the raw progressUrl parameter. */
 async function fetchProgress(progressUrl: string, ctx: CourseContext): Promise<MigrationProgress> {
   const safeUrl = assertCanvasSuppliedUrlIsSameOrigin(progressUrl, ctx.baseUrl);
-  const response = await fetch(safeUrl, {
-    headers: { Authorization: `Bearer ${ctx.token}` },
-  });
+  const response = await canvasGet(safeUrl, ctx.token);
   if (!response.ok) throw canvasError(response.status, ctx.institution);
   const data = (await response.json()) as RawProgress;
   return mapProgress(data);
@@ -178,9 +177,9 @@ export async function cancelMigrationJob(
   code?: string
 ): Promise<{ progressState: string }> {
   const ctx = await resolveCourse(courseUrl, code);
-  const response = await fetch(
+  const response = await canvasGet(
     `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/content_migrations/${migrationId}`,
-    { headers: { Authorization: `Bearer ${ctx.token}` } }
+    ctx.token
   );
   if (!response.ok) throw canvasError(response.status, ctx.institution);
   const raw = (await response.json()) as RawContentMigration;

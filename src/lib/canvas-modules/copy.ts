@@ -1,4 +1,5 @@
 import { canvasError, resolveCourse } from "../canvas-core";
+import { canvasGet } from "../canvas-fetch-response";
 import { writeJson } from "./fetch-helpers";
 import type { SelectiveNode } from "./types";
 import type { RawMigration, RawSelective } from "./raw-types";
@@ -45,9 +46,9 @@ export async function getMigrationState(
   code?: string
 ): Promise<string> {
   const ctx = await resolveCourse(contextCourseUrl, code);
-  const response = await fetch(
+  const response = await canvasGet(
     `${ctx.baseUrl}/api/v1/courses/${destCourseId}/content_migrations/${migrationId}`,
-    { headers: { Authorization: `Bearer ${ctx.token}` } }
+    ctx.token
   );
   if (!response.ok) throw canvasError(response.status, ctx.institution);
   const data = (await response.json()) as RawMigration;
@@ -72,9 +73,9 @@ export async function getSelectiveData(
   code?: string
 ): Promise<SelectiveNode[]> {
   const ctx = await resolveCourse(contextCourseUrl, code);
-  const response = await fetch(
+  const response = await canvasGet(
     `${ctx.baseUrl}/api/v1/courses/${destCourseId}/content_migrations/${migrationId}/selective_data`,
-    { headers: { Authorization: `Bearer ${ctx.token}` } }
+    ctx.token
   );
   if (!response.ok) throw canvasError(response.status, ctx.institution);
   const data = (await response.json()) as RawSelective[];

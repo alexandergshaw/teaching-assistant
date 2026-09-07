@@ -6,11 +6,7 @@
 // remote-supplied JSON, and a foreign-origin value must be refused BEFORE
 // any fetch is issued - not caught after the fact by a failed request. The
 // guard itself is the shared `assertCanvasSuppliedUrlIsSameOrigin`
-// (src/lib/canvas-remote-url.ts). getMigrationProgress and the GET halves of
-// cancelMigrationJob dial Canvas via the platform `fetch` directly (they were
-// not part of the fetch-helpers/canvasFetch migration - see the note below),
-// so those tests are unaffected and still stub globalThis.fetch exactly as
-// before.
+// (src/lib/canvas-remote-url.ts).
 //
 // resolveCourse now calls resolveCanvasCredential (src/lib/canvas-credentials.ts),
 // which asks getEffectiveIdentity() who the caller is and only falls back to
@@ -34,27 +30,35 @@ vi.mock("../lms-credentials", () => ({
 }));
 
 // listContentMigrations reads through fetchAll, and cancelMigrationJob's
-// final POST /cancel goes through writeJson - both (fetch-helpers.ts) now
-// dial Canvas via canvasFetch (real DNS resolution + connection pinning)
-// instead of the platform fetch, so stubbing globalThis.fetch alone no longer
-// intercepts either. fetchProgress (used by getMigrationProgress and by
-// cancelMigrationJob's own progress check) and cancelMigrationJob's initial
-// GET of the migration itself are UNCHANGED - both still call `fetch`
-// directly (migrations.ts never routed them through fetch-helpers) - so they
-// keep working against the existing globalThis.fetch stub with no changes at
-// all.
+// final POST /cancel goes through writeJson - both (fetch-helpers.ts) dial
+// Canvas via canvasFetch (real DNS resolution + connection pinning) instead
+// of the platform fetch, so stubbing globalThis.fetch alone does not
+// intercept either - mocked at the fetch-helpers boundary instead, as
+// before.
+//
+// fetchProgress (used by getMigrationProgress and by cancelMigrationJob's
+// own progress check) and cancelMigrationJob's initial GET of the migration
+// itself now dial Canvas through canvasGet (src/lib/canvas-fetch-response.ts),
+// which itself goes through canvasFetch - migrations.ts never routed them
+// through fetch-helpers, so they are mocked at the canvasFetch module
+// boundary instead, same as fetch-helpers.canvas-fetch.test.ts. Stubbing
+// globalThis.fetch (this file's previous approach for these two) no longer
+// intercepts either, which is why every getMigrationProgress/cancelMigrationJob
+// test below used to hang until timeout.
 //
 // Mocked at the fetch-helpers boundary (fetchAll/writeJson) rather than at
-// canvasFetch: no fixture here spans multiple pages (listContentMigrations
-// pagination is already covered by fetch-helpers.canvas-fetch.test.ts), and
-// the SSRF guard under test (assertCanvasSuppliedUrlIsSameOrigin) runs in
-// migrations.ts itself, entirely before any fetchAll/writeJson call - mocking
-// either boundary leaves that guard's own tests exercising the real guard
+// canvasFetch for the first pair: no fixture here spans multiple pages
+// (listContentMigrations pagination is already covered by
+// fetch-helpers.canvas-fetch.test.ts), and the SSRF guard under test
+// (assertCanvasSuppliedUrlIsSameOrigin) runs in migrations.ts itself,
+// entirely before any fetchAll/writeJson/canvasGet call - mocking any of
+// these boundaries leaves that guard's own tests exercising the real guard
 // either way.
 vi.mock("./fetch-helpers", async () => {
   const actual = await vi.importActual<typeof import("./fetch-helpers")>("./fetch-helpers");
   return { ...actual, fetchAll: vi.fn(), writeJson: vi.fn() };
 });
+vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -64,24 +68,26 @@ import {
   classifyMigration,
 } from "./migrations";
 import { fetchAll, writeJson } from "./fetch-helpers";
+import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
 
 const mockFetchAll = vi.mocked(fetchAll);
 const mockWriteJson = vi.mocked(writeJson);
+const mockCanvasFetch = vi.mocked(canvasFetch);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 const BASE = "https://canvas.mccneb.edu";
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+/** Builds an `ok: true` CanvasFetchResult carrying a JSON body - the shape
+ * canvasGet's underlying canvasFetch returns for a completed exchange. */
+function okResult(body: unknown, status = 200): CanvasFetchResult {
+  return { ok: true, status, headers: {}, body: Buffer.from(JSON.stringify(body)) };
 }
 
 beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
   mockFetchAll.mockReset();
   mockWriteJson.mockReset();
+  mockCanvasFetch.mockReset();
 });
 
 afterEach(() => {
@@ -222,21 +228,23 @@ describe("listContentMigrations (AC1)", () => {
 });
 
 describe("getMigrationProgress (AC2) - SSRF guard", () => {
-  it("fetches an on-host progress_url and maps the result", async () => {
-    const fetchMock = vi.fn(async () =>
-      jsonResponse({ id: 501, workflow_state: "running", completion: 40, message: null })
+  it("fetches an on-host progress_url through canvasGet (the adapter), not platform fetch, and maps the result", async () => {
+    mockCanvasFetch.mockResolvedValueOnce(
+      okResult({ id: 501, workflow_state: "running", completion: 40, message: null })
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     const progress = await getMigrationProgress(COURSE_URL, `${BASE}/api/v1/progress/501`);
 
     expect(progress).toEqual({ id: 501, workflowState: "running", completion: 40, message: null });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(1);
+    expect(mockCanvasFetch.mock.calls[0][0]).toBe(`${BASE}/api/v1/progress/501`);
+    // The credential goes to canvasFetch itself, never a caller-built
+    // Authorization header.
+    expect(mockCanvasFetch.mock.calls[0][2]).toEqual({ token: "test-token" });
   });
 
   it("maps a missing completion/message to null, not undefined", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ id: 501, workflow_state: "queued" }));
-    vi.stubGlobal("fetch", fetchMock);
+    mockCanvasFetch.mockResolvedValueOnce(okResult({ id: 501, workflow_state: "queued" }));
 
     const progress = await getMigrationProgress(COURSE_URL, `${BASE}/api/v1/progress/501`);
 
@@ -245,118 +253,114 @@ describe("getMigrationProgress (AC2) - SSRF guard", () => {
   });
 
   it("refuses a foreign-origin progress_url and issues NO fetch", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({}));
-    vi.stubGlobal("fetch", fetchMock);
-
     await expect(
       getMigrationProgress(COURSE_URL, "https://evil.example.com/api/v1/progress/501")
     ).rejects.toThrow(
       'Refusing to follow a Canvas-supplied URL: expected it to be on https://canvas.mccneb.edu, but it resolved to a different origin (https://evil.example.com). Received "https://evil.example.com/api/v1/progress/501".'
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockCanvasFetch).not.toHaveBeenCalled();
   });
 
   it("refuses a progress_url on a different port as a different origin", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({}));
-    vi.stubGlobal("fetch", fetchMock);
-
     await expect(
       getMigrationProgress(COURSE_URL, "https://canvas.mccneb.edu:8443/api/v1/progress/501")
     ).rejects.toThrow(
       'Refusing to follow a Canvas-supplied URL: expected it to be on https://canvas.mccneb.edu, but it resolved to a different origin (https://canvas.mccneb.edu:8443). Received "https://canvas.mccneb.edu:8443/api/v1/progress/501".'
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockCanvasFetch).not.toHaveBeenCalled();
+  });
+
+  it("throws a fixed literal - never anything derived from the underlying failure - when Canvas is unreachable", async () => {
+    mockCanvasFetch.mockResolvedValueOnce({ ok: false, kind: "unreachable" });
+
+    await expect(getMigrationProgress(COURSE_URL, `${BASE}/api/v1/progress/501`)).rejects.toThrow(
+      "Canvas did not respond."
+    );
   });
 });
 
 describe("cancelMigrationJob (AC3)", () => {
-  function migrationResponse(body: Record<string, unknown>) {
-    return jsonResponse(body);
+  function migrationResult(body: Record<string, unknown>, status = 200): CanvasFetchResult {
+    return okResult(body, status);
   }
 
   it("throws naming the workflow_state when the migration has no progress_url", async () => {
-    const fetchMock = vi.fn(async () =>
-      migrationResponse({ id: 1, workflow_state: "pre_processing" })
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    mockCanvasFetch.mockResolvedValueOnce(migrationResult({ id: 1, workflow_state: "pre_processing" }));
 
     await expect(cancelMigrationJob(COURSE_URL, 1)).rejects.toThrow(
       /pre_processing.*no job to cancel and no way to delete the migration/
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(1);
   });
 
   it("throws 'already finished' when the progress is completed, without POSTing cancel", async () => {
-    const fetchMock = vi.fn(async (url: string | URL) => {
+    mockCanvasFetch.mockImplementation(async (url: string) => {
       const href = String(url);
       if (href.includes("/content_migrations/1")) {
-        return migrationResponse({
+        return migrationResult({
           id: 1,
           workflow_state: "running",
           progress_url: `${BASE}/api/v1/progress/501`,
         });
       }
       if (href.includes("/progress/501")) {
-        return jsonResponse({ id: 501, workflow_state: "completed" });
+        return okResult({ id: 501, workflow_state: "completed" });
       }
-      throw new Error(`unexpected fetch: ${href}`);
+      throw new Error(`unexpected canvasFetch call: ${href}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     await expect(cancelMigrationJob(COURSE_URL, 1)).rejects.toThrow(/already finished/);
     // GET migration + GET progress, but never a third call (the POST cancel,
     // which would go through the mocked writeJson - asserted below).
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(2);
     expect(mockWriteJson).not.toHaveBeenCalled();
   });
 
   it("refuses a foreign-origin progress_url and issues no progress or cancel fetch", async () => {
-    const fetchMock = vi.fn(async (url: string | URL) => {
+    mockCanvasFetch.mockImplementation(async (url: string) => {
       const href = String(url);
       if (href.includes("/content_migrations/1")) {
-        return migrationResponse({
+        return migrationResult({
           id: 1,
           workflow_state: "running",
           progress_url: "https://evil.example.com/api/v1/progress/501",
         });
       }
-      throw new Error(`unexpected fetch: ${href}`);
+      throw new Error(`unexpected canvasFetch call: ${href}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     await expect(cancelMigrationJob(COURSE_URL, 1)).rejects.toThrow(
       'Refusing to follow a Canvas-supplied URL: expected it to be on https://canvas.mccneb.edu, but it resolved to a different origin (https://evil.example.com). Received "https://evil.example.com/api/v1/progress/501".'
     );
     // Only the trusted GET of the migration itself - never a fetch to the
     // foreign host, for the state check OR the cancel POST.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(1);
     expect(mockWriteJson).not.toHaveBeenCalled();
   });
 
   it("POSTs /cancel with a message and returns the resulting progress state", async () => {
-    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+    mockCanvasFetch.mockImplementation(async (url: string) => {
       const href = String(url);
-      if (href.includes("/content_migrations/1") && (!init || !init.method)) {
-        return migrationResponse({
+      if (href.includes("/content_migrations/1")) {
+        return migrationResult({
           id: 1,
           workflow_state: "running",
           progress_url: `${BASE}/api/v1/progress/501`,
         });
       }
-      if (href.includes("/progress/501") && (!init || !init.method)) {
-        return jsonResponse({ id: 501, workflow_state: "queued" });
+      if (href.includes("/progress/501")) {
+        return okResult({ id: 501, workflow_state: "queued" });
       }
-      throw new Error(`unexpected fetch: ${href} ${init?.method}`);
+      throw new Error(`unexpected canvasFetch call: ${href}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
     mockWriteJson.mockResolvedValueOnce({ id: 501, workflow_state: "failed" });
 
     const result = await cancelMigrationJob(COURSE_URL, 1);
 
     expect(result).toEqual({ progressState: "failed" });
-    // The two trusted GETs (migration, then its progress) still went through
-    // raw fetch, unaffected by the migration.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The two trusted GETs (migration, then its progress) went through
+    // canvasGet - the adapter, not platform fetch.
+    expect(mockCanvasFetch).toHaveBeenCalledTimes(2);
     // The actual cancel POST now goes through the mocked writeJson.
     expect(mockWriteJson).toHaveBeenCalledTimes(1);
     const [url, method, , params] = mockWriteJson.mock.calls[0] as unknown as [

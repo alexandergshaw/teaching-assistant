@@ -38,9 +38,10 @@ vi.mock("../lms-credentials", () => ({
 // (fetch-helpers.ts) now dial Canvas via canvasFetch (real DNS resolution +
 // connection pinning) instead of the platform fetch, so stubbing
 // globalThis.fetch alone no longer intercepts either, which is why every test
-// below used to hang until timeout. Page bodies (getPage, pages.ts) are
-// UNCHANGED - that call was never routed through fetch-helpers - so they keep
-// working against the existing globalThis.fetch stub with no changes at all.
+// below used to hang until timeout. Page bodies (getPage, pages.ts) ALSO now
+// dial Canvas through canvasGet (src/lib/canvas-fetch-response.ts), which
+// itself goes through canvasFetch - so that boundary is mocked at canvasFetch
+// too, rather than at globalThis.fetch (which it no longer reaches).
 //
 // Mocked at the fetch-helpers boundary (fetchAll/safeFetchAll) rather than at
 // canvasFetch: this suite is about the ORCHESTRATION (which lists get
@@ -54,12 +55,15 @@ vi.mock("./fetch-helpers", async () => {
   const actual = await vi.importActual<typeof import("./fetch-helpers")>("./fetch-helpers");
   return { ...actual, fetchAll: vi.fn(), safeFetchAll: vi.fn() };
 });
+vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
 
 import { fetchModuleContentForWeeks } from "./module-content";
 import { fetchAll, safeFetchAll } from "./fetch-helpers";
+import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
 
 const mockFetchAll = vi.mocked(fetchAll);
 const mockSafeFetchAll = vi.mocked(safeFetchAll);
+const mockCanvasFetch = vi.mocked(canvasFetch);
 
 const COURSE_URL = "https://canvas.mccneb.edu/courses/123";
 
@@ -103,19 +107,16 @@ const MODULE_13_ITEMS = [
   },
 ];
 
-function jsonResponse(body: unknown) {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => body,
-    headers: { get: () => null },
-  } as unknown as Response;
+/** Builds an `ok: true` CanvasFetchResult carrying a JSON body - the shape
+ * canvasGet's underlying canvasFetch returns for a completed exchange. */
+function okResult(body: unknown): CanvasFetchResult {
+  return { ok: true, status: 200, headers: {}, body: Buffer.from(JSON.stringify(body)) };
 }
 
 let requested: string[] = [];
 
-/** Shared routing for both transport boundaries under test: getPage's raw
- * `fetch` (page bodies) and the mocked fetchAll/safeFetchAll (everything
+/** Shared routing for both transport boundaries under test: getPage's
+ * canvasFetch (page bodies) and the mocked fetchAll/safeFetchAll (everything
  * else). Kept as one function so the two boundaries can never silently drift
  * apart on what a given URL should return. */
 function listFixtureFor(href: string): unknown[] {
@@ -130,14 +131,15 @@ function listFixtureFor(href: string): unknown[] {
 
 function stubCanvas() {
   requested = [];
-  // getPage (pages.ts) still dials Canvas via raw `fetch` directly - it was
-  // never routed through fetch-helpers, so it is untouched by the
-  // canvasFetch migration and keeps working against a stubbed global fetch.
-  const fetchMock = vi.fn(async (url: string | URL) => {
+  // getPage (pages.ts) now dials Canvas through canvasGet
+  // (src/lib/canvas-fetch-response.ts), which itself goes through
+  // canvasFetch - mocked at that module boundary, same as
+  // fetch-helpers.canvas-fetch.test.ts, rather than at globalThis.fetch.
+  mockCanvasFetch.mockImplementation(async (url: string): Promise<CanvasFetchResult> => {
     const href = String(url);
     requested.push(href);
     if (href.includes("/pages/loops-in-theory")) {
-      return jsonResponse({
+      return okResult({
         page_id: 1,
         url: "loops-in-theory",
         title: "Loops, in theory",
@@ -145,9 +147,8 @@ function stubCanvas() {
         published: true,
       });
     }
-    throw new Error(`unexpected raw fetch: ${href}`);
+    throw new Error(`unexpected canvasFetch: ${href}`);
   });
-  vi.stubGlobal("fetch", fetchMock);
 
   const listHandler = async (url: string | URL) => {
     const href = String(url);
@@ -156,8 +157,6 @@ function stubCanvas() {
   };
   mockFetchAll.mockImplementation(listHandler);
   mockSafeFetchAll.mockImplementation(listHandler);
-
-  return fetchMock;
 }
 
 const countMatching = (pattern: RegExp) => requested.filter((u) => pattern.test(u)).length;
@@ -166,6 +165,7 @@ beforeEach(() => {
   vi.stubEnv("MCC_CANVAS_API_TOKEN", "test-token");
   mockFetchAll.mockReset();
   mockSafeFetchAll.mockReset();
+  mockCanvasFetch.mockReset();
 });
 
 afterEach(() => {
@@ -208,11 +208,11 @@ describe("fetchModuleContentForWeeks: the request shape (AC1 item 5)", () => {
   });
 
   it("asks Canvas for nothing at all when no weeks are requested", async () => {
-    const fetchMock = stubCanvas();
+    stubCanvas();
 
     const out = await fetchModuleContentForWeeks(COURSE_URL, [], 15, "MCC");
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockCanvasFetch).not.toHaveBeenCalled();
     expect(mockFetchAll).not.toHaveBeenCalled();
     expect(mockSafeFetchAll).not.toHaveBeenCalled();
     expect(out.size).toBe(0);

@@ -238,7 +238,24 @@ const EMBEDDED_BEARER_PATTERN = /\b(bearer\s+)\S{1,255}/gi;
 // value), extended with the parameter names Canvas/Supabase URLs actually
 // use ("access_token" is Canvas's own OAuth query param name; "apikey" is
 // PostgREST/Supabase's).
-const EMBEDDED_KEY_PARAM_PATTERN = /([?&](?:access_token|api[-_]?key|token|secret)=)[^&\s"'<>]{1,500}/gi;
+//
+// A BARE "key" is in the list, and it is the one that matters most here.
+// This app's own model calls authenticate with the API key as a plain
+// `?key=` query parameter (see llm.ts's postGenerateContent), so the
+// request URL IS a secret - which is exactly the argument
+// generation-diag.ts makes for redacting any URL it reports. The original
+// alternation only recognised "api_key"/"apikey"/"api-key", every one of
+// which requires a literal "api", so the parameter this deployment
+// actually uses matched NOTHING and the key passed through unredacted into
+// workflow_run_steps.error and from there into the downloadable run log.
+// Verified by running both patterns against a real-shaped URL: the old one
+// left the key intact, the new one redacts it.
+//
+// Adding it is safe precisely because the delimiter is part of the match:
+// "key" must follow a "?" or "&" immediately, so "?monkey=" and "&sortkey="
+// do not match, and "api_key" still matches its own longer alternative,
+// which is ordered ahead of the bare one.
+const EMBEDDED_KEY_PARAM_PATTERN = /([?&](?:access_token|api[-_]?key|key|token|secret)=)[^&\s"'<>]{1,500}/gi;
 
 /** Scrub every recognizable secret SUBSTRING out of a free-text string,
  * leaving everything else untouched - the counterpart to

@@ -49,18 +49,61 @@ export async function upsertArtifactTemplate(
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase.from("artifact_templates").upsert(insertRow, { onConflict: "id" });
+  // SCOPED UPDATE, THEN INSERT - deliberately NOT `.upsert(row, { onConflict:
+  // "id" })`, which is what this used to be and which was a cross-tenant
+  // takeover. `template.id` arrives from the CLIENT, the caller holds a
+  // service-role client (RLS bypassed, auth.uid() null), and the action's
+  // guard is requireOwner() - which is now an alias for requireUser(), i.e.
+  // any active account. So passing another user's template id made the
+  // upsert match THEIR row by primary key and rewrite it with this caller's
+  // user_id: their template destroyed, and reassigned to the attacker, in one
+  // call. Ids are guessable enough to matter - run logs print uuids in the
+  // clear on purpose.
+  //
+  // The update is filtered on BOTH id and user_id, so a foreign id matches
+  // nothing. If nothing was updated the row is either new (insert succeeds) or
+  // owned by someone else (insert fails on the primary key, and refusing is
+  // the correct outcome - never silently take it over).
+  const { data: updated, error: updateError } = await supabase
+    .from("artifact_templates")
+    .update(insertRow)
+    .eq("id", template.id)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  if (updated && updated.length > 0) {
+    return;
+  }
+
+  const { error } = await supabase.from("artifact_templates").insert(insertRow);
 
   if (error) {
     throw new Error(error.message);
   }
 }
 
+/**
+ * Delete one of THIS USER'S templates.
+ *
+ * `userId` is required and filtered on, and that is the whole point of the
+ * parameter: this used to be `.delete().eq("id", id)` with no owner filter at
+ * all, called with a service-role client that bypasses RLS, behind a guard
+ * (requireOwner) that is now an alias for requireUser. Any active account
+ * could therefore delete any other account's template by supplying its id.
+ * Filtering on user_id makes a foreign id match zero rows, which Supabase
+ * reports as a successful no-op - correct here, because the caller learns
+ * nothing about whether that id exists for somebody else.
+ */
 export async function deleteArtifactTemplate(
   supabase: SupabaseClient<Database>,
+  userId: string,
   id: string
 ): Promise<void> {
-  const { error } = await supabase.from("artifact_templates").delete().eq("id", id);
+  const { error } = await supabase.from("artifact_templates").delete().eq("id", id).eq("user_id", userId);
 
   if (error) {
     throw new Error(error.message);

@@ -350,6 +350,34 @@ describe("redactEmbeddedSecrets", () => {
     expect(scrubbed).toContain("https://mit.instructure.com/api/v1/users/self");
   });
 
+  // This app's OWN model calls authenticate with a bare `?key=` query
+  // parameter (llm.ts, postGenerateContent), which makes the request URL
+  // itself a secret. The alternation used to list only "api_key"/"apikey"/
+  // "api-key" - all of which require a literal "api" - so the parameter this
+  // deployment actually uses matched NOTHING, and a provider error that
+  // echoed the rejected request carried the key straight through
+  // logStepOutcome into workflow_run_steps.error and the downloadable run
+  // log. Durable, operator-visible, and silent.
+  it("scrubs a bare key= query parameter - this app's own model URL carries its API key that way", () => {
+    const scrubbed = redactEmbeddedSecrets(
+      "Draft failed: HTTP 400 - POST https://generativelanguage.googleapis.com/v1beta/models/x:generateContent?key=AIzaSyFAKEKEYVALUE0000000000000 was rejected"
+    );
+    expect(scrubbed).not.toContain("AIzaSyFAKEKEYVALUE0000000000000");
+    expect(scrubbed).toContain("key=[REDACTED]");
+    // The rest of the URL survives, because knowing WHICH endpoint rejected
+    // the call is the whole diagnostic value of keeping the message at all.
+    expect(scrubbed).toContain("generativelanguage.googleapis.com");
+  });
+
+  // The delimiter is part of the match, which is what makes the bare "key"
+  // alternative safe to add: it must follow a "?" or "&" immediately, so an
+  // ordinary parameter that merely ENDS in "key" is untouched. Without this
+  // test the widening above could quietly start redacting real diagnostic
+  // values and nothing would notice.
+  it("does not redact an ordinary parameter that merely ends in key", () => {
+    const message = "GET https://example.edu/list?monkey=banana&sortkey=name returned 200";
+    expect(redactEmbeddedSecrets(message)).toBe(message);
+  });
   it("scrubs an AWS access key id embedded in an error", () => {
     const scrubbed = redactEmbeddedSecrets("Rejected credential AKIAIOSFODNN7EXAMPLE for this request");
     expect(scrubbed).not.toContain("AKIAIOSFODNN7EXAMPLE");

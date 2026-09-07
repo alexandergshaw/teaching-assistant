@@ -78,12 +78,12 @@ export async function deleteArtifactTemplateAction(
   id: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    await requireOwner();
+    const user = await requireOwner();
     if (isPresetArtifactTemplateId(id)) {
       return { error: "Built-in templates cannot be edited - duplicate it first." };
     }
     const supabase = createServiceClient();
-    await deleteArtifactTemplate(supabase, id);
+    await deleteArtifactTemplate(supabase, user.id, id);
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not delete the template." };

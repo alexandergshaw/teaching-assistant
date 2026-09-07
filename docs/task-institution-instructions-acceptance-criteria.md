@@ -132,7 +132,7 @@ every existing per-institution table in this codebase.
 11. A pure exported resolver:
     `resolveTaskInstruction(instructions: TaskInstructionMap, institution: string | null | undefined, taskId: string): string`
     returning `""` when there is no match. `TaskInstructionMap` is keyed by
-    `` `${normalizedInstitution} ${taskId}` `` or an equivalent nested map -
+    `` `${normalizedInstitution}\x00${taskId}` `` or an equivalent nested map -
     pick one, document it, and never build the key inline at a call site.
 12. Instructions load once per Tasks tab mount alongside the existing task data,
     scoped to the user - not per row and not per cell. The existing hook

@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import { computeSyllabusAckDueAt, findExistingAckQuiz, syllabusAckTaskPatch, SYLLABUS_ACK_QUIZ_TITLE, SYLLABUS_ACK_TASK_ID } from "./syllabus-ack-quiz";
 import { TERM_TASKS } from "./course-tasks-catalog";
 

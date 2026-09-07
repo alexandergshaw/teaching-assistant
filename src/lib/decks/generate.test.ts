@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // generateDeckFromTemplate's sequencing pre-pass (D5) calls sequenceConcepts,
 // which calls callLlm() (network) for non-embedded providers. Mocked so the

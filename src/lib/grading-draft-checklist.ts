@@ -1,4 +1,4 @@
-﻿import type { GradingDraftPayload } from "./grading-drafts";
+import type { GradingDraftPayload } from "./grading-drafts";
 import type { GradingRunEntry } from "./grade";
 
 // Pure helpers behind the drafted-grades page's per-assignment full-credit

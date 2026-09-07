@@ -1,4 +1,4 @@
-﻿// TDD contract for the Tasks tab's view logic: resolving the per-user task
+// TDD contract for the Tasks tab's view logic: resolving the per-user task
 // catalog, filtering/sorting rows, progress arithmetic, persisted column state,
 // and CSV export. Written BEFORE the implementation, from the acceptance
 // criteria. Asserts observable behavior only.

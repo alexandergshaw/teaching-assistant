@@ -333,7 +333,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     const rosterNames = parseRosterNames(selectedRosterText);
     for (const row of rawRowsRef.current) {
       const match = matchNameAgainstRoster(row.studentName, rosterNames);
-      if (match.nameMatch !== row.nameMatch || match.rosterCandidates.join("") !== row.rosterCandidates.join("")) {
+      if (match.nameMatch !== row.nameMatch || match.rosterCandidates.join("\x01") !== row.rosterCandidates.join("\x01")) {
         gradingRows.applyRosterMatch(row.id, match);
       }
     }

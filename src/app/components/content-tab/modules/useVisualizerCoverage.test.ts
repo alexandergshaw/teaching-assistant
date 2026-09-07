@@ -1,4 +1,4 @@
-﻿// Pure-logic contract for the "Visualizer coverage" bulk-bar control
+// Pure-logic contract for the "Visualizer coverage" bulk-bar control
 // (useVisualizerCoverage.ts). vitest here is node-env and renders no
 // component (see this repo's own "vitest is node-env... no component is
 // ever rendered" note), so this covers everything an executable test CAN

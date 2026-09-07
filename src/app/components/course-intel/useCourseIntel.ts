@@ -302,7 +302,7 @@ export function buildNameByIndex(
   const multiCourse = courses.length > 1;
   const nameCounts = countNames(students.map((student) => student.name));
   const nameAndCourseCounts = countNames(
-    students.map((student) => `${student.name.trim()} ${student.courseIndex ?? 0}`)
+    students.map((student) => `${student.name.trim()}\u0000${student.courseIndex ?? 0}`)
   );
 
   const byIndex = new Map<StudentIndex, string>();
@@ -314,7 +314,7 @@ export function buildNameByIndex(
       continue;
     }
     const course = courseNameByIndex.get(student.courseIndex ?? 0) ?? "";
-    const uniqueInCourse = (nameAndCourseCounts.get(`${name} ${student.courseIndex ?? 0}`) ?? 0) <= 1;
+    const uniqueInCourse = (nameAndCourseCounts.get(`${name}\u0000${student.courseIndex ?? 0}`) ?? 0) <= 1;
     if (multiCourse && course && uniqueInCourse) {
       byIndex.set(student.index, `${name} (${course})`);
       continue;

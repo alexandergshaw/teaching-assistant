@@ -1,4 +1,4 @@
-﻿// Grading-repo internal logic, split out of steps.grading-repos.ts (which had
+// Grading-repo internal logic, split out of steps.grading-repos.ts (which had
 // grown past this repo's 1000-line-per-file cap). gradingRepoSteps (the
 // StepDefinition[] array) stays in steps.grading-repos.ts; every helper that
 // array's run() functions call - gradeTileRepos, saveRepoGradingDraft,

@@ -1,4 +1,4 @@
-﻿# Tasks tab: sort and filter rows by ANY column's values
+# Tasks tab: sort and filter rows by ANY column's values
 
 Extends REGRESSION #232 of `docs/REGRESSION.md` (the Tasks tab) and the two AC documents
 it cites. Numbering continues from the amendments file, which ends at 146, so the

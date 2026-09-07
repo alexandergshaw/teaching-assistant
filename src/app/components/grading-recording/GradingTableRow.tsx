@@ -37,7 +37,13 @@ import { Button, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import rowStyles from "./GradingTable.module.css";
-import { joinFeedback, type GradingRow, type GradingRowNameMatch, type GradingRowState } from "./grading-row";
+import {
+  gradingRowSubmissionTimeStatus,
+  joinFeedback,
+  type GradingRow,
+  type GradingRowNameMatch,
+  type GradingRowState,
+} from "./grading-row";
 import { GRADING_TABLE_COLUMN_COUNT, type GradingFeedbackField } from "./grading-rows";
 // docs/recording-controls-ux-acceptance-criteria.md CC5: the one arm/confirm
 // component for every destructive or overwriting action.
@@ -261,21 +267,42 @@ function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyErr
               </Button>
             )}
             {/* D23c. Records THAT the work was late, never WHEN - the only
-                clock here is when the instructor graded, and deriving a
-                submission time from it would mark a whole class late for a
-                grading session held after the deadline. Toggling off returns
-                the row to "unknown" rather than to "on time", because we
-                never knew it was on time - that is the third state existing
-                for a reason rather than a boolean wearing a disguise. */}
-            <Button
-              size="small"
-              variant="text"
-              aria-pressed={row.submissionTimeStatus === "marked-late"}
-              aria-label={`Mark ${row.studentName}'s submission as late`}
-              onClick={() => onMarkLate(row.id)}
-            >
-              {row.submissionTimeStatus === "marked-late" ? "Late" : "Mark late"}
-            </Button>
+                clock this surface has is when the INSTRUCTOR graded, and
+                deriving a submission time from it would mark a whole class
+                late for a grading session held after the deadline.
+
+                SHOWN ONLY WHEN CLICKING IT WOULD CHANGE SOMETHING, and the
+                first version of this got that wrong in a way worth recording.
+                It rendered a button whose label flipped to "Late" with
+                aria-pressed set - so it read as a toggle - while
+                markSubmissionLate only ever SETS "marked-late" and has no
+                inverse. Clicking it a second time did nothing at all. A
+                control that looks live and is inert is the exact defect this
+                project keeps re-shipping, and dressing a one-way action as a
+                toggle is how it gets in.
+
+                So: a button only for "unknown". "marked-late" renders as
+                plain text - the state is worth showing and there is nothing
+                to press - and "known" hides it entirely, because a row with a
+                real submission instant already answers the lateness question
+                and marking it by hand could only contradict the record.
+
+                Read through gradingRowSubmissionTimeStatus rather than off the
+                field, so an older row with the property absent normalises to
+                "unknown" instead of falling through every comparison. */}
+            {gradingRowSubmissionTimeStatus(row) === "unknown" && (
+              <Button
+                size="small"
+                variant="text"
+                aria-label={`Mark ${row.studentName}'s submission as late`}
+                onClick={() => onMarkLate(row.id)}
+              >
+                Mark late
+              </Button>
+            )}
+            {gradingRowSubmissionTimeStatus(row) === "marked-late" && (
+              <span className={styles.fieldHint}>Marked late</span>
+            )}
           </div>
           {row.userEdited && removeArmed && (
             <p id={removeConsequenceId} role="status" aria-live="polite" className={controls.consequence}>

@@ -25,6 +25,7 @@ import {
   appendBatchBlocks,
   renderMaterialsText,
   capMaterialsText,
+  reduceCaptureToMaterials,
 } from "./module-blocks";
 import type { ExtractedBlock, ModuleBlockKind } from "./module-extraction-prompt";
 
@@ -258,5 +259,118 @@ describe("capMaterialsText", () => {
 
   it("DECK_MATERIALS_CAP is 120000, per DE14", () => {
     expect(DECK_MATERIALS_CAP).toBe(120_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reduceCaptureToMaterials - the fixed four-stage pipeline, assembled.
+// Extracted from ModuleDeckCapturePanel.tsx's handleGenerate so a second
+// capture panel does not have to restate the ordering by hand.
+// ---------------------------------------------------------------------------
+
+describe("reduceCaptureToMaterials - stage order", () => {
+  it("suppresses furniture BEFORE the seam join - a furniture line surviving into the join would duplicate itself at every seam it touches", () => {
+    // "Nav Home" is in 3 of 4 batches (0.75, over the 0.6 furniture
+    // threshold) and sits at every seam between batch 0/1 and 1/2. Furniture
+    // suppression must remove it before the join ever compares those seams -
+    // if it ran after (or not at all before the join), the join would try
+    // to match "Nav Home" against "Nav Home" at each seam AS CONTENT, and
+    // any seam where that match fails (batch 1/2, below) leaves it
+    // duplicated straight through into the rendered text.
+    const batches = [
+      [block("Nav Home", ""), block("Para A", "")],
+      [block("Nav Home", ""), block("Para A", ""), block("Para B", "")],
+      [block("Nav Home", ""), block("Para B", ""), block("Para C", "")],
+      [block("Para D", "")],
+    ];
+    const result = reduceCaptureToMaterials(batches);
+    expect(result.text).not.toContain("Nav Home");
+    expect(result.text).toBe(["Para A", "Para B", "Para C", "Para D"].join("\n\n"));
+  });
+
+  it("caps the FINAL rendered text last - capping an earlier stage's data reintroduces the tail-drop-across-headings bug DE16 exists to forbid", () => {
+    // Two batches, two headings, no overlap between them (different
+    // headings never merge - DE13). Rendered (correct order), the text
+    // carries "## Week 4"/"## Week 5" markers that let capMaterialsText
+    // downsample every heading-anchored segment proportionally, so both
+    // headings' content survives the cap. Capped on any earlier
+    // representation (e.g. the raw joined block text, with no "## " markers
+    // at all) collapses to ONE segment and a naive head-keep on it would
+    // silently drop the entire second heading - exactly the AC9 complaint
+    // DE16 was written to answer.
+    const aText = "a".repeat(300);
+    const bText = "b".repeat(300);
+    const batches = [[block(aText, "Week 4")], [block(bText, "Week 5")]];
+    const result = reduceCaptureToMaterials(batches, 200);
+    expect(result.text).toMatch(/materials capped/);
+    expect(result.text).toContain("Week 4");
+    expect(result.text).toContain("Week 5");
+    expect(result.text).toContain("a");
+    expect(result.text).toContain("b");
+  });
+});
+
+describe("reduceCaptureToMaterials - anti-global-dedupe (AM-H) survives the composed pipeline", () => {
+  it("a repeated short line across NON-adjacent batches survives (not eaten by a global dedupe set)", () => {
+    // "Due Sunday" appears in batch 0 and batch 2, with batch 1 between them
+    // - never at a shared seam - and stays under the furniture threshold
+    // (2 of 4 batches, 0.5). A global Set<normalizedText> across the whole
+    // run would silently delete the second real occurrence; this file's
+    // design explicitly rejects that (see appendBatchBlocks's own header).
+    const batches = [
+      [block("Due Sunday", ""), block("Unrelated one", "")],
+      [block("Unrelated two", "")],
+      [block("Unrelated three", ""), block("Due Sunday", "")],
+      [block("Unrelated four", "")],
+    ];
+    const result = reduceCaptureToMaterials(batches);
+    expect(result.text.match(/Due Sunday/g)).toHaveLength(2);
+  });
+
+  it("an adjacent-batch overlap is still joined through the full composed pipeline, not just the underlying primitive", () => {
+    // Each of "Para B", "Para C" and "Para D" is duplicated across exactly
+    // one seam (and stays at 0.5 batch-presence, under the furniture
+    // threshold) - the composed function must still collapse each seam
+    // duplicate to a single occurrence.
+    const batches = [
+      [block("Para A", ""), block("Para B", "")],
+      [block("Para B", ""), block("Para C", "")],
+      [block("Para C", ""), block("Para D", "")],
+      [block("Para D", ""), block("Para E", "")],
+    ];
+    const result = reduceCaptureToMaterials(batches);
+    expect(result.text).toBe(["Para A", "Para B", "Para C", "Para D", "Para E"].join("\n\n"));
+    for (const label of ["Para A", "Para B", "Para C", "Para D", "Para E"]) {
+      expect(result.text.match(new RegExp(label, "g"))).toHaveLength(1);
+    }
+  });
+});
+
+describe("reduceCaptureToMaterials - reported counts match what actually happened", () => {
+  it("charsRemoved/blocksAffected per stage and illegibleDropped are exactly what the pipeline did to this input", () => {
+    // 4 batches, heading "W1" throughout (so the join's heading-equality
+    // check never blocks a real seam match). "Nav Home" sits in every batch
+    // (4/4 = 1.0, over threshold) and is removed as furniture; "Para A",
+    // "Para B" and "Para C" each sit at exactly one seam (2/4 = 0.5, under
+    // threshold) and survive suppression to be joined; the trailing block is
+    // illegible and must be dropped (never rendered) but still counted.
+    const batches = [
+      [block("Nav Home", "W1"), block("Para A", "W1")],
+      [block("Nav Home", "W1"), block("Para A", "W1"), block("Para B", "W1")],
+      [block("Nav Home", "W1"), block("Para B", "W1"), block("Para C", "W1")],
+      [block("Nav Home", "W1"), block("Para C", "W1"), block("Illegible text here", "W1", "prose", true)],
+    ];
+    const result = reduceCaptureToMaterials(batches);
+
+    expect(result.stages).toEqual([
+      { stage: "chrome-suppression", charactersRemoved: "Nav Home".length * 4, blocksAffected: 4 },
+      { stage: "duplicate-join", charactersRemoved: "Para A".length + "Para B".length + "Para C".length },
+      { stage: "control-text-removal", charactersRemoved: 0 },
+      { stage: "proportional-downsampling", charactersRemoved: 0 },
+    ]);
+    expect(result.illegibleDropped).toBe(1);
+    expect(result.blocks).toHaveLength(4); // 3 joined survivors + the illegible tail, pre-render
+    expect(result.text).toBe(["## W1", "Para A", "Para B", "Para C"].join("\n\n"));
+    expect(result.text).not.toContain("Illegible");
   });
 });

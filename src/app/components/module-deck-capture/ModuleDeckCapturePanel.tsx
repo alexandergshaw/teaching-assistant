@@ -60,7 +60,7 @@ import { triggerFileDownload } from "../course-planning/utils";
 import { listDeckTemplatesAction } from "@/app/actions";
 import { extractModuleContentAction } from "@/app/actions/module-content-extract";
 import { MODULE_EXTRACT_BATCH_SIZE, type ExtractedBlock } from "./module-extraction-prompt";
-import { suppressPageFurniture, appendBatchBlocks, renderMaterialsText, capMaterialsText } from "./module-blocks";
+import { reduceCaptureToMaterials } from "./module-blocks";
 import { accumulateDroppedFrames, canGenerateDeck, estimateRunCost, describeScrollSafety } from "./module-deck-dispatch";
 import {
   buildModuleDeckCaptureRunLog,
@@ -74,7 +74,6 @@ import {
   type ModuleDeckCaptureEncodeNotice,
   type ModuleDeckCaptureGenerationAttempt,
   type ModuleDeckCaptureBlocks,
-  type ModuleDeckCaptureReductionStage,
 } from "./module-capture-log";
 import { generateDeckFromCaptureApi, type DeckFromCaptureRequest } from "./deck-from-capture-client";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
@@ -534,32 +533,18 @@ export default function ModuleDeckCapturePanel({ active }: { active: boolean }) 
       // DE12/DE16's fixed reduction pipeline: chrome suppression, then the
       // seam overlap-join (never a global dedupe set - see module-blocks.ts's
       // own header for why), then rendering, then the cap (never
-      // tail-truncated).
-      const suppressed = suppressPageFurniture(batchBlocksRef.current);
-      const beforeJoinChars = suppressed.batches.reduce((sum, batch) => sum + batch.reduce((s, b) => s + b.text.length, 0), 0);
-      let accumulated: ExtractedBlock[] = [];
-      suppressed.batches.forEach((batch, i) => {
-        accumulated = appendBatchBlocks(accumulated, batch, i);
-      });
-      const afterJoinChars = accumulated.reduce((sum, b) => sum + b.text.length, 0);
-      const rendered = renderMaterialsText(accumulated);
-      const capped = capMaterialsText(rendered.text);
-
-      const reductionStages: ModuleDeckCaptureReductionStage[] = [
-        { stage: "chrome-suppression", charactersRemoved: suppressed.charsRemoved, blocksAffected: suppressed.blocksRemoved },
-        { stage: "duplicate-join", charactersRemoved: Math.max(0, beforeJoinChars - afterJoinChars) },
-        { stage: "control-text-removal", charactersRemoved: capped.controlTextCharsRemoved },
-        { stage: "proportional-downsampling", charactersRemoved: capped.downsampledCharsRemoved },
-      ];
-      setMaterialsTextForLog(capped.text);
-      setBlocksForLog({ blocksExtracted: totalBlockCount, blocksIllegible: illegibleBlockCount, reductionStages });
+      // tail-truncated). The ordering itself lives in module-blocks.ts's
+      // reduceCaptureToMaterials, not here - see that function's own header.
+      const reduction = reduceCaptureToMaterials(batchBlocksRef.current);
+      setMaterialsTextForLog(reduction.text);
+      setBlocksForLog({ blocksExtracted: totalBlockCount, blocksIllegible: illegibleBlockCount, reductionStages: reduction.stages });
 
       const payload: DeckFromCaptureRequest = {
         courseUrl: "",
         courseId,
         moduleLabel: moduleLabel.trim() || undefined,
         templateId,
-        materialsText: capped.text,
+        materialsText: reduction.text,
         provider,
       };
       const at = new Date().toISOString();
@@ -568,14 +553,14 @@ export default function ModuleDeckCapturePanel({ active }: { active: boolean }) 
         setGenerateError(result.error);
         setGenerationAttempts((prev) => [
           ...prev,
-          { at, outcome: "error", error: result.error, materialsCharacterCount: capped.text.length, resolvedSlideCount },
+          { at, outcome: "error", error: result.error, materialsCharacterCount: reduction.text.length, resolvedSlideCount },
         ]);
         return;
       }
       setSavedArtifact(result.artifact);
       setGenerationAttempts((prev) => [
         ...prev,
-        { at, outcome: "success", error: "", materialsCharacterCount: capped.text.length, resolvedSlideCount },
+        { at, outcome: "success", error: "", materialsCharacterCount: reduction.text.length, resolvedSlideCount },
       ]);
     } finally {
       setGenerating(false);

@@ -437,3 +437,79 @@ export function capMaterialsText(text: string, cap: number = DECK_MATERIALS_CAP)
   const result = `${keptSegments.join("\n\n")}${notice}`;
   return { text: result, controlTextCharsRemoved, downsampledCharsRemoved, cut: true };
 }
+
+// ---------------------------------------------------------------------------
+// reduceCaptureToMaterials - the fixed four-stage pipeline, assembled once.
+//
+// Every consumer of this module needs the SAME reduction applied in the SAME
+// order: suppress furniture, THEN join batches by seam overlap (never a
+// global dedupe set - see appendBatchBlocks's own header above for why),
+// THEN render to Markdown-ish text, THEN cap. That ordering is not
+// incidental - furniture must be gone before the seam join runs (a furniture
+// line sitting at a batch seam would otherwise participate in the overlap
+// match), and the cap must run LAST, on the rendered text, never before
+// rendering and never before the join. A second consumer restating this
+// four-line sequence by hand is exactly how the order gets silently
+// inverted; this function is the one place it is written down.
+//
+// `ReductionStage` deliberately MIRRORS module-capture-log.ts's own
+// `ModuleDeckCaptureReductionStage` shape (stage name, charactersRemoved, an
+// optional blocksAffected) rather than importing it - this file stays free
+// of any dependency on the log-formatting module, matching this file's own
+// header (React-free, DOM-free, minimal deps: one value import). The two
+// shapes are structurally identical on purpose, so a caller that needs the
+// log's own type can assign this function's `stages` straight into a
+// `ModuleDeckCaptureReductionStage[]`-typed field with no cast.
+// ---------------------------------------------------------------------------
+
+export interface ReductionStage {
+  stage: "chrome-suppression" | "duplicate-join" | "control-text-removal" | "proportional-downsampling";
+  charactersRemoved: number;
+  /** Omitted (never present) for stages that do not operate block-by-block -
+   * mirrors ModuleDeckCaptureReductionStage's own optionality exactly. */
+  blocksAffected?: number;
+}
+
+export interface ReduceCaptureToMaterialsResult {
+  /** The final, capped materials text handed to the deck generator. */
+  text: string;
+  /** The blocks AFTER the seam join, BEFORE rendering - for a caller that
+   * needs the joined blocks themselves, not just the rendered text. */
+  blocks: ExtractedBlock[];
+  /** One entry per stage, in pipeline order, ready to hand to a run log. */
+  stages: ReductionStage[];
+  /** Blocks dropped at the rendering stage because `illegible` was true -
+   * counted, never rendered (see renderMaterialsText's own header). */
+  illegibleDropped: number;
+}
+
+export function reduceCaptureToMaterials(
+  batches: ReadonlyArray<ReadonlyArray<ExtractedBlock>>,
+  cap: number = DECK_MATERIALS_CAP
+): ReduceCaptureToMaterialsResult {
+  // Stage 1: suppress page furniture, before anything else touches the batches.
+  const suppressed = suppressPageFurniture(batches);
+  const beforeJoinChars = suppressed.batches.reduce((sum, batch) => sum + batch.reduce((s, b) => s + b.text.length, 0), 0);
+
+  // Stage 2: seam overlap-join, folding each batch in with its correct index.
+  let accumulated: ExtractedBlock[] = [];
+  suppressed.batches.forEach((batch, i) => {
+    accumulated = appendBatchBlocks(accumulated, batch, i);
+  });
+  const afterJoinChars = accumulated.reduce((sum, b) => sum + b.text.length, 0);
+
+  // Stage 3: render to Markdown-ish materials text.
+  const rendered = renderMaterialsText(accumulated);
+
+  // Stage 4: cap - always last, always on the rendered text.
+  const capped = capMaterialsText(rendered.text, cap);
+
+  const stages: ReductionStage[] = [
+    { stage: "chrome-suppression", charactersRemoved: suppressed.charsRemoved, blocksAffected: suppressed.blocksRemoved },
+    { stage: "duplicate-join", charactersRemoved: Math.max(0, beforeJoinChars - afterJoinChars) },
+    { stage: "control-text-removal", charactersRemoved: capped.controlTextCharsRemoved },
+    { stage: "proportional-downsampling", charactersRemoved: capped.downsampledCharsRemoved },
+  ];
+
+  return { text: capped.text, blocks: accumulated, stages, illegibleDropped: rendered.illegibleDropped };
+}

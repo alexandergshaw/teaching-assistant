@@ -148,6 +148,47 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
+// supabase/migrations/20261017000000_announcement_exemplars.sql
+//
+// Defined directly in this file, rather than added to
+// ./types.tables-a.ts / ./types.tables-b.ts / ./types.tables-c.ts as this
+// repo's usual hand-maintained-row-types convention would put it (see
+// types.tables-c.ts's own header for that convention) - this table's
+// migration, module and tests were built by one agent in a batch of
+// concurrent agents each scoped to a disjoint file set, and this file was
+// the only types file in that agent's set. A later pass may want to move
+// these three interfaces into types.tables-c.ts (which has headroom) purely
+// for consistency; nothing here depends on them staying in this file.
+export interface AnnouncementExemplarsRow {
+  id: string;
+  user_id: string;
+  course_id: string;
+  exemplar_text: string;
+  outline: Json;
+  label: string | null;
+  created_at: string;
+}
+
+export interface AnnouncementExemplarsInsert {
+  id?: string;
+  user_id: string;
+  course_id: string;
+  exemplar_text: string;
+  outline: Json;
+  label?: string | null;
+  created_at?: string;
+}
+
+export interface AnnouncementExemplarsUpdate {
+  id?: string;
+  user_id?: string;
+  course_id?: string;
+  exemplar_text?: string;
+  outline?: Json;
+  label?: string | null;
+  created_at?: string;
+}
+
 // @supabase/postgrest-js's generic client requires each table entry to
 // satisfy `GenericTable` (Row/Insert/Update assignable to Record<string,
 // unknown>, plus a `Relationships` array) or the whole schema silently
@@ -163,6 +204,12 @@ type Expand<T> = { [K in keyof T]: T[K] };
 export interface Database {
   public: {
     Tables: {
+      announcement_exemplars: {
+        Row: Expand<AnnouncementExemplarsRow>;
+        Insert: Expand<AnnouncementExemplarsInsert>;
+        Update: Expand<AnnouncementExemplarsUpdate>;
+        Relationships: [];
+      };
       app_users: {
         Row: Expand<AppUsersRow>;
         Insert: Expand<AppUsersInsert>;

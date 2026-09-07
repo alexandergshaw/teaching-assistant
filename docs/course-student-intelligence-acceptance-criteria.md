@@ -1540,3 +1540,93 @@ decides membership did.
 The corpus is still never persisted. Recorded rows already live in the
 instructor's own browser, and copying them into this app's database would create
 the second copy D8 refuses, for no gain.
+
+---
+
+# D22. TWO CORRECTIONS FROM BUILDING IT, one of them to D20b
+
+## D22a. `student_repos[].canvasUserId` IS HAND-EDITABLE. D20b overstated it.
+
+D20b called it "a real numeric Canvas id, written once by the GitHub
+roster-binding workflow from a live call and persisted on the course row",
+and leaned on that to make it the preferred offline anchor.
+
+**Verified false in one direction:** `RosterCell.tsx` renders a hand-editable
+"Canvas user id" column, seeds new rows with `canvasUserId: ""`, and round-
+trips the field as free text. So blanks and arbitrary strings reach it in
+production, and it is not necessarily machine-written.
+
+It is still worth preferring over a name match WHEN IT PARSES - a real id is a
+fact and a name match is an inference - but the reasoning changes: it is now
+"an id somebody or something put here" rather than "an id Canvas gave us".
+
+**The implementation already got this right for the right reason.**
+`parseCachedCanvasUserId` refuses to coerce - a digit check, not `Number()` -
+so blank, `"abc"`, `"-1"` and `"0"` are all rejected rather than becoming a
+plausible-looking id. That refusal was defensive when written and is load-
+bearing now.
+
+## D22b. `GradingRow` HAS NO ASSESSMENT ID, and that is a second missing half
+
+D21d identified the missing COURSE on recorded rows as the blocker. There is a
+second: `GradingRow` carries `totalScore` as free text and nothing identifying
+WHICH assessment the score is for.
+
+That breaks the offline denominator specifically. "No recorded work on 3 of 8
+assessments" needs the 8, and without an assessment id every recorded row
+collapses into a single assessment - so the count is meaningless rather than
+merely imprecise.
+
+Both halves are needed together: `(course, assessment)` is what makes a
+recorded grade locatable, and `(name, course)` is what makes it attributable.
+
+## D22c. A SIGNAL THAT WOULD HAVE BEEN ABOUT THE INSTRUCTOR
+
+Worth recording because the failure is subtle and general. `no-recent-activity`
+offline is computed from recorded rows - so "nothing for 21 days" is as much a
+fact about the INSTRUCTOR's capture cadence as about the student. An
+instructor who simply stopped grading for three weeks would put their entire
+class on the concern list.
+
+The fix, and it generalises: the signal additionally requires that SOMEONE
+ELSE has more recent recorded activity in the same course. That converts it
+from a statement about the calendar into a statement about this student
+relative to their classmates, which is what the instructor actually meant to
+ask.
+
+## D22d. WHAT THE OFFLINE VOCABULARY CANNOT SAY YET
+
+`ConcernSignalKind` is closed and has no offline members, so four are bent,
+with the meaning carried in the human-readable label rather than the kind:
+
+- `missing-work` is the worst bend - the same word for a different fact.
+  Canvas's `missing` accounts for a manual teacher override and for submission
+  types that cannot be submitted online; the offline one means "no recorded
+  work on an assessment others were graded on".
+- `late-work` has NO offline analogue at all - nothing in a recorded row
+  carries a due date - and is never emitted rather than approximated.
+- `insufficient-data` fits exactly and gained a second honest meaning: two
+  students share this name.
+
+**Discussion participation gets no signal at all**, deliberately. Captured
+reply rows feed recency and are counted, but offline capture is opportunistic,
+so "zero captured posts" is much closer to "we did not see" than to "they did
+not post" - and no existing kind can carry that distinction honestly.
+
+The contract should gain real offline members rather than leaving these bends
+in place. Recorded as debt, not fixed here, because widening a closed union
+that four modules already switch on is its own change.
+
+## D22e. THE STORED-CITATION GAP IS NOW BLOCKING, not theoretical
+
+D19f opened it and D20f widened it; it is now load-bearing. `ConcernRow.userId`
+is a non-optional `CanvasUserId`, and offline most students have no trustworthy
+id - so an offline concern set cannot be expressed in the shipped type at all.
+The implementation defined a parallel `OfflineConcernRow` with a nullable id
+rather than fabricating one, which is right, but the two cannot stay parallel
+forever.
+
+**Nothing offline can be persisted through `CourseIntelAnswerRecord.
+citedStudents` until that field can express an unverified identity.** Storing a
+borrowed or fabricated id would launder a screen-read name into the one field
+the whole design treats as ground truth.

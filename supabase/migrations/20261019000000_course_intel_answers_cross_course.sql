@@ -82,7 +82,7 @@ alter table public.course_intel_answers
 comment on column public.course_intel_answers.course_id is
   'The one course this row is about, or NULL for a cross-course answer - see course_ids for what a cross-course row is about instead. NULLABLE since 20261019000000_course_intel_answers_cross_course.sql; every single-course row, past and future, still has this set.';
 comment on column public.course_intel_answers.course_ids is
-  'The full set of course_hub ids a CROSS-COURSE answer covered (acceptance-criteria decision D24e - coverage is part of the answer''s meaning, not a footnote). Empty on every single-course row, where course_id alone already says which course this is; never populated at the same time as course_id - see course_intel_answers_course_scope_check. No per-element foreign key - see this migration's header for why that is a named gap, not an oversight.';
+  'The full set of course_hub ids a CROSS-COURSE answer covered (acceptance-criteria decision D24e - coverage is part of the answer''s meaning, not a footnote). Empty on every single-course row, where course_id alone already says which course this is; never populated at the same time as course_id - see course_intel_answers_course_scope_check. No per-element foreign key - see this migration''s header for why that is a named gap, not an oversight.';
 
 alter table public.course_intel_answers
   drop constraint if exists course_intel_answers_course_scope_check;

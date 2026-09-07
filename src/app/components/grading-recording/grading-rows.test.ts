@@ -454,6 +454,13 @@ describe("gradingClearTableSignature (\"Clear table\" confirm-arm signature - AC
 // useGradingAssessmentDeclarations.ts, a NEW file in this same directory -
 // same story again: the scan itself needed no change, only the two
 // expectation lists below.
+//
+// "ta-rec-grade-assessment" (docs/course-student-intelligence-acceptance-
+// criteria.md D22b/D23e - the panel's own assessment selector, the
+// instructor's typed label for what they are currently grading) was added by
+// GradingRecordingPanel.tsx, which already lives in this same directory -
+// same story again: the scan itself needed no change, only the two
+// expectation lists below.
 // ---------------------------------------------------------------------------
 
 describe("grading-recording persisted key canary (self-contained - recording-split.structure.test.ts cannot see this directory)", () => {
@@ -466,9 +473,10 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations)", () => {
+  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations, assessment)", () => {
     const keys = Array.from(new Set(combined.match(/ta-rec-grade-[a-z-]*/g) ?? [])).sort();
     expect(keys).toEqual([
+      "ta-rec-grade-assessment",
       "ta-rec-grade-course",
       "ta-rec-grade-declarations",
       "ta-rec-grade-filter",
@@ -511,6 +519,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     "ta-rec-grade-course",
     "ta-rec-grade-table",
     "ta-rec-grade-declarations",
+    "ta-rec-grade-assessment",
   ])(
     '"%s" has both a localStorage read and a localStorage write call wired to that key (directly, or via a const STORAGE_KEY_* binding)',
     (key) => {

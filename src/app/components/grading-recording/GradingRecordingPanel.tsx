@@ -47,8 +47,8 @@
 // (see its own header) - this file calls matchNameAgainstRoster and
 // applyRosterMatch itself, once per row, right after every setAllRows.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, MenuItem, TextField } from "@mui/material";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Autocomplete, Button, MenuItem, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -133,6 +133,16 @@ import { triggerFileDownload } from "../course-planning/utils";
 // STORAGE_KEY_FILTER/STORAGE_KEY_SORT idiom - the canary's isWired() helper
 // covers both the direct-literal shape and this indirect-const shape.
 const STORAGE_KEY_COURSE = "ta-rec-grade-course";
+// docs/course-student-intelligence-acceptance-criteria.md D22b/D23e: the
+// instructor's own typed label for what they are currently grading - "the
+// blocking piece" per this task's own brief. Same canary discipline as
+// STORAGE_KEY_COURSE immediately above (a bound const, added to grading-
+// rows.test.ts's key-inventory canary in this same change). Persisted flat,
+// not scoped per course, mirroring STORAGE_KEY_COURSE's own single-value
+// shape - switching courses does not clear it, the same way switching
+// courses does not clear the rubric text either; the instructor is expected
+// to type a new one when they move on to grading a different assessment.
+const STORAGE_KEY_ASSESSMENT = "ta-rec-grade-assessment";
 
 interface Notice extends GradingExtractionOutcome {
   id: string;
@@ -234,10 +244,65 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
   const selectedCourse = (courses ?? []).find((c) => c.id === courseId) ?? null;
   const selectedRosterText = selectedCourse?.roster ?? null;
 
+  // docs/course-student-intelligence-acceptance-criteria.md D22b/D23e: the
+  // assessment selector - "the blocking piece" this task's own brief names.
+  // There is no LMS to enumerate assignments from (that is the entire point
+  // of this offline surface), so this is a free-text label the instructor
+  // types themselves, persisted the same way `courseId` above is. Matches
+  // useGradingAssessmentDeclarations.ts's own `assessmentId` convention
+  // exactly (an instructor-typed string, trimmed before use as a key) so a
+  // name typed here and a deadline declared there refer to the same thing -
+  // see that file's own header on why a mismatch between the two would be
+  // silent and fatal to the missing-work count.
+  const [assessmentLabel, setAssessmentLabelState] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem(STORAGE_KEY_ASSESSMENT) ?? "";
+  });
+  const setAssessmentLabel = useCallback((next: string) => {
+    setAssessmentLabelState(next);
+    try {
+      window.localStorage.setItem(STORAGE_KEY_ASSESSMENT, next);
+    } catch {
+      // Best-effort, mirrors setCourseId's own identical handling above -
+      // losing this persistence does not affect the in-memory session.
+    }
+  }, []);
+  // Trimmed before it ever becomes a scope value - useGradingAssessmentDeclarations.ts's
+  // own deserializeGradingDeclarations trims `assessmentId` the same way on
+  // read, so " Essay 2 " and "Essay 2" must key identically here too, or a
+  // stray trailing space would silently split one assessment's rows across
+  // two scopes.
+  const assessmentId = assessmentLabel.trim();
+
   // COURSE-SCOPED - see the note in useDiscussionReplies. This one matters
   // most: recorded grades are the offline gradebook, and an unattributed
   // grade cannot be counted against any course's assessments.
-  const gradingRows = useGradingRows(courseId);
+  //
+  // ASSESSMENT-SCOPED (D22b/D23e), for the identical reason: a row minted
+  // while no assessment is selected reads UNATTRIBUTED on this axis, exactly
+  // like `course` does with no course selected - see useGradingRows.ts's own
+  // ASSESSMENT SCOPING header section for why this does not also filter the
+  // VISIBLE table (only course does that); the assessment tag exists to make
+  // a row's assessment attributable for a future per-assessment denominator,
+  // not to change what this panel itself shows.
+  const gradingRows = useGradingRows(courseId, assessmentId);
+
+  // D22b/D23e: previously-typed assessment labels for the CURRENTLY selected
+  // course (drawn from `gradingRows.rawRows`, already course-scoped) - pure
+  // typing convenience so an instructor returning to grade more of "Essay 2"
+  // tomorrow can pick the exact same label from the list rather than risk a
+  // typo that would silently start a second, disconnected assessment bucket.
+  // Suggestions only (MUI Autocomplete's `freeSolo`) - never a closed set,
+  // since there is no catalogue of assessments to choose from (this file's
+  // own header, and grading-row.ts's own `assessment` doc comment, both name
+  // this as the reason it must stay free text).
+  const assessmentOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const row of gradingRows.rawRows) {
+      if (row.assessment) seen.add(row.assessment);
+    }
+    return Array.from(seen).sort();
+  }, [gradingRows.rawRows]);
   const rawRowsRef = useRef(gradingRows.rawRows);
   useEffect(() => {
     rawRowsRef.current = gradingRows.rawRows;
@@ -674,6 +739,36 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
             This course has no roster on file - names will show as &quot;No roster to check&quot; until one is added to its course tile.
           </p>
         )}
+        {/* D22b/D23e: the assessment selector - free text, since there is no
+            LMS to enumerate assignments from. Autocomplete/freeSolo mirrors
+            GithubRepoPicker.tsx's own established shape for "type-to-filter,
+            free entry allowed" in this codebase - suggestions come from this
+            course's own previously-typed labels (assessmentOptions above),
+            never a closed catalogue. Not required to start capture (course
+            selection is not required either, for the identical reason:
+            D21d/D22b both treat "unattributed" as an honest, correctable-
+            going-forward outcome rather than a blocked one) - the hint below
+            says exactly what happens if it is left blank, so nothing here is
+            ever enabled and then silently rejected. */}
+        <div className={styles.adaptRow}>
+          <Autocomplete
+            freeSolo
+            options={assessmentOptions}
+            value={assessmentLabel}
+            onInputChange={(_, next) => setAssessmentLabel(next)}
+            size="small"
+            className={controls.fieldMd}
+            renderInput={(params) => (
+              <TextField {...params} label="Assessment (your own label - e.g. Essay 2, Week 3 discussion)" />
+            )}
+          />
+        </div>
+        {assessmentId === "" && (
+          <p className={styles.fieldHint}>
+            No assessment set - submissions captured now will not be attributed to any assessment. Type one above at
+            any point; it will apply to submissions captured from then on, not to rows already recorded.
+          </p>
+        )}
       </fieldset>
 
       <fieldset className={controls.section}>
@@ -829,6 +924,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         setSort={gradingRows.setSort}
         onEditField={gradingRows.editField}
         onRemoveRow={gradingRows.removeRow}
+        onMarkLate={gradingRows.markSubmissionLate}
         onClearTable={gradingRows.clearTable}
         onCopyError={handleCopyFeedbackError}
       />

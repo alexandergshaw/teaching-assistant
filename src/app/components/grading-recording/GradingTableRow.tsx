@@ -89,6 +89,17 @@ export interface GradingTableRowProps {
   row: GradingRow;
   onEditField: (id: string, field: GradingFeedbackField, value: string) => void;
   onRemove: (id: string) => void;
+  /**
+   * Marks this row's submission as having arrived late.
+   *
+   * There is no timestamp involved and there must not be. The only clock this
+   * surface has access to is when the INSTRUCTOR graded, and deriving lateness
+   * from it would mark an entire class late for a grading session held a week
+   * after the deadline. So the row records THAT it was late and stays honest
+   * about not knowing when - which is why submissionTimeStatus has three
+   * values rather than a boolean.
+   */
+  onMarkLate: (id: string) => void;
   /** CC14: a clipboard failure surfaces through the panel's existing notice
    *  path - the same channel DiscussionReplyRow.tsx's own onCopyError feeds,
    *  rather than a new row-local error affordance. */
@@ -101,7 +112,7 @@ export interface GradingTableRowProps {
   registerRemoveRef: (id: string, el: HTMLButtonElement | null) => void;
 }
 
-function GradingTableRowImpl({ row, onEditField, onRemove, onCopyError, registerRemoveRef }: GradingTableRowProps) {
+function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyError, registerRemoveRef }: GradingTableRowProps) {
   const stateBadge = STATE_BADGE[row.state];
   const matchBadge = NAME_MATCH_BADGE[row.nameMatch];
   // R3b: an unmatched/ambiguous name never blocks the feedback - it only
@@ -249,6 +260,22 @@ function GradingTableRowImpl({ row, onEditField, onRemove, onCopyError, register
                 Remove
               </Button>
             )}
+            {/* D23c. Records THAT the work was late, never WHEN - the only
+                clock here is when the instructor graded, and deriving a
+                submission time from it would mark a whole class late for a
+                grading session held after the deadline. Toggling off returns
+                the row to "unknown" rather than to "on time", because we
+                never knew it was on time - that is the third state existing
+                for a reason rather than a boolean wearing a disguise. */}
+            <Button
+              size="small"
+              variant="text"
+              aria-pressed={row.submissionTimeStatus === "marked-late"}
+              aria-label={`Mark ${row.studentName}'s submission as late`}
+              onClick={() => onMarkLate(row.id)}
+            >
+              {row.submissionTimeStatus === "marked-late" ? "Late" : "Mark late"}
+            </Button>
           </div>
           {row.userEdited && removeArmed && (
             <p id={removeConsequenceId} role="status" aria-live="polite" className={controls.consequence}>

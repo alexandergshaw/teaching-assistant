@@ -87,6 +87,9 @@ export interface GradingTableProps {
   setSort: (sort: GradingSort) => void;
   onEditField: (id: string, field: GradingFeedbackField, value: string) => void;
   onRemoveRow: (id: string) => void;
+  /** Forwarded straight to each row - see GradingTableRow's own prop doc for
+   *  why this records lateness without a timestamp. */
+  onMarkLate: (id: string) => void;
   onClearTable: () => void;
   /** CC14: threaded straight through to every row's Copy feedback button -
    *  see GradingTableRow.tsx's own prop doc for why this feeds the panel's
@@ -103,6 +106,7 @@ export default function GradingTable({
   setSort,
   onEditField,
   onRemoveRow,
+  onMarkLate,
   onClearTable,
   onCopyError,
 }: GradingTableProps) {
@@ -271,6 +275,7 @@ export default function GradingTable({
                   row={row}
                   onEditField={onEditField}
                   onRemove={handleRemove}
+                  onMarkLate={onMarkLate}
                   onCopyError={onCopyError}
                   registerRemoveRef={registerRemoveRef}
                 />

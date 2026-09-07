@@ -81,6 +81,55 @@
 // scope - otherwise the very first extraction sync after a course switch
 // would silently erase every other course's (and the unattributed bucket's)
 // rows.
+//
+// ASSESSMENT SCOPING (docs/course-student-intelligence-acceptance-criteria.md
+// D22b/D23e): this hook ALSO takes a required `assessmentId` (an
+// instructor-TYPED label - "Essay 2", "Week 3 discussion" - the same kind of
+// string useGradingAssessmentDeclarations.ts's own `assessmentId` is, so a
+// name typed here and a deadline declared there can key-match exactly).
+// Deliberately NOT a second filter axis the way `courseId` is: `rows`/
+// `rawRows`/`totalCount` stay scoped to COURSE ONLY - grading-row.ts's
+// `assessment` field exists to make a recorded row's assessment
+// ATTRIBUTABLE (for a future per-assessment denominator elsewhere in this
+// app), not to change what this table itself displays, and the brief this
+// hook was built against asked only to "wire it into the store, so newly
+// captured rows are stamped with it at mint time" - filtering the visible
+// table by assessment as well would be a real, separate UX decision this
+// task was not asked to make. `setAllRows` stamps `assessmentScope` onto
+// every row it does not already recognize by id, mirroring `courseScope`'s
+// own stamp exactly and using the SAME `previousScoped` lookup array (see
+// setAllRows below) - grading-row.ts's own test ("stamping course and
+// assessment together preserves both axes independently") pins this exact
+// composition. An already-attributed row's assessment is NEVER overwritten
+// by whichever assessment happens to be selected now - grading-row.ts's own
+// SABOTAGE TARGET note on `stampGradingRowsWithAssessment` names this
+// precisely.
+//
+// `assessmentId` is REQUIRED, not defaulted - see this file's own
+// `useGradingRows` doc comment on why `courseId` had to become required
+// after shipping defaulted for one wave (TS2554 beats a silent
+// always-unattributed capture). The identical footgun applies here: an
+// omitted argument would compile and every newly captured row would mint
+// unattributed, with nothing failing or warning.
+//
+// LATE MARKING (docs/course-student-intelligence-acceptance-criteria.md
+// D23c): `markSubmissionLate` below sets a row's `submissionTimeStatus` to
+// "marked-late" - D23c's cheap, honest fallback source for lateness (the
+// instructor asserting it while grading), NEVER derived from a clock read in
+// this file (see grading-row.ts's own `GradingRowSubmissionTimeStatus` doc
+// comment for why capture/grading time is never used as a stand-in for
+// submission time). HONEST REACHABILITY FINDING, mirroring grading-row.ts's
+// own finding on `assessment` before it was wired: nothing calls
+// `markSubmissionLate` yet. A real per-row "Mark late" control needs
+// GradingTable.tsx to forward a new callback prop to GradingTableRow.tsx,
+// and GradingTable.tsx is outside this task's file set - adding the button
+// to GradingTableRow.tsx alone, with no prop path feeding it, would be a
+// button that never renders (GradingTable.tsx does not pass the callback
+// down), which is worse than not building it. `markSubmissionLate` is built
+// and wired to this hook's return value now so that adding the on-screen
+// control later (once GradingTable.tsx is in scope) is the same kind of
+// small, additive change `stampGradingRowsWithAssessment` already was for
+// `assessment` - not a second store-design effort from scratch.
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -99,6 +148,7 @@ import {
 import {
   gradingRowMatchesCourse,
   stampGradingRowsWithCourse,
+  stampGradingRowsWithAssessment,
   countUnattributedGradingRows,
   type GradingRow,
   type GradingRowNameMatch,
@@ -172,6 +222,14 @@ export interface UseGradingRowsReturn {
   removeRow: (id: string) => void;
   clearTable: () => void;
 
+  /** D23c: sets `id`'s `submissionTimeStatus` to "marked-late" and clears
+   *  `submittedAt` (marked-late carries a verdict, never a timestamp - see
+   *  grading-row.ts's own doc comment on `GradingRowSubmissionTimeStatus`).
+   *  A no-op when `id` is not found, mirroring `editField`/`applyRosterMatch`'s
+   *  own "row is gone" discipline. See this file's own header (LATE MARKING)
+   *  for the honest finding on why nothing calls this yet. */
+  markSubmissionLate: (id: string) => void;
+
   /** Item 4. Null once the last persistence write succeeded (in full or in
    *  the reduced, submission-text-dropped form); the exact user-facing
    *  message otherwise. In-memory rows keep working regardless - this never
@@ -198,12 +256,21 @@ export interface UseGradingRowsReturn {
  *
  * Pass the course_hub uuid. An empty string is still legal and still means
  * "no course selected" - what is no longer legal is forgetting to say.
+ *
+ * `assessmentId` (D22b/D23e) is the instructor-typed assessment label - see
+ * this file's own ASSESSMENT SCOPING header section. An empty string is
+ * still legal and still means "no assessment set" - what is no longer legal
+ * is forgetting to say, for the identical reason `courseId` above stopped
+ * being optional.
  */
-export function useGradingRows(courseId: string): UseGradingRowsReturn {
+export function useGradingRows(courseId: string, assessmentId: string): UseGradingRowsReturn {
   // D21d: "" collapses to the same `undefined` scope a row with no course
   // tag carries - see the file header and useReplyRows.ts's own identical
   // comment on its courseScope.
   const courseScope = courseId.length > 0 ? courseId : undefined;
+  // D22b/D23e: identical collapse, for the identical reason - see the file
+  // header's ASSESSMENT SCOPING section.
+  const assessmentScope = assessmentId.length > 0 ? assessmentId : undefined;
 
   // Read-once-in-the-initializer, guarded by `typeof window` - mirrors
   // useReplyRows.ts's own `rawRows` initializer (STORAGE_KEY_TABLE).
@@ -299,11 +366,22 @@ export function useGradingRows(courseId: string): UseGradingRowsReturn {
       // current scope; a row that WAS already present keeps its own prior
       // course value exactly.
       const previousScoped = rowsRef.current.filter((r) => gradingRowMatchesCourse(r, courseScope));
-      const stamped = stampGradingRowsWithCourse(next, previousScoped, courseScope);
+      const stampedCourse = stampGradingRowsWithCourse(next, previousScoped, courseScope);
+      // D22b/D23e: the identical stamp, one axis at a time, on the SAME
+      // `previousScoped` lookup - a row already present in `previousScoped`
+      // keeps its own prior assessment exactly; only a row `next` introduces
+      // that this scope's own previous slice did not already have gets
+      // stamped with the CURRENTLY selected assessment. Never re-adopts an
+      // existing row into whichever assessment happens to be selected now -
+      // grading-row.ts's own SABOTAGE TARGET note on
+      // stampGradingRowsWithAssessment names this precisely, and
+      // grading-row.test.ts's "stamping course and assessment together"
+      // test pins this exact course-then-assessment composition.
+      const stamped = stampGradingRowsWithAssessment(stampedCourse, previousScoped, assessmentScope);
       const otherScopes = rowsRef.current.filter((r) => !gradingRowMatchesCourse(r, courseScope));
       commitRows([...otherScopes, ...stamped]);
     },
-    [commitRows, courseScope]
+    [commitRows, courseScope, assessmentScope]
   );
 
   const editField = useCallback(
@@ -334,6 +412,27 @@ export function useGradingRows(courseId: string): UseGradingRowsReturn {
       const idx = raw.findIndex((r) => r.id === id);
       if (idx === -1) return;
       const next = raw.map((r, i) => (i === idx ? applyRosterMatchToRow(r, match) : r));
+      commitRows(next);
+    },
+    [commitRows]
+  );
+
+  // D23c: marks one row "marked-late" - a verdict, never a timestamp (see
+  // this file's own header, LATE MARKING). `submittedAt` is explicitly
+  // cleared rather than left whatever it happened to be, so an in-memory row
+  // can never carry a stale timestamp under a non-"known" status - the same
+  // invariant grading-row-serialization.ts's buildWireRow already enforces
+  // on write, made true in memory too rather than relying on the write path
+  // to paper over it. A no-op when `id` is not found, mirroring
+  // editField/applyRosterMatch's own "row is gone" discipline above.
+  const markSubmissionLate = useCallback(
+    (id: string) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      if (idx === -1) return;
+      const next = raw.map((r, i) =>
+        i === idx ? { ...r, submissionTimeStatus: "marked-late" as const, submittedAt: undefined } : r
+      );
       commitRows(next);
     },
     [commitRows]
@@ -388,6 +487,7 @@ export function useGradingRows(courseId: string): UseGradingRowsReturn {
     applyRosterMatch,
     removeRow,
     clearTable,
+    markSubmissionLate,
     persistError,
   };
 }

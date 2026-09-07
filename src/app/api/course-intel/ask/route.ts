@@ -35,6 +35,7 @@ import {
 } from "@/lib/course-intel/fetch";
 import { buildCourseIntelReaders } from "@/lib/course-intel/canvas-readers";
 import { appendCourseIntelAnswer } from "@/lib/course-intel/history";
+import { persistCrossCourseAnswer } from "@/lib/course-intel/cross-course-persist";
 import { classifyLmsFailure, LIVE_LMS_CONNECTION, lmsCourseNotLinked } from "@/lib/course-intel/connection";
 import { parseOfflinePayload } from "@/lib/course-intel/offline-payload";
 import { answerOfflineAsk } from "@/lib/course-intel/offline-answer";
@@ -474,7 +475,36 @@ export async function POST(req: NextRequest) {
       stripSentinel: stripCitationSentinel,
       describeError,
     });
-    return NextResponse.json(result.body, { status: result.status });
+
+    // Persist, in ./cross-course-persist - see that module's own header for
+    // why this happens here rather than inside ./cross-course-answer (out of
+    // scope: a concurrent agent owns it) and why the covered-course set
+    // saved is the full `courseIds` scope, not only the courses a live read
+    // reached (D24e).
+    const persisted = await persistCrossCourseAnswer({
+      status: result.status,
+      body: result.body,
+      courseIds,
+      question,
+      assembledAt,
+      persist: (input) =>
+        withDeadline(
+          appendCourseIntelAnswer(createServiceClient(), userId, {
+            courseIds: input.courseIds,
+            question: input.question,
+            answerMarkdown: input.answerMarkdown,
+            citedStudents: input.citedStudents,
+            omissions: [],
+            tier: "signals",
+            assembledAt: input.assembledAt,
+          }),
+          PERSIST_WAIT_MS,
+          "Saving the answer"
+        ).then((entry) => entry.id),
+      describeError,
+      logError: (message, detail) => console.error(message, detail),
+    });
+    return NextResponse.json(persisted.body, { status: persisted.status });
   };
 
   // -------------------------------------------------------------------------

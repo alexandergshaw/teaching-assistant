@@ -205,7 +205,13 @@ export interface AnnouncementExemplarsUpdate {
 export interface CourseIntelAnswersRow {
   id: string;
   user_id: string;
-  course_id: string;
+  /** NULL on a cross-course answer, which has no single honest course - see
+   *  course_ids, and 20261019000000_course_intel_answers_cross_course.sql.
+   *  Exactly one of the two is populated, enforced by a CHECK constraint. */
+  course_id: string | null;
+  /** The full set of courses a CROSS-COURSE answer covered; empty on every
+   *  single-course row. */
+  course_ids: string[];
   scope_student: string;
   question: string;
   answer_markdown: string;
@@ -219,7 +225,8 @@ export interface CourseIntelAnswersRow {
 export interface CourseIntelAnswersInsert {
   id?: string;
   user_id: string;
-  course_id: string;
+  course_id: string | null;
+  course_ids?: string[];
   scope_student?: string;
   question: string;
   answer_markdown: string;
@@ -233,7 +240,8 @@ export interface CourseIntelAnswersInsert {
 export interface CourseIntelAnswersUpdate {
   id?: string;
   user_id?: string;
-  course_id?: string;
+  course_id?: string | null;
+  course_ids?: string[];
   scope_student?: string;
   question?: string;
   answer_markdown?: string;

@@ -40865,3 +40865,135 @@ code the reuse survey recommends.
   fifteen call sites. The last of those is shipped code and IS a real gap; it
   is left for its own change rather than folded in here, because it touches
   every action file in the app.
+
+## 408. Course Intel becomes one textbox, and the history it writes has no reader
+
+The owner's request: "that tab needs to just contain a textbox to talk to an ai,
+no course picker ... ask a question specific to a course ... or ask a question
+about all courses overall ... and the answer should query all possible course,
+both online and offline" (2026-09-07).
+
+Shipped across 9b33d73, 326146e and the cross-course history work. The last
+subsection is a gap found while verifying the others, not a defect introduced
+by them.
+
+### 408a - the question resolves the course, and names never reach a prompt
+
+There is no picker and no course id on the request. `scopeCourseIntelCourses`
+resolves the question against the instructor's own course list and returns one
+of three scopes - one course, some courses, all courses - or refuses.
+
+**Whole forms only, never a single token.** A lone course-name token
+("Ethical", "Networks") is an ordinary English word, and a single-token
+fallback would scope unrelated questions to a course by accident. Four forms
+per course: name, code, and each with the term.
+
+**Ambiguity is the expected path here, not the exception.** The same course
+runs every term, so two rows differing only by term is normal - the reverse of
+the student-name case. An in-session tiebreak resolves the common collision;
+where it cannot, the refusal names the TERMS, since that is the only thing
+distinguishing them.
+
+`assertNoCourseNameRemains` throws rather than returning, mirroring
+`assertNoStudentNameRemains`. Both are called at the end of their own module's
+scoping function - a course name never reaches a composed prompt.
+
+**Verified directly, against the resolver rather than by reading:** the owner's
+two verbatim example questions resolve to one-course (the in-session section,
+name stripped) and to all-courses respectively; a collision with neither
+section in session refuses and names both terms; and "which students need
+ethical guidance about late work" does NOT scope to Ethical Hacking.
+
+### 408b - a budget cut was reported as an unreachable LMS
+
+`unreachable` means Canvas was asked and did not answer: a real fault. A course
+the cross-course deadline never reached was never contacted and nothing is
+wrong with it. Reporting one as the other sends an instructor to debug a
+working connection.
+
+`LmsUnavailableReason` gained `"budget-cut"` with its own lead sentence, which
+had to differ in substance rather than wording - it names the shared time
+budget and ends with the actionable half: a single-course question has the
+whole budget to itself, so asking about that course alone genuinely will read
+it. `unreachable` itself is untouched, and still carries no detail, because
+flattening it is what stops a failure's timing revealing whether a host and
+port exist.
+
+Live courses also stopped being read strictly one at a time - serialization
+alone was cutting courses before the deadline was the real constraint. A
+fixed-size pull-worker pool runs three at once, bounded because this fans out
+against one instructor's Canvas token.
+
+**What did not move:** recorded courses are still assembled FIRST and
+synchronously, so what gets cut is always live work and never the half that
+costs nothing. A budget-cut course still makes `superlativeBasis` partial, so
+a ranking over an incomplete set refuses to present a superlative.
+
+### 408c - a cross-course answer had no honest course_id, so it was not stored
+
+`course_intel_answers.course_id` was `not null`, and a five-course answer has
+no single honest value for it - so cross-course answers were simply dropped
+while every single-course answer was kept.
+
+`course_id` is now nullable and `course_ids uuid[]` holds the covered set, with
+a CHECK constraint enforcing exactly one of the two. Existing rows satisfy the
+first branch (`array_length('{}', 1)` is NULL, coalesced to 0), so the
+constraint validates without `NOT VALID` and the column add is a metadata
+change rather than a rewrite.
+
+**The retrieval half is the part that silently fails if missed.** A per-course
+history read must not drop a cross-course row that covered that course. Two
+tenant-filtered queries (`course_id = X`, and `course_ids @> ARRAY[X]` served
+by a GIN index) are merged and re-sorted in JS - the DB ordering of each half
+is not sufficient once they are concatenated.
+
+The persisted coverage set is the FULL requested scope, never a subset
+re-derived from which reads succeeded, and the stored question is the
+instructor's own words rather than the model-facing rewrite - that rewrite has
+course names replaced by markers and would be unreadable in history.
+
+A per-course clear still deletes only single-course rows. That is correct
+rather than a gap: deleting a cross-course row because one of its courses was
+cleared would destroy history for every other course it covered.
+
+### 408d - LIMITS: the history store has no reader
+
+Found by tracing reachability rather than correctness, after the persistence
+work was verified.
+
+**All five Course Intel history actions - get, export, append, delete, clear -
+are referenced by zero components.** Persistence happens (the route calls the
+lib directly, not the action), so answers accumulate correctly, and 408c makes
+that store consistent for cross-course answers too. But nothing in the UI
+reads, exports or clears any of it, single-course or cross-course.
+
+So 408c fixed a real defect in a store that is still invisible. That is worth
+stating plainly rather than filing as done: the migration and data layer are
+correct and needed, and the feature they serve is not reachable by the
+instructor.
+
+The Knowledge tab already has a working history surface
+(`KnowledgeOverviewHistory.tsx`) and is the obvious pattern to follow.
+
+### 408e - a raw NUL byte made a source file invisible to grep, for the second time
+
+Not part of the request; found while verifying 408a and fixed under 6b5328b.
+
+`useCourseIntel.ts` shipped with two literal 0x00 bytes where an escape was
+intended (a composite map key). The string value is identical, so tsc, eslint,
+19883 tests and the build were all green - **but git, grep and ripgrep then
+skip the file silently.** This repo leans on source-text tests because vitest
+is node-env and renders no component, so the file dropped out of its own wiring
+tests and out of the emoji scan while every gate stayed green.
+
+A repo-wide scan found twelve affected files: five with control bytes, seven
+with a PowerShell BOM. Item 10 above recorded this same class from an earlier
+occurrence and did not prevent it - and that entry ITSELF contained a raw NUL,
+which is the actual reason `grep -a` had become "required" on this file.
+
+A prose note cannot catch a byte-level hazard.
+`src/source-bytes.structure.test.ts` now does, reporting file and line.
+Sabotaged three ways - reintroduced NUL, reintroduced BOM, emptied file list -
+each red. The NUL sabotage was briefly invisible because grep refused to read
+vitest's own output once it contained the byte, which is the bug demonstrating
+itself.

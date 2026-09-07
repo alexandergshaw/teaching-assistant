@@ -214,6 +214,12 @@ export interface CourseStudentRecord {
    */
   readonly onRoster: boolean;
 
+  /** How this student was identified - see StudentIdentitySource. Carried per
+   * student rather than per assembly because one assembly can mix them: a
+   * course can have cached ids for some students and only roster names for
+   * the rest. */
+  readonly identitySource: StudentIdentitySource;
+
   readonly grades: Presence<StudentGradeSummary>;
   readonly submissions: Presence<StudentSubmissionSummary>;
   readonly discussion: Presence<StudentDiscussionActivity>;
@@ -281,6 +287,80 @@ export interface CourseAnnouncementBrief {
 
 /** Which tier of data an assembly holds. The cheap tier answers the concern
  * question completely and touches no student writing at all. */
+/**
+ * WHY THE APP COULD NOT REACH AN LMS, when it could not.
+ *
+ * There is no single "offline" state in this app - there are four, and they
+ * already fail differently, so collapsing them would mean telling an
+ * instructor to connect Canvas when they already have and it is merely down.
+ *
+ * `no-credential` deliberately does NOT distinguish "no such institution",
+ * "half-configured" and "you never connected" - that indistinguishability is a
+ * security property of the credential resolver and must not be unpicked here
+ * to produce a friendlier message.
+ */
+export type LmsUnavailableReason =
+  /** No stored credential for this user and institution. */
+  | "no-credential"
+  /** The course has no Canvas URL at all - an export-only course, which is a
+   * normal kind of course here rather than a broken one. */
+  | "no-lms-course"
+  /** Configured and reachable in principle, but this attempt failed. */
+  | "unreachable";
+
+/**
+ * Whether this assembly was built against a live LMS, and if not, why.
+ *
+ * SEPARATE FROM `AssemblyTier` ON PURPOSE. Tier says how MUCH was fetched;
+ * this says whether fetching was possible at all. Without it an offline
+ * assembly is indistinguishable from a deliberately cheap one unless you
+ * inspect every source's `Presence` reason one by one - so the instructor
+ * would see a screen of identical "not enough information" rows with nothing
+ * saying why.
+ *
+ * Detected, never chosen. Asking the instructor to select "offline" would be
+ * asking them to already know the thing they are asking this tool to tell
+ * them, and it would duplicate state the credential resolver already knows.
+ */
+export type LmsConnection =
+  | { readonly state: "live" }
+  | { readonly state: "unavailable"; readonly reason: LmsUnavailableReason; readonly detail: string };
+
+/**
+ * How we know who a student is.
+ *
+ * OFFLINE, `(name, course)` IS THE KEY, and that is not a compromise of AC1.
+ * AC1 forbids joining on a display name in the LIVE case, where a sound
+ * numeric id exists and a name would be strictly worse for no gain. Offline
+ * there is no id to prefer: the choice is a name or no feature, and AC1 was
+ * never an argument for the second. Within one course, against the
+ * instructor's own roster, a name is a workable key - and the instructor
+ * knows their own students, which is what makes it workable rather than
+ * merely necessary.
+ *
+ * What does NOT relax is collision handling. Two students called Alex Chen in
+ * one section is uncommon and entirely real, and a silent merge would report
+ * one of them on the other's work. `ambiguous-name` exists so that case stops
+ * and asks instead of guessing - the same four-outcome discipline the grading
+ * tool already applies to this exact problem.
+ */
+export type StudentIdentitySource =
+  /** Resolved live, from the LMS. The strongest form. */
+  | "lms-roster"
+  /** A numeric Canvas id cached on the course row by the repo-binding
+   * workflow. A FACT from a real prior call, not a match - categorically
+   * different from a name - but its age is unknowable offline and its
+   * coverage is partial by construction. */
+  | "cached-canvas-id"
+  /** Matched by name against this course's own roster, exactly, after
+   * canonicalising case, whitespace and "Last, First" order. */
+  | "course-roster-name"
+  /** The name matched more than one roster entry. Nothing is attributed until
+   * the instructor says which student is meant. NEVER resolved by picking. */
+  | "ambiguous-name"
+  /** The instructor attached this material to this student themselves. */
+  | "instructor-attached";
+
 export type AssemblyTier = "signals" | "signals+text";
 
 export interface CourseIntelAssembly {

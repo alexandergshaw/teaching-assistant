@@ -543,7 +543,26 @@ export function buildCourseIntelAssembly(input: JoinInput): CourseIntelAssembly 
       }
     }
 
-    return { userId, index, name, sortableName, onRoster, grades, submissions, discussion, messages, lastActivityAt };
+    // A live join always resolved this student against the LMS roster, so
+    // that is the identity source, and an off-roster participant is still
+    // roster-derived in the sense that matters: we know their numeric id
+    // because the LMS told us, not because a name matched. The offline
+    // sources (a cached binding, a course roster name, an instructor
+    // attachment) are set by whatever builds an offline assembly, never here.
+    const identitySource = "lms-roster" as const;
+    return {
+      userId,
+      index,
+      name,
+      sortableName,
+      onRoster,
+      identitySource,
+      grades,
+      submissions,
+      discussion,
+      messages,
+      lastActivityAt,
+    };
   });
 
   if (offRosterIds.length > 0) {

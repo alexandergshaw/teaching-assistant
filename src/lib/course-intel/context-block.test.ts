@@ -50,6 +50,7 @@ function student(over: Partial<CourseStudentRecord> & { index: number; userId: n
     name: `Student ${over.index}`,
     sortableName: `Student ${over.index}`,
     onRoster: true,
+    identitySource: "lms-roster",
     grades: { state: "loaded", value: { currentScore: 61, finalScore: 58 } },
     submissions: submissions(),
     discussion: { state: "none" },

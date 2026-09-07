@@ -27,6 +27,9 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
     environment: "node",
+    // Blocks real network calls - see vitest.setup.ts for the sabotage check
+    // that passed for the wrong reason and prompted it.
+    setupFiles: ["./vitest.setup.ts"],
     // Tests must be hermetic: blank out the Supabase config so database-backed
     // code paths always take their in-repo fallbacks under vitest.
     env: {

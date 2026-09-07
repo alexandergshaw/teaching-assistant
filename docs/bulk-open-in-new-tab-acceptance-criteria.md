@@ -232,3 +232,29 @@ instance and not from any fixture in this repo. Which Canvas version the
 target institution runs is unknown. The safe implementation (never send
 `external_url`) was chosen precisely so the feature does not depend on that
 answer.
+
+## Recorded debt: `newTab` shipped OPTIONAL, not required
+
+AC3 specifies `newTab: boolean | null` on `CanvasModuleItem`. It shipped as
+`newTab?: boolean | null`.
+
+The reason was scope, not design: making it required broke `tsc` across roughly
+fifteen test files outside the implementing group's allow-list, all of which
+construct literal `CanvasModuleItem` fixtures. Editing files owned by
+concurrent siblings mid-wave is how a wave gate stops meaning anything, so the
+field was widened instead.
+
+**The cost, stated so nobody discovers it the hard way.** `undefined` and
+`null` now both mean "not applicable here", and a consumer that checks
+`item.newTab === null` will silently miss the `undefined` case. `mapModuleItem`
+always sets a real `boolean | null`, so `undefined` can only come from a test
+fixture - which means the bug would appear in a test and not in production,
+the least useful place for it.
+
+**The fix is mechanical and small:** add `newTab: null` to the fixtures that
+need it and tighten the field to required. It was deferred only because a
+sibling agent held some of those files at the time. Do it in the next change
+that touches that directory, not as a standing exception.
+
+Callers in the meantime should read the value as `item.newTab ?? null` rather
+than comparing to `null` directly.

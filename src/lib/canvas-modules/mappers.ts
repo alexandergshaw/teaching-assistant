@@ -19,6 +19,11 @@ export function mapModuleItem(raw: RawModuleItem, fallbackModuleId: number): Can
       typeof raw.content_details?.points_possible === "number" ? raw.content_details.points_possible : null,
     htmlUrl: raw.html_url ?? null,
     externalUrl: raw.external_url ?? null,
+    // Canvas OMITS `new_tab` (rather than sending `false`) for every item
+    // type it does not apply to, so `?? null` is a faithful mapping of what
+    // the response actually distinguishes - not a defensive default. `null`
+    // here means "not applicable"; `false` means "applicable, currently off".
+    newTab: raw.new_tab ?? null,
   };
 }
 

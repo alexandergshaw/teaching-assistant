@@ -5,8 +5,7 @@ import {
 } from "../canvas-core";
 import { fetchWithThrottleRetry, isCanvasRateLimitStatus, type ThrottleBudget } from "../canvas-throttle";
 import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
-import { canvasFetch, type CanvasFetchResult } from "../canvas-fetch";
-import type { IncomingHttpHeaders } from "node:http";
+import { canvasGet, canvasRequest } from "../canvas-fetch-response";
 
 export type CourseContext = {
   courseId: string;
@@ -29,51 +28,21 @@ export type CourseContext = {
 // The canvasFetch adapter - the pattern the rest of this migration follows.
 //
 // Every bearer-carrying request in this file used to go straight to the
-// platform `fetch`. It now goes through `canvasFetch` (src/lib/canvas-fetch.ts),
-// which pins the dialled connection to a resolved-and-classified address (SEC1,
-// closing DNS rebinding) and never follows a redirect blind (SEC2). Neither
-// property is optional, and neither is a drop-in: `canvasFetch` returns a
-// discriminated union, not a `Response`, so every call site's response
-// handling has to be rewritten, not renamed. The three functions below
-// (`canvasGet`, `canvasRequest`, `canvasFetchResultToResponse`) are that
-// rewrite, done once, so `fetchAll`/`writeJson`/`fetchJson` keep their EXACT
-// existing signatures and their exact existing `.ok`/`.status`/`.json()`
-// call shape below this line - only what sits behind that call shape changed.
-//
-// THE FAILURE MAPPING, AND WHY EACH HALF IS A THROW, NOT A VALUE.
-// `canvasFetch` hands back three shapes: `ok: true` (a completed HTTP
-// exchange - any status), `kind: "host-not-allowed"`, and
-// `kind: "unreachable"`. Every existing caller in this file (and every
-// existing caller of `fetchAll`/`writeJson`/`fetchJson`, unchanged) already
-// knows how to handle exactly two outcomes: a `Response` it can call `.ok`/
-// `.status`/`.json()` on, or a thrown `Error` it either lets propagate,
-// wraps in `canvasError`, or catches (`fetchJson`, `safeFetchAll`). So
-// `ok: true` maps onto a real `Response` - never a look-alike object - and
-// both failure kinds map onto a throw, for two DIFFERENT reasons:
-//   - `"unreachable"` is already time-flattened upstream (SEC9/E-UX4)
-//     specifically so a network-layer failure's latency carries no signal.
-//     `fetchWithThrottleRetry` only retries a completed `Response` whose
-//     status matches its predicate - it never retries a rejected `attempt()`
-//     (see its own doc comment: "a request that failed mid-flight might have
-//     been applied and is deliberately left alone"). Throwing here, rather
-//     than inventing some sentinel `Response`, is what makes an unreachable
-//     host behave EXACTLY like the old rejected-`fetch` case: propagate once,
-//     never retried. Turning it into a value the retry loop could inspect
-//     would risk exactly the retry-on-network-failure this module's own doc
-//     comment forbids.
-//   - `"host-not-allowed"` is a configuration or attack signal decided
-//     entirely by `canvasFetch`'s own classifier before any socket opens -
-//     retrying it would just repeat a decision that cannot change. Throwing
-//     keeps it out of the retry loop for the same reason.
-// Neither thrown message ever carries a raw provider or network string
-// (docs/lms-credentials-acceptance-criteria.md SEC4 - a token embedded in a
-// logged error message is exactly what the run-log scrubber exists to
-// prevent): `"unreachable"` carries no text of its own to leak, so the thrown
-// message here is a fixed literal; `"host-not-allowed"`'s `reason` is text
-// `canvasFetch` itself composed from its own classification (never an
-// upstream response body or a raw `Error#message`), so surfacing it is safe
-// by the same argument `canvas-fetch.ts`'s own doc comment makes for why that
-// `reason` string exists at all.
+// platform `fetch`. It now goes through `canvasFetch` (src/lib/canvas-fetch.ts)
+// via `canvasGet`/`canvasRequest` (src/lib/canvas-fetch-response.ts), which
+// pins the dialled connection to a resolved-and-classified address (SEC1,
+// closing DNS rebinding) and never follows a redirect blind (SEC2). Those two
+// functions, plus the `canvasFetch`-result-to-`Response`/throw mapping behind
+// them, used to live in this file; they are now extracted to
+// `canvas-fetch-response.ts` so every OTHER Canvas module migrating onto
+// `canvasFetch` shares this one adapter rather than growing its own,
+// slightly different copy of a security-critical mapping. See that file's
+// own doc comment for the full failure-mapping reasoning (the discriminated
+// union `canvasFetch` returns, and why each failure kind is a throw, not a
+// value) - it applies unchanged here. `fetchAll`/`writeJson`/`fetchJson`
+// below keep their EXACT existing signatures and their exact existing
+// `.ok`/`.status`/`.json()` call shape - only what sits behind that call
+// shape changed.
 //
 // TIMEOUT: LEFT UNSPECIFIED, ON PURPOSE - NOT AN OVERSIGHT.
 // `canvasFetch`'s own doc comment argues three different `timeoutMs` bounds
@@ -100,89 +69,6 @@ export type CourseContext = {
 // through `CourseContext` should pass it as `timeoutMs` here rather than
 // re-deriving this reasoning.
 // ============================================================================
-
-/** Every HTTP status the Fetch spec forbids from carrying a body. Node's
- * `Response` constructor throws a `TypeError` if given a non-null body for
- * one of these - verified directly against this repo's Node version - so
- * this set exists specifically to null out `canvasFetch`'s body (a `Buffer`,
- * possibly zero-length, never `null`) before it reaches `new Response(...)`.
- * `101`/`103` cannot occur here in practice (this is the response to an
- * already-completed exchange, never an interim status), but they are
- * included for the same reason `canvas-fetch.ts` itself is written
- * defensively: this is the platform's own null-body list, not a guess at
- * which subset Canvas happens to use today. */
-const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
-
-/**
- * Converts one `IncomingHttpHeaders` object (Node's lower-cased, possibly-
- * multi-valued header shape - what `canvasFetch` returns) into a `Headers`
- * instance, so every existing caller's `response.headers.get("link")` keeps
- * working unchanged. A header repeated by the server (an array value) is
- * appended, not overwritten, matching how a real multi-value response header
- * would already behave through the platform's own `fetch`.
- */
-function toResponseHeaders(headers: IncomingHttpHeaders): Headers {
-  const result = new Headers();
-  for (const [key, value] of Object.entries(headers)) {
-    if (value === undefined) {
-      continue;
-    }
-    if (Array.isArray(value)) {
-      for (const one of value) {
-        result.append(key, one);
-      }
-    } else {
-      result.set(key, value);
-    }
-  }
-  return result;
-}
-
-/**
- * Maps one `canvasFetch` result onto exactly what every function below this
- * point already expects: a real `Response` for a completed exchange, or a
- * thrown `Error` for either failure kind. See the section header above for
- * the full reasoning - this function's body is just that reasoning, applied.
- */
-function canvasFetchResultToResponse(result: CanvasFetchResult): Response {
-  if (result.ok) {
-    // `Response`'s DOM-derived `BodyInit` type wants a `Uint8Array` backed by
-    // a real `ArrayBuffer`, never Node's `Buffer` (whose `.buffer` is typed
-    // `ArrayBufferLike`, i.e. possibly a `SharedArrayBuffer` - a mismatch TS
-    // reports even though a `Buffer` is trivially a `Uint8Array` at runtime).
-    // `new Uint8Array(result.body)` copies into exactly that shape; response
-    // bodies are already capped at `MAX_RESPONSE_BYTES` (canvas-fetch.ts), so
-    // the copy is bounded and cheap.
-    const body = NULL_BODY_STATUSES.has(result.status) ? null : new Uint8Array(result.body);
-    return new Response(body, { status: result.status, headers: toResponseHeaders(result.headers) });
-  }
-
-  if (result.kind === "host-not-allowed") {
-    throw new Error(`Canvas request refused: ${result.reason}`);
-  }
-
-  // result.kind === "unreachable": a fixed literal, never anything derived
-  // from the underlying failure - see SEC4 note above.
-  throw new Error("Canvas did not respond.");
-}
-
-/** One bearer-carrying request through `canvasFetch`, converted to the
- * `Response` shape every caller below already handles. `init` never carries
- * an `Authorization` header - `canvasFetch` attaches the bearer itself from
- * `token`, and drops a caller-supplied `Authorization` rather than trusting
- * two sources of truth to agree (see its own doc comment). */
-async function canvasRequest(
-  url: string,
-  init: { method?: string; headers?: Readonly<Record<string, string>>; body?: string },
-  token: string
-): Promise<Response> {
-  const result = await canvasFetch(url, init, { token });
-  return canvasFetchResultToResponse(result);
-}
-
-async function canvasGet(url: string, token: string): Promise<Response> {
-  return canvasRequest(url, {}, token);
-}
 
 // ============================================================================
 // Public helpers - signatures unchanged from before the migration.

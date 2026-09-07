@@ -5,6 +5,7 @@
 import { canvasError, parseNextLink, type CanvasInstitution } from "../canvas-core";
 import { isZeroableAssignment } from "../grade-zeros";
 import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
+import { canvasGet } from "../canvas-fetch-response";
 
 /** A non-submitter for an assignment (missing submission past due date). */
 export interface CanvasNonSubmitter {
@@ -58,11 +59,9 @@ export async function listAssignmentNonSubmitters(
   nowIso: string
 ): Promise<CanvasMissingResult> {
   // Get assignment metadata
-  const assignmentResponse = await fetch(
+  const assignmentResponse = await canvasGet(
     `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    token
   );
   if (!assignmentResponse.ok) {
     throw canvasError(assignmentResponse.status, institution);
@@ -123,9 +122,7 @@ export async function listAssignmentNonSubmitters(
         `Canvas pagination exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages while reading submissions for assignment ${assignmentId} - refusing to follow further "next" links.`
       );
     }
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -204,9 +201,7 @@ export async function listAssignmentBriefsWithDue(
         `Canvas pagination exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages while listing assignments for course ${courseId} - refusing to follow further "next" links.`
       );
     }
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }

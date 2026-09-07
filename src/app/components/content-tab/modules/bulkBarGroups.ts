@@ -471,6 +471,24 @@ export interface BulkBarFacts {
    * the two is exactly the mistake F6 was written to head off.
    */
   releaseReviewOpen: boolean;
+  /** `bulkItemActions.eligibleNewTabCount()` (docs/bulk-open-in-new-tab-
+   * acceptance-criteria.md) - count of selected items whose Canvas type can
+   * carry the `new_tab` flag (ExternalUrl/ExternalTool only). Drives the
+   * "items" group's Open-in-a-new-tab/Open-in-the-same-tab hint and
+   * disabled reason (BulkItemsSection.tsx), read there as `?? 0`.
+   *
+   * OPTIONAL, unlike every other field on this interface - the one
+   * deliberate exception, and the reason is mechanical, not design: this
+   * file's own test suite (bulkBarGroups.test.ts) builds every BulkBarFacts
+   * fixture from one `baseFacts()` object literal, and that file already
+   * sits at this repo's hard-ratcheted 1026-line ceiling
+   * (file-size-ceiling.structure.test.ts) with a comment stating it must
+   * not grow by even one line. A required field here would force a new
+   * line onto that literal and fail that gate. Every REAL caller
+   * (buildBulkBarFacts.ts) sets this field unconditionally; only synthetic
+   * test facts omit it, which is exactly why every reader treats absence as
+   * 0 rather than as a fact this bar is uncertain about. */
+  eligibleNewTabCount?: number;
 }
 
 /** Per-group runtime state `groupOpen` needs, supplied by the group's OWN

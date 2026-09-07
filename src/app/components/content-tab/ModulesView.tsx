@@ -673,6 +673,7 @@ export function ModulesView({
                     onEditPage={onEditPage}
                     onPageEditorTrigger={onPageEditorTrigger}
                     bulkPublish={bulkItemActions.bulkPublish}
+                    bulkSetNewTab={bulkItemActions.bulkSetNewTab}
                     descSharedState={bulkItemActions.descSharedState}
                     descPartialCounts={bulkItemActions.descPartialCounts}
                     bulkItemsDescription={bulkItemActions.bulkItemsDescription}

@@ -95,20 +95,39 @@ const RUBRIC_NEAR_DEAD = {
   recommendation: "Collapse to a single inline sentence when rubricsCount is 0 instead of a full-width disabled select.",
 };
 
-/** BulkItemsSection's "Items" row (29 controls total in that file - see this
- * file's header for the reconciliation). Publish/Unpublish are fan-out-write
- * per D2's correction, not the benign baseline the acceptance criteria's own
- * first draft assumed. */
+/** BulkItemsSection's "Items" row (32 controls total in that file - after
+ * AC5's itemsGenerateAssociateRubric (29 -> 30) and this file's own
+ * itemsOpenInNewTab/itemsOpenInSameTab (30 -> 32); see this file's header
+ * for the reconciliation). Publish/Unpublish are fan-out-write per D2's
+ * correction, not the benign baseline the acceptance criteria's own first
+ * draft assumed. */
 const itemsGroup: BulkBarGroupDef = {
   id: "items",
   label: "Items",
   disclosure: true,
   defaultOpen: true,
-  consequenceTag: "Publish/Unpublish apply to every selected item at once; a later Unpublish cannot restore a mixed prior state.",
+  consequenceTag:
+    "Publish/Unpublish apply to every selected item at once; a later Unpublish cannot restore a mixed prior state. Open in a new tab / Open in the same tab set the new-tab flag on every ELIGIBLE selected item at once (external links and external tool items only - Canvas applies no server-side type guard of its own, so this client-side eligibility check is the only one that exists).",
   visible: (f) => f.itemCount > 0,
   controls: [
     { id: "itemsPublish", kind: "button", label: "Publish", tier: "fan-out-write", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: ONE_CLICK_UNPERSISTED },
     { id: "itemsUnpublish", kind: "button", label: "Unpublish", tier: "fan-out-write", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: ONE_CLICK_UNPERSISTED },
+    // docs/bulk-open-in-new-tab-acceptance-criteria.md AC1/AC2: SET (never
+    // toggle) every ELIGIBLE selected item's Canvas `new_tab` flag at once -
+    // two explicit actions rather than one ambiguous toggle, since a mixed
+    // selection (some on, some off) has no sensible "toggle" meaning.
+    // Always visible whenever the group is (matching Publish/Unpublish
+    // immediately above); a selection with zero eligible items is handled
+    // by DISABLING the control with its reason visible
+    // (BulkItemsSection.tsx), never by a narrower `visible` predicate - see
+    // this repo's standing "disabled with the reason visible, never
+    // enabled-then-rejected" rule. Eligibility itself (ExternalUrl/
+    // ExternalTool only) is a real guard, not a nicety: Canvas applies
+    // `new_tab` with no content-type check server-side, so a write against
+    // an ineligible item would otherwise be silently accepted and 200-OK'd -
+    // see ./bulkNewTabSummary.ts's own header for the full citation.
+    { id: "itemsOpenInNewTab", kind: "button", label: "Open in a new tab", tier: "fan-out-write", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: ONE_CLICK_UNPERSISTED },
+    { id: "itemsOpenInSameTab", kind: "button", label: "Open in the same tab", tier: "fan-out-write", visible: (f) => f.itemCount > 0, persistKey: null, unpersistedReason: ONE_CLICK_UNPERSISTED },
     {
       id: "itemsEditInDetailOrPage",
       kind: "button",

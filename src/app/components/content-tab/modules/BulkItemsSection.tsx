@@ -20,6 +20,13 @@ import { bulkRemoveFromModuleBannerText, bulkRemoveFromModuleButtonLabel } from 
 // that prop's own doc comment on BulkItemsSectionProps.
 function NOOP_CLEAR_RUBRIC_RUN_LOG(): void {}
 
+// Visually-rendered (not just aria-only) reason/hint for the two new-tab
+// controls in the "items" group below - shows a count when eligible items
+// exist, the disabled reason when none do. One static id is enough (this
+// section renders once per bar), matching "bulkItemsSection-gate-heading"'s
+// own hardcoded-id precedent a few lines down in this file.
+const NEW_TAB_REASON_ID = "bulkItemsSection-newtab-reason";
+
 // This section owns six of the bar's thirteen groups (docs/bulk-bar-
 // reorganization-acceptance-criteria.md, section 3b/D5): "items", "content",
 // "dueDates", "grading", "submissionType", "move". The catalog in
@@ -96,6 +103,22 @@ export interface BulkItemsSectionProps {
    * the SAME ref (decision 4). */
   onPageEditorTrigger: (trigger: HTMLElement) => void;
   bulkPublish: (published: boolean) => void;
+  /**
+   * docs/bulk-open-in-new-tab-acceptance-criteria.md AC1/AC2 - the write
+   * behind the "Open in a new tab" / "Open in the same tab" controls.
+   *
+   * REQUIRED, DELIBERATELY. It shipped optional-with-a-no-op-default for one
+   * wave, because this file's caller (ModulesView.tsx) was outside that
+   * chunk's file set - and the result was a feature that COMPILED, rendered
+   * the right enabled/disabled state and the right count, and wrote nothing
+   * at all when clicked. Every gate stayed green over a dead control.
+   *
+   * Making it required is what stops that recurring: a caller that forgets to
+   * pass it now fails to compile instead of shipping a button that does
+   * nothing. Do not reintroduce a default here to make some future caller
+   * compile - wire the caller.
+   */
+  bulkSetNewTab: (requestedNewTab: boolean) => void;
   descSharedState: "idle" | "loading" | "same" | "mixed" | "partial";
   /** S2: populated only while descSharedState === "partial" - how many of
    * the selected gradables' current descriptions could not be read, out of
@@ -211,6 +234,7 @@ export function BulkItemsSection({
   onEditPage,
   onPageEditorTrigger,
   bulkPublish,
+  bulkSetNewTab,
   descSharedState,
   descPartialCounts,
   bulkItemsDescription,
@@ -324,6 +348,65 @@ export function BulkItemsSection({
           <Button variant="outlined" size="small" disabled={opBusy} onClick={() => bulkPublish(false)}>
             Unpublish
           </Button>
+          {/* docs/bulk-open-in-new-tab-acceptance-criteria.md AC1/AC2: SET
+              (never toggle) every ELIGIBLE selected item's Canvas `new_tab`
+              flag. `eligibleCount` drives both buttons' state AND the
+              hint/reason span below - one number, never two things that
+              could disagree. `aria-disabled` (never the native `disabled`
+              prop) is used for the eligibility gate specifically, matching
+              ModuleItemRow.tsx's own "Remove" button precedent and its
+              comment: a native `disabled` button drops out of the tab
+              order entirely, so a keyboard/screen-reader user would never
+              land on it and never hear why it is inert. `opBusy` still uses
+              the native `disabled` prop, same as every other button in
+              this group, since that is a transient state with nothing to
+              explain. */}
+          {(() => {
+            const eligibleCount = facts.eligibleNewTabCount ?? 0;
+            const noneEligible = eligibleCount === 0;
+            return (
+              <span className={styles.bulkField}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={opBusy}
+                  aria-disabled={noneEligible ? "true" : undefined}
+                  aria-describedby={noneEligible ? NEW_TAB_REASON_ID : undefined}
+                  sx={{ opacity: noneEligible ? 0.55 : 1 }}
+                  onClick={() => {
+                    if (noneEligible) return;
+                    bulkSetNewTab(true);
+                  }}
+                >
+                  Open in a new tab
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={opBusy}
+                  aria-disabled={noneEligible ? "true" : undefined}
+                  aria-describedby={noneEligible ? NEW_TAB_REASON_ID : undefined}
+                  sx={{ opacity: noneEligible ? 0.55 : 1 }}
+                  onClick={() => {
+                    if (noneEligible) return;
+                    bulkSetNewTab(false);
+                  }}
+                >
+                  Open in the same tab
+                </Button>
+                {/* Always rendered (never a hover-only title) - shows a
+                    COUNT once at least one selected item is eligible, and
+                    the DISABLED REASON when none are, matching the
+                    "submissionType" group's own selectedAssignmentCount
+                    hint immediately below in this file. */}
+                <span id={NEW_TAB_REASON_ID} className={styles.bulkHint}>
+                  {noneEligible
+                    ? "None of the selected items support this - only external links and external tool items do."
+                    : `${eligibleCount} of ${facts.itemCount} selected item${facts.itemCount === 1 ? "" : "s"} can open in a new tab.`}
+                </span>
+              </span>
+            );
+          })()}
           {selectedItems().length === 1 &&
             (() => {
               const one = selectedItems()[0];

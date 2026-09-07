@@ -35,6 +35,7 @@
 
 import { canvasError, resolveCourse } from "../canvas-core";
 import { courseFileDownloadUrl } from "../canvas-url";
+import { canvasRequest } from "../canvas-fetch-response";
 
 export interface AnnouncementImageUploadResult {
   fileId: number;
@@ -70,14 +71,15 @@ export async function uploadAnnouncementImage(
   params.append("parent_folder_path", "uploads");
   params.append("on_duplicate", "rename");
 
-  const presign = await fetch(`${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${ctx.token}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+  const presign = await canvasRequest(
+    `${ctx.baseUrl}/api/v1/courses/${ctx.courseId}/files`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
     },
-    body: params.toString(),
-  });
+    ctx.token
+  );
   if (!presign.ok) {
     throw canvasError(presign.status, ctx.institution);
   }
@@ -91,6 +93,12 @@ export async function uploadAnnouncementImage(
 
   // Step 2 (+ transparent step 3 via fetch's redirect-follow, see header):
   // POST the bytes to the pre-signed URL, carrying upload_params unmodified.
+  // NOT routed through canvasRequest/canvasFetch (../canvas-fetch-response.ts):
+  // this call carries no Authorization header at all - the pre-signed
+  // upload_params ARE the credential for this hop - so it is not
+  // bearer-carrying and canvasFetch's forced bearer attachment would be
+  // wrong here. It also POSTs a multipart FormData body, which
+  // CanvasFetchInit's `body?: string | Buffer` does not accept.
   const form = new FormData();
   for (const [key, value] of Object.entries(ticket.upload_params)) form.append(key, value);
   form.append("file", new Blob([new Uint8Array(buffer)], { type: contentType }), fileName);

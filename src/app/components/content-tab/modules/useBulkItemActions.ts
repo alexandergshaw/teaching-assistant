@@ -38,6 +38,11 @@ import {
 import { planModuleShiftMoves, planMoveToModulePositions } from "./bulkItemModulePlacementPlan";
 import { computeSelectedGradables, groupIdsByKind } from "./bulkItemSelectionQueries";
 import { createBulkOpRunners } from "./bulkOpRunners";
+// docs/bulk-open-in-new-tab-acceptance-criteria.md AC1/AC2 - the runner (a
+// NEW LEAF, not grown here - see its own header) and the eligibility
+// predicate it shares with the count below.
+import { runBulkNewTabAction } from "./bulkNewTabRunner";
+import { isEligibleForNewTab } from "./bulkNewTabSummary";
 import { classifyDescriptionShare, type DescSharedState } from "./descSharedState";
 import type { RubricRunLogEntry } from "@/lib/rubric-run-log";
 // The run-log concern (state, persistence, recordRubricRunLog/
@@ -120,6 +125,14 @@ export interface UseBulkItemActionsReturn {
   bulkRubric: () => void;
   openRubricBuilder: () => void;
   selectedAssignmentCount: () => number;
+  /** docs/bulk-open-in-new-tab-acceptance-criteria.md - count of selected
+   * items whose Canvas type can carry `new_tab` (ExternalUrl/ExternalTool
+   * only). Same "count function" shape as selectedAssignmentCount above. */
+  eligibleNewTabCount: () => number;
+  /** Sets every eligible selected item's `new_tab` flag to `requestedNewTab`
+   * (a SET, never a toggle - AC2). Ineligible items are skipped, not
+   * failed; see ./bulkNewTabRunner.ts for the classify-before-write order. */
+  bulkSetNewTab: (requestedNewTab: boolean) => void;
   bulkUpdateSubmissionType: () => void;
   bulkSetDescription: () => void;
   bulkAddQuestionsToQuizzes: () => void;
@@ -719,6 +732,29 @@ export function useBulkItemActions(
     return selectedItems().filter(({ item }) => item.type === "Assignment" && typeof item.contentId === "number").length;
   };
 
+  // docs/bulk-open-in-new-tab-acceptance-criteria.md AC1/AC2 - the pure
+  // classify-then-write orchestration lives in ./bulkNewTabRunner.ts (a NEW
+  // LEAF, not grown here - see that file's own header). This hook only
+  // binds courseUrl/acronym into the Canvas write and hands the result to
+  // setNote/reload, the same shape every other action here already follows.
+  const eligibleNewTabCount = (): number =>
+    selectedItems().filter(({ item }) => isEligibleForNewTab(item.type)).length;
+
+  const bulkSetNewTab = (requestedNewTab: boolean) => {
+    const items = selectedItems();
+    if (items.length === 0) return;
+    void (async () => {
+      setOpBusy(true);
+      setNote(null);
+      const { note } = await runBulkNewTabAction(items, requestedNewTab, (it, moduleId, newTab) =>
+        updateModuleItemAction(courseUrl, moduleId, it.id, { newTab }, acronym)
+      );
+      setOpBusy(false);
+      setNote(note);
+      reload();
+    })();
+  };
+
   // Update submission type on all selected assignments.
   const bulkUpdateSubmissionType = () => {
     if (bulkSubType === "") {
@@ -894,7 +930,7 @@ export function useBulkItemActions(
     bulkSubType, setBulkSubType,
     confirmDeleteContent,
     bulkPublish, bulkSetDue, bulkShiftDue, bulkStaggerDue, bulkShiftModules, bulkMoveToModule,
-    bulkSetPoints, bulkRubric, openRubricBuilder, selectedAssignmentCount, bulkUpdateSubmissionType,
+    bulkSetPoints, bulkRubric, openRubricBuilder, selectedAssignmentCount, eligibleNewTabCount, bulkSetNewTab, bulkUpdateSubmissionType,
     bulkSetDescription, bulkAddQuestionsToQuizzes, bulkRemoveFromModule, confirmRemoveFromModule, bulkDeleteContent,
   };
 }

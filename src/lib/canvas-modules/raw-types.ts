@@ -20,6 +20,14 @@ export interface RawModuleItem {
   content_id?: number | null;
   html_url?: string | null;
   external_url?: string | null;
+  /**
+   * "Open in a new tab", emitted by Canvas from the SAME conditional block as
+   * `external_url` - present only for ExternalUrl/ExternalTool items; the key
+   * is OMITTED (not sent as `false`) for every other type. Canvas's published
+   * docs annotate this "(only for 'ExternalTool' type)", but the serializer
+   * source emits it for ExternalUrl too - the docs are stale, not this field.
+   */
+  new_tab?: boolean;
   content_details?: { due_at?: string | null; points_possible?: number | null } | null;
 }
 

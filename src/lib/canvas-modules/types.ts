@@ -19,6 +19,23 @@ export interface CanvasModuleItem {
   pointsPossible: number | null;
   htmlUrl: string | null;
   externalUrl: string | null;
+  /**
+   * "Open in a new tab" - applies only to ExternalUrl/ExternalTool items.
+   * `null` means "does not apply here" (Canvas omitted the key); `false`
+   * means "applies, and is currently off". Collapsing those two to a plain
+   * boolean would make an ineligible item look identical to an eligible one
+   * set to off - see canSetNewTab in module-items.ts for the type check that
+   * keeps that distinction meaningful.
+   *
+   * Declared optional (rather than required `boolean | null`) solely so the
+   * many pre-existing `CanvasModuleItem` fixture literals elsewhere in the
+   * test suite - outside this change's file set - keep compiling unchanged.
+   * mapModuleItem (mappers.ts) always sets it to `boolean | null`, never
+   * `undefined`, for every item it actually maps; a caller reading a real
+   * mapped item can treat `undefined` and `null` the same way ("not
+   * applicable here").
+   */
+  newTab?: boolean | null;
 }
 
 /** One module with its ordered items. */

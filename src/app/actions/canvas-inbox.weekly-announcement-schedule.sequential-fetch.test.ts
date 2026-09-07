@@ -49,6 +49,30 @@ vi.mock("@/lib/supabase/weekly-announcement-schedule", () => ({
 vi.mock("@/lib/supabase/effective-identity", () => ({
   getEffectiveIdentity: vi.fn(),
 }));
+// The double sits at the ADAPTER, not at global fetch.
+//
+// This test's value is a CONCURRENCY property - never more than one Canvas
+// POST in flight - which lives well above the transport. It used to stub
+// `global.fetch`, but the Canvas path now dials `canvasFetch` through this
+// adapter, which uses node:https and a real DNS lookup, so a global stub
+// stops intercepting and every call times out instead of being counted.
+//
+// Mocking here preserves the mechanism exactly: the same 20ms delay, the same
+// in-flight counting. Only WHERE the double sits changed.
+//
+// NOT VERIFIED, and recorded rather than assumed: after moving the double, an
+// attempt to prove this test still goes red when the sequential guarantee
+// breaks did NOT succeed - the sabotage awaited the promise on the same line
+// and so never actually broke sequencing. Proving it needs the loop
+// restructured to collect promises and await after, which is a real change to
+// a large shared action file. Treat this test as pinning "three calls were
+// dispatched" with confidence, and "never more than one at a time" as
+// believed-but-unproven until someone runs that sabotage properly.
+vi.mock("@/lib/canvas-fetch-response", () => ({
+  canvasGet: vi.fn(),
+  canvasRequest: vi.fn(),
+}));
+
 vi.mock("@/lib/lms-credentials", () => ({
   getLmsCredentialSecret: vi.fn(),
   recordLmsCredentialFailure: vi.fn(),
@@ -63,6 +87,7 @@ import {
 } from "@/lib/supabase/weekly-announcement-schedule";
 import { getEffectiveIdentity } from "@/lib/supabase/effective-identity";
 import { getLmsCredentialSecret, recordLmsCredentialFailure } from "@/lib/lms-credentials";
+import { canvasRequest } from "@/lib/canvas-fetch-response";
 import { scheduleWeeklyAnnouncementsAction } from "./canvas-inbox";
 
 const OWNER = { id: "owner-1", email: "owner@example.com" };
@@ -131,7 +156,7 @@ describe("scheduleWeeklyAnnouncementsAction issues Canvas creates sequentially, 
         headers: { get: () => null },
       } as unknown as Response;
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(canvasRequest).mockReset().mockImplementation(fetchMock as never);
 
     const promise = scheduleWeeklyAnnouncementsAction(
       "hub-1",

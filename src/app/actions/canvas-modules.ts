@@ -226,12 +226,19 @@ export async function listAssignmentGroupsAction(
   }
 }
 
-/** Update a module item's title / indent / publish state / position / module. */
+/** Update a module item's title / indent / publish state / position / module / new-tab flag. */
 export async function updateModuleItemAction(
   courseUrl: string,
   moduleId: number,
   itemId: number,
-  fields: { title?: string; indent?: number; published?: boolean; position?: number; targetModuleId?: number },
+  fields: {
+    title?: string;
+    indent?: number;
+    published?: boolean;
+    position?: number;
+    targetModuleId?: number;
+    newTab?: boolean;
+  },
   acronym?: string
 ): Promise<{ ok: true } | { error: string }> {
   try {

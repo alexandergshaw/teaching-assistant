@@ -10,6 +10,7 @@ import {
   assertCanvasSuppliedUrlIsPublic,
   CANVAS_PAGINATION_PAGE_CAP,
 } from "../canvas-remote-url";
+import { canvasGet, canvasRequest } from "../canvas-fetch-response";
 
 /** One announcement, ready for the UI. The message is plain text. */
 export interface CanvasAnnouncement {
@@ -55,9 +56,7 @@ function toAnnouncement(
 /** Fetch the course's display name for a heading. */
 export async function getCourseName(courseUrl: string, code?: string): Promise<string> {
   const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
-  const response = await fetch(`${baseUrl}/api/v1/courses/${courseId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await canvasGet(`${baseUrl}/api/v1/courses/${courseId}`, token);
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }
@@ -71,9 +70,7 @@ export async function getCourseInfo(
   code?: string
 ): Promise<{ name: string; startAt: string | null; syllabusBody: string }> {
   const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
-  const response = await fetch(`${baseUrl}/api/v1/courses/${courseId}?include[]=syllabus_body`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await canvasGet(`${baseUrl}/api/v1/courses/${courseId}?include[]=syllabus_body`, token);
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }
@@ -96,12 +93,10 @@ export async function exportCourseCartridge(
 ): Promise<{ fileName: string; base64: string }> {
   const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
 
-  const exportResponse = await fetch(
+  const exportResponse = await canvasRequest(
     `${baseUrl}/api/v1/courses/${courseId}/content_exports?export_type=common_cartridge&skip_notifications=true`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    { method: "POST" },
+    token
   );
   if (!exportResponse.ok) {
     throw canvasError(exportResponse.status, institution);
@@ -117,9 +112,9 @@ export async function exportCourseCartridge(
   const pollIntervalMs = 5000;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const statusResponse = await fetch(
+    const statusResponse = await canvasGet(
       `${baseUrl}/api/v1/courses/${courseId}/content_exports/${exportData.id}`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      token
     );
     if (!statusResponse.ok) {
       throw canvasError(statusResponse.status, institution);
@@ -165,14 +160,24 @@ export async function exportCourseCartridge(
   // whole operation instead of being retried with the token attached - which
   // is correct, because there is no export worth leaking a credential for.
   // Both fetches dial their guard's RETURNED string, never the raw candidate.
+  //
+  // The canvasFetch migration does NOT change this split - it only hardens
+  // one side of it. The free download stays on the platform's bare `fetch`:
+  // it carries no bearer token, so canvasFetch's DNS-pinning/no-blind-redirect
+  // protections exist to protect a credential this call never sends, and
+  // assertCanvasSuppliedUrlIsPublic already governs the origin it may legally
+  // reach (see that guard's own doc comment on why a hostname-level check is
+  // enough here). The retry, which DOES carry the bearer, is exactly the kind
+  // of bearer-carrying request the rest of this migration moves onto
+  // canvasGet/canvasRequest - it is now further protected against DNS
+  // rebinding and a blind redirect on top of the pre-existing same-origin
+  // guard, and still fires only when the free download already failed.
   const downloadUrl = assertCanvasSuppliedUrlIsPublic(attachment.url);
 
   let attachmentResponse = await fetch(downloadUrl);
   if (!attachmentResponse.ok) {
     const authorizedUrl = assertCanvasSuppliedUrlIsSameOrigin(attachment.url, baseUrl);
-    attachmentResponse = await fetch(authorizedUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    attachmentResponse = await canvasGet(authorizedUrl, token);
     if (!attachmentResponse.ok) {
       throw new Error("Could not download the export from the LMS.");
     }
@@ -223,7 +228,7 @@ export async function listAnnouncements(
         `Canvas pagination exceeded ${CANVAS_PAGINATION_PAGE_CAP} pages while listing announcements for course ${courseId} - refusing to follow further "next" links.`
       );
     }
-    const response: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const response: Response = await canvasGet(url, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -345,16 +350,14 @@ export async function createAnnouncement(
     params.append("delayed_post_at", when.toISOString());
   }
 
-  const response = await fetch(
+  const response = await canvasRequest(
     `${baseUrl}/api/v1/courses/${courseId}/discussion_topics`,
     {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
-    }
+    },
+    token
   );
   if (!response.ok) {
     throw canvasError(response.status, institution);
@@ -405,14 +408,15 @@ export async function createScheduledAnnouncementResilient(
   params.append("delayed_post_at", delayedPostAtIso);
 
   const response = await fetchWithThrottleRetry(() =>
-    fetch(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/x-www-form-urlencoded",
+    canvasRequest(
+      `${baseUrl}/api/v1/courses/${courseId}/discussion_topics`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
       },
-      body: params.toString(),
-    })
+      token
+    )
   );
   if (!response.ok) {
     throw canvasError(response.status, institution);
@@ -444,14 +448,15 @@ export async function updateAnnouncementSchedule(
   params.append("delayed_post_at", delayedPostAtIso);
 
   const response = await fetchWithThrottleRetry(() =>
-    fetch(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/x-www-form-urlencoded",
+    canvasRequest(
+      `${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
       },
-      body: params.toString(),
-    })
+      token
+    )
   );
   if (!response.ok) {
     throw canvasError(response.status, institution);
@@ -475,9 +480,7 @@ export async function getAnnouncementById(
 ): Promise<CanvasAnnouncement | null> {
   const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
   const response = await fetchWithThrottleRetry(() =>
-    fetch(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    canvasGet(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`, token)
   );
   if (response.status === 404) return null;
   if (!response.ok) {

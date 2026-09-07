@@ -134,6 +134,16 @@ export function buildBulkBarFacts({
     moduleCount: selection.selectedModules.size,
     itemCount: selection.selected.size,
     selectedAssignmentCount: bulkItemActions.selectedAssignmentCount(),
+    // docs/bulk-open-in-new-tab-acceptance-criteria.md - see
+    // BulkBarFacts.eligibleNewTabCount's own doc comment (bulkBarGroups.ts)
+    // for why this one field is optional. The `?.()` here is for the SAME
+    // mechanical reason, one level down: buildBulkBarFacts.test.ts (outside
+    // this chunk's file set) builds its `bulkItemActions` fixture as a
+    // partial object cast through `as unknown as UseBulkItemActionsReturn`
+    // that does not implement every method - calling this one directly
+    // would throw for every one of that file's existing test cases, none of
+    // which concern this feature at all.
+    eligibleNewTabCount: bulkItemActions.eligibleNewTabCount?.() ?? 0,
     singleItemEditKind,
     bulkAddType: bulkModuleActions.bulkAddType,
     bulkAddFileContentPresent: bulkModuleActions.bulkAddFileContent.trim() !== "",

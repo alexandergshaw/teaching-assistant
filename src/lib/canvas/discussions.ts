@@ -3,6 +3,7 @@
  */
 
 import { canvasError, htmlToText, type CanvasInstitution } from "../canvas-core";
+import { canvasGet } from "../canvas-fetch-response";
 
 /** A single post or reply by a student in a discussion thread. */
 export interface DiscussionPost {
@@ -89,9 +90,7 @@ export async function fetchDiscussionDueAt(
   topicId: string
 ): Promise<string | null> {
   try {
-    const response = await fetch(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(`${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}`, token);
     if (!response.ok) return null;
     const topic = (await response.json()) as {
       assignment?: { due_at?: string | null } | null;
@@ -129,7 +128,7 @@ export async function fetchDiscussion(
 ): Promise<{ students: CanvasStudentWork[]; dueAt: string | null }> {
   const endpoint = `${baseUrl}/api/v1/courses/${courseId}/discussion_topics/${topicId}/view`;
   const [response, dueAt] = await Promise.all([
-    fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } }),
+    canvasGet(endpoint, token),
     fetchDiscussionDueAt(baseUrl, token, courseId, topicId),
   ]);
   if (!response.ok) {

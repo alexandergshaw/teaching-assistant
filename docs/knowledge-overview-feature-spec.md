@@ -207,5 +207,39 @@ Listed because each cost real debugging:
   character budget, with question-relevance ranking for the Ask path. This is
   adequate up to a few hundred pages and is a lot less machinery.
 - No cross-organisation search. Scope is always one organisation.
-- No automatic regeneration on page edit; staleness is surfaced and the user
-  decides.
+
+## CORRECTION: the summary DOES regenerate itself
+
+An earlier draft of this document said "no automatic regeneration on page
+edit; staleness is surfaced and the user decides." **That was wrong** - it
+described an intention, not the shipped code, and it was written after the
+behaviour had already changed. Anyone building from the earlier text would
+have built a manual-only refresh.
+
+What actually happens:
+
+- Staleness is computed CLIENT-SIDE, as a pure id-keyed set diff between the
+  persisted snapshot and the page list the UI already holds. No clock
+  comparison anywhere - no timestamp parsing, no greater-than. This is
+  deliberate, so staleness cannot freeze between reloads the way a
+  server-computed value did in an earlier version.
+- When a summary is missing or stale, an effect regenerates it AUTOMATICALLY
+  after a 2-second debounce. There is also a manual Regenerate button.
+- The anti-loop guard is the important part, and it is easy to get wrong. The
+  effect is keyed on the exact fingerprint SET of the pages in scope, not on
+  the boolean `stale`. If generation fails - offline, model error, quota -
+  `stale` stays true forever, and a naive "regenerate while stale" effect
+  would retry on every render, silently spending money without end. Having
+  already attempted THIS page set means it is not attempted again until the
+  pages actually change.
+
+**If you are porting this to another app, copy the fingerprint-keyed guard
+along with the auto-refresh.** The auto-refresh without it is a cost leak
+that only shows up when the model is failing - which is exactly when nobody
+is watching the bill.
+
+One caution the original text was accidentally right about, for the wrong
+reason: a 2-second debounce suits a knowledge base an instructor edits a few
+times a month. If your content changes every few minutes, that cadence will
+fire continuous LLM calls nobody asked for. Lengthen the debounce or make it
+manual for that case - the decision belongs to how volatile your data is.

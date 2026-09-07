@@ -1766,3 +1766,123 @@ computation is.
 - The homogeneity assumption is exactly as good as the instructor's own
   consistency, and a course part-graded in two tools produces a wrong missing
   count. Detection helps; it cannot fully close it.
+
+---
+
+# D24. A TOP-LEVEL TAB, NO PICKER, AND THE QUESTION CHOOSES ITS OWN SCOPE
+
+**The request, verbatim (2026-09-07):** "i need course intel as a separate
+parent level tab ... and that tab needs to just contain a textbox to talk to an
+ai, no course picker. the textbox should allow me to ask a question specific to
+a course (i.e. what students are struggling in Ethical Hacking?) or ask a
+question about all courses overall (i.e. what courses have had the least amount
+of items turned in late) and the answer should query all possible course, both
+online and offline"
+
+## D24a. IT MOVES, IT DOES NOT GET ADDED
+
+Course Intel leaves the Manual sub-rail entirely and becomes a seventh
+top-level tab. So this is a MOVE: four registration points added, six removed.
+
+**Adding a top-level tab has its own silent-failure point, and it is the same
+shape as the one that bit the sub-rail version.** `ActiveTab` is a union - tsc
+catches a missing render branch nowhere, but does catch some misuse - while
+`ACTIVE_TAB_VALUES` is a RUNTIME `Set` that `normalizeActiveTab` consults.
+Forget the set and the tab type-checks, the strip renders, and every URL or
+restored session bounces silently to another tab.
+
+The reachability canary written for the sub-rail version points at
+`manual-rail.ts` and `manualView ===`. It must move with the feature and cover
+the set, or it will pass while checking a registration that no longer exists -
+a canary asserting a fact about the old location is worse than none, because it
+reads as coverage.
+
+## D24b. NO PICKER MEANS THE QUESTION RESOLVES THE COURSE, and course names
+## collide harder than student names
+
+With the picker gone there is no selected course, so the question itself
+carries the scope: "what students are struggling in Ethical Hacking?"
+
+That is the same resolution problem already solved for student names, and it
+reuses the same four-outcome discipline - matched, ambiguous, unmatched,
+none-named - resolved against the instructor's own course list, never guessed.
+
+**But course names collide MORE than student names, not less.** The same course
+runs every term: two "Ethical Hacking" rows differing only by term is the normal
+case, not the edge case. Two students sharing a name is uncommon; two courses
+sharing a name is routine.
+
+So ambiguity here is the expected path rather than the exception, and it must
+resolve well rather than merely refuse: prefer a currently-active term when the
+course list says which is active, and otherwise ask - showing the terms, since
+that is the only thing distinguishing them.
+
+## D24c. THREE SCOPES, AND THE THIRD IS NEW
+
+- **one course, one student** - as built.
+- **one course, whole class** - as built.
+- **ALL COURSES** - new. "What courses have had the least amount of items turned
+  in late."
+
+## D24d. THE COST PROBLEM RETURNS, MULTIPLIED - and offline is the reason it
+## is survivable
+
+One course's signals tier is roughly 6 to 16 Canvas calls. N live courses is N
+times that, against the same 60-second platform cap that already killed the
+obvious single-course design.
+
+Three things make it work:
+
+- **Cross-course questions use the SIGNALS tier ONLY, never text.** This is not
+  a compromise: "which courses have the least late work" is inherently a
+  signals question, and no phrasing of a cross-course question needs a
+  student's prose. The expensive tier is scoped to single-student questions,
+  where it was always the point.
+- **OFFLINE COURSES COST ZERO CANVAS CALLS.** Their data is already local. So a
+  mixed answer's offline half is always complete, cannot time out, and cannot
+  fail - which inverts the usual expectation that offline is the degraded path.
+  **Assemble offline courses FIRST**, so whatever the deadline cuts is live
+  work, and the answer always contains everything that was free.
+- **A per-course soft deadline**, stopping before the wall the way the
+  single-course fetch already does, with courses that did not fit reported
+  rather than dropped.
+
+## D24e. A RANKING THAT SILENTLY OMITS COURSES IS WORSE THAN A LIST THAT DOES
+
+This is the sharpest new risk and it deserves its own decision.
+
+"Which courses have the least late work" is a RANKING, and the shape of a
+ranking asserts that everything was considered. If two of five courses timed
+out, a ranking over the other three is not a partial answer - it is a confident
+wrong answer, and nothing about how it reads reveals that.
+
+**So a cross-course answer states which courses it covered, in which mode, and
+which it could not reach - always, not only when something failed.** The
+existing per-source omission discipline applies at COURSE granularity, and for
+a ranking it is promoted from a footnote to part of the claim.
+
+Where coverage is incomplete, the answer must not present a superlative at all:
+"the least late work among the four courses I could read" is honest; "the least
+late work" is not.
+
+## D24f. THE CONNECTION MODE BECOMES PER COURSE
+
+`LmsConnection` was added to the assembly on the assumption of one course per
+answer. A cross-course answer mixes live and offline courses in one response,
+so the mode belongs per course.
+
+That is an additive contract change, and it is blocked while a concurrent agent
+holds the contract file - recorded here, made once that lands, not raced.
+
+## D24g. WHAT DOES NOT CHANGE
+
+The concern set is still computed in TypeScript, and the model still explains
+rows rather than choosing them - across courses as much as within one. A
+cross-course question does not become a judgement call because it is broader;
+if anything the reverse, since a ranking invites a model to invent an ordering
+far more readily than a single-course summary does.
+
+Students are still indices, still never named to the model. Across courses that
+needs care: an index must be unambiguous within the ANSWER, not merely within
+one course's assembly, or S3 in one course and S3 in another collide in the
+same response.

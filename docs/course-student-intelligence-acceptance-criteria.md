@@ -1594,7 +1594,9 @@ from a statement about the calendar into a statement about this student
 relative to their classmates, which is what the instructor actually meant to
 ask.
 
-## D22d. WHAT THE OFFLINE VOCABULARY CANNOT SAY YET
+## D22d. LARGELY SUPERSEDED BY D23 - missing and late ARE detectable given a
+## declared grading tool and an instructor-entered deadline. The bends below
+## shrink; the reasoning about not borrowing Canvas's wording still holds.
 
 `ConcernSignalKind` is closed and has no offline members, so four are bent,
 with the meaning carried in the human-readable label rather than the kind:
@@ -1630,3 +1632,137 @@ forever.
 citedStudents` until that field can express an unverified identity.** Storing a
 borrowed or fabricated id would launder a screen-read name into the one field
 the whole design treats as ground truth.
+
+---
+
+# D23. MISSING, LATE AND RESUBMISSION ARE ALL DETECTABLE. D22d was too pessimistic.
+
+**The owner's correction, verbatim (2026-09-07):** "and it is possible to detect
+missing work. assume that all discussion board posts will be graded by the same
+tool (i.e. recording for offline, ___ for online, etc) and all assignments will
+be graded by the same tool (i.e. repo grader, live lms connection, etc). then
+flag whatever students don't have a submission by the deadline (which I would
+have to enter manually) ... by this same measure, it would be possible to flag
+late work too, in addition to resubmissions ... and these metrics can then be
+used to flag students who are doing well, doing poorly and needing outreach, or
+actively working to remedy their grade"
+
+## D23a. THE HOMOGENEITY ASSUMPTION IS WHAT MAKES ABSENCE MEAN SOMETHING
+
+This is the load-bearing idea and it is worth stating precisely, because
+everything else follows from it.
+
+D22d concluded that offline "missing" could only ever mean "no recorded work on
+an assessment OTHERS were graded on" - a weak, relative signal - because absence
+of a recorded row is ambiguous: the student might have submitted and been graded
+somewhere else.
+
+**The assumption removes the ambiguity.** If one tool is the authoritative
+grader for a given kind of work in a course, then for an assessment of that
+kind, that tool's rows are the complete record. Absence is no longer "we did not
+see it" - it is "it is not there."
+
+That upgrades the comparison set from "students others were graded against" to
+**the roster**, which is the same basis Canvas's own `missing` uses. The signal
+stops being relative and starts being absolute.
+
+**It must be DECLARED, not inferred, and it must be checkable.** The assumption
+is the instructor's statement about how they work, so:
+
+- the authoritative tool is recorded per course and per work kind
+  (discussion posts, assignments), which is exactly the granularity the owner
+  described;
+- if grades for one assessment turn up in a tool that is not the declared one,
+  the assumption is violated for that assessment and its missing count is
+  WRONG. That must be detected and stated, not silently averaged over. A
+  half-migrated assessment producing a confident missing list is the worst
+  outcome available here.
+
+## D23b. THE DEADLINE IS INSTRUCTOR-ENTERED, and that is the piece that
+## unblocks two signals rather than one
+
+D22d said `late-work` has no offline analogue because "nothing in a recorded row
+carries a due date". That was a true observation and a wrong conclusion - I
+treated a missing field as a permanent property rather than a gap the instructor
+can fill.
+
+A manually entered deadline per assessment gives:
+
+- **MISSING**: at or after the deadline, a roster student with no row for that
+  assessment has not submitted. Needs no timestamp at all - it is set difference
+  against the roster.
+- **LATE**: a submission that arrived after the deadline.
+- **RESUBMISSION**: more than one row for the same student and assessment.
+
+## D23c. LATE HAS A DEPENDENCY THE OTHER TWO DO NOT, and it must not be fudged
+
+Missing and resubmission need only the roster, the assessment id and (for
+missing) the deadline. **Late additionally needs to know WHEN THE STUDENT
+SUBMITTED**, and no recorded row carries that today.
+
+Three candidate sources, and only two are honest:
+
+1. **The submission timestamp shown on screen.** Canvas and every LMS display
+   it. Extracting it is real work in the capture prompt, and it is the only
+   source that actually answers the question.
+2. **The instructor marks the row late** while grading - cheap, accurate, and
+   already how they would know.
+3. **The capture time as a proxy - REJECTED.** That is when the INSTRUCTOR
+   graded, not when the student submitted. Grading a week after the deadline
+   would mark the entire class late. This is precisely the D22c failure -
+   a signal that is secretly about the instructor's own cadence - and it would
+   be worse here because it looks plausible.
+
+**DECIDED: (1) where extraction can get it, (2) as the fallback, and never
+(3).** A row whose submission time is unknown is `late: unknown`, not
+`late: false` - the same not-fetched-versus-none discipline the whole feature
+already runs on. An unknown-time submission is never counted as on time.
+
+## D23d. THREE OUTCOMES, NOT ONE, AND THE THIRD IS THE VALUABLE ONE
+
+The owner's sharpest point, and the one I would not have reached: these metrics
+separate students into **doing well**, **doing poorly and needing outreach**,
+and **actively working to remedy their grade** - and the third is a genuinely
+different state, not a milder version of the second.
+
+A student with three late submissions and two resubmissions this week is
+**recovering**. A student with three missing and silence is **disengaged**. The
+concern design as built would flag both, similarly, and be actively wrong about
+the first - it would send an outreach message to someone who is already doing
+the thing the outreach would ask for, which is worse than saying nothing.
+
+**DECIDED: recovery is its own outcome with its own evidence**, and the evidence
+is behavioural rather than score-based: late-but-present submissions,
+resubmissions, and recency of activity after a gap. It is reported as its own
+category and must never be folded into the concern list as a weaker concern.
+
+Note this also gives the concern set something it lacked: a reason to REMOVE a
+student. Missing work plus recent resubmission activity is a different situation
+from missing work alone, and the model is not asked to notice that - the
+computation is.
+
+## D23e. WHAT THIS CHANGES ABOUT WHAT IS ALREADY BUILT
+
+- `ConcernSignalKind` genuinely needs new members now rather than bends:
+  `missing-work` can mean what it says (absence against the roster by a
+  deadline), and `late-work` becomes emittable. D22d's bend list shrinks.
+- **The assessment id (D22b) is no longer just the denominator's problem.**
+  Deadline, missing, late and resubmission all key on
+  `(course, assessment, student)`. It is the central missing field.
+- `GradingRow` needs the assessment id and a submission-time field. Neither is
+  a student identity and neither weakens that file's no-`userId` rule - but the
+  rule's reasoning should be re-read before touching it, not assumed.
+- The homogeneity declaration is new per-course state, and per the standing
+  rule it persists and joins its directory's canary.
+
+## D23f. WHAT IS STILL HONESTLY UNKNOWABLE
+
+- A student who submitted and whose submission the instructor has not yet
+  graded is indistinguishable from one who did not submit, under this scheme,
+  because the tool only sees what was graded. The deadline makes absence
+  meaningful; it does not make ungraded work visible. **That gap must be stated
+  in the answer**, not left for the instructor to remember - it is the one place
+  this design can call an honest student missing.
+- The homogeneity assumption is exactly as good as the instructor's own
+  consistency, and a course part-graded in two tools produces a wrong missing
+  count. Detection helps; it cannot fully close it.

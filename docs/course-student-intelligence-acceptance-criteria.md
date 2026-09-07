@@ -1276,3 +1276,142 @@ Nothing ran. The per-tool data shapes are read from source. Whether the
 recording tools' localStorage tables reliably contain anything for a given
 course is unobserved - they are global, not course-scoped, which is itself a
 problem an attach flow has to handle rather than assume away.
+
+---
+
+# D20. WORKING WITH AND WITHOUT A LIVE LMS
+
+**The request, verbatim (2026-09-06, mid-build):** "this feature needs to work
+with both a live connection to an lms and none".
+
+## D20a. There are FOUR "no LMS" states, not one, and they already throw
+## differently
+
+- **No credential configured.** `resolveCanvasCredential` falls back to the
+  owner's env pair only for `role === "owner"`; every other identity with no
+  stored row gets one deliberately indistinguishable message, compared BY
+  IDENTITY at every consumer rather than by copied text. That indistinguishability
+  is a security property and must not be unpicked to make a nicer error.
+- **A course with no Canvas URL at all.** Real and first-class: export-only
+  courses exist, have a test fixture, and resolve by row id with no Canvas
+  dependency. They still carry roster, student repos, materials, cartridges and
+  syllabus data.
+- **Configured but unreachable.** A different error shape again - `canvasError`
+  produces token/not-found/HTTP-status messages, none of which equal the
+  credential message, and a pure network failure never reaches it at all.
+- **A non-Canvas LMS.** **Document only.** The Blackboard work is an offline
+  CARTRIDGE parser feeding the same import pipeline; `course_hub.lms` is
+  free-text metadata that nothing branches on. There is exactly one live LMS
+  integration in this app.
+
+**Surfacing WHICH of the first three applies costs nothing** - they already
+return distinct strings - and telling an instructor to "connect Canvas" when
+they already have and it is merely down is the kind of small wrongness that
+makes a tool feel broken.
+
+## D20b. THE ONE DURABLE OFFLINE IDENTITY ANCHOR, and it is not the roster
+
+`course_hub.roster` is free text, one student per line, optionally
+`Name | githubusername`. The parser strips the username half. **There is no
+Canvas id in it anywhere**, and the username, where present, is a GitHub handle.
+
+**`course_hub.student_repos[].canvasUserId` is the exception, and it is the only
+one in the whole codebase.** It is a real numeric Canvas id, written once by the
+GitHub roster-binding workflow from a live call, and persisted on the course
+row - so reading it back needs no connection at all.
+
+**DECIDED: that is the offline identity anchor, where populated.** It is a
+cached fact from a real Canvas call, not a guess, which is categorically
+different from a name match. But it is cached, its age is unknowable offline,
+and its coverage is partial by construction - the repo-grades UI already counts
+rows `withoutCanvasId` - so any record built from it carries an explicit
+identity-source marker and is never presented with the confidence of a
+freshly-resolved live roster.
+
+For a name with no cached id: **per-item instructor confirmation, never an
+automatic name join.** Same rule D19 already set for recorded content, for the
+same reason.
+
+**Explicitly NOT decided as "refuse to attribute anything offline".** That would
+throw away the one sound anchor this app has, and it is over-strict.
+
+## D20c. THE CONCERN QUESTION CANNOT BE ANSWERED OFFLINE. It refuses.
+
+D1 requires the concern set to be computed from missing work, per-assignment
+scores, late flags and days since activity. **None of that exists in any offline
+store.** There is no cached gradebook anywhere in this codebase - no migration
+holds a grade, a submission or a score.
+
+So the honest offline answer is a refusal, not a weaker list. A concern answer
+assembled from recorded grading rows would cover only whatever the instructor
+happened to grade by screen recording, which is not a course-wide picture and
+would read as one.
+
+**This is the single most important line in this decision.** A feature that
+answers "who are the students of concern" worse, with no visible difference, is
+far more dangerous than one that declines - it is the same invisible-harm shape
+as D1's omission attack, arriving through the front door instead.
+
+**What already works in our favour, verified rather than assumed:** with every
+student's submissions `not-fetched`, `computeConcernSet` already emits an
+`insufficient-data` row per student rather than "missing 7 of 7", and keeps any
+signal that CAN still be computed alongside it. That behaviour falls out of the
+`Presence` design; it needs no offline special case. What it needs is the MODE
+line above it explaining why every row says that.
+
+## D20d. THE OTHER TWO QUESTIONS, HONESTLY BOUNDED
+
+- **"What areas has X asked about"** - partially answerable, from recorded
+  captures only, and only for rows the instructor attaches per D19. There is no
+  offline corpus to search: the recording tables are GLOBAL, not course-scoped,
+  and hold only whatever was captured in that browser. It cannot become a
+  general "search everything about X".
+- **"How is Y doing"** - not answerable from grades offline. The most it can
+  honestly say is what an attached grading capture recorded for one assignment.
+
+## D20e. ONE CODE PATH THAT DEGRADES, NOT TWO MODES THE INSTRUCTOR PICKS
+
+**DECIDED: automatic detection, one path, always visible.**
+
+Two instructor-picked modes is rejected outright: it asks the instructor to
+already know the thing they are asking the tool to tell them, and it duplicates
+state that credential resolution already knows deterministically.
+
+Silent auto-detection is equally rejected, for D14's reason: the same question
+produces a materially weaker answer with no other visible difference.
+
+The precedent to mirror is already in this app - the content tab's
+live-then-export fallback degrades automatically on ANY live failure and renders
+a permanent, non-dismissible note carrying the underlying error. Copy that
+shape, including its refusal to be dismissible.
+
+Course-intel's case is harder than that precedent, and the difference matters:
+there is no "export" equivalent for grades, so for the concern question the
+fallback is not weaker data, it is a visible refusal.
+
+## D20f. THE CONTRACT CHANGE THIS FORCES
+
+`AssemblyTier` says how MUCH was fetched, not whether an LMS was reachable.
+`Presence.not-fetched` covers a source, not the assembly. **So an offline
+assembly is currently indistinguishable from a deliberately cheap one without
+inspecting every reason** - the instructor would see a screen of identical "not
+enough information" rows with nothing saying why.
+
+`CourseIntelAssembly` gains an explicit connection mode carrying which of the
+three live states applies, and `CourseStudentRecord` gains an identity-source
+marker per D20b. Both are additive.
+
+And the gap D19f already opened widens: `CourseIntelAnswerRecord.citedStudents`
+stores `{ index, userId }`, and offline there may be no trustworthy `userId` at
+all - not for a recorded attachment, and not for a roster name with no cached
+binding. That field needs an explicit unverified marker before any of this
+lands, or such an answer cannot honestly be stored.
+
+## D20g. WHAT WAS NOT VERIFIED
+
+Nothing ran. Whether `student_repos[].canvasUserId` is actually populated for
+these courses is unmeasured and structurally partial. Whether a genuine network
+outage is distinguishable from an HTTP error anywhere in the UI today was not
+found in this pass. The real mix of export-only versus Canvas-connected courses
+in this owner's data is unknown, which matters because it decides whether
+offline mode is an edge case or the common one.

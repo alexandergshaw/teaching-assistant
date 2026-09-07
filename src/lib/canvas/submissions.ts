@@ -81,7 +81,17 @@ export async function fetchAssignment(
     pagesFetched++;
     const page = (await response.json()) as CanvasSubmission[];
     submissions.push(...page);
-    next = parseNextLink(response.headers.get("link"));
+    // E-CRIT1. Capped but NOT origin-checked until now - the eleventh such
+    // follow found in this codebase, and the one that slipped through a
+    // file-level sweep because this file mentions the guard four times
+    // already, all of them for ATTACHMENT urls rather than for this loop.
+    // That near-miss is why the structural test beside this file counts call
+    // sites rather than files.
+    //
+    // Dial the guard's RETURN value, never the input: a relative Link header
+    // resolves against baseUrl inside the guard, so the two can differ.
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   const students: CanvasStudentWork[] = [];

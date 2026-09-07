@@ -1163,3 +1163,116 @@ to persist. So it is **not built**, and that is the right call.
 rather than discovered the first time someone asks. The honest interim answer
 is the export control from D8: an instructor can produce what is held and
 delete individual rows.
+
+---
+
+# D19. THE RECORDING SUITE AS AN INPUT - honoured where it adds something,
+# declined where the owner already declined it
+
+**The request, verbatim (2026-09-06, mid-build):** "this thing should also allow
+the recording suite of tools to submit data".
+
+## D19a. The owner already ruled on this, and the ruling is in the code
+
+`src/app/components/grading-recording/grading-row.ts` quotes it directly:
+
+> "if i'm using the recording to grade students, it's not possible to bind the
+> score to a student or upload to an lms"
+
+and adds: "a name read off a screen is not a student identity." The file has NO
+`userId` field and says it never will - posting one is a COMPILE ERROR, not a
+discipline, explicitly because "conventions are what this repo has watched fail
+six times this session."
+
+That ruling is about grade WRITE-BACK, and this request is about READING into an
+assembly, so it does not settle the new question outright. But it settles the
+premise underneath it, and the premise is the whole problem: **screen capture
+reads pixels and cannot see a user id.**
+
+## D19b. What each recording tool actually holds
+
+- **Discussion-reply capture**: `author`, `post`, `replyingToAuthor` - all
+  screen-read display-name strings. **No Canvas-matching step exists at all.**
+  Persisted to one global localStorage table, not scoped to a course.
+- **Message-reply capture**: `student` and per-message `sender`, both screen-read
+  names, plus an optional matched-conversation snapshot. The match is a
+  name-similarity heuristic tolerant of a dropped middle name or a surname-only
+  read. Even a SUCCESSFUL match copies participant NAMES into the row, never
+  ids.
+- **Grading capture**: `studentName` plus a match state of
+  matched/ambiguous/unmatched, resolved by exact string comparison against a
+  hand-pasted roster field - stricter than the message heuristic, and still a
+  name.
+- **Module-deck capture**: no per-student data whatsoever. Irrelevant here.
+
+## D19c. THE FINDING THAT DECIDES IT: for two of the three, recording is a
+## strictly WORSE substitute, not merely a riskier one
+
+For discussion replies and messages, the live Canvas API already returns
+everything a capture would show, **correctly keyed, at equal or lower cost.**
+The discussion reader already threads `parentUserId` through with no new
+plumbing; a message needs exactly one extra call per thread for a sound
+`authorId`.
+
+So for those two sources the capture is narrower (limited to what fit on screen
+during one session), unkeyed, and dependent on a fuzzy match the API path does
+not need at all. Adding them would import the identity problem this feature was
+designed to avoid, in exchange for less data.
+
+**A second-order trap worth naming:** a confidently-wrong name match picks a
+`conversationId`, and one hop later that yields a numeric `authorId` which LOOKS
+sound. A confidently-wrong id is worse than an admittedly-fuzzy name, because
+everything downstream stops treating it as uncertain.
+
+## D19d. THE ONE PLACE IT ADDS SOMETHING REAL
+
+**Grading capture, for assignments the automated pipeline structurally cannot
+see.** Decision D4 established that `listAssignmentNonSubmitters` deliberately
+filters out unpublished, `not_graded`, `omit_from_final_grade` and
+non-online-submission assignments. A paper or in-class assessment graded through
+the recording tool therefore has **no other digital trace anywhere in this
+app** - the API path is not merely slower for it, it is blind to it.
+
+That is a genuine gap in the assembly, and it is exactly the kind of work an
+instructor most wants reflected when asking how a student is doing.
+
+Recorded text also costs nothing against the 60-second Canvas budget, because it
+is already sitting in the browser as extracted strings.
+
+## D19e. DECIDED - the shape
+
+- **Recorded content is ATTACHED BY THE INSTRUCTOR, per item, to a specific
+  question.** Never auto-joined, never a new `Presence` source silently
+  populated on `CourseStudentRecord`. That record is keyed on `CanvasUserId`,
+  whose own doc comment names this app's name-matching feature as the exact
+  failure it exists to prevent - wiring a name-matched row into it would
+  recreate that defect inside the type built to forbid it.
+- **A distinct `StudentTextKind` marks it**, so its weaker provenance travels
+  with it into the prompt, the UI and the stored citation. Recorded text is
+  doubly hostile: it inherits every framing rule that applies to student writing,
+  AND arrives with less certainty than API data, because nothing verifies the
+  screen showed what the extraction reported.
+- **Grading capture first**, since it is the only source with a real gap to
+  fill. Discussion and message capture become manual attachments too, but as a
+  convenience for when Canvas is slow or unreachable - not as a data source.
+- **Nothing recorded is ever persisted by this feature.** The corpus decision
+  (D8) holds and is strengthened: recorded rows are the highest-blast-radius
+  content combined with the weakest identity in the system.
+
+## D19f. A TYPE GAP THIS REVEALS, and it must be closed before the code lands
+
+`CourseIntelAnswerRecord.citedStudents` stores `{ index, userId }`. **A
+recording-sourced citation has no trustworthy `userId` to put there.**
+
+So either that type gains an explicit way to mark a citation as
+instructor-attached-and-unverified, or such a citation cannot be honestly
+stored at all. Storing a fabricated or borrowed id would be the single worst
+outcome available here - it would launder a screen-read name into the one field
+the whole design treats as ground truth.
+
+## D19g. WHAT WAS NOT VERIFIED
+
+Nothing ran. The per-tool data shapes are read from source. Whether the
+recording tools' localStorage tables reliably contain anything for a given
+course is unobserved - they are global, not course-scoped, which is itself a
+problem an attach flow has to handle rather than assume away.

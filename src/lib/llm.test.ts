@@ -292,6 +292,67 @@ describe("describeLlmFailure", () => {
     const result = describeLlmFailure({ ok: false, status: 0, body: "" }, "Schedule generation failed");
     expect(result).toBe("Schedule generation failed: network error");
   });
+
+  // This app authenticates its model calls with the API key as a plain
+  // `?key=` query parameter, and a provider validation error routinely quotes
+  // the request it rejected. The body reaching this function is therefore a
+  // credential-shaped string, and what this function returns goes straight
+  // back to the caller as a user-facing error - and, for the workflow steps
+  // that throw it, into a durable run log.
+  //
+  // The redaction was already understood one field over:
+  // generateModuleIntroScriptAction redacts the SAME body into its
+  // failureBodyRedacted diag field and has a test asserting it. The error
+  // string built here, from the same bytes, did not - and it is the one a
+  // person actually sees.
+  it("redacts a request URL echoed back in the body, so an API key cannot ride out in a user-facing error", () => {
+    const body =
+      "Bad Request: the request to https://generativelanguage.googleapis.com/v1beta/models/m:generateContent?key=AIzaSyREALLOOKINGSECRET123 could not be processed";
+
+    const result = describeLlmFailure({ ok: false, status: 400, body }, "Draft failed");
+
+    expect(result).not.toContain("AIzaSyREALLOOKINGSECRET123");
+    expect(result).not.toContain("https://");
+    expect(result).not.toMatch(/key=/i);
+    // The surrounding prose survives - the point is to keep the message
+    // diagnostic, not to blank it.
+    expect(result).toContain("Bad Request");
+    expect(result).toContain("could not be processed");
+  });
+
+  // ORDERING. The first version of this test claimed redact-before-truncate
+  // was what stopped a key surviving a long body. That was WRONG, and the
+  // sabotage check caught it: swapping to slice-then-redact left the test
+  // green. Both redaction patterns anchor at the FRONT of the secret (the
+  // "https://" and the "key=" respectively) and a prefix-slice never removes
+  // a front, so cutting first cannot strand key material either way.
+  //
+  // The ordering still matters, just for a different reason, and this is the
+  // property that is actually demonstrable: redacting first REPLACES a long
+  // URL with a short marker, so the diagnostic prose after it survives the
+  // 200-character cut. Cutting first spends the whole budget on the URL and
+  // throws that prose away. The message stays useful, which is the entire
+  // reason for not simply blanking the body.
+  it("redacts before truncating, so the prose AFTER a long URL survives the 200-character cut", () => {
+    const padding = "y".repeat(120);
+    const url =
+      "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent?key=AIzaSyREALLOOKINGSECRET123";
+    const body = `${padding} ${url} and the field contents is required`;
+
+    const result = describeLlmFailure({ ok: false, status: 400, body }, "Draft failed");
+
+    expect(result).toContain("and the field contents is required");
+    expect(result).not.toContain("AIzaSy");
+  });
+  it("leaves an ordinary body untouched, so redaction did not cost the diagnostics", () => {
+    // The guard against over-redacting. Without it, a redactor that blanked
+    // everything would satisfy every assertion above.
+    const result = describeLlmFailure(
+      { ok: false, status: 400, body: "The model refused: the prompt asked for disallowed content." },
+      "Draft failed"
+    );
+    expect(result).toBe("Draft failed: HTTP 400 — The model refused: the prompt asked for disallowed content.");
+  });
 });
 
 describe("describeEmptyLlmText", () => {

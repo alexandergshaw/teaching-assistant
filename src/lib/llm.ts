@@ -7,6 +7,7 @@ import {
   getGeminiThinkingLevel,
   getGeminiMinOutputTokens,
 } from "./gemini";
+import { redactSensitiveText } from "./lms-generation/generation-diag";
 
 /**
  * Provider dispatch for all LLM calls.
@@ -229,12 +230,35 @@ export type LlmImageResult =
  * block in callGemini), where "HTTP 0" would read as nonsense, so that case
  * gets its own wording. An empty/whitespace body omits the trailing dash
  * segment rather than emitting a dangling " — ".
+ *
+ * THE BODY IS REDACTED BEFORE IT IS TRUNCATED, and both halves of that
+ * sentence matter.
+ *
+ * Redacted, because `result.body` is the RAW upstream response and this
+ * app authenticates its model calls with the API key as a plain `?key=`
+ * query parameter - so a provider validation error that echoes the request
+ * it rejected carries the credential, and this string is returned straight
+ * to the caller as a user-facing error. That was already understood one
+ * field over: generateModuleIntroScriptAction redacts the same body into
+ * its `failureBodyRedacted` diag field, and has a test asserting it. The
+ * error string built HERE, from the same bytes, did not - and it is the one
+ * a person actually sees. Fixing it here rather than at each call site
+ * covers all 64 of them at once.
+ *
+ * Before it is truncated, because slicing first can cut a secret in half and
+ * leave the front of it in the message - the same ordering the workflow
+ * run-log scrubber documents for the same reason.
+ *
+ * redactSensitiveText lives in a genuinely dependency-free leaf (it imports
+ * nothing at all), so importing it here creates no cycle despite pointing
+ * from this core module into a feature directory. If that leaf ever grows
+ * an import, this is the edge that has to move, not the redaction.
  */
 export function describeLlmFailure(
   result: Extract<LlmResult, { ok: false }>,
   label: string
 ): string {
-  const body = result.body.slice(0, 200).trim();
+  const body = redactSensitiveText(result.body).trim();
   const prefix = result.status > 0 ? `${label}: HTTP ${result.status}` : `${label}: network error`;
   return body ? `${prefix} — ${body}` : prefix;
 }

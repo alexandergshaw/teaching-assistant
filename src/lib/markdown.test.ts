@@ -86,6 +86,34 @@ describe("markdownToHtml - link href security", () => {
     expect(html).not.toContain("<a ");
     expect(html).toBe("<p>Bad</p>");
   });
+
+  it("rejects a BACKSLASH-relative /\\host target, which resolves off-site exactly like //host", () => {
+    // The test directly above blocks `//host`. This one is the same attack
+    // with one character changed, and the allowlist used to permit it: the
+    // exclusion was "second character must not be a slash", and a backslash
+    // is not a slash. But the WHATWG URL parser treats a backslash AS a
+    // slash for special schemes, so a browser resolves `/\\evil.example/x`
+    // against https: and lands on https://evil.example/x - off-site, which is
+    // precisely what the sibling test exists to prevent.
+    //
+    // Built with String.fromCharCode so the backslash cannot be silently
+    // consumed by an editing tool or a shell on its way into this file - the
+    // whole test turns vacuous if the character it is about goes missing.
+    const backslash = String.fromCharCode(92);
+    const html = markdownToHtml(`[Bad](/${backslash}evil.example/x)`);
+    expect(html).not.toContain("<a ");
+    expect(html).toBe("<p>Bad</p>");
+  });
+
+  it("still allows an ordinary site-relative path, which is what the single-slash case is FOR", () => {
+    // The guard against over-tightening. Narrowing the exclusion to cover a
+    // backslash must not start rejecting the real links this rule exists to
+    // permit - without this, the fix above could be "corrected" into a rule
+    // that blocks every relative link and nothing would notice.
+    expect(markdownToHtml("[Docs](/courses/123/assignments)")).toBe(
+      '<p><a href="/courses/123/assignments">Docs</a></p>'
+    );
+  });
 });
 
 describe("markdownToHtml - quote escaping", () => {

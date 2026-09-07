@@ -129,7 +129,23 @@ export function htmlToMarkdown(html: string): string {
 // scheme (nothing a browser will execute), so allowing it here preserves
 // that documented behavior rather than silently turning those inline
 // references into plain text.
-const ALLOWED_LINK_HREF = /^(https?:|mailto:|attachment:|#|\/(?!\/))/i;
+//
+// A BACKSLASH IS EXCLUDED ALONGSIDE THE SECOND SLASH, and leaving it out was
+// a real bypass of the rule directly above. The exclusion used to be
+// `(?!\/)` - second character must not be a slash - which blocks
+// `//evil.example/x` but not `/\evil.example/x`. The WHATWG URL parser
+// treats a backslash as a slash for special schemes, so the browser resolves
+// the second form to `https://evil.example/x` exactly like the first: one
+// character changed, same off-site link, allowlist satisfied. Verified
+// directly against the platform URL parser rather than reasoned about.
+//
+// This is reachable today wherever markdownToHtml renders text this app did
+// not author - the knowledge overview renders model output through it - and
+// it is about to matter more: the exemplar-driven announcement drafter is
+// specified to post through this renderer rather than textToHtml, which
+// would put model output derived from a user-pasted document in front of
+// every student in a course.
+const ALLOWED_LINK_HREF = /^(https?:|mailto:|attachment:|#|\/(?![/\\]))/i;
 
 function renderInlineMd(text: string): string {
   let s = escapeHtml(text);

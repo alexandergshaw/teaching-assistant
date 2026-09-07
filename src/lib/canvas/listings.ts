@@ -3,7 +3,46 @@
  */
 
 import { canvasError, parseNextLink, resolveInstitutionByCode, type CanvasInstitution } from "../canvas-core";
-import { CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
+import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
+import { canvasGet } from "../canvas-fetch-response";
+
+// ============================================================================
+// The canvasFetch adapter - see src/lib/canvas-modules/fetch-helpers.ts for
+// the reference migration this file follows, and src/lib/canvas-fetch-response.ts
+// for the shared canvasFetch -> Response/throw mapping every migrated Canvas
+// module reuses rather than re-deriving its own copy. Every bearer-carrying
+// fetch below (fetchCoursesForQuery, listCoursesByTerm, listAssignments,
+// listStudents, listCourseRoster, listStudentGradeSummaries,
+// listAssignmentTextSubmissions - 7 sites) now goes through canvasGet, which
+// pins the dialled connection to a resolved-and-classified address (SEC1,
+// closing DNS rebinding) and never follows a redirect blind (SEC2). Every
+// function below keeps its exact existing signature and its exact existing
+// `.ok`/`.status`/`.json()` call shape - only what sits behind that call
+// shape changed. (listCourseAssignmentDueDates makes no fetch of its own -
+// it delegates to listAssignmentBriefsWithDue in ./auto-zero, out of this
+// file's scope.)
+//
+// PAGINATION'S "next" LINK NOW ALSO GOES THROUGH
+// assertCanvasSuppliedUrlIsSameOrigin (E-CRIT1, src/lib/canvas-remote-url.ts).
+// Before this migration, every loop below dialled parseNextLink's raw
+// candidate directly - the exact un-mitigated primitive that module's own doc
+// comment names ("Every one of its 26 call sites then dials that URL with
+// Authorization: Bearer <token> attached"). Migrating this file off bare
+// fetch is the moment to close that here too, matching
+// src/lib/canvas-modules/fetch-helpers.ts's fetchAll: every `next` link is
+// verified same-origin with the resolved baseUrl before it is ever dialed,
+// and the DIALED url is the guard's own return value, not the raw header
+// candidate - a relative Link header resolves against the base inside the
+// guard, and only that resolved string is safe to fetch. The existing page
+// cap (CANVAS_PAGINATION_PAGE_CAP, checked via `pagesFetched` in each loop's
+// condition) is untouched.
+//
+// TIMEOUT: LEFT UNSPECIFIED, ON PURPOSE - see fetch-helpers.ts's own "TIMEOUT:
+// LEFT UNSPECIFIED, ON PURPOSE" note for the full reasoning. Every call below
+// omits timeoutMs and takes canvasFetch's own default (DEFAULT_TIMEOUT_MS,
+// 15s), which is strictly safer than what every one of these functions had
+// before this migration: no timeout at all.
+// ============================================================================
 
 /** One assignment in a course, for the pull-back picker. */
 export interface CanvasAssignmentBrief {
@@ -70,7 +109,7 @@ async function fetchCoursesForQuery(
   const courses: Array<{ id: string; name: string }> = [];
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -81,7 +120,8 @@ async function fetchCoursesForQuery(
         courses.push({ id: String(course.id), name: course.name?.trim() || `Course ${course.id}` });
       }
     }
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
   return courses;
 }
@@ -144,7 +184,7 @@ export async function listCoursesByTerm(
 
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -167,7 +207,8 @@ export async function listCoursesByTerm(
         }
       }
     }
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
   return courses;
 }
@@ -180,9 +221,7 @@ export async function listAssignments(code: string, courseId: string): Promise<C
 
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -197,7 +236,8 @@ export async function listAssignments(code: string, courseId: string): Promise<C
         });
       }
     }
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   assignments.sort((a, b) => a.name.localeCompare(b.name));
@@ -212,9 +252,7 @@ export async function listStudents(code: string, courseId: string): Promise<Canv
 
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -228,7 +266,8 @@ export async function listStudents(code: string, courseId: string): Promise<Canv
         });
       }
     }
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   students.sort((a, b) => a.name.localeCompare(b.name));
@@ -251,9 +290,7 @@ export async function listCourseRoster(code: string, courseId: string): Promise<
 
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -269,7 +306,8 @@ export async function listCourseRoster(code: string, courseId: string): Promise<
         });
       }
     }
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   entries.sort((a, b) => a.sortableName.localeCompare(b.sortableName) || a.name.localeCompare(b.name));
@@ -287,9 +325,7 @@ export async function listStudentGradeSummaries(
 
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -309,7 +345,8 @@ export async function listStudentGradeSummaries(
         });
       }
     }
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   return summaries;
@@ -342,16 +379,15 @@ export async function listAssignmentTextSubmissions(
 
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
     pagesFetched++;
     const page = (await response.json()) as CanvasSubmission[];
     submissions.push(...page);
-    next = parseNextLink(response.headers.get("link"));
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
 
   const results: CanvasTextSubmission[] = [];

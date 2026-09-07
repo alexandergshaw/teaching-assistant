@@ -172,6 +172,7 @@ describe("integrate-source-into-lms step", () => {
               pointsPossible: 10,
               htmlUrl: null,
               externalUrl: null,
+              newTab: null,
             },
           ],
         }),

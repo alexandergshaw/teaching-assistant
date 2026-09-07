@@ -137,7 +137,7 @@ const SOME_ITEM = {
     dueAt: null,
     pointsPossible: null,
     htmlUrl: null,
-    externalUrl: null,
+    externalUrl: null, newTab: null,
   },
 };
 

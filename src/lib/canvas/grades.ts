@@ -4,7 +4,40 @@
 
 import { parseCanvasUrl } from "../canvas-url";
 import { canvasError, resolveInstitution } from "../canvas-core";
+import { canvasGet, canvasRequest } from "../canvas-fetch-response";
 import { fetchAssignmentObject, normalizeCriterionName, earnedPoints } from "./metadata";
+
+// ============================================================================
+// The canvasFetch adapter - see src/lib/canvas-fetch-response.ts for the full
+// failure-mapping reasoning (the discriminated union canvasFetch returns, and
+// why each failure kind is a throw, not a value). Both bearer-carrying fetch
+// calls in this file now go through canvasGet/canvasRequest.
+//
+// TIMEOUT: LEFT UNSPECIFIED, ON PURPOSE. Same rationale as
+// src/lib/canvas-modules/fetch-helpers.ts's own "TIMEOUT: LEFT UNSPECIFIED,
+// ON PURPOSE" note - neither call below has a deadline or attended/unattended
+// flag to plumb through, so both omit timeoutMs and take canvasFetch's own
+// DEFAULT_TIMEOUT_MS (15s).
+//
+// THE GRADE-POST WRITE IS DELIBERATELY NOT WRAPPED IN A CATCH-AND-CONTINUE.
+// canvasRequest throws (never returns a value) for both canvasFetch failure
+// kinds ("unreachable", "host-not-allowed") specifically because a write that
+// failed mid-flight MIGHT HAVE BEEN APPLIED and must never be retried (see
+// fetchWithThrottleRetry's own doc comment, and canvas-fetch-response.ts's
+// module header). Before this migration, the per-student loop below caught
+// EVERY exception from the write (bare fetch's rejected promise included) and
+// recorded it into `failures` - a bucket callers treat as retry-eligible
+// (a genuine Canvas rejection, e.g. a 404 or 403, is safe to retry, since
+// Canvas never applied it). Continuing to catch a canvasRequest throw the
+// same way would put an "unknown whether it applied" outcome into that same
+// retry-eligible bucket, which is exactly the retryable-value conversion the
+// adapter's own doc comment warns against. So the write below lets a
+// canvasRequest throw propagate straight out of postCanvasGrades, aborting
+// the rest of the batch rather than risking a caller retrying (and
+// potentially double-posting) a grade whose fate is unknown. A genuine HTTP
+// failure (`!response.ok` - Canvas answered and said no) is unaffected and
+// still lands in `failures` exactly as before.
+// ============================================================================
 
 interface CanvasDiscussionTopicObject {
   message?: string | null;
@@ -52,9 +85,9 @@ export async function postCanvasGrades(
 
   let assignmentId = parsed.kind === "assignment" ? parsed.id : "";
   if (parsed.kind === "discussion") {
-    const response = await fetch(
+    const response = await canvasGet(
       `${baseUrl}/api/v1/courses/${parsed.courseId}/discussion_topics/${parsed.id}`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      token
     );
     if (!response.ok) {
       throw canvasError(response.status, institution);
@@ -117,35 +150,34 @@ export async function postCanvasGrades(
       continue;
     }
 
-    try {
-      const response = await fetch(
-        `${baseUrl}/api/v1/courses/${parsed.courseId}/assignments/${assignmentId}/submissions/${userId}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: params.toString(),
-        }
-      );
-      if (!response.ok) {
-        const error =
-          response.status === 404
-            ? "No submission found for this student in Canvas (HTTP 404)."
-            : response.status === 401 || response.status === 403
-              ? `Not authorized to post this grade (check ${institution.code}_CANVAS_API_TOKEN's grading access).`
-              : `Canvas rejected the grade (HTTP ${response.status}).`;
-        failures.push({ userId, error });
-        continue;
-      }
-      posted += 1;
-    } catch (err) {
-      failures.push({
-        userId,
-        error: err instanceof Error ? err.message : "Request failed.",
-      });
+    // Deliberately NOT wrapped in try/catch: see this file's module doc
+    // comment ("THE GRADE-POST WRITE IS DELIBERATELY NOT WRAPPED IN A
+    // CATCH-AND-CONTINUE"). A canvasRequest throw here (an "unreachable" or
+    // "host-not-allowed" adapter failure) propagates straight out of
+    // postCanvasGrades rather than being folded into `failures`, so the rest
+    // of the batch is never attempted once one write's outcome is unknown. A
+    // completed HTTP exchange - Canvas actually answered, even with a
+    // rejection - is unaffected and still handled by `!response.ok` below.
+    const response = await canvasRequest(
+      `${baseUrl}/api/v1/courses/${parsed.courseId}/assignments/${assignmentId}/submissions/${userId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      },
+      token
+    );
+    if (!response.ok) {
+      const error =
+        response.status === 404
+          ? "No submission found for this student in Canvas (HTTP 404)."
+          : response.status === 401 || response.status === 403
+            ? `Not authorized to post this grade (check ${institution.code}_CANVAS_API_TOKEN's grading access).`
+            : `Canvas rejected the grade (HTTP ${response.status}).`;
+      failures.push({ userId, error });
+      continue;
     }
+    posted += 1;
   }
 
   return { posted, failures, skipped };

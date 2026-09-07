@@ -3,8 +3,35 @@
  */
 
 import { canvasError, parseNextLink, resolveDefaultInstitution, resolveInstitution, resolveInstitutionByCode, type CanvasInstitution } from "../canvas-core";
-import { CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
+import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
 import { getEffectiveIdentity } from "../supabase/effective-identity";
+import { canvasGet, canvasRequest } from "../canvas-fetch-response";
+
+// ============================================================================
+// The canvasFetch adapter.
+//
+// Every bearer-carrying request in this file (all 8 of them: getSelfId,
+// both listConversations branches, getConversation, replyToConversation,
+// setConversationWorkflowState, createConversation, getUnreadCount) used to
+// go straight to the platform `fetch`. Each now goes through `canvasFetch`
+// (src/lib/canvas-fetch.ts) via `canvasGet`/`canvasRequest`
+// (src/lib/canvas-fetch-response.ts), which pins the dialled connection to a
+// resolved-and-classified address (SEC1, closing DNS rebinding) and never
+// follows a redirect blind (SEC2). See that file's own doc comment for the
+// full failure-mapping reasoning (the discriminated union `canvasFetch`
+// returns, and why each failure kind is a throw, not a value) - it applies
+// unchanged here. Every function below keeps its EXACT existing signature and
+// its exact existing `.ok`/`.status`/`.json()` call shape - only what sits
+// behind that call shape changed.
+//
+// TIMEOUT: LEFT UNSPECIFIED, ON PURPOSE - same reasoning as
+// src/lib/canvas-modules/fetch-helpers.ts's own "TIMEOUT: LEFT UNSPECIFIED,
+// ON PURPOSE" comment: no caller in this file carries a deadline or an
+// attended/unattended flag today, so every call below omits `timeoutMs` and
+// takes `canvasFetch`'s own default, `DEFAULT_TIMEOUT_MS` (15s), which is
+// strictly safer than the "no timeout at all" every one of these calls had
+// before.
+// ============================================================================
 
 export interface CanvasConversationSummary {
   id: number;
@@ -111,9 +138,7 @@ async function getSelfId(ctx: { token: string; baseUrl: string }): Promise<numbe
     const cacheKey = `${identity.id}:${ctx.baseUrl}`;
     const cached = selfIdCache.get(cacheKey);
     if (typeof cached === "number") return cached;
-    const response = await fetch(`${ctx.baseUrl}/api/v1/users/self`, {
-      headers: { Authorization: `Bearer ${ctx.token}` },
-    });
+    const response = await canvasGet(`${ctx.baseUrl}/api/v1/users/self`, ctx.token);
     if (!response.ok) return null;
     const data = (await response.json()) as { id?: number };
     if (typeof data.id === "number") {
@@ -173,9 +198,7 @@ export async function listConversations(
   const { institution, token, baseUrl } = await resolveInbox(code);
 
   if (!opts) {
-    const response = await fetch(`${baseUrl}/api/v1/conversations?per_page=50`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(`${baseUrl}/api/v1/conversations?per_page=50`, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -192,14 +215,29 @@ export async function listConversations(
   let next: string | null = `${baseUrl}/api/v1/conversations?${params.toString()}`;
   let pagesFetched = 0;
   while (next && pagesFetched < INBOX_COURSE_SEARCH_PAGE_CAP) {
-    const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
     const items = (await response.json()) as CanvasConversationListItem[];
     out.push(...mapConversationList(items));
     pagesFetched++;
-    next = parseNextLink(response.headers.get("link"));
+    // E-CRIT1: the Link header is chosen by the REMOTE host, and this loop
+    // dials it carrying this app's bearer token, so an unguarded follow hands
+    // the credential to whatever origin that host names. canvasFetch does not
+    // close this on its own - its refusal list covers special-purpose
+    // addresses (loopback, private, link-local), NOT an ordinary public host,
+    // so `Link: <https://attacker.example/...>; rel="next"` would be dialled
+    // like any other URL. This loop was missed when every other parseNextLink
+    // follow in the codebase was guarded: it was capped, but never
+    // origin-checked.
+    //
+    // Dial the string the guard RETURNS, never the input. The guard accepts a
+    // RELATIVE Link header and resolves it against baseUrl, so for a relative
+    // candidate the return value differs from what went in, and dialling the
+    // input would pass the check and then fetch something else.
+    const rawNext = parseNextLink(response.headers.get("link"));
+    next = rawNext ? assertCanvasSuppliedUrlIsSameOrigin(rawNext, baseUrl) : null;
   }
   return out;
 }
@@ -210,9 +248,7 @@ export async function getConversation(
   code?: string
 ): Promise<CanvasConversationDetail> {
   const { institution, token, baseUrl } = await resolveInbox(code);
-  const response = await fetch(`${baseUrl}/api/v1/conversations/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await canvasGet(`${baseUrl}/api/v1/conversations/${id}`, token);
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }
@@ -264,16 +300,14 @@ export async function replyToConversation(
   const params = new URLSearchParams();
   params.append("body", body.trim());
 
-  const response = await fetch(
+  const response = await canvasRequest(
     `${baseUrl}/api/v1/conversations/${id}/add_message`,
     {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
-    }
+    },
+    token
   );
   if (!response.ok) {
     throw canvasError(response.status, institution);
@@ -290,14 +324,15 @@ export async function setConversationWorkflowState(
   const params = new URLSearchParams();
   params.append("conversation[workflow_state]", state);
 
-  const response = await fetch(`${baseUrl}/api/v1/conversations/${id}`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+  const response = await canvasRequest(
+    `${baseUrl}/api/v1/conversations/${id}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
     },
-    body: params.toString(),
-  });
+    token
+  );
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }
@@ -328,14 +363,15 @@ export async function createConversation(
   params.append("context_code", `course_${courseId}`);
   params.append("force_new", "1");
 
-  const response = await fetch(`${baseUrl}/api/v1/conversations`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+  const response = await canvasRequest(
+    `${baseUrl}/api/v1/conversations`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
     },
-    body: params.toString(),
-  });
+    token
+  );
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }
@@ -344,9 +380,7 @@ export async function createConversation(
 /** Unread Canvas inbox conversation count for an institution (for badges). */
 export async function getUnreadCount(code: string): Promise<number> {
   const { institution, token, baseUrl } = await resolveInbox(code);
-  const response = await fetch(`${baseUrl}/api/v1/conversations/unread_count`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await canvasGet(`${baseUrl}/api/v1/conversations/unread_count`, token);
   if (!response.ok) {
     throw canvasError(response.status, institution);
   }

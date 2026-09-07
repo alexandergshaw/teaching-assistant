@@ -109,6 +109,7 @@ const SOME_ITEM = {
     pointsPossible: null,
     htmlUrl: null,
     externalUrl: null,
+    newTab: null,
   },
 };
 

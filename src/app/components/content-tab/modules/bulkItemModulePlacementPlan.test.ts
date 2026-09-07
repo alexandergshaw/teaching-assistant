@@ -25,6 +25,7 @@ function item(id: number, moduleId: number): CanvasModuleItem {
     pointsPossible: null,
     htmlUrl: null,
     externalUrl: null,
+    newTab: null,
   };
 }
 

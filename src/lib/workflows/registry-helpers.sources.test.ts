@@ -73,6 +73,7 @@ describe("gatherModuleMaterials - default policy byte-identical behavior", () =>
               dueAt: null,
               pointsPossible: null,
               externalUrl: null,
+              newTab: null,
             },
           ],
         },
@@ -176,6 +177,7 @@ describe("gatherModuleMaterials - AC1/AC2 course-level live LMS (no module selec
               dueAt: null,
               pointsPossible: null,
               externalUrl: null,
+              newTab: null,
             },
           ],
         },
@@ -221,6 +223,7 @@ describe("gatherModuleMaterials - AC1/AC2 course-level live LMS (no module selec
               dueAt: null,
               pointsPossible: null,
               externalUrl: null,
+              newTab: null,
             },
           ],
         },
@@ -410,7 +413,7 @@ describe("gatherModuleMaterials - AC2 match-by-name (name-reference module value
       pages: [],
       modules: [
         { id: 1, name: "module 05: loops", position: 5, published: true, itemsCount: 1, items: [
-          { id: 1, moduleId: 1, type: "Quiz", title: "Loop quiz", position: 1, indent: 0, published: true, contentId: 1, htmlUrl: null, pageUrl: null, dueAt: null, pointsPossible: null, externalUrl: null },
+          { id: 1, moduleId: 1, type: "Quiz", title: "Loop quiz", position: 1, indent: 0, published: true, contentId: 1, htmlUrl: null, pageUrl: null, dueAt: null, pointsPossible: null, externalUrl: null, newTab: null },
         ] },
       ],
     });

@@ -23,6 +23,7 @@ function item(id: number, overrides: Partial<CanvasModuleItem>): CanvasModuleIte
     pointsPossible: null,
     htmlUrl: null,
     externalUrl: null,
+    newTab: null,
     ...overrides,
   };
 }

@@ -5,7 +5,33 @@
 import JSZip from "jszip";
 import { canvasError, htmlToText, parseNextLink, type CanvasInstitution } from "../canvas-core";
 import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
+import { canvasGet } from "../canvas-fetch-response";
 import type { CanvasStudentWork } from "./discussions";
+
+// ============================================================================
+// The canvasFetch adapter migration - see src/lib/canvas-fetch-response.ts's
+// own doc comment for the full failure-mapping reasoning (both bearer-carrying
+// fetches below now go through canvasGet, which pins the dialled connection
+// to a resolved-and-classified address (SEC1) and never follows a redirect
+// blind (SEC2)). TIMEOUT is left unspecified on both calls, per
+// canvas-modules/fetch-helpers.ts's own "LEFT UNSPECIFIED, ON PURPOSE"
+// rationale - this file has no deadline/attended flag to plumb through
+// either, so both calls fall through to canvasFetch's own DEFAULT_TIMEOUT_MS.
+//
+// THE ATTACHMENT-URL SPLIT DOES NOT APPLY HERE THE WAY IT DOES IN
+// announcements.ts's exportCourseCartridge. That function makes TWO fetches
+// for one attachment URL - an unauthenticated attempt (assertCanvasSuppliedUrlIsPublic,
+// may leave the Canvas origin, stays on bare fetch because it carries no
+// bearer) and, only if that fails, a bearer-carrying retry
+// (assertCanvasSuppliedUrlIsSameOrigin, migrated to canvasGet). This file's
+// attachment download below is a DIFFERENT shape: a single fetch, already
+// guarded by assertCanvasSuppliedUrlIsSameOrigin, that always carries the
+// bearer token - there is no preceding unauthenticated attempt to preserve on
+// bare fetch. A same-origin-locked call that carries a bearer is exactly the
+// kind of call this migration moves onto canvasGet (that is the "bearer
+// retry" half of the split, not the "free download" half), so it migrates
+// like every other call in this file rather than staying behind.
+// ============================================================================
 
 // Skip attachments larger than this to bound memory/latency.
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
@@ -48,9 +74,7 @@ export async function fetchAssignment(
 
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await canvasGet(next, token);
     if (!response.ok) {
       throw canvasError(response.status, institution);
     }
@@ -103,9 +127,7 @@ export async function fetchAssignment(
         // malformed attachment URL throws here and is caught below, skipping
         // just that attachment rather than the whole fetch.
         const safeAttachmentUrl = assertCanvasSuppliedUrlIsSameOrigin(attachment.url, baseUrl);
-        const fileRes = await fetch(safeAttachmentUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const fileRes = await canvasGet(safeAttachmentUrl, token);
         if (!fileRes.ok) continue;
         const buffer = await fileRes.arrayBuffer();
         if (buffer.byteLength > MAX_ATTACHMENT_BYTES) continue;

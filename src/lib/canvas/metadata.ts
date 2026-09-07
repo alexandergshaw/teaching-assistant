@@ -4,6 +4,28 @@
 
 import { parseCanvasUrl, type ParsedCanvasUrl, extractCanvasFileIds } from "../canvas-url";
 import { canvasError, htmlToText, type CanvasInstitution, resolveInstitution } from "../canvas-core";
+import { canvasGet } from "../canvas-fetch-response";
+
+// ============================================================================
+// The canvasFetch adapter migration - see src/lib/canvas-fetch-response.ts's
+// own doc comment for the full failure-mapping reasoning. All four
+// bearer-carrying fetches below (fetchAssignmentObject, and the discussion-
+// topic reads in fetchCanvasMetaWith/fetchAssignmentPointsPossible/
+// getSpeedGraderUrl) now go through canvasGet, which pins the dialled
+// connection to a resolved-and-classified address (SEC1) and never follows a
+// redirect blind (SEC2), instead of the platform's bare fetch. None of these
+// reads touches a Canvas-supplied attachment/progress URL - every URL dialed
+// here is one this file itself builds from a trusted baseUrl - so the
+// attachment-URL split (public-host guard for an unauthenticated download vs.
+// same-origin guard for a bearer retry, see submissions.ts's own migration
+// note) does not apply to this file at all.
+//
+// TIMEOUT is left unspecified on every call, per canvas-modules/
+// fetch-helpers.ts's own "LEFT UNSPECIFIED, ON PURPOSE" rationale - none of
+// this file's functions carries a deadline or an attended/unattended flag to
+// plumb through, so every call falls through to canvasFetch's own
+// DEFAULT_TIMEOUT_MS.
+// ============================================================================
 
 interface CanvasRubricRating {
   description?: string;
@@ -76,9 +98,9 @@ export async function fetchAssignmentObject(
   courseId: string,
   assignmentId: string
 ): Promise<CanvasAssignmentObject> {
-  const response = await fetch(
+  const response = await canvasGet(
     `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    token
   );
   if (!response.ok) {
     throw canvasError(response.status, institution);
@@ -134,9 +156,9 @@ export async function fetchCanvasMetaWith(
 
   // Discussion: the topic message is the description; a graded discussion links
   // to an assignment that may carry the rubric.
-  const response = await fetch(
+  const response = await canvasGet(
     `${baseUrl}/api/v1/courses/${parsed.courseId}/discussion_topics/${parsed.id}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    token
   );
   if (!response.ok) {
     throw canvasError(response.status, institution);
@@ -181,9 +203,9 @@ export async function fetchAssignmentPointsPossible(url: string): Promise<number
     let assignmentId = parsed.kind === "assignment" ? parsed.id : "";
 
     if (parsed.kind === "discussion") {
-      const response = await fetch(
+      const response = await canvasGet(
         `${baseUrl}/api/v1/courses/${parsed.courseId}/discussion_topics/${parsed.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        token
       );
       if (!response.ok) return null;
       const topic = (await response.json()) as CanvasDiscussionTopicObject;
@@ -229,9 +251,9 @@ export async function getSpeedGraderUrl(url: string): Promise<string | null> {
   let assignmentId = parsed.kind === "assignment" ? parsed.id : "";
   if (parsed.kind === "discussion") {
     try {
-      const response = await fetch(
+      const response = await canvasGet(
         `${baseUrl}/api/v1/courses/${parsed.courseId}/discussion_topics/${parsed.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        token
       );
       if (!response.ok) return null;
       const topic = (await response.json()) as CanvasDiscussionTopicObject;

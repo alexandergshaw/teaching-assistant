@@ -36,6 +36,7 @@ function liveItem(overrides: Partial<CanvasModuleItem>): CanvasModuleItem {
     pointsPossible: null,
     htmlUrl: null,
     externalUrl: null,
+    newTab: null,
     ...overrides,
   };
 }

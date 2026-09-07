@@ -87,6 +87,7 @@ function makeLiveItem(id: number) {
       pointsPossible: null,
       htmlUrl: null,
       externalUrl: null,
+      newTab: null,
     },
   };
 }
@@ -382,6 +383,7 @@ describe("linkVisualizerPagesIntoModuleAction", () => {
             pointsPossible: null,
             htmlUrl: null,
             externalUrl: url,
+            newTab: null,
           })),
         },
       ],

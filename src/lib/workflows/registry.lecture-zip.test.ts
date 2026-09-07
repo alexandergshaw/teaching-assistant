@@ -363,6 +363,7 @@ describe("lecture-zip step", () => {
               dueAt: null,
               pointsPossible: null,
               externalUrl: null,
+              newTab: null,
             },
           ],
         },
@@ -587,7 +588,7 @@ describe("lecture-zip step", () => {
           published: true,
           itemsCount: 1,
           items: [
-            { id: 1, moduleId: 7, type: "Quiz", title: "Loop quiz", position: 1, indent: 0, published: true, contentId: 1, htmlUrl: null, pageUrl: null, dueAt: null, pointsPossible: null, externalUrl: null },
+            { id: 1, moduleId: 7, type: "Quiz", title: "Loop quiz", position: 1, indent: 0, published: true, contentId: 1, htmlUrl: null, pageUrl: null, dueAt: null, pointsPossible: null, externalUrl: null, newTab: null },
           ],
         },
       ],

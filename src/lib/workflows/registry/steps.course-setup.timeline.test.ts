@@ -121,6 +121,7 @@ function makeContent(contentId: number) {
             pointsPossible: 100,
             htmlUrl: null,
             externalUrl: null,
+            newTab: null,
           },
         ],
       },

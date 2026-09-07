@@ -114,6 +114,7 @@ function makeModule(name: string, assignmentContentId: number): CanvasModule {
         pointsPossible: 100,
         htmlUrl: null,
         externalUrl: null,
+        newTab: null,
       },
     ],
   };

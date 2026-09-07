@@ -22,6 +22,7 @@ function moduleItem(overrides: Partial<CanvasModuleItem> & Pick<CanvasModuleItem
     pointsPossible: null,
     htmlUrl: null,
     externalUrl: null,
+    newTab: null,
     ...overrides,
   };
 }

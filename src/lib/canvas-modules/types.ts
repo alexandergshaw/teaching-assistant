@@ -27,15 +27,19 @@ export interface CanvasModuleItem {
    * set to off - see canSetNewTab in module-items.ts for the type check that
    * keeps that distinction meaningful.
    *
-   * Declared optional (rather than required `boolean | null`) solely so the
-   * many pre-existing `CanvasModuleItem` fixture literals elsewhere in the
-   * test suite - outside this change's file set - keep compiling unchanged.
-   * mapModuleItem (mappers.ts) always sets it to `boolean | null`, never
-   * `undefined`, for every item it actually maps; a caller reading a real
-   * mapped item can treat `undefined` and `null` the same way ("not
-   * applicable here").
+   * REQUIRED, not optional, and it briefly was not. It shipped as
+   * `newTab?: boolean | null` for exactly one commit, because making it
+   * required broke tsc across the many pre-existing CanvasModuleItem
+   * fixture literals in test files that a concurrent sibling agent held at
+   * the time. The cost of that widening was that `undefined` and `null`
+   * both meant "not applicable", so a consumer written as
+   * `item.newTab === null` would silently miss the `undefined` case - and
+   * since mapModuleItem always sets a real `boolean | null`, `undefined`
+   * could only ever originate in a test fixture, which is the least useful
+   * place for a bug to appear. Narrowed back as soon as those files were
+   * free.
    */
-  newTab?: boolean | null;
+  newTab: boolean | null;
 }
 
 /** One module with its ordered items. */

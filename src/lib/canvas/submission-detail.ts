@@ -4,7 +4,30 @@
 
 import { canvasError, htmlToText, resolveInstitutionByCode } from "../canvas-core";
 import { assertCanvasSuppliedUrlIsSameOrigin } from "../canvas-remote-url";
+import { canvasGet } from "../canvas-fetch-response";
 import type { CanvasStudentWork } from "./discussions";
+
+// ============================================================================
+// The canvasFetch adapter - see src/lib/canvas-modules/fetch-helpers.ts for
+// the reference migration, and src/lib/canvas-fetch-response.ts for the
+// shared canvasFetch -> Response/throw mapping every migrated Canvas module
+// reuses rather than re-deriving its own copy. All three bearer-carrying
+// fetches below (the assignment read, the submission read, and the
+// per-attachment download) now go through canvasGet, which pins the dialled
+// connection to a resolved-and-classified address (SEC1, closing DNS
+// rebinding) and never follows a redirect blind (SEC2). fetchSubmissionDetail
+// keeps its exact existing signature and its exact existing
+// `.ok`/`.status`/`.json()`/`.arrayBuffer()` call shape - only what sits
+// behind that call shape changed. The attachment download already ran
+// through assertCanvasSuppliedUrlIsSameOrigin before this migration (E-CRIT1)
+// - that guard, and dialling its RETURNED string rather than the raw
+// attachment.url, is untouched here.
+//
+// TIMEOUT: LEFT UNSPECIFIED, ON PURPOSE - see fetch-helpers.ts's own "TIMEOUT:
+// LEFT UNSPECIFIED, ON PURPOSE" note for the full reasoning. All three calls
+// below omit timeoutMs and take canvasFetch's own default (DEFAULT_TIMEOUT_MS,
+// 15s), strictly safer than the no-timeout-at-all these fetches had before.
+// ============================================================================
 
 // Skip attachments larger than this to bound memory/latency.
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
@@ -76,18 +99,18 @@ export async function fetchSubmissionDetail(
 ): Promise<CanvasSubmissionDetail> {
   const { institution, token, baseUrl } = await resolveInstitutionByCode(code);
 
-  const assignmentResponse = await fetch(
+  const assignmentResponse = await canvasGet(
     `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    token
   );
   if (!assignmentResponse.ok) {
     throw canvasError(assignmentResponse.status, institution);
   }
   const assignment = (await assignmentResponse.json()) as CanvasAssignmentDetailItem;
 
-  const submissionResponse = await fetch(
+  const submissionResponse = await canvasGet(
     `${baseUrl}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}?include[]=user`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    token
   );
   if (!submissionResponse.ok) {
     throw canvasError(submissionResponse.status, institution);
@@ -109,9 +132,7 @@ export async function fetchSubmissionDetail(
       // malformed attachment URL throws here and is caught below, skipping
       // just that attachment rather than the whole submission.
       const safeAttachmentUrl = assertCanvasSuppliedUrlIsSameOrigin(attachment.url, baseUrl);
-      const fileRes = await fetch(safeAttachmentUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const fileRes = await canvasGet(safeAttachmentUrl, token);
       if (!fileRes.ok) continue;
       const buffer = await fileRes.arrayBuffer();
       if (buffer.byteLength > MAX_ATTACHMENT_BYTES) continue;

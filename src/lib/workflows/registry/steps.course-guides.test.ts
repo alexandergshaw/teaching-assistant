@@ -388,6 +388,7 @@ describe("generate-course-guides step", () => {
               pointsPossible: null,
               htmlUrl: null,
               externalUrl: null,
+              newTab: null,
             },
           ],
         },

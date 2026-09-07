@@ -3,9 +3,43 @@
  */
 
 import { canvasError, parseNextLink, resolveInstitutionByCode, type CanvasInstitution } from "../canvas-core";
+import { canvasGet } from "../canvas-fetch-response";
 import { fetchCanvasMetaWith } from "./metadata";
 import { listActiveTeacherCourses } from "./listings";
-import { CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
+import { assertCanvasSuppliedUrlIsSameOrigin, CANVAS_PAGINATION_PAGE_CAP } from "../canvas-remote-url";
+
+// ============================================================================
+// The canvasFetch adapter - see src/lib/canvas-fetch-response.ts for the full
+// failure-mapping reasoning. All three bearer-carrying fetch calls in this
+// file (the two needs-grading assignment scans and the unread-conversations
+// lookup) are plain reads, so all three go through canvasGet, never
+// canvasRequest - none of them writes anything.
+//
+// TIMEOUT: LEFT UNSPECIFIED, ON PURPOSE, same reasoning as
+// src/lib/canvas-modules/fetch-helpers.ts's own note - none of these calls
+// have a deadline or attended/unattended flag to plumb through, so all three
+// omit timeoutMs and take canvasFetch's own DEFAULT_TIMEOUT_MS (15s).
+//
+// E-CRIT1, CLOSED HERE. Both Link-header loops below were capped by
+// CANVAS_PAGINATION_PAGE_CAP but never origin-checked - they dialled
+// whatever URL the remote host put in its rel="next" header, carrying this
+// app's bearer token. parseNextLink (../canvas-core) performs no origin
+// check of its own, and canvasFetch does not close this either: its refusal
+// list covers special-purpose addresses (loopback, private, link-local),
+// not an ordinary public host. So a Canvas instance that had been
+// compromised - or was never the real thing - could collect the credential
+// by answering page one with a rel="next" pointing anywhere it liked.
+//
+// This was missed when every other parseNextLink follow was guarded; the
+// same miss turned up in the same wave in canvas/inbox.ts (one loop) and
+// canvas/listings.ts (seven), which is what makes it a class rather than an
+// oversight. Every follow now passes through
+// assertCanvasSuppliedUrlIsSameOrigin and dials the string the guard
+// RETURNS - never the input. That distinction is load-bearing: the guard
+// accepts a RELATIVE Link header and resolves it against baseUrl, so for a
+// relative candidate the return value differs from what went in, and
+// dialling the input would pass the check and then fetch something else.
+// ============================================================================
 
 /** One assignment/discussion needing grading, one row in the Live Feed table. */
 export interface CanvasQueueItem {
@@ -60,7 +94,7 @@ async function scanNeedsGrading(ctx: {
     let next: string | null = `${baseUrl}/api/v1/courses/${course.id}/assignments?bucket=ungraded&include[]=needs_grading_count&per_page=100`;
     let pagesFetched = 0;
     while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-      const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await canvasGet(next, token);
       if (!response.ok) {
         throw canvasError(response.status, institution);
       }
@@ -95,7 +129,8 @@ async function scanNeedsGrading(ctx: {
           rubricText: "",
         });
       }
-      next = parseNextLink(response.headers.get("link"));
+      const rawNextA = parseNextLink(response.headers.get("link"));
+      next = rawNextA ? assertCanvasSuppliedUrlIsSameOrigin(rawNextA, baseUrl) : null;
     }
   }
   return items;
@@ -164,20 +199,21 @@ export async function getCourseNotifications(
   let next: string | null = `${baseUrl}/api/v1/courses/${courseId}/assignments?bucket=ungraded&include[]=needs_grading_count&per_page=100`;
   let pagesFetched = 0;
   while (next && pagesFetched < CANVAS_PAGINATION_PAGE_CAP) {
-    const response = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await canvasGet(next, token);
     if (!response.ok) throw canvasError(response.status, institution);
     pagesFetched++;
     const page = (await response.json()) as Array<{ needs_grading_count?: number }>;
     for (const a of page) {
       if (typeof a.needs_grading_count === "number" && a.needs_grading_count > 0) needsGrading += a.needs_grading_count;
     }
-    next = parseNextLink(response.headers.get("link"));
+    const rawNextB = parseNextLink(response.headers.get("link"));
+    next = rawNextB ? assertCanvasSuppliedUrlIsSameOrigin(rawNextB, baseUrl) : null;
   }
 
   let unread = 0;
-  const convRes = await fetch(
+  const convRes = await canvasGet(
     `${baseUrl}/api/v1/conversations?scope=unread&filter[]=course_${courseId}&per_page=100`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    token
   );
   if (convRes.ok) {
     const convs = (await convRes.json()) as unknown[];

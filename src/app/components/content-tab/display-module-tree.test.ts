@@ -43,6 +43,7 @@ function makeCanvasItem(overrides: Partial<CanvasModuleItem> = {}): CanvasModule
     pointsPossible: null,
     htmlUrl: "https://canvas.example.edu/courses/1/pages/week-1-reading",
     externalUrl: null,
+    newTab: null,
     ...overrides,
   };
 }
@@ -75,6 +76,7 @@ describe("canvasItemToDisplay (via canvasModuleToDisplay)", () => {
       pointsPossible: 20,
       htmlUrl: "https://canvas.example.edu/courses/1/assignments/777",
       externalUrl: null,
+      newTab: null,
     });
     const [display] = canvasModuleToDisplay(makeCanvasModule({ items: [source] })).items;
 

@@ -62,7 +62,7 @@ describe("source: existing-lms-course", () => {
           published: true,
           itemsCount: 1,
           items: [
-            { id: 1, moduleId: 1, title: "Overview", type: "Page", position: 1, indent: 0, published: true, pageUrl: "overview", contentId: null, dueAt: null, pointsPossible: null, htmlUrl: null, externalUrl: null },
+            { id: 1, moduleId: 1, title: "Overview", type: "Page", position: 1, indent: 0, published: true, pageUrl: "overview", contentId: null, dueAt: null, pointsPossible: null, htmlUrl: null, externalUrl: null, newTab: null },
           ],
         },
       ],
@@ -81,7 +81,7 @@ describe("source: existing-lms-course", () => {
           published: true,
           itemsCount: 1,
           items: [
-            { id: 1, moduleId: 1, title: "Overview", type: "Page", position: 1, indent: 0, published: true, pageUrl: "overview", contentId: null, dueAt: null, pointsPossible: null, htmlUrl: null, externalUrl: null },
+            { id: 1, moduleId: 1, title: "Overview", type: "Page", position: 1, indent: 0, published: true, pageUrl: "overview", contentId: null, dueAt: null, pointsPossible: null, htmlUrl: null, externalUrl: null, newTab: null },
           ],
         },
       ],
@@ -114,7 +114,7 @@ describe("source: existing-lms-course", () => {
           published: true,
           itemsCount: 1,
           items: [
-            { id: 1, moduleId: 1, title: "Overview", type: "Page", position: 1, indent: 0, published: true, pageUrl: "overview", contentId: null, dueAt: null, pointsPossible: null, htmlUrl: null, externalUrl: null },
+            { id: 1, moduleId: 1, title: "Overview", type: "Page", position: 1, indent: 0, published: true, pageUrl: "overview", contentId: null, dueAt: null, pointsPossible: null, htmlUrl: null, externalUrl: null, newTab: null },
           ],
         },
       ],

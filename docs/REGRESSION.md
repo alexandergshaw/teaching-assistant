@@ -40448,3 +40448,420 @@ asserted is unchanged; only where it is observed moved.
   co-located with the submit spinner as the aesthetics pass specified,
   matching this page's own existing convention for its two sibling sections.
   Disclosed, not silent.
+
+
+## 405. Bulk "open in a new tab", and the transport adapter leaves its pilot
+
+Two threads in one commit (f04eb19). One is a feature an instructor asked for;
+the other is the next step of moving Canvas traffic onto DNS-pinned fetching.
+
+### The feature: bulk new_tab on module items
+
+**405a - the read path was three lines, because the field already rode the
+response.** Canvas emits `new_tab` from the SAME conditional block as
+`external_url`, and this app already reads `external_url` off that exact
+response. So no `include[]`, no second endpoint, no per-item fetch: a field on
+`RawModuleItem`, a line in `mapModuleItem`, a field on `CanvasModuleItem`. For
+non-external items the key is ABSENT rather than `false`, so `raw.new_tab ??
+null` is faithful to the payload rather than imposing a shape on it.
+
+The published Canvas docs annotate `new_tab` as "(only for 'ExternalTool'
+type)". The serializer emits it for `ExternalUrl` too. The docs are wrong.
+
+**405b - the survey reversed the most dangerous thing in the criteria.** The
+acceptance criteria warned that omitting `module_item[external_url]` on an
+update might blank the link, and suggested resending it defensively. Canvas's
+controller assigns the url only when the param is PRESENT - so omitting it is
+safe. But that guard is Ruby truthiness, and **in Ruby `""` is TRUTHY**, so the
+"defensive" version (`append("module_item[external_url]", item.externalUrl ??
+"")`) would have set the url to empty string on every item whose `externalUrl`
+this app holds as null. Mass link erasure, caused by the defence against it.
+
+**RESOLUTION, enforced structurally rather than by discipline:**
+`updateModuleItem`'s `fields` type has NO `externalUrl` member, so no code path
+can send it. The question is moot rather than answered correctly.
+
+**405c - Canvas applies `new_tab` with NO content-type guard, which makes the
+client-side predicate the only guard that exists.** The controller assigns it
+unconditionally. Canvas will accept, store and 200-OK a `new_tab` write on an
+Assignment, Page or Quiz - an ineligible item does not fail loudly, it silently
+SUCCEEDS and would be counted as done. `canSetNewTab` is therefore not a
+nicety that avoids a rejection; it is the only thing between the instructor and
+a report reading "11 done" about eight items where nothing happened.
+
+The naming trap that predicate has to survive: the API's `type` is
+`"ExternalTool"` while the database's `content_type` is
+`"ContextExternalTool"`. The predicate tests the API spelling and returns false
+for the DB one.
+
+Settled in the same reading: `"false"` is a truthy Ruby string, so
+`value_to_boolean("false")` runs and writes `false`. Set-not-toggle works in
+BOTH directions. Send the literal `"true"`/`"false"`, never an empty value.
+
+**405d - "already correct" is a third outcome, deliberately.** Every existing
+per-item bulk action in this app collapses results into `N done, M failed` and
+discards the Canvas error string. Copying that here would make a re-run read
+either "N updated" (implies work happened) or "N failed" (implies breakage),
+when the truth is neither. `bulkNewTabSummary.ts` carries a discriminated
+outcome per item - updated / unchanged / skipped-with-its-kind /
+failed-with-its-reason - modelled on the rubric generate-and-associate action,
+the only per-item reporting here that already distinguishes SKIPPED from
+FAILED. Classification happens BEFORE the write, so an item already in the
+requested state costs no Canvas call at all.
+
+It is a new pure leaf with its own test file, not an addition to
+`useBulkItemActions.ts`, which sits at 900 of 1000 lines and has already been
+split twice for this exact reason. Being a leaf is also what makes it testable,
+since vitest here renders no component.
+
+**405e - IT WOULD HAVE SHIPPED DEAD, and every gate would have stayed green.**
+`ModulesView.tsx` lists every `BulkItemsSection` prop by hand, and that file was
+left out of the implementing group's allow-list. The prop was therefore
+declared optional with a no-op default. The result compiled, rendered the
+correct enabled/disabled state and the correct affected-item count - because
+those ride a pre-existing prop pipeline - and wrote nothing at all when
+clicked.
+
+The implementer reported it rather than hiding it: the count and hint were
+live, "the actual write is unreachable until `ModulesView.tsx` gets one added
+line".
+
+Fixed twice over. The wire was added, and the prop was made REQUIRED with the
+reason written above it, so removing the wire is now
+`error TS2741: Property 'bulkSetNewTab' is missing`. Sabotage-verified by
+unwiring and reading that error. The no-op default is deleted.
+
+This is the third time in this project that a feature has been one unlisted
+wiring file away from shipping dead. The standing rule - a group's file list
+must contain the file that CALLS the new export - was not applied here, and
+only the implementer's own report caught it.
+
+### The transport: the adapter leaves its pilot
+
+**405f - extracted to a leaf before the fan-out, not during it.** The pilot's
+adapter was private to `fetch-helpers.ts`. Eleven more files need it, and
+duplicating a security-critical mapping across eleven call sites is a failure
+this repo has been bitten by before. It moved to `canvas-fetch-response.ts`
+first, taking a bare `token: string` rather than a `CourseContext`, and four
+files were migrated through it to prove the extraction.
+
+**`fetch-helpers.ts`'s own tests pass UNMODIFIED.** That is the proof the
+extraction was behaviour-neutral: the file that owned the adapter kept every
+assertion it had.
+
+**405g - the attachment split survived, and was sabotage-checked BOTH ways.**
+Entry 403e's two-rule split (free download may leave the Canvas origin; the
+bearer retry is origin-locked) is preserved through the adapter. Collapsing it
+so the free download carries a bearer turns tests red; re-imposing same-origin
+on the free download turns different tests red.
+
+**405h - one call site correctly did NOT migrate.** A pre-signed upload POST
+carries no Authorization header and sends a `FormData` body the adapter's type
+does not accept. Documented inline as a deliberate exception rather than forced
+through, because forcing it would have meant widening the adapter's contract to
+accommodate the one case that does not need it.
+
+**405i - the recipe from 404f found a third broken test outside its file set**,
+and the agent reported it BY NAME instead of editing a file it did not own. It
+was fixed here, with the double moved up to the adapter boundary, since the
+property that test protects is concurrency and mocking below the adapter would
+have made its assertion vacuous.
+
+**405j - one thing could not be verified, recorded in the test itself.** After
+moving that double, the attempt to prove the test still fails when the
+sequential guarantee breaks was ITSELF wrong - the sabotage awaited the promise
+on the same line, so sequencing was never actually broken. "Three calls
+dispatched" is pinned and proven. "Never more than one in flight at a time" is
+believed and UNPROVEN, and the test says so in its own header rather than
+implying a guarantee it does not deliver.
+
+### 405k - ratchets that had to move in the same commit
+
+The bulk-bar control-count canary went 30 to 32 for the two new controls - the
+one that fails the suite if missed. The `items` group's `consequenceTag` was
+EXTENDED, not nulled, because a test asserts it is non-null for any group
+reachable at fan-out-write tier. Both new controls declare `persistKey: null`
+with a non-empty `unpersistedReason`, or the persistence canary's "exactly 1
+declared" assertion breaks.
+
+### 405l - gates
+
+- `npx vitest run`: 943 files, 18924 tests, all passing.
+- `npx tsc --noEmit`: exit 0.
+- `npx eslint .`: 0 errors (6 pre-existing warnings).
+- `npx next build`: "Compiled successfully in 17.4s" AND "Finished TypeScript
+  in 44s". The static-prerender tail fails on a missing Supabase URL/key - no
+  `.env*` file on this machine - which is environmental and unchanged.
+- Byte-scan across all 30 changed paths, compared against HEAD for tracked
+  files: zero non-ASCII introduced.
+
+### 405m - LIMITS
+
+- **`newTab` shipped OPTIONAL (`newTab?: boolean | null`), not required.** The
+  criteria specify required. Making it required broke `tsc` across roughly
+  fifteen test files outside the implementing group's allow-list, all of which
+  construct literal `CanvasModuleItem` fixtures, and editing files a concurrent
+  sibling holds is how a wave gate stops meaning anything. The cost: `undefined`
+  and `null` now both mean "not applicable", so a consumer comparing
+  `item.newTab === null` silently misses the `undefined` case. `mapModuleItem`
+  always sets a real `boolean | null`, so `undefined` can only originate in a
+  test fixture - the least useful place for the bug to appear. Callers must read
+  `item.newTab ?? null`. The fix is mechanical: add `newTab: null` to the
+  fixtures and tighten the field.
+- **Nothing here has been rendered.** vitest is node-env and collects no
+  `.test.tsx`, so the bulk bar's disabled state, its count copy, and its
+  keyboard behaviour are verified by READING the source only. The summariser is
+  genuinely tested; the control that calls it is not.
+- **No Canvas behaviour above was observed against a live instance.** All of it
+  is read from canvas-lms source. Which version the target institution runs is
+  unknown - which is precisely why the implementation was chosen so as not to
+  depend on the answer.
+- **Two existing code paths create ExternalUrl items and neither sets
+  `new_tab`**, so every link this app creates lands in exactly the state this
+  bulk action then has to fix. Setting it at creation was out of scope and
+  remains an obvious, small follow-up.
+- **The transport swap is 5 of 24 files done.** The remaining bearer-carrying
+  sites still use plain `fetch`, so for them the same-origin guard remains a
+  hostname-level check that does not resolve DNS, and redirects are still
+  followed by default.
+
+
+## 406. The Canvas transport fan-out, and a guard class that was reported closed and was not
+
+Wave 6 moved the remaining seven `src/lib/canvas/` files onto `canvasFetch`
+through the shared adapter - and in doing so found that entry 403c's claim was
+false.
+
+### 406a - what 403c said, and what was actually true
+
+Entry 403c states: "Every such follow now passes through
+`assertCanvasSuppliedUrlIsSameOrigin` and dials the guard's RETURNED string.
+Every loop is now capped."
+
+The second sentence was true. **The first was not.** Ten `Link: rel="next"`
+follows across three files were capped but never origin-checked:
+
+- `canvas/listings.ts` - **seven** loops
+- `canvas/grading-queue.ts` - two
+- `canvas/inbox.ts` - one
+
+Each dialled whatever URL the remote host named in its `rel="next"` header,
+carrying this app's bearer token. Two different agents found it independently
+in the same wave, in different files, which is what makes it a CLASS rather
+than an oversight - and is the only reason it was found at all, since no test
+anywhere asserts the guard's presence on a loop that lacks it.
+
+**`canvasFetch` does not close this.** Its refusal list covers special-purpose
+addresses - loopback, private, link-local - not an ordinary public host. So a
+Canvas instance that had been compromised, or was never the real thing, could
+have collected the credential by answering page one with a `rel="next"`
+pointing anywhere it liked. The transport migration made the request DNS-pinned
+and redirect-safe; it did not make the destination trustworthy, because the
+destination was chosen by the remote host.
+
+All ten now pass through the guard and dial the string the guard RETURNS. That
+distinction is load-bearing and is now tested rather than asserted in a
+comment: the guard accepts a RELATIVE Link header and resolves it against the
+base, so for a relative candidate the return value differs from the input, and
+dialling the input would pass the check and then fetch something else.
+
+**Every one is sabotage-checked in both directions** - a cross-origin
+`rel="next"` must be refused BEFORE the second request is dispatched (asserted
+on the call count, because asserting only that it threw would still pass if the
+token went out and the throw came afterwards), and a relative one must be
+resolved. Removing the guard turns both red.
+
+### 406b - the pagination cap cannot be protected by a test timeout
+
+Two groups independently sabotaged a page cap and reported the same thing: it
+did not fail, it **hung**, and vitest's own per-test timeout never fired.
+
+An unbounded chain of already-resolved promises never yields to the
+macrotask/timer phase, so the timer that would report the timeout never runs.
+One agent had to kill the process externally after 30 seconds of no output.
+
+The consequence is worth stating plainly, because it inverts the usual
+reassurance: **an explicit test timeout protects against an off-by-one cap
+regression (`<` becoming `<=` fails cleanly in 45ms) but cannot rescue a fully
+unbounded one.** Only the cap's presence does. No test-side mitigation closes
+that failure mode.
+
+### 406c - the write path, where being wrong has consequences outside the app
+
+`postCanvasGrades` POSTs grades to a real gradebook. Its per-student write used
+to sit inside a `try/catch` that caught ANY exception - including a rejected
+bare `fetch` - folded it into `failures`, and continued to the next student.
+
+After migration that would have meant catching a `canvasRequest` throw
+(`unreachable` / `host-not-allowed`) and putting an "unknown whether it
+applied" outcome into the bucket callers treat as retry-eligible. That is
+exactly the retryable-value conversion the adapter forbids, and the reason it
+forbids it is that a request which failed mid-flight MIGHT HAVE BEEN APPLIED.
+
+The catch-and-continue is removed for the write call only. A `canvasRequest`
+throw now propagates and aborts the rest of the batch; a completed exchange
+(`!response.ok` - a 401, 403, 404) is unaffected and still lands in `failures`
+exactly as before. Sabotage-checked: re-wrapping it makes the new test resolve
+with BOTH students in `failures`, proving the second student's write would have
+gone out after the first failed mid-flight.
+
+### 406d - one judgment call, flagged rather than buried
+
+`submissions.ts`'s attachment download migrated, unlike the content-export
+attachment in `announcements.ts` which deliberately did not. The distinction is
+real and was checked rather than assumed: the export path has a two-step
+shape - a credential-free public-host download first, a bearer retry second -
+and only the first step must stay on bare `fetch`. `submissions.ts` has no such
+first step; it is a single fetch that already carried the bearer and was
+already origin-locked, which is the "bearer retry" shape. It migrated on that
+basis, documented inline so nobody has to re-derive it.
+
+### 406e - the `newTab` debt from entry 405m, paid
+
+`CanvasModuleItem.newTab` is now REQUIRED (`boolean | null`), as the criteria
+always specified. It shipped optional for exactly one commit because tightening
+it broke `tsc` across seventeen test files a concurrent sibling held.
+
+Twenty fixtures gained `newTab: null`. One of them had to go on the SAME LINE
+as its neighbour: `lms-generation.test.ts` sits exactly at its allow-listed
+ratchet ceiling of 1124 lines, and a ratchet is meant to fall, never to be
+raised to accommodate a one-line fixture field.
+
+### 406f - gates
+
+- `npx vitest run`: 946 files, 18970 tests, all passing.
+- `npx tsc --noEmit`: exit 0.
+- `npx eslint .`: 0 errors (6 pre-existing warnings).
+- `npx next build`: "Compiled successfully in 17.9s" and "Finished TypeScript
+  in 45s". The static-prerender tail still fails on a missing Supabase URL/key -
+  no `.env*` on this machine - which is environmental and unchanged.
+- Byte-scan across all changed paths: four files carry non-ASCII and all four
+  were proven pre-existing by diffing their non-ASCII lines against HEAD. Zero
+  introduced.
+
+### 406g - LIMITS
+
+- **The transport swap is 12 of 24 files done.** All of `src/lib/canvas/` is
+  migrated; all of `src/lib/canvas-modules/` beyond `fetch-helpers.ts` is not -
+  roughly 20 bearer-carrying sites across eleven files. For those, the
+  same-origin guard remains a hostname-level check that does not resolve DNS,
+  and redirects are still followed by default.
+- **The guard sweep covered `parseNextLink` follows only.** Every current
+  follow is guarded, and the two pure parsers (`canvas-core.ts`,
+  `canvas/pagination.ts`) correctly have no guard because they dial nothing.
+  But nothing automated asserts that a FUTURE loop carries the guard - which
+  is precisely how ten of them came to be missing while 403c recorded the
+  opposite. A structural test that finds `parseNextLink(` and requires
+  `assertCanvasSuppliedUrlIsSameOrigin` in the same function would close it;
+  it does not exist yet.
+- **Nothing ran against a real Canvas.** Every test uses fakes.
+- **CRLF was introduced by the editing tools twice in this wave**, in different
+  groups, and caught only by each group's own byte-level scan. Normalised back
+  to LF before reporting. Nothing else catches it.
+
+
+## 407. Two live security holes, found by a pass on a feature that has not been built
+
+The announcement-from-walkthrough feature has no code yet. Its cybersecurity
+peer pass, threat-modelling the design against the real codebase, found two
+defects in ALREADY-SHIPPED code that have nothing to do with that feature.
+Both are fixed here. Both were verified directly before being believed.
+
+### 407a - this app's own API key survived the run-log scrubber
+
+`redactEmbeddedSecrets` scrubs secrets out of workflow step errors before they
+are written to `workflow_run_steps.error` and rendered into the downloadable
+run log. Its URL-parameter pattern recognised `access_token`, `api_key`,
+`apikey`, `api-key`, `token` and `secret`.
+
+**Every one of those `api` variants requires a literal "api". This app's model
+calls authenticate with a bare `?key=` query parameter** (`llm.ts`,
+`postGenerateContent`), which matched nothing in the alternation.
+
+The path is live end to end: `draftAnnouncementAction` returns
+`Draft failed: HTTP <status> - <raw upstream body>`, the `draft-announcement`
+workflow step throws that string, `logStepOutcome` scrubs it with the pattern
+that cannot match, and it persists. Durable, operator-visible, and silent.
+
+**Verified by running both regexes, source-verbatim, against a real-shaped
+URL** rather than reading them: the old pattern left the key intact, the new
+one redacts it. One word added to the alternation.
+
+Adding a bare `key` is safe precisely because the delimiter is part of the
+match - `key` must follow `?` or `&` immediately - so `?monkey=` and
+`&sortkey=` are untouched, and `api_key` still matches its own longer
+alternative, which is ordered ahead. Both properties are now pinned by tests,
+and the second one matters: without it, widening the pattern could quietly
+start redacting real diagnostic values and nothing would notice.
+
+Note this is the SAME module whose leading-`\b` bug was found and fixed on
+2026-09-05. That fix was real and holds. This is a different gap in the same
+scrubber, found a day later, by someone looking at it for a different reason.
+
+### 407b - any signed-in account could delete or steal any other account's
+### artifact templates
+
+Two defects in one module, both reachable today.
+
+`deleteArtifactTemplate` was `.delete().eq("id", id)` - **no owner filter at
+all.** `saveArtifactTemplateAction` was worse: `.upsert(row, { onConflict:
+"id" })` with a CLIENT-SUPPLIED `template.id` and this caller's `user_id` in
+the row, so passing another user's template id matched THEIR row by primary key
+and rewrote it. Their template destroyed and reassigned to the attacker, in one
+call.
+
+Three things line up to make it reachable rather than theoretical:
+- the actions use `createServiceClient()`, which bypasses RLS entirely and
+  leaves `auth.uid()` null, so the table's four correct owner-scoped policies
+  never run;
+- the guard is `requireOwner()`, which since the multi-user migration is an
+  alias for `requireUser()` - any active account, not the owner;
+- ids are not a meaningful obstacle: this repo prints uuids in the clear in run
+  logs on purpose.
+
+**Fixed:** the delete filters on both `id` and `user_id`, so a foreign id
+matches zero rows - reported as a successful no-op, which is right, because the
+caller learns nothing about whether that id exists for somebody else. The
+upsert became a SCOPED UPDATE, then an INSERT: the update filters on both
+columns, and if it matched nothing the row is either new (insert succeeds) or
+owned by someone else (insert fails on the primary key). **Refusing is the
+correct outcome; silently taking it over was the bug.**
+
+Both are now pinned by tests using a fake client that records which filters
+each call applied, because nothing else can see this - the policies that would
+have caught it are bypassed by the client these functions are handed. Sabotage:
+dropping the owner filter from the delete turns two tests red, dropping it from
+the update turns a third red.
+
+### 407c - what this says about where to look
+
+Neither defect is in new code. Both are in code that shipped, passed every
+gate, and would have kept passing indefinitely, because the gates check
+behaviour the tests describe and no test described these.
+
+What found them was a threat model of a DIFFERENT, unbuilt feature, done
+against the real code rather than against the design document - specifically,
+the question "which existing module would an implementer copy for this?" The
+answer was `artifact-templates.ts`, and reading it as a template to be copied
+is what exposed it. That is worth repeating as a technique: the reuse survey
+and the security pass find different things when the security pass reads the
+code the reuse survey recommends.
+
+### 407d - LIMITS
+
+- **Whether a real Gemini error body echoes the request URL is unverified.**
+  The regex gap is proven and the fix is proven; the exploitability of that gap
+  depends on upstream behaviour that cannot be observed without a live key.
+  `generation-diag.ts` asserts in its own header that it is not hypothetical.
+  Fixed regardless, because the fix costs one word.
+- **The artifact-template fix was reasoned and tested against a fake client,
+  never against a real database.** The filters are pinned; that the database
+  enforces them as expected is inferred from PostgREST semantics, not observed.
+- The security pass reported several other findings that are NOT fixed here
+  because they belong to the unbuilt feature's design rather than to shipped
+  code: prompt-framing for the pasted exemplar, the absent third-party-
+  disclosure before a screen capture, and `describeLlmFailure` putting 200
+  characters of raw upstream body into a user-facing string across roughly
+  fifteen call sites. The last of those is shipped code and IS a real gap; it
+  is left for its own change rather than folded in here, because it touches
+  every action file in the app.

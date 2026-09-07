@@ -45,6 +45,7 @@ vi.mock("../canvas-fetch", () => ({ canvasFetch: vi.fn() }));
 import {
   listAnnouncements,
   createAnnouncement,
+  createAnnouncementFromMarkdown,
   createScheduledAnnouncementResilient,
   updateAnnouncementSchedule,
   getAnnouncementById,
@@ -371,6 +372,69 @@ describe("Canvas announcements transport", () => {
       expect(result.message).toBe("Hello there");
       expect(result.message.toLowerCase()).not.toContain("img");
       expect(result.message).not.toContain("<");
+    });
+  });
+
+  // docs/announcement-from-walkthrough-acceptance-criteria.md, decision P1:
+  // the exemplar-driven walkthrough drafter emits Markdown, and posting it
+  // through the plain-text path (createAnnouncement/textToHtml) would
+  // publish literal "##"/"-" characters to every student. These tests pin
+  // that createAnnouncementFromMarkdown takes the OTHER path
+  // (markdownToHtml) and that createAnnouncement above is completely
+  // untouched by this addition.
+  describe("createAnnouncementFromMarkdown (P1: markdownToHtml, never textToHtml)", () => {
+    it("renders a Markdown heading and list as real HTML elements, not escaped literal characters", async () => {
+      mockCanvasFetch.mockResolvedValue(okResult({ id: 1, title: "T" }));
+
+      await createAnnouncementFromMarkdown(COURSE_URL, "T", "## Due this week\n- Homework 3\n- Quiz 2", "MCC");
+
+      const [, init] = mockCanvasFetch.mock.calls[0];
+      const sent = new URLSearchParams(String(init.body));
+      const message = sent.get("message") ?? "";
+      expect(message).toBe("<h2>Due this week</h2>\n<ul><li>Homework 3</li><li>Quiz 2</li></ul>");
+      // Sabotage check: a regression back to textToHtml would escape the
+      // markdown characters and wrap the whole thing in one <p>, never
+      // produce a real <h2>/<ul>.
+      expect(message).not.toContain("##");
+      expect(message).not.toMatch(/^<p>/);
+    });
+
+    it("with an image argument, appends the same <img> shape buildAnnouncementBodyHtml uses", async () => {
+      mockCanvasFetch.mockResolvedValue(okResult({ id: 1, title: "T" }));
+
+      await createAnnouncementFromMarkdown(COURSE_URL, "T", "Plain paragraph.", "MCC", null, {
+        url: "https://canvas.mccneb.edu/files/9/download",
+        altText: "An illustration",
+      });
+
+      const [, init] = mockCanvasFetch.mock.calls[0];
+      const sent = new URLSearchParams(String(init.body));
+      expect(sent.get("message")).toBe(
+        '<p>Plain paragraph.</p><p><img src="https://canvas.mccneb.edu/files/9/download" alt="An illustration"></p>'
+      );
+    });
+
+    it("rejects a blank title/body before ever calling Canvas, same validation as createAnnouncement", async () => {
+      await expect(createAnnouncementFromMarkdown(COURSE_URL, "", "Body", "MCC")).rejects.toThrow(
+        "An announcement needs a title."
+      );
+      await expect(createAnnouncementFromMarkdown(COURSE_URL, "Title", "   ", "MCC")).rejects.toThrow(
+        "An announcement needs a message."
+      );
+      expect(mockCanvasFetch).not.toHaveBeenCalled();
+    });
+
+    it("does not change createAnnouncement's own plain-text behavior (sabotage check: the two functions stay independent)", async () => {
+      mockCanvasFetch.mockResolvedValue(okResult({ id: 1, title: "T" }));
+
+      await createAnnouncement(COURSE_URL, "T", "## Not markdown here, just text", "MCC");
+
+      const [, init] = mockCanvasFetch.mock.calls[0];
+      const sent = new URLSearchParams(String(init.body));
+      // createAnnouncement must still HTML-escape and wrap in <p> - a
+      // regression that routed it through markdownToHtml too would turn
+      // this literal "##" into a real heading.
+      expect(sent.get("message")).toBe("<p>## Not markdown here, just text</p>");
     });
   });
 

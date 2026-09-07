@@ -30,6 +30,7 @@ import DiscussionRepliesPanel from "./recording/DiscussionRepliesPanel";
 import GradingRecordingPanel from "./grading-recording/GradingRecordingPanel";
 import WalkthroughPanel from "./recording/WalkthroughPanel";
 import ModuleDeckCapturePanel from "./module-deck-capture/ModuleDeckCapturePanel";
+import WalkthroughAnnouncementPanel from "./walkthrough-announcement/WalkthroughAnnouncementPanel";
 import MessageRepliesPanel from "./message-replies/MessageRepliesPanel";
 import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
@@ -58,7 +59,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // navigateToRecordingTool("grading") entry, exactly the same two entry
   // points "discussions" already has.
   const [recView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading" | "moduledeck" | "messages"
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading" | "moduledeck" | "walkannounce" | "messages"
   >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
@@ -70,6 +71,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       v === "announcement" ||
       v === "grading" ||
       v === "moduledeck" ||
+      v === "walkannounce" ||
       v === "messages"
       ? v
       : "record";
@@ -585,7 +587,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           points at the record panel's id rather than a non-existent
           announcement-only one. */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["grading", "Grading (from a recording)"], ["moduledeck", "Module walkthrough deck"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["grading", "Grading (from a recording)"], ["moduledeck", "Module walkthrough deck"], ["walkannounce", "Announcement from a walkthrough"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
             aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}
@@ -861,6 +863,17 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           walkthrough-deck-acceptance-criteria.md AC1). */}
       <div role="tabpanel" id="rec-panel-moduledeck" aria-labelledby="rec-tab-moduledeck" style={{ display: recView === "moduledeck" ? undefined : "none" }}>
         <ModuleDeckCapturePanel active={active && recView === "moduledeck"} />
+      </div>
+
+      {/* Same always-mounted stack, same reason: an in-progress screen-share
+          capture and its frame queue must survive the user switching to
+          another inner view - the announcement-from-a-walkthrough feature's
+          own capture loop needs exactly the guarantee "moduledeck" needs
+          above (docs/announcement-from-walkthrough-acceptance-criteria.md).
+          A SIBLING capture surface to "moduledeck", not a mode of it - see
+          recording-launch.ts's own comment on this view for why. */}
+      <div role="tabpanel" id="rec-panel-walkannounce" aria-labelledby="rec-tab-walkannounce" style={{ display: recView === "walkannounce" ? undefined : "none" }}>
+        <WalkthroughAnnouncementPanel active={active && recView === "walkannounce"} />
       </div>
 
       {/* Same always-mounted stack, same reason: an in-progress inbox capture

@@ -73,6 +73,8 @@ export {
   listAnnouncements,
   createAnnouncement,
   buildAnnouncementBodyHtml,
+  createAnnouncementFromMarkdown,
+  buildAnnouncementBodyHtmlFromMarkdown,
   createScheduledAnnouncementResilient,
   updateAnnouncementSchedule,
   getAnnouncementById,

@@ -3,6 +3,7 @@
  */
 
 import { canvasError, htmlToText, textToHtml, resolveCourse } from "../canvas-core";
+import { markdownToHtml } from "../markdown";
 import { parseNextLink } from "./pagination";
 import { fetchWithThrottleRetry } from "../canvas-throttle";
 import {
@@ -364,6 +365,96 @@ export async function createAnnouncement(
   }
   const topic = (await response.json()) as CanvasDiscussionTopicListItem;
   return toAnnouncement(topic, { title, message });
+}
+
+/**
+ * Build the HTML Canvas receives for a MARKDOWN-authored announcement body -
+ * the exemplar-driven walkthrough drafter's own posting path
+ * (docs/announcement-from-walkthrough-acceptance-criteria.md, decision P1).
+ *
+ * WHY THIS EXISTS, RATHER THAN REUSING buildAnnouncementBodyHtml ABOVE. That
+ * function - and createAnnouncement below it - convert `message` through
+ * textToHtml, which HTML-escapes the text and wraps blank-line-separated
+ * paragraphs in <p>/<br>. That is correct for every announcement this app
+ * has ever posted, because draftAnnouncementAction's own prompt
+ * (src/app/actions/messaging.ts) explicitly forbids markdown, headings and
+ * bullet symbols. The walkthrough drafter's prompt (walkthrough-announcement-
+ * prompt.ts) does the opposite on purpose - AC2 asks it to REPRODUCE an
+ * exemplar's structural outline, which requires real Markdown headings and
+ * lists - so a body drafted by that prompt and posted through textToHtml
+ * would publish literal "##"/"-" characters to every student in the course.
+ * P1 is the finding that caught this before it shipped: the whole exemplar
+ * premise defeats itself at the last step, silently, with every other gate
+ * green.
+ *
+ * markdownToHtml (src/lib/markdown.ts) is reused rather than rebuilt: it is
+ * already this repo's XSS-hardened renderer for model-authored Markdown (the
+ * knowledge overview posts model output through it today), and its own
+ * header comment already names this exact call site as the reason its link-
+ * href allowlist was hardened.
+ *
+ * This is a NEW function, not a parameter added to buildAnnouncementBodyHtml,
+ * for the same reason createAnnouncement itself is never edited by weekly-
+ * scheduling features that need different behavior (see this file's own
+ * comment above the weekly-announcement-scheduling section below): every
+ * EXISTING caller of buildAnnouncementBodyHtml/createAnnouncement emits plain
+ * text, never markdown, so widening their shared conversion step would be a
+ * change with no upside and a real risk to a path this repo does not want
+ * touched.
+ */
+export function buildAnnouncementBodyHtmlFromMarkdown(markdownBody: string, image?: AnnouncementBodyImage): string {
+  const bodyHtml = markdownToHtml(markdownBody.trim());
+  if (!image) return bodyHtml;
+  return `${bodyHtml}<p><img src="${escapeHtmlAttr(image.url)}" alt="${escapeHtmlAttr(image.altText)}"></p>`;
+}
+
+/**
+ * Post a new announcement whose body is MARKDOWN, converting it via
+ * markdownToHtml rather than createAnnouncement's textToHtml - see
+ * buildAnnouncementBodyHtmlFromMarkdown's own doc comment above for why this
+ * is a separate function rather than a parameter on createAnnouncement.
+ * Otherwise identical to createAnnouncement: same Canvas endpoint, same
+ * title/message validation, same delayed_post_at scheduling support, same
+ * error mapping.
+ */
+export async function createAnnouncementFromMarkdown(
+  courseUrl: string,
+  title: string,
+  markdownBody: string,
+  code?: string,
+  delayedPostAt?: string | null,
+  image?: AnnouncementBodyImage
+): Promise<CanvasAnnouncement> {
+  if (!title.trim()) throw new Error("An announcement needs a title.");
+  if (!markdownBody.trim()) throw new Error("An announcement needs a message.");
+  const { courseId, institution, token, baseUrl } = await resolveCourse(courseUrl, code);
+
+  const params = new URLSearchParams();
+  params.append("title", title.trim());
+  params.append("message", buildAnnouncementBodyHtmlFromMarkdown(markdownBody, image));
+  params.append("is_announcement", "true");
+  if (delayedPostAt && delayedPostAt.trim()) {
+    const when = new Date(delayedPostAt.trim());
+    if (Number.isNaN(when.getTime())) {
+      throw new Error("Could not read the scheduled visibility time.");
+    }
+    params.append("delayed_post_at", when.toISOString());
+  }
+
+  const response = await canvasRequest(
+    `${baseUrl}/api/v1/courses/${courseId}/discussion_topics`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    },
+    token
+  );
+  if (!response.ok) {
+    throw canvasError(response.status, institution);
+  }
+  const topic = (await response.json()) as CanvasDiscussionTopicListItem;
+  return toAnnouncement(topic, { title, message: markdownBody });
 }
 
 // ── Weekly-announcement-scheduling support (AC6, AC7) ───────────────────────

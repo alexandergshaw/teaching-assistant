@@ -44,7 +44,16 @@
  * from (a) the Recording tab directly and (b) a Modules bulk-bar action that
  * pre-fills which module to capture via `capturePrefill` below - see that
  * field's own doc comment for why the prefill rides the event `detail`
- * rather than a one-shot slot, and why it is advisory only. */
+ * rather than a one-shot slot, and why it is advisory only.
+ *
+ * "walkannounce" (docs/announcement-from-walkthrough-acceptance-criteria.md):
+ * a SIBLING capture surface to "moduledeck", not a mode of it - a second
+ * capture entry point and a second screen-share grant, deliberately (see
+ * that document's "WHERE IT LIVES" section for why: ModuleDeckCapturePanel.tsx
+ * was already within ~150 lines of this repo's 1000-line ceiling with its
+ * one available JSX extraction already spent). Reads a series of LMS pages
+ * exactly like "moduledeck" does, then drafts an ANNOUNCEMENT matching a
+ * pasted exemplar's format, and/or a video script - never a slide deck. */
 export type RecordingLaunchView =
   | "record"
   | "announcement"
@@ -55,6 +64,7 @@ export type RecordingLaunchView =
   | "avatar"
   | "grading"
   | "moduledeck"
+  | "walkannounce"
   | "messages";
 
 const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
@@ -67,6 +77,7 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "avatar",
   "grading",
   "moduledeck",
+  "walkannounce",
   "messages",
 ];
 

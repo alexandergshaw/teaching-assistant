@@ -40997,3 +40997,57 @@ Sabotaged three ways - reintroduced NUL, reintroduced BOM, emptied file list -
 each red. The NUL sabotage was briefly invisible because grep refused to read
 vitest's own output once it contained the byte, which is the bug demonstrating
 itself.
+
+### 408f - the migration did not apply, and the guard written for it was vacuous
+
+Recorded after 408c shipped, because it happened after 408c shipped.
+
+The cross-course migration FAILED against production. A `comment on column`
+string contained an apostrophe that was not doubled - `see this migration's
+header` - so Postgres ended the literal at `migration'` and parsed the rest of
+the sentence as SQL.
+
+**This failed in the one place this repo has no local check.** Migrations
+auto-apply from a GitHub Action on push. tsc, eslint, 19903 tests and
+`next build` were all green, because none of them read SQL. So the TypeScript
+that depends on `course_ids` landed on main while the column did not - the
+worst shape a failed deploy can take, because main was briefly inconsistent
+with its own database rather than simply behind it.
+
+It was found by checking the Action run rather than assuming it. Nothing in the
+push output says a migration failed.
+
+Diagnosis had no logs available (the logs endpoint needs auth) and no local
+Postgres, so the plausible causes were eliminated in order: migration ordering
+(this file is genuinely the newest - the July `microsoft_credentials` and
+`syllabus_templates` files are far older), a missing base table (`bc29d40`
+applied it cleanly), and CLI drift (pinned, and prior runs used the same pin).
+A quote-parity scan across all 107 migrations then returned exactly one file:
+this one.
+
+**THE GUARD WRITTEN FOR THIS BUG DID NOT CATCH THIS BUG.** The first version
+checked that every string literal is closed by end of file. Run against the
+real defect, it passed. A mis-terminated literal does not run to EOF - it
+closes early, and the next stray apostrophe (here, `migration's` inside a `--`
+comment further down the same file) re-opens and re-closes it. The file
+balances and an end-of-file check sees nothing.
+
+That is the tenth test in this project that could not fail, and the only one so
+far written against a defect that was already in hand and reproducible - which
+is the strongest possible condition for writing a test, and it still happened.
+The lesson is not "sabotage-check", which was already the rule and is what
+caught it. It is that a check aimed at a failure mode can be aimed slightly
+wrong and look exactly like a check that works.
+
+The check that does catch it is narrower: an apostrophe between two letters,
+outside line comments and dollar-quoted bodies. Correct SQL cannot produce one
+- a real apostrophe is doubled (`answer''s` does not match) and a string
+delimiter is not letter-adjacent on both sides. Verified at zero occurrences
+across all 107 migrations, with no `E'...'` strings, which would be the one
+legitimate exception. The end-of-file check is kept, because it catches an
+unclosed dollar-quoted body, which the apostrophe rule does not.
+
+`src/supabase-migrations.structure.test.ts`. Three sabotages, each red: the
+production bug restored verbatim, an unclosed `$$` body, and an emptied file
+list. Fixed and applied in d69c411, Action run confirmed green rather than
+assumed.

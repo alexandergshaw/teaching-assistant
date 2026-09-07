@@ -40975,6 +40975,17 @@ instructor.
 The Knowledge tab already has a working history surface
 (`KnowledgeOverviewHistory.tsx`) and is the obvious pattern to follow.
 
+**RESOLVED in 1818675, same session.** The tab now renders a history surface
+wired end to end - list, per-entry delete, clear-all and export. It needed a
+NEW all-scopes reader rather than a reuse: every existing history function
+takes a courseId, and D24 left this tab without one. Each entry states its own
+coverage in course names, per D24e.
+
+One correction to this entry's own last line: Knowledge has list and clear, and
+NO export control - the brief that said otherwise was wrong, and the
+implementer checked rather than copying a pattern that does not exist. Export
+was built here regardless because D8 requires it.
+
 ### 408e - a raw NUL byte made a source file invisible to grep, for the second time
 
 Not part of the request; found while verifying 408a and fixed under 6b5328b.

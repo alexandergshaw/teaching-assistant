@@ -30,8 +30,18 @@
 // "read once in the initializer, write on every commit" shape - except
 // there is no debounce here: this file has none of useReplyRows.ts's
 // generation-guard/debounce machinery (see the file's own header above), so
-// every mutator's `commitRows` call persists synchronously via
-// `persistRows`, same as `setSort`/`setFilterText` already do below.
+// every mutator's `commitRows` call persists synchronously, same as
+// `setSort`/`setFilterText` already do below.
+//
+// WAVE 2 of the assessment-grading extraction: the rawRows/rowsRef/
+// persistRows/commitRows machinery itself moved to
+// assessment-shared/useAssessmentRowStore.ts, generalised over the row type
+// via a per-surface AssessmentRowCodec - this file calls it with
+// `gradingRowCodec` (grading-row-serialization.ts) and `STORAGE_KEY_TABLE`
+// below. The BEHAVIOUR is unchanged; only where the state/persistence
+// machinery lives moved. See useAssessmentRowStore.ts's own header for the
+// full discipline it inherited from here verbatim - including WHY its own
+// parameter is spelled `STORAGE_KEY_TABLE` even though the hook is generic.
 //
 // Serialization itself (the version constant, the read/write coercion, and
 // the quota-fallback write that drops `submissionText` first) lives in
@@ -47,14 +57,15 @@
 //
 // Quota (item 4): a table of thirty submissions' worth of full-length
 // submission text WILL exceed a real class's localStorage quota.
-// `persistRows` below tries the full write first; on failure it retries
-// with `serializeGradingRowsWithoutSubmissionText` (submissionText dropped,
-// every feedback field and `userEdited` kept - see that function's own doc
-// comment for why submissionText, not feedback, is what gets sacrificed
-// first); if even THAT throws, the failure is reported via `persistError`,
-// never swallowed. Caught by catching, never by `err.name` - mirrors
-// useReplyRows.ts's own AC23a discipline (Firefox/Safari private mode each
-// throw something different here).
+// useAssessmentRowStore.ts's own `persistRows` tries the full write first;
+// on failure it retries with the codec's `dropBulk: true` write
+// (submissionText dropped, every feedback field and `userEdited` kept - see
+// grading-row-serialization.ts's `toWire` for why submissionText, not
+// feedback, is what gets sacrificed first); if even THAT throws, the
+// failure is reported via `persistError`, never swallowed. Caught by
+// catching, never by `err.name` - mirrors useReplyRows.ts's own AC23a
+// discipline (Firefox/Safari private mode each throw something different
+// here).
 //
 // Keys are whole string literals throughout this file (never a template
 // literal) - this directory's own canary
@@ -131,7 +142,7 @@
 // small, additive change `stampGradingRowsWithAssessment` already was for
 // `assessment` - not a second store-design effort from scratch.
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   sortGradingRowsForTable,
   filterGradingRowsForTable,
@@ -153,14 +164,23 @@ import {
   type GradingRow,
   type GradingRowNameMatch,
 } from "./grading-row";
-import {
-  serializeGradingRows,
-  serializeGradingRowsWithoutSubmissionText,
-  deserializeGradingRows,
-} from "./grading-row-serialization";
+import { gradingRowCodec } from "./grading-row-serialization";
+import { useAssessmentRowStore } from "../assessment-shared/useAssessmentRowStore";
 
 const STORAGE_KEY_FILTER = "ta-rec-grade-filter";
 const STORAGE_KEY_SORT = "ta-rec-grade-sort";
+// MUST stay named `STORAGE_KEY_TABLE` (the `STORAGE_KEY_*` shape) - a
+// SEPARATE canary this wave does not own,
+// courseIntelOfflineTables.test.ts's "is still declared as a storage key by
+// $owner" check, reads this exact file as source text and requires
+// `const STORAGE_KEY_\w+ = "ta-rec-grade-table"` to still be found here.
+// This directory's OWN persisted-key canary (grading-rows.test.ts) then
+// requires the SAME identifier spelling to appear at the actual
+// localStorage read/write call site - which, since WAVE 2, lives in
+// assessment-shared/useAssessmentRowStore.ts, not here - so that hook's own
+// parameter is deliberately ALSO spelled `STORAGE_KEY_TABLE` (see its own
+// header) even though the hook itself is generic. Renaming either side
+// breaks one of the two source-text canaries.
 const STORAGE_KEY_TABLE = "ta-rec-grade-table";
 
 // Item 4: the exact user-facing messages for the two ways a persistence
@@ -272,13 +292,16 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
   // header's ASSESSMENT SCOPING section.
   const assessmentScope = assessmentId.length > 0 ? assessmentId : undefined;
 
-  // Read-once-in-the-initializer, guarded by `typeof window` - mirrors
-  // useReplyRows.ts's own `rawRows` initializer (STORAGE_KEY_TABLE).
-  const [rawRows, setRawRows] = useState<GradingRow[]>(() => {
-    if (typeof window === "undefined") return [];
-    return deserializeGradingRows(window.localStorage.getItem(STORAGE_KEY_TABLE));
-  });
-  const [persistError, setPersistError] = useState<string | null>(null);
+  // WAVE 2: rawRows/rowsRef/persistRows/commitRows now live in
+  // useAssessmentRowStore.ts - see this file's own PERSISTENCE SCOPE header
+  // section. `STORAGE_KEY_TABLE` is passed as the whole string literal
+  // binding itself (never a template literal) - see that hook's own header
+  // for why the persisted-key canaries require this.
+  const { rawRows, rowsRef, commitRows, persistError } = useAssessmentRowStore<GradingRow>(
+    STORAGE_KEY_TABLE,
+    gradingRowCodec,
+    { reduced: STORAGE_REDUCED_MESSAGE, full: STORAGE_FULL_MESSAGE }
+  );
 
   // Read-once-in-the-initializer, guarded by `typeof window` - mirrors
   // useReplyRows.ts's own sort/filter initializers. The table is not owned
@@ -292,47 +315,6 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
     if (typeof window === "undefined") return "";
     return window.localStorage.getItem(STORAGE_KEY_FILTER) ?? "";
   });
-
-  // The single synchronously-fresh source of truth for the row array -
-  // mirrors useReplyRows.ts's rowsRef discipline (see that file's own
-  // header for the staleness reasoning this avoids). Every mutator below
-  // reads/writes rowsRef.current, never a `rawRows` closure.
-  const rowsRef = useRef<GradingRow[]>(rawRows);
-
-  // Item 4: tries the full write first; on failure (real-world cause is
-  // almost always quota - Firefox's NS_ERROR_DOM_QUOTA_REACHED, Safari
-  // private mode throwing on any setItem, or the origin's quota actually
-  // filled by some other ta- key), retries with submissionText dropped
-  // (serializeGradingRowsWithoutSubmissionText keeps every feedback field
-  // and userEdited - see that function's own doc comment for why
-  // submissionText is what gets sacrificed first, never feedback). If even
-  // the reduced write throws, nothing was saved this time and that is
-  // reported, never swallowed. Caught by catching, never by `err.name` -
-  // mirrors useReplyRows.ts's own AC23a discipline.
-  const persistRows = useCallback((rows: GradingRow[]) => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY_TABLE, serializeGradingRows(rows));
-      setPersistError(null);
-      return;
-    } catch {
-      // fall through to the reduced write below
-    }
-    try {
-      window.localStorage.setItem(STORAGE_KEY_TABLE, serializeGradingRowsWithoutSubmissionText(rows));
-      setPersistError(STORAGE_REDUCED_MESSAGE);
-    } catch {
-      setPersistError(STORAGE_FULL_MESSAGE);
-    }
-  }, []);
-
-  const commitRows = useCallback(
-    (next: GradingRow[]) => {
-      rowsRef.current = next;
-      setRawRows(next);
-      persistRows(next);
-    },
-    [persistRows]
-  );
 
   const setSort = useCallback((next: GradingSort) => {
     setSortState(next);
@@ -381,7 +363,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
       const otherScopes = rowsRef.current.filter((r) => !gradingRowMatchesCourse(r, courseScope));
       commitRows([...otherScopes, ...stamped]);
     },
-    [commitRows, courseScope, assessmentScope]
+    [commitRows, rowsRef, courseScope, assessmentScope]
   );
 
   const editField = useCallback(
@@ -392,7 +374,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
       const next = raw.map((r, i) => (i === idx ? editGradingRowField(r, field, value) : r));
       commitRows(next);
     },
-    [commitRows]
+    [commitRows, rowsRef]
   );
 
   const applyGradingResult = useCallback(
@@ -403,7 +385,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
       const next = raw.map((r, i) => (i === idx ? applyGradingResultToRow(r, result) : r));
       commitRows(next);
     },
-    [commitRows]
+    [commitRows, rowsRef]
   );
 
   const applyRosterMatch = useCallback(
@@ -414,7 +396,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
       const next = raw.map((r, i) => (i === idx ? applyRosterMatchToRow(r, match) : r));
       commitRows(next);
     },
-    [commitRows]
+    [commitRows, rowsRef]
   );
 
   // D23c: marks one row "marked-late" - a verdict, never a timestamp (see
@@ -435,7 +417,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
       );
       commitRows(next);
     },
-    [commitRows]
+    [commitRows, rowsRef]
   );
 
   const removeRow = useCallback(
@@ -445,7 +427,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
       if (next === raw) return; // row is gone - intentional no-op, mirrors editField's own discipline
       commitRows(next);
     },
-    [commitRows]
+    [commitRows, rowsRef]
   );
 
   const clearTable = useCallback(() => {
@@ -454,7 +436,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
     // never destroy another class's (or the unattributed bucket's) data,
     // now that they can share one underlying table.
     commitRows(rowsRef.current.filter((r) => !gradingRowMatchesCourse(r, courseScope)));
-  }, [commitRows, courseScope]);
+  }, [commitRows, rowsRef, courseScope]);
 
   // D21d: the course-scoped slice of the full table - every display/count
   // field below reads from this, never from `rawRows` (the whole table)

@@ -461,12 +461,35 @@ describe("gradingClearTableSignature (\"Clear table\" confirm-arm signature - AC
 // GradingRecordingPanel.tsx, which already lives in this same directory -
 // same story again: the scan itself needed no change, only the two
 // expectation lists below.
+//
+// WAVE 2 of the assessment-grading extraction: useGradingRows.ts moved its
+// rawRows/rowsRef/persistRows/commitRows machinery to
+// assessment-shared/useAssessmentRowStore.ts (a SIBLING directory) - the
+// actual `localStorage.getItem`/`setItem` calls for "ta-rec-grade-table"
+// now live there, while the `const STORAGE_KEY_TABLE = "ta-rec-grade-table"`
+// binding stays in useGradingRows.ts. The scan below now reads BOTH
+// directories and joins their text into one `combined` haystack, so
+// `isWired`'s "the literal key binding and the read/write call both appear
+// in the combined text" check still holds even though the two halves now
+// live in different files in different directories - this is the ONLY
+// acceptable fix (see this wave's own brief): the regexes and the expected
+// six-key literal list below are unchanged.
 // ---------------------------------------------------------------------------
 
 describe("grading-recording persisted key canary (self-contained - recording-split.structure.test.ts cannot see this directory)", () => {
   const dir = path.resolve(process.cwd(), "src/app/components/grading-recording");
+  const sharedDir = path.resolve(process.cwd(), "src/app/components/assessment-shared");
   const files = fs.readdirSync(dir).filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
-  const combined = files.map((f) => fs.readFileSync(path.join(dir, f), "utf-8")).join("\n");
+  const sharedFiles = fs.readdirSync(sharedDir).filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
+  const combined = [
+    ...files.map((f) => fs.readFileSync(path.join(dir, f), "utf-8")),
+    ...sharedFiles.map((f) => fs.readFileSync(path.join(sharedDir, f), "utf-8")),
+  ].join("\n");
+
+  it("finds at least one file in each scanned directory - a scan over a renamed or empty directory passes over nothing", () => {
+    expect(files.length).toBeGreaterThan(0);
+    expect(sharedFiles.length).toBeGreaterThan(0);
+  });
 
   it("finds at least one ta-rec-grade-prefixed key to check - a check over nothing proves nothing", () => {
     const keys = combined.match(/ta-rec-grade-[a-z-]*/g) ?? [];

@@ -54,6 +54,7 @@
 import { describe, it, expect } from "vitest";
 import {
   GRADING_TABLE_VERSION,
+  gradingRowCodec,
   serializeGradingRows,
   serializeGradingRowsWithoutSubmissionText,
   deserializeGradingRows,
@@ -581,5 +582,90 @@ describe("assessment (D22b/D23e)", () => {
     const restored = deserializeGradingRows(serializeGradingRows(rows));
     expect(restored[0].course).toBe("course-A");
     expect(restored[0].assessment).toBe("essay-2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE FROZEN EXACT-KEY-SET ORACLE, on the REAL codec.
+//
+// WHY IT LIVES HERE AND NOT BESIDE THE GENERIC ENVELOPE. Wave 2 originally
+// put this oracle in assessment-shared/assessment-row-store.test.ts against a
+// FIXTURE codec, because assessment-shared.structure.test.ts forbids the words
+// `nameMatch`, `rosterCandidates`, `submittedAt` and friends anywhere in that
+// directory - that boundary is deliberate and correct, and it is what keeps
+// per-surface semantics out of the shared core.
+//
+// But an exact-key-set oracle over a FIXTURE codec proves only that the
+// generic envelope calls `toWire`. It cannot see a new field added to the
+// REAL row, which is the entire thing the oracle exists to catch: a field
+// riding silently into localStorage. Moving it left the real codec unguarded,
+// with every gate green - a zero-power check for its own stated purpose.
+//
+// So the oracle belongs on this side of the boundary, where naming a
+// GradingRow field is legal. The fixture-codec version in assessment-shared
+// stays: it guards the generic contract, which is a different, smaller claim.
+//
+// WHAT BREAKS IT, deliberately: adding a field to `toWire`
+// (grading-row-serialization.ts) without adding it here. That is the moment to
+// stop and ask whether the new field belongs in the instructor's browser
+// storage at all - which is a decision, not a formality, because A0-2's whole
+// point is that this row never carries anything that could name a student to
+// an LMS.
+// ---------------------------------------------------------------------------
+describe("the persisted wire row's exact key set (frozen oracle, real codec)", () => {
+  // Written out by hand, in `toWire`'s own declaration order. NOT derived from
+  // the codec, and never `Object.keys(row)` of a fixture - an oracle computed
+  // from the thing it checks agrees with it by construction and can never
+  // fail. This list is the independent source.
+  const EXPECTED_WIRE_KEYS = [
+    "id",
+    "studentName",
+    "nameMatch",
+    "rosterCandidates",
+    "submissionText",
+    "state",
+    "totalScore",
+    "strengths",
+    "improvements",
+    "overallComment",
+    "error",
+    "userEdited",
+    "course",
+    "assessment",
+    "submissionTimeStatus",
+    "submittedAt",
+  ];
+
+  it("writes exactly these 16 keys and no others", () => {
+    const wire = gradingRowCodec.toWire(makeRow(), { dropBulk: false });
+    expect(Object.keys(wire)).toEqual(EXPECTED_WIRE_KEYS);
+  });
+
+  it("writes the same key set when bulk text is dropped - dropBulk blanks a value, never removes a key", () => {
+    const wire = gradingRowCodec.toWire(makeRow(), { dropBulk: true });
+    expect(Object.keys(wire)).toEqual(EXPECTED_WIRE_KEYS);
+    // The reduced-payload retry must still round-trip: a MISSING key and an
+    // empty one are different on read, and only the empty one is safe.
+    expect(wire.submissionText).toBe("");
+  });
+
+  it("carries no key that could name a student to an LMS (A0-2, checked at the storage boundary)", () => {
+    // Layer 1 (NoPostableIdentity) is a compile-time guard, and TypeScript is
+    // structural - nothing in the type system stops a runtime object from
+    // carrying an extra property. This is the runtime half of that invariant,
+    // and it is why the type guard alone was never sufficient.
+    const forbidden = [
+      "userId",
+      "user_id",
+      "canvasUserId",
+      "sisUserId",
+      "loginId",
+      "canvasSubmissionId",
+      "submissionId",
+      "enrollmentId",
+      "studentId",
+    ];
+    const keys = Object.keys(gradingRowCodec.toWire(makeRow(), { dropBulk: false }));
+    expect(keys.filter((k) => forbidden.includes(k))).toEqual([]);
   });
 });

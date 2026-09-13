@@ -16,7 +16,7 @@
 // client AS AN ARGUMENT, so both paths can be proven here with fakes rather
 // than reasoned about in review. This is the same shape uploadTaskAttachment
 // uses for the same class of problem.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { withUploadedSyllabusFile, isKnownUploadPath, syllabusUploadStoragePath } from "./syllabus-upload-source";
 
 /** A fake of the only two storage calls this lifecycle makes, recording the
@@ -266,6 +266,126 @@ describe("isKnownUploadPath", () => {
 // a fourth argument) or the rubric caller's explicit segment is caught here
 // rather than discovered in Storage.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// The observability fix for the invisible failed removal: a resolved
+// { error } from storage.remove() (the real failure shape - see fakeStorage
+// above) must no longer be swallowed silently. The primary axis uses the
+// EXISTING removeError fixture, resolved rather than rejected, because that
+// is the shape the real @supabase/storage-js client is documented to
+// produce. A rejecting fake is kept as a secondary axis only, to prove the
+// wrapping try/catch does not itself throw uncaught - not as evidence the
+// primary path is exercised.
+// ---------------------------------------------------------------------------
+describe("withUploadedSyllabusFile: a failed removal is now logged, never silently swallowed", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("logs console.error with decomposed {userId, segment, uploadId} fields when the finally-block remove resolves an error", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const storage = fakeStorage({ removeError: "storage down" });
+    const result = await withUploadedSyllabusFile(storage.client, USER_ID, PATH, async () => "extracted");
+
+    // The swallow's contract is unchanged: a failed cleanup never masks a
+    // successful parse.
+    expect(result).toEqual({ ok: true, value: "extracted" });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Failed to remove a temporary upload object after use:",
+      { userId: USER_ID, segment: "syllabus-uploads", uploadId: "abc.docx" },
+      { message: "storage down" }
+    );
+    // The full concatenated path is a copy-pastable Storage key and must
+    // never appear as a single log argument.
+    for (const call of errorSpy.mock.calls) {
+      for (const arg of call) {
+        expect(JSON.stringify(arg)).not.toContain(PATH);
+      }
+    }
+  });
+
+  it("logs console.error on the download-failed branch's own remove call too", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const storage = fakeStorage({ downloadError: "network", removeError: "storage down" });
+    await withUploadedSyllabusFile(storage.client, USER_ID, PATH, async () => "x");
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Failed to remove a temporary upload object after use:",
+      { userId: USER_ID, segment: "syllabus-uploads", uploadId: "abc.docx" },
+      { message: "storage down" }
+    );
+  });
+
+  it("does NOT log console.error when removal succeeds - no false alarms", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const storage = fakeStorage();
+    await withUploadedSyllabusFile(storage.client, USER_ID, PATH, async () => "extracted");
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  // Secondary axis: the real @supabase/storage-js client is not confirmed to
+  // ever reject this promise - this axis exists only to prove the wrapping
+  // try/catch does not itself throw uncaught, not as evidence the primary
+  // path (a resolved { error }) is exercised.
+  it("secondary axis: a remove() that REJECTS is caught too, and still does not mask a successful parse", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = {
+      async download() {
+        return { data: new Uint8Array([1]), error: null };
+      },
+      async remove() {
+        throw new Error("storage client threw");
+      },
+    };
+    const result = await withUploadedSyllabusFile(client, USER_ID, PATH, async () => "extracted");
+    expect(result).toEqual({ ok: true, value: "extracted" });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Failed to remove a temporary upload object after use (threw):",
+      { userId: USER_ID, segment: "syllabus-uploads", uploadId: "abc.docx" },
+      expect.any(Error)
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The new console.warn on the download-error branch (distinct from a
+// transient-vs-orphan-sweep-race ambiguity residual): a genuine tab-close
+// race is at least distinguishable in the logs from an ordinary transient
+// download failure, without changing the caller-facing return value.
+// ---------------------------------------------------------------------------
+describe("withUploadedSyllabusFile: the download-failure console.warn", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("logs console.warn with decomposed fields on a download failure", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const storage = fakeStorage({ downloadError: "object not found" });
+    const result = await withUploadedSyllabusFile(storage.client, USER_ID, PATH, async () => "x");
+
+    expect(result.ok).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Uploaded-file download failed (possibly already removed by the orphan sweep, or a genuine transient Storage error):",
+      { userId: USER_ID, segment: "syllabus-uploads", uploadId: "abc.docx" },
+      { message: "object not found" }
+    );
+    for (const call of warnSpy.mock.calls) {
+      for (const arg of call) {
+        expect(JSON.stringify(arg)).not.toContain(PATH);
+      }
+    }
+  });
+
+  it("does not log console.warn on the happy path", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const storage = fakeStorage({ bytes: new Uint8Array([1]) });
+    await withUploadedSyllabusFile(storage.client, USER_ID, PATH, async () => "x");
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("syllabusUploadStoragePath: segment defaulting", () => {
   it("defaults to syllabus-uploads when no segment is passed - existing callers are unaffected", () => {
     expect(syllabusUploadStoragePath("user-1", "upload-1", ".docx")).toBe("user-1/syllabus-uploads/upload-1.docx");

@@ -1,0 +1,149 @@
+name: Sweep orphaned syllabus/rubric uploads
+
+# Fires the orphan-upload sweep on a schedule by calling the deployed,
+# CRON_SECRET-guarded endpoint (src/app/api/cron/sweep-orphan-uploads/route.ts).
+# Two independent mechanisms leave objects behind under
+# ${userId}/rubric-uploads/... and ${userId}/syllabus-uploads/... in the
+# private "course-files" bucket - see src/lib/orphan-upload-sweep.ts's own
+# header - and this workflow is the only thing that ever revisits them.
+#
+# SETUP (one time): this reuses the same CRON_SECRET repository secret
+# unattended-runs.yml already uses (Settings -> Secrets and variables ->
+# Actions), matching the value set in Vercel. See the orphan-uploads-sweep
+# design's REC-7 note: this widens that one secret's blast radius from
+# "trigger a scheduled workflow run" to "trigger a mass-delete across every
+# user's Storage objects under two path segments" - recorded, not solved
+# here, since minting a second secret is new production configuration to
+# remember to set and the practical exposure is judged proportionate.
+#
+# Offset from unattended-runs.yml's own cron minutes so the two workflows'
+# GitHub Actions load never collides.
+
+on:
+  schedule:
+    - cron: "9,24,39,54 * * * *"
+  workflow_dispatch: {}
+
+# Never run two overlapping ticks of THIS workflow. A manual curl or a
+# second automation hitting the same endpoint is a separate, unsolved
+# overlap case - see orphan-upload-sweep.ts's header and the design's R10
+# note: it now surfaces as a nonzero failedCount, which - per Ruling 1 below
+# - does not fail this workflow in this first deployment.
+concurrency:
+  group: sweep-orphan-uploads
+  cancel-in-progress: false
+
+jobs:
+  sweep-orphan-uploads:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the orphan-upload sweep endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "The CRON_SECRET repository secret is not set."
+            echo "Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "https://teaching-assistant-pi.vercel.app/api/cron/sweep-orphan-uploads")
+          echo "HTTP $code"
+          cat /tmp/resp.json 2>/dev/null || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "Endpoint returned $code (expected 200 with a Bearer CRON_SECRET)."
+            exit 1
+          fi
+
+          # RULING 1 (binding, orphan-uploads-sweep design): the delete/failure
+          # accounting ships OBSERVATIONAL ONLY in this first deployment.
+          # failedCount is read and logged below, but does NOT fail this
+          # workflow - remove()'s real data-field semantics for a named
+          # delete are unmeasured in this checkout, and a naive rule here
+          # could mark 100% of genuine deletions as failed, training the one
+          # alert this deployment has to be ignored. A live tick settles it;
+          # this workflow only reads failedCount to log it for that purpose.
+          #
+          # jq ships preinstalled on GitHub's ubuntu-latest runner image, so
+          # this is the primary path. The grep fallback below is dependency-
+          # free and deliberately crude - see unattended-runs.yml's own
+          # comment on the identical fallback for why it can only over-count,
+          # never under-count.
+          if command -v jq >/dev/null 2>&1; then
+            failedCount=$(jq '.failedCount' /tmp/resp.json 2>/dev/null)
+            totalUserPrefixes=$(jq '.totalUserPrefixes' /tmp/resp.json 2>/dev/null)
+            listingErrors=$(jq '.listingErrors' /tmp/resp.json 2>/dev/null)
+          else
+            # NOTE: this fallback path does NOT fail closed the way the jq
+            # path below does. totalUserPrefixes becomes the prose string
+            # below (neither "0" nor "null"), which silently disables BOTH
+            # of the totalUserPrefixes warnings; and a failed/absent grep
+            # match forces failedCount="0", which means the "could not read
+            # failedCount" fail-closed check just below can never fire on
+            # this path either. jq ships preinstalled on GitHub's
+            # ubuntu-latest runner image, so this path is not expected to be
+            # exercised in practice - recorded here so a future reader does
+            # not assume this fallback carries the same guarantees.
+            echo "jq not found on this runner; falling back to a grep-based check."
+            failedGrep=$(grep -oE '"failedCount":[0-9]+' /tmp/resp.json 2>/dev/null | grep -oE '[0-9]+$')
+            if [ -n "$failedGrep" ] && [ "$failedGrep" != "0" ]; then
+              failedCount="$failedGrep"
+            else
+              failedCount="0"
+            fi
+            totalUserPrefixes="unknown (grep fallback does not read totalUserPrefixes)"
+            listingErrors="unknown (grep fallback does not read listingErrors)"
+          fi
+
+          if [ -z "$failedCount" ] || [ "$failedCount" = "null" ]; then
+            echo "Could not read failedCount from the response body - failing closed, since this workflow's failure email is the only alert this deployment has."
+            exit 1
+          fi
+
+          echo "Total user prefixes this tick: $totalUserPrefixes; failedCount: $failedCount (observational only - not gating this workflow's exit code, see Ruling 1)."
+
+          # Non-failing, loud warning: a legitimately fresh deployment can be
+          # quiet on day one. totalUserPrefixes is JSON null (not 0) when
+          # phase 1 itself did not complete within budget - checked
+          # separately below with its own distinct message, since null == 0
+          # is false and a merged check would silently drop this case.
+          if [ "$totalUserPrefixes" = "0" ]; then
+            echo "::warning::Sweep saw zero user prefixes this tick - normal on a brand-new deployment, but also the signature of a missing/wrong service-role key or an empty bucket. Investigate if this persists across multiple ticks."
+          fi
+
+          # RULING B (binding): unlike the "0" case above, totalUserPrefixes
+          # === null means phase 1 (the full root pass) did not even
+          # complete within its own budget this tick - no cleanup work was
+          # attempted at all. That is never a healthy state, so this fails
+          # the workflow (exit 1) rather than only warning. This does NOT
+          # conflict with Ruling 1, which constrains failedCount only - see
+          # the failedCount check below, unchanged and still non-failing. A
+          # ::warning:: annotation on an otherwise-green run sends NO
+          # notification, and this workflow's failure email is the only
+          # alert this deployment has - so a warning-only null case and the
+          # "0" case above would both alert nobody.
+          if [ "$totalUserPrefixes" = "null" ]; then
+            echo "::error::Sweep's root listing pass did not complete within budget this tick - no cleanup work was attempted. If this persists across ticks, the deployment likely has more user prefixes than PHASE1_ROOT_LISTING_BUDGET_MS was sized for; see src/lib/orphan-upload-sweep.ts."
+            exit 1
+          fi
+
+          if [ "$failedCount" != "0" ]; then
+            echo "::warning::failedCount is nonzero this tick ($failedCount) - logged for the post-deploy measurement in Ruling 1, not failing this workflow."
+          fi
+
+          # MJ-2: a listing error (wrong bucket, revoked service-role key, a
+          # storage policy change) is a DIFFERENT failure mode than merely
+          # running out of budget - previously it produced the exact same
+          # truncatedByBudget: true with every other count at zero as an
+          # ordinary slow tick, and nothing here ever inspected it. Kept as
+          # a warning (not a hard failure) since, like totalUserPrefixes
+          # === 0, a single tick's nonzero count is not yet evidence of a
+          # persistent problem - see src/lib/orphan-upload-sweep.ts's
+          # listingErrors doc.
+          if [ -n "$listingErrors" ] && [ "$listingErrors" != "0" ] && [ "$listingErrors" != "null" ]; then
+            echo "::warning::listingErrors is nonzero this tick ($listingErrors) - a Storage listing call actually failed (wrong bucket, revoked service-role key, a policy change), distinct from merely running out of time. Investigate if this persists across multiple ticks."
+          fi
+
+          echo "Sweep tick complete."

@@ -56,9 +56,14 @@ export type SyllabusUploadResult<V> = { ok: true; value: V } | { ok: false; erro
  * `extractSyllabusTextAction` WHOLE for its download/extract/delete logic
  * but must not therefore have its object live under a path segment named
  * for the syllabus feature). Add a third by adding its segment here - and
- * nowhere else.
+ * nowhere else: this array is exported specifically so
+ * src/lib/orphan-upload-sweep.ts (the scheduled backstop that sweeps
+ * whatever this lifecycle leaves behind) imports it directly instead of
+ * hand-restating its own copy - a restated copy would silently miss a third
+ * segment added only here, with `tsc` staying silent because
+ * `readonly UploadPathSegment[]` accepts any subset of the union.
  */
-const UPLOAD_PATH_SEGMENTS = ["syllabus-uploads", "rubric-uploads"] as const;
+export const UPLOAD_PATH_SEGMENTS = ["syllabus-uploads", "rubric-uploads"] as const;
 
 /** The closed set of path segments `withUploadedSyllabusFile` will ever
  * download and delete. See `UPLOAD_PATH_SEGMENTS` above for why this is a
@@ -130,7 +135,34 @@ export async function withUploadedSyllabusFile<T, V>(
   const { data, error } = await storage.download(storagePath);
 
   if (error || data === null) {
-    await storage.remove([storagePath]).catch(() => {});
+    // storagePath is decomposed rather than logged whole: it is a
+    // copy-pastable Storage key, directly usable, unmodified, as the
+    // argument to another .remove()/.download() call against this bucket.
+    // Split is safe here because isKnownUploadPath has already accepted this
+    // exact `${userId}/${segment}/${rest}` shape above.
+    const [logUserId, logSegment, ...rest] = storagePath.split("/");
+    const logUploadId = rest.join("/");
+    console.warn(
+      "Uploaded-file download failed (possibly already removed by the orphan sweep, or a genuine transient Storage error):",
+      { userId: logUserId, segment: logSegment, uploadId: logUploadId },
+      error
+    );
+    try {
+      const { error: removeError } = await storage.remove([storagePath]);
+      if (removeError) {
+        console.error(
+          "Failed to remove a temporary upload object after use:",
+          { userId: logUserId, segment: logSegment, uploadId: logUploadId },
+          removeError
+        );
+      }
+    } catch (err) {
+      console.error(
+        "Failed to remove a temporary upload object after use (threw):",
+        { userId: logUserId, segment: logSegment, uploadId: logUploadId },
+        err
+      );
+    }
     const message = error?.message?.trim();
     return { ok: false, error: message || "Could not download the uploaded syllabus file." };
   }
@@ -144,7 +176,24 @@ export async function withUploadedSyllabusFile<T, V>(
       error: err instanceof Error ? err.message : "Could not process the uploaded syllabus file.",
     };
   } finally {
-    await storage.remove([storagePath]).catch(() => {});
+    const [logUserId, logSegment, ...rest] = storagePath.split("/");
+    const logUploadId = rest.join("/");
+    try {
+      const { error: removeError } = await storage.remove([storagePath]);
+      if (removeError) {
+        console.error(
+          "Failed to remove a temporary upload object after use:",
+          { userId: logUserId, segment: logSegment, uploadId: logUploadId },
+          removeError
+        );
+      }
+    } catch (err) {
+      console.error(
+        "Failed to remove a temporary upload object after use (threw):",
+        { userId: logUserId, segment: logSegment, uploadId: logUploadId },
+        err
+      );
+    }
   }
 }
 

@@ -20,7 +20,15 @@
 // features").
 
 import { compareNameKey, filterRowsByQuery } from "../recording/discussion-table-view";
-import { GRADING_ROW_HAYSTACK, type GradingRow, type GradingRowState } from "./grading-row";
+import { GRADING_ROW_HAYSTACK, type GradingRow } from "./grading-row";
+import {
+  editAssessmentField,
+  applyAssessmentResult,
+  removeAssessmentRow,
+  clearTableSignature,
+  type AssessmentFeedbackField,
+  type AssessmentResultInput,
+} from "../assessment-shared/assessment-row";
 
 // ---------------------------------------------------------------------------
 // Sorting - "sortable by name" is the only sort this table needs (the AC's
@@ -95,7 +103,10 @@ export const GRADING_TABLE_COLUMN_COUNT = 5;
 // precedent these two functions mirror.
 // ---------------------------------------------------------------------------
 
-export type GradingFeedbackField = "totalScore" | "strengths" | "improvements" | "overallComment";
+/** A type alias of the shared core's AssessmentFeedbackField - kept as its
+ *  own named export so every existing import of `GradingFeedbackField`
+ *  keeps compiling unchanged (WAVE 1's "no consumer churn" rule). */
+export type GradingFeedbackField = AssessmentFeedbackField;
 
 /**
  * AC18-equivalent: an instructor typing into any feedback field marks the
@@ -103,20 +114,20 @@ export type GradingFeedbackField = "totalScore" | "strengths" | "improvements" |
  * to ready and clears any stale error - typing a score or comment by hand
  * is itself a way of "having" feedback, even before any grading pass has
  * run for this row.
+ *
+ * WAVE 1 of the snapshot-grading extraction: a thin wrapper over the shared
+ * core's editAssessmentField (assessment-shared/assessment-row.ts) - the
+ * behaviour lives there now, verbatim, so both this table and a future
+ * snapshot-grading table share exactly one implementation rather than two
+ * that can drift apart.
  */
 export function editGradingRowField(row: GradingRow, field: GradingFeedbackField, value: string): GradingRow {
-  const nextState: GradingRowState = row.state === "pending" || row.state === "failed" ? "ready" : row.state;
-  return { ...row, [field]: value, userEdited: true, state: nextState, error: "" };
+  return editAssessmentField(row, field, value);
 }
 
-export interface GradingResultInput {
-  totalScore: string;
-  strengths: string;
-  improvements: string;
-  overallComment: string;
-  state: GradingRowState;
-  error?: string;
-}
+/** A type alias of the shared core's AssessmentResultInput - kept as its
+ *  own named export, identical reasoning to `GradingFeedbackField` above. */
+export type GradingResultInput = AssessmentResultInput;
 
 /**
  * AC44-equivalent, in its simplest form. This wave builds no grading
@@ -136,20 +147,13 @@ export interface GradingResultInput {
  * from a grading attempt, since those describe the ATTEMPT, not the
  * instructor's own words. Only the four scored fields
  * (totalScore/strengths/improvements/overallComment) are held back.
+ *
+ * WAVE 1 of the snapshot-grading extraction: a thin wrapper over the shared
+ * core's applyAssessmentResult (assessment-shared/assessment-row.ts) - see
+ * editGradingRowField's own identical note above.
  */
 export function applyGradingResultToRow(row: GradingRow, result: GradingResultInput): GradingRow {
-  if (row.userEdited) {
-    return { ...row, state: result.state, error: result.error ?? "" };
-  }
-  return {
-    ...row,
-    totalScore: result.totalScore,
-    strengths: result.strengths,
-    improvements: result.improvements,
-    overallComment: result.overallComment,
-    state: result.state,
-    error: result.error ?? "",
-  };
+  return applyAssessmentResult(row, result);
 }
 
 /** Merges a roster-match verdict (grading-roster-match.ts's
@@ -267,10 +271,13 @@ export function classifyGradingResult(result: GradingRecordingResult): GradingRe
 
 /** Removes one row by id. A no-op (returns the same array reference) when
  *  the id is not present, mirroring editGradingRowField/applyGradingResultToRow's
- *  own "row is gone" no-op discipline at their call sites in useGradingRows.ts. */
+ *  own "row is gone" no-op discipline at their call sites in useGradingRows.ts.
+ *
+ *  WAVE 1 of the snapshot-grading extraction: a thin wrapper over the shared
+ *  core's removeAssessmentRow (assessment-shared/assessment-row.ts) - see
+ *  editGradingRowField's own identical note above. */
 export function removeGradingRow(rows: ReadonlyArray<GradingRow>, id: string): GradingRow[] {
-  if (!rows.some((r) => r.id === id)) return rows as GradingRow[];
-  return rows.filter((r) => r.id !== id);
+  return removeAssessmentRow(rows, id);
 }
 
 /**
@@ -284,7 +291,11 @@ export function removeGradingRow(rows: ReadonlyArray<GradingRow>, id: string): G
  * from totalCount alone - unlike the reply table's own deleteSignature, this
  * table carries no separate "with a saved recording" wrinkle to fold in
  * (GradingRow has no equivalent of a saved capture video).
+ *
+ * WAVE 1 of the snapshot-grading extraction: a thin wrapper over the shared
+ * core's clearTableSignature (assessment-shared/assessment-row.ts) - see
+ * editGradingRowField's own identical note above.
  */
 export function gradingClearTableSignature(totalCount: number): string {
-  return String(totalCount);
+  return clearTableSignature(totalCount);
 }

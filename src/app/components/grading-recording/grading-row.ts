@@ -27,6 +27,21 @@
 //
 // Pure and dependency-free so both the client surface and a "use server" action
 // can import it.
+//
+// WAVE 1 of the snapshot-grading extraction pulled the row core shared by
+// every assessment-grading surface (id/studentName/state/error/userEdited
+// plus the four scored fields) up into
+// src/app/components/assessment-shared/assessment-row.ts's AssessmentRowCore.
+// `GradingRow` below now EXTENDS that core and adds only this surface's own
+// fields (nameMatch/rosterCandidates/submissionText/course/assessment/
+// submittedAt, etc.) - the shared core's own file exists specifically to
+// keep those per-surface fields OUT of it (see that file's own
+// assessment-shared.structure.test.ts). This is a type-level move only:
+// every existing `GradingRow` literal still compiles unchanged, because the
+// combined field set is identical to what this interface declared before.
+
+import type { AssessmentRowCore, AssessmentRowState } from "../assessment-shared/assessment-row";
+import { joinAssessmentFeedback } from "../assessment-shared/assessment-row";
 
 /**
  * How confident we are that the name read off the screen belongs to a real
@@ -44,7 +59,10 @@
  */
 export type GradingRowNameMatch = "matched" | "ambiguous" | "unmatched" | "no-roster";
 
-export type GradingRowState = "pending" | "grading" | "ready" | "failed";
+/** A type alias of the shared core's AssessmentRowState - kept as its own
+ *  named export so every existing import of `GradingRowState` keeps
+ *  compiling unchanged (WAVE 1's "no consumer churn" rule). */
+export type GradingRowState = AssessmentRowState;
 
 /**
  * docs/course-student-intelligence-acceptance-criteria.md D23c: how much is
@@ -93,36 +111,23 @@ export type GradingRowSubmissionTimeStatus = "known" | "marked-late" | "unknown"
  * There is deliberately no `userId`, no `canvasSubmissionId`, and no field that
  * could carry one. See this file's header.
  */
-export interface GradingRow {
-  /** Opaque, minted once on capture. Never derived from the student name - a
-   *  name can be re-read differently between frames, and an id that changed
-   *  would orphan the instructor's edits. */
-  id: string;
-  /** The display name exactly as read off the screen. R3: a submission whose
-   *  name could not be read is SKIPPED at extraction rather than attributed to
-   *  the nearest visible name, so this is never a guess. */
-  studentName: string;
+export interface GradingRow extends AssessmentRowCore {
+  // id, studentName, state, totalScore, strengths, improvements,
+  // overallComment, error, and userEdited all come from AssessmentRowCore
+  // now (see this file's own WAVE 1 header comment) - their doc comments
+  // moved to that shared core; nothing about their meaning on THIS surface
+  // changed. `studentName` there is documented as "a display label only" -
+  // on this surface it is still, specifically, R3's verbatim-read name (a
+  // submission whose name could not be read is SKIPPED at extraction rather
+  // than attributed to the nearest visible name, so it is never a guess),
+  // and `state` there is `AssessmentRowState`, identical in membership to
+  // this file's own `GradingRowState` alias above.
   nameMatch: GradingRowNameMatch;
   /** Who the roster matched, when `nameMatch` is "matched" or "ambiguous".
    *  Empty otherwise. Shown, never auto-applied. */
   rosterCandidates: readonly string[];
   /** The submission text read off the screen. */
   submissionText: string;
-  state: GradingRowState;
-  /** The scored result, once graded. Composed through the shared grading
-   *  helpers (composeOverallComment / formatFeedback), never authored
-   *  field-by-field, so a reader sees the same composition every other grader
-   *  produces. */
-  totalScore: string;
-  strengths: string;
-  improvements: string;
-  overallComment: string;
-  /** Verbatim failure text for this row - never "an error occurred". */
-  error: string;
-  /** True once the instructor has typed into any feedback field, so a re-grade
-   *  can refuse to overwrite their words (the reply table's own AC18/AC44 rule,
-   *  which this surface inherits rather than reinvents). */
-  userEdited: boolean;
   /** docs/course-student-intelligence-acceptance-criteria.md D21d: the
    *  course_hub row id (a uuid) this row was captured under. Absent for a
    *  row that predates course-scoping (a pre-existing global table's row) or
@@ -226,7 +231,7 @@ export const GRADING_ROW_HAYSTACK = (row: GradingRow): readonly string[] => [
  * two blank lines followed by one.
  */
 export function joinFeedback(row: GradingRow): string {
-  return [row.strengths, row.improvements, row.overallComment].filter((field) => field.trim() !== "").join("\n\n");
+  return joinAssessmentFeedback(row);
 }
 
 // ---------------------------------------------------------------------------

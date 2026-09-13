@@ -41229,3 +41229,111 @@ NOT total, and said so in the file: `canvasFetch` dials through `node:https`
 rather than `fetch`, so a test mocking neither could still reach the network
 that way. Closing that needs a module mock rather than a global. This closes the
 hole that was observed.
+
+## 411. Baseline: the grading row mutators, before the assessment-shared extraction
+
+Written BEFORE hand-off, per docs/DEV_LOOP.md's baseline seat, because the
+snapshot-grading extraction is about to move these five functions into a shared
+module and `grep -a` over this file found no existing entry covering their
+behaviour. This entry records what the code DOES today, read out of the source
+on 2026-09-13 at commit 98192dd - not what it is supposed to do. If the
+extraction changes any line below, that is a regression, not a refactor.
+
+Nothing here is a new requirement. It is an oracle.
+
+### The five functions moving
+
+**`editGradingRowField(row, field, value)` - `grading-rows.ts:107-110`.**
+Returns `{ ...row, [field]: value, userEdited: true, state: nextState, error: "" }`
+where `nextState` is `"ready"` if `row.state` is `"pending"` or `"failed"`, and
+`row.state` unchanged otherwise. Four observable facts, each independently
+breakable:
+
+1. `userEdited` becomes `true` unconditionally.
+2. `error` is cleared to `""` unconditionally, including when the row was not
+   in a failed state.
+3. `"pending"` and `"failed"` both promote to `"ready"`. `"grading"` does NOT -
+   a row mid-grade stays `"grading"`.
+4. Only the named field changes; the other three scored fields are untouched.
+
+**`applyGradingResultToRow(row, result)` - `grading-rows.ts:140-156`.** The
+userEdited refusal, and it is asymmetric on purpose:
+
+- If `row.userEdited` is true, ONLY `state` and `error` are updated. All four
+  scored fields (`totalScore`, `strengths`, `improvements`, `overallComment`)
+  are held back.
+- Otherwise all four scored fields plus `state` and `error` are written.
+- In BOTH branches `error` is `result.error ?? ""` - an absent `error` becomes
+  the empty string, never `undefined`.
+
+The reason `state`/`error` are not gated, per the function's own doc comment:
+they describe the grading ATTEMPT, not the instructor's words, so even an edited
+row should still show a fresh failed/ready transition. An extraction that gates
+all six fields uniformly would look tidier and would be wrong.
+
+**`removeGradingRow(rows, id)` - `grading-rows.ts:271-274`.** The subtle one:
+
+```ts
+if (!rows.some((r) => r.id === id)) return rows as GradingRow[];
+return rows.filter((r) => r.id !== id);
+```
+
+**When the id is not present it returns the SAME ARRAY REFERENCE**, not a copy.
+An extraction that filters unconditionally is behaviourally identical by value
+and different by identity, which changes referential-equality checks and can
+defeat a `memo` or retrigger an effect. No test pins this today. Pin it.
+
+**`gradingClearTableSignature(totalCount)` - `grading-rows.ts:288-290`.**
+`String(totalCount)`. Signature-based confirm-arming, no timer: a row landing or
+leaving mid-session changes the signature and disarms a stale confirmation on
+its own.
+
+**`joinFeedback(row)` - `grading-row.ts:228-230`.**
+`[strengths, improvements, overallComment]`, filtered to those whose `.trim()`
+is non-empty, joined with `"\n\n"`. Two facts: `totalScore` is deliberately NOT
+included (the copied text never asserts a score the app does not post), and a
+blank field is omitted entirely rather than contributing a blank line - a row
+with only an overall comment copies as one paragraph, not two blank lines and a
+paragraph.
+
+### What must NOT move, and why
+
+**`applyRosterMatchToRow` - `grading-rows.ts:160-165`.** It is roster semantics
+and it is explicitly NOT gated by `userEdited`, because `nameMatch` and
+`rosterCandidates` are not instructor-editable. The snapshot surface has no
+roster path at all: its name is typed by the instructor. If this function or its
+two fields reach the shared core, `NAME_MATCH_BADGE`
+(`GradingTableRow.tsx:87-92`) becomes renderable for a hand-typed name, which
+would claim a verification that never happened.
+
+### Facts about the surrounding gates, so the extraction does not trip them blind
+
+- The persisted-key canary in `grading-rows.test.ts:466-486` builds its haystack
+  with `fs.readdirSync` over `src/app/components/grading-recording` ONLY -
+  non-recursive, `.test.ts` excluded. Its `isWired` helper requires the
+  `localStorage.getItem`/`setItem` call and the `const NAME = "key"` binding to
+  appear in that same combined text. **Moving a localStorage call into
+  `assessment-shared/` breaks it.** Wave 1 moves no persistence, so it should be
+  untouched; wave 2 must extend the scanned file list rather than loosen
+  `isWired` or drop a key.
+- `GRADING_TABLE_COLUMN_COUNT = 5` (`grading-rows.ts:88`) is read at
+  `GradingTable.tsx:264` and `GradingTableRow.tsx:316`, and the header renders
+  exactly five `<th>` at `GradingTable.tsx:241-258`. **No test pins that
+  correspondence.** A shared row component taking slot props would desync
+  colSpan from the header count with every gate green, and no component is
+  rendered by any test here to catch it. This is the concrete reason the
+  extraction takes three small leaves instead of one parameterised row.
+
+### The invariant the extraction must preserve, and how it is now enforced
+
+`GradingRow` carries no postable identity, and today that rests on nobody adding
+the field. After wave 1 it rests on `NoPostableIdentity<R>`, measured on
+2026-09-13 to reject a row carrying `userId` at a generic call site with
+`TS2345: Argument of type 'Dirty' is not assignable to parameter of type
+'never'`, with the clean control still compiling. tsc in this repo does read a
+`.types.ts` fixture under `src/` - verified by canary, not by absence.
+
+Correction to the plan that produced this wave: the tuple-wrapped spelling and
+the naive `Extract<keyof T, K> extends never ? T : never` behave IDENTICALLY
+here. The claim that the naive form "defers and guards nothing" is false. The
+tuple form is kept as defensive, not as required.

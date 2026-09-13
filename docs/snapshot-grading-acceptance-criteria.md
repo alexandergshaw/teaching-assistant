@@ -857,3 +857,64 @@ together, since at 1080p/q0.92 the budget allows it. That keeps the
 transcription's reviewability and per-shot failure reporting while letting the
 model re-read a rubric table it flattened badly. It costs one extra pass over
 the same pixels, and it is the only shape where a bad read is recoverable.
+
+---
+
+## 11. The A0-2 identity guard, measured
+
+The architect pass called this "the single most important sabotage target in
+this plan" and could not settle it, because `this-repo.md` reserves `tsc` to the
+wave gate. It is settled now, before wave 1, with a throwaway probe under `src/`
+that was deleted afterwards.
+
+**Three questions, three answers.**
+
+**Q1. Does `npx tsc --noEmit` in this repo read a `.types.ts` file under
+`src/`?** YES. Proven by canary, not by absence: a deliberate
+`const canary: number = "not a number"` produced
+`src/zz-guard-probe.types.ts(40,14): error TS2322`. Without that canary a clean
+run would have been indistinguishable from tsc ignoring the file - which is the
+`traps-search.md` rule about absence claims, applied to a type checker.
+
+**Q2. Does the guard actually reject a row carrying a forbidden key, at a
+GENERIC CALL SITE - the real usage, where the type parameter is naked?** YES.
+With the suppressions removed so the raw diagnostic was visible:
+
+```
+error TS2345: Argument of type 'Dirty' is not assignable to parameter of type 'never'.
+```
+
+on a `declare function edit<R extends Core>(row: Guard<R>, ...)` called with a
+`Dirty` row (`Dirty extends Core` plus `userId: number`). The clean control -
+the same call with a row carrying no forbidden key - compiles. So **A0-2 Layer 2
+has a working instrument**, and it is `@ts-expect-error` in a type-only file
+checked by the ordinary `tsc` gate.
+
+**Q3. Is the tuple wrapper REQUIRED, as the plan states?** NO - and this
+corrects the plan. The architect wrote that the naive spelling
+`Extract<keyof T, K> extends never ? T : never` "defers on a naked type
+parameter and resolves permissively, i.e. compiles, guards nothing, and leaves
+tsc green." **Measured, both spellings behave identically**: naive and
+tuple-wrapped each produced TS2345 at the generic call site, and each accepted
+the clean control. TypeScript infers `R` from the argument here, so the
+conditional resolves rather than deferring.
+
+**What to do with that.** Keep the tuple form - it is free, and it is genuinely
+more robust in positions this probe did not exercise (the alias inside a union,
+or distributed over a union-typed `R`). But **delete the justification**, and do
+not let any brief repeat the claim that the naive spelling is inert. A plan that
+rests a security invariant on a false statement about the type checker invites a
+checker to distrust the parts that are true, and the next agent to "simplify"
+the guard on the grounds that the stated reason does not hold.
+
+**What this does NOT prove**, stated so it is not over-read: TypeScript is
+structural, so nothing here stops a runtime object from carrying an extra
+property that never appears in a type. Layer 3 - `toWire` enumerating fields
+explicitly, pinned by a frozen exact-key-set oracle - remains load-bearing and
+is not made redundant by Layer 2.
+
+**Residual closed.** The residual register's "whether `@ts-expect-error` in a
+`.types.ts` file is picked up by this tsconfig" is answered YES, measured, and
+no longer needs to gate wave 1. Wave 1 still sabotage-checks its own guard - by
+breaking the alias and confirming tsc goes red - because that proves the
+project's specific guard fires, not merely that the mechanism can.

@@ -95,10 +95,10 @@ describe("D4: the citation construction closes the class this A7 test alone cann
   // unverified.
   it("a citation invented to justify a grade the injection asked for is rejected because it is not IN the transcript", () => {
     const fabricated: SnapshotRubricAreaAnswer[] = [
-      { area: "Correctness", score: "10/10", quote: "the function correctly reverses any string", shotIndex: 3 },
+      { area: "Correctness", score: "10/10", quote: "the function correctly reverses any string", shotIndex: 3, source: "shot" },
     ];
     const byShot = new Map([[3, HOSTILE_SUBMISSION_TRANSCRIPT]]);
-    const result = verifySnapshotCitations(fabricated, byShot, HOSTILE_SUBMISSION_TRANSCRIPT);
+    const result = verifySnapshotCitations(fabricated, byShot, HOSTILE_SUBMISSION_TRANSCRIPT, "");
     expect(result[0].verified).toBe(false);
   });
 });

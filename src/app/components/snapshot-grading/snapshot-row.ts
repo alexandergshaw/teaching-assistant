@@ -20,7 +20,6 @@
 import type { AssessmentRowCore, NoPostableIdentity } from "../assessment-shared/assessment-row";
 import type { SnapshotRole } from "./snapshot-shot";
 import type { LlmProvider } from "@/lib/llm";
-import type { RubricCriterion } from "@/lib/grade/types";
 import { deriveTotalScore } from "@/lib/grade/parsing";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +43,12 @@ export interface SnapshotRubricAreaEvidence {
   score: string;
   quote: string;
   shotIndex: number;
+  // RULING A / M1: classified by the parser from the RAW shotIndex value
+  // before coercion (never "pasted" for a missing or non-numeric field). A
+  // row persisted by F1 before this field existed reads back as "unknown"
+  // (snapshot-row-serialization.ts's fromWire default) - never "pasted",
+  // which would misrender an old row's evidence as rubric/assignment text.
+  source: "shot" | "pasted" | "unknown";
   verified: boolean;
 }
 
@@ -262,7 +267,6 @@ export function buildTranscriptBlock(entries: readonly TranscriptEntry[]): strin
 export interface SnapshotGradeRequestInput {
   assignmentText: string;
   rubricText: string;
-  criteria: RubricCriterion[];
   /** The full, role-labeled transcription - possibly edited by the
    *  instructor per A1f - covering every shot regardless of whether its
    *  image made it into the grade call. */

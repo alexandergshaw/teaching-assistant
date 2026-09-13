@@ -57,6 +57,7 @@ import {
 } from "./snapshot-row";
 import { useAssessmentRowStore } from "../assessment-shared/useAssessmentRowStore";
 import { snapshotRowCodec } from "./snapshot-row-serialization";
+import { RubricInputModal } from "../grading-recording/RubricInputModal";
 import SnapshotResultCard from "./SnapshotResultCard";
 import SnapshotCaptureBar from "./SnapshotCaptureBar";
 import SnapshotShotTray from "./SnapshotShotTray";
@@ -128,6 +129,10 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   // refuses to persist for the same reason.
   const [assignmentText, setAssignmentText] = useState("");
   const [rubricText, setRubricText] = useState("");
+  // A3a: RubricInputModal (paste + PDF/doc extract) is the reviewed-text
+  // path, matching GradingRecordingPanel.tsx's own button/modal wiring.
+  const [rubricModalOpen, setRubricModalOpen] = useState(false);
+  const rubricButtonRef = useRef<HTMLButtonElement>(null);
 
   // The read pass's own state: one entry per shot, keyed by its 1-based
   // session-stable index (the shots array's own current position).
@@ -201,6 +206,16 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   const nextStudentButtonRef = useRef<HTMLButtonElement>(null);
   const [grading, setGrading] = useState(false);
   const [gradeError, setGradeError] = useState<string | null>(null);
+  // BLOCKER 1 fix: what the most recent Grade call actually pinned into the
+  // prompt's "you MUST return exactly one item for each required area...
+  // never omit areas" instruction - see snapshot-grade.ts's own
+  // SnapshotGradeActionResult.pinnedRubricAreas doc comment. `null` means no
+  // grade has completed yet (nothing to show); an empty array after a grade
+  // with rubric text supplied means the parser recognized none of it, so the
+  // model was free to choose its own areas - a real and different case from
+  // "no rubric text at all", which is why this is tracked separately from
+  // `rubricText`.
+  const [pinnedRubricAreas, setPinnedRubricAreas] = useState<{ name: string; points: number | null }[] | null>(null);
 
   // A6c: a single in-flight guard on each of Read/Grade - double-clicking
   // must not produce two calls or two committed results. A reload/unmount
@@ -283,6 +298,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     setSplitNotice(null); // a notice naming the previous student must not survive into the next student's pass
     setReadError(null); // a failure from the previous student's Read must not survive into the next student's pass
     setGradeError(null); // a failure from the previous student's Grade must not survive into the next student's pass
+    setPinnedRubricAreas(null); // the previous student's pinned-areas readout must not survive into the next student's pass
     activeRowIdRef.current = null; // the NEXT successful Grade mints a fresh row, never updates a finished one
     setNextStudentArmed(false);
     announce("Cleared this student's shots. Assignment and rubric shots are kept.");
@@ -344,6 +360,20 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     if (!el) return;
     const handlePaste = (event: ClipboardEvent) => {
       if (!activeRef.current) return;
+      // Ruling C: ModalShell does not portal, so the rubric modal's own
+      // textarea sits INSIDE this rootRef subtree while open - without this
+      // guard, pasting a rubric SCREENSHOT into the open modal would file it
+      // as a shot behind the modal instead of into the modal's own text
+      // field. MAJOR-3 correction: RubricInputModal has no image-paste
+      // handler of any kind (it only accepts .docx/.pdf/.txt/.md via its
+      // file input) - so with this guard in place, pasting a rubric
+      // screenshot while the modal is open reaches nothing at all and
+      // silently does nothing. That is still correct: before this guard
+      // existed, the same paste at least became a (behind-the-modal) shot;
+      // now it is dropped rather than misfiled. An instructor who wants to
+      // paste a rubric screenshot should close this modal first and paste it
+      // as a rubric-role shot in the tray instead.
+      if (document.querySelector('[aria-modal="true"]')) return;
       const items = event.clipboardData?.items;
       if (!items) return;
       const files = extractPastedImageFiles(Array.from(items), (item) => item.getAsFile());
@@ -465,7 +495,6 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     const result = await snapshotGradeAction({
       assignmentText,
       rubricText,
-      criteria: [],
       transcriptBlock: transcriptText,
       shots: shotsForGrade,
       provider: DEFAULT_PROVIDER,
@@ -479,9 +508,31 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       return;
     }
 
+    setPinnedRubricAreas(result.pinnedRubricAreas);
+    // MAJOR-3 fix: this is the only channel that reveals a rubric area was
+    // dropped from grading, and it renders asynchronously after Grade
+    // completes - a screen-reader user checking the page at that moment
+    // hears nothing unless this panel's own announce() helper is used, the
+    // same as every other state change in this file.
+    if (result.pinnedRubricAreas.length > 0) {
+      announce(
+        `Pinned rubric areas: ${result.pinnedRubricAreas.map((a) => a.name).join(", ")}. Other rubric areas, if any, were not graded.`
+      );
+    } else if (rubricText.trim()) {
+      announce("No rubric areas could be parsed from the rubric text - the model chose its own areas.");
+    }
+
     const transcriptsByShotIndex = new Map<number, string>();
     shotReads.forEach((entry, idx) => transcriptsByShotIndex.set(idx, entry.transcript));
-    const verified = verifySnapshotCitations(result.answer.rubricResults, transcriptsByShotIndex, transcriptText);
+    // The DEDICATED corpus a `source: "pasted"` citation verifies against -
+    // never consulted for a "shot" or "unknown" citation (RULING A).
+    const pastedTextCorpus = `${rubricText}\n\n${assignmentText}`;
+    const verified = verifySnapshotCitations(
+      result.answer.rubricResults,
+      transcriptsByShotIndex,
+      transcriptText,
+      pastedTextCorpus
+    );
 
     const suppliedRoles = new Set(shots.map((shot) => shot.role));
     const hasRubricText = rubricText.trim().length > 0;
@@ -642,16 +693,24 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         size="small"
         slotProps={{ htmlInput: { "aria-label": "Assignment instructions text" } }}
       />
-      <TextField
-        label="Rubric (optional - pasted text preferred over a shot)"
-        value={rubricText}
-        onChange={(e) => setRubricText(e.target.value)}
-        multiline
-        minRows={2}
-        fullWidth
-        size="small"
-        slotProps={{ htmlInput: { "aria-label": "Rubric text" } }}
-      />
+      {/* MAJOR-1 fix: the button used to read "Edit rubric" once rubric text
+          existed, but RubricInputModal has no initial-text prop (its own
+          `useState("")`), so "Edit" would open an EMPTY textarea rather than
+          the text already captured - a false promise. "Replace rubric" is
+          honest about what actually happens. The hint sentence restores the
+          preference this whole feature exists to state (A3a), and the status
+          line mirrors GradingRecordingPanel.tsx's own confirmation of what
+          was captured, which this button's own copy used to promise but
+          never rendered. */}
+      <Button variant="outlined" size="small" ref={rubricButtonRef} onClick={() => setRubricModalOpen(true)}>
+        {rubricText.trim() ? "Replace rubric" : "Add rubric"}
+      </Button>
+      <p className={styles.fieldHint}>
+        Rubric (optional - pasted text preferred over a shot).
+      </p>
+      {rubricText.trim() && (
+        <p className={styles.fieldHint}>{`Rubric set (${rubricText.trim().length} characters).`}</p>
+      )}
 
       <p className={styles.fieldHint}>
         Reading and grading upload shots to Google&apos;s Gemini API (generativelanguage.googleapis.com) - the only two
@@ -666,6 +725,43 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
           {grading ? "Grading..." : "Grade"}
         </Button>
       </div>
+
+      {pinnedRubricAreas !== null && (
+        // BLOCKER 1: the only channel that reveals what extractRubricCriteria
+        // actually parsed out of rubricText - a prose rubric with mixed
+        // formatting (e.g. "Correctness - 10 points." next to "Participation
+        // (10 pts):") can parse PARTIALLY, and the grade prompt then pins the
+        // model to grade ONLY the recognized areas and instructs it to omit
+        // every other area, silently dropping real rubric areas from the
+        // total. This line is the instructor's only way to see that.
+        //
+        // MAJOR-1(b) fix: `pinnedRubricAreas` is ALSO `[]` when no rubric
+        // text was ever supplied - the normal, expected case for the
+        // rubric-as-a-shot path (A3a). Branch on whether rubric TEXT exists,
+        // not just on the parsed-areas length, so an instructor who never
+        // typed rubric text is never told their rubric "failed to parse".
+        //
+        // MAJOR-3 fix: a dropped rubric area changes the score, so the
+        // non-empty case is a warning notice (this codebase's own
+        // controls.notice/noticeWarning shape, matching RubricInputModal's
+        // partial-extraction notice) with role="status"/aria-live, not a
+        // silent fieldHint indistinguishable from the Gemini-privacy
+        // boilerplate above it. The no-rubric-text case is genuinely just
+        // information, so it stays a hint.
+        pinnedRubricAreas.length > 0 ? (
+          <p className={`${controls.notice} ${controls.noticeWarning}`} role="status" aria-live="polite">
+            {`Pinned rubric areas: ${pinnedRubricAreas
+              .map((a) => (a.points != null ? `${a.name} (out of ${a.points})` : a.name))
+              .join(", ")}. The model was required to grade exactly these areas and no others - if your rubric has more areas than this, they were not parsed and were NOT graded.`}
+          </p>
+        ) : rubricText.trim() ? (
+          <p className={`${controls.notice} ${controls.noticeWarning}`} role="status" aria-live="polite">
+            No rubric areas could be parsed from the rubric text - the model chose its own areas.
+          </p>
+        ) : (
+          <p className={styles.fieldHint}>No rubric text was supplied - the model chose its own areas.</p>
+        )
+      )}
 
       {readError && <p role="alert">{readError}</p>}
 
@@ -703,6 +799,23 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
             />
           ))}
         </div>
+      )}
+
+      {rubricModalOpen && (
+        <RubricInputModal
+          onSubmit={(text) => {
+            setRubricText(text);
+            // MAJOR-1(a) fix: the pinned-areas readout below is a stale
+            // answer about the PREVIOUS rubric text once a new one is
+            // submitted - clear it here the same way the Next-student path
+            // already does, so the instructor never sees a parse result
+            // that no longer describes what is in the box.
+            setPinnedRubricAreas(null);
+            setRubricModalOpen(false);
+          }}
+          onClose={() => setRubricModalOpen(false)}
+          restoreFocusRef={rubricButtonRef}
+        />
       )}
     </div>
   );

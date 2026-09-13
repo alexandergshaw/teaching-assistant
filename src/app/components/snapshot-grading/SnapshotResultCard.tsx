@@ -154,11 +154,17 @@ export default function SnapshotResultCard({
                 <p key={area.area} className={styles.fieldHint}>
                   {area.area}: {area.score} -{" "}
                   {area.verified ? (
-                    citationsUnavailable ? (
+                    area.source === "pasted" ? (
+                      <>
+                        quotes the pasted rubric/assignment text, not the student&apos;s work: &quot;{area.quote}&quot;
+                      </>
+                    ) : citationsUnavailable ? (
                       <>
                         citation index no longer reliable (the shot tray has changed since this was graded): &quot;
                         {area.quote}&quot;
                       </>
+                    ) : area.source === "unknown" ? (
+                      <>verified against the session transcript (shot unconfirmed): &quot;{area.quote}&quot;</>
                     ) : (
                       <>verified (Shot {area.shotIndex || "n/a"}): &quot;{area.quote}&quot;</>
                     )

@@ -31,7 +31,9 @@ function makeFullRow(overrides: Partial<SnapshotAssessmentRow> = {}): SnapshotAs
     improvements: "Cite the rubric line.",
     overallComment: "Solid work overall.",
     shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
-    rubricAreas: [{ area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, verified: true }],
+    rubricAreas: [
+      { area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, source: "shot", verified: true },
+    ],
     missingRoles: ["replies"],
     instructionLikeContent: false,
     instructionLikeContentQuote: undefined,

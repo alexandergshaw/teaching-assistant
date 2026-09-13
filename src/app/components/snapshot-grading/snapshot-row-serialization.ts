@@ -25,6 +25,7 @@ export const SNAPSHOT_TABLE_VERSION = 1;
 
 const VALID_STATES = new Set<string>(["pending", "grading", "ready", "failed"]);
 const VALID_READ_STATUSES = new Set<string>(["read", "partly-read", "not-read"]);
+const VALID_EVIDENCE_SOURCES = new Set<string>(["shot", "pasted", "unknown"]);
 
 function isSnapshotRole(v: unknown): v is SnapshotRole {
   return typeof v === "string" && (SNAPSHOT_ROLES as readonly string[]).includes(v);
@@ -180,6 +181,13 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<SnapshotAsse
           score: typeof e.score === "string" ? e.score : "",
           quote: typeof e.quote === "string" ? e.quote : "",
           shotIndex: e.shotIndex as number,
+          // F3/M1: a row persisted by F1 before `source` existed reads back
+          // with no field at all here - defaults to "unknown", NEVER
+          // "pasted", so an old row's evidence is never misrendered as
+          // rubric/assignment text it was not classified as.
+          source: (typeof e.source === "string" && VALID_EVIDENCE_SOURCES.has(e.source)
+            ? e.source
+            : "unknown") as SnapshotRubricAreaEvidence["source"],
           verified: typeof e.verified === "boolean" ? e.verified : false,
         }))
     : [];

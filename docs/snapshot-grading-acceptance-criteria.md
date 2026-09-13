@@ -962,8 +962,21 @@ The feature is reachable at Recording, sub-tab "Snapshot grading".
 ### What is NOT built, stated rather than implied
 
 - **A4d**: completed assessments do not survive a reload. One row, in memory.
-- **A3a**: `RubricInputModal` is not wired; the grade prompt receives an empty
-  `criteria` array and rubric/assignment arrive as plain text fields.
+- **A3a**: `RubricInputModal` IS wired (F3), and `criteria` is derived
+  server-side in `snapshot-grade.ts` via `extractRubricCriteria(rubricText)`
+  immediately before the grade-pass prompt is built - it is no longer always
+  empty. That parser only recognizes the `Name (N pts):` rubric shape,
+  though, and a prose or mixed-format rubric (e.g. one sentence written as
+  `Name - N points.` next to another written as `Name (N pts):`) parses
+  PARTIALLY: `criteria` comes back with only the recognized areas, and the
+  grade prompt's pinned instruction ("you MUST return exactly one
+  rubricResults item for each required area listed above... do not omit
+  areas", `prompts.ts:38`) then commands the model to grade ONLY those areas
+  and drop every other real rubric area from the total. This is not
+  cosmetic - it changes the score, not just the labels - and nothing in the
+  UI could reveal it until F3's fix, which surfaces the exact pinned area
+  list (with points) next to the Grade button, and a distinct message when
+  none of the rubric text parsed at all.
 - **Section 8's U-items**: the click budget, `SegmentedToggle` role arming,
   `ConfirmArmButtons` on Next student, and the live-region wording are still at
   wave 4's level.
@@ -976,8 +989,8 @@ The feature is reachable at Recording, sub-tab "Snapshot grading".
 ### The next chunk, if the owner wants it
 
 In dependency order, per `docs/loop/wave-dispatch.md`: A4d persistence (wave 1,
-data - it defines a stored shape), then the U-items (wave 3, experience). A3a's
-modal wiring is small and independent. None is started.
+data - it defines a stored shape), then the U-items (wave 3, experience). None
+is started.
 
 ### Two process facts a fresh session needs
 

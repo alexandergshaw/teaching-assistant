@@ -113,6 +113,13 @@ export interface SnapshotRubricAreaAnswer {
   score: string;
   quote: string;
   shotIndex: number;
+  /** RULING A: classified from the RAW shotIndex value before any coercion,
+   *  so a missing or non-numeric field (e.g. "shot 3") can never become
+   *  indistinguishable from a genuinely sanctioned pasted-text citation
+   *  (snapshot-grade-prompt.ts:43's explicit shotIndex: 0 contract). Coercing
+   *  first and branching on the coerced number was the exact defect this
+   *  field exists to close - see coercion-changes-set-membership.md. */
+  source: "shot" | "pasted" | "unknown";
 }
 
 export interface SnapshotGradeAnswer {
@@ -126,7 +133,7 @@ export interface SnapshotGradeAnswer {
 
 function normalizeRubricArea(
   score: { area: string; score: string },
-  evidence: ReadonlyMap<string, { quote: string; shotIndex: number }>
+  evidence: ReadonlyMap<string, { quote: string; shotIndex: number; source: "shot" | "pasted" | "unknown" }>
 ): SnapshotRubricAreaAnswer {
   const found = evidence.get(score.area);
   return {
@@ -134,6 +141,7 @@ function normalizeRubricArea(
     score: score.score,
     quote: found?.quote ?? "",
     shotIndex: found?.shotIndex ?? 0,
+    source: found?.source ?? "unknown",
   };
 }
 
@@ -161,15 +169,26 @@ export function parseSnapshotGradeResponse(raw: string): SnapshotGradeAnswer | n
       .filter((r) => r.area !== "");
 
     const evidenceList = Array.isArray(parsed.rubricAreaEvidence) ? parsed.rubricAreaEvidence : [];
-    const evidence = new Map<string, { quote: string; shotIndex: number }>();
+    const evidence = new Map<string, { quote: string; shotIndex: number; source: "shot" | "pasted" | "unknown" }>();
     for (const e of evidenceList) {
       if (!e || typeof e !== "object") continue;
       const rec = e as Record<string, unknown>;
       if (typeof rec.area !== "string") continue;
-      const shotIndex = typeof rec.shotIndex === "number" ? rec.shotIndex : Number(rec.shotIndex ?? 0);
+      const rawShotIndex = rec.shotIndex;
+      let shotIndex = 0;
+      let source: "shot" | "pasted" | "unknown" = "unknown";
+      if (typeof rawShotIndex === "number" && Number.isFinite(rawShotIndex)) {
+        if (rawShotIndex === 0) {
+          source = "pasted";
+        } else if (rawShotIndex > 0) {
+          source = "shot";
+          shotIndex = rawShotIndex;
+        }
+      }
       evidence.set(rec.area, {
         quote: typeof rec.quote === "string" ? rec.quote : "",
-        shotIndex: Number.isFinite(shotIndex) ? shotIndex : 0,
+        shotIndex,
+        source,
       });
     }
 

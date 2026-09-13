@@ -92,7 +92,9 @@ describe("parseSnapshotGradeResponse", () => {
     expect(result).toEqual({
       overallComment: "Nice work overall.",
       improvements: "Consider tightening the intro.",
-      rubricResults: [{ area: "Correctness", score: "8/10", quote: "the loop terminates correctly", shotIndex: 3 }],
+      rubricResults: [
+        { area: "Correctness", score: "8/10", quote: "the loop terminates correctly", shotIndex: 3, source: "shot" },
+      ],
       instructionLikeContent: false,
       instructionLikeContentQuote: undefined,
       missingRoles: ["rubric"],
@@ -124,7 +126,9 @@ describe("parseSnapshotGradeResponse", () => {
       missingRoles: [],
     });
     const result = parseSnapshotGradeResponse(raw);
-    expect(result?.rubricResults).toEqual([{ area: "Style", score: "5/5", quote: "", shotIndex: 0 }]);
+    expect(result?.rubricResults).toEqual([
+      { area: "Style", score: "5/5", quote: "", shotIndex: 0, source: "unknown" },
+    ]);
   });
 
   it("returns null when there are no rubric results at all", () => {

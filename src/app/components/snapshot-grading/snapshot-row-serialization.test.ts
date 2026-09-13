@@ -30,7 +30,9 @@ function makeFullRow(overrides: Partial<SnapshotAssessmentRow> = {}): SnapshotAs
     improvements: "Cite the rubric line.",
     overallComment: "Solid work overall.",
     shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
-    rubricAreas: [{ area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, verified: true }],
+    rubricAreas: [
+      { area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, source: "shot", verified: true },
+    ],
     missingRoles: ["replies"],
     instructionLikeContent: false,
     instructionLikeContentQuote: undefined,
@@ -61,7 +63,9 @@ describe("snapshotRowCodec.toWire", () => {
       improvements: "Cite the rubric line.",
       overallComment: "Solid work overall.",
       shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
-      rubricAreas: [{ area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, verified: true }],
+      rubricAreas: [
+        { area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, source: "shot", verified: true },
+      ],
       missingRoles: ["replies"],
       instructionLikeContent: false,
       instructionLikeContentQuote: undefined,
@@ -146,7 +150,9 @@ describe("snapshotRowCodec.fromWire - happy path (non-load-bearing continuity ch
       improvements: "Cite the rubric line.",
       overallComment: "Solid work overall.",
       shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
-      rubricAreas: [{ area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, verified: true }],
+      rubricAreas: [
+        { area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, source: "shot", verified: true },
+      ],
       missingRoles: ["replies"],
       instructionLikeContent: false,
       instructionLikeContentQuote: undefined,
@@ -202,7 +208,9 @@ describe("snapshotRowCodec.fromWire - CONTESTED VALUE 3b: rubricAreas drops non-
     };
     const result = snapshotRowCodec.fromWire(raw);
     expect(result?.rubricAreas).toHaveLength(1);
-    expect(result?.rubricAreas).toEqual([{ area: "A", score: "1/1", quote: "q", shotIndex: 1, verified: true }]);
+    expect(result?.rubricAreas).toEqual([
+      { area: "A", score: "1/1", quote: "q", shotIndex: 1, source: "unknown", verified: true },
+    ]);
   });
 });
 

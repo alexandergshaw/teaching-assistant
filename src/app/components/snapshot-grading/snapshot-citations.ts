@@ -22,36 +22,57 @@ export interface SnapshotCitationResult {
   score: string;
   quote: string;
   shotIndex: number;
+  // Carried through so the UI can render pasted-text evidence distinctly
+  // from shot-verified evidence (Ruling D) - never the numeric shotIndex
+  // alone, which cannot distinguish a sanctioned pasted citation from a
+  // missing/non-numeric one (see snapshot-parse.ts's own classification).
+  source: "shot" | "pasted" | "unknown";
   /** True only when `quote` (normalized) is found verbatim inside the
-   *  transcript it claims to come from, or inside the combined transcript as
-   *  a fallback when shotIndex does not resolve to a known shot. */
+   *  transcript it claims to come from, inside the dedicated pasted-text
+   *  corpus (only for a `source: "pasted"` citation), or inside the combined
+   *  transcript as a fallback when the source cannot be resolved that way. */
   verified: boolean;
 }
 
 /**
  * `transcriptsByShotIndex` maps a shot's 1-based global index to that shot's
  * own transcript text. `combinedTranscript` is every shot's transcript
- * joined together (and any pasted rubric/assignment text) - the fallback
- * corpus for a citation whose `shotIndex` is 0 (pasted text, per the grade
- * prompt's own contract) or whose claimed index does not resolve to a known
- * shot, since a wrong-but-real quote should still verify against the whole
- * session rather than being penalized for a bad index alone.
+ * joined together - the fallback corpus for a citation whose claimed index
+ * does not resolve to a known shot, since a wrong-but-real quote should
+ * still verify against the whole session rather than being penalized for a
+ * bad index alone. `pastedTextCorpus` is the instructor's own pasted
+ * rubric/assignment text - the ONLY corpus a `source: "pasted"` citation may
+ * verify against; it is never consulted for a `"shot"` or `"unknown"`
+ * citation, which closes the fabrication vector a numeric-sentinel
+ * `shotIndex: 0` discriminator could not (RULING A).
  */
 export function verifySnapshotCitations(
   areas: readonly SnapshotRubricAreaAnswer[],
   transcriptsByShotIndex: ReadonlyMap<number, string>,
-  combinedTranscript: string
+  combinedTranscript: string,
+  pastedTextCorpus: string
 ): SnapshotCitationResult[] {
   const normalizedCombined = normalizeForMatch(combinedTranscript);
+  const normalizedPastedText = normalizeForMatch(pastedTextCorpus);
   return areas.map((a) => {
     const quote = a.quote.trim();
     if (!quote) {
-      return { area: a.area, score: a.score, quote: a.quote, shotIndex: a.shotIndex, verified: false };
+      return { area: a.area, score: a.score, quote: a.quote, shotIndex: a.shotIndex, source: a.source, verified: false };
     }
     const normalizedQuote = normalizeForMatch(quote);
-    const ownCorpus = transcriptsByShotIndex.get(a.shotIndex);
+    const ownCorpus = a.source === "shot" ? transcriptsByShotIndex.get(a.shotIndex) : undefined;
     const verifiedAgainstOwnShot = ownCorpus ? normalizeForMatch(ownCorpus).includes(normalizedQuote) : false;
-    const verified = verifiedAgainstOwnShot || normalizedCombined.includes(normalizedQuote);
-    return { area: a.area, score: a.score, quote: a.quote, shotIndex: a.shotIndex, verified };
+    const verifiedAgainstPastedText = a.source === "pasted" ? normalizedPastedText.includes(normalizedQuote) : false;
+    const verified = verifiedAgainstOwnShot || verifiedAgainstPastedText || normalizedCombined.includes(normalizedQuote);
+    // BLOCKER 2 fix: `source` must reflect which corpus actually verified the
+    // quote, not the model's self-reported claim - a "pasted" citation whose
+    // quote only matched the student transcript (the combined-transcript
+    // fallback) must not render as rubric evidence.
+    const resolvedSource: SnapshotCitationResult["source"] = verifiedAgainstPastedText
+      ? "pasted"
+      : verifiedAgainstOwnShot
+        ? "shot"
+        : "unknown";
+    return { area: a.area, score: a.score, quote: a.quote, shotIndex: a.shotIndex, source: resolvedSource, verified };
   });
 }

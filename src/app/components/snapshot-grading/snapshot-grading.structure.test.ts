@@ -212,3 +212,26 @@ describe("directory-wide ta-snap-* key exact-set canary (this directory has no c
     expect(combinedSource).toMatch(/localStorage\.setItem\(\s*ARMED_ROLE_KEY\s*,/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FINAL FIX WAVE: the "don't grade a screenshot of the rubric modal itself"
+// paste guard's correctness lives entirely in ANOTHER component's markup -
+// it is true only because ModalShell.tsx emits aria-modal="true" on the open
+// modal's div, which the guard checks for. Nothing before this test asserted
+// that fact. If ModalShell ever moves to role="dialog" alone (dropping
+// aria-modal), the guard becomes a silent no-op and rubric screenshots start
+// filing themselves as shots behind an open modal - every other gate stays
+// green. This was run against a deliberately broken ModalShell.tsx (the
+// attribute value changed to aria-modal="false") and observed red before
+// being restored byte-identical; see this wave's report for the failing
+// output.
+// ---------------------------------------------------------------------------
+
+describe("ModalShell actually emits aria-modal=\"true\" (the fact the snapshot paste guard depends on)", () => {
+  const modalShellPath = path.resolve(process.cwd(), "src/app/components/ui/ModalShell.tsx");
+  const modalShellSource = fs.readFileSync(modalShellPath, "utf-8");
+
+  it('ModalShell.tsx contains aria-modal="true"', () => {
+    expect(modalShellSource).toContain('aria-modal="true"');
+  });
+});

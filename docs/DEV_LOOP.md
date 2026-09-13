@@ -20,10 +20,11 @@ the orchestrator's output is the most expensive text in the system.
 ## The core principle
 
 **The implementer and the verifier are never the same agent, and neither are the
-author and the checker of ANY artifact.** A cheap model writes the bulk of the
-code; a stronger model sets criteria and gates quality; a FRESH peer
-adversarially checks everything a model authors. Nothing ships until it provably
-meets stated acceptance criteria.
+author and the checker of ANY artifact.** Authoring - criteria, design, plans,
+code - runs on the cheaper tier; a FRESH peer on the stronger tier adversarially
+checks everything a model authors. Nothing ships until it provably meets stated
+acceptance criteria. The strength goes into checking rather than authoring
+because a checked mistake is caught and an unchecked one ships.
 
 **The orchestrator authors nothing except chunking, rulings, the decisions
 ledger and the push.** Catching yourself producing an artifact instead of
@@ -36,14 +37,24 @@ routing one is the signal to spawn the seat.
 Set in `.claude/agents/`, not per call, so a per-call override cannot silently
 re-tier a seat. Full mapping, model IDs and prices in `this-repo.md` section 8.
 
-| Tier | Model | Used for |
+| Agent | Model | Used for |
 |---|---|---|
-| top | `fable` | Only where a mistake is inherited by everything downstream: the chunking, and a seam every wave depends on |
-| seat | `opus` | Acceptance criteria, design seats, plans, test notes, verification, remediation, root-cause analysis |
-| checker | `opus` | The adversarial check over each artifact |
-| implementer | `sonnet` | Code, fixes, tests written from notes, mechanical sweeps |
+| `loop-checker` | opus | The adversarial check over each artifact |
+| `loop-top` | opus | Only where a mistake is inherited by everything downstream and is NOT itself checked: the chunking, and a seam every wave is built against |
+| `loop-seat` | sonnet | Acceptance criteria, design seats, plans, test notes, verification, remediation, root-cause analysis |
+| `loop-implementer` | sonnet | Code, fixes, tests written from notes, mechanical sweeps |
 
-Opus is 2.5x Sonnet and 5x Haiku per token; Fable is 2x Opus.
+**The principle, to reason from if the numbers change: spend the strong tier
+where there is no backstop, not where the work is verifiable.** A seat is
+checked by a fresh peer before anyone acts on its output, so a seat mistake is
+caught. Nothing checks the checker, and little checks the top tier, so those are
+where a mistake ships. That is the whole argument, and it does not depend on
+today's prices.
+
+Opus is exactly 2.5x Sonnet per token, at any mix of input and output: input is
+$5 against $2, output $25 against $10, and both ratios are 2.5. So the cost of
+this policy is easy to reason about without knowing the input/output split of
+any particular run.
 
 ---
 

@@ -199,18 +199,36 @@ The Agent tool's `model` field accepts `opus`, `sonnet`, `haiku`, `fable`.
 Current IDs and first-party API rates, per the `claude-api` skill (cached
 2026-06-24) - re-read that skill rather than quoting these from memory later:
 
-| Tier here | Model | ID | Input $/MTok | Output $/MTok |
+| Agent | Model | ID | Input $/MTok | Output $/MTok |
 |---|---|---|---|---|
-| top | Claude Fable 5.1 | `claude-fable-5-1` | 10.00 | 50.00 |
-| seat / checker | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
-| implementer | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
-| mechanical | Claude Haiku 4.5 | `claude-haiku-4-5` | 1.00 | 5.00 |
+| `loop-checker` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
+| `loop-top` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
+| `loop-seat` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
+| `loop-implementer` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
 
-**Cost ratio: Opus is 2.5x Sonnet and 5x Haiku on both input and output; Fable
-is 2x Opus.** A seat pass over this repo has run 100k-210k tokens in practice
-(measured across the six pre-code passes on one feature), so an Opus seat is
-roughly $0.5-1.0 of input plus output at the rates above. That is the number
-that makes the stopping rule in the orchestration traps card concrete.
+Fable is not used at any tier.
+
+**Opus is exactly 2.5x Sonnet per token at ANY input/output mix** - 5 against 2
+on input, 25 against 10 on output, both ratios 2.5. So this policy's cost can be
+reasoned about without knowing any run's in/out split, which is useful because
+the harness reports a single total per agent.
+
+**Measured agent sizes in this repo**, from one feature's full run: design seats
+102k-247k tokens each (median about 137k), implementer waves 148k-232k, checkers
+133k-135k. Budget roughly 150k tokens per agent and about 10-14 agents for a
+feature of this size.
+
+**What the tier split costs and saves, measured on that run.** Six passes ran on
+Opus for 1.04M tokens; seven on Sonnet for 0.93M. Moving the four authoring
+passes among those six to Sonnet - keeping both checkers on Opus - moves 768k
+tokens down a tier. At a 90/10 in/out blend that is $7.00/MTok against
+$2.80/MTok, so about **$3.20 saved per feature of this size, roughly a third of
+total agent spend**, with the adversarial checks untouched. The saving scales
+linearly with how much authoring a feature needs.
+
+**The rate limit binds before the dollars do.** A wave died mid-run against a
+session limit during that same feature. Tier choice buys limit headroom as well
+as money, and the headroom is what actually stops work.
 
 **I could not confirm** whether the agent-definition frontmatter supports an
 `effort` key in this build. The definitions in `.claude/agents/` therefore set

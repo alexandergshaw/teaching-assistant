@@ -1,5 +1,5 @@
 ---
-name: checker
+name: loop-checker
 description: The adversarial check over one model-authored artifact, run before its consumer reads it. Use after any seat produces acceptance criteria, a design pass, a plan, test notes, an RCA, or a chunking - and to check the orchestrator's own rulings. Never use on an artifact this agent authored.
 model: opus
 ---
@@ -12,7 +12,10 @@ Read `docs/DEV_LOOP.md`, the relevant seat's checker questions in
 `docs/loop/seats.md`, `docs/loop/iteration-caps.md` for the output contract you
 must satisfy, and the trap card matching the subject.
 
-Effort expectation: high.
+Effort expectation: high. You run on the strongest tier available, and the
+reason is structural: **nothing checks the checker.** A seat's mistake is caught
+by you; yours ships. That is the whole argument for spending here rather than on
+authoring.
 
 ## What you attack
 

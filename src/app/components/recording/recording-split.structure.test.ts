@@ -123,13 +123,13 @@ describe("recording-split structure", () => {
     // Announcement-from-a-walkthrough front door for that feature
     // (docs/announcement-from-walkthrough-acceptance-criteria.md) - a
     // SIBLING capture surface to Module walkthrough deck, not a mode of it.
-    it("should render exactly eleven inner-view tabs", () => {
+    it("should render exactly twelve inner-view tabs", () => {
       const stripLine = recordingTabContent
         .split("\n")
         .find((line: string) => line.includes('["record", "Record"]'));
       expect(stripLine, "expected to find the inner-view strip's array literal in RecordingTab.tsx").toBeTruthy();
       const entries = stripLine!.match(/\["[a-z]+",\s*"[^"]+"\]/g) ?? [];
-      expect(entries).toHaveLength(11);
+      expect(entries).toHaveLength(12);
     });
 
     it("should include a dedicated announcement entry in the strip, not only the pre-existing per-take route", () => {
@@ -182,9 +182,9 @@ describe("recording-split structure", () => {
     // "walkannounce" each add their own dedicated panel
     // (docs/message-replies-acceptance-criteria.md M1/M2,
     // docs/announcement-from-walkthrough-acceptance-criteria.md).
-    it("renders exactly ten tabpanel content divs (eleven tabs, record/announcement sharing one)", () => {
+    it("renders exactly eleven tabpanel content divs (twelve tabs, record/announcement sharing one)", () => {
       const matches = recordingTabContent.match(/role="tabpanel"/g) ?? [];
-      expect(matches).toHaveLength(10);
+      expect(matches).toHaveLength(11);
     });
 
     // The eleven tab buttons render from ONE array literal via a single
@@ -205,6 +205,7 @@ describe("recording-split structure", () => {
         "discussions",
         "messages",
         "grading",
+        "snapgrade",
         "moduledeck",
         "walkannounce",
         "speed",
@@ -215,7 +216,7 @@ describe("recording-split structure", () => {
       const panelTargets = new Set(
         keys.map((key) => (key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`))
       );
-      expect(panelTargets.size).toBe(10);
+      expect(panelTargets.size).toBe(11);
       for (const target of panelTargets) {
         expect(recordingTabContent, `expected a tabpanel div with id="${target}"`).toContain(`id="${target}"`);
       }

@@ -65,7 +65,8 @@ export type RecordingLaunchView =
   | "grading"
   | "moduledeck"
   | "walkannounce"
-  | "messages";
+  | "messages"
+  | "snapgrade";
 
 const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "record",
@@ -79,6 +80,7 @@ const RECORDING_LAUNCH_VIEWS: readonly RecordingLaunchView[] = [
   "moduledeck",
   "walkannounce",
   "messages",
+  "snapgrade",
 ];
 
 /** Already-framed, already-capped prompt text - built via

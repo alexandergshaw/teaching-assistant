@@ -1,0 +1,167 @@
+/* Snapshot grading, WAVE 4. Only what RecordingControls.module.css and
+   GradingTable.module.css do not already give - neither ships a thumbnail
+   tray or a capture-bar layout, since grading-recording's own UI is a text
+   table with no images and no armed-role toggle. */
+
+.panelRoot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Standard accessible-hiding pattern (WorkflowPanel.module.css:262-271) -
+   clipped, not display:none, so assistive tech still reads it. Used for the
+   tray's tile accessible names and the panel's own aria-live announcer. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.captureBar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.captureRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.disclosure {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.keyHint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.wireFigure {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+.trayEmpty {
+  padding: var(--space-4);
+  border: 1px dashed var(--field-border);
+  border-radius: var(--radius-md);
+}
+
+.trayContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.roleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.roleHeading {
+  margin: 0;
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.tileGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tile {
+  position: relative;
+  width: 96px;
+  height: 72px;
+  padding: 0;
+  border: 2px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  background: var(--card-background);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.tile:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+.tileSelected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.tileImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tileMeta {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--navy) 70%, transparent);
+  color: #fff;
+  font-size: var(--font-size-2xs);
+  line-height: 1.4;
+}
+
+.actionRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.roleChoice {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-xs);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.roleChoice:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+.noteInput {
+  min-width: 160px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-xs);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}

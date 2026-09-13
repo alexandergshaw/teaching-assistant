@@ -32,6 +32,7 @@ import WalkthroughPanel from "./recording/WalkthroughPanel";
 import ModuleDeckCapturePanel from "./module-deck-capture/ModuleDeckCapturePanel";
 import WalkthroughAnnouncementPanel from "./walkthrough-announcement/WalkthroughAnnouncementPanel";
 import MessageRepliesPanel from "./message-replies/MessageRepliesPanel";
+import SnapshotGradingPanel from "./snapshot-grading/SnapshotGradingPanel";
 import TakeAnnouncementPanel from "./recording/TakeAnnouncementPanel";
 import { useAnnouncementBusy, type AnnouncementRecordingContext, type PostedAnnouncementInfo } from "./recording/useTakeAnnouncement";
 import { listRecordingFiles, downloadRecordingFile, type RecordingFile } from "@/lib/recording-files";
@@ -59,7 +60,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   // navigateToRecordingTool("grading") entry, exactly the same two entry
   // points "discussions" already has.
   const [recView, setRecView] = useState<
-    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading" | "moduledeck" | "walkannounce" | "messages"
+    "record" | "discussions" | "speed" | "captions" | "slides" | "avatar" | "announcement" | "grading" | "moduledeck" | "walkannounce" | "messages" | "snapgrade"
   >(() => {
     if (typeof window === "undefined") return "record";
     const v = localStorage.getItem("ta-rec-view");
@@ -72,7 +73,8 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
       v === "grading" ||
       v === "moduledeck" ||
       v === "walkannounce" ||
-      v === "messages"
+      v === "messages" ||
+      v === "snapgrade"
       ? v
       : "record";
   });
@@ -587,7 +589,7 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           points at the record panel's id rather than a non-existent
           announcement-only one. */}
       <div className={styles.lessonInnerTabs} role="tablist" aria-label="Recording tools">
-        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["grading", "Grading (from a recording)"], ["moduledeck", "Module walkthrough deck"], ["walkannounce", "Announcement from a walkthrough"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
+        {([["record", "Record"], ["announcement", "Record announcement"], ["discussions", "Discussion replies"], ["messages", "Message replies"], ["grading", "Grading (from a recording)"], ["snapgrade", "Grading (from screenshots)"], ["moduledeck", "Module walkthrough deck"], ["walkannounce", "Announcement from a walkthrough"], ["speed", "Change speed"], ["captions", "Caption a video"], ["slides", "Narrate a deck"], ["avatar", "Avatar"]] as const).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={recView === key}
             id={`rec-tab-${key}`}
             aria-controls={key === "announcement" ? "rec-panel-record" : `rec-panel-${key}`}
@@ -853,6 +855,16 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
           "discussions" needs above. */}
       <div role="tabpanel" id="rec-panel-grading" aria-labelledby="rec-tab-grading" style={{ display: recView === "grading" ? undefined : "none" }}>
         <GradingRecordingPanel active={active && recView === "grading"} />
+      </div>
+
+      {/* Same always-mounted stack, same reason: a live screen-share session
+          and its shot tray must survive the user switching to another inner
+          view - snapshot-grading's own capture surface (docs/snapshot-
+          grading-acceptance-criteria.md), a SIBLING of "grading" rather than
+          a mode of it, needs exactly the guarantee "grading" needs above.
+          WAVE 4 ships capture/tray only - no grading action yet. */}
+      <div role="tabpanel" id="rec-panel-snapgrade" aria-labelledby="rec-tab-snapgrade" style={{ display: recView === "snapgrade" ? undefined : "none" }}>
+        <SnapshotGradingPanel active={active && recView === "snapgrade"} />
       </div>
 
       {/* Same always-mounted stack, same reason: an in-progress screen-share

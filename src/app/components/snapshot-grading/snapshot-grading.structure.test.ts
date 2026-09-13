@@ -1,0 +1,118 @@
+import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+
+// THE WIRING WAVE'S OWN REACHABILITY CANARY (docs/snapshot-grading-
+// acceptance-criteria.md section 5, X5/X6). Copies module-deck-capture's own
+// precedent (module-deck-capture.structure.test.ts) almost exactly: a panel
+// can ship fully built and completely UNREACHABLE, or reachable right up
+// until a reload silently drops it back to "record" because the recView
+// union and its SEPARATE localStorage restore guard are two lists nothing
+// forces to move together. Every assertion below was sabotage-checked while
+// this file was written - see the report for both sides of that check.
+
+const RECORDING_TAB_PATH = path.resolve(process.cwd(), "src/app/components/RecordingTab.tsx");
+const recordingTabSource = fs.readFileSync(RECORDING_TAB_PATH, "utf-8");
+
+const SNAPSHOT_GRADING_DIR = path.resolve(process.cwd(), "src/app/components/snapshot-grading");
+
+describe("SnapshotGradingPanel is actually mounted by RecordingTab (reachability, entry point a)", () => {
+  it("RecordingTab.tsx imports the default export from ./snapshot-grading/SnapshotGradingPanel", () => {
+    expect(recordingTabSource).toMatch(
+      /import SnapshotGradingPanel from "\.\/snapshot-grading\/SnapshotGradingPanel"/
+    );
+  });
+
+  it("RecordingTab.tsx actually renders <SnapshotGradingPanel - an import alone proves nothing", () => {
+    expect(recordingTabSource).toMatch(/<SnapshotGradingPanel\b/);
+  });
+
+  it('the rendered panel receives active={active && recView === "snapgrade"} - the same always-mounted, display:none-toggled idiom every sibling inner view uses, never unmounted on tab switch', () => {
+    expect(recordingTabSource).toMatch(/<SnapshotGradingPanel active=\{active && recView === "snapgrade"\}/);
+  });
+});
+
+describe('"snapgrade" is wired into BOTH the recView union AND the SEPARATE restore guard (the trap)', () => {
+  it('"snapgrade" is a member of the recView useState union type', () => {
+    // Anchor on the union literal's own line - deliberately NOT a bare
+    // `source.includes('"snapgrade"')` check, which the restore guard's own
+    // occurrence would also satisfy and could never fail independently of
+    // it.
+    const unionLine = recordingTabSource
+      .split("\n")
+      .find((line) => line.includes('"record" | "discussions" | "speed"'));
+    expect(unionLine, "expected to find the recView union type's own line in RecordingTab.tsx").toBeTruthy();
+    expect(unionLine).toMatch(/"snapgrade"/);
+  });
+
+  it('"snapgrade" is a member of the SEPARATE localStorage restore guard\'s v === chain (the actual trap: this can be missing while the test above still passes)', () => {
+    // Isolate JUST the restore-guard block - from its own
+    // `localStorage.getItem("ta-rec-view")` read to its own closing
+    // `: "record";` fallback - so this cannot be satisfied by the union
+    // line above happening to contain the same literal.
+    const guardStart = recordingTabSource.indexOf('localStorage.getItem("ta-rec-view")');
+    expect(guardStart, "expected to find the restore guard's own localStorage read").toBeGreaterThan(-1);
+    const guardEnd = recordingTabSource.indexOf(': "record";', guardStart);
+    expect(guardEnd, "expected to find the restore guard's own closing fallback").toBeGreaterThan(-1);
+    const guardBlock = recordingTabSource.slice(guardStart, guardEnd);
+    expect(guardBlock).toMatch(/v === "snapgrade"/);
+  });
+
+  it("the inner-view tab strip includes a snapgrade entry, so the view is reachable by more than a reload or a launch event", () => {
+    expect(recordingTabSource).toMatch(/\["snapgrade",\s*"[^"]+"\]/);
+  });
+});
+
+describe('"snapgrade" is a member of the RecordingLaunchView union AND the RECORDING_LAUNCH_VIEWS runtime validator (src/lib/recording-launch.ts)', () => {
+  const recordingLaunchSource = fs.readFileSync(path.resolve(process.cwd(), "src/lib/recording-launch.ts"), "utf-8");
+
+  it('"snapgrade" is in the RecordingLaunchView union type', () => {
+    expect(recordingLaunchSource).toMatch(/export type RecordingLaunchView =[\s\S]*?"snapgrade"[\s\S]*?;/);
+  });
+
+  it('"snapgrade" is in the RECORDING_LAUNCH_VIEWS runtime array - the array is the actual validator, the union is only the type', () => {
+    const arrayMatch = recordingLaunchSource.match(/const RECORDING_LAUNCH_VIEWS[\s\S]*?\];/);
+    expect(arrayMatch, "expected to find the RECORDING_LAUNCH_VIEWS array literal").toBeTruthy();
+    expect(arrayMatch![0]).toMatch(/"snapgrade"/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// X4: this directory's own ta-snap-* key canary. recording-split.structure
+// .test.ts's exact-set canary scans only src/app/components/recording/ plus
+// RecordingTab.tsx, and does NOT reach this directory - so without this
+// block, a persisted key landing here would be invisible to every existing
+// gate in this repo. Exact-set (not merely ordinal) since this wave's own
+// key set is small and fully known: only the armed-role toggle persists
+// (U10: rubric/assignment text does not exist in this wave, and even once it
+// lands in a later wave U10 says it must NOT persist).
+// ---------------------------------------------------------------------------
+
+describe("directory-wide ta-snap-* key exact-set canary (this directory has no canary anywhere else)", () => {
+  const files = fs.readdirSync(SNAPSHOT_GRADING_DIR);
+  const nonTestFiles = files.filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
+
+  it("finds more than 3 non-test files in this directory - a scan over an empty or renamed directory proves nothing", () => {
+    expect(nonTestFiles.length).toBeGreaterThan(3);
+  });
+
+  const combinedSource = nonTestFiles
+    .map((f) => fs.readFileSync(path.join(SNAPSHOT_GRADING_DIR, f), "utf-8"))
+    .join("\n");
+
+  const keys = combinedSource.match(/(?<![a-zA-Z])ta-snap-[a-z-]*[a-z]/g) ?? [];
+  const distinctKeys = Array.from(new Set(keys)).sort();
+
+  it("finds at least one ta-snap-* key across every non-test file in this directory - a check over nothing proves nothing", () => {
+    expect(keys.length).toBeGreaterThan(0);
+  });
+
+  it("finds exactly the expected ta-snap-* key set (only the armed-role toggle persists - U10 keeps shot bytes and any future rubric/assignment text out of localStorage)", () => {
+    expect(distinctKeys).toEqual(["ta-snap-armed-role"]);
+  });
+
+  it("ta-snap-armed-role is wired to both a read and a write", () => {
+    expect(combinedSource).toMatch(/localStorage\.getItem\(\s*ARMED_ROLE_KEY\s*\)/);
+    expect(combinedSource).toMatch(/localStorage\.setItem\(\s*ARMED_ROLE_KEY\s*,/);
+  });
+});

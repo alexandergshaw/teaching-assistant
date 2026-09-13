@@ -27,6 +27,7 @@ import {
   moveShotWithinRole,
   mintShotId,
   computeSnapshotWireBytes,
+  partitionShotsForNextStudent,
   type SnapshotRole,
   type SnapshotShot,
   type SnapshotSource,
@@ -76,6 +77,11 @@ export interface UseSnapshotShotsReturn {
   setRole: (id: string, role: SnapshotRole) => void;
   setNote: (id: string, note: string) => void;
   moveShot: (id: string, direction: -1 | 1) => void;
+  /** F1 (A4b): clears every PER-STUDENT shot (post/replies/submission/other)
+   *  and leaves the STABLE ones (assignment/rubric) in place, revoking the
+   *  cleared shots' object URLs. Does not touch armedRole/ta-snap-armed-role
+   *  - Next student does not re-arm anything. */
+  clearPerStudentShots: () => void;
 }
 
 export function useSnapshotShots(): UseSnapshotShotsReturn {
@@ -148,6 +154,14 @@ export function useSnapshotShots(): UseSnapshotShotsReturn {
     setShots((prev) => moveShotWithinRole(prev, id, direction));
   }, []);
 
+  const clearPerStudentShots = useCallback(() => {
+    setShots((prev) => {
+      const { kept, cleared } = partitionShotsForNextStudent(prev);
+      cleared.forEach((shot) => URL.revokeObjectURL(shot.previewUrl));
+      return kept;
+    });
+  }, []);
+
   return {
     shots,
     armedRole,
@@ -159,5 +173,6 @@ export function useSnapshotShots(): UseSnapshotShotsReturn {
     setRole,
     setNote,
     moveShot,
+    clearPerStudentShots,
   };
 }

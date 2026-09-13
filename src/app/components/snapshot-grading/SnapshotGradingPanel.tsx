@@ -32,23 +32,35 @@ import { editAssessmentField, applyAssessmentResult } from "../assessment-shared
 import type { AssessmentFeedbackField } from "../assessment-shared/assessment-row";
 import { useSnapshotCapture } from "./useSnapshotCapture";
 import { useSnapshotShots } from "./useSnapshotShots";
-import { checkShotWireBudget, groupShotsByRole, MAX_SHOTS, SNAPSHOT_ROLES, type SnapshotRole } from "./snapshot-shot";
+import {
+  checkShotWireBudget,
+  groupShotsByRole,
+  computeNextStudentCounts,
+  describeNextStudentCounts,
+  MAX_SHOTS,
+  SNAPSHOT_ROLES,
+  type SnapshotRole,
+} from "./snapshot-shot";
 import { snapshotReadBatchAction } from "@/app/actions/snapshot-read";
 import { snapshotGradeAction } from "@/app/actions/snapshot-grade";
 import { verifySnapshotCitations } from "./snapshot-citations";
 import {
-  createEmptySnapshotRow,
   mintSnapshotRowId,
   computeSnapshotTotalScore,
   buildTranscriptBlock,
+  upsertSnapshotRow,
+  resolveGradeTarget,
   READ_BATCH_SIZE,
   type SnapshotAssessmentRow,
   type SnapshotShotReadReport,
   type SnapshotShotReadStatus,
 } from "./snapshot-row";
+import { useAssessmentRowStore } from "../assessment-shared/useAssessmentRowStore";
+import { snapshotRowCodec } from "./snapshot-row-serialization";
 import SnapshotResultCard from "./SnapshotResultCard";
 import SnapshotCaptureBar from "./SnapshotCaptureBar";
 import SnapshotShotTray from "./SnapshotShotTray";
+import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import controls from "../recording/RecordingControls.module.css";
 import panelStyles from "./SnapshotGrading.module.css";
 
@@ -99,6 +111,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     setRole,
     setNote,
     moveShot,
+    clearPerStudentShots,
   } = useSnapshotShots();
 
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -123,7 +136,69 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
 
-  const [row, setRow] = useState<SnapshotAssessmentRow | null>(null);
+  // F1 (A4d): matches every sibling <prefix>-table key exactly -
+  // ta-rec-grade-table, ta-rec-disc-table, ta-rec-msg-table - none carries a
+  // middle segment.
+  const STORAGE_KEY_TABLE = "ta-snap-table";
+  const SNAP_TABLE_REDUCED_MESSAGE =
+    "Storage was almost full, so this assessment's evidence citations were not saved (the score and feedback were).";
+  const SNAP_TABLE_FULL_MESSAGE = "Storage is full - this assessment could not be saved. It is still shown below.";
+
+  const {
+    rawRows: sessionRows,
+    rowsRef: sessionRowsRef,
+    commitRows: commitSessionRows,
+    persistError: sessionPersistError,
+  } = useAssessmentRowStore<SnapshotAssessmentRow>(STORAGE_KEY_TABLE, snapshotRowCodec, {
+    reduced: SNAP_TABLE_REDUCED_MESSAGE,
+    full: SNAP_TABLE_FULL_MESSAGE,
+  });
+
+  // F1 (A4d/A4b): tracks rows GRADED BEFORE THE MOST RECENT PER-STUDENT SHOT
+  // CLEAR - either because the row was already in storage at mount (U10
+  // guarantees zero live shots exist at mount, so a restored row was
+  // necessarily graded before whatever shots exist now) or because a later
+  // Next-student transition cleared the shots it was graded against
+  // (handleNextStudentConfirm below). Either way, the row's shot-index
+  // citations may no longer point at the shot they name - not because the
+  // shot is gone, but because kept (stable-role) shots shift position once
+  // per-student shots are removed from around them, so even a citation
+  // naming a KEPT shot can end up pointing at the wrong index. There is
+  // deliberately no removal branch: activeRowIdRef starts null on every
+  // mount and is set ONLY inside handleGrade's own isNewRow branch when
+  // minting a brand-new row id - nothing ever points it at an id already in
+  // this set, so no row already in this set can ever become the `existing`
+  // target of an in-place update.
+  //
+  // NOTE (this seat's own scoping): this set tracks rows restored at mount,
+  // or graded before the most recent per-student clear - it does not, and
+  // cannot, track every event that can invalidate a shot-index citation
+  // (deleting or reordering a shot in the tray also does, and neither
+  // feeds this set). Widening it to cover those is out of scope for this
+  // chunk; see the report.
+  const [rowsGradedBeforeLastShotChange, setRowsGradedBeforeLastShotChange] = useState<ReadonlySet<string>>(
+    // Reads `sessionRows` (a plain value, already resolved by
+    // useAssessmentRowStore's own lazy initializer earlier in this same
+    // render), not `sessionRowsRef.current` - the react-hooks/refs lint rule
+    // forbids reading a ref's value during render, even from inside another
+    // hook's own lazy initializer. Equivalent on mount: both are the same
+    // array, freshly deserialized from storage.
+    () => new Set(sessionRows.map((r) => r.id))
+  );
+
+  const activeRowIdRef = useRef<string | null>(null);
+  const [splitNotice, setSplitNotice] = useState<string | null>(null);
+  const [nextStudentArmed, setNextStudentArmed] = useState(false);
+  // MAJOR-3: ConfirmArmButtons' own Escape handler is a React onKeyDown on
+  // its wrapping span, so it only fires once focus is actually inside that
+  // span. Arming from the `n` shortcut below happens from a keypress
+  // anywhere in the body (Guard 2 already refuses it from inside a field),
+  // so without moving focus onto the control here, Escape cannot cancel and
+  // Enter cannot confirm after an `n`-armed keypress - only a mouse click
+  // could. Idle and armed are the SAME <Button> DOM node (ConfirmArmButtons'
+  // own header), so focusing this ref works immediately, before the state
+  // update that flips its label even lands.
+  const nextStudentButtonRef = useRef<HTMLButtonElement>(null);
   const [grading, setGrading] = useState(false);
   const [gradeError, setGradeError] = useState<string | null>(null);
 
@@ -149,6 +224,69 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   const announce = useCallback((message: string) => {
     if (liveRegionRef.current) liveRegionRef.current.textContent = message;
   }, []);
+
+  // F1 (A4b): the panel's existing keydown effect closes over its dependency
+  // array once; a value read directly inside the handler from a variable
+  // recomputed every render (like nextStudentCounts) freezes at whatever it
+  // was on the render that last re-registered the listener. Mirrors this
+  // exact file's own `activeRef` idiom rather than adding
+  // `nextStudentCounts` to the keydown effect's own deps, which would tear
+  // down and re-add the global listener on every shot add/remove.
+  const nextStudentCounts = computeNextStudentCounts(shots);
+  const nextStudentCountsRef = useRef(nextStudentCounts);
+  useEffect(() => {
+    nextStudentCountsRef.current = nextStudentCounts;
+  }, [nextStudentCounts]);
+
+  // "Next student" ends this student's grading pass - it is not "clear the
+  // shots", and its enable rule must not be written against only one of its
+  // seven responsibilities. On confirm it: (1) clears per-student shots, (2)
+  // clears shotReads, (3) clears transcriptText, (4) clears splitNotice,
+  // (5) resets activeRowIdRef to null so the NEXT successful Grade mints a
+  // fresh row instead of updating the last one, (6) clears readError, and
+  // (7) clears gradeError. activeRowIdRef is reset
+  // NOWHERE else in this file. The control is therefore always enabled, even
+  // when there are no per-student shots to clear (clearedTotal === 0):
+  // resets (2)-(7) are useful work in exactly that case, and disabling the
+  // control there would strand activeRowIdRef pointing at the previous
+  // student's row - so the next Grade (which only requires transcript text,
+  // not a per-student shot) would find that row via resolveGradeTarget and
+  // upsertSnapshotRow would silently overwrite it, destroying a completed,
+  // persisted assessment.
+  const handleNextStudentConfirm = useCallback(() => {
+    // Guard on the QUANTITY that matters - the number of shots this clear
+    // actually removes (nextStudentCountsRef.current.clearedTotal), not on
+    // the length of sessionRowsRef.current (the session's row list, which is
+    // unrelated and only coincidentally zero at the same time the tray is
+    // empty on a fresh mount). Reads the ref, not the closed-over
+    // `nextStudentCounts` variable, for the same reason the keydown effect
+    // above does: this callback's own identity is stable across renders (see
+    // its dep array), so a direct reference here would freeze at whatever
+    // count was live when this callback was created.
+    if (nextStudentCountsRef.current.clearedTotal > 0) {
+      // Every row currently in the session list has its shot-index
+      // numbering invalidated by this clear, not only rows that cited a
+      // per-student shot - see the declaration comment on
+      // rowsGradedBeforeLastShotChange above for why kept (stable-role)
+      // shots are equally affected once per-student shots are removed from
+      // around them.
+      setRowsGradedBeforeLastShotChange((prev) => {
+        const rowsToFlag = sessionRowsRef.current;
+        const next = new Set(prev);
+        rowsToFlag.forEach((r) => next.add(r.id));
+        return next;
+      });
+    }
+    clearPerStudentShots();
+    setShotReads(new Map());
+    setTranscriptText("");
+    setSplitNotice(null); // a notice naming the previous student must not survive into the next student's pass
+    setReadError(null); // a failure from the previous student's Read must not survive into the next student's pass
+    setGradeError(null); // a failure from the previous student's Grade must not survive into the next student's pass
+    activeRowIdRef.current = null; // the NEXT successful Grade mints a fresh row, never updates a finished one
+    setNextStudentArmed(false);
+    announce("Cleared this student's shots. Assignment and rubric shots are kept.");
+  }, [clearPerStudentShots, announce, sessionRowsRef]);
 
   const [encodeNotice, setEncodeNoticeState] = useState<string | null>(null);
 
@@ -235,6 +373,20 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       const key = e.key.toLowerCase();
       if (key === "s") {
         handleSnap();
+        return;
+      }
+      if (key === "n") {
+        setNextStudentArmed(true); // arms only - never auto-confirms
+        // MAJOR-3: move focus onto the control so the keyboard can then
+        // cancel (Escape) or confirm (Enter) it - see nextStudentButtonRef's
+        // own declaration comment above for why this is safe to do
+        // immediately rather than in an effect keyed off nextStudentArmed.
+        nextStudentButtonRef.current?.focus();
+        // Reads the ref, not the closed-over `nextStudentCounts` - this
+        // effect's own dependency array is unchanged by this branch, so a
+        // direct reference here would freeze at whatever count was live on
+        // the render that registered this listener.
+        announce(describeNextStudentCounts(nextStudentCountsRef.current));
         return;
       }
       const role = ROLE_BY_DIGIT[e.key];
@@ -350,35 +502,62 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
 
     const totalScore = computeSnapshotTotalScore(result.answer.rubricResults);
 
-    setRow((prev) => {
-      const base = prev ?? createEmptySnapshotRow(mintSnapshotRowId(Date.now()), "");
-      const scored = applyAssessmentResult(base, {
-        state: "ready",
-        totalScore,
-        strengths: "",
-        improvements: result.answer.improvements,
-        overallComment: result.answer.overallComment,
-      });
-      const merged: SnapshotAssessmentRow = {
-        ...scored,
-        shotReports,
-        rubricAreas: verified,
-        missingRoles,
-        instructionLikeContent: result.answer.instructionLikeContent,
-        instructionLikeContentQuote: result.answer.instructionLikeContentQuote,
-        imageFallbackNote: result.imageFallbackNote,
-      };
-      return merged;
+    const { base, isNewRow, supersededEditedRow } = resolveGradeTarget(
+      sessionRowsRef.current,
+      activeRowIdRef.current,
+      () => mintSnapshotRowId(Date.now())
+    );
+    if (isNewRow) activeRowIdRef.current = base.id;
+
+    const scored = applyAssessmentResult(base, {
+      state: "ready",
+      totalScore,
+      strengths: "",
+      improvements: result.answer.improvements,
+      overallComment: result.answer.overallComment,
     });
-  }, [shots, transcriptText, assignmentText, rubricText, shotReads]);
+    const merged: SnapshotAssessmentRow = {
+      ...scored,
+      shotReports,
+      rubricAreas: verified,
+      missingRoles,
+      instructionLikeContent: result.answer.instructionLikeContent,
+      instructionLikeContentQuote: result.answer.instructionLikeContentQuote,
+      imageFallbackNote: result.imageFallbackNote,
+      evidenceDropped: false, // a fresh grade always carries full evidence in memory
+    };
+    commitSessionRows(upsertSnapshotRow(sessionRowsRef.current, merged));
+    // No `rowsGradedBeforeLastShotChange` update needed here: `merged.id` is
+    // never already a member of that set, because a row once added to it can
+    // never again be `resolveGradeTarget`'s `existing` (activeRowIdRef never
+    // points at an id already in that set).
 
-  const handleEditRowField = useCallback((id: string, field: AssessmentFeedbackField, value: string) => {
-    setRow((prev) => (prev && prev.id === id ? editAssessmentField(prev, field, value) : prev));
-  }, []);
+    if (supersededEditedRow) {
+      const name = supersededEditedRow.studentName || "this student";
+      setSplitNotice(
+        `Kept the earlier edited feedback for ${name} as its own entry - this new grade was saved alongside it, not over it.`
+      );
+      announce("Saved as a new entry next to the earlier edited one, so your edits were not overwritten.");
+    } else {
+      setSplitNotice(null);
+    }
+  }, [shots, transcriptText, assignmentText, rubricText, shotReads, sessionRowsRef, commitSessionRows, announce]);
 
-  const handleEditStudentName = useCallback((id: string, name: string) => {
-    setRow((prev) => (prev && prev.id === id ? { ...prev, studentName: name } : prev));
-  }, []);
+  const handleEditRowField = useCallback(
+    (id: string, field: AssessmentFeedbackField, value: string) => {
+      commitSessionRows(
+        sessionRowsRef.current.map((r) => (r.id === id ? editAssessmentField(r, field, value) : r))
+      );
+    },
+    [commitSessionRows, sessionRowsRef]
+  );
+
+  const handleEditStudentName = useCallback(
+    (id: string, name: string) => {
+      commitSessionRows(sessionRowsRef.current.map((r) => (r.id === id ? { ...r, studentName: name } : r)));
+    },
+    [commitSessionRows, sessionRowsRef]
+  );
 
   const grouped = groupShotsByRole(shots);
   const roleCounts = Object.fromEntries(Object.entries(grouped).map(([role, shots]) => [role, shots.length])) as Record<SnapshotRole, number>;
@@ -432,6 +611,21 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         onSetRole={setRole}
         onSetNote={setNote}
         onMove={moveShot}
+      />
+
+      <p id="snap-next-student-consequence" className={styles.fieldHint}>
+        {describeNextStudentCounts(nextStudentCounts)}
+      </p>
+      <ConfirmArmButtons
+        armed={nextStudentArmed}
+        idleLabel="Next student"
+        confirmLabel="Confirm - clear this student's shots"
+        tone="warning"
+        onArm={() => setNextStudentArmed(true)}
+        onConfirm={handleNextStudentConfirm}
+        onCancel={() => setNextStudentArmed(false)}
+        consequenceId="snap-next-student-consequence"
+        buttonRef={nextStudentButtonRef}
       />
 
       <p className={styles.fieldHint}>
@@ -490,13 +684,25 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
 
       {gradeError && <p role="alert">{gradeError}</p>}
 
-      {row && (
-        <SnapshotResultCard
-          row={row}
-          onEditField={handleEditRowField}
-          onEditStudentName={handleEditStudentName}
-          onCopyError={setGradeError}
-        />
+      {sessionPersistError && <p role="alert">{sessionPersistError}</p>}
+      {splitNotice && <p role="status">{splitNotice}</p>}
+      {sessionRows.length > 0 && (
+        <div>
+          <p className={styles.fieldHint}>
+            Completed assessments ({sessionRows.length}) - some may be from an earlier session, restored on reload.
+            Reloading clears the shots; completed assessments are kept.
+          </p>
+          {[...sessionRows].reverse().map((sessionRow) => (
+            <SnapshotResultCard
+              key={sessionRow.id}
+              row={sessionRow}
+              onEditField={handleEditRowField}
+              onEditStudentName={handleEditStudentName}
+              onCopyError={setGradeError}
+              citationsUnavailable={rowsGradedBeforeLastShotChange.has(sessionRow.id)}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

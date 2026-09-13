@@ -198,3 +198,79 @@ function sourceDescription(source: SnapshotSource): string {
 export function shotTileLabel(shot: SnapshotShot, indexInRole: number, roleTotal: number): string {
   return `Shot ${indexInRole} of ${roleTotal}, ${SNAPSHOT_ROLE_LABELS[shot.role]}, ${sourceDescription(shot.source)}`;
 }
+
+// ---------------------------------------------------------------------------
+// F1 (A4b): "Next student" clears the per-student shots and keeps the stable
+// context (assignment/rubric). `submission` and `other` are classified
+// PER-STUDENT here as the safer default - a student's own captured work, or
+// an unlabelled ad-hoc artifact tied to one grading pass, should not
+// silently leak into the next student's context.
+// ---------------------------------------------------------------------------
+
+export const STABLE_SNAPSHOT_ROLES: readonly SnapshotRole[] = ["assignment", "rubric"];
+
+export function partitionShotsForNextStudent(
+  shots: readonly SnapshotShot[]
+): { kept: SnapshotShot[]; cleared: SnapshotShot[] } {
+  const stable = new Set(STABLE_SNAPSHOT_ROLES);
+  const kept: SnapshotShot[] = [];
+  const cleared: SnapshotShot[] = [];
+  for (const shot of shots) (stable.has(shot.role) ? kept : cleared).push(shot);
+  return { kept, cleared };
+}
+
+export interface NextStudentCounts {
+  clearedTotal: number;
+  keptTotal: number;
+  clearedByRole: Partial<Record<SnapshotRole, number>>;
+  keptByRole: Partial<Record<SnapshotRole, number>>;
+}
+
+function tallyByRole(shots: readonly SnapshotShot[]): Partial<Record<SnapshotRole, number>> {
+  const tally: Partial<Record<SnapshotRole, number>> = {};
+  for (const shot of shots) tally[shot.role] = (tally[shot.role] ?? 0) + 1;
+  return tally;
+}
+
+export function computeNextStudentCounts(shots: readonly SnapshotShot[]): NextStudentCounts {
+  const { kept, cleared } = partitionShotsForNextStudent(shots);
+  return {
+    clearedTotal: cleared.length,
+    keptTotal: kept.length,
+    clearedByRole: tallyByRole(cleared),
+    keptByRole: tallyByRole(kept),
+  };
+}
+
+function describeRoleTally(tally: Partial<Record<SnapshotRole, number>>): string {
+  return Object.entries(tally)
+    .map(([role, count]) => `${count} ${SNAPSHOT_ROLE_LABELS[role as SnapshotRole]}`)
+    .join(", ");
+}
+
+/** U8.3's exact prose shape - built here so it is unit-testable, since this
+ *  repo renders no component in any test and a string assembled inline in
+ *  JSX cannot be pinned by anything. The role names come from
+ *  SNAPSHOT_ROLE_LABELS (Capitalized, e.g. "Post", "Replies"), not the raw
+ *  lowercase SnapshotRole values - so the actual output this function
+ *  produces for a tray of 1 post + 3 replies + 1 assignment + 2 rubric shots
+ *  is: "This clears 4 shots (1 Post, 3 Replies) and keeps 3 (1 Assignment, 2
+ *  Rubric)." */
+export function describeNextStudentCounts(counts: NextStudentCounts): string {
+  // F1 (fix wave 2): an empty tray has nothing to clear AND nothing to keep,
+  // so the generic template below would read "This clears 0 shots and keeps
+  // 0." - true but useless, since it describes a quantity rather than the
+  // action. The control is always enabled (see handleNextStudentConfirm's
+  // own comment), and with an empty tray its only real effect is starting a
+  // fresh student, so say that instead of reporting two zeroes.
+  if (counts.clearedTotal === 0 && counts.keptTotal === 0) {
+    return "There are no shots to clear or keep - this starts a new student.";
+  }
+  const clearedDetail = describeRoleTally(counts.clearedByRole);
+  const keptDetail = describeRoleTally(counts.keptByRole);
+  const clearedPart = `This clears ${counts.clearedTotal} shot${counts.clearedTotal === 1 ? "" : "s"}${
+    clearedDetail ? ` (${clearedDetail})` : ""
+  }`;
+  const keptPart = `keeps ${counts.keptTotal}${keptDetail ? ` (${keptDetail})` : ""}`;
+  return `${clearedPart} and ${keptPart}.`;
+}

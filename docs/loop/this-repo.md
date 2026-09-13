@@ -37,8 +37,20 @@ Error: @supabase/ssr: Your project's URL and API key are required to create a Su
 
 There is no `.env` file in this checkout (`ls -a | grep -i env` returns only
 `next-env.d.ts`), so prerendering a page that constructs a Supabase client
-cannot work locally. **The gate is the `(check-mark) Compiled successfully` line, not the
-exit code.** Grep for it; do not `&&` on the build.
+cannot work locally.
+
+**The page NAMED in that error varies between runs, and that is not a
+regression.** `TopBar.tsx:501` calls `useSupabase()`, and 8 pages import it
+(`grep -rln "components/TopBar" src/app --include=page.tsx | wc -l`), so any of
+them can be the one that errors first among the 15 parallel prerender workers.
+The root cause is `src/app/layout.tsx:13`, which wraps EVERY route in
+`SupabaseProvider`, so every prerendered page is env-dependent - not just the
+account pages. Measured 2026-09-13: four consecutive builds on the same tree
+named `/account/integrations`, `/account/diagnostics` and `/_not-found`. Do not treat a
+different page name as evidence that a diff broke something.
+
+**The gate is the `(check-mark) Compiled successfully` line, not the exit
+code.** Grep for it; do not `&&` on the build.
 
 This matters because `next build` is the ONLY gate that catches two real
 defects in this repo: a `"use server"` file exporting a non-async binding

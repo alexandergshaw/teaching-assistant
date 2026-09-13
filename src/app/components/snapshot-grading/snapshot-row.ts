@@ -65,6 +65,16 @@ export interface SnapshotAssessmentRow extends AssessmentRowCore {
    *  reached and some shots were sent as transcription text only. Rendered
    *  in the SAME block as the score, per the brief - never buried. */
   imageFallbackNote?: string;
+  /** F1: set true ONLY by the codec's dropBulk write path - never by a
+   *  fresh grade (handleGrade always sets this false on a row it just
+   *  produced). Read by SnapshotResultCard to render a DURABLE, post-reload
+   *  notice that this row's evidence citations were not saved, closing the
+   *  gap where `persistError` (a useState, not persisted) would otherwise
+   *  say nothing once the tab that saw the quota failure is gone. REQUIRED,
+   *  not optional - an optional field would make both the wire enumeration
+   *  and the read-side default decorative, since a caller could always omit
+   *  it and TypeScript would not object. */
+  evidenceDropped: boolean;
 }
 
 export type NoPostableSnapshotRow = NoPostableIdentity<SnapshotAssessmentRow>;
@@ -90,6 +100,64 @@ export function createEmptySnapshotRow(id: string, studentName: string): Snapsho
     rubricAreas: [],
     missingRoles: [],
     instructionLikeContent: false,
+    evidenceDropped: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// F1 (A4d/A4b): the session list's own in-memory mutator and grade-target
+// resolution. Named pure functions rather than inline logic in
+// SnapshotGradingPanel.tsx - this repo renders no component in any test, so
+// the find/map/spread these replace would have been unreachable by every
+// test here if left inline.
+// ---------------------------------------------------------------------------
+
+/** Replaces the row with the same id if one exists, appends otherwise. */
+export function upsertSnapshotRow(
+  rows: readonly SnapshotAssessmentRow[],
+  row: SnapshotAssessmentRow
+): SnapshotAssessmentRow[] {
+  const idx = rows.findIndex((r) => r.id === row.id);
+  if (idx === -1) return [...rows, row];
+  return rows.map((r, i) => (i === idx ? row : r));
+}
+
+export interface GradeTargetResolution {
+  base: SnapshotAssessmentRow;
+  /** true when the caller must upsert this as a NEW row rather than the
+   *  active one - either because there is no active row yet, or because of
+   *  the case below. */
+  isNewRow: boolean;
+  /** Set to the PREVIOUS active row ONLY when `isNewRow` is true BECAUSE
+   *  that row was already hand-edited by the instructor - null when
+   *  `isNewRow` is true simply because there was no active row yet. Lets
+   *  the caller announce a split ONLY when a split actually happened, never
+   *  on an ordinary first grade. */
+  supersededEditedRow: SnapshotAssessmentRow | null;
+}
+
+/** A re-grade of a row the instructor has already hand-edited
+ *  (`userEdited === true`) must NEVER merge into it - `applyAssessmentResult`
+ *  holds back only the four AssessmentFeedback fields on an edited row; it
+ *  does nothing to protect `rubricAreas`, `shotReports`, `missingRoles`, or
+ *  `instructionLikeContent`, all of which the panel's own merge object
+ *  overwrites unconditionally. This function makes that state
+ *  unrepresentable: an edited row is never touched again; a re-grade
+ *  becomes a NEW row instead, inheriting the student's typed name so it is
+ *  not misread as a different student. */
+export function resolveGradeTarget(
+  rows: readonly SnapshotAssessmentRow[],
+  activeId: string | null,
+  mintId: () => string
+): GradeTargetResolution {
+  const existing = activeId ? rows.find((r) => r.id === activeId) ?? null : null;
+  if (existing && !existing.userEdited) {
+    return { base: existing, isNewRow: false, supersededEditedRow: null };
+  }
+  return {
+    base: createEmptySnapshotRow(mintId(), existing?.studentName ?? ""),
+    isNewRow: true,
+    supersededEditedRow: existing && existing.userEdited ? existing : null,
   };
 }
 

@@ -152,6 +152,38 @@ describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY 
   });
 });
 
+// ---------------------------------------------------------------------------
+// MAJOR-1: A4d can be unwired with every other gate green. The directory-wide
+// ta-snap-* key scan below reads only the non-test files in THIS directory,
+// so it never sees the real localStorage.getItem/setItem calls, which live
+// in assessment-shared/useAssessmentRowStore.ts. Deleting the
+// useAssessmentRowStore call from the panel (persistence silently stops)
+// would leave tsc, lint, every other test, and the build all green without
+// this block.
+// ---------------------------------------------------------------------------
+
+describe("A4d: SnapshotGradingPanel is actually wired to useAssessmentRowStore for ta-snap-table (the real persistence call the directory key scan above cannot see)", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+  const storePath = path.resolve(process.cwd(), "src/app/components/assessment-shared/useAssessmentRowStore.ts");
+  const storeSource = fs.readFileSync(storePath, "utf-8");
+
+  it('SnapshotGradingPanel.tsx declares const STORAGE_KEY_TABLE = "ta-snap-table"', () => {
+    expect(panelSource).toMatch(/const STORAGE_KEY_TABLE = "ta-snap-table";/);
+  });
+
+  it("SnapshotGradingPanel.tsx actually calls useAssessmentRowStore<SnapshotAssessmentRow>(STORAGE_KEY_TABLE, snapshotRowCodec, ...) - declaring the key literal alone proves nothing", () => {
+    expect(panelSource).toMatch(
+      /useAssessmentRowStore<SnapshotAssessmentRow>\(\s*STORAGE_KEY_TABLE,\s*snapshotRowCodec/
+    );
+  });
+
+  it("useAssessmentRowStore.ts passes its STORAGE_KEY_TABLE parameter through to both localStorage.getItem and localStorage.setItem", () => {
+    expect(storeSource).toMatch(/localStorage\.getItem\(STORAGE_KEY_TABLE\)/);
+    expect(storeSource).toMatch(/localStorage\.setItem\(\s*STORAGE_KEY_TABLE,/);
+  });
+});
+
 describe("directory-wide ta-snap-* key exact-set canary (this directory has no canary anywhere else)", () => {
   const files = fs.readdirSync(SNAPSHOT_GRADING_DIR);
   const nonTestFiles = files.filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
@@ -171,8 +203,8 @@ describe("directory-wide ta-snap-* key exact-set canary (this directory has no c
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("finds exactly the expected ta-snap-* key set (only the armed-role toggle persists - U10 keeps shot bytes and any future rubric/assignment text out of localStorage)", () => {
-    expect(distinctKeys).toEqual(["ta-snap-armed-role"]);
+  it("finds exactly the expected ta-snap-* key set (the armed-role toggle and the completed-assessment table; U10 keeps shot bytes and rubric/assignment text out of localStorage)", () => {
+    expect(distinctKeys).toEqual(["ta-snap-armed-role", "ta-snap-table"]);
   });
 
   it("ta-snap-armed-role is wired to both a read and a write", () => {

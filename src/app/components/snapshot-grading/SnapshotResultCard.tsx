@@ -27,6 +27,23 @@ export interface SnapshotResultCardProps {
   onEditField: (id: string, field: AssessmentFeedbackField, value: string) => void;
   onEditStudentName: (id: string, name: string) => void;
   onCopyError: (message: string) => void;
+  /** F1: true for a row graded before the most recent per-student shot clear
+   *  - either restored from storage at this mount (U10: shots never persist,
+   *  so a restored row was necessarily graded before whatever shots exist
+   *  now) or because a later Next-student transition cleared the shots it
+   *  was graded against. In either case the row's shot-index citations may
+   *  no longer point at the shot they name - NOT necessarily because that
+   *  shot is gone (a kept, stable-role shot can shift position too) - so
+   *  when true, every shot-index number rendered for this row (the read
+   *  report and every rubric-area citation line) is dropped in favour of
+   *  language that says the index cannot be trusted, rather than claiming
+   *  the shot is missing.
+   *  NOTE (this seat's own scoping): this flag tracks rows restored at mount,
+   *  or graded before the most recent per-student clear - a tray delete or
+   *  reorder can also invalidate a shot-index citation, and neither is
+   *  tracked by this flag. Widening it to cover those is out of scope for
+   *  this chunk; see the report. */
+  citationsUnavailable: boolean;
 }
 
 function statusLabel(status: SnapshotShotReadReport["status"]): string {
@@ -50,7 +67,13 @@ function groupReportsByRole(reports: readonly SnapshotShotReadReport[]): Map<str
   return grouped;
 }
 
-export default function SnapshotResultCard({ row, onEditField, onEditStudentName, onCopyError }: SnapshotResultCardProps) {
+export default function SnapshotResultCard({
+  row,
+  onEditField,
+  onEditStudentName,
+  onCopyError,
+  citationsUnavailable,
+}: SnapshotResultCardProps) {
   const tally = summarizeShotReports(row.shotReports);
   const grouped = groupReportsByRole(row.shotReports);
   const hasResult = row.state === "ready" || row.state === "failed";
@@ -80,7 +103,13 @@ export default function SnapshotResultCard({ row, onEditField, onEditStudentName
             {Array.from(grouped.entries()).map(([role, reports]) => (
               <p key={role} className={styles.fieldHint}>
                 {(SNAPSHOT_ROLE_LABELS as Record<string, string>)[role] ?? role} (
-                {reports.map((r) => `Shot ${r.shotIndex}: ${statusLabel(r.status)}${r.reason ? ` (${r.reason})` : ""}`).join(", ")}
+                {reports
+                  .map((r) =>
+                    citationsUnavailable
+                      ? `${statusLabel(r.status)}${r.reason ? ` (${r.reason})` : ""}`
+                      : `Shot ${r.shotIndex}: ${statusLabel(r.status)}${r.reason ? ` (${r.reason})` : ""}`
+                  )
+                  .join(", ")}
                 )
               </p>
             ))}
@@ -89,7 +118,7 @@ export default function SnapshotResultCard({ row, onEditField, onEditStudentName
                 acceptance criteria's own X9. */}
             {row.missingRoles.length > 0 && (
               <p className={styles.fieldHint}>
-                Not supplied this session: {row.missingRoles.map((r) => SNAPSHOT_ROLE_LABELS[r]).join(", ")}. Graded on general
+                Not supplied when this was graded: {row.missingRoles.map((r) => SNAPSHOT_ROLE_LABELS[r]).join(", ")}. Graded on general
                 standards for those areas.
               </p>
             )}
@@ -111,6 +140,13 @@ export default function SnapshotResultCard({ row, onEditField, onEditStudentName
             onEditField={onEditField}
           />
 
+          {row.evidenceDropped && row.rubricAreas.length === 0 && (
+            <p role="alert">
+              Evidence citations unavailable for this assessment (storage was full when it was saved) - the score
+              and feedback survived.
+            </p>
+          )}
+
           {row.rubricAreas.length > 0 && (
             <div>
               <p className={styles.fieldHint}>Rubric area evidence (D4: each citation is checked against the transcription):</p>
@@ -118,7 +154,14 @@ export default function SnapshotResultCard({ row, onEditField, onEditStudentName
                 <p key={area.area} className={styles.fieldHint}>
                   {area.area}: {area.score} -{" "}
                   {area.verified ? (
-                    <>verified (Shot {area.shotIndex || "n/a"}): &quot;{area.quote}&quot;</>
+                    citationsUnavailable ? (
+                      <>
+                        citation index no longer reliable (the shot tray has changed since this was graded): &quot;
+                        {area.quote}&quot;
+                      </>
+                    ) : (
+                      <>verified (Shot {area.shotIndex || "n/a"}): &quot;{area.quote}&quot;</>
+                    )
                   ) : (
                     <>unverified - no matching text found in the transcription, treat as unsupported</>
                   )}

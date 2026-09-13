@@ -88,6 +88,70 @@ describe('"snapgrade" is a member of the RecordingLaunchView union AND the RECOR
 // lands in a later wave U10 says it must NOT persist).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// WAVE 5, A7c: "the snap path calls no server action" from wave 4 extends to
+// "the read/grade actions are called ONLY from a click handler, never a
+// useEffect". GradingRecordingPanel.tsx:475-487 is the shape this must never
+// copy: a useEffect that fires a server action the moment some piece of
+// state crosses a threshold, with no button in the path. This test isolates
+// every useEffect BLOCK in SnapshotGradingPanel.tsx (bracket-counting from
+// each "useEffect(" to its own matching close) and asserts neither
+// snapshotReadBatchAction nor snapshotGradeAction is called from inside one.
+// ---------------------------------------------------------------------------
+
+describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY from a click handler", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+
+  function extractEffectBodies(source: string): string[] {
+    const bodies: string[] = [];
+    let searchFrom = 0;
+    for (;;) {
+      const start = source.indexOf("useEffect(", searchFrom);
+      if (start === -1) break;
+      let depth = 0;
+      let i = start + "useEffect(".length - 1; // sit on the opening "("
+      let end = -1;
+      for (; i < source.length; i++) {
+        if (source[i] === "(") depth++;
+        else if (source[i] === ")") {
+          depth--;
+          if (depth === 0) {
+            end = i;
+            break;
+          }
+        }
+      }
+      if (end === -1) break;
+      bodies.push(source.slice(start, end + 1));
+      searchFrom = end + 1;
+    }
+    return bodies;
+  }
+
+  it("finds at least two useEffect blocks in the panel - a scan over none proves nothing", () => {
+    expect(extractEffectBodies(panelSource).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("calls both actions somewhere in the file - a check that neither is called anywhere proves nothing", () => {
+    expect(panelSource).toMatch(/snapshotReadBatchAction\(/);
+    expect(panelSource).toMatch(/snapshotGradeAction\(/);
+  });
+
+  it("no useEffect block in the panel calls snapshotReadBatchAction or snapshotGradeAction", () => {
+    const effectBodies = extractEffectBodies(panelSource);
+    for (const body of effectBodies) {
+      expect(body).not.toMatch(/snapshotReadBatchAction\(/);
+      expect(body).not.toMatch(/snapshotGradeAction\(/);
+    }
+  });
+
+  it("handleRead and handleGrade are wired to onClick, not to a dependency-array effect", () => {
+    expect(panelSource).toMatch(/onClick=\{\(\)\s*=>\s*void handleRead\(\)\}/);
+    expect(panelSource).toMatch(/onClick=\{\(\)\s*=>\s*void handleGrade\(\)\}/);
+  });
+});
+
 describe("directory-wide ta-snap-* key exact-set canary (this directory has no canary anywhere else)", () => {
   const files = fs.readdirSync(SNAPSHOT_GRADING_DIR);
   const nonTestFiles = files.filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));

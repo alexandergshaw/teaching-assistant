@@ -208,6 +208,15 @@ Current IDs and first-party API rates, per the `claude-api` skill (cached
 
 Fable is not used at any tier.
 
+**`.claude/agents/` is read at SESSION START, so a definition added or renamed
+mid-session is NOT available until the session restarts.** Measured 2026-09-13:
+after committing the four `loop-*` definitions, dispatching `loop-implementer`
+returned `Agent type 'loop-implementer' not found`, listing only the built-ins.
+Until a restart, dispatch `general-purpose` with an explicit `model` matching the
+intended tier and point the brief at the definition file by path. This is the one
+sanctioned use of a per-call `model` override, and it exists only because the
+definition cannot be loaded - it is not a licence to re-tier a seat.
+
 **Opus is exactly 2.5x Sonnet per token at ANY input/output mix** - 5 against 2
 on input, 25 against 10 on output, both ratios 2.5. So this policy's cost can be
 reasoned about without knowing any run's in/out split, which is useful because

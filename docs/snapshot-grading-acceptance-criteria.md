@@ -652,3 +652,135 @@ as sensitive, and a `localStorage` copy reads oddly beside A2d's promise. Record
 the exception in the new directory's canary comment or a later agent will "fix"
 it. Shots stay in memory; say so out loud rather than letting a reload look like
 a fresh session: "Reloading clears the shots. Completed assessments are kept."
+
+---
+
+## 9. Round 2 disposal register
+
+Round 2's adversarial check returned DEFECTIVE with three REPEAT classes. Under
+`docs/loop/iteration-caps.md` a repeat goes to disposal, not to another
+revision. This section is that disposal round: it adds no new requirements.
+
+### Corrections to statements in this document that were FALSE
+
+**C1. X10 was wrong that A4c is already built, and this is the correction that
+matters most, because X10 is the scope question put to the owner.** Verified at
+`grading-row.ts:101-104`: `studentName` is "the display name exactly as read off
+the screen". The recording grader INFERS the name from pixels. It is also not
+editable - `onEditField` is typed to `GradingFeedbackField` and its only four
+call sites are `totalScore`, `strengths`, `improvements` and `overallComment`
+(`GradingTableRow.tsx:219,337,347,357`); the name renders as a bare
+`<th scope="row">{row.studentName}</th>` at `:195`. **A4c is NOT built, and no
+typed-name path exists anywhere in `grading-recording/`.** X10's "four already
+built" is three: one-click copy, edit-before-copy, and reload-surviving
+persistence.
+
+**C2. A1e's own stated range refutes A1e's own conclusion.** The budget is
+3,670,016 bytes. A1e's range is "2.7-13 MB on the wire" and then claims a single
+combined call "would be refused ... in the ordinary case, not the extreme one".
+**2.7 MB passes.** The bottom of the range is under the limit, so the range as
+stated does not establish the claim - and no instrument produced 2-10 MB in the
+first place. A1e's conclusion may still be right; it is not yet EARNED, and must
+not be treated as settled until the measurement below lands.
+
+**C3. A7's headline is false for half the path.** `buildGradingRecordingPrompt`
+already appends `knowledgeContext` carrying the exact `knowledge-context.ts`
+framing header, with a landed test pinning it verbatim
+(`grading-feedback-prompt.test.ts:49`). What is unframed is the SUBMISSION slot
+- a narrower and more useful finding than the one A7 states. A7's "no delimiter"
+is also wrong: the delimiter is a newline-Submission-newline label; what is
+missing is a framing SENTENCE. And `buildGradingRecordingPrompt` is declared at
+`:101`, not `:108`.
+
+**C4. The A7 block quote elided its own counterweight.** `prompts.ts:70` in full
+reads "Grade generously by default, but do not automatically award full points
+when an explicit rubric violation is present." Truncating the clause that
+weakens the thesis, under the word "verbatim", is a framing error. The
+generosity clauses are also not three: `:67` and `:85` are calibration clauses
+too, and were unnamed.
+
+### Disposals
+
+**D1. Class `unverified-already-exists` -> RELOCATE.** Receiver: the
+**architect + reuse survey seat**, which is already obliged to open what it
+cites. Obligation it now carries: a vetted symbol / `file:line` /
+actual-behaviour line for EVERY "already built" and EVERY "does not exist"
+assertion in sections 5, 7 and 5c - including whether `studentName` is typed or
+read. No claim of that kind in this document is load-bearing until that pass
+returns.
+
+**D2. Class `unmeasured-number-presented-as-measured` -> RELOCATE.** Two
+receivers, because neither is settleable by argument:
+
+- **U1's click count** goes back to the UX seat, to re-walk the PROPOSED layout
+  including A1f's transcription-review step, which U1 does not count. U1's
+  15/8/13 triple is additionally the worked example in `docs/loop/seats.md`
+  reproduced verbatim - that example describes the RECORDING grader and must not
+  be reused as this panel's measurement.
+- **The session byte range and the read-pass latency** go to a measurement step:
+  encode a real screenshot at the chosen quality, report the base64 length, and
+  time one vision call at that size against the 60s invocation cap.
+
+**D3. Class `stale-superseded-clause` -> one RESTRUCTURING pass, plus one RULING
+the author cannot make.**
+
+- The restructuring merges sections 7 and 8 into the body. A3, A2c, A2d and A7
+  requirement 1 are REWRITTEN against the read/grade split rather than annotated
+  after it. Per `iteration-caps.md` entry gate 3 it ships a disposition table
+  mapping every prior requirement to kept / handed over / withdrawn, and the
+  next checker audits that table before reading anything else.
+- **The ruling** is X9 versus U8.1, which are peers and contradict: X9 makes an
+  unreadable shot in a supplied role an ERROR; U8.1 renders a score with a
+  "Not read" badge on that tile. **Provisional ruling, for the owner to
+  confirm: U8.1 wins.** A3d's own text forbids a *quiet* grade, not a loud one,
+  and X9 silently escalated "loud" to "none" by importing R1a, which governs a
+  batch-empty read rather than one unreadable shot among seven. A grader that
+  refuses to produce anything because one of seven shots was blurry is worse for
+  the instructor than one that scores what it could see and says loudly what it
+  could not.
+
+**D4. Class `self-reported-receipt` is at its second attempt; cap 1 forbids a
+third strengthening.** X8 replaced a role label with a verbatim quotation, and a
+model that will emit a role it never used will emit a quotation it never read.
+The next attempt must CHANGE KIND: **the app string-matches each cited quotation
+against the transcript and refuses to render an area whose quote is not found.**
+That is a construction that makes the bad state unrepresentable, which is what
+ends this class. X8 also pointed the instructor at the wrong artifact - a tile
+in a twelve-tile tray is not a legible source for dense text; the falsifiable
+artifact is the transcription A1e now produces.
+
+### Residual register
+
+| Residual | Owner | Instrument | Measured at |
+|---|---|---|---|
+| Session wire bytes at the chosen encoding | measurement step | encode a real screenshot, report base64 length | before the build wave |
+| Read-pass latency vs the 60s invocation cap | measurement step | one timed vision call at that payload | before the build wave |
+| Click count, first use and repeat use | UX seat | re-walk the proposed layout | before the build wave |
+| Whether the read pass is one action per batch or one action looping batches | architect seat | read the layout | the layout pass |
+| Every "already built" claim in sections 5, 7, 5c | architect seat | open the file | the reuse survey |
+
+### Recorded, carried into the restructuring
+
+- **A1f lets the instructor edit the evidence the grade cites**, and nothing
+  records that a transcript was edited before grading. Minimum missing
+  requirement: an on-screen "edited" marker per transcript block, carried into
+  the copyable output.
+- **A1e makes a read pass mandatory that does what A2c's optional probe already
+  does**, with the same action and the same pixels. And there are now THREE
+  egress triggers, not the two A7a corrected to - and A1f forces one of them
+  BEFORE Grade, which negates A2d's on-screen promise literally.
+- **Section 6 says shots sit in browser storage; U10 says they stay in memory
+  and a reload clears them.** One of these is the retention statement the
+  REGRESSION entry must carry.
+- **A1d defers the encoding choice and never makes it**, while A1e and A7f both
+  spend it. A7f's snap-time refusal of a 4K PNG refuses exactly the
+  full-fidelity shot A1d asks for.
+- **The axis where the split is WORSE, which A1e wrongly claimed did not exist:
+  spatial information is destroyed.** A rubric is a table, code is indented, an
+  assignment carries diagrams. After the split the grade pass sees a flattened
+  string and structurally cannot re-look at the pixels. Section 6 still lists
+  "can a vision model read dense text reliably" as OPEN - the split converts
+  that from a soft dependency into a hard one, because a bad read is now
+  unrecoverable at grade time. Total wire cost is also unchanged, not reduced;
+  wall-clock and failure surface multiply; and a partial-failure state (batches
+  1-4 read, batch 5 failed) has no specified behaviour.

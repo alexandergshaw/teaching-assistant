@@ -119,6 +119,34 @@ describe("buildWalkthroughAnnouncementPrompt - P1 markdown is required, not forb
   });
 });
 
+describe("buildWalkthroughAnnouncementPrompt - EMPHASIS is requested, not merely permitted", () => {
+  it("instructs the model to use markdown bold or italic where content warrants it", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
+    const lower = prompt.toLowerCase();
+    expect(lower).toContain("emphasis");
+    expect(lower).toContain("bold");
+    expect(lower).toContain("italic");
+    expect(lower).not.toContain("no markdown");
+    expect(lower).not.toContain("do not use markdown");
+  });
+
+  it("still permits emphasis on the structureless-outline branch (EMPTY_ANNOUNCEMENT_OUTLINE) - the pair that actually collides", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ outline: EMPTY_ANNOUNCEMENT_OUTLINE }));
+    const lower = prompt.toLowerCase();
+    // The pinned substring from the "tolerates absent optional inputs"
+    // describe block above must survive untouched.
+    expect(lower).toContain("no discernible structure");
+    // The structureless-outline instruction itself, not just the separate
+    // EMPHASIS block elsewhere in the prompt, must say emphasis is still
+    // fine - the amendment is inside the "no headings and no lists" string.
+    const structurelessIndex = lower.indexOf("no discernible structure");
+    const structurelessWindow = lower.slice(structurelessIndex, structurelessIndex + 400);
+    expect(structurelessWindow).toContain("emphasis");
+    expect(structurelessWindow).not.toContain("no markdown");
+    expect(structurelessWindow).not.toContain("do not use markdown");
+  });
+});
+
 describe("buildWalkthroughAnnouncementPrompt - AC4/AC6 ordering and coverage", () => {
   it("instructs covering content in walked order and deduplicating a repeated page to its first appearance", () => {
     const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());

@@ -260,7 +260,7 @@ export async function draftWalkthroughAnnouncementAction(
         "",
         "Requirements:",
         '- "title": a short, specific subject line (no more than ~10 words). Plain text, no markdown.',
-        '- "message": the announcement body itself, formatted exactly as instructed above (Markdown headings/lists where the outline calls for them).',
+        '- "message": the announcement body itself, formatted exactly as instructed above (Markdown headings/lists where the outline calls for them, and Markdown bold/italic emphasis per the EMPHASIS instruction above).',
         "- Do not include any text outside the JSON object.",
       ].join("\n"),
     ].join("\n\n");

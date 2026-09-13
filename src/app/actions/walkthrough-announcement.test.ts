@@ -113,6 +113,35 @@ describe("draftWalkthroughAnnouncementAction", () => {
     expect(promptText).toContain("[P1] Week 4 Overview");
   });
 
+  it("requests markdown bold/italic emphasis in the full composed prompt handed to the model, including the action's own JSON-requirements string (which the prompt-builder's own test file cannot see, since it is composed here at :263, one file away from the library)", async () => {
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: '{"title": "Week 4 update", "message": "## Due This Week\\n- Homework 3"}',
+    } as never);
+
+    await draftWalkthroughAnnouncementAction({
+      courseLabel: "PSYC 101",
+      moduleLabel: "Week 4",
+      materialsText: "## Week 4 Overview\nWe covered functions and scope.",
+      outline: REALISTIC_OUTLINE,
+      coverageBlock: "[P1] Week 4 Overview",
+      notes: "Mention the exam date.",
+    });
+
+    const [request] = vi.mocked(callLlm).mock.calls[0];
+    const promptText = (request.contents[0].parts[0] as { text: string }).text;
+    const lower = promptText.toLowerCase();
+    expect(lower).toContain("emphasis");
+    expect(lower).toContain("bold");
+    expect(lower).toContain("italic");
+    // The amended JSON-requirements string itself, not just the builder's
+    // own EMPHASIS block elsewhere in the prompt.
+    expect(promptText).toContain(
+      'the announcement body itself, formatted exactly as instructed above (Markdown headings/lists where the outline calls for them, and Markdown bold/italic emphasis per the EMPHASIS instruction above).'
+    );
+  });
+
   it("P11 defense in depth: an object with an extra, out-of-contract 'exemplarText' field never reaches the composed prompt - this action's signature has no parameter capable of carrying raw exemplar text at all", async () => {
     vi.mocked(callLlm).mockResolvedValue({ ok: true, status: 200, text: '{"title": "T", "message": "M"}' } as never);
 

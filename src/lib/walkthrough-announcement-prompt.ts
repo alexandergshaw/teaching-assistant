@@ -153,7 +153,7 @@ function renderOutlineSection(section: OutlineSection): string {
  */
 function renderOutlineBlock(outline: AnnouncementOutline): string {
   if (outline.sections.length === 0) {
-    return "The exemplar had no discernible structure (a single unheaded paragraph, or an empty document). Write the announcement as one or two plain paragraphs, with no headings and no lists.";
+    return "The exemplar had no discernible structure (a single unheaded paragraph, or an empty document). Write the announcement as one or two plain paragraphs, with no headings and no lists (bold and italic emphasis are still fine where the content warrants it).";
   }
 
   const lines = outline.sections.map(renderOutlineSection);
@@ -226,11 +226,17 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
       "- The outline below governs FORMAT: section order, whether each section opens with a heading or a paragraph break, whether its body is prose or a list (and if a list, ordered or unordered), and roughly how long each section runs.",
       "- The writing-style sample at the end (if present) governs VOICE: word choice, sentence rhythm, and tone.",
       "- When the two would pull in different directions - for example the outline is terse and the style sample is chatty - FORMAT WINS ON STRUCTURE and VOICE WINS ON WORDING. Follow the outline's shape exactly, written in the style sample's voice.",
+      "- Markdown emphasis (bold/italic) is FORMAT, not wording; a style sample that happens to contain none does not cancel it.",
     ].join("\n"),
 
     [
       "WRITE IN MARKDOWN",
       "- Use Markdown headings, bullet lists, and ordered lists wherever the outline below calls for them. This is a formatted document that should visibly match the outline's structure, not a plain-text paragraph.",
+    ].join("\n"),
+
+    [
+      "EMPHASIS",
+      "- Where the content genuinely has something worth marking (a due date, a key term, an urgent change), use Markdown bold (**text**) or italic (*text*) to mark it. Do not force emphasis into a sentence that has nothing worth marking.",
     ].join("\n"),
 
     [

@@ -19,25 +19,31 @@ core card.
 
 ---
 
-## Triage: which seats run
+## Triage: which seats run, and in which wave
 
 Per chunk, record the **trigger that fired** for each seat that runs and each
 that does not. When unsure, the seat runs. The verifier later rules on every
 triaged-out seat's trigger against the built diff, so a wrong triage is caught
 rather than silently accepted.
 
-| Seat | Trigger |
-|---|---|
-| Architect + reuse | Any new module, any new directory, or any change touching more than two existing files. Effectively always. |
-| User experience | Any change a user can see, click, or hear read aloud. |
-| Data / storage | Anything persisted: a `ta-` localStorage key, a Supabase table, a migration, a file in Storage, or a change to what a persisted shape contains. |
-| Visual / aesthetic | Any new surface, or any change to an existing surface's layout, spacing, or colour. |
-| Operability and admin | Anything an owner must configure, audit, revoke, or delete. |
-| Security | Any new server action, any new network egress, any user- or model-authored text that reaches a prompt or the DOM, any credential path. |
-| Reliability | Anything with a failure mode that is not a thrown error: a stream, a long call, a retry, a background job, a resource that must be released. |
-| Accessibility | Any change to markup, focus, or keyboard behaviour. Note the ceiling: **no component is rendered by any test here**, so this seat's findings are reading claims, and it must say so. |
-| External-facts research | The plan rests on anything outside this repo: a library's behaviour, a platform limit, an API's contract, a browser quirk. |
-| Baseline | The area being changed has no coverage in `docs/REGRESSION.md`. Runs BEFORE hand-off, not after. |
+**Seats run in dependency waves, not all at once** - `wave-dispatch.md` has the
+rule, the measured cost, and the duplication it prevents. The wave column below
+is the default assignment; re-sort with that card's input test if a chunk's
+dependencies differ. Regenerate each wave's briefs after the previous wave
+lands, or the sequencing is pure wall-clock for no benefit.
+
+| Seat | Wave | Trigger |
+|---|---|---|
+| Architect + reuse | 1 | Any new module, any new directory, or any change touching more than two existing files. Effectively always. |
+| User experience | 3 | Any change a user can see, click, or hear read aloud. |
+| Data / storage | 1 | Anything persisted: a `ta-` localStorage key, a Supabase table, a migration, a file in Storage, or a change to what a persisted shape contains. |
+| Visual / aesthetic | 3 | Any new surface, or any change to an existing surface's layout, spacing, or colour. |
+| Operability and admin | 2 | Anything an owner must configure, audit, revoke, or delete. |
+| Security | 2 | Any new server action, any new network egress, any user- or model-authored text that reaches a prompt or the DOM, any credential path. |
+| Reliability | 2 | Anything with a failure mode that is not a thrown error: a stream, a long call, a retry, a background job, a resource that must be released. |
+| Accessibility | 3 | Any change to markup, focus, or keyboard behaviour. Note the ceiling: **no component is rendered by any test here**, so this seat's findings are reading claims, and it must say so. |
+| External-facts research | 1 | The plan rests on anything outside this repo: a library's behaviour, a platform limit, an API's contract, a browser quirk. |
+| Baseline | 1 | The area being changed has no coverage in `docs/REGRESSION.md`. Runs BEFORE hand-off, not after. |
 
 ---
 

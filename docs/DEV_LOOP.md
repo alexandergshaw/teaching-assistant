@@ -8,6 +8,7 @@ the orchestrator's output is the most expensive text in the system.
 |---|---|
 | `docs/loop/this-repo.md` | The measured facts: gate commands and what passing looks like, test framework and its hard limits, the structural gates that turn an innocuous change red, shell quirks, what cannot be verified here at all, tier-to-model mapping and cost |
 | `docs/loop/seats.md` | Per-seat briefs: what each seat produces and what its checker must ask |
+| `docs/loop/wave-dispatch.md` | Which seats run in which dependency wave, why fanning all of them out at once duplicates work, and what sequencing does and does not cost |
 | `docs/loop/iteration-caps.md` | How many rounds an artifact gets, the four legal disposals, the checker output contract, the anti-gaming rules |
 | `docs/loop/traps-tests.md` | Tests and mutation |
 | `docs/loop/traps-spec.md` | Specification and measurement |
@@ -81,11 +82,15 @@ user experiences and the failures the tests must catch - mechanism belongs to
 the architect, global-invariant accounting to the plan, oracle construction to
 the test seat.
 
-**Design seats, concurrent.** Architecture; user experience; data and storage;
-visual and aesthetic; operability and admin; security; reliability;
-accessibility. Plus external-facts research when the plan rests on anything
-outside the repo, and a baseline seat when the area has no regression coverage.
-Briefs and checker questions in `seats.md`.
+**Design seats, in DEPENDENCY WAVES - never all at once.** Wave 1 is structure
+and state (architect + reuse survey, data and storage) plus anything that only
+reads and reports (baseline, external-facts research). Wave 2 is constraints
+(security, reliability, operability and admin). Wave 3 is experience (user
+experience, visual and aesthetic, accessibility). Within a wave, run in
+parallel; between waves, **regenerate the briefs** so later seats build on what
+earlier ones established instead of re-deriving it. Fanning all six out at once
+produced three duplicate discoveries and one moot section in a single measured
+stage - see `wave-dispatch.md`. Briefs and checker questions in `seats.md`.
 
 **Checks.** Every model-authored artifact is checked by a fresh peer before its
 consumer reads it - adversarial brief, "break it", default to defective when

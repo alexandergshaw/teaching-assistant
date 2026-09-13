@@ -7,10 +7,44 @@ import {
   selectShotsForGradeCall,
   computeSnapshotTotalScore,
   buildTranscriptBlock,
+  upsertSnapshotRow,
+  resolveGradeTarget,
   GRADE_PASS_IMAGE_BUDGET_BYTES,
   READ_BATCH_SIZE,
   type SnapshotShotReadReport,
+  type SnapshotAssessmentRow,
 } from "./snapshot-row";
+import { snapshotRowCodec } from "./snapshot-row-serialization";
+
+// Duplicated per-file (test notes M1): not imported from
+// snapshot-row-serialization.test.ts or snapshot-shot.test.ts - a
+// cross-*.test.ts import re-runs the other file's describe blocks.
+function makeFullRow(overrides: Partial<SnapshotAssessmentRow> = {}): SnapshotAssessmentRow {
+  return {
+    id: "snap-row-1",
+    studentName: "Priya N.",
+    state: "ready",
+    error: "",
+    userEdited: false,
+    totalScore: "8/10",
+    strengths: "Clear thesis.",
+    improvements: "Cite the rubric line.",
+    overallComment: "Solid work overall.",
+    shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
+    rubricAreas: [{ area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, verified: true }],
+    missingRoles: ["replies"],
+    instructionLikeContent: false,
+    instructionLikeContentQuote: undefined,
+    imageFallbackNote: undefined,
+    evidenceDropped: false,
+    ...overrides,
+  };
+}
+
+function makeMintId(startAt = 0): () => string {
+  let n = startAt;
+  return () => `minted-${n++}`;
+}
 
 describe("mintSnapshotRowId", () => {
   it("mints distinct ids even in the same millisecond", () => {
@@ -31,6 +65,12 @@ describe("createEmptySnapshotRow", () => {
     expect(row.missingRoles).toEqual([]);
     expect(row.instructionLikeContent).toBe(false);
     expect("userId" in row).toBe(false);
+    expect(row.evidenceDropped).toBe(false);
+  });
+
+  it("sets evidenceDropped to false (B3: required on every freshly-minted row, not optional)", () => {
+    const row = createEmptySnapshotRow("r1", "Sam");
+    expect(row.evidenceDropped).toBe(false);
   });
 });
 
@@ -139,6 +179,143 @@ describe("READ_BATCH_SIZE", () => {
   it("is a small, positive batch size (D: one action call per batch, client-orchestrated)", () => {
     expect(READ_BATCH_SIZE).toBeGreaterThan(0);
     expect(READ_BATCH_SIZE).toBeLessThanOrEqual(12);
+  });
+});
+
+describe("upsertSnapshotRow", () => {
+  it("appends a row with a new id", () => {
+    const rows = [makeFullRow({ id: "r1" })];
+    const next = upsertSnapshotRow(rows, makeFullRow({ id: "r2" }));
+    expect(next.map((r) => r.id)).toEqual(["r1", "r2"]);
+    expect(rows.map((r) => r.id)).toEqual(["r1"]); // input not mutated
+  });
+
+  it("replaces the row with a matching id in place, preserving position", () => {
+    const rows = [makeFullRow({ id: "r1" }), makeFullRow({ id: "r2" }), makeFullRow({ id: "r3" })];
+    const replacement = makeFullRow({ id: "r2", studentName: "Changed" });
+    const next = upsertSnapshotRow(rows, replacement);
+    expect(next.map((r) => r.id)).toEqual(["r1", "r2", "r3"]);
+    expect(next[1].studentName).toBe("Changed");
+  });
+});
+
+describe("resolveGradeTarget", () => {
+  it("merges in place when the active row exists and is not userEdited", () => {
+    const active = makeFullRow({ id: "r1", userEdited: false });
+    const result = resolveGradeTarget([active], "r1", makeMintId());
+    expect(result.isNewRow).toBe(false);
+    expect(result.base).toBe(active);
+    expect(result.supersededEditedRow).toBeNull();
+  });
+
+  it("mints a new row when there is no active row yet (activeId null)", () => {
+    const result = resolveGradeTarget([], null, makeMintId());
+    expect(result.isNewRow).toBe(true);
+    expect(result.supersededEditedRow).toBeNull();
+    expect(result.base.id).toBe("minted-0");
+    expect(result.base.studentName).toBe("");
+  });
+
+  it("mints a new row when activeId points at a row that isn't in the list (M4: the observable consequence is a blank student name)", () => {
+    const result = resolveGradeTarget(
+      [makeFullRow({ id: "other", studentName: "Someone Else" })],
+      "missing-id",
+      makeMintId()
+    );
+    expect(result.isNewRow).toBe(true);
+    expect(result.supersededEditedRow).toBeNull();
+    expect(result.base.studentName).toBe(""); // M4: not "Someone Else" - a stale id must not borrow the wrong row's name
+  });
+
+  it("CONTESTED: mints a new row, inheriting the student name, when the active row is userEdited - never merges into it", () => {
+    const active = makeFullRow({ id: "r1", userEdited: true, studentName: "Priya N." });
+    const result = resolveGradeTarget([active], "r1", makeMintId());
+    expect(result.isNewRow).toBe(true);
+    expect(result.base).not.toBe(active);
+    expect(result.base.id).toBe("minted-0");
+    expect(result.base.studentName).toBe("Priya N.");
+    expect(result.base.userEdited).toBe(false);
+    expect(result.base.evidenceDropped).toBe(false); // B3: evidenceDropped is REQUIRED on the freshly-minted row too
+    expect(result.supersededEditedRow).toBe(active);
+  });
+
+  it("a second re-grade of the freshly-minted row merges into it, rather than minting again", () => {
+    const active = makeFullRow({ id: "r1", userEdited: true, studentName: "Priya N." });
+    const first = resolveGradeTarget([active], "r1", makeMintId());
+    const rowsAfterFirstGrade = upsertSnapshotRow([active], first.base);
+    const second = resolveGradeTarget(rowsAfterFirstGrade, first.base.id, makeMintId(1));
+    expect(second.isNewRow).toBe(false);
+    expect(second.base).toBe(first.base);
+    expect(second.base.evidenceDropped).toBe(false);
+    expect(second.supersededEditedRow).toBeNull();
+  });
+
+  it("calls the injected mintId function exactly once on a new-row branch (mintSnapshotRowId's own monotonicity is pinned separately above, not re-tested here)", () => {
+    let calls = 0;
+    const countingMint = () => {
+      calls++;
+      return `id-${calls}`;
+    };
+    resolveGradeTarget([], null, countingMint);
+    expect(calls).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COMPOSED CASE (Ruling 2): a corrupt stored userEdited reads back as
+// edited, so the first re-grade after a corrupt read mints a new row rather
+// than merging - preserving, not overwriting, feedback that could not be
+// proven safe to touch.
+// ---------------------------------------------------------------------------
+
+describe("COMPOSED: contested value 1 (fromWire's userEdited default) x resolveGradeTarget's edited-row-never-merges rule", () => {
+  it("a row restored with a corrupt userEdited value mints a new row on its first re-grade, preserving (not overwriting) the unreadable row", () => {
+    const corruptWire = {
+      id: "r1",
+      studentName: "Priya N.",
+      state: "ready",
+      error: "",
+      userEdited: "not-a-boolean", // corrupt - not a real boolean
+      totalScore: "7/10",
+      strengths: "",
+      improvements: "",
+      overallComment: "",
+      shotReports: [],
+      rubricAreas: [],
+      missingRoles: [],
+      instructionLikeContent: false,
+      evidenceDropped: false,
+    };
+    const restored = snapshotRowCodec.fromWire(corruptWire) as SnapshotAssessmentRow;
+    expect(restored.userEdited).toBe(true); // contested value 1, restated as this case's precondition
+
+    const result = resolveGradeTarget([restored], restored.id, makeMintId());
+    expect(result.isNewRow).toBe(true);
+    expect(result.supersededEditedRow).toBe(restored);
+    expect(result.base.studentName).toBe("Priya N."); // the split never loses the student's name
+  });
+
+  it("contrast: a normally-persisted row (userEdited round-trips as a real boolean) is unaffected", () => {
+    const cleanWire = {
+      id: "r1",
+      studentName: "Priya N.",
+      state: "ready",
+      error: "",
+      userEdited: false,
+      totalScore: "7/10",
+      strengths: "",
+      improvements: "",
+      overallComment: "",
+      shotReports: [],
+      rubricAreas: [],
+      missingRoles: [],
+      instructionLikeContent: false,
+      evidenceDropped: false,
+    };
+    const restored = snapshotRowCodec.fromWire(cleanWire) as SnapshotAssessmentRow;
+    expect(restored.userEdited).toBe(false);
+    const result = resolveGradeTarget([restored], restored.id, makeMintId());
+    expect(result.isNewRow).toBe(false); // merges - no false split
   });
 });
 

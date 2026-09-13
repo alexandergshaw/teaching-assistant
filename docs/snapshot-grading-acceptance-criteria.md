@@ -784,3 +784,76 @@ artifact is the transcription A1e now produces.
   unrecoverable at grade time. Total wire cost is also unchanged, not reduced;
   wall-clock and failure surface multiply; and a partial-failure state (batches
   1-4 read, batch 5 failed) has no specified behaviour.
+
+---
+
+## 10. The byte measurement, and what it does to A1e
+
+Residual D2's first half is now MEASURED, not estimated. This closes the
+`unmeasured-number-presented-as-measured` class for the session byte range.
+
+**Instrument.** `System.Drawing` screen capture on this machine, encoded through
+the real JPEG codec at each quality, byte counts read off the encoded stream and
+inflated by 4/3 for base64. Command recorded in the session transcript; it is a
+`[Drawing.Graphics]::CopyFromScreen` into a `MemoryStream` per quality, not an
+estimate from pixel counts.
+
+**Screen actually measured: 1920x1080** - this machine's real screen, capturing
+whatever was on it. Text-heavy content is the worst case for JPEG on thin dark
+strokes, which is the content this feature photographs.
+
+| Encoding | One shot, raw | One shot, wire | SIX shots, wire | vs 3.5 MB budget |
+|---|---|---|---|---|
+| JPEG q0.55 (the stream's setting) | 143 KB | 191 KB | **1.12 MB** | fits, 3.1x headroom |
+| JPEG q0.75 | 199 KB | 266 KB | **1.56 MB** | fits |
+| JPEG q0.85 | 255 KB | 340 KB | **1.99 MB** | fits |
+| JPEG q0.92 (full fidelity) | 349 KB | 465 KB | **2.73 MB** | **fits**, 0.77 MB spare |
+| PNG | 1,510 KB | 2,014 KB | **11.80 MB** | refused, 3.4x over |
+
+At 3840x2160, upscaled from the same capture - a **lower bound**, because a
+true 4K screenshot carries real detail this upscale does not:
+
+| Encoding | SIX shots, wire | vs budget |
+|---|---|---|
+| JPEG q0.55 | 2.89 MB | fits |
+| JPEG q0.92 | **5.40 MB** | **refused** |
+
+### What this does to A1e
+
+**A1e's stated reason for the read/grade split is refuted for the common case.**
+A1e claimed a single all-shots-at-once call "would be refused by
+`checkWireBudget` ... in the ordinary case, not the extreme one." On a 1080p
+screen at FULL fidelity, six shots are 2.73 MB and the combined call **fits**,
+with room for the prompt. C2 already flagged that A1e's own range floor passed;
+the measurement now settles it.
+
+**The real fork is encoding and screen resolution, not shot count.** PNG is
+refused at 1080p on six shots by a factor of 3.4. JPEG q0.92 is refused at 4K.
+JPEG q0.55 fits everywhere. A1d deferred the encoding choice and A1e spent it;
+**A1d must now actually pick, and the pick is what decides whether a combined
+call is viable at all.** Recommendation: JPEG, q0.85-0.92, with a snap-time
+per-shot pre-flight, and no PNG path for captured shots (a PASTED png is a
+different case and must be re-encoded on intake, not passed through).
+
+### The split now has to justify itself on its other merits, and one is negative
+
+The budget argument is gone. What remains for the split:
+
+- **For:** the instructor sees and can correct the transcription before grading
+  (A1f); per-shot read failures become a natural output rather than an
+  inference (A3d); and evidence citations become checkable against text that is
+  on screen (the D4 construction).
+- **Against, and this is the one the AC wrongly denied:** a flattened
+  transcription **destroys spatial structure**. A rubric is a table; code is
+  indented; an assignment carries diagrams. The grade pass cannot re-look at the
+  pixels. Section 6 still lists vision legibility on dense text as an OPEN
+  question, and the split converts that from a soft dependency into a hard one,
+  because a bad read becomes unrecoverable at grade time.
+
+**Consequence for the plan: the split is no longer a forced move, and must be
+re-decided on those merits alone.** A defensible third shape now exists that the
+AC never considered - send the images AND the transcription to the grade pass
+together, since at 1080p/q0.92 the budget allows it. That keeps the
+transcription's reviewability and per-shot failure reporting while letting the
+model re-read a rubric table it flattened badly. It costs one extra pass over
+the same pixels, and it is the only shape where a bad read is recoverable.

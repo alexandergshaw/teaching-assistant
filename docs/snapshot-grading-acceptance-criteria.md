@@ -918,3 +918,72 @@ is not made redundant by Layer 2.
 no longer needs to gate wave 1. Wave 1 still sabotage-checks its own guard - by
 breaking the alias and confirming tsc goes red - because that proves the
 project's specific guard fires, not merely that the mechanism can.
+
+---
+
+## 11. Handoff - state as of 2026-09-13, commit 42d2214
+
+Written for a session that has none of the originating conversation. Everything
+below is verified against the tree, not recalled.
+
+### Shipped, in order
+
+| Commit | What |
+|---|---|
+| `b9cbcdc` | Wave 1 - `assessment-shared/assessment-row.ts`: the shared row core and the `NoPostableIdentity` guard |
+| `540c088` | Wave 2 - the persistence layer, plus the real-codec key-set oracle |
+| `fd8fa18` | Wave 3 - three shared UI leaves; `GradingTableRow` 399 to 278, `GradingTable` 289 to 256 |
+| `4c79b42` | Wave 4 - the reachable capture surface, no grading |
+| `42d2214` | Wave 5 - read pass, grade pass, verified result card |
+
+The feature is reachable at Recording, sub-tab "Snapshot grading".
+
+### Owner decisions already made - do NOT re-open
+
+1. **Extract and share**, not a second panel. A0-1's blanket ban on
+   parameterising the recording grader is OVERRULED; the shared machinery lives
+   in `assessment-shared/`.
+2. **An unreadable shot among several does NOT block the grade.** Score it,
+   badge the tile, name the gap above the score. This overrules section 7's X9.
+3. **Agent tiers:** `loop-checker` and `loop-top` on Opus, `loop-seat` and
+   `loop-implementer` on Sonnet, Fable unused. Principle: spend the strong tier
+   where there is no backstop, not where the work is verifiable.
+
+### Settled by measurement - do NOT re-derive
+
+- Six JPEG q0.92 shots at 1920x1080 are **2.73 MB** on the wire against a
+  3,670,016-byte budget. They fit. PNG does not (11.80 MB). q0.92 at 4K does not
+  (5.40 MB). Section 10 has the full table and the instrument.
+- The identity guard fires: an OPTIONAL `userId` on either row type produces
+  `TS2345 ... not assignable to parameter of type 'never'` at every shared
+  mutator call site. Both the tuple-wrapped and naive spellings behave the same;
+  section 9's C-notes correct the plan that said otherwise.
+
+### What is NOT built, stated rather than implied
+
+- **A4d**: completed assessments do not survive a reload. One row, in memory.
+- **A3a**: `RubricInputModal` is not wired; the grade prompt receives an empty
+  `criteria` array and rubric/assignment arrive as plain text fields.
+- **Section 8's U-items**: the click budget, `SegmentedToggle` role arming,
+  `ConfirmArmButtons` on Next student, and the live-region wording are still at
+  wave 4's level.
+- **The 60s latency residual is still open** and cannot be closed in this
+  environment - there are no API keys, so no vision call has ever been timed.
+  If a 2.5 MB multi-image grade call returns over about 45s in production, the
+  fallback is transcription-only grading, which is already built and reachable
+  through `GRADE_PASS_IMAGE_BUDGET_BYTES`.
+
+### The next chunk, if the owner wants it
+
+In dependency order, per `docs/loop/wave-dispatch.md`: A4d persistence (wave 1,
+data - it defines a stored shape), then the U-items (wave 3, experience). A3a's
+modal wiring is small and independent. None is started.
+
+### Two process facts a fresh session needs
+
+- `.claude/agents/` is read at SESSION START. A definition committed mid-session
+  is not dispatchable until a restart - measured, see `this-repo.md` section 8.
+- `docs/loop/` is the loop. `DEV_LOOP.md` is the index; the traps cards carry
+  the failures behind each rule. Read `this-repo.md` before running any gate:
+  the build exits 1 by design, `tsc` must not run concurrently, and two
+  line-counting tools disagree by 42 on one real file.

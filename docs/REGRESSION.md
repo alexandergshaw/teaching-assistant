@@ -41337,3 +41337,328 @@ Correction to the plan that produced this wave: the tuple-wrapped spelling and
 the naive `Extract<keyof T, K> extends never ? T : never` behave IDENTICALLY
 here. The claim that the naive form "defers and guards nothing" is false. The
 tuple form is kept as defensive, not as required.
+
+---
+
+## 412. Area baseline: the snapshot-grading result surface, before A4d gives it a persisted list
+
+Written BEFORE hand-off for chunk F1 (A4d: completed snapshot assessments must
+accumulate in a list that survives a reload), per docs/DEV_LOOP.md's baseline
+seat. Coverage check first, per docs/loop/this-repo.md section 4: `grep -a -n
+-i "SnapshotGradingPanel\|SnapshotResultCard\|snapshot-grade\|snapshot-read\|
+assessment-row\|assessment-shared\|SnapshotCaptureBar\|SnapshotShotTray"
+docs/REGRESSION.md` returns exactly two hits outside this entry - entry 411's
+title line (`:41233`) and, inside 411, `:41316`, the sentence "Moving a
+localStorage call into `assessment-shared/` breaks it" (part of the
+`grading-rows.test.ts` persisted-key canary note - see the breakage list
+below). Both are
+about `grading-rows.ts`'s five mutators before the assessment-shared
+EXTRACTION (the recording grader's row logic), not about the snapshot-grading
+surface those mutators were moved into. **Nothing in this
+file covered the shipped snapshot-grading result surface (waves 1-5, commits
+b9cbcdc / 540c088 / fd8fa18 / 4c79b42 / 42d2214) before now.** That is itself
+the finding the baseline seat exists to catch: five waves shipped and the
+group's own regression entry was never appended for the as-built surface,
+only for the shared extraction underneath it.
+
+Everything below is read out of the source at commit `73aaa5d` on 2026-09-13,
+not recalled and not the acceptance criteria's stated intent. Where a claim is
+about markup, order, or keyboard/ARIA behavior, it is labeled a READING CLAIM -
+docs/loop/this-repo.md section 2: vitest here is node-env, collects only
+`src/**/*.test.ts`, and renders no component, so nothing below was ever seen
+on a screen by any test.
+
+### The assessment lifecycle today: one row, in `useState`, half-overwritten on re-grade, gone on reload
+
+`SnapshotGradingPanel.tsx:126`: `const [row, setRow] = useState<SnapshotAssessmentRow | null>(null);`
+That is the entire store. There is no array, no id-keyed map, and no
+persistence call anywhere in this component or its hooks (see the key
+enumeration below).
+
+- **Created:** only inside `handleGrade`'s `setRow` updater, `SnapshotGradingPanel.tsx:353-371`.
+  The updater reads `const base = prev ?? createEmptySnapshotRow(mintSnapshotRowId(Date.now()), "")`
+  (`:354`) - so a row is minted (`snapshot-row.ts:74-76` for `mintSnapshotRowId`,
+  `:78-94` for `createEmptySnapshotRow`) only the FIRST time Grade succeeds in
+  a session. Every subsequent successful Grade call in the same session
+  reuses `prev` as `base` (same `id`, same `studentName`).
+- **What a second Grade call actually does to that reused row - a HALF-OVERWRITE, not a clean overwrite.**
+  Two independent paths do NOT move together:
+  - `applyAssessmentResult` (`assessment-shared/assessment-row.ts:146-163`)
+    is called first, at `SnapshotGradingPanel.tsx:355-361`. Its own branch at
+    `assessment-row.ts:151-153` - `if (source.userEdited) { return { ...source,
+    state: result.state, error: result.error ?? "" }; }` - means that if the
+    instructor has typed into ANY feedback field since the row was created
+    (which sets `userEdited: true` via `editAssessmentField`,
+    `assessment-row.ts:120-129`, called from
+    `SnapshotGradingPanel.tsx:375-377`), a re-grade does NOT overwrite
+    `totalScore`, `strengths`, `improvements`, or `overallComment` - those four
+    fields are held back and the instructor's typed values survive.
+  - The panel's own merge, immediately after, at `SnapshotGradingPanel.tsx:362-370`,
+    is unconditional: `shotReports`, `rubricAreas`, `missingRoles`,
+    `instructionLikeContent`, `instructionLikeContentQuote`, and
+    `imageFallbackNote` are spread onto the result of `applyAssessmentResult`
+    with no `userEdited` check anywhere in this block or in the function that
+    contains it (`handleGrade`, `:300-373`).
+  - **Net effect: on a row the instructor has hand-edited, a second Grade
+    press keeps the instructor's score/strengths/improvements/comment intact
+    but silently replaces the read report, rubric-area evidence, missing-role
+    list, and injection flag with the new call's results.** There is no
+    on-screen indication that these two halves of the same row now disagree
+    in provenance. A4d turning `row` into a list makes this the exact
+    behavior a new "re-grade an existing entry" affordance would inherit if
+    it reuses `applyAssessmentResult` the way `handleGrade` does today.
+- **Held:** component-local React state only (`SnapshotGradingPanel.tsx:126`).
+  `row` is not persisted anywhere; see the key enumeration below.
+- **Cleared:** never explicitly. There is no delete/clear/reset control for
+  `row` anywhere in `SnapshotGradingPanel.tsx` - grep for `setRow(null)` and
+  for any "clear"/"reset"/"new assessment" button in this file and in
+  `SnapshotResultCard.tsx`, `SnapshotCaptureBar.tsx`, `SnapshotShotTray.tsx`
+  finds none. The only way `row` changes after creation is a fresh successful
+  Grade call (the half-overwrite above), or an instructor edit via
+  `handleEditRowField` (`:375-377`) / `handleEditStudentName` (`:379-381`).
+- **On reload:** `row`'s initial value is `null` (`:126`), read from nothing.
+  A full page reload loses it unconditionally - there is no rehydration path
+  to lose track of, because there is no write path either.
+- **On "Next student" (A4b):** this control does not exist in the shipped
+  code. No button,
+  handler, or state transition implementing "clear the per-student shots,
+  keep the rubric/assignment context" exists anywhere in this tree. See the
+  reach section below for the closest existing primitive (single-shot
+  delete) an A4d/A4b implementation could reuse.
+- **The panel is never unmounted while the tab is open (READING CLAIM)**,
+  which extends this lifecycle beyond the directory boundary:
+  `src/app/components/RecordingTab.tsx:866-867` mounts `SnapshotGradingPanel`
+  inside a permanently-present `role="tabpanel"` div toggled only by
+  `style={{ display: recView === "snapgrade" ? undefined : "none" }}`
+  (`:866`), never by conditional rendering. So `row`, `shots`,
+  `assignmentText`, and `rubricText` all survive a switch to any other
+  Recording sub-tab and back - they die only on an actual page reload, not on
+  a tab switch. This is the same always-mounted idiom entry 411's own reach
+  checklist documents for the recording grader's siblings.
+
+### The result card's render order (READING CLAIM - no test renders this)
+
+`SnapshotResultCard.tsx` renders, top to bottom, in this literal JSX order:
+the student-name `TextField` (`:60-67`); `row.error` as an alert if
+non-empty (`:69`); then, gated on `hasResult = row.state === "ready" ||
+row.state === "failed"` (`:56`), a single fragment containing, IN THIS ORDER:
+(1) the read-report block - the read tally sentence (`:78-79`), one line per
+role group from `groupReportsByRole` (`:80-86`), the `missingRoles` gap
+sentence (`:90-95`), `imageFallbackNote` (`:96`), and the
+`instructionLikeContent` alert (`:97-103`); (2) `AssessmentScoreField`
+(`:106-112`); (3) the rubric-area evidence list, gated on
+`row.rubricAreas.length > 0` (`:114-128`); (4) `AssessmentFeedbackFields`
+(`:130-136`). The read report renders in the same returned fragment as the
+score and directly above it in source order, matching U8.1's "directly above
+the score, in the same block" as read from this file - this is a JSX-order
+reading claim, not a verified rendered-DOM claim (no test renders this
+component; `SnapshotResultCard.tsx` is a `.tsx` file and vitest here collects
+only `.test.ts`).
+
+### The per-shot read report's unreadable-shot behavior (READING CLAIM - no test renders this)
+
+`SnapshotGradingPanel.tsx:286`: a shot's status is `"read"` if `r.readable` is
+true, else `"partly-read"` if `r.transcript.trim()` is non-empty, else
+`"not-read"`. On a batch-level read failure (the `"error" in result` branch,
+`:277-281`), every shot in that batch is force-set to `"not-read"` with
+`reason: result.error` and an empty transcript. Per the OWNER DECISION
+recorded at `snapshot-row.ts:50-57` (overruling the acceptance criteria's own
+X9): an unreadable shot does NOT block grading. `handleGrade` proceeds
+regardless of `shotReads` contents; a shot with no entry in `shotReads` at
+grade time reports as `"not-read"` with no reason
+(`SnapshotGradingPanel.tsx:345-349`, `entry ? entry.status : "not-read"`).
+
+**There is no badge.** `snapshot-row.ts:50-57`'s own comment describes the
+wave's INTENTION (`"Not read"/"Partly read" badge on that shot`), not what the
+code renders. What `SnapshotResultCard.tsx` actually renders
+(`:80-86`, reading claim) is one plain `<p className={styles.fieldHint}>` per
+role group, containing a comma-joined string built by
+`reports.map((r) => \`Shot ${r.shotIndex}: ${statusLabel(r.status)}${r.reason
+? \` (${r.reason})\` : ""}\`).join(", ")` (`:83`) - a text line grouped by
+role, not a per-tile badge element, and not attached to the shot thumbnail in
+`SnapshotShotTray.tsx` at all (the tray and the result card are two separate
+components; the tray never reads `shotReads`).
+
+### What is persisted today under a `ta-` key, enumerated by grep
+
+`grep -rn "localStorage\|\"ta-" src/app/components/snapshot-grading/
+src/app/components/assessment-shared/` (true output, pasted in full, not
+summarized):
+
+```
+src/app/components/snapshot-grading/snapshot-grading.structure.test.ts:10, 48, 50, 53, 54, 174, 175, 178, 179, 180
+src/app/components/snapshot-grading/useSnapshotCapture.ts:9
+src/app/components/snapshot-grading/useSnapshotShots.ts:16, 35, 44, 95
+src/app/components/assessment-shared/assessment-row-store.ts:17
+src/app/components/assessment-shared/useAssessmentRowStore.ts:41, 43, 98, 107, 114
+```
+
+There are TWO runtime read/write pairs in this combined scope, and only one
+of them belongs to `snapshot-grading/`:
+
+1. **`snapshot-grading/useSnapshotShots.ts`**: `const ARMED_ROLE_KEY =
+   "ta-snap-armed-role";` (`:35`), read at `:44`
+   (`window.localStorage.getItem(ARMED_ROLE_KEY)`, falling back to
+   `"assignment"` if absent or invalid per `isSnapshotRole`, `:37-39`) and
+   written at `:95` (`window.localStorage.setItem(ARMED_ROLE_KEY,
+   armedRole)` inside a `useEffect` keyed on `armedRole`). Confirmed
+   independently by `snapshot-grading.structure.test.ts:175`'s own exact-set
+   canary (`expect(distinctKeys).toEqual(["ta-snap-armed-role"])`) - see the
+   breakage section below for that test's exact anchor lines.
+2. **`assessment-shared/useAssessmentRowStore.ts`**: `STORAGE_KEY_TABLE`
+   (parameter name, not a literal defined in this file - the literal
+   `"ta-rec-grade-table"` lives in `grading-recording/useGradingRows.ts` per
+   this file's own header comment at `:41`), read at `:98`
+   (`window.localStorage.getItem(STORAGE_KEY_TABLE)`) and written at `:107`
+   and `:114` (the two-tier `persistRows` write and its `dropBulk: true`
+   retry). **`SnapshotGradingPanel.tsx` does not call this hook** - see
+   below - so this second pair exists in the scanned directories but is not
+   currently reachable from the snapshot-grading surface.
+
+`row`, `shots`, `assignmentText`, `rubricText`, and `transcriptText` are held
+only in `useState` in `SnapshotGradingPanel.tsx` / `useSnapshotShots.ts` and
+are not written to `localStorage` by anything in either directory.
+
+`useAssessmentRowStore.ts` is a full generic persistence hook (read-once
+initializer, `rowsRef`, `persistRows` with the `dropBulk` retry -
+`:98-114`) already used by the recording grader.
+**`grep -rln "useAssessmentRowStore\b" src/` returns SIX files:**
+
+```
+src/app/components/assessment-shared/assessment-row-store.ts
+src/app/components/assessment-shared/AssessmentFeedbackFields.tsx
+src/app/components/assessment-shared/useAssessmentRowStore.ts
+src/app/components/grading-recording/grading-row-serialization.ts
+src/app/components/grading-recording/grading-rows.test.ts
+src/app/components/grading-recording/useGradingRows.ts
+```
+
+`SnapshotGradingPanel.tsx:31-32` imports `editAssessmentField` and
+`applyAssessmentResult` from `assessment-row.ts` only - it does not import or
+call `useAssessmentRowStore` anywhere. The persistence machinery a
+data/storage seat would reach for already exists and is already unused by
+this surface; that is a fact about the tree, not a recommendation.
+
+### The copy the surface shows about reloads
+
+`SnapshotCaptureBar.tsx:52-54` (rendered inside `SnapshotGradingPanel.tsx` via
+`<SnapshotCaptureBar ... />`, `:415-427`):
+
+> Nothing here leaves this device until you grade. Reloading clears the
+> shots; completed assessments are not kept across a reload in this build.
+
+`SnapshotCaptureBar.tsx:52-54` currently asserts completed assessments are
+not kept across a reload, and that is true of the code as of `73aaa5d`. This
+is the only on-screen statement about reload behavior in this surface.
+
+### What a persistence change here could plausibly break, named at the call site
+
+1. **`snapshot-grading.structure.test.ts:167`** (`const keys =
+   combinedSource.match(/(?<![a-zA-Z])ta-snap-[a-z-]*[a-z]/g) ?? [];`) is the
+   exact-set key regex; the non-test file filtering it scans is built at
+   `:156-157` (`const files = fs.readdirSync(SNAPSHOT_GRADING_DIR);` /
+   `const nonTestFiles = files.filter((f) => /\.(ts|tsx)$/.test(f) &&
+   !f.endsWith(".test.ts"));`); the result is sorted at `:168`
+   (`Array.from(new Set(keys)).sort()`) and asserted at `:175`
+   (`expect(distinctKeys).toEqual(["ta-snap-armed-role"])`). Any new
+   `ta-snap-*` key A4d introduces in a non-test file under this directory
+   must be inserted into that `toEqual([...])` array **in alphabetical
+   position**, not appended - the array is compared against a `.sort()`ed
+   result, so an appended-but-unsorted key fails even when the key itself is
+   correctly named. Conversely, a key spelled `ta-rec-*`, or one added to a
+   file this canary does not scan (anything outside
+   `src/app/components/snapshot-grading/`), stays invisible to it - the
+   canary matches `ta-snap-[a-z-]*[a-z]` only, and only over the non-test
+   `.ts`/`.tsx` files identified at `:156-157`. This canary must be SEEN TO
+   FAIL (by writing the key first and running the test before touching the
+   expected array) before it is trusted - editing the expected array first
+   and then writing the key proves only that the same string was typed
+   twice.
+2. **`assessment-shared.structure.test.ts:24-32`** is the `FORBIDDEN_WORDS`
+   array; `"shot"` is `:30` and `"snapshot"` is `:31` inside it (`:29` is
+   `"submittedAt"`, a different entry). The check itself is
+   `source.includes(word)` at `:50`, case-sensitive against the lowercase
+   literals in that array, inside a `.filter()` whose scanned file list is
+   built at `:34-36` (`listFiles` = every `.ts`/`.tsx` file in the directory)
+   and narrowed at `:46` to exclude only `assessment-shared.structure.test.ts`
+   itself - so the sibling test files in that directory
+   (`assessment-row.test.ts`, `assessment-row-store.test.ts`, etc.) ARE
+   scanned too, not just the production files. Any identifier containing
+   "Snapshot" or "snapshot" also contains the lowercase run "shot" and trips
+   at `:50`; only a form keeping a capital S with no lowercase "shot" run
+   anywhere (`ShotReport`, `ShotTray`, `SHOT_LIMIT`, a sentence opening "Shot
+   bytes") passes. Whether a specific identifier an implementer chooses is
+   safe is for that implementer to check by running
+   `npx vitest run src/app/components/assessment-shared/assessment-shared.structure.test.ts`
+   after landing anything in that directory.
+3. **No test today pins the single-row-per-session or half-overwrite
+   behavior described above.** `snapshot-row.test.ts:26-48` exercises
+   `createEmptySnapshotRow`, `editAssessmentField`, and
+   `applyAssessmentResult` as pure functions on one row object and never
+   touches `SnapshotGradingPanel.tsx`'s `useState`/`setRow` wiring or the
+   unconditional merge at `:362-370` - because no test here renders a
+   component. There is therefore no test that will go red merely because
+   A4d changes `row` from a single nullable value to a list, or because a
+   re-grade's read-report/rubric-area overwrite stops being unconditional;
+   this document is the only place that behavior is pinned as of `73aaa5d`.
+4. **`p11-containment-snapshot.test.ts`** imports only from
+   `./snapshot-grade-prompt` (`GRADE_FRAMING_HEADER`,
+   `GRADE_PRECEDENCE_CLAUSE`, `buildSnapshotGradeSystemPrompt` - `:2-6`),
+   `./snapshot-citations` (`verifySnapshotCitations` - `:7`), and a type from
+   `./snapshot-parse` (`SnapshotRubricAreaAnswer` - `:8`) -
+   (`grep -n "snapshot-row"
+   src/app/components/snapshot-grading/p11-containment-snapshot.test.ts`
+   exits 1, no match). This file tests pure prompt/citation functions only
+   and touches no row state, so it is unaffected by a persistence change to
+   the panel.
+5. **`recording/recording-split.structure.test.ts:216-220`**'s
+   `panelTargets.size === 11` and its `ta-rec-*` ordinal canary do not scan
+   `src/app/components/snapshot-grading/` at all - confirmed by
+   `grep -n "ta-rec-grade\|panelTargets\|ta-snap"
+   src/app/components/recording/recording-split.structure.test.ts` finding
+   THREE `panelTargets` lines (`:216`, `:219`, `:220`) and nothing under
+   `ta-snap`. A `ta-snap-*` key written under
+   `src/app/components/snapshot-grading/` is invisible to this specific gate.
+6. **This is a FLOOR, not the set of guards that can catch a persistence
+   change - two more exist outside this directory:**
+   - `grading-rows.test.ts:481-487` builds a combined haystack from
+     `src/app/components/grading-recording/` AND
+     `src/app/components/assessment-shared/`; `:499-509` is its exact-set
+     assertion over `ta-rec-grade-*` keys found in that combined haystack.
+     Entry 411 names this canary at `:41310-41317`. A `ta-rec-grade-*` key
+     added to a file under `assessment-shared/` is caught by this canary.
+   - `recording-split.structure.test.ts:333-408` is a SEPARATE exact-set
+     `ta-rec-*` canary whose haystack (`combinedRecordingSource`, built at
+     `:277`) includes `src/app/components/RecordingTab.tsx`. A `ta-rec-*` key
+     added to `RecordingTab.tsx` itself is caught by this canary, so "A4d's
+     persisted key is invisible to every gate regardless of its spelling" is
+     false as a general claim - it is invisible only to the two directory-
+     scoped canaries in items 1 and 5 above.
+   - `src/app/components/RecordingTab.tsx`'s own `ta-rec-view` restore
+     ladder is a further, independent guard: `:66` reads it
+     (`localStorage.getItem("ta-rec-view")`), `:77` is the `v === "snapgrade"`
+     line inside the hand-written `||` restore chain, and `:83` writes it
+     (`localStorage.setItem("ta-rec-view", recView)`).
+     `snapshot-grading.structure.test.ts:48-58` pins `"snapgrade"` inside
+     that specific guard block (isolated from the union type's own
+     occurrence of the same literal).
+
+### The closest existing primitive to A4b, for whoever picks that up next
+
+`SnapshotShotTray.tsx:147` (`aria-label="Delete this shot"`) is a per-shot
+delete `IconButton` wired to `removeShotById` via the tray's `handleRemove`
+callback (reading claim on the JSX; the wiring itself - `removeShotById` being
+called - is confirmed in `useSnapshotShots.ts:131-137`'s own definition,
+which is the function this button ultimately calls through the tray's props).
+This is the closest thing in the tree today to A4b's "clear the per-student
+shots and keep the [rubric/assignment] context" - it deletes one shot at a
+time, nothing implements a bulk per-student clear, and A4b's control does not
+exist as stated above.
+
+### What is NOT determined here
+
+Whether A4d's list should reuse `useAssessmentRowStore` or a new hook, where
+its storage key should live, and what its codec should look like are
+architect/data-seat decisions, not baseline findings - this entry states only
+what exists today and what today's tests will and will not notice when it
+changes.

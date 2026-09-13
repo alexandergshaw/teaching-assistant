@@ -20,7 +20,7 @@ Run them from **PowerShell**. All four are repo-root commands.
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit` | 10.2s | **No output at all**, exit 0. Any output is a failure. |
 | Lint | `npm run lint` | 104.9s | `(cross-mark) 4 problems (0 errors, 4 warnings)`, exit 0 |
-| Tests | `npm test` | 70.3s | `Test Files 1005 passed (1005)` / `Tests 20052 passed (20052)`, exit 0 |
+| Tests | `npm test` | 63.6s | `Test Files 1017 passed (1017)` / `Tests 20200 passed (20200)`, exit 0 |
 | Build | `npm run build` | 66.6s | `(check-mark) Compiled successfully in 16.5s`, then **exit 1**. See below. |
 
 ### The build gate does not exit 0, and must not be expected to
@@ -43,12 +43,12 @@ exit code.** Grep for it; do not `&&` on the build.
 This matters because `next build` is the ONLY gate that catches two real
 defects in this repo: a `"use server"` file exporting a non-async binding
 (`src/lib/use-server-exports.test.ts` covers part of it, but only the part it
-scans), and certain module-boundary errors. tsc, eslint and 20,052 tests all
+scans), and certain module-boundary errors. tsc, eslint and 20,200 tests all
 pass on both.
 
 ### The four lint warnings are the baseline
 
-`RecordingTab.tsx:345` (exhaustive-deps), `repoGradesSliceA.guards.test.ts:83`,
+`RecordingTab.tsx:347` (exhaustive-deps), `repoGradesSliceA.guards.test.ts:83`,
 and two in `canvas-modules/new-quiz.test.ts`. Zero errors. A fifth warning is a
 regression introduced by the current change; say so rather than letting the
 count drift.
@@ -59,7 +59,7 @@ count drift.
 
 - **Framework:** vitest 4.1.9, `environment: "node"` (`vitest.config.ts`).
 - **Collection:** `include: ["src/**/*.test.ts"]` - **`.test.tsx` is not
-  collected.** 1005 files, 20,052 tests.
+  collected.** 1017 files, 20,200 tests.
 - **NO COMPONENT IS EVER RENDERED BY ANY TEST IN THIS REPO.** There is no
   jsdom, no testing-library, no render call. Every claim about markup, focus
   order, keyboard behaviour or ARIA comes from *reading source*, and a green
@@ -96,7 +96,7 @@ These are the ones that catch a change that "should not have broken anything":
 | Gate | Enforces |
 |---|---|
 | `src/file-size-ceiling.structure.test.ts` | **1000 lines, repo-wide over all of `src/`.** `LIMIT = 1000` at `:21`. Has an `ALLOWED_OVERAGE` ratchet: each entry is pinned to the file's count when the list was written, so a listed file may shrink but fails the moment it grows. Never raise a `maxLines` to fit a file that grew. |
-| `src/app/components/recording/recording-split.structure.test.ts` | Scans `src/app/components/recording/` **non-recursively** plus `RecordingTab.tsx` and `TabShell.tsx` by name. Also holds hardcoded counts: exactly 11 sub-tab strip entries, exactly 10 `role="tabpanel"` occurrences, `panelTargets.size === 10`, and a hardcoded view-restore list. Adding a sub-tab breaks three of those and passes the fourth **falsely**. Also owns the `ta-rec-*` persisted-key ordinal canary as an exact-set assertion - which does NOT reach sibling directories (`useGradingRows.ts`'s three real `ta-rec-grade-*` keys are absent from its expected set), so adding a sibling key to that set FAILS it. |
+| `src/app/components/recording/recording-split.structure.test.ts` | Scans `src/app/components/recording/` **non-recursively** plus `RecordingTab.tsx` and `TabShell.tsx` by name. Also holds hardcoded counts: exactly 12 sub-tab strip entries (`:132`), exactly 11 `role="tabpanel"` occurrences (`:187`), `panelTargets.size === 11` (`:219`), and a hardcoded view-restore list. Re-measured 2026-09-13 by `grep -n` on the test; the figures here were one low across all three after the snapshot-grading sub-tab landed. Adding a sub-tab breaks three of those and passes the fourth **falsely**. Also owns the `ta-rec-*` persisted-key ordinal canary as an exact-set assertion - which does NOT reach sibling directories (`useGradingRows.ts`'s three real `ta-rec-grade-*` keys are absent from its expected set), so adding a sibling key to that set FAILS it. |
 | `src/source-bytes.structure.test.ts` | **Source files must stay text.** No BOM, no control bytes except TAB/LF/CR. Exists because a tool materialised a `\x00` escape as a literal NUL byte twice; the file then greps as binary and silently drops out of every source-text test, the emoji scan, and every search - while passing tsc, eslint, vitest and the build. |
 | `src/supabase-migrations.structure.test.ts` | Migration SQL must be lexically well-formed. Exists because an undoubled apostrophe in a `comment on column` string reached production: migrations auto-apply from a GitHub Action on push to main, so the first sign was a red Action after the commit landed, with the TypeScript that depended on the schema already merged. |
 | `src/lib/no-emojis.test.ts` | Owns the no-emoji policy **and its one authorized exception** (`CHECKLIST_DONE_PREFIX`, which the owner asked for explicitly). Pure JS regex, never shells out to grep. Do not hand-roll an emoji scan - see the search traps card for why. |
@@ -121,8 +121,9 @@ newline, which once failed a 1000-line file that was exactly at the wall.
 
 ## 4. Regression cases
 
-- `docs/REGRESSION.md`, 41,231 lines, entries numbered to **410**.
-- `grep -ac "^## " docs/REGRESSION.md` returns **364**, not 410 - the heading
+- `docs/REGRESSION.md`, 41,543 lines (`@(Get-Content docs/REGRESSION.md).Count`,
+  2026-09-13), entries numbered to **412**.
+- `grep -ac "^## " docs/REGRESSION.md` returns **366**, not 412 - the heading
   count and the entry count do not agree, so do not use one to infer the other.
   Find the next entry number by reading the tail, not by counting.
 - **`grep -a` is required on this file.** It contains a raw NUL byte (from the

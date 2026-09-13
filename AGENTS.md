@@ -10,6 +10,23 @@ Never insert emojis into any code, comments, strings, variable names, documentat
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+<!-- BEGIN:dev-loop-pointer -->
+# The dev loop lives in docs/DEV_LOOP.md
+
+Read `docs/DEV_LOOP.md` before starting any multi-step change. It is the core
+card and it points at the rest: `docs/loop/this-repo.md` (the measured gate
+commands, the structural gates, and what this environment cannot verify),
+`docs/loop/seats.md`, `docs/loop/iteration-caps.md`, and four trap cards. Tier
+definitions are in `.claude/agents/`.
+
+Two rules from it that apply to every agent, not just the orchestrator:
+
+- **Every quantity names the command that produced it.** Two line-counting
+  tools in this repo disagree by 42 on one file.
+- **No component is rendered by any test here.** A green suite proves nothing
+  about markup, focus, or keyboard behaviour.
+<!-- END:dev-loop-pointer -->
+
 <!-- BEGIN:never-stall-the-loop -->
 # Never stall the loop (applies to the MAIN session only)
 

@@ -21,7 +21,7 @@
 // to this component - the same division RecordingTab.tsx/
 // DiscussionRepliesPanel.tsx already use for useReplyRows().
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { TextField, IconButton, InputAdornment } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -30,6 +30,10 @@ import rowStyles from "./GradingTable.module.css";
 import GradingTableRow from "./GradingTableRow";
 import { GRADING_TABLE_COLUMN_COUNT, gradingClearTableSignature, type GradingFeedbackField, type GradingSort } from "./grading-rows";
 import type { GradingRow } from "./grading-row";
+// WAVE 3 of the assessment-grading extraction: the keyed-ref-map
+// focus-after-remove machinery moved verbatim to assessment-shared - see
+// that hook's own header for why the container fallback is load-bearing.
+import { useRemoveFocusRefs } from "../assessment-shared/useRemoveFocusRefs";
 // Generic, dependency-free two-click confirm-arming helper (not owned by
 // this feature) - the SAME signature-based-not-timer-based idiom
 // DiscussionRepliesPanel.tsx's own "Delete table" uses (isConfirmArmed +
@@ -126,44 +130,7 @@ export default function GradingTable({
   // (same element in both branches, so React never remounts it across a
   // last-row removal), giving a fallback target that survives even the
   // "removed the only remaining row" case.
-  const removeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const pendingFocusIdRef = useRef<string | null>(null);
-  const pendingFocusFallbackRef = useRef(false);
-
-  const registerRemoveRef = useCallback((id: string, el: HTMLButtonElement | null) => {
-    if (el) removeRefs.current.set(id, el);
-    else removeRefs.current.delete(id);
-  }, []);
-
-  useLayoutEffect(() => {
-    const targetId = pendingFocusIdRef.current;
-    const wantsFallback = pendingFocusFallbackRef.current;
-    pendingFocusIdRef.current = null;
-    pendingFocusFallbackRef.current = false;
-    if (!targetId && !wantsFallback) return;
-    const next = targetId ? removeRefs.current.get(targetId) : null;
-    if (next) next.focus();
-    else containerRef.current?.focus();
-  });
-
-  const handleRemove = useCallback(
-    (id: string) => {
-      const idx = rows.findIndex((r) => r.id === id);
-      const fallback = rows[idx + 1] ?? rows[idx - 1] ?? null;
-      if (fallback) {
-        pendingFocusIdRef.current = fallback.id;
-      } else {
-        // No neighbour in the currently-rendered (filtered) rows - either
-        // this was the last visible row or the last row overall. Either way
-        // the row's own subtree is about to unmount; fall back to the
-        // persistent container rather than dropping focus to <body>.
-        pendingFocusFallbackRef.current = true;
-      }
-      onRemoveRow(id);
-    },
-    [rows, onRemoveRow]
-  );
+  const { containerRef, registerRemoveRef, handleRemove } = useRemoveFocusRefs(rows, onRemoveRow);
 
   if (totalCount === 0) {
     return (

@@ -32,53 +32,26 @@
 // DiscussionReplyRow.tsx's own `lastReplyForArm` check) - signature-based,
 // never a timer.
 
-import { memo, useEffect, useRef, useState } from "react";
-import { Button, TextField } from "@mui/material";
+import { memo, useState } from "react";
+import { Button } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import rowStyles from "./GradingTable.module.css";
 import {
   gradingRowSubmissionTimeStatus,
-  joinFeedback,
   type GradingRow,
   type GradingRowNameMatch,
-  type GradingRowState,
 } from "./grading-row";
 import { GRADING_TABLE_COLUMN_COUNT, type GradingFeedbackField } from "./grading-rows";
 // docs/recording-controls-ux-acceptance-criteria.md CC5: the one arm/confirm
 // component for every destructive or overwriting action.
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
-// CC14: the shared clipboard helper - no site inlines its own guard anymore.
-import { writeClipboardText } from "../ui/clipboard";
-// CC14: "its icon swaps to the check for two seconds after a copy exactly as
-// Copy reply does" - reused, not redrawn, from the file that idiom shipped
-// in first.
-import { CopyIcon, CheckIcon } from "../recording/discussion-icons";
-// CC12: the shared clip-rect idiom, for the transient "Copied feedback for
-// {name}" confirmation - visible confirmation is the icon swap alone (WCAG
-// 2.5.3 Label in Name keeps the button's own label stable), so the fact of
-// the copy reaches assistive tech through this hidden live region instead.
-import { visuallyHidden } from "../ui/visuallyHidden";
-
-// Mirrors recording/DiscussionReplyRow.tsx's own COPY_RESET_MS exactly -
-// "exactly as Copy reply does" (CC14) means the same 1.5s window.
-const COPY_RESET_MS = 1500;
-
-// Fixer pass finding 3: the failure message now names the student, the same
-// way every other per-row failure on this table does (Remove's consequence
-// line, the failed-grade error text) - a generic "could not copy" gives an
-// instructor grading several submissions no way to tell which row it was
-// about once it has scrolled past.
-function clipboardFailureMessage(studentName: string): string {
-  return `Could not copy feedback for ${studentName} automatically. Select the text in the feedback fields and copy it.`;
-}
-
-const STATE_BADGE: Record<GradingRowState, { label: string; variant: "ghBadgeNeutral" | "ghBadgeWarning" | "ghBadgeSuccess" | "ghBadgeDanger" }> = {
-  pending: { label: "Waiting", variant: "ghBadgeNeutral" },
-  grading: { label: "Grading", variant: "ghBadgeWarning" },
-  ready: { label: "Ready", variant: "ghBadgeSuccess" },
-  failed: { label: "Failed", variant: "ghBadgeDanger" },
-};
+// WAVE 3 of the assessment-grading extraction: the score field, the three
+// text feedback fields, and the Copy feedback control/live region all moved
+// to assessment-shared - see that file's own header for why the score
+// field is a separate small export rather than folded into the default one.
+import AssessmentFeedbackFields, { AssessmentScoreField } from "../assessment-shared/AssessmentFeedbackFields";
+import AssessmentStateBadge from "../assessment-shared/AssessmentStateBadge";
 
 /** R3a's four states, rendered honestly - "no-roster" gets its OWN neutral
  *  wording ("No roster to check"), never the "unmatched" copy, so it can
@@ -119,7 +92,6 @@ export interface GradingTableRowProps {
 }
 
 function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyError, registerRemoveRef }: GradingTableRowProps) {
-  const stateBadge = STATE_BADGE[row.state];
   const matchBadge = NAME_MATCH_BADGE[row.nameMatch];
   // R3b: an unmatched/ambiguous name never blocks the feedback - it only
   // changes what the row SAYS. Candidates are shown, never auto-applied
@@ -150,45 +122,6 @@ function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyErr
   // as today - no arming needed at all.
   const handleRemoveOneClick = () => onRemove(row.id);
 
-  // CC14: "Copy feedback" - joins the three feedback fields via
-  // joinFeedback (grading-row.ts) and copies through the shared clipboard
-  // helper (ui/clipboard.ts), the same guard every other copy site in this
-  // app now shares rather than inlining its own. Icon-only confirmation
-  // (CopyIcon -> CheckIcon for COPY_RESET_MS), exactly as Copy reply does -
-  // the visible "Copy feedback" label never swaps, only the icon and title.
-  const [copied, setCopied] = useState(false);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleCopyFeedback = async () => {
-    // Fixer pass finding 3a: an all-empty row's joinFeedback is "" (its own
-    // documented empty guard, pinned in grading-row.test.ts) - copying that
-    // silently would leave the instructor's clipboard empty with no sign
-    // anything went wrong, and the check/CheckIcon swap would falsely claim
-    // a successful copy. Refused before it ever reaches the clipboard, and
-    // the icon never swaps.
-    const text = joinFeedback(row);
-    if (text === "") {
-      onCopyError(`There is no feedback to copy for ${row.studentName} yet.`);
-      return;
-    }
-    try {
-      await writeClipboardText(text);
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-      setCopied(true);
-      copyTimerRef.current = setTimeout(() => setCopied(false), COPY_RESET_MS);
-    } catch {
-      onCopyError(clipboardFailureMessage(row.studentName));
-    }
-  };
-
-  // Fixer pass finding 3d: a copy click just before the row unmounts (Remove
-  // clicked, or the whole table cleared) must not leave a stale timer firing
-  // setCopied on an unmounted component.
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-    };
-  }, []);
-
   return (
     <>
       <tr className={rowStyles.summaryRow}>
@@ -203,10 +136,7 @@ function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyErr
           )}
         </td>
         <td>
-          <span className={`${styles.ghBadge} ${styles[stateBadge.variant]}`}>{stateBadge.label}</span>
-          {row.userEdited && (
-            <span className={`${styles.ghBadge} ${styles.ghBadgeNeutral} ${rowStyles.badgeGap}`}>Yours</span>
-          )}
+          <AssessmentStateBadge state={row.state} userEdited={row.userEdited} />
           {/* CC11 / AC17a-style discipline (recording/DiscussionReplyRow.tsx):
               a field-level line, never a full .notice card or role="alert" -
               several rows can fail at once and an assertive interruption per
@@ -214,13 +144,12 @@ function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyErr
           {row.state === "failed" && row.error && <p className={rowStyles.rowErrorText}>{row.error}</p>}
         </td>
         <td>
-          <TextField
-            value={row.totalScore}
-            onChange={(e) => onEditField(row.id, "totalScore", e.target.value)}
-            size="small"
-            placeholder={row.state === "pending" ? "-" : undefined}
-            className={rowStyles.scoreField}
-            slotProps={{ htmlInput: { "aria-label": `Score for ${row.studentName}` } }}
+          <AssessmentScoreField
+            rowId={row.id}
+            displayName={row.studentName}
+            totalScore={row.totalScore}
+            disabledPlaceholder={row.state === "pending"}
+            onEditField={onEditField}
           />
         </td>
         <td>
@@ -331,63 +260,13 @@ function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyErr
             </div>
 
             <div className={rowStyles.feedbackBlock}>
-              <TextField
-                label="Strengths"
-                value={row.strengths}
-                onChange={(e) => onEditField(row.id, "strengths", e.target.value)}
-                multiline
-                minRows={2}
-                fullWidth
-                size="small"
-                slotProps={{ htmlInput: { "aria-label": `Strengths for ${row.studentName}` } }}
+              <AssessmentFeedbackFields
+                rowId={row.id}
+                displayName={row.studentName}
+                feedback={row}
+                onEditField={onEditField}
+                onCopyError={onCopyError}
               />
-              <TextField
-                label="Improvements"
-                value={row.improvements}
-                onChange={(e) => onEditField(row.id, "improvements", e.target.value)}
-                multiline
-                minRows={2}
-                fullWidth
-                size="small"
-                slotProps={{ htmlInput: { "aria-label": `Improvements for ${row.studentName}` } }}
-              />
-              <TextField
-                label="Overall comment"
-                value={row.overallComment}
-                onChange={(e) => onEditField(row.id, "overallComment", e.target.value)}
-                multiline
-                minRows={3}
-                fullWidth
-                size="small"
-                slotProps={{ htmlInput: { "aria-label": `Overall comment for ${row.studentName}` } }}
-              />
-              {/* CC14: "Copy feedback" - the one control the sibling
-                  (DiscussionReplyRow's Copy reply) has and this row lacked.
-                  The visible label is stable (WCAG 2.5.3 Label in Name, the
-                  same rule Copy reply follows) - only the icon and title
-                  swap on copy. */}
-              <div className={styles.ghActions}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={copied ? <CheckIcon /> : <CopyIcon />}
-                  onClick={() => void handleCopyFeedback()}
-                  title={copied ? "Copied" : `Copy feedback for ${row.studentName}`}
-                  aria-label={`Copy feedback for ${row.studentName}`}
-                >
-                  Copy feedback
-                </Button>
-              </div>
-              {/* Fixer pass finding 3b: the visible label never swaps (WCAG
-                  2.5.3), and the icon-only swap it does get is invisible to
-                  assistive tech - this throttle-free, one-shot live region
-                  announces the same confirmation for the same COPY_RESET_MS
-                  window the icon shows it. */}
-              {copied && (
-                <span role="status" aria-live="polite" style={visuallyHidden}>
-                  {`Copied feedback for ${row.studentName}`}
-                </span>
-              )}
             </div>
           </div>
         </td>

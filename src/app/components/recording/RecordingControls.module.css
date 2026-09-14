@@ -1,9 +1,16 @@
 /* docs/recording-controls-ux-acceptance-criteria.md CC13. Shared controls
    vocabulary for the nine Recording sub-tabs, imported everywhere as
-   `controls`. Holds EXACTLY the classes in the CC13 table and nothing else -
-   the orphan-class ratchet (courses/page-module-css-orphan-classes.test.ts)
-   is EXPECTED to read above its pinned 137 after this file lands, because in
-   this wave most of these classes have no consumer yet (wave 1 wires them).
+   `controls`. Holds the classes in the CC13 table, plus one documented
+   exception: `.draftPreview` (added by commit `b3701cd` for the rendered
+   walkthrough-announcement draft preview) is NOT in that table. This header
+   used to read "EXACTLY the classes in the CC13 table and nothing else",
+   which was already false when it was written; the membership rule is
+   documentation, not an enforced invariant - `page-module-css-orphan-classes.test.ts` is a
+   count ratchet, not a closed-set assertion, so nothing in the test suite
+   rejects a class outside the table. The orphan-class ratchet
+   (courses/page-module-css-orphan-classes.test.ts) is EXPECTED to read above
+   its pinned 137 after this file lands, because in this wave most of these
+   classes have no consumer yet (wave 1 wires them).
    No descendant `legend` or `fieldset` selector anywhere in this file - MUI's
    OutlinedInput renders its own <fieldset><legend> (NotchedOutline.js) and a
    descendant selector here would reach into it by accident. */
@@ -421,4 +428,17 @@ fieldset.section + fieldset.section {
   background: var(--surface-muted);
   padding: var(--space-1) var(--space-1);
   border-radius: var(--radius-xs);
+}
+
+.draftPreview pre {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2);
+  overflow-x: auto;
+  background: var(--surface-muted);
+  border-radius: var(--radius-xs);
+}
+
+.draftPreview pre code {
+  padding: 0;
+  background: none;
 }

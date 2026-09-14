@@ -368,3 +368,57 @@ fieldset.section + fieldset.section {
   font-weight: 600;
   color: var(--text-primary);
 }
+
+/* The walkthrough-announcement draft slot's rendered Markdown preview
+   (AnnouncementDraftSlot.tsx) - ported from course-intel.module.css:36-77's
+   .answerProse rule set, which is this app's one other markdownToHtml
+   render surface, rather than importing that module here (this panel does
+   not otherwise use course-intel.module.css, and coupling two unrelated
+   panels' CSS modules together for one shared rule set is worse than a
+   small, intentional copy). globals.css:359 zeroes margin/padding on every
+   element and :388 strips link color/underline, so without this the raw
+   HTML renders as one unbroken block with markerless lists and invisible
+   links. */
+.draftPreview,
+.draftPreview :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--text-primary);
+}
+
+.draftPreview {
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+}
+
+.draftPreview :is(h1, h2, h3, h4, h5, h6) {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+
+.draftPreview p {
+  margin: 0 0 var(--space-2);
+}
+
+.draftPreview ul,
+.draftPreview ol {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-5);
+}
+
+.draftPreview li {
+  margin-bottom: var(--space-1);
+}
+
+.draftPreview a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.draftPreview code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--surface-muted);
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-xs);
+}

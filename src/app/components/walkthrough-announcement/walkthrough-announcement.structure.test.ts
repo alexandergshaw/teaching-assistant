@@ -126,11 +126,95 @@ describe("P1: the panel posts via the markdown-safe action, never the plain-text
     "utf-8"
   );
 
-  it("imports postWalkthroughAnnouncementAction", () => {
-    expect(panelSource).toMatch(/postWalkthroughAnnouncementAction/);
+  it("calls postWalkthroughAnnouncementAction(...)", () => {
+    // Tightened from a bare-import match (docs/announcement-from-walkthrough-acceptance-criteria.md): the call, not
+    // merely the import, must survive - the drafting/posting logic moved
+    // into useAnnouncementDraftSlots.ts, but every literal server-action
+    // call was required to stay in this panel (blocker 5). A doc comment
+    // alone (as this test's own name once implied) would satisfy the old
+    // regex; this one requires the actual call expression.
+    expect(panelSource).toMatch(/postWalkthroughAnnouncementAction\(/);
   });
 
   it("never imports createAnnouncementAction (the plain-text poster every OTHER announcement surface uses)", () => {
     expect(panelSource).not.toMatch(/\bcreateAnnouncementAction\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G2 reachability canary, mirroring this file's own header precedent: an
+// earlier wave shipped 2,711 lines of pure, fully-tested leaves that NOTHING
+// CALLED. This wave adds three new files (announcement-draft-slots.ts,
+// useAnnouncementDraftSlots.ts, AnnouncementDraftSlot.tsx) - nothing else in
+// this repo proves the panel actually mounts the row or calls the hook, so a
+// build where all three exist and slots.map was never wired would pass
+// every other gate here.
+// ---------------------------------------------------------------------------
+
+describe("G2: the panel actually mounts the multi-draft-slot seam, not just imports it", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it("renders <AnnouncementDraftSlot - an import alone proves nothing", () => {
+    expect(panelSource).toMatch(/<AnnouncementDraftSlot\b/);
+  });
+
+  it("calls useAnnouncementDraftSlots(...)", () => {
+    expect(panelSource).toMatch(/useAnnouncementDraftSlots\(/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Restored source-text instruments (docs/announcement-from-walkthrough-acceptance-criteria.md 8): AC-F6's amended
+// notice wording, the Copy path's markdownToHtml reference, and the
+// markdown-lite exclusion - each read off this directory's own non-test
+// source, the only mechanism that can check these facts in a repo where no
+// test renders a component.
+// ---------------------------------------------------------------------------
+
+describe("G2: restored source-text instruments (AC :92, :130, :138)", () => {
+  const files = fs.readdirSync(WALKTHROUGH_ANNOUNCEMENT_DIR);
+  const nonTestFiles = files.filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
+  const combinedSource = nonTestFiles
+    .map((f) => fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, f), "utf-8"))
+    .join("\n");
+
+  it("AC-F6's amended Markdown-formatting notice is present somewhere in this directory's non-test source", () => {
+    expect(combinedSource).toMatch(/Markdown formatting \(##, -, numbered lists, \*\*bold\*\*, \*italic\*\)/);
+  });
+
+  it("the Copy path's source references markdownToHtml", () => {
+    expect(combinedSource).toMatch(/markdownToHtml/);
+  });
+
+  it("no file in this directory imports markdown-lite", () => {
+    expect(combinedSource).not.toMatch(/markdown-lite/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B2: the rendered draft preview is pinned in AnnouncementDraftSlot.tsx
+// SPECIFICALLY, not the whole-directory concatenation above - the
+// markdownToHtml assertion at :188-190 matches because
+// useAnnouncementDraftSlots.ts's own Copy payload also calls markdownToHtml,
+// so it stays green even if AnnouncementDraftSlot.tsx's preview div is
+// deleted entirely. Sabotage-checked: deleting the
+// `dangerouslySetInnerHTML={{ __html: previewHtml }}` line from
+// AnnouncementDraftSlot.tsx turned the first assertion below red while the
+// directory-wide one above stayed green; restoring the line turned it green
+// again.
+// ---------------------------------------------------------------------------
+
+describe("B2: AnnouncementDraftSlot.tsx itself renders the markdownToHtml preview", () => {
+  const slotSource = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+
+  it("renders dangerouslySetInnerHTML with previewHtml", () => {
+    expect(slotSource).toMatch(/dangerouslySetInnerHTML=\{\{\s*__html:\s*previewHtml/);
+  });
+
+  it("previewHtml is derived from markdownToHtml(...)", () => {
+    expect(slotSource).toMatch(/markdownToHtml\(/);
   });
 });

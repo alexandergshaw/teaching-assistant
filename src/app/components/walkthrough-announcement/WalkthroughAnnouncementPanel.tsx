@@ -51,7 +51,7 @@ import { MODULE_EXTRACT_BATCH_SIZE, type ExtractedBlock } from "../module-deck-c
 import { reduceCaptureToMaterials } from "../module-deck-capture/module-blocks";
 import { deriveWalkthroughPageCoverage, renderWalkthroughCoverageBlock } from "./walkthrough-announcement-coverage";
 import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
-import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline } from "@/lib/announcement-outline-types";
+import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import { WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP } from "@/lib/walkthrough-announcement-prompt";
 import { WALKTHROUGH_SCRIPT_MATERIALS_CAP } from "@/lib/walkthrough-script-prompt";
 import {
@@ -63,6 +63,13 @@ import {
   draftWalkthroughVideoScriptAction,
   postWalkthroughAnnouncementAction,
 } from "@/app/actions/walkthrough-announcement";
+import { useAnnouncementDraftSlots, type AnnouncementDraftRequestContext } from "./useAnnouncementDraftSlots";
+import AnnouncementDraftSlot from "./AnnouncementDraftSlot";
+import {
+  MAX_ANNOUNCEMENT_BATCH_SIZE,
+  type TemplateCandidate,
+  type TemplateOptionSource,
+} from "./announcement-draft-slots";
 
 // PERSISTED CONTROLS (AC1/AC3) - a bound const per key, mirroring
 // ModuleDeckCapturePanel.tsx's own STORAGE_KEY_* idiom, so the directory's
@@ -204,14 +211,13 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const [mostRecentExemplar, setMostRecentExemplar] = useState<AnnouncementExemplarSummary | null>(null);
   const [savedExemplars, setSavedExemplars] = useState<AnnouncementExemplarSummary[] | null>(null);
   const [savedExemplarsLoading, setSavedExemplarsLoading] = useState(false);
+  const [savedExemplarsFailed, setSavedExemplarsFailed] = useState(false);
   const [showExemplarPicker, setShowExemplarPicker] = useState(false);
-  const [pickedExemplarId, setPickedExemplarId] = useState("");
   const [removeArmedId, setRemoveArmedId] = useState<string | null>(null);
 
-  // AC1's own default: the most recent saved exemplar, fetched with a
-  // single-row query rather than the full list (getMostRecentAnnouncement
-  // ExemplarAction) - browsing every saved exemplar is a separate, on-demand
-  // call (loadSavedExemplars below), only paid for when actually opened.
+  // AC1's default (most recent) AND (G2: every slot's dropdown needs the
+  // full list up front) the full saved list, fetched eagerly together,
+  // cancellation-guarded.
   useEffect(() => {
     let cancelled = false;
     // setState-in-effect idiom (see AGENTS.md/CLAUDE.md guidance and this
@@ -223,16 +229,42 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       if (cancelled) return;
       setMostRecentExemplar(null);
       setSavedExemplars(null);
+      setSavedExemplarsFailed(false);
       setShowExemplarPicker(false);
-      setPickedExemplarId("");
-      if (!courseId) return;
-      const result = await getMostRecentAnnouncementExemplarAction(courseId);
-      if (cancelled) return;
-      if ("error" in result) {
-        setExemplarError(result.error);
+      if (!courseId) {
+        // Clear here, not after the await: a run that early-returns must not
+        // leave the flag true, which would permanently disable Generate.
+        setSavedExemplarsLoading(false);
         return;
       }
-      setMostRecentExemplar(result.exemplar);
+      setSavedExemplarsLoading(true);
+      const [mostRecentResult, listResult] = await Promise.all([
+        getMostRecentAnnouncementExemplarAction(courseId),
+        listAnnouncementExemplarsAction(courseId),
+      ]);
+      // Clear AFTER the cancellation check, never before it. Clearing first
+      // creates the inverse race: on a course switch, this run's resolution
+      // lands after the successor already set the flag true, and clears it
+      // while the successor is still in flight - so `savedLoading` reads
+      // false with `savedExemplars` reset to null, `optionsForSlot` sees
+      // listResolved, and a slot pointing at a saved exemplar is flagged
+      // "no longer available" while it is merely reloading. That is the
+      // exact fact this flag exists to separate. The stuck-true case the
+      // earlier comment worried about is handled at the `!courseId` early
+      // return above, which is the only path that skips this.
+      if (cancelled) return;
+      setSavedExemplarsLoading(false);
+      if ("error" in mostRecentResult) {
+        setExemplarError(mostRecentResult.error);
+      } else {
+        setMostRecentExemplar(mostRecentResult.exemplar);
+      }
+      if ("error" in listResult) {
+        setExemplarError(listResult.error);
+        setSavedExemplarsFailed(true);
+      } else {
+        setSavedExemplars(listResult.exemplars);
+      }
     })();
     return () => {
       cancelled = true;
@@ -242,10 +274,12 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const loadSavedExemplars = useCallback(async () => {
     if (!courseId) return;
     setSavedExemplarsLoading(true);
+    setSavedExemplarsFailed(false);
     const result = await listAnnouncementExemplarsAction(courseId);
     setSavedExemplarsLoading(false);
     if ("error" in result) {
       setExemplarError(result.error);
+      setSavedExemplarsFailed(true);
       return;
     }
     setSavedExemplars(result.exemplars);
@@ -276,39 +310,12 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     setExemplarSaved(true);
   }, [courseId, exemplarText, exemplarLabel]);
 
-  const handleRemoveExemplar = useCallback(async (id: string) => {
-    const result = await deleteAnnouncementExemplarAction(id);
-    if ("error" in result) {
-      setExemplarError(result.error);
-      return;
-    }
-    setSavedExemplars((prev) => (prev ?? []).filter((e) => e.id !== id));
-    setPickedExemplarId((prev) => (prev === id ? "" : prev));
-    setMostRecentExemplar((prev) => (prev?.id === id ? null : prev));
-    setRemoveArmedId(null);
-  }, []);
-
-  // P11/AC2: the outline the drafter actually reads. A fresh paste wins over
-  // a picked saved exemplar, which wins over the course's most-recent one -
-  // "nothing chosen and nothing pasted" falls back to
-  // EMPTY_ANNOUNCEMENT_OUTLINE, which walkthrough-announcement-prompt.ts's
-  // own renderOutlineBlock already handles as "write one or two plain
-  // paragraphs, no headings, no lists."
+  // P11/AC2: the outline a "pasted"/"default" choice reads (resolveLive
+  // below) - per-slot precedence lives in resolveChoice, not here.
   const pastedOutline = useMemo(
     () => (exemplarText.trim() ? deriveAnnouncementOutline(exemplarText) : null),
     [exemplarText]
   );
-  const pickedExemplar = (savedExemplars ?? []).find((e) => e.id === pickedExemplarId) ?? null;
-  const effectiveOutline: AnnouncementOutline =
-    pastedOutline ?? pickedExemplar?.outline ?? mostRecentExemplar?.outline ?? EMPTY_ANNOUNCEMENT_OUTLINE;
-
-  const defaultExemplarHint = exemplarText.trim()
-    ? null
-    : pickedExemplar
-      ? `Using the saved exemplar "${pickedExemplar.label ?? new Date(pickedExemplar.createdAt).toLocaleDateString()}".`
-      : mostRecentExemplar
-        ? `Using your most recently saved exemplar${mostRecentExemplar.label ? ` ("${mostRecentExemplar.label}")` : ""} by default - paste one above to use a different format.`
-        : null;
 
   // --- Notices --------------------------------------------------------------
 
@@ -421,48 +428,127 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const hasMaterial = legibleBlockCount > 0;
 
   // --- Generation (P5: two buttons, P6: two independent output states) -------
-
-  const [annGenerating, setAnnGenerating] = useState(false);
-  const [annError, setAnnError] = useState<string | null>(null);
-  const [annTitle, setAnnTitle] = useState("");
-  const [annMessage, setAnnMessage] = useState("");
-  const [annArmedFor, setAnnArmedFor] = useState<string | null>(null);
-  const [posting, setPosting] = useState(false);
-  const [postError, setPostError] = useState<string | null>(null);
-  const [postedInfo, setPostedInfo] = useState<{ course: string } | null>(null);
+  // G2: N (<= MAX_ANNOUNCEMENT_BATCH_SIZE) draft slots, owned by
+  // useAnnouncementDraftSlots. Every literal server-action call stays HERE
+  // (the hook takes them as injected draftOne/postDraft adapters), so the
+  // P1 pin keeps proving this panel is the one that calls the poster.
 
   const [scriptGenerating, setScriptGenerating] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
   const [scriptText, setScriptText] = useState("");
 
-  const handleGenerateAnnouncement = useCallback(async () => {
-    setAnnGenerating(true);
-    setAnnError(null);
-    try {
-      const reduction = reduceCaptureToMaterials(batchBlocksRef.current, WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP);
-      const coverageBlock = renderWalkthroughCoverageBlock(deriveWalkthroughPageCoverage(reduction.blocks));
+  // Every slot's dropdown reads the SAME options source, fetched eagerly by
+  // the course-change effect above.
+  const optionSource: TemplateOptionSource = useMemo(
+    () => ({
+      hasPastedText: Boolean(exemplarText.trim()),
+      mostRecent: mostRecentExemplar
+        ? {
+            id: mostRecentExemplar.id,
+            label: mostRecentExemplar.label || new Date(mostRecentExemplar.createdAt).toLocaleDateString(),
+            outline: mostRecentExemplar.outline,
+          }
+        : null,
+      saved: (savedExemplars ?? []).map(
+        (e): TemplateCandidate => ({ id: e.id, label: e.label || new Date(e.createdAt).toLocaleDateString(), outline: e.outline })
+      ),
+      savedLoading: savedExemplarsLoading,
+      savedFailed: savedExemplarsFailed,
+    }),
+    [exemplarText, mostRecentExemplar, savedExemplars, savedExemplarsLoading, savedExemplarsFailed]
+  );
+
+  const buildRequest = useCallback(() => {
+    const reduction = reduceCaptureToMaterials(batchBlocksRef.current, WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP);
+    const coverageBlock = renderWalkthroughCoverageBlock(deriveWalkthroughPageCoverage(reduction.blocks));
+    return {
+      courseLabel: selectedCourse?.name ?? "",
+      moduleLabel: moduleLabel.trim() || null,
+      materialsText: reduction.text,
+      coverageBlock,
+      notes: notesText,
+      provider,
+    };
+  }, [selectedCourse, moduleLabel, notesText, provider]);
+
+  const resolveLive = useCallback(
+    () => ({ pastedOutline, mostRecent: optionSource.mostRecent }),
+    [pastedOutline, optionSource.mostRecent]
+  );
+
+  const draftOne = useCallback(
+    async (
+      ctx: AnnouncementDraftRequestContext,
+      outline: AnnouncementOutline
+    ): Promise<{ title: string; message: string } | { error: string }> => {
       const result = await draftWalkthroughAnnouncementAction({
-        courseLabel: selectedCourse?.name ?? "",
-        moduleLabel: moduleLabel.trim() || null,
-        materialsText: reduction.text,
-        outline: effectiveOutline,
-        coverageBlock,
-        notes: notesText,
-        provider,
+        courseLabel: ctx.courseLabel,
+        moduleLabel: ctx.moduleLabel,
+        materialsText: ctx.materialsText,
+        outline,
+        coverageBlock: ctx.coverageBlock,
+        notes: ctx.notes,
+        provider: ctx.provider,
       });
+      if ("error" in result) return { error: result.error };
+      return { title: result.title, message: result.message };
+    },
+    []
+  );
+
+  const postDraft = useCallback(
+    (title: string, message: string) => {
+      if (!selectedCourse) return null;
+      return postWalkthroughAnnouncementAction(selectedCourse.canvasUrl, title, message, selectedCourse.institution ?? undefined).then(
+        (result) => {
+          if ("error" in result) {
+            return { error: `Canvas refused the announcement - ${result.error}. Nothing was posted.` };
+          }
+          return { course: selectedCourse.name };
+        }
+      );
+    },
+    [selectedCourse]
+  );
+
+  const {
+    slots,
+    readyToDraftCount,
+    addSlot,
+    removeSlot,
+    chooseTemplate,
+    editSlot,
+    generate,
+    regenerate,
+    copySlot,
+    armPost,
+    cancelPost,
+    armRegenerate,
+    cancelRegenerate,
+    postSignatureFor,
+  } = useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft });
+
+  const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
+
+  const handleRemoveExemplar = useCallback(
+    async (id: string) => {
+      const result = await deleteAnnouncementExemplarAction(id);
       if ("error" in result) {
-        setAnnError(result.error);
+        setExemplarError(result.error);
         return;
       }
-      setAnnTitle(result.title);
-      setAnnMessage(result.message);
-      setAnnArmedFor(null);
-      setPostedInfo(null);
-      setPostError(null);
-    } finally {
-      setAnnGenerating(false);
-    }
-  }, [selectedCourse, moduleLabel, effectiveOutline, notesText, provider]);
+      setSavedExemplars((prev) => (prev ?? []).filter((e) => e.id !== id));
+      setMostRecentExemplar((prev) => (prev?.id === id ? null : prev));
+      setRemoveArmedId(null);
+      // Reconcile any slot pointing at the deleted exemplar back to default.
+      for (const slot of slots) {
+        if (slot.choice.kind === "saved" && slot.choice.exemplarId === id) {
+          chooseTemplate(slot.id, { kind: "default" });
+        }
+      }
+    },
+    [slots, chooseTemplate]
+  );
 
   const handleGenerateScript = useCallback(async () => {
     setScriptGenerating(true);
@@ -485,40 +571,6 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       setScriptGenerating(false);
     }
   }, [selectedCourse, moduleLabel, notesText, provider]);
-
-  // --- Post (AC7, decision P1) -------------------------------------------------
-
-  const postSignature = courseId ? JSON.stringify(["walkthrough-announcement", courseId, annTitle, annMessage]) : null;
-  const postArmed = postSignature !== null && isConfirmArmed(annArmedFor, postSignature);
-  const POST_CONSEQUENCE_ID = "wta-post-confirm-consequence";
-
-  const commitPost = useCallback(async () => {
-    if (!selectedCourse) return;
-    setPosting(true);
-    setPostError(null);
-    const result = await postWalkthroughAnnouncementAction(
-      selectedCourse.canvasUrl,
-      annTitle,
-      annMessage,
-      selectedCourse.institution ?? undefined
-    );
-    setPosting(false);
-    if ("error" in result) {
-      setPostError(`Canvas refused the announcement - ${result.error}. Nothing was posted.`);
-      return;
-    }
-    setAnnArmedFor(null);
-    setPostedInfo({ course: selectedCourse.name });
-  }, [selectedCourse, annTitle, annMessage]);
-
-  const handlePostArm = useCallback(() => {
-    if (!postSignature) return;
-    if (postArmed) {
-      void commitPost();
-      return;
-    }
-    setAnnArmedFor(postSignature);
-  }, [postSignature, postArmed, commitPost]);
 
   return (
     <div className={styles.adaptPanel}>
@@ -597,7 +649,6 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           minRows={4}
           fullWidth
         />
-        {defaultExemplarHint && <p className={styles.fieldHint}>{defaultExemplarHint}</p>}
         <div className={styles.adaptRow}>
           <TextField
             size="small"
@@ -640,14 +691,20 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
               <div key={ex.id} className={styles.adaptRow}>
                 <Button
                   size="small"
-                  variant={pickedExemplarId === ex.id ? "contained" : "outlined"}
-                  onClick={() => {
-                    setPickedExemplarId(ex.id);
-                    setExemplarText("");
-                  }}
+                  variant="outlined"
+                  disabled={slots.length >= MAX_ANNOUNCEMENT_BATCH_SIZE}
+                  onClick={() =>
+                    addSlot({
+                      kind: "saved",
+                      exemplarId: ex.id,
+                      label: ex.label || new Date(ex.createdAt).toLocaleDateString(),
+                      outline: ex.outline,
+                    })
+                  }
                 >
-                  {ex.label || new Date(ex.createdAt).toLocaleDateString()}
+                  Add a draft from this
                 </Button>
+                <span className={styles.fieldHint}>{ex.label || new Date(ex.createdAt).toLocaleDateString()}</span>
                 <span className={styles.fieldHint}>{ex.exemplarPreview}</span>
                 <ConfirmArmButtons
                   armed={removeArmedId === ex.id}
@@ -731,12 +788,12 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           variant={variantFor(!capturing && hasMaterial)}
           color="primary"
           size="small"
-          loading={annGenerating}
+          loading={anyDrafting}
           loadingPosition="start"
-          disabled={capturing || extracting || !hasMaterial || annGenerating}
-          onClick={() => void handleGenerateAnnouncement()}
+          disabled={capturing || extracting || !hasMaterial || anyDrafting || savedExemplarsLoading || readyToDraftCount === 0}
+          onClick={() => generate()}
         >
-          {annGenerating ? "Generating…" : "Generate announcement"}
+          {anyDrafting ? "Generating…" : "Generate announcement"}
         </Button>
         <Button
           variant="outlined"
@@ -751,89 +808,48 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         </Button>
       </div>
       {!hasMaterial && <p className={styles.fieldHint}>Record and stop a walkthrough first - nothing has been read yet.</p>}
-
-      {/* AC7: the announcement draft, editable before it goes anywhere,
-          posted by a Post button - never automatically. */}
-      {(annError || annTitle || annMessage) && (
-        <fieldset className={controls.section}>
-          <legend className={controls.sectionLegend}>Announcement draft</legend>
-          {annError && (
-            <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
-              {annError}
-            </div>
-          )}
-          {(annTitle || annMessage) && (
-            <>
-              <TextField
-                size="small"
-                label="Subject"
-                value={annTitle}
-                onChange={(e) => {
-                  setAnnTitle(e.target.value);
-                  setAnnArmedFor(null);
-                }}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label="Message (Markdown)"
-                value={annMessage}
-                onChange={(e) => {
-                  setAnnMessage(e.target.value);
-                  setAnnArmedFor(null);
-                }}
-                multiline
-                minRows={6}
-                fullWidth
-              />
-              <p className={styles.fieldHint}>
-                Markdown formatting (##, -, numbered lists) becomes real headings and lists when posted - it is not
-                published as literal characters.
-              </p>
-
-              {postArmed && (
-                <div className={`${controls.notice} ${controls.noticeWarning}`}>
-                  <p id={POST_CONSEQUENCE_ID} role="status" aria-live="polite">
-                    Posting publishes this announcement to every student in {selectedCourse?.name ?? "the course"}{" "}
-                    immediately - Canvas has no unpublished state for an announcement - and this app cannot recall or
-                    delete it afterward.
-                  </p>
-                </div>
-              )}
-              {postError && (
-                <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
-                  {postError}
-                </div>
-              )}
-              <div className={`${styles.ghActions} ${controls.runRow}`}>
-                <ConfirmArmButtons
-                  armed={postArmed}
-                  idleLabel="Post to Canvas"
-                  confirmLabel="Confirm post"
-                  tone="primary"
-                  idleVariant="contained"
-                  loading={posting}
-                  loadingLabel="Posting…"
-                  disabled={!selectedCourse || !annTitle.trim() || !annMessage.trim()}
-                  onArm={handlePostArm}
-                  onConfirm={handlePostArm}
-                  onCancel={() => setAnnArmedFor(null)}
-                  consequenceId={POST_CONSEQUENCE_ID}
-                />
-                <Button size="small" variant="outlined" onClick={() => void navigator.clipboard.writeText(`${annTitle}\n\n${annMessage}`)}>
-                  Copy
-                </Button>
-              </div>
-              {!selectedCourse && <p className={styles.fieldHint}>Choose a course above to post to.</p>}
-              {postedInfo && (
-                <p role="status" aria-live="polite" className={styles.fieldHint}>
-                  Posted to {postedInfo.course}. Students can see it now.
-                </p>
-              )}
-            </>
-          )}
-        </fieldset>
+      {hasMaterial && readyToDraftCount === 0 && !anyDrafting && (
+        <p className={styles.fieldHint}>
+          Every draft slot already has a draft - add another slot, or use Regenerate on one.
+        </p>
       )}
+
+      {/* AC7/G2: one row per draft slot - always visible from mount, never
+          gated on a generated result the way the single-draft version was. */}
+      <fieldset className={controls.section}>
+        <legend className={controls.sectionLegend}>Announcement drafts</legend>
+        {slots.map((slot, index) => (
+          <AnnouncementDraftSlot
+            key={slot.id}
+            slot={slot}
+            ordinal={index + 1}
+            optionSource={optionSource}
+            onRetryOptions={savedExemplarsFailed ? () => void loadSavedExemplars() : null}
+            postArmed={isConfirmArmed(slot.postArmedFor, postSignatureFor(slot) ?? "")}
+            courseName={selectedCourse?.name ?? null}
+            canRemove={slots.length > 1}
+            onChooseTemplate={chooseTemplate}
+            onEdit={editSlot}
+            onRegenerateArm={armRegenerate}
+            onRegenerateConfirm={regenerate}
+            onRegenerateCancel={cancelRegenerate}
+            onPostArm={armPost}
+            onPostCancel={cancelPost}
+            onCopy={copySlot}
+            onRemove={removeSlot}
+          />
+        ))}
+        <div className={styles.ghActions}>
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={slots.length >= MAX_ANNOUNCEMENT_BATCH_SIZE}
+            onClick={() => addSlot({ kind: "default" })}
+          >
+            Add another draft slot
+          </Button>
+        </div>
+      </fieldset>
 
       {/* AC5: the video script - never posted, just read aloud while
           re-recording. */}

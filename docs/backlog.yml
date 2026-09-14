@@ -58,24 +58,6 @@
   instrument: 'Vercel function logs after the first timeout'
   from: 'c25bdec'
   note: ''
-- id: 'D1'
-  state: 'owner'
-  title: 'How should a researched resource link look to a student? An inline [label](url) sentence is the current default. A trailing "Related resources" LIST is ruled out: the zero-section branch of src/lib/walkthrough-announcement-prompt.ts forbids lists outright, so the presentation must be branch-independent or explicitly branch-aware. Why it is blocked: product judgment; changes what the architect designs.'
-  owns: []
-  verify: null
-  blocked_by: []
-  instrument: ''
-  from: ''
-  note: ''
-- id: 'D2'
-  state: 'owner'
-  title: 'Should a terse template stay terse? I ruled that the announcement floor (greeting, sign-off, one item per paragraph) outranks an exemplar carrying none, because "announcement-shaped by default" was the ask. It is a deliberate override of exemplar fidelity and it is reversible. Why it is blocked: a product call I made on the owner''s behalf.'
-  owns: []
-  verify: null
-  blocked_by: []
-  instrument: ''
-  from: ''
-  note: ''
 - id: 'N1'
   state: 'unscoped'
   title: 'Suggest-and-confirm roles for snapshot shots. Created by ruling H1-E. With H1 wave 1 removing the taught Read click, per-shot ROLE ARMING is the only remaining per-shot cost in the owner''s original complaint - the criteria banned inferring roles and used that ban to avoid touching arming. The ban on inferring from PIXELS stands and is correct: role is not a caption, it selects the prompt''s framing block, drives image-budget priority (snapshot-grade.ts:75), drives the Next-student keep/clear partition (snapshot-shot.ts:210) and drives missingRoles, so a mis-inference changes the score and the data lifecycle. The right shape is SUGGEST-AND-CONFIRM: the read pass already sends every shot to a vision model and returns per-shot results, and the tray already supports select-then-set re-roling, so a PROPOSED role the instructor confirms costs no extra model call and keeps role an instructor attribution. Do not build it blind.'
@@ -103,15 +85,6 @@
   instrument: ''
   from: 'docs/multi-user-login-acceptance-criteria.md A6'
   note: 'Its own wave (pre-migration Trigger column)'
-- id: 'G5'
-  state: 'owner'
-  title: 'What should Generate DO when clicked while the exemplar fetch has timed out? Created by ruling G1-D. Once G1 bounds the fetch, Generate re-enables with savedExemplars still null - so a click drafts with no format to match. The G1 criteria raised this and declined to answer it, which is legitimate, but it belongs in the queue rather than inside a criterion. Recommended default: draft anyway, with the draft slot stating plainly that no saved format was matched - consistent with the zero-area rubric precedent, where grading unpinned with honest copy beat blocking.'
-  owns: []
-  verify: null
-  blocked_by: []
-  instrument: 'Decide, then the G1 architect binds it. No repo-local measurement can settle a product question.'
-  from: 'ruling G1-D'
-  note: 'Do not let an implementer settle this by accident: with the eight consumers unfixed, that click drafts silently against a list the user was just told does not exist.'
 - id: 'G6'
   state: 'unscoped'
   title: 'Both announcement-exemplar actions return an EMPTY SUCCESS for a blank courseId, before querying. src/app/actions/walkthrough-announcement.ts:122 returns {exemplar: null} and :141 returns {exemplars: []}, each above its createServiceClient() call - so "I did not query" reaches the client in the same shape as "I queried and this course has none". That is the same false-claim family G1 exists to close, one layer deeper: the client cannot tell them apart no matter what state machine it runs, because the distinction is already gone at the boundary.'

@@ -20,11 +20,7 @@ _None._
 
 Never worked by an agent. Needs a human decision; the owner answers.
 
-| id | title | owns | verify | blocked_by | instrument | from | note |
-|---|---|---|---|---|---|---|---|
-| D1 | How should a researched resource link look to a student? An inline [label](url) sentence is the current default. A trailing "Related resources" LIST is ruled out: the zero-section branch of src/lib/walkthrough-announcement-prompt.ts forbids lists outright, so the presentation must be branch-independent or explicitly branch-aware. Why it is blocked: product judgment; changes what the architect designs. | - | - | - | - | - | - |
-| D2 | Should a terse template stay terse? I ruled that the announcement floor (greeting, sign-off, one item per paragraph) outranks an exemplar carrying none, because "announcement-shaped by default" was the ask. It is a deliberate override of exemplar fidelity and it is reversible. Why it is blocked: a product call I made on the owner's behalf. | - | - | - | - | - | - |
-| G5 | What should Generate DO when clicked while the exemplar fetch has timed out? Created by ruling G1-D. Once G1 bounds the fetch, Generate re-enables with savedExemplars still null - so a click drafts with no format to match. The G1 criteria raised this and declined to answer it, which is legitimate, but it belongs in the queue rather than inside a criterion. Recommended default: draft anyway, with the draft slot stating plainly that no saved format was matched - consistent with the zero-area rubric precedent, where grading unpinned with honest copy beat blocking. | - | - | - | Decide, then the G1 architect binds it. No repo-local measurement can settle a product question. | ruling G1-D | Do not let an implementer settle this by accident: with the eight consumers unfixed, that click drafts silently against a list the user was just told does not exist. |
+_None._
 
 ## Verification (owner)
 

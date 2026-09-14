@@ -303,3 +303,125 @@ describe("backlog 4.1: the panel actually mounts AnnouncementCourseFieldset, not
     expect(panelSource).toMatch(/researchOn=\{researchOn\}/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// G1: the saved-exemplar fetch is bounded (raceWithTimeout) at both call
+// sites, and the resulting SavedFormatsState reaches every render site
+// through the one shared savedFormatsStatusText function rather than each
+// caller deriving its own prose. Facts and wiring only, per this file's own
+// house rule (source-text assertions on exact prose have twice forced
+// contorted implementations in this repo) - never the sentences themselves.
+// ---------------------------------------------------------------------------
+
+describe("G1: both saved-exemplar fetch sites are bounded with raceWithTimeout", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it("imports raceWithTimeout from the shared bounded-race leaf", () => {
+    expect(panelSource).toMatch(/import\s*\{\s*raceWithTimeout\s*\}\s*from\s*"@\/lib\/bounded-race"/);
+  });
+
+  it("the mount effect's Promise.all(...) is passed to raceWithTimeout, not awaited directly", () => {
+    expect(panelSource).toMatch(/raceWithTimeout\(\s*Promise\.all\(/);
+  });
+
+  it("loadSavedExemplars's own single fetch is also passed to raceWithTimeout", () => {
+    const start = panelSource.indexOf("const loadSavedExemplars = useCallback");
+    expect(start, "expected to find loadSavedExemplars's own definition").toBeGreaterThan(-1);
+    const end = panelSource.indexOf("}, [courseId]);", start);
+    const body = panelSource.slice(start, end);
+    expect(body).toMatch(/raceWithTimeout\(\s*listAnnouncementExemplarsAction\(courseId\)/);
+  });
+
+  it("raceWithTimeout is bounded by the shared EXEMPLAR_FETCH_TIMEOUT_MS constant at both call sites, not a locally re-declared number", () => {
+    const occurrences = panelSource.match(/raceWithTimeout\([^;]*?EXEMPLAR_FETCH_TIMEOUT_MS/g) ?? [];
+    expect(occurrences.length).toBe(2);
+  });
+});
+
+describe("G1: every saved-formats render site derives its prose from savedFormatsStatusText, not its own string", () => {
+  const draftSlotSource = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+  const fieldsetSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementCourseFieldset.tsx"),
+    "utf-8"
+  );
+
+  it("AnnouncementDraftSlot.tsx imports savedFormatsStatusText and calls it", () => {
+    expect(draftSlotSource).toMatch(/import\s*\{[^}]*savedFormatsStatusText[^}]*\}\s*from\s*"\.\/announcement-draft-slots"/);
+    expect(draftSlotSource).toMatch(/savedFormatsStatusText\(/);
+  });
+
+  it("AnnouncementDraftSlot.tsx's saved-formats hint carries role=\"status\" aria-live=\"polite\", matching its siblings in this file", () => {
+    const callSite = draftSlotSource.indexOf("savedFormatsStatusText(");
+    expect(callSite, "expected to find the savedFormatsStatusText call").toBeGreaterThan(-1);
+    const nearby = draftSlotSource.slice(callSite, callSite + 600);
+    expect(nearby).toMatch(/role="status"/);
+    expect(nearby).toMatch(/aria-live="polite"/);
+  });
+
+  it("AnnouncementDraftSlot.tsx's Retry gate checks BOTH the failed and timedout states, not failed alone", () => {
+    const callSite = draftSlotSource.indexOf("savedFormatsStatusText(");
+    const nearby = draftSlotSource.slice(callSite, callSite + 600);
+    expect(nearby).toMatch(/"failed"/);
+    expect(nearby).toMatch(/"timedout"/);
+  });
+
+  it("AnnouncementCourseFieldset.tsx imports savedFormatsStatusText and calls it", () => {
+    expect(fieldsetSource).toMatch(/import\s*\{[^}]*savedFormatsStatusText[^}]*\}\s*from\s*"\.\/announcement-draft-slots"/);
+    expect(fieldsetSource).toMatch(/savedFormatsStatusText\(/);
+  });
+
+  it("AnnouncementCourseFieldset.tsx no longer reads a savedExemplarsLoading boolean prop - it takes the full SavedFormatsState", () => {
+    expect(fieldsetSource).not.toMatch(/savedExemplarsLoading/);
+    expect(fieldsetSource).toMatch(/savedFormatsState/);
+  });
+});
+
+describe("G1 task 8 canary: :830's Retry wiring is keyed to failed OR timedout, never failed alone", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it("onRetryOptions on <AnnouncementDraftSlot checks both savedFormatsState states, not just \"failed\"", () => {
+    const callSite = panelSource.indexOf("onRetryOptions=");
+    expect(callSite, "expected to find the onRetryOptions prop passed to AnnouncementDraftSlot").toBeGreaterThan(-1);
+    const nearby = panelSource.slice(callSite, callSite + 300);
+    expect(nearby).toMatch(/savedFormatsState === "failed"/);
+    expect(nearby).toMatch(/savedFormatsState === "timedout"/);
+  });
+});
+
+describe("G1: Generate's disable gate is keyed only to the loading state, so a timed-out fetch re-enables it", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it("Generate's disabled expression checks savedFormatsState === \"loading\", not \"failed\" or \"timedout\"", () => {
+    const start = panelSource.indexOf("disabled={");
+    const idx = panelSource.indexOf('savedFormatsState === "loading"');
+    expect(idx, "expected to find Generate's own loading check").toBeGreaterThan(start);
+    const nearby = panelSource.slice(idx - 200, idx + 50);
+    expect(nearby).not.toMatch(/savedFormatsState === "failed"/);
+    expect(nearby).not.toMatch(/savedFormatsState === "timedout"/);
+  });
+});
+
+describe("G1: the old savedExemplarsLoading/savedExemplarsFailed booleans are gone from the panel, not merely unused", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it("no useState binding named savedExemplarsLoading or savedExemplarsFailed remains", () => {
+    expect(panelSource).not.toMatch(/\[savedExemplarsLoading,/);
+    expect(panelSource).not.toMatch(/\[savedExemplarsFailed,/);
+  });
+
+  it("savedFormatsState is declared via useState<SavedFormatsState>", () => {
+    expect(panelSource).toMatch(/useState<SavedFormatsState>\("loaded"\)/);
+  });
+});

@@ -33,6 +33,7 @@
 // is safer than a whole screen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { raceWithTimeout } from "@/lib/bounded-race";
 import { Button, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
@@ -75,9 +76,11 @@ import AnnouncementCourseFieldset, {
   type WtaCourseOption,
 } from "./AnnouncementCourseFieldset";
 import {
+  EXEMPLAR_FETCH_TIMEOUT_MS,
   MAX_ANNOUNCEMENT_BATCH_SIZE,
   type ResearchNotice,
   type ResourceOutcome,
+  type SavedFormatsState,
   type TemplateCandidate,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
@@ -253,50 +256,70 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
 
   const [mostRecentExemplar, setMostRecentExemplar] = useState<AnnouncementExemplarSummary | null>(null);
   const [savedExemplars, setSavedExemplars] = useState<AnnouncementExemplarSummary[] | null>(null);
-  const [savedExemplarsLoading, setSavedExemplarsLoading] = useState(false);
-  const [savedExemplarsFailed, setSavedExemplarsFailed] = useState(false);
+  // G1: replaces the old savedExemplarsLoading/savedExemplarsFailed booleans
+  // (announcement-draft-slots.ts's own SavedFormatsState doc comment). Starts
+  // "loaded" to preserve today's behaviour exactly (both booleans used to
+  // start false) - "loaded with a null list and no course chosen" is an
+  // imprecise pre-existing representation of that idle state, left as-is
+  // this wave.
+  const [savedFormatsState, setSavedFormatsState] = useState<SavedFormatsState>("loaded");
   const [showExemplarPicker, setShowExemplarPicker] = useState(false);
   const [removeArmedId, setRemoveArmedId] = useState<string | null>(null);
 
   // AC1's default (most recent) AND (G2: every slot's dropdown needs the
   // full list up front) the full saved list, fetched eagerly together,
   // cancellation-guarded.
+  // Shared between this effect and loadSavedExemplars below - both fetch the
+  // same saved-exemplar list, and either can be in flight when the other
+  // starts (a course switch while the picker's own retry is in flight, or
+  // vice versa). One counter, bumped at the start of EITHER fetch, is what
+  // lets a stale resolution recognize itself as stale no matter which of the
+  // two started it (AccessibilityProvider.tsx's scanRunId/aborted idiom).
+  const savedListRunId = useRef(0);
+
   useEffect(() => {
-    let cancelled = false;
+    const runId = ++savedListRunId.current;
+    const stale = () => savedListRunId.current !== runId;
     // setState-in-effect idiom (see AGENTS.md/CLAUDE.md guidance and this
     // repo's own useCourseIntel.ts precedent): every setState below is
     // reached only after an await, never synchronously from the effect
     // body - eslint's react-hooks/set-state-in-effect rejects the latter.
     void (async () => {
       await Promise.resolve();
-      if (cancelled) return;
+      if (stale()) return;
       setMostRecentExemplar(null);
       setSavedExemplars(null);
-      setSavedExemplarsFailed(false);
+      setSavedFormatsState("loaded");
       setShowExemplarPicker(false);
-      if (!courseId) {
-        // Clear here, not after the await: a run that early-returns must not
-        // leave the flag true, which would permanently disable Generate.
-        setSavedExemplarsLoading(false);
+      if (!courseId) return;
+      setSavedFormatsState("loading");
+      // Bounded per G1: a hung fetch must not leave the picker waiting
+      // forever. Promise.race cannot cancel either promise below - only the
+      // caller's own wait - so a timeout here does not stop the request.
+      const outcome = await raceWithTimeout(
+        Promise.all([getMostRecentAnnouncementExemplarAction(courseId), listAnnouncementExemplarsAction(courseId)]),
+        EXEMPLAR_FETCH_TIMEOUT_MS
+      );
+      // Sequence-token guard, not the old local `cancelled` flag: a newer
+      // fetch (this effect re-running on another course switch, or the
+      // picker's own loadSavedExemplars) may already have written a fresher
+      // list by the time this one resolves. The concrete failure this
+      // closes: this fetch hangs, the instructor opens the picker and its
+      // own fetch resolves first, then saves a new exemplar (prepended onto
+      // that fresher list) - if this stale fetch were still allowed to
+      // write afterward, it would overwrite that list with its own
+      // pre-save snapshot and the new exemplar would silently vanish.
+      if (stale()) return;
+      if (outcome.kind === "timedout") {
+        setSavedFormatsState("timedout");
         return;
       }
-      setSavedExemplarsLoading(true);
-      const [mostRecentResult, listResult] = await Promise.all([
-        getMostRecentAnnouncementExemplarAction(courseId),
-        listAnnouncementExemplarsAction(courseId),
-      ]);
-      // Clear AFTER the cancellation check, never before it. Clearing first
-      // creates the inverse race: on a course switch, this run's resolution
-      // lands after the successor already set the flag true, and clears it
-      // while the successor is still in flight - so `savedLoading` reads
-      // false with `savedExemplars` reset to null, `optionsForSlot` sees
-      // listResolved, and a slot pointing at a saved exemplar is flagged
-      // "no longer available" while it is merely reloading. That is the
-      // exact fact this flag exists to separate. The stuck-true case the
-      // earlier comment worried about is handled at the `!courseId` early
-      // return above, which is the only path that skips this.
-      if (cancelled) return;
-      setSavedExemplarsLoading(false);
+      if (outcome.kind === "failed") {
+        setExemplarError(outcome.error instanceof Error ? outcome.error.message : "Could not load your saved formats.");
+        setSavedFormatsState("failed");
+        return;
+      }
+      const [mostRecentResult, listResult] = outcome.value;
       if ("error" in mostRecentResult) {
         setExemplarError(mostRecentResult.error);
       } else {
@@ -304,37 +327,68 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       }
       if ("error" in listResult) {
         setExemplarError(listResult.error);
-        setSavedExemplarsFailed(true);
+        setSavedFormatsState("failed");
       } else {
+        setExemplarError(null);
         setSavedExemplars(listResult.exemplars);
+        setSavedFormatsState("loaded");
       }
     })();
+    // Bump on unmount too. The counter alone only marks a run stale when
+    // ANOTHER fetch starts, so without this an in-flight fetch resolving
+    // after unmount would still run its setState calls - which the previous
+    // `cancelled` flag's cleanup did guard against. Bumping here restores
+    // that guard: React runs this cleanup before the next invocation, and
+    // that invocation captures its own id afterwards, so the extra bump
+    // never strands a live run.
     return () => {
-      cancelled = true;
+      savedListRunId.current += 1;
     };
   }, [courseId]);
 
   const loadSavedExemplars = useCallback(async () => {
     if (!courseId) return;
-    setSavedExemplarsLoading(true);
-    setSavedExemplarsFailed(false);
-    const result = await listAnnouncementExemplarsAction(courseId);
-    setSavedExemplarsLoading(false);
-    if ("error" in result) {
-      setExemplarError(result.error);
-      setSavedExemplarsFailed(true);
+    const runId = ++savedListRunId.current;
+    const stale = () => savedListRunId.current !== runId;
+    setSavedFormatsState("loading");
+    const outcome = await raceWithTimeout(listAnnouncementExemplarsAction(courseId), EXEMPLAR_FETCH_TIMEOUT_MS);
+    // Same sequence-token guard as the mount effect above, and the same
+    // reason: this call and that effect share one counter, so whichever
+    // started later wins and an earlier, now-stale resolution never
+    // overwrites it.
+    if (stale()) return;
+    if (outcome.kind === "timedout") {
+      setSavedFormatsState("timedout");
       return;
     }
+    if (outcome.kind === "failed") {
+      setExemplarError(outcome.error instanceof Error ? outcome.error.message : "Could not load your saved formats.");
+      setSavedFormatsState("failed");
+      return;
+    }
+    const result = outcome.value;
+    if ("error" in result) {
+      setExemplarError(result.error);
+      setSavedFormatsState("failed");
+      return;
+    }
+    setExemplarError(null);
     setSavedExemplars(result.exemplars);
+    setSavedFormatsState("loaded");
   }, [courseId]);
 
   const handleToggleExemplarPicker = useCallback(() => {
     setShowExemplarPicker((prev) => {
       const next = !prev;
-      if (next && savedExemplars === null) void loadSavedExemplars();
+      // State-aware, not "list is null": in the timed-out state
+      // savedExemplars is ALSO still null, so gating on nullness alone would
+      // spawn a fresh fetch on every picker open with no limit. Start one
+      // only when nothing is already in flight and the list is not already
+      // resolved - failed/timedout are exactly the states worth retrying.
+      if (next && savedFormatsState !== "loading" && savedFormatsState !== "loaded") void loadSavedExemplars();
       return next;
     });
-  }, [savedExemplars, loadSavedExemplars]);
+  }, [savedFormatsState, loadSavedExemplars]);
 
   const handleSaveExemplar = useCallback(async () => {
     if (!courseId || !exemplarText.trim()) return;
@@ -348,10 +402,18 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       return;
     }
     setSavedExemplars((prev) => (prev ? [result.exemplar, ...prev] : prev));
+    if (savedExemplars === null) {
+      // The list was never loaded (or is failed/timedout), so the prepend
+      // above was a no-op - the new exemplar would otherwise never appear in
+      // the picker. Fabricating a one-element list here would falsely claim
+      // this is the ONLY saved format rather than an unknown-sized list, so
+      // start a fresh bounded load instead and let it fetch the real thing.
+      void loadSavedExemplars();
+    }
     setMostRecentExemplar(result.exemplar);
     setExemplarLabel("");
     setExemplarSaved(true);
-  }, [courseId, exemplarText, exemplarLabel]);
+  }, [courseId, exemplarText, exemplarLabel, savedExemplars, loadSavedExemplars]);
 
   // P11/AC2: the outline a "pasted"/"default" choice reads (resolveLive
   // below) - per-slot precedence lives in resolveChoice, not here.
@@ -495,10 +557,9 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       saved: (savedExemplars ?? []).map(
         (e): TemplateCandidate => ({ id: e.id, label: e.label || new Date(e.createdAt).toLocaleDateString(), outline: e.outline })
       ),
-      savedLoading: savedExemplarsLoading,
-      savedFailed: savedExemplarsFailed,
+      savedState: savedFormatsState,
     }),
-    [exemplarText, mostRecentExemplar, savedExemplars, savedExemplarsLoading, savedExemplarsFailed]
+    [exemplarText, mostRecentExemplar, savedExemplars, savedFormatsState]
   );
 
   const buildRequest = useCallback((): AnnouncementDraftRequestContext => {
@@ -708,7 +769,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         exemplarError={exemplarError}
         showExemplarPicker={showExemplarPicker}
         onToggleExemplarPicker={handleToggleExemplarPicker}
-        savedExemplarsLoading={savedExemplarsLoading}
+        savedFormatsState={savedFormatsState}
         savedExemplars={savedExemplars}
         canAddSlotFromExemplar={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE}
         onAddSlotFromExemplar={(ex) =>
@@ -784,7 +845,12 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           size="small"
           loading={anyDrafting}
           loadingPosition="start"
-          disabled={capturing || extracting || !hasMaterial || anyDrafting || savedExemplarsLoading || readyToDraftCount === 0}
+          // Per the owner's recorded decision (G1): only the LOADING state
+          // gates Generate - a timed-out fetch re-enables it, so a click
+          // drafts anyway rather than waiting indefinitely on saved formats.
+          disabled={
+            capturing || extracting || !hasMaterial || anyDrafting || savedFormatsState === "loading" || readyToDraftCount === 0
+          }
           onClick={() => void generate()}
         >
           {anyDrafting ? "Generating…" : "Generate announcement"}
@@ -827,7 +893,13 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             slot={slot}
             ordinal={index + 1}
             optionSource={optionSource}
-            onRetryOptions={savedExemplarsFailed ? () => void loadSavedExemplars() : null}
+            /* Named canary (G1 task 8): keyed to BOTH failed and timedout,
+               never failed alone - a ternary keyed to failure only ships
+               Retry dead in the timed-out state, and vitest here renders no
+               component to catch that. */
+            onRetryOptions={
+              savedFormatsState === "failed" || savedFormatsState === "timedout" ? () => void loadSavedExemplars() : null
+            }
             postArmed={isConfirmArmed(slot.postArmedFor, postSignatureFor(slot) ?? "")}
             courseName={selectedCourse?.name ?? null}
             canRemove={slots.length > 1}

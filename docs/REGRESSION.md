@@ -41875,3 +41875,195 @@ Two design choices exist because a source-text assertion could not carry them:
 be written; and grading with NO rubric stays enabled, because a null-guard
 added "defensively" for that state would have silently disabled Grade for
 every instructor who does not use a rubric.
+
+## 415. G1: the exemplar fetch gets a bound, and four facts stop being two booleans
+
+Backlog G1. The Generate button could sit disabled with "Loading your saved
+formats..." on screen for an unbounded time, and the Retry affordance beside it
+was reachable only after a REJECTION - so a hang, which is not a rejection,
+had no recovery at all.
+
+**The premise in 413c was wrong and was corrected before this shipped
+(`86d9529`).** The Supabase QUERY is already bounded: `SERVER_FETCH_TIMEOUT_MS
+= 8_000` (`src/lib/supabase/server.ts:82`), `boundedFetch` wraps every fetch in
+`AbortSignal.timeout` (`:84-85`), and it is wired into `createServiceClient`
+(`:135-138`), which both exemplar actions use. That file's own comment block
+(`:45-80`) works out the compounding: postgrest-js retries a timed-out GET 3
+more times with 1s/2s/4s backoff, each attempt getting a fresh 8s signal, so
+the worst case is about 39s and then an ordinary `{data: null, error}`. What is
+genuinely unbounded is the CLIENT-to-SERVER-ACTION transport, which
+`boundedFetch` runs on the wrong side of, plus the platform ceiling that
+backlog G4 records as UNKNOWN.
+
+That correction is load-bearing, not cosmetic: the acceptance criteria's
+placeholder bound was 12,000 ms, which fires between the server's second and
+third attempt - telling the user we gave up while the query was about to
+succeed.
+
+### 415a - the acceptance criteria, as shipped
+
+- **AC-1** Both fetch sites route through one shared bound, not two ad hoc
+  `Promise.race` constructs. Sites: the mount effect's `Promise.all` of two
+  actions, and `loadSavedExemplars`'s single action.
+- **AC-2** The bound is provable with fake timers and zero real elapsed time.
+- **AC-3** "still loading", "loaded and genuinely empty", "failed" and "we
+  stopped waiting" render through ONE owned text function whose branches are
+  pairwise distinct - loaded-empty and timed-out especially, since one is a
+  completed fact and the other an open question.
+- **AC-4** Retry re-races a fresh promise and still calls ONE action. Making
+  it call both would be an unrequested behaviour change.
+- **AC-5** Generate's gate recovers within the bound. Per owner decision G5's
+  recorded default, a click in the timed-out state DRAFTS ANYWAY rather than
+  blocking.
+- **AC-6** The panel stays inside the 1000-line ceiling.
+- **AC-7** Nothing claims the underlying call was cancelled, aborted, or
+  stopped consuming quota. `Promise.race` cannot cancel the loser; the honest
+  fact is that the client stopped waiting.
+
+### 415b - what is measured true today
+
+All counts from PowerShell `@(Get-Content <path>).Count`, run at the wave gate:
+
+| file | lines |
+|---|---|
+| `src/lib/bounded-race.ts` | 75 |
+| `src/lib/bounded-race.test.ts` | 66 |
+| `announcement-draft-slots.ts` | 488 |
+| `announcement-draft-slots.test.ts` | 686 |
+| `WalkthroughAnnouncementPanel.tsx` | **975** (was 903) |
+| `AnnouncementDraftSlot.tsx` | 262 |
+| `AnnouncementCourseFieldset.tsx` | 258 |
+| `walkthrough-announcement.structure.test.ts` | 427 |
+
+- `LIMIT = 1000` at `src/file-size-ceiling.structure.test.ts:30`; the panel is
+  not in `ALLOWED_OVERAGE`. At 975 it has **25 lines of headroom** - the next
+  feature to touch it should expect to split it, and should size the split
+  against its own additions rather than against the ceiling.
+- `raceWithTimeout` bounds with `setTimeout`, NOT `AbortSignal.timeout`.
+  Measured this session with a control: under `vi.useFakeTimers()` plus
+  `advanceTimersByTimeAsync(20000)`, a `setTimeout` callback fires (control
+  passes) and an `AbortSignal.timeout(8000)` does NOT. So an
+  `AbortSignal`-based bound is untestable here, which is why the existing
+  `withDeadline` (`src/lib/course-intel/fetch.ts:316`) was NOT reused despite
+  being generic, exported and tested with 6 direct call sites.
+- `EXEMPLAR_FETCH_TIMEOUT_MS = 20_000`, derived in its own comment from the
+  8s/39s figures above: long enough to clear the common degraded case (8s
+  timeout, 1s backoff, second attempt succeeds, about 9s), short of the worst
+  case past which the query surfaces its own better error.
+- `TemplateOptionSource.savedLoading` and `.savedFailed` are GONE, replaced by
+  `savedState: SavedFormatsState` ("loading" | "loaded" | "failed" |
+  "timedout"). The two `useState` bindings behind them are gone too, which is
+  the part that matters - see 415c.
+- `listResolved` is now `src.savedState === "loaded"`. This is the line that
+  flags a slot "(no longer available)", a claim of DELETION, so that claim is
+  now reachable from exactly one state.
+- `savedFormatsStatusText(state, savedCount)` is exhaustive with a
+  `never`-typed default arm, and its strings are control-free: none names a
+  button, because one of its call sites has no Retry affordance and naming one
+  there would be false.
+
+### 415c - the enforcement mechanism, and why the obvious one does NOT work
+
+The design originally justified the breaking type change with "tsc becomes the
+enforcer - deleting the two interface fields errors at every consumer." **That
+was false and was disproved mechanically during review.** Two holes:
+
+- three consumers read the panel's own `useState` values and props, never
+  `TemplateOptionSource`, so deleting INTERFACE fields cannot error there;
+- the object is built inside `useMemo`, and inference through its generic drops
+  EXCESS-property checking, so a build keeping both stale booleans while adding
+  `savedState` compiles clean. (Confirmed from the other direction at the wave
+  gate: `tsc` reported `:485` as `TS2741 Property 'savedState' is missing`, a
+  MISSING-property error. Missing errors; excess does not.)
+
+What actually enforces it is cruder and stronger: **the two `useState`
+bindings were deleted, so every reader is a reference to a `const` that no
+longer exists.** That is a missing binding, not a type subtlety a generic can
+erase. `tsc` failed at five sites until all were converted.
+
+**If this is ever revisited**, the count is the thing to distrust. The number
+of readers of these signals went 1, then 6, then 7, then 8, then 9 across five
+separate readers looking hard - including one point where the queue's own note
+said "eight" while the design said "seven". No enumeration here proved
+trustworthy, which is the whole argument for the missing-binding construction
+over another careful list.
+
+### 415d - the concurrency fix, which closes a LIVE defect
+
+`loadSavedExemplars` had NO cancellation guard at all, and the mount effect's
+`cancelled` flag guarded only its own invocation - never a second, independent
+call racing it. Both were reachable simultaneously on `main`, because the
+"Browse saved exemplars" control (`AnnouncementCourseFieldset.tsx:176`, gated
+only on `!courseId`) fires `loadSavedExemplars` whenever `savedExemplars ===
+null`, which is exactly the state a hang leaves.
+
+The interleaving that lost data, constructed rather than asserted: mount fetch
+A hangs; the instructor opens the picker at t=2s and fetch B starts; B resolves
+`[X,Y]`; the instructor saves a new exemplar and it is prepended to `[Z,X,Y]`;
+A resolves at t=9s with its pre-Z snapshot and, `cancelled` being false,
+writes `[X,Y]`. Z vanishes from the picker and every slot dropdown with no
+error and no user action - and a slot pointing at Z then reads "(no longer
+available)", a deletion claim for a row that exists.
+
+Fixed with a SHARED `useRef` sequence token bumped at the start of either
+fetch, gating every `setState` after the await, following
+`AccessibilityProvider.tsx:143-165`'s `scanRunId`/`aborted()` idiom. The
+effect's cleanup also bumps it, which restores the unmount guard the old
+`cancelled` flag provided and which the first rewrite of this code silently
+dropped.
+
+**Refinement from verification, worth keeping because it is easy to get
+backwards.** That exact interleaving is reachable PRE-fix, which is what made
+it a live defect. Post-fix it is structurally unreachable, and not because of
+the sequence token - the state-aware picker-toggle predicate closes it, since
+the toggle no longer starts a fetch while one is in flight. The token is still
+required, and the verification pass had to construct a DIFFERENT reachable
+overlap to exercise it: `handleSaveExemplar`'s new null-list fallback (below)
+can itself start a `loadSavedExemplars` that overlaps an in-flight one. So the
+fix's own new recovery path is what keeps the token load-bearing. Anyone
+tempted to remove the token as redundant should re-read that: the predicate and
+the token close different doors.
+
+Also fixed in the same family: the picker-toggle predicate no longer starts a
+fetch when one is in flight or the list is already loaded (before the fix, the
+timed-out state left `savedExemplars` null, so every picker-open spawned
+another fetch without limit), and a successful save while the list is unknown
+now starts a fresh load instead of leaving the new exemplar invisible.
+
+### 415e - what today's tests will NOT notice
+
+No component is rendered by any test in this repo (vitest is node-env and
+collects only `src/**/*.test.ts`), so **everything about the rendered result
+is a reading claim**, verified by inspection and not by a passing suite:
+
+- whether the timed-out text actually appears at each render site;
+- whether Retry is really clickable in the timed-out state. This one needs TWO
+  places to agree - the panel's `onRetryOptions` value AND the slot's own gate
+  - and a build that fixes one and not the other ships Retry dead with every
+  gate green. Both were changed; a structure-test canary asserts the wiring is
+  not keyed to the failed state alone, which is source text, not behaviour.
+- the `role="status" aria-live="polite"` added to the draft-slot hint
+  paragraph, which its sibling paragraphs already had.
+
+The executable assertions that DO exist and can fail: the bound's fake-timer
+tests including a `vi.getTimerCount() === 0` leak control (proved by removing
+the `clearTimeout` and watching it go red), a computed pairwise-distinctness
+table over the status text, and a table asserting `unavailable` is true only
+for `"loaded"` (proved by treating `"timedout"` as resolved and watching two
+tests go red).
+
+### 415f - deliberately out of scope, recorded so it is a decision
+
+- **Backlog G6** (filed with this wave): both exemplar actions return an empty
+  SUCCESS for a blank `courseId` before querying
+  (`src/app/actions/walkthrough-announcement.ts:122,141`), so "I did not
+  query" is indistinguishable from "this course has none". Deferred because
+  reachability is unproven - the panel guards `!courseId`, so only a
+  whitespace-only id gets through - and because the fix changes two actions'
+  return unions.
+- `created_at` has no tiebreak column, so "newest first" is not a total order
+  on EITHER the mount path or the recovery path. An invented client-side
+  tiebreak was designed and then WITHDRAWN, because applying it to one path
+  only would have let a successful Retry silently rename the default format.
+- Whether 20s is too long to stare at a disabled button is an owner
+  preference, not a calibration.

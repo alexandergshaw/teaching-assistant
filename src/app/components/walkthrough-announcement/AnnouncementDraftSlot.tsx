@@ -22,6 +22,7 @@ import {
   choiceId,
   optionsForSlot,
   receiptLabel,
+  savedFormatsStatusText,
   type DraftSlot,
   type TemplateChoice,
   type TemplateOptionSource,
@@ -98,19 +99,28 @@ export default function AnnouncementDraftSlot({
         ))}
       </TextField>
 
-      {(optionSource.savedLoading || optionSource.savedFailed) && (
-        <p className={styles.fieldHint}>
-          {optionSource.savedLoading ? "Loading your saved formats..." : "Could not load your saved formats."}
-          {optionSource.savedFailed && onRetryOptions && (
-            <>
-              {" "}
-              <button type="button" className={styles.linkButton} onClick={onRetryOptions}>
-                Retry
-              </button>
-            </>
-          )}
-        </p>
-      )}
+      {(() => {
+        const statusText = savedFormatsStatusText(optionSource.savedState, optionSource.saved.length);
+        if (!statusText) return null;
+        // Retry must be reachable in the TIMED-OUT state too, not only after
+        // a rejection - a timeout is not a negative result (see
+        // savedFormatsStatusText's own doc comment), so it deserves the same
+        // way back in as an outright failure.
+        const canRetry = (optionSource.savedState === "failed" || optionSource.savedState === "timedout") && onRetryOptions;
+        return (
+          <p role="status" aria-live="polite" className={styles.fieldHint}>
+            {statusText}
+            {canRetry && (
+              <>
+                {" "}
+                <button type="button" className={styles.linkButton} onClick={onRetryOptions}>
+                  Retry
+                </button>
+              </>
+            )}
+          </p>
+        );
+      })()}
 
       {selectedOption.unavailable && (
         <p className={styles.fieldHint}>This format is no longer available - choose another before regenerating.</p>

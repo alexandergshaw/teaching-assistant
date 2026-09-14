@@ -13,6 +13,7 @@ import { describe, it, expect } from "vitest";
 import {
   MAX_ANNOUNCEMENT_BATCH_SIZE,
   FIRST_SLOT_ID,
+  EXEMPLAR_FETCH_TIMEOUT_MS,
   choiceId,
   builtFromId,
   defaultOptionLabel,
@@ -23,10 +24,12 @@ import {
   initialSlots,
   emptySlotIds,
   slotsReducer,
+  savedFormatsStatusText,
   type DraftSlot,
   type Drafted,
   type LiveDefaults,
   type TemplateOptionSource,
+  type SavedFormatsState,
   type SlotsAction,
 } from "./announcement-draft-slots";
 import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline } from "@/lib/announcement-outline-types";
@@ -50,9 +53,14 @@ const SRC_EMPTY: TemplateOptionSource = {
   hasPastedText: false,
   mostRecent: null,
   saved: [],
-  savedLoading: false,
-  savedFailed: false,
+  savedState: "loaded",
 };
+
+// G1: the four SavedFormatsState members. Every table test below is built
+// by iterating THIS array (never a hand-listed set of assertions), so a
+// fifth member added to the source type only needs adding here once for
+// every such table test to pick it up.
+const ALL_SAVED_FORMATS_STATES: readonly SavedFormatsState[] = ["loading", "loaded", "failed", "timedout"];
 
 describe("initialSlots / makeSlot / emptySlotIds", () => {
   it("initialSlots returns exactly one slot, choice default, phase empty", () => {
@@ -78,13 +86,18 @@ describe("choiceId / builtFromId / defaultOptionLabel / receiptLabel", () => {
     expect(builtFromId({ kind: "none" })).toBe("none");
   });
 
-  it("defaultOptionLabel prefers pasted, then loading, then most-recent, then none", () => {
+  it("defaultOptionLabel prefers pasted, then loading, then most-recent, then loaded-empty", () => {
     expect(defaultOptionLabel({ ...SRC_EMPTY, hasPastedText: true })).toMatch(/pasted above/);
-    expect(defaultOptionLabel({ ...SRC_EMPTY, savedLoading: true })).toMatch(/checking/);
+    expect(defaultOptionLabel({ ...SRC_EMPTY, savedState: "loading" })).toMatch(/checking/);
     expect(defaultOptionLabel({ ...SRC_EMPTY, mostRecent: { id: "e1", label: "Week 3 kickoff", outline: OUTLINE_A } })).toMatch(
       /Week 3 kickoff/
     );
     expect(defaultOptionLabel(SRC_EMPTY)).toMatch(/no saved format yet/);
+  });
+
+  it("G1: defaultOptionLabel does not say 'no saved format yet' when failed or timedout - the fetch never determined whether a format exists", () => {
+    expect(defaultOptionLabel({ ...SRC_EMPTY, savedState: "failed" })).not.toMatch(/no saved format yet/);
+    expect(defaultOptionLabel({ ...SRC_EMPTY, savedState: "timedout" })).not.toMatch(/no saved format yet/);
   });
 
   it("receiptLabel names the built-from template", () => {
@@ -156,7 +169,7 @@ describe("optionsForSlot - Set G", () => {
 
   it("POSITIVE case (relocated obligation 1): a saved choice absent from a SUCCESSFULLY loaded list is flagged unavailable: true", () => {
     const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
-    const src: TemplateOptionSource = { ...SRC_EMPTY, savedLoading: false, savedFailed: false, saved: [] };
+    const src: TemplateOptionSource = { ...SRC_EMPTY, savedState: "loaded", saved: [] };
     const options = optionsForSlot(slot, src);
     const synthetic = options.find((o) => o.id === choiceId(slot.choice));
     expect(synthetic).toBeDefined();
@@ -168,16 +181,32 @@ describe("optionsForSlot - Set G", () => {
 
   it("NEGATIVE case: the same absent saved choice is NOT unavailable while the list is still loading", () => {
     const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
-    const options = optionsForSlot(slot, { ...SRC_EMPTY, savedLoading: true });
+    const options = optionsForSlot(slot, { ...SRC_EMPTY, savedState: "loading" });
     const synthetic = options.find((o) => o.id === choiceId(slot.choice));
     expect(synthetic?.unavailable).toBe(false);
   });
 
   it("NEGATIVE case: the same absent saved choice is NOT unavailable when the list failed to load", () => {
     const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
-    const options = optionsForSlot(slot, { ...SRC_EMPTY, savedFailed: true });
+    const options = optionsForSlot(slot, { ...SRC_EMPTY, savedState: "failed" });
     const synthetic = options.find((o) => o.id === choiceId(slot.choice));
     expect(synthetic?.unavailable).toBe(false);
+  });
+
+  it("G1 NEGATIVE case: the same absent saved choice is NOT unavailable after the fetch timed out - a timeout proves nothing about whether the format still exists", () => {
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
+    const options = optionsForSlot(slot, { ...SRC_EMPTY, savedState: "timedout" });
+    const synthetic = options.find((o) => o.id === choiceId(slot.choice));
+    expect(synthetic?.unavailable).toBe(false);
+  });
+
+  it("G1 table: unavailable is true only for 'loaded', false for every other SavedFormatsState, for a saved choice absent from the list", () => {
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
+    for (const state of ALL_SAVED_FORMATS_STATES) {
+      const options = optionsForSlot(slot, { ...SRC_EMPTY, savedState: state });
+      const synthetic = options.find((o) => o.id === choiceId(slot.choice));
+      expect(synthetic?.unavailable, `state=${state}`).toBe(state === "loaded");
+    }
   });
 
   it("does not synthesize an extra option when the saved choice IS present in src.saved", () => {
@@ -554,6 +583,79 @@ describe("escapeForCopyTitle", () => {
 
   it("leaves a plain title untouched", () => {
     expect(escapeForCopyTitle("Week 3 kickoff")).toBe("Week 3 kickoff");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1 - savedFormatsStatusText, EXEMPLAR_FETCH_TIMEOUT_MS.
+// ---------------------------------------------------------------------------
+
+describe("EXEMPLAR_FETCH_TIMEOUT_MS", () => {
+  it("is 20 seconds - short of the ~39s worst case in supabase/server.ts, past the common 8s-timeout-then-1s-backoff-retry case", () => {
+    expect(EXEMPLAR_FETCH_TIMEOUT_MS).toBe(20_000);
+  });
+});
+
+describe("savedFormatsStatusText - G1", () => {
+  it("returns null only for loaded with a non-empty list", () => {
+    expect(savedFormatsStatusText("loaded", 3)).toBeNull();
+    for (const state of ALL_SAVED_FORMATS_STATES) {
+      if (state === "loaded") continue;
+      expect(savedFormatsStatusText(state, 3), `state=${state}`).not.toBeNull();
+    }
+    expect(savedFormatsStatusText("loaded", 0)).not.toBeNull();
+  });
+
+  it("keeps the two existing strings byte-for-byte", () => {
+    expect(savedFormatsStatusText("loading", 0)).toBe("Loading your saved formats...");
+    expect(savedFormatsStatusText("failed", 0)).toBe("Could not load your saved formats.");
+  });
+
+  it("the timedout string never claims the fetch failed, was cancelled, was aborted, or stopped running", () => {
+    const text = savedFormatsStatusText("timedout", 0);
+    expect(text).not.toBeNull();
+    const lower = (text ?? "").toLowerCase();
+    expect(lower).not.toMatch(/fail/);
+    expect(lower).not.toMatch(/cancel/);
+    expect(lower).not.toMatch(/abort/);
+    expect(lower).not.toMatch(/stopped/);
+  });
+
+  it("no branch names a button - control-free", () => {
+    for (const state of ALL_SAVED_FORMATS_STATES) {
+      const text = savedFormatsStatusText(state, 0);
+      if (text === null) continue;
+      const lower = text.toLowerCase();
+      expect(lower, `state=${state}`).not.toMatch(/retry/);
+      expect(lower, `state=${state}`).not.toMatch(/generate/);
+    }
+  });
+
+  it("table: every branch's non-null text is pairwise distinct from every other branch's, including loaded-empty vs timedout specifically", () => {
+    // Computed, not hand-listed: one representative case per
+    // SavedFormatsState member (savedCount 0, the only count that can yield
+    // non-null text for "loaded"), then every pair of distinct states is
+    // asserted to produce distinct text. A fifth SavedFormatsState member
+    // added to ALL_SAVED_FORMATS_STATES above is automatically included
+    // here, so a future added branch stays covered without editing this
+    // test.
+    const cases = ALL_SAVED_FORMATS_STATES.map((state) => ({ state, text: savedFormatsStatusText(state, 0) })).filter(
+      (c): c is { state: SavedFormatsState; text: string } => c.text !== null
+    );
+    // Sanity: this table must actually contain both "loaded" (loaded-empty)
+    // and "timedout" - otherwise the pairwise loop below would vacuously
+    // pass without ever comparing the pair this item exists to separate.
+    expect(cases.some((c) => c.state === "loaded")).toBe(true);
+    expect(cases.some((c) => c.state === "timedout")).toBe(true);
+    for (let i = 0; i < cases.length; i++) {
+      for (let j = i + 1; j < cases.length; j++) {
+        expect(cases[i].text, `${cases[i].state} vs ${cases[j].state}`).not.toBe(cases[j].text);
+      }
+    }
+  });
+
+  it("loaded-empty and timedout are distinct specifically", () => {
+    expect(savedFormatsStatusText("loaded", 0)).not.toBe(savedFormatsStatusText("timedout", 0));
   });
 });
 

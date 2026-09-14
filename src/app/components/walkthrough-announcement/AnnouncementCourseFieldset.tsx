@@ -19,6 +19,7 @@ import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
+import { savedFormatsStatusText, type SavedFormatsState } from "./announcement-draft-slots";
 
 export interface AnnouncementExemplarSummary {
   id: string;
@@ -54,7 +55,7 @@ export interface AnnouncementCourseFieldsetProps {
 
   readonly showExemplarPicker: boolean;
   readonly onToggleExemplarPicker: () => void;
-  readonly savedExemplarsLoading: boolean;
+  readonly savedFormatsState: SavedFormatsState;
   readonly savedExemplars: readonly AnnouncementExemplarSummary[] | null;
   readonly canAddSlotFromExemplar: boolean;
   readonly onAddSlotFromExemplar: (exemplar: AnnouncementExemplarSummary) => void;
@@ -94,7 +95,7 @@ export default function AnnouncementCourseFieldset({
   exemplarError,
   showExemplarPicker,
   onToggleExemplarPicker,
-  savedExemplarsLoading,
+  savedFormatsState,
   savedExemplars,
   canAddSlotFromExemplar,
   onAddSlotFromExemplar,
@@ -186,10 +187,15 @@ export default function AnnouncementCourseFieldset({
 
       {showExemplarPicker && (
         <div className={controls.stack}>
-          {savedExemplarsLoading && <p className={styles.fieldHint}>Loading…</p>}
-          {!savedExemplarsLoading && (savedExemplars ?? []).length === 0 && (
-            <p className={styles.fieldHint}>No saved exemplars for this course yet.</p>
-          )}
+          {/* G1: reads the state directly rather than a loading boolean - a
+              timed-out fetch is NOT "loaded and empty" (that would falsely
+              claim the course has no saved exemplars when the fetch never
+              determined that), so this must distinguish the four states, not
+              collapse timedout/failed into "not loading". */}
+          {(() => {
+            const statusText = savedFormatsStatusText(savedFormatsState, (savedExemplars ?? []).length);
+            return statusText ? <p className={styles.fieldHint}>{statusText}</p> : null;
+          })()}
           {(savedExemplars ?? []).map((ex) => (
             <div key={ex.id} className={styles.adaptRow}>
               <Button

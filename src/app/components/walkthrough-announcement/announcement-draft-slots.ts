@@ -99,12 +99,43 @@ export interface TemplateCandidate {
   readonly outline: AnnouncementOutline;
 }
 
+/**
+ * G1: the four - and only four - facts a saved-exemplar fetch can leave us
+ * in. Deliberately NOT five: "loaded and the list happens to be empty" is
+ * not a distinct state here, it is `"loaded"` with `saved.length === 0` -
+ * emptiness is derived from the list, never carried as its own member,
+ * because a fifth member would give `optionsForSlot`'s `listResolved` check
+ * (below) a second value to treat as resolved and reopen exactly the bug
+ * this type exists to close.
+ */
+export type SavedFormatsState = "loading" | "loaded" | "failed" | "timedout";
+
+/**
+ * G1: how long `AnnouncementDraftSlot.tsx` waits on the saved-exemplar fetch
+ * (via `bounded-race.ts`) before moving the slot to `"timedout"` and letting
+ * the instructor proceed without saved formats. NOT the 60s Vercel function
+ * ceiling - that figure was struck down for this surface by a prior ruling,
+ * and G4 records it as UNKNOWN, not as a bound this file may cite.
+ *
+ * The number comes from `src/lib/supabase/server.ts:82`'s own
+ * `SERVER_FETCH_TIMEOUT_MS = 8_000` and that file's comment block
+ * (`:45-80`): a timed-out `.select()` (a GET) is NOT aborted, it is retried
+ * by postgrest-js up to 3 more times with 1s/2s/4s backoff sleeps between
+ * attempts, each retry getting its own fresh 8s bound - worst case near 39s
+ * before the query itself ever resolves with an error. 20s is deliberately
+ * short of that worst case (past which the query surfaces its own, better
+ * error) but long enough to clear the COMMON degraded case: one 8s timeout,
+ * a 1s backoff, and a second attempt that succeeds - roughly 9s. Waiting
+ * past 20s buys nothing an instructor would notice; giving up before ~9s
+ * would abandon a fetch that was about to succeed on its own.
+ */
+export const EXEMPLAR_FETCH_TIMEOUT_MS = 20_000;
+
 export interface TemplateOptionSource {
   readonly hasPastedText: boolean;
   readonly mostRecent: TemplateCandidate | null;
   readonly saved: readonly TemplateCandidate[];
-  readonly savedLoading: boolean;
-  readonly savedFailed: boolean;
+  readonly savedState: SavedFormatsState;
 }
 
 export interface TemplateOption {
@@ -126,9 +157,53 @@ export function builtFromId(t: ResolvedTemplate): string {
 
 export function defaultOptionLabel(src: TemplateOptionSource): string {
   if (src.hasPastedText) return "Default - the announcement pasted above";
-  if (src.savedLoading) return "Default - checking your saved formats...";
+  if (src.savedState === "loading") return "Default - checking your saved formats...";
   if (src.mostRecent) return `Default - your most recent ("${src.mostRecent.label}")`;
-  return "Default - no saved format yet";
+  if (src.savedState === "loaded") return "Default - no saved format yet";
+  // G1: "failed" or "timedout" - the fetch never determined whether a saved
+  // format exists (a timeout in particular is not a negative result, see
+  // EXEMPLAR_FETCH_TIMEOUT_MS above), so claiming "no saved format yet" here
+  // would be a false claim of absence. The reason itself is surfaced by
+  // savedFormatsStatusText at the call site's own banner, not repeated here.
+  return "Default - your saved formats";
+}
+
+/**
+ * G1: the one line of prose (or nothing) a call site shows above/near the
+ * saved-format picker for a given `SavedFormatsState`. Modeled on
+ * `resourceSearchOutcomeText` in `src/lib/resource-search-outcome.ts` - an
+ * exhaustive switch over a closed set of states, each arm returning a fixed,
+ * control-free sentence (never naming a button: one caller of this function
+ * has no Retry affordance to name, so naming one anywhere here would be a
+ * false statement at that site).
+ *
+ * Returns `null` for the one case with nothing to say: loaded, with at
+ * least one saved format. Every other branch returns a string, and every
+ * returned string is pairwise distinct from every other - most importantly
+ * "loaded but empty" and "timedout", which must never collapse into the
+ * same sentence: one is a completed fact (no saved formats exist), the
+ * other is an open question (we stopped waiting; the server may still
+ * answer). See announcement-draft-slots.test.ts for the exhaustive
+ * pairwise-distinctness check.
+ */
+export function savedFormatsStatusText(state: SavedFormatsState, savedCount: number): string | null {
+  switch (state) {
+    case "loading":
+      return "Loading your saved formats...";
+    case "loaded":
+      return savedCount > 0 ? null : "You have no saved formats yet.";
+    case "failed":
+      return "Could not load your saved formats.";
+    case "timedout":
+      // Promise.race cannot cancel the losing fetch - it is still running
+      // on the server. "Failed", "cancelled" and "stopped" would all be
+      // false statements; the honest fact is only that we stopped waiting.
+      return "This is taking longer than expected. Your saved formats may still be on their way.";
+    default: {
+      const exhaustive: never = state;
+      return exhaustive;
+    }
+  }
 }
 
 export function receiptLabel(t: ResolvedTemplate): string {
@@ -148,14 +223,16 @@ export function receiptLabel(t: ResolvedTemplate): string {
  * dropdown would show one format while `resolveChoice` drafts from another.
  *
  * `unavailable` is computed true for a `saved` choice absent from
- * `src.saved` ONLY once the saved-exemplar list finished loading
- * successfully (`!src.savedLoading && !src.savedFailed`) - "deleted," "not
- * loaded yet" and "failed to load" are three different facts, and only the
- * first one may claim the format is gone. While loading or after a failed
- * load, the synthetic option is still built (from the slot's own carried
- * label/outline, so the current value is never missing from the option
- * list) but flagged `unavailable: false` - the loading/failed window is
- * covered by the caller's own banner, not by this flag. For a `pasted`
+ * `src.saved` ONLY when `src.savedState === "loaded"` - "deleted," "not
+ * loaded yet," "failed to load" and (G1) "gave up waiting" are FOUR
+ * different facts, and only the first one may claim the format is gone.
+ * While loading, after a failed load, or after a timeout, the synthetic
+ * option is still built (from the slot's own carried label/outline, so the
+ * current value is never missing from the option list) but flagged
+ * `unavailable: false` - a timeout in particular proves nothing about
+ * whether the format still exists, so it must not be treated as
+ * resolved. That loading/failed/timedout window is covered by the caller's
+ * own banner (via `savedFormatsStatusText`), not by this flag. For a `pasted`
  * choice with the paste box now empty (`!src.hasPastedText`), there is no
  * equivalent loading/failed window - the paste box is either populated or
  * not, synchronously - so that synthetic option is always flagged
@@ -186,7 +263,7 @@ export function optionsForSlot(slot: DraftSlot, src: TemplateOptionSource): read
   const currentId = choiceId(slot.choice);
   if (!options.some((o) => o.id === currentId)) {
     if (slot.choice.kind === "saved") {
-      const listResolved = !src.savedLoading && !src.savedFailed;
+      const listResolved = src.savedState === "loaded";
       options.push({
         id: currentId,
         label: slot.choice.label,

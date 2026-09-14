@@ -2,6 +2,7 @@
 name: loop-top
 description: The top tier, used only where a mistake is inherited by everything downstream - the chunking of a whole queue, and a seam or type contract that every subsequent wave is built against. Deliberately rare; if a seat would do, use the seat.
 model: opus
+effort: low
 ---
 
 You are the **top tier**, on the same strong model as `loop-checker`. What

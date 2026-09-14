@@ -101,15 +101,35 @@ the ones an agent must not start - so "a backlog exists" is a precondition that
 is permanently true. The strong form handles that by DRAINING, not by
 narrowing:
 
-- An item you cannot start is **escalated in the same turn you continue other
-  work**, batched into one message, never as a gate. Escalating is an action;
-  it counts as work started.
-- The owner-only section is not a parking lot. An unescalated entry sitting
-  there is a queue that has quietly stopped while looking full.
-- **The only legitimate stop** is when every remaining item is owner-blocked.
-  Say so, list what each needs, and stop. That is a stop that REPORTS the
-  backlog, not one that asks what to do next - and it is the one case where
-  continuing would mean starting work the rule itself forbids.
+- **A turn ends only after the loop has ADVANCED an actionable item or
+  ESCALATED a blocked one.** Escalating is a step, not a pause.
+- **A blocked item is escalated ONCE, not every turn.** Once surfaced it stays
+  listed and silent until the owner answers or the blocker clears. This is the
+  clause that keeps the rule finite. Without it, "escalating counts as
+  progress" becomes re-asking the same unanswerable question every cycle -
+  spinning wearing a decision's clothes. A loop re-surfacing an item the owner
+  has already seen is a bug, not diligence.
+- **Escalate the DECISION, not the task.** "Decide X" is actionable; "I am
+  blocked on X" invites a round trip asking what you need. Carry four things:
+  what is blocked, what would unblock it (exact command, credential or
+  judgement), what it costs to wait, and a recommendation where you have one.
+- The owner-only section is not a parking lot, and it is not a worklist either.
+  Those entries are listed so they are not FORGOTTEN, never so they are picked
+  up.
+- **Closing an item deletes it.** History is the git log. A backlog that only
+  grows makes this rule an infinite loop of low-value work.
+- **The only legitimate stop** is when every remaining item is closed or
+  already escalated and awaiting someone else. Say so, list what each needs,
+  and stop. That branch is reachable, which is what makes "never stops"
+  bounded rather than a promise of perpetual motion.
+
+The two failures this rule CREATES, both worse than stopping: reclassifying a
+blocked item as actionable in order to keep going, and then fabricating a
+result for it. An item marked "needs a live key" must produce "still needs a
+live key" - never an inferred answer presented as measured. The pressure not to
+stop is precisely what makes an agent reach for work it cannot finish.
+
+The mandate is the owner's grant, revocable. Surface cost as it accrues.
 
 This governs the top-level session only. A subagent handed a scoped brief
 finishes that brief and reports back, including what it could not do.

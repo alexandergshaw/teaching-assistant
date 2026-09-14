@@ -9,6 +9,7 @@ the orchestrator's output is the most expensive text in the system.
 | `docs/loop/this-repo.md` | The measured facts: gate commands and what passing looks like, test framework and its hard limits, the structural gates that turn an innocuous change red, shell quirks, what cannot be verified here at all, tier-to-model mapping and cost |
 | `docs/loop/seats.md` | Per-seat briefs: what each seat produces and what its checker must ask |
 | `docs/loop/wave-dispatch.md` | Which seats run in which dependency wave, why fanning all of them out at once duplicates work, and what sequencing does and does not cost |
+| `docs/loop/parallel-disjointness.md` | When two items may run SIMULTANEOUSLY: file-set disjointness computed rather than eyeballed, informational independence, the 2-3 cap, and the shared resources that no file list shows |
 | `docs/loop/iteration-caps.md` | How many rounds an artifact gets, the four legal disposals, the checker output contract, the anti-gaming rules |
 | `docs/loop/traps-tests.md` | Tests and mutation |
 | `docs/loop/traps-spec.md` | Specification and measurement |
@@ -181,14 +182,41 @@ nothing in the suite reads `docs/`.
   entries are exactly the ones an agent must NOT start. So the rule resolves
   that tension by DRAINING rather than stopping:
 
-  - An item you cannot start is **escalated in the same turn you continue
-    other work** - batched into one message, never as a gate.
-  - The owner-only section is not a parking lot. An entry sitting there that
-    nobody has escalated is a queue that has quietly stopped.
-  - **The one legitimate stop** is when every remaining item is owner-blocked.
-    Then say so plainly, list what each one needs, and stop - continuing would
-    mean starting work the rule forbids. That is a stop WITH the backlog
-    reported, not a stop asking what to do next.
+  - **A turn ends only after the loop has either ADVANCED an actionable item
+    or ESCALATED a blocked one.** Escalating is a step, not a pause - that is
+    what lets the rule bind the whole file instead of a favoured section.
+  - **A blocked item is escalated ONCE, not every turn.** Once surfaced it
+    stays listed and silent until the owner answers or the blocker clears.
+    This clause is what keeps the rule FINITE: without it, "escalating counts
+    as progress" degenerates into re-asking the same unanswerable question
+    every cycle - spinning wearing a decision's clothes, and more annoying
+    than silence. If you catch the loop re-surfacing an item the owner has
+    already seen, that is the bug.
+  - **Owner-only items are listed so they are not forgotten, never so they are
+    picked up.** The backlog says this in its own text, because an agent
+    reading a list of open items will otherwise reasonably try to close them.
+  - **Escalate the DECISION, not the task.** "I need you to decide X" is
+    actionable; "I am blocked on X" invites a round trip asking what you need.
+    A good escalation carries four things: what is blocked, what would unblock
+    it (the exact command, credential or judgement), what it costs to leave it,
+    and a recommendation where you legitimately have one.
+  - **Closing an item DELETES it.** History lives in the git log, not in the
+    file. A backlog that only ever grows turns this rule into an infinite loop
+    of low-value work.
+  - **The one legitimate stop** is when every remaining item is either closed
+    or already escalated and awaiting someone else. Say so, list what each one
+    needs, and stop. That branch is reachable, and it is what makes "never
+    stops" a bounded rule rather than a promise of an infinite loop.
+
+  Two failures this rule creates if applied carelessly, both worse than
+  stopping: **reclassifying a blocked item as actionable** to keep going, and
+  then **fabricating a result for it**. An item marked "needs a live key" must
+  produce "still needs a live key", never an inferred answer presented as
+  measured. The pressure not to stop is exactly what makes an agent reach for
+  work it cannot finish.
+
+  The never-stop mandate is the owner's grant and is revocable. Surface cost as
+  it accrues rather than presenting a total at the end.
 
   Details and the failure behind it in `traps-orchestration.md`.
 - **Disjoint backlog items are worked SIMULTANEOUSLY, not in sequence.**
@@ -197,18 +225,28 @@ nothing in the suite reads `docs/`.
   turn. Standing consent; do not ask. "The current chunk is mid-flight" is a
   reason to check disjointness, never a reason to idle a second item.
 
-  Disjointness is measured in FILES, not in topics. Two items that both "touch
-  the announcement feature" may be disjoint; two that both edit one CSS module
-  are not, however unrelated they sound. Before dispatching, list each item's
-  file set and confirm the intersection is empty - and remember a wave dispatched
-  LATER in the same chunk may claim a file, so check planned waves too, not just
-  running ones.
+  **What "disjoint" means is stricter than the word sounds, and
+  `parallel-disjointness.md` is the authority.** Two items may run together
+  only if they are disjoint in BOTH senses: their file sets do not intersect,
+  AND neither establishes a fact the other designs against. An item's file set
+  is **the files it edits PLUS the tests asserting on the behaviour it
+  changes** - a one-line change to a shared helper edits one file and can break
+  forty. Intersect the sets mechanically (`sort | uniq -d`) and paste the
+  output; empty is the only pass. Pair every search with a canary, because
+  `grep -P` is broken here and reports clean without checking.
+
+  **Cap a wave at 2-3 items.** Beyond that they rediscover each other's
+  findings; this repo's own four-seat fan-out produced two internally-sound
+  design passes that directly contradicted each other.
 
   The gate is unchanged and non-negotiable: each agent gets an explicit file
   list, and `git status --short` is checked against it. Concurrency is what
   makes an over-reaching agent expensive - one agent outside its list can
-  revert a sibling's work - so the narrower the lists, the safer the parallelism.
-  Never `git stash` under concurrency: it reverts every sibling's files.
+  revert a sibling's work. Also shared, and not visible in any file list:
+  `npx tsc --noEmit` has ONE caller (it races on `tsconfig.tsbuildinfo`), no
+  two agents may sabotage-verify on the tree at once, `git stash` reverts every
+  sibling's files, and `docs/BACKLOG.md` is a file like any other - if an agent
+  may write it, the orchestrator may not, in that window.
 - **The backlog is the queue, not a diary.** It records what is OWED and by
   whom, never what happened - `docs/REGRESSION.md` holds behaviour and the git
   log holds history. The instance behind this rule: the first version of

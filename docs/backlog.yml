@@ -121,15 +121,15 @@
   instrument: ''
   from: 'docs/multi-user-login-acceptance-criteria.md A6'
   note: 'Its own wave (pre-migration Trigger column)'
-- id: 'R3'
-  state: 'actionable'
-  title: 'First wave of R2: reclassify the media-file cohort from requireOwner() to requireAppOwner(). These four files are the one cohort where call-site and resource-level assertion coincide, because no deeper layer exists to assert at - so this does NOT contradict the architecture doc RESOLVED 3 / SUPERSEDES decision that rejected per-call-site classification for the Canvas/GitHub cohort. Split out by orchestrator ruling so the judgment-heavy remainder stays in R2.'
-  owns: ['src/app/actions/media.ts', 'src/app/actions/media-voice.ts', 'src/app/actions/media-avatar.ts', 'src/app/actions/media-likeness.ts', 'src/app/actions/action-guard-coverage.test.ts']
-  verify: 'npx vitest run src/app/actions/action-guard-coverage.test.ts -t "media actions are owner-only"'
+- id: 'V7'
+  state: 'verification'
+  title: 'Confirm the Stop guard actually BLOCKS. The decision logic is pure and unit-tested (8 cases, sabotage-verified) and the CLI exits 2 with the reason on stderr, but nothing here has observed a real hook invocation consuming that exit code. backlog-automation.md B1: a hook that silently never fires is worse than its absence, because its presence is taken as proof. Until this is confirmed, the guard is NOT a gate and no document may call it one.'
+  owns: []
+  verify: null
   blocked_by: []
-  instrument: 'Cohort measured 2026-09-14: grep -coE over the four files gives 17 + 10 + 3 + 11 = 41 call sites (the scoping pass said 42; 41 is the measured figure). OWNER_ONLY map exists at action-guard-coverage.test.ts:287. VERIFY PROVEN TO FAIL NOW: the command exits 0 but reports Tests 12 skipped (12) - zero passed - which closure-runner.ts treats as failure; the same file without the -t filter reports 12 passed, as the canary.'
-  from: 'orchestrator ruling, splitting R2'
-  note: 'The named test does not exist yet; writing it is part of the work. The two wrong directions cost differently: a wrong requireUser silently exposes an owner-private resource, a wrong requireAppOwner loudly locks out an instructor.'
+  instrument: 'With an actionable item in the queue, end a session normally and confirm the stop is refused with the R-item reason on screen. Then run: npm run backlog:stop-guard (expect exit 2) and echo {"stop_hook_active":true} | npm run backlog:stop-guard (expect exit 0, no loop).'
+  from: 'the Stop guard commit'
+  note: 'If it does NOT block, say so - the correct response is to remove .claude/settings.json rather than leave a gate nobody enforces.'
 - id: 'G1'
   state: 'unscoped'
   title: 'A hung exemplar fetch disables Generate indefinitely. WalkthroughAnnouncementPanel.tsx:793 disables it on savedExemplarsLoading, and the Promise.all at :241-244 has no timeout - either call in it hanging does this, so a fix that times out only one leaves the hole open. Two loading signals exist. CORRECTION, measured: an earlier version of this entry said "neither of which is an error state", which is FALSE for AnnouncementDraftSlot.tsx:103 - that line is a ternary whose false arm renders "Could not load your saved formats." with a Retry button at :104-108. The substance survives anyway, and that is the point worth keeping: on a HANG rather than a rejection, savedFailed stays false, so the error arm never renders and the user sees "Loading your saved formats..." forever. An error state that only a rejection can reach is not coverage for a hang. WalkthroughAnnouncementPanel.tsx:686 has no error arm at all.'

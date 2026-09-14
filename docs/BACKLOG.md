@@ -14,9 +14,7 @@ Closing an item DELETES its row from `docs/backlog.yml` - there is no
 
 Worked by an agent. Leaves this section when `verify` exits 0 and actually runs at least one assertion (Ruling BA-2).
 
-| id | title | owns | verify | blocked_by | instrument | from | note |
-|---|---|---|---|---|---|---|---|
-| R3 | First wave of R2: reclassify the media-file cohort from requireOwner() to requireAppOwner(). These four files are the one cohort where call-site and resource-level assertion coincide, because no deeper layer exists to assert at - so this does NOT contradict the architecture doc RESOLVED 3 / SUPERSEDES decision that rejected per-call-site classification for the Canvas/GitHub cohort. Split out by orchestrator ruling so the judgment-heavy remainder stays in R2. | src/app/actions/media.ts, src/app/actions/media-voice.ts, src/app/actions/media-avatar.ts, src/app/actions/media-likeness.ts, src/app/actions/action-guard-coverage.test.ts | npx vitest run src/app/actions/action-guard-coverage.test.ts -t "media actions are owner-only" | - | Cohort measured 2026-09-14: grep -coE over the four files gives 17 + 10 + 3 + 11 = 41 call sites (the scoping pass said 42; 41 is the measured figure). OWNER_ONLY map exists at action-guard-coverage.test.ts:287. VERIFY PROVEN TO FAIL NOW: the command exits 0 but reports Tests 12 skipped (12) - zero passed - which closure-runner.ts treats as failure; the same file without the -t filter reports 12 passed, as the canary. | orchestrator ruling, splitting R2 | The named test does not exist yet; writing it is part of the work. The two wrong directions cost differently: a wrong requireUser silently exposes an owner-private resource, a wrong requireAppOwner loudly locks out an instructor. |
+_None._
 
 ## Owner decision
 
@@ -39,6 +37,7 @@ Never worked by an agent. Needs a live system or a real credential; the owner re
 | V4 | Confirm the sweep's prefix form matches. A ruling pinned ${userId}/${segment} with no trailing slash; only a live listing proves Supabase agrees. Signature of a wrong guess: a positive scannedUserPrefixes with every other count at zero. | - | - | - | Same tick as V3 (formerly 1.3) | c25bdec | - |
 | V5 | Confirm the scheduled workflow fires. | - | - | - | The Actions web UI after merge | c25bdec | - |
 | V6 | Check whether a killed tick leaves its start-of-tick line. src/app/api/cron/sweep-orphan-uploads/route.ts:92 logs it; the sibling run-schedules/ route chose a durable DB write instead, precisely because a tick killed at the platform cap never runs finally. | - | - | - | Vercel function logs after the first timeout | c25bdec | - |
+| V7 | Confirm the Stop guard actually BLOCKS. The decision logic is pure and unit-tested (8 cases, sabotage-verified) and the CLI exits 2 with the reason on stderr, but nothing here has observed a real hook invocation consuming that exit code. backlog-automation.md B1: a hook that silently never fires is worse than its absence, because its presence is taken as proof. Until this is confirmed, the guard is NOT a gate and no document may call it one. | - | - | - | With an actionable item in the queue, end a session normally and confirm the stop is refused with the R-item reason on screen. Then run: npm run backlog:stop-guard (expect exit 2) and echo {"stop_hook_active":true} \| npm run backlog:stop-guard (expect exit 0, no loop). | the Stop guard commit | If it does NOT block, say so - the correct response is to remove .claude/settings.json rather than leave a gate nobody enforces. |
 
 ## Unscoped
 

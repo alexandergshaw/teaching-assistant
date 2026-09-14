@@ -12,7 +12,8 @@
     "backlog:render": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts render > docs/BACKLOG.md",
     "backlog:check-generated": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts check-generated",
     "backlog:next": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts next",
-    "backlog:wave": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts wave"
+    "backlog:wave": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts wave",
+    "backlog:stop-guard": "node --experimental-strip-types --experimental-default-type=module --experimental-loader ./src/tools/backlog/resolve-ts-hook.ts src/tools/backlog/cli.ts stop-guard"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

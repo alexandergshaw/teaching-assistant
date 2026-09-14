@@ -24,6 +24,7 @@ import type { BacklogItem } from "./types";
 import { parseBacklogYaml } from "./yaml-codec";
 import { renderBacklogMarkdown } from "./render";
 import { checkGeneratedText } from "./check-generated";
+import { decideStopGuard } from "./stop-guard";
 import { selectNext } from "./next";
 import { selectWave } from "./wave";
 import { findDuplicateIds } from "./ids";
@@ -62,6 +63,30 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
     return { exitCode: result.ok ? 0 : 1, output: result.message };
   }
 
+  // The Stop guard (src/tools/backlog/stop-guard.ts). Exit 2 with the reason
+  // on stderr is the shape a blocking hook uses; exit 0 allows the stop.
+  //
+  // UNVERIFIED AS A GATE: nothing here has observed a real hook invocation
+  // consuming this exit code. Until the owner confirms a block is actually
+  // taken, treat a passing stop-guard run as "the DECISION is right", never as
+  // "the session was stopped from ending". `backlog-automation.md` B1 is the
+  // reason for that caution: a hook that silently never fires is worse than
+  // its absence, because its presence is taken as proof.
+  if (command === "stop-guard") {
+    const items = parseBacklogYaml(deps.readYaml());
+    const dupError = requireDuplicateFree(items);
+    if (dupError) return { exitCode: 1, output: dupError };
+    const decision = decideStopGuard({
+      items,
+      stopHookActive: argv.includes("--stop-hook-active"),
+      overrideRequested: argv.includes("--override"),
+    });
+    if (decision.decision === "block") {
+      return { exitCode: 2, output: decision.reason };
+    }
+    return { exitCode: 0, output: `stop allowed: ${decision.reason}` };
+  }
+
   if (command === "next") {
     const items = parseBacklogYaml(deps.readYaml());
     const dupError = requireDuplicateFree(items);
@@ -98,7 +123,7 @@ export function dispatch(argv: string[], deps: CliDeps): Dispatched {
 
   return {
     exitCode: 64,
-    output: `unknown command "${command ?? ""}". Expected one of: render, check-generated, next, wave.`,
+    output: `unknown command "${command ?? ""}". Expected one of: render, check-generated, next, wave, stop-guard.`,
   };
 }
 
@@ -110,14 +135,53 @@ function realDeps(): CliDeps {
   };
 }
 
+/**
+ * A Stop hook receives its payload as JSON on STDIN, and `stop_hook_active`
+ * is the flag that stops a blocking hook from looping forever. Reading it
+ * from argv only (as an earlier draft of this file did) would leave the
+ * loop-prevention permanently off while LOOKING wired - which is
+ * backlog-automation.md B1 exactly. Best-effort and defensive: no stdin, bad
+ * JSON, or a missing field all mean "not active", which is the safe default
+ * (it blocks once, then the flag arrives on the retry).
+ */
+function stopHookActiveFromStdin(): boolean {
+  try {
+    // If stdin is a TTY there is no piped payload and readFileSync(0) would
+    // BLOCK FOREVER waiting for input - which would hang every session at
+    // the stop, the worst possible failure for a guard meant to be
+    // invisible when it allows. Measured: running the command by hand
+    // without a pipe hung until it was killed.
+    if (process.stdin.isTTY) return false;
+    const raw = readFileSync(0, "utf-8").trim();
+    if (!raw) return false;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return false;
+    return (parsed as { stop_hook_active?: unknown }).stop_hook_active === true;
+  } catch {
+    return false;
+  }
+}
+
 function main(): void {
-  const result = dispatch(process.argv.slice(2), realDeps());
+  const argv = process.argv.slice(2);
+  if (argv[0] === "stop-guard" && stopHookActiveFromStdin()) {
+    argv.push("--stop-hook-active");
+  }
+  const result = dispatch(argv, realDeps());
   // `render`'s output is a full file (renderBacklogMarkdown already ends it
   // with exactly one newline) meant to be redirected straight into
   // docs/BACKLOG.md; every other command's output is a short human-readable
   // line. Only pad the latter, so `npm run backlog:render > docs/BACKLOG.md`
   // reproduces check-generated's expected bytes exactly.
-  process.stdout.write(result.output.endsWith("\n") ? result.output : `${result.output}\n`);
+  const text = result.output.endsWith("\n") ? result.output : `${result.output}\n`;
+  // A blocking stop-guard decision goes to STDERR, because that is where a
+  // hook surfaces its reason back to the agent; everything else stays on
+  // stdout so `render` can still be redirected into the generated file.
+  if (result.exitCode === 2 && process.argv[2] === "stop-guard") {
+    process.stderr.write(text);
+  } else {
+    process.stdout.write(text);
+  }
   process.exitCode = result.exitCode;
 }
 

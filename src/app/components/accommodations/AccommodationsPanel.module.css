@@ -1,0 +1,250 @@
+/* Accommodations/extensions panel (backlog N4). Reuses the app's existing
+   floating-surface language (--radius-md/--shadow-md/--card-border, the same
+   tokens ContextMenu.tsx and AiChatFab's windows use) rather than inventing
+   a new visual style. */
+
+/* ---------------------------------------------------------------------
+   THE CENTRAL MECHANISM. Applied ONLY to the element wrapping a rendered
+   accommodations-derived text node (resolved name / id fallback / note /
+   resolved course+assignment name) via AccommodationsText.tsx - never to
+   the panel root, never to a form input, never to the scope-label's own
+   static copy. See AccommodationsText.tsx's header for the full rationale
+   and the portal problem this exists to avoid, and requirement 3 of the
+   build brief for what this rule does NOT do (it does not survive print /
+   Save-as-PDF, and it does not stop find-in-page - this narrows the
+   in-page drag-select leak only, it is not a confidentiality boundary).
+   accommodations.wiring.test.ts asserts this exact block, by regex anchored
+   on both the selector and the property together.
+   --------------------------------------------------------------------- */
+.entryText {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The collapsed ambient control (AccommodationsAmbientControl.tsx) only -
+   kept in this module rather than a separate stylesheet since this wave's
+   file list does not include a third CSS file. Positioned opposite
+   AiChatFab's dial (DIAL_BOTTOM/DIAL_RIGHT = 24, AiChatFab.tsx:41-42) to
+   avoid overlapping its 56px click target. */
+.fab {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid var(--card-border);
+  background: var(--field-background);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1200;
+}
+
+.fab:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The panel now adopts ModalShell (ModalShell.tsx), which renders its own
+   `.previewBackdrop`/`.previewModal` (page.module.css) - this component no
+   longer renders its own backdrop or dialog surface, so the old .overlay
+   rule is gone (it would otherwise be an orphan the moment this file's only
+   reference to it was removed - page-module-css-orphan-classes.test.ts's
+   ratchet). .panel is passed as ModalShell's `contentClassName` (appended
+   after `.previewModal`); width/height/overflow are set via ModalShell's
+   `contentStyle` instead (inline, so they reliably win regardless of CSS
+   module load order) - this rule now only carries the padding/gap/layout
+   `.previewModal` does not already provide for this panel's stacked fields. */
+.panel {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.headerRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.closeButton {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  display: inline-flex;
+}
+
+.closeButton:hover {
+  background: var(--surface-muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fieldLabel {
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.select {
+  height: var(--control-height-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--card-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  padding: 0 var(--space-3);
+}
+
+.textarea {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--card-border);
+  background: var(--field-background);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  padding: var(--space-2) var(--space-3);
+  min-height: 64px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.scopeLabel {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+.statusLine {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  padding: var(--space-2) 0;
+}
+
+.errorLine {
+  font-size: var(--font-size-sm);
+  color: #b91c1c;
+  background: color-mix(in srgb, #b91c1c 10%, var(--field-background));
+  border: 1px solid color-mix(in srgb, #b91c1c 30%, var(--field-background));
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.iconButton {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  display: inline-flex;
+}
+
+.iconButton:hover {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.addForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px solid var(--card-border);
+  padding-top: var(--space-3);
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.primaryButton {
+  height: var(--control-height-md);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primaryButton:hover {
+  background: var(--accent-hover);
+}
+
+.primaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  height: var(--control-height-md);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}

@@ -270,7 +270,13 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // predecessors before it - it adopts ModalShell from birth for its four
     // approve/suspend/promote/demote confirmations, so it lands in
     // ADOPTING_PATHS below rather than on any non-adopting allowlist.
-    expect(DIALOG_SITES.length).toBe(51);
+    //
+    // 52, not 51, as of the accommodations/extensions panel chunk (backlog
+    // N4): accommodations/AccommodationsPanel.tsx is one more new dialog
+    // site, on the same terms as AccountPeopleList.tsx before it - it adopts
+    // ModalShell from birth rather than needing a name on one of the three
+    // allowlists.
+    expect(DIALOG_SITES.length).toBe(52);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -330,7 +336,10 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // 36 as of the owner account-management screen chunk - the thirty-five
     // described above plus account/people/AccountPeopleList.tsx, which
     // likewise adopts ModalShell from birth.
-    expect(ADOPTING_PATHS.size).toBe(36);
+    // 37 as of the accommodations/extensions panel chunk (backlog N4) - the
+    // thirty-six described above plus accommodations/AccommodationsPanel.tsx,
+    // which likewise adopts ModalShell from birth.
+    expect(ADOPTING_PATHS.size).toBe(37);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

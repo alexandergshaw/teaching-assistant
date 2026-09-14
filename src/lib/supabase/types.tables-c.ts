@@ -81,3 +81,45 @@ export interface LmsCredentialSaveAttemptsUpdate {
   user_id?: string;
   attempted_at?: string;
 }
+
+// supabase/migrations/20261020000000_institution_accommodations.sql
+// Backlog N4 - disability-related student data (accommodations/extensions).
+// Deliberately NO course_name/assignment_name/student-name column - every
+// human-readable name is resolved live from the Canvas API, never persisted
+// (orchestrator ruling N4-U). See that migration's header and
+// src/lib/accommodations.ts for the full rationale.
+export interface InstitutionAccommodationsRow {
+  id: string;
+  user_id: string;
+  institution: string;
+  course_id: string;
+  assignment_id: string;
+  canvas_user_id: string;
+  note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InstitutionAccommodationsInsert {
+  id?: string;
+  user_id: string;
+  institution: string;
+  course_id: string;
+  assignment_id: string;
+  canvas_user_id: string;
+  note?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InstitutionAccommodationsUpdate {
+  id?: string;
+  user_id?: string;
+  institution?: string;
+  course_id?: string;
+  assignment_id?: string;
+  canvas_user_id?: string;
+  note?: string;
+  created_at?: string;
+  updated_at?: string;
+}

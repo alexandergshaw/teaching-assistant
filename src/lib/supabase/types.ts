@@ -73,6 +73,9 @@ import type {
   LmsCredentialsRow,
   LmsCredentialsInsert,
   LmsCredentialsUpdate,
+  InstitutionAccommodationsRow,
+  InstitutionAccommodationsInsert,
+  InstitutionAccommodationsUpdate,
 } from "./types.tables-c";
 import type {
   AppUsersRow,
@@ -409,6 +412,12 @@ export interface Database {
         Row: Expand<GradingDraftsRow>;
         Insert: Expand<GradingDraftsInsert>;
         Update: Expand<GradingDraftsUpdate>;
+        Relationships: [];
+      };
+      institution_accommodations: {
+        Row: Expand<InstitutionAccommodationsRow>;
+        Insert: Expand<InstitutionAccommodationsInsert>;
+        Update: Expand<InstitutionAccommodationsUpdate>;
         Relationships: [];
       };
       institution_fields: {

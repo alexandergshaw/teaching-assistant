@@ -42067,3 +42067,196 @@ tests go red).
   only would have let a successful Retry silently rename the default format.
 - Whether 20s is too long to stare at a disabled button is an owner
   preference, not a calibration.
+
+## 416. N4: the accommodations list, and a privacy mechanism that is honest about its limits
+
+Backlog N4, the owner's ask of 2026-09-14: store and access a
+per-institution, per-assignment list of students with accommodations or
+extensions, reachable from ANY page, with the institution and assignment
+selected MANUALLY - never inferred from the current page.
+
+**This is disability-related student data.** Nearly every decision below was
+made in the stricter direction for that reason, and where a decision looks
+arbitrary the entry says what was measured.
+
+### 416a - the acceptance criteria, as shipped
+
+- **AC-S1** No accommodations data in `localStorage` or `sessionStorage`, ever.
+  Any id-to-name resolution is in-memory only and dies with the panel.
+- **AC-S2a** Accommodations text is unselectable BY CONSTRUCTION, not filtered
+  by a guard.
+- **AC-S3** Default-collapsed; the open state is not persisted.
+- **AC-S5** Nothing about the list is derivable from the collapsed control -
+  no count, no dot, no colour, no varying tooltip or aria-label, and the
+  control renders identically whether or not data exists, including whether
+  it renders at all.
+- **AC-X1** The active institution/course/assignment scope is visibly
+  displayed whenever any accommodations data is shown.
+- **AC-ID1** A student entry is `{ canvasUserId, note? }`. The student's NAME
+  is never written to the database.
+- **AC-A1** The selector reuses the existing `listCourses`/`listAssignments`/
+  `listStudents` cascade; no parallel hook was built.
+- **AC-A2** Many entries per scope; no uniqueness constraint on the scope
+  tuple alone.
+- **AC-L1/L2/L3** The decision logic is a pure leaf with zero React/DOM
+  imports, every function tested.
+
+### 416b - what is measured true today
+
+All counts from PowerShell `@(Get-Content <path>).Count` at the wave gate:
+
+| file | lines |
+|---|---|
+| `supabase/migrations/20261020000000_institution_accommodations.sql` | 121 |
+| `src/lib/accommodations-logic.ts` | 54 |
+| `src/lib/accommodations-logic.test.ts` | 50 |
+| `src/lib/accommodations.ts` | 263 |
+| `src/lib/accommodations.test.ts` | 340 |
+| `src/app/actions/accommodations.ts` | 152 |
+| `AccommodationsText.tsx` | 47 |
+| `AccommodationsPanel.tsx` | 602 |
+| `AccommodationsPanel.module.css` | 250 |
+| `AccommodationsAmbientControl.tsx` | 65 |
+| `accommodations.wiring.test.ts` | 130 |
+| `accommodations.structure.test.ts` | 96 |
+| `src/app/layout.tsx` | 179 |
+
+Everything is well clear of the 1000-line ceiling; the panel at 602 is the
+largest new file.
+
+### 416c - THE PRIVACY MECHANISM, and what it does NOT do
+
+**A single named component, `AccommodationsText`, carries
+`user-select: none`.** Every accommodations-derived string renders through it.
+
+**Why a component and not a CSS rule on the panel.** The global
+`SelectionChatWidget` is mounted on every route
+(`src/app/layout.tsx`), reads `window.getSelection()` and can send the text to
+a model. Its guard tests the mouseup TARGET against its own node and then
+reads the selection GLOBALLY, so any exclusion keyed on the target does not
+bound what the selection CONTAINS - a drag that starts inside the panel and
+releases outside it captures the text. A range-based check closes that but not
+a selection SPANNING the boundary.
+
+And a container-scoped CSS rule fails for a second, independent reason:
+MUI 9.0.1 renders `Autocomplete`/`Menu`/`Dialog` into `document.body` PORTALS
+(`disablePortal` defaults false and is used in zero of 34 `Autocomplete` sites
+here), so a rule scoped to the panel root never reaches a portaled listbox -
+which is exactly where a student picker would list student NAMES. A component
+carries the treatment WITH the content, so where React mounts it stops
+mattering.
+
+**STATE THIS PLAINLY, because the next reader will over-trust it:** this is a
+CAPTURE-SURFACE REDUCTION against the in-page selection API. It is NOT data
+containment. It is defeated outright by PRINT and Save-as-PDF (an open panel is
+one keystroke from a copyable file on disk), and find-in-page works as a
+disclosure oracle. No comment or UI copy may imply otherwise.
+
+**The stated, documented gap:** the add-form and edit-form note `<textarea>`s
+carry `value={newNote}` / `value={editNote}` - unavoidable, since a note being
+typed or corrected must be visible - and a native `<textarea>` does not honour
+`user-select: none` on its own editable content. These are the ONLY two
+identity-bearing `value=` sites, and `accommodations.wiring.test.ts` enumerates
+them as the only permitted ones, so a third fails the gate.
+
+**How attribute-borne identity was closed:** the student picker is a native
+`<select>`, so its `value` is the opaque Canvas id and the name is `<option>`
+text rendered as OS chrome rather than a page DOM node. Every icon button
+carries a constant generic `aria-label`. `ModalShell`'s required `label` is a
+constant.
+
+### 416d - the guard that had to key on the right thing
+
+`src/lib/accommodations.ts` calls `assertNotImpersonated()` FIRST in every
+exported function.
+
+**Why it keys on impersonation being PRESENT rather than on identity being
+absent**, which is the non-obvious part: under `runAsOwner`,
+`requireAppOwner()` returns a full identity (`src/lib/supabase/auth.ts:408-414`)
+BEFORE the session path is reached, while the RLS-respecting session client has
+no JWT - so `auth.uid()` is null and an RLS-denied SELECT returns
+`{ data: [], error: null }`. An identity check therefore PASSES in exactly the
+case it would have been written for, and the user is shown an EMPTY
+ACCOMMODATIONS LIST WITH NO ERROR: told, silently and confidently, that no
+student on this assignment has accommodations. That is the worst output this
+feature can produce, and no gate in this repo would have seen it.
+
+An earlier version of this ruling asserted the identity check and would have
+shipped a guard that could not fire. It was caught by an adversarial check of
+the orchestrator's own rulings.
+
+**Every read, update AND delete filters on `user_id`** - all three mutating
+verbs, not just read and delete, which an earlier version of the criterion
+omitted.
+
+### 416e - other decisions worth not re-deriving
+
+- **No seventh global provider.** `src/app/layout.tsx` already nests six. The
+  ambient control holds NO accommodations data until opened, fetches on open,
+  and drops it on close - so "collapsed" is structural rather than cosmetic.
+  Collapsed-but-loaded would still have the data in the React tree and DevTools.
+- **No error boundary exists anywhere in this app** (`find src -name "error.tsx"
+  -o -name "global-error.tsx"` returns nothing; no `componentDidCatch`
+  anywhere). A globally mounted component that throws white-screens every
+  route, so this one must never throw.
+- **No `course_name`/`assignment_name` columns.** All three names resolve live
+  from `listCourses(code)` / `listAssignments(code, courseId)` /
+  `listStudents(code, courseId)` - verified to need only the institution code
+  and the stored `course_id`. A row of opaque ids is hard to act on without
+  Canvas access; the same row carrying "Introduction to Chemistry" and
+  "Midterm 2" is not.
+- **A failed fetch is NOT rendered as an empty list.** AC-X1 shows the scope
+  whenever data is shown, so a failed fetch under a correct scope label would
+  read as an authoritative "nobody here has accommodations". Loading, empty and
+  error are distinct states. Same false-claim family as entry 415, different
+  surface.
+- **The actions are barrel-routed** through `src/app/actions.ts`, because
+  `action-guard-coverage.test.ts` collects names only under
+  `if (target === barrel && clause)` - a non-barrel action is invisible to its
+  root-layout reachability assertion, and this feature IS globally mounted.
+
+### 416f - what today's tests will NOT notice
+
+No component is rendered by any test here (vitest is node-env, collects only
+`src/**/*.test.ts`), so everything about the rendered result is a READING
+claim: whether the panel is keyboard-reachable, whether focus restores to the
+opening button, whether the collapsed control really discloses nothing, and -
+most importantly - **whether `user-select: none` actually suppresses selection
+in a real browser for this markup.** The central privacy mechanism of this
+feature is unverified by construction in this environment. Owner verification
+in a real browser is the only instrument: open the panel, drag-select across a
+name, and confirm no selection-chat icon appears.
+
+The executable assertions that DO exist and can fail, each PROVEN able to fail
+rather than assumed: the impersonation guard (sabotaged across all four verbs,
+all went red), the `ta-` exact-set scan (sabotaged with a canary key, went
+red), the wiring test's mechanism assertions (sabotaged twice - the CSS rule
+and the component's className - both went red), the pure leaf's own tests, and
+the negative `localStorage` scan over `src/lib/accommodations.ts`.
+
+That last canary was initially MISSING - the implementer who wrote the scan
+could not fire it without editing a file outside its wave, and said so in the
+test's own comment rather than claiming coverage it had not proven. Verification
+logged it as a residual; it was then closed by measurement instead: a
+`localStorage` reference was injected into that module, the scan went red for
+the right test, and the file was restored byte-clean. A negative scan nobody has
+seen fail is not a scan, and this repo has been burned by exactly that before.
+
+### 416g - deliberately out of scope, recorded as decisions
+
+- **Retention.** Nothing in this app ever deletes a user
+  (`grep -rniE "delete_?user|removeUser|deleteAccount|admin\.delete" src` returns
+  nothing; the lifecycle is `pending|active|suspended`), so the DDL carries NO
+  cascade claim, because such a claim would be false. The only deletion is the
+  owner deleting a row by hand - and that control is reachable only through a
+  cascade fed by a LIVE teacher-enrollment listing, so an instructor who has
+  lost enrollment cannot reach it. **There is no deletion path that survives
+  the end of a teaching relationship.** Escalated to the owner.
+- **`requireOwner()` vs `requireAppOwner()`.** The actions use `requireOwner()`
+  (delegates to `requireUser()`, any active account), following the design's
+  stated precedent, with the caveat in a code comment. Tenant isolation still
+  holds via the `user_id` filter and RLS. Whether instructor accounts should
+  reach this feature at all is an owner decision, deliberately not settled by
+  an agent.
+- **Backlog G6**: the sibling exemplar actions return an empty SUCCESS for a
+  blank `courseId` before querying. Same false-claim family, different feature.

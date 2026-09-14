@@ -22,6 +22,7 @@ export type {
   ScheduleWeekPlan,
 } from "./actions-types";
 
+export * from "./actions/accommodations";
 export * from "./actions/artifact-templates";
 export * from "./actions/auth-signup";
 export * from "./actions/automation-runs";

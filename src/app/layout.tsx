@@ -4,6 +4,7 @@ import "./globals.css";
 import SelectionChatWidget from "./components/SelectionChatWidget";
 import AiChatFab from "./components/AiChatFab";
 import ContextMenu from "./components/ContextMenu";
+import AccommodationsAmbientControl from "./components/accommodations/AccommodationsAmbientControl";
 import { InstitutionCountsProvider } from "./components/InstitutionCounts";
 import { VcCountsProvider } from "./components/VcCounts";
 import { FilesInboxProvider } from "./components/FilesInbox";
@@ -169,6 +170,7 @@ export default async function RootLayout({
             <SelectionChatWidget />
             <AiChatFab />
             <ContextMenu />
+            <AccommodationsAmbientControl />
           </SupabaseProvider>
         </AppThemeProvider>
       </body>

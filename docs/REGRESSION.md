@@ -41760,6 +41760,37 @@ REJECTION sets. G1 is now `actionable` in `docs/backlog.yml` and is being
 worked; this note exists so the regression pass that closes it compares
 against the lines that exist rather than the lines that used to.
 
+**PREMISE CORRECTED 2026-09-14, during G1's architect pass.** 413c says the
+hang is indefinite. That is WRONG for the Supabase query segment, and the
+correction is recorded here because this entry is the oracle a later pass
+compares against - an oracle that overstates a defect will agree with a fix
+that overstates its own achievement.
+
+Measured by direct read of `src/lib/supabase/server.ts` this session:
+`SERVER_FETCH_TIMEOUT_MS = 8_000` (`:82`); `boundedFetch` wraps every fetch in
+`AbortSignal.timeout(8000)` (`:84-85`); and it is wired into
+`createServiceClient` (`:135-138`), which BOTH exemplar actions use. That
+file's own comment block (`:45-80`) already works out the compounding:
+postgrest-js does not recognise a `TimeoutError` as an abort, so it retries a
+timed-out GET `DEFAULT_MAX_RETRIES` (3) more times with 1s/2s/4s backoff, each
+attempt getting a FRESH 8s signal. Worst case for one degraded read is
+4 x 8s + ~7s of backoff, about **39 seconds**, after which the caller gets an
+ordinary `{ data: null, error }` - finite, never a thrown exception, and never
+infinite.
+
+So a degraded QUERY eventually surfaces as a rejection, which sets
+`savedExemplarsFailed` and makes the existing Retry affordance appear. What
+is genuinely unbounded is the **client-to-server-action transport** - the
+browser's own call to the `"use server"` endpoint, which `boundedFetch` runs
+on the wrong side of - together with the platform invocation ceiling that
+backlog G4 records as UNKNOWN (`grep -n maxDuration src/app/page.tsx` returns
+nothing, re-run this session).
+
+The defect is real and still worth fixing. Only the word "indefinitely" was
+wrong, and it was load-bearing: it is why the placeholder timeout was set at
+12,000ms, which would have fired INSIDE the server's own retry window and
+told the user the fetch had given up while it was about to succeed.
+
 ### 413d - draft slots deliberately do NOT persist (backlog 5.2, closed)
 
 Recorded because the entry had already been rediscovered twice: nothing about

@@ -191,6 +191,24 @@ nothing in the suite reads `docs/`.
     reported, not a stop asking what to do next.
 
   Details and the failure behind it in `traps-orchestration.md`.
+- **Disjoint backlog items are worked SIMULTANEOUSLY, not in sequence.**
+  Owner's rule, 2026-09-13. The queue is not a single file - if two entries
+  touch non-overlapping file sets, they run as concurrent subagents in the same
+  turn. Standing consent; do not ask. "The current chunk is mid-flight" is a
+  reason to check disjointness, never a reason to idle a second item.
+
+  Disjointness is measured in FILES, not in topics. Two items that both "touch
+  the announcement feature" may be disjoint; two that both edit one CSS module
+  are not, however unrelated they sound. Before dispatching, list each item's
+  file set and confirm the intersection is empty - and remember a wave dispatched
+  LATER in the same chunk may claim a file, so check planned waves too, not just
+  running ones.
+
+  The gate is unchanged and non-negotiable: each agent gets an explicit file
+  list, and `git status --short` is checked against it. Concurrency is what
+  makes an over-reaching agent expensive - one agent outside its list can
+  revert a sibling's work - so the narrower the lists, the safer the parallelism.
+  Never `git stash` under concurrency: it reverts every sibling's files.
 - **The backlog is the queue, not a diary.** It records what is OWED and by
   whom, never what happened - `docs/REGRESSION.md` holds behaviour and the git
   log holds history. The instance behind this rule: the first version of

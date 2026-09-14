@@ -32,6 +32,16 @@ export interface SnapshotCitationResult {
    *  corpus (only for a `source: "pasted"` citation), or inside the combined
    *  transcript as a fallback when the source cannot be resolved that way. */
   verified: boolean;
+  /** Resolved from idByGlobalIndex when (and only when) this result's final
+   *  `source === "shot"`; null for "pasted"/"unknown" always, and null for a
+   *  "shot" result whose shotIndex has no entry (a hallucinated index -
+   *  never a thrown error, never a fabricated id). Ruling R1-B: computed
+   *  independently at EACH return site below, never hoisted into one shared
+   *  `const` above the branch - the two return statements read different
+   *  source variables (the raw `a.source` vs. the resolved `resolvedSource`)
+   *  and a hoist would silently use the wrong one for whichever branch did
+   *  not declare it. */
+  shotId: string | null;
 }
 
 /**
@@ -50,14 +60,19 @@ export function verifySnapshotCitations(
   areas: readonly SnapshotRubricAreaAnswer[],
   transcriptsByShotIndex: ReadonlyMap<number, string>,
   combinedTranscript: string,
-  pastedTextCorpus: string
+  pastedTextCorpus: string,
+  idByGlobalIndex: ReadonlyMap<number, string>
 ): SnapshotCitationResult[] {
   const normalizedCombined = normalizeForMatch(combinedTranscript);
   const normalizedPastedText = normalizeForMatch(pastedTextCorpus);
   return areas.map((a) => {
     const quote = a.quote.trim();
     if (!quote) {
-      return { area: a.area, score: a.score, quote: a.quote, shotIndex: a.shotIndex, source: a.source, verified: false };
+      // The RAW, parser-classified source - the corpus-matching branches
+      // below never run for this path, so `resolvedSource` does not exist
+      // here (Ruling R1-B: read the variable this branch actually has).
+      const shotId = a.source === "shot" ? idByGlobalIndex.get(a.shotIndex) ?? null : null;
+      return { area: a.area, score: a.score, quote: a.quote, shotIndex: a.shotIndex, source: a.source, verified: false, shotId };
     }
     const normalizedQuote = normalizeForMatch(quote);
     const ownCorpus = a.source === "shot" ? transcriptsByShotIndex.get(a.shotIndex) : undefined;
@@ -73,6 +88,7 @@ export function verifySnapshotCitations(
       : verifiedAgainstOwnShot
         ? "shot"
         : "unknown";
-    return { area: a.area, score: a.score, quote: a.quote, shotIndex: a.shotIndex, source: resolvedSource, verified };
+    const shotId = resolvedSource === "shot" ? idByGlobalIndex.get(a.shotIndex) ?? null : null;
+    return { area: a.area, score: a.score, quote: a.quote, shotIndex: a.shotIndex, source: resolvedSource, verified, shotId };
   });
 }

@@ -29,9 +29,17 @@ function makeFullRow(overrides: Partial<SnapshotAssessmentRow> = {}): SnapshotAs
     strengths: "Clear thesis.",
     improvements: "Cite the rubric line.",
     overallComment: "Solid work overall.",
-    shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
+    shotReports: [{ shotIndex: 1, role: "post", status: "read", shotId: "shot-id-1" }],
     rubricAreas: [
-      { area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, source: "shot", verified: true },
+      {
+        area: "Clarity",
+        score: "4/5",
+        quote: "As I see it...",
+        shotIndex: 1,
+        source: "shot",
+        verified: true,
+        shotId: "shot-id-1",
+      },
     ],
     missingRoles: ["replies"],
     instructionLikeContent: false,
@@ -62,9 +70,17 @@ describe("snapshotRowCodec.toWire", () => {
       strengths: "Clear thesis.",
       improvements: "Cite the rubric line.",
       overallComment: "Solid work overall.",
-      shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
+      shotReports: [{ shotIndex: 1, role: "post", status: "read", shotId: "shot-id-1" }],
       rubricAreas: [
-        { area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, source: "shot", verified: true },
+        {
+          area: "Clarity",
+          score: "4/5",
+          quote: "As I see it...",
+          shotIndex: 1,
+          source: "shot",
+          verified: true,
+          shotId: "shot-id-1",
+        },
       ],
       missingRoles: ["replies"],
       instructionLikeContent: false,
@@ -149,9 +165,17 @@ describe("snapshotRowCodec.fromWire - happy path (non-load-bearing continuity ch
       strengths: "Clear thesis.",
       improvements: "Cite the rubric line.",
       overallComment: "Solid work overall.",
-      shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
+      shotReports: [{ shotIndex: 1, role: "post", status: "read", shotId: "shot-id-1" }],
       rubricAreas: [
-        { area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, source: "shot", verified: true },
+        {
+          area: "Clarity",
+          score: "4/5",
+          quote: "As I see it...",
+          shotIndex: 1,
+          source: "shot",
+          verified: true,
+          shotId: "shot-id-1",
+        },
       ],
       missingRoles: ["replies"],
       instructionLikeContent: false,
@@ -190,7 +214,7 @@ describe("snapshotRowCodec.fromWire - CONTESTED VALUE 3a: shotReports drops non-
     };
     const result = snapshotRowCodec.fromWire(raw);
     expect(result?.shotReports).toHaveLength(1);
-    expect(result?.shotReports).toEqual([{ shotIndex: 1, role: "post", status: "read", reason: undefined }]);
+    expect(result?.shotReports).toEqual([{ shotIndex: 1, role: "post", status: "read", reason: undefined, shotId: null }]);
   });
 });
 
@@ -209,7 +233,7 @@ describe("snapshotRowCodec.fromWire - CONTESTED VALUE 3b: rubricAreas drops non-
     const result = snapshotRowCodec.fromWire(raw);
     expect(result?.rubricAreas).toHaveLength(1);
     expect(result?.rubricAreas).toEqual([
-      { area: "A", score: "1/1", quote: "q", shotIndex: 1, source: "unknown", verified: true },
+      { area: "A", score: "1/1", quote: "q", shotIndex: 1, source: "unknown", verified: true, shotId: null },
     ]);
   });
 });
@@ -228,6 +252,28 @@ describe("snapshotRowCodec.fromWire - shotReports.status defaults to 'not-read'"
     const raw = { id: "x", shotReports: [{ shotIndex: 1, role: "post", status: "bogus" }] };
     const result = snapshotRowCodec.fromWire(raw);
     expect(result?.shotReports[0].status).toBe("not-read");
+  });
+});
+
+describe("snapshotRowCodec.fromWire - CONTESTED VALUE 5: shotId (R1) - a legacy row with no shotId field renders IDENTICALLY to a hallucinated-index row whose shotId later fails to resolve, both as null (Ruling R1-D's owner decision)", () => {
+  it.each([
+    [{ shotIndex: 1, role: "post", status: "read" }, null],
+    [{ shotIndex: 1, role: "post", status: "read", shotId: null }, null],
+    [{ shotIndex: 1, role: "post", status: "read", shotId: 42 }, null],
+    [{ shotIndex: 1, role: "post", status: "read", shotId: "shot-id-9" }, "shot-id-9"],
+  ])("shotReports[].shotId defaults to null on a missing/corrupt value, preserving an explicit string (%j -> %s)", (entry, expected) => {
+    const result = snapshotRowCodec.fromWire({ id: "x", shotReports: [entry] });
+    expect(result?.shotReports[0].shotId).toBe(expected);
+  });
+
+  it.each([
+    [{ area: "A", score: "1/1", quote: "q", shotIndex: 1, verified: true }, null],
+    [{ area: "A", score: "1/1", quote: "q", shotIndex: 1, verified: true, shotId: null }, null],
+    [{ area: "A", score: "1/1", quote: "q", shotIndex: 1, verified: true, shotId: 42 }, null],
+    [{ area: "A", score: "1/1", quote: "q", shotIndex: 1, verified: true, shotId: "shot-id-9" }, "shot-id-9"],
+  ])("rubricAreas[].shotId defaults to null on a missing/corrupt value, preserving an explicit string (%j -> %s)", (entry, expected) => {
+    const result = snapshotRowCodec.fromWire({ id: "x", rubricAreas: [entry] });
+    expect(result?.rubricAreas[0].shotId).toBe(expected);
   });
 });
 

@@ -9,6 +9,8 @@ import {
   buildTranscriptBlock,
   upsertSnapshotRow,
   resolveGradeTarget,
+  resolveCitationShotPosition,
+  buildShotReports,
   nextParseRequestId,
   isStaleParseResult,
   isConfirmedAreasReady,
@@ -18,7 +20,9 @@ import {
   READ_BATCH_SIZE,
   type SnapshotShotReadReport,
   type SnapshotAssessmentRow,
+  type ShotReadEntry,
 } from "./snapshot-row";
+import type { SnapshotShot } from "./snapshot-shot";
 import { snapshotRowCodec } from "./snapshot-row-serialization";
 
 // Duplicated per-file (test notes M1): not imported from
@@ -35,9 +39,17 @@ function makeFullRow(overrides: Partial<SnapshotAssessmentRow> = {}): SnapshotAs
     strengths: "Clear thesis.",
     improvements: "Cite the rubric line.",
     overallComment: "Solid work overall.",
-    shotReports: [{ shotIndex: 1, role: "post", status: "read" }],
+    shotReports: [{ shotIndex: 1, role: "post", status: "read", shotId: "shot-id-1" }],
     rubricAreas: [
-      { area: "Clarity", score: "4/5", quote: "As I see it...", shotIndex: 1, source: "shot", verified: true },
+      {
+        area: "Clarity",
+        score: "4/5",
+        quote: "As I see it...",
+        shotIndex: 1,
+        source: "shot",
+        verified: true,
+        shotId: "shot-id-1",
+      },
     ],
     missingRoles: ["replies"],
     instructionLikeContent: false,
@@ -107,9 +119,9 @@ describe("SnapshotAssessmentRow reuses the shared assessment-row.ts mutators unc
 describe("summarizeShotReports (U8.1's tally)", () => {
   it("counts read/partly-read/not-read separately", () => {
     const reports: SnapshotShotReadReport[] = [
-      { shotIndex: 1, role: "replies", status: "read" },
-      { shotIndex: 2, role: "replies", status: "read" },
-      { shotIndex: 3, role: "replies", status: "not-read", reason: "too blurry" },
+      { shotIndex: 1, role: "replies", status: "read", shotId: "shot-id-1" },
+      { shotIndex: 2, role: "replies", status: "read", shotId: "shot-id-2" },
+      { shotIndex: 3, role: "replies", status: "not-read", reason: "too blurry", shotId: "shot-id-3" },
     ];
     expect(summarizeShotReports(reports)).toEqual({ read: 2, partlyRead: 0, notRead: 1 });
   });
@@ -429,6 +441,121 @@ describe("addConfirmedArea (Ruling B35-11: an added area may carry null points)"
     addConfirmedArea(areas, "Grammar", 10);
     expect(areas).toHaveLength(1);
   });
+});
+
+// ---------------------------------------------------------------------------
+// R1-B/R1-H: resolveCitationShotPosition and buildShotReports - both carry
+// the identical i+1 construction and the identical off-by-one exposure, so
+// both get an oracle and a sabotage control (Ruling R1-H, discharging the
+// obligation R1-B applied to only one of the two extracted builds).
+// ---------------------------------------------------------------------------
+
+function makeSnapshotShot(overrides: Partial<SnapshotShot> = {}): SnapshotShot {
+  return {
+    id: "shot-1",
+    role: "assignment",
+    base64: "AAAA",
+    previewUrl: "blob:test",
+    source: "capture",
+    capturedAt: 0,
+    ...overrides,
+  };
+}
+
+describe("resolveCitationShotPosition (R1-D: resolves live position, or null - null is reported as 'cannot be resolved', never 'removed')", () => {
+  const shots: SnapshotShot[] = [
+    makeSnapshotShot({ id: "shot-z" }),
+    makeSnapshotShot({ id: "shot-a" }),
+    makeSnapshotShot({ id: "shot-m" }),
+  ];
+
+  it("resolves the FIRST shot's id to position 1, not 0", () => {
+    expect(resolveCitationShotPosition(shots, "shot-z")).toBe(1);
+  });
+
+  it("resolves the LAST shot's id to its 1-based position", () => {
+    expect(resolveCitationShotPosition(shots, "shot-m")).toBe(3);
+  });
+
+  it("returns null for a shotId of null (never named a shot)", () => {
+    expect(resolveCitationShotPosition(shots, null)).toBeNull();
+  });
+
+  it("returns null for a shotId that names no shot currently in `shots` (deleted, or never loaded - reload starts with [])", () => {
+    expect(resolveCitationShotPosition(shots, "shot-does-not-exist")).toBeNull();
+  });
+
+  it("returns null against an empty tray - the dominant case on every reload (U10: shots never persist)", () => {
+    expect(resolveCitationShotPosition([], "shot-z")).toBeNull();
+  });
+
+  it("tracks a REORDER: the same id resolves to its new position after the array is reordered", () => {
+    const reordered = [shots[2], shots[0], shots[1]]; // shot-m, shot-z, shot-a
+    expect(resolveCitationShotPosition(reordered, "shot-z")).toBe(2);
+  });
+
+  // SABOTAGE CONTROL: with resolveCitationShotPosition's return line
+  // temporarily changed from `idx === -1 ? null : idx + 1` to
+  // `idx === -1 ? null : idx` (0-based), "resolves the FIRST shot's id to
+  // position 1, not 0" goes red - expected 0 to be 1 - and "resolves the
+  // LAST shot's id to its 1-based position" goes red - expected 2 to be 3.
+  // Restoring `idx + 1` turns both green again.
+});
+
+describe("buildShotReports (R1-B/R1-H: the SAME i+1 construction as buildIdByGlobalIndex, carrying the identical off-by-one exposure)", () => {
+  const shots: SnapshotShot[] = [
+    makeSnapshotShot({ id: "shot-z", role: "assignment" }),
+    makeSnapshotShot({ id: "shot-a", role: "rubric" }),
+    makeSnapshotShot({ id: "shot-m", role: "submission" }),
+  ];
+
+  function makeReadEntry(overrides: Partial<ShotReadEntry> = {}): ShotReadEntry {
+    return { shotIndex: 1, shotId: "shot-z", role: "assignment", transcript: "t", status: "read", ...overrides };
+  }
+
+  it("assigns the FIRST shot report shotIndex 1 (and its own shot.id), not 0", () => {
+    const reports = buildShotReports(shots, new Map());
+    expect(reports[0].shotIndex).toBe(1);
+    expect(reports[0].shotId).toBe("shot-z");
+  });
+
+  it("assigns the LAST shot report its 1-based position and matching id", () => {
+    const reports = buildShotReports(shots, new Map());
+    expect(reports[2].shotIndex).toBe(3);
+    expect(reports[2].shotId).toBe("shot-m");
+  });
+
+  it("every entry carries shot.id directly from the live shots array - never null, never a model-authored value", () => {
+    const reports = buildShotReports(shots, new Map());
+    expect(reports.map((r) => r.shotId)).toEqual(["shot-z", "shot-a", "shot-m"]);
+  });
+
+  it("defaults status to 'not-read' when shotReads has no entry at that index", () => {
+    const reports = buildShotReports(shots, new Map());
+    expect(reports.every((r) => r.status === "not-read")).toBe(true);
+  });
+
+  it("pulls status/reason from shotReads keyed by 1-based index", () => {
+    const shotReads = new Map<number, ShotReadEntry>([
+      [1, makeReadEntry({ shotIndex: 1, shotId: "shot-z", status: "read" })],
+      [2, makeReadEntry({ shotIndex: 2, shotId: "shot-a", status: "partly-read", reason: "blurred" })],
+    ]);
+    const reports = buildShotReports(shots, shotReads);
+    expect(reports[0].status).toBe("read");
+    expect(reports[1]).toMatchObject({ status: "partly-read", reason: "blurred" });
+    expect(reports[2].status).toBe("not-read"); // no entry at index 3
+  });
+
+  it("returns an empty array for an empty tray", () => {
+    expect(buildShotReports([], new Map())).toEqual([]);
+  });
+
+  // SABOTAGE CONTROL: with buildShotReports' `const idx = i + 1;` temporarily
+  // changed to `const idx = i;` (0-based), "assigns the FIRST shot report
+  // shotIndex 1, not 0" goes red - expected 0 to be 1 - and the
+  // shotReads-keyed-by-1-based-index case goes red too, since shotReads.get
+  // (0) misses every entry keyed the old (correct) way, silently returning
+  // "not-read" for shots that WERE read. Restoring `i + 1` turns both green.
 });
 
 // ---------------------------------------------------------------------------

@@ -167,6 +167,24 @@ export function moveShotWithinRole(shots: readonly SnapshotShot[], id: string, d
   return next;
 }
 
+/**
+ * The globalIndex -> shot.id map, built EXACTLY the way handleGrade labels
+ * shots for the model: useSnapshotGrade.ts:95's shotsForGrade uses
+ * `shots.map((shot, i) => ({ globalIndex: i + 1, ... }))` - 1-based, over the
+ * FULL shots array, never the role-filtered subset SnapshotShotTray.tsx uses
+ * for its own tile numbering (a different, pre-existing convention). This
+ * function must be called with the SAME `shots` array, inside the SAME
+ * synchronous stretch of handleGrade that built shotsForGrade (closure-safety:
+ * `shots` is a destructured const, so nothing can re-point the binding
+ * mid-invocation - never read from `shotsRef.current`). A 0-based build, or
+ * one built from a role-filtered array, keys every citation to the wrong shot
+ * and persists it that way (Ruling R1-B) - strictly worse than the defect
+ * this whole feature exists to fix.
+ */
+export function buildIdByGlobalIndex(shots: readonly SnapshotShot[]): ReadonlyMap<number, string> {
+  return new Map(shots.map((shot, i) => [i + 1, shot.id]));
+}
+
 /** U7: the tray is grouped by role, one tab stop, roving tabindex - this is
  *  the pure grouping the UI renders from. Preserves each role's own
  *  insertion order (array order), never re-sorting within a group. */

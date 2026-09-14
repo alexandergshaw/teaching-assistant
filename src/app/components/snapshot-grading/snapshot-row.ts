@@ -18,7 +18,7 @@
 // it turns tsc green again. See the report for both quoted diagnostics.
 
 import type { AssessmentRowCore, NoPostableIdentity } from "../assessment-shared/assessment-row";
-import type { SnapshotRole } from "./snapshot-shot";
+import type { SnapshotRole, SnapshotShot } from "./snapshot-shot";
 import type { LlmProvider } from "@/lib/llm";
 import { deriveTotalScore } from "@/lib/grade/parsing";
 
@@ -38,6 +38,21 @@ export interface ShotReadEntry {
   transcript: string;
   status: SnapshotShotReadStatus;
   reason?: string;
+  /** RULING R1-E: the shot.id this entry was read FROM, captured at read
+   *  time from the then-current `shots` array. Required, not optional -
+   *  without it, the grade pass can only match a read transcript back to a
+   *  shot by READ-TIME position, and `shotReads` is cleared at only two
+   *  sites (next-student, the read pass itself) - neither delete nor
+   *  reorder clears it. Read, then delete/reorder a shot, then Grade: the
+   *  quote would verify against one shot's transcript while the persisted
+   *  id came from a DIFFERENT shot at the same numeric position - a wrong
+   *  shot IDENTITY, permanently persisted, with no index left to fall back
+   *  on. Keying the grade-time transcript lookup by this id instead (see
+   *  useSnapshotGrade.ts) makes that divergence unrepresentable: the
+   *  transcript and the id both come from the SAME shot, matched by id, not
+   *  from two different arrays matched only by coincidentally-equal
+   *  position. */
+  shotId: string;
 }
 
 export interface SnapshotShotReadReport {
@@ -48,6 +63,13 @@ export interface SnapshotShotReadReport {
    *  a locally-derived note when the read pass failed outright for this
    *  shot's batch. */
   reason?: string;
+  /** shot.id at construction time (buildShotReports below) - REQUIRED, not
+   *  optional: R1-E's closed window depends on every fresh entry carrying a
+   *  real id. Always non-null for a freshly built report - every entry is
+   *  shot-sourced by construction, there is no model-authored index to
+   *  hallucinate here. null only for a row persisted before this field
+   *  existed (drop-tolerant default in snapshot-row-serialization.ts). */
+  shotId: string | null;
 }
 
 export interface SnapshotRubricAreaEvidence {
@@ -62,6 +84,17 @@ export interface SnapshotRubricAreaEvidence {
   // which would misrender an old row's evidence as rubric/assignment text.
   source: "shot" | "pasted" | "unknown";
   verified: boolean;
+  /** Resolved ONCE, at grade time, from the SAME globalIndex -> shot.id map
+   *  the model's own labels were built from (buildIdByGlobalIndex,
+   *  snapshot-shot.ts). null when final `source !== "shot"`, when the
+   *  model's shotIndex has no entry in that map (a hallucinated index), or
+   *  when this row was persisted before this field existed (drop-tolerant
+   *  default in snapshot-row-serialization.ts - RULING R1-D: a legacy
+   *  `source: "shot"` row with no shotId and a genuinely-hallucinated-index
+   *  row with a shotId that fails to resolve now render IDENTICALLY, by
+   *  owner decision - the citation is reported only as "cannot be
+   *  resolved", never as "removed"). */
+  shotId: string | null;
 }
 
 /**
@@ -195,6 +228,55 @@ export function summarizeShotReports(reports: readonly SnapshotShotReadReport[])
     else notRead++;
   }
   return { read, partlyRead, notRead };
+}
+
+/**
+ * Resolves a persisted shotId to its CURRENT 1-based position in the live
+ * `shots` array - the SAME global-position convention the model itself was
+ * given (useSnapshotGrade.ts:95, and snapshot-read-prompt.ts's identical
+ * scheme for the read pass), tracked live through deletes and reorders.
+ * Returns null when shotId is null, or when it names no shot currently in
+ * `shots` - RULING R1-D: that null is reported as "cannot be resolved",
+ * never as "removed", because a genuine deletion and a not-yet-loaded tray
+ * (the dominant case, every reload - `shots` is `[]` on every mount) are
+ * indistinguishable here on purpose. Reused at multiple render sites in
+ * SnapshotResultCard.tsx: the rubric-area citation line and the read-report
+ * line - one function, not a classifier per call site.
+ */
+export function resolveCitationShotPosition(
+  shots: readonly SnapshotShot[],
+  shotId: string | null
+): number | null {
+  if (shotId === null) return null;
+  const idx = shots.findIndex((s) => s.id === shotId);
+  return idx === -1 ? null : idx + 1;
+}
+
+/**
+ * The read report's per-shot entries, built directly from `shots` by array
+ * position - never from a model answer, so there is no hallucination risk
+ * and shot.id is already in scope at construction time (unlike the
+ * rubric-area case, which needs idByGlobalIndex because the model's
+ * shotIndex is untrusted input - see snapshot-citations.ts). Extracted here
+ * (Ruling R1-B) so a vitest leaf can execute it without importing the hook -
+ * there is no useSnapshotGrade.test.ts, and importing a .ts file that wraps
+ * its only export in useCallback does not exercise it.
+ */
+export function buildShotReports(
+  shots: readonly SnapshotShot[],
+  shotReads: ReadonlyMap<number, ShotReadEntry>
+): SnapshotShotReadReport[] {
+  return shots.map((shot, i) => {
+    const idx = i + 1;
+    const entry = shotReads.get(idx);
+    return {
+      shotIndex: idx,
+      shotId: shot.id,
+      role: shot.role,
+      status: entry ? entry.status : "not-read",
+      reason: entry?.reason,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -24,12 +24,12 @@ import {
   computeSnapshotTotalScore,
   resolveGradeTarget,
   upsertSnapshotRow,
+  buildShotReports,
   type SnapshotAssessmentRow,
-  type SnapshotShotReadReport,
   type ShotReadEntry,
   type ConfirmedRubricArea,
 } from "./snapshot-row";
-import { SNAPSHOT_ROLES, type SnapshotShot, type SnapshotRole } from "./snapshot-shot";
+import { SNAPSHOT_ROLES, buildIdByGlobalIndex, type SnapshotShot, type SnapshotRole } from "./snapshot-shot";
 
 export interface UseSnapshotGradeParams {
   shots: SnapshotShot[];
@@ -93,6 +93,13 @@ export function useSnapshotGrade(params: UseSnapshotGradeParams): { handleGrade:
     setGradeError(null);
 
     const shotsForGrade = shots.map((shot, i) => ({ globalIndex: i + 1, role: shot.role, base64: shot.base64 }));
+    // Built from the SAME `shots` binding, in the same synchronous stretch,
+    // as shotsForGrade above - the documented convention (Ruling R1-B) so a
+    // future edit that builds one of these two maps from a different array
+    // is visible to a reader, not just correct by the closure-safety
+    // argument alone (shots cannot change within one invocation regardless
+    // of where in this function body the line sits).
+    const idByGlobalIndex = buildIdByGlobalIndex(shots);
 
     const result = await snapshotGradeAction(
       {
@@ -133,8 +140,22 @@ export function useSnapshotGrade(params: UseSnapshotGradeParams): { handleGrade:
       announce("No rubric areas could be parsed from the rubric text - the model chose its own areas.");
     }
 
+    // RULING R1-E: `shotReads` is keyed by READ-TIME position and is cleared
+    // at only two sites (next-student, the read pass itself) - neither
+    // delete nor reorder clears it. Looking a citation's transcript up by
+    // that stale numeric position, while `idByGlobalIndex` above resolves
+    // the SAME numeric position against the CURRENT `shots` array, would let
+    // a quote verify against one shot's transcript while the id written
+    // alongside it names a DIFFERENT shot - a wrong identity, permanently
+    // persisted. Closing the window: match by `shot.id` instead of
+    // position, so the transcript and the id both come from the SAME shot.
+    const transcriptsByShotId = new Map<string, string>();
+    shotReads.forEach((entry) => transcriptsByShotId.set(entry.shotId, entry.transcript));
     const transcriptsByShotIndex = new Map<number, string>();
-    shotReads.forEach((entry, idx) => transcriptsByShotIndex.set(idx, entry.transcript));
+    shots.forEach((shot, i) => {
+      const transcript = transcriptsByShotId.get(shot.id);
+      if (transcript !== undefined) transcriptsByShotIndex.set(i + 1, transcript);
+    });
     // The DEDICATED corpus a `source: "pasted"` citation verifies against -
     // never consulted for a "shot" or "unknown" citation (RULING A).
     const pastedTextCorpus = `${rubricText}\n\n${assignmentText}`;
@@ -142,7 +163,8 @@ export function useSnapshotGrade(params: UseSnapshotGradeParams): { handleGrade:
       result.answer.rubricResults,
       transcriptsByShotIndex,
       transcriptText,
-      pastedTextCorpus
+      pastedTextCorpus,
+      idByGlobalIndex
     );
 
     const suppliedRoles = new Set(shots.map((shot) => shot.role));
@@ -156,11 +178,7 @@ export function useSnapshotGrade(params: UseSnapshotGradeParams): { handleGrade:
         return !suppliedRoles.has(r);
       });
 
-    const shotReports: SnapshotShotReadReport[] = shots.map((shot, i) => {
-      const idx = i + 1;
-      const entry = shotReads.get(idx);
-      return { shotIndex: idx, role: shot.role, status: entry ? entry.status : "not-read", reason: entry?.reason };
-    });
+    const shotReports = buildShotReports(shots, shotReads);
 
     const totalScore = computeSnapshotTotalScore(result.answer.rubricResults);
 
@@ -189,10 +207,6 @@ export function useSnapshotGrade(params: UseSnapshotGradeParams): { handleGrade:
       evidenceDropped: false, // a fresh grade always carries full evidence in memory
     };
     commitSessionRows(upsertSnapshotRow(sessionRowsRef.current, merged));
-    // No `rowsGradedBeforeLastShotChange` update needed here: `merged.id` is
-    // never already a member of that set, because a row once added to it can
-    // never again be `resolveGradeTarget`'s `existing` (activeRowIdRef never
-    // points at an id already in that set).
 
     if (supersededEditedRow) {
       const name = supersededEditedRow.studentName || "this student";

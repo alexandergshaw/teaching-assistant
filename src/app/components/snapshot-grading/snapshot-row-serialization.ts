@@ -169,6 +169,11 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<SnapshotAsse
             ? e.status
             : "not-read") as SnapshotShotReadStatus,
           reason: typeof e.reason === "string" ? e.reason : undefined,
+          // R1: a row persisted before this field existed reads back with no
+          // shotId at all - defaults to null, which resolveCitationShotPosition
+          // (snapshot-row.ts) reports as "cannot be resolved" (Ruling R1-D),
+          // never as "removed".
+          shotId: typeof e.shotId === "string" ? e.shotId : null,
         }))
     : [];
 
@@ -189,6 +194,11 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<SnapshotAsse
             ? e.source
             : "unknown") as SnapshotRubricAreaEvidence["source"],
           verified: typeof e.verified === "boolean" ? e.verified : false,
+          // R1 (same default rule as shotReports above): a legacy row with no
+          // shotId field, or a genuinely-hallucinated-index row whose shotId
+          // fails to resolve later, render IDENTICALLY - "cannot be
+          // resolved" - by Ruling R1-D's owner decision.
+          shotId: typeof e.shotId === "string" ? e.shotId : null,
         }))
     : [];
 

@@ -18,8 +18,13 @@ import { TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import AssessmentFeedbackFields, { AssessmentScoreField } from "../assessment-shared/AssessmentFeedbackFields";
 import { editAssessmentField } from "../assessment-shared/assessment-row";
-import { summarizeShotReports, type SnapshotAssessmentRow, type SnapshotShotReadReport } from "./snapshot-row";
-import { SNAPSHOT_ROLE_LABELS } from "./snapshot-shot";
+import {
+  summarizeShotReports,
+  resolveCitationShotPosition,
+  type SnapshotAssessmentRow,
+  type SnapshotShotReadReport,
+} from "./snapshot-row";
+import { SNAPSHOT_ROLE_LABELS, type SnapshotShot } from "./snapshot-shot";
 import type { AssessmentFeedbackField } from "../assessment-shared/assessment-row";
 
 export interface SnapshotResultCardProps {
@@ -27,23 +32,16 @@ export interface SnapshotResultCardProps {
   onEditField: (id: string, field: AssessmentFeedbackField, value: string) => void;
   onEditStudentName: (id: string, name: string) => void;
   onCopyError: (message: string) => void;
-  /** F1: true for a row graded before the most recent per-student shot clear
-   *  - either restored from storage at this mount (U10: shots never persist,
-   *  so a restored row was necessarily graded before whatever shots exist
-   *  now) or because a later Next-student transition cleared the shots it
-   *  was graded against. In either case the row's shot-index citations may
-   *  no longer point at the shot they name - NOT necessarily because that
-   *  shot is gone (a kept, stable-role shot can shift position too) - so
-   *  when true, every shot-index number rendered for this row (the read
-   *  report and every rubric-area citation line) is dropped in favour of
-   *  language that says the index cannot be trusted, rather than claiming
-   *  the shot is missing.
-   *  NOTE (this seat's own scoping): this flag tracks rows restored at mount,
-   *  or graded before the most recent per-student clear - a tray delete or
-   *  reorder can also invalidate a shot-index citation, and neither is
-   *  tracked by this flag. Widening it to cover those is out of scope for
-   *  this chunk; see the report. */
-  citationsUnavailable: boolean;
+  /** The LIVE tray, passed down so this card can resolve each citation's
+   *  shotId to its current position via resolveCitationShotPosition
+   *  (snapshot-row.ts). Replaces the old citationsUnavailable boolean flag -
+   *  RULING R1-D: there is no separate "removed" state to flag; a citation
+   *  either resolves against this live tray or it does not, and "does not"
+   *  is reported as "cannot be resolved" (true in every case - reload,
+   *  deletion, reorder, a hallucinated index - never as "removed", which
+   *  would be false for the dominant case: every reload starts with an
+   *  empty tray, U10). */
+  shots: readonly SnapshotShot[];
 }
 
 function statusLabel(status: SnapshotShotReadReport["status"]): string {
@@ -72,7 +70,7 @@ export default function SnapshotResultCard({
   onEditField,
   onEditStudentName,
   onCopyError,
-  citationsUnavailable,
+  shots,
 }: SnapshotResultCardProps) {
   const tally = summarizeShotReports(row.shotReports);
   const grouped = groupReportsByRole(row.shotReports);
@@ -104,11 +102,11 @@ export default function SnapshotResultCard({
               <p key={role} className={styles.fieldHint}>
                 {(SNAPSHOT_ROLE_LABELS as Record<string, string>)[role] ?? role} (
                 {reports
-                  .map((r) =>
-                    citationsUnavailable
-                      ? `${statusLabel(r.status)}${r.reason ? ` (${r.reason})` : ""}`
-                      : `Shot ${r.shotIndex}: ${statusLabel(r.status)}${r.reason ? ` (${r.reason})` : ""}`
-                  )
+                  .map((r) => {
+                    const position = resolveCitationShotPosition(shots, r.shotId);
+                    const label = position !== null ? `Shot ${position}` : "shot not resolvable";
+                    return `${label}: ${statusLabel(r.status)}${r.reason ? ` (${r.reason})` : ""}`;
+                  })
                   .join(", ")}
                 )
               </p>
@@ -150,29 +148,40 @@ export default function SnapshotResultCard({
           {row.rubricAreas.length > 0 && (
             <div>
               <p className={styles.fieldHint}>Rubric area evidence (D4: each citation is checked against the transcription):</p>
-              {row.rubricAreas.map((area) => (
-                <p key={area.area} className={styles.fieldHint}>
-                  {area.area}: {area.score} -{" "}
-                  {area.verified ? (
-                    area.source === "pasted" ? (
-                      <>
-                        quotes the pasted rubric/assignment text, not the student&apos;s work: &quot;{area.quote}&quot;
-                      </>
-                    ) : citationsUnavailable ? (
-                      <>
-                        citation index no longer reliable (the shot tray has changed since this was graded): &quot;
-                        {area.quote}&quot;
-                      </>
-                    ) : area.source === "unknown" ? (
-                      <>verified against the session transcript (shot unconfirmed): &quot;{area.quote}&quot;</>
+              {row.rubricAreas.map((area) => {
+                // RULING R1-D: the buckets sit INSIDE the `verified` true arm
+                // (R1-C, unchanged) - an unverified citation keeps reading
+                // "unsupported", never "named a shot we cannot identify".
+                // Only a `source === "shot"` citation resolves a live
+                // position at all; "pasted"/"unknown" never had a shot to
+                // begin with.
+                const position = area.source === "shot" ? resolveCitationShotPosition(shots, area.shotId) : null;
+                return (
+                  <p key={area.area} className={styles.fieldHint}>
+                    {area.area}: {area.score} -{" "}
+                    {area.verified ? (
+                      area.source === "pasted" ? (
+                        <>
+                          quotes the pasted rubric/assignment text, not the student&apos;s work: &quot;{area.quote}
+                          &quot;
+                        </>
+                      ) : area.source === "unknown" ? (
+                        <>verified against the session transcript (shot unconfirmed): &quot;{area.quote}&quot;</>
+                      ) : position !== null ? (
+                        <>verified (Shot {position}): &quot;{area.quote}&quot;</>
+                      ) : (
+                        <>
+                          named a shot when this was graded, but which one cannot be resolved (the shot tray has
+                          changed since this was graded, or this row predates that tracking): &quot;{area.quote}
+                          &quot;
+                        </>
+                      )
                     ) : (
-                      <>verified (Shot {area.shotIndex || "n/a"}): &quot;{area.quote}&quot;</>
-                    )
-                  ) : (
-                    <>unverified - no matching text found in the transcription, treat as unsupported</>
-                  )}
-                </p>
-              ))}
+                      <>unverified - no matching text found in the transcription, treat as unsupported</>
+                    )}
+                  </p>
+                );
+              })}
             </div>
           )}
 

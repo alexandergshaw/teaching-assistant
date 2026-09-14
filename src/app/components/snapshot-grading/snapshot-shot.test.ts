@@ -12,6 +12,7 @@ import {
   groupShotsByRole,
   shotTileLabel,
   mintShotId,
+  buildIdByGlobalIndex,
   partitionShotsForNextStudent,
   computeNextStudentCounts,
   describeNextStudentCounts,
@@ -280,4 +281,55 @@ describe("describeNextStudentCounts", () => {
     });
     expect(description).toBe("There are no shots to clear or keep - this starts a new student.");
   });
+});
+
+// ---------------------------------------------------------------------------
+// R1-B/R1-H: buildIdByGlobalIndex is THE oracle a wrong-but-plausible
+// implementation must fail. Fixture ids are deliberately position-
+// distinguishable (never "shot-0"/"shot-1"/"shot-2", which could let an
+// off-by-one bug accidentally produce a value that LOOKS right) - this is
+// the shape Ruling R1-B's own section 7 handoff specifies.
+// ---------------------------------------------------------------------------
+
+describe("buildIdByGlobalIndex (R1-B: the SAME i+1 rule useSnapshotGrade.ts's shotsForGrade uses to label shots for the model)", () => {
+  const shots: SnapshotShot[] = [
+    makeShot({ id: "shot-z" }),
+    makeShot({ id: "shot-a" }),
+    makeShot({ id: "shot-m" }),
+  ];
+
+  it("keys the FIRST array element at 1, not 0", () => {
+    expect(buildIdByGlobalIndex(shots).get(1)).toBe("shot-z");
+  });
+
+  it("keys the LAST array element at its 1-based position, not its 0-based one", () => {
+    expect(buildIdByGlobalIndex(shots).get(3)).toBe("shot-m");
+  });
+
+  it("has no entry at the 0-based key a wrong implementation would use", () => {
+    expect(buildIdByGlobalIndex(shots).get(0)).toBeUndefined();
+  });
+
+  it("has exactly one entry per shot", () => {
+    expect(buildIdByGlobalIndex(shots).size).toBe(3);
+  });
+
+  it("returns an empty map for an empty tray", () => {
+    expect(buildIdByGlobalIndex([]).size).toBe(0);
+  });
+
+  // SABOTAGE CONTROL (Ruling R1-B item 2, discharged): with
+  // buildIdByGlobalIndex's body temporarily changed to
+  // `new Map(shots.map((shot, i) => [i, shot.id]))` (0-based - the exact
+  // wrong construction the ruling names as the silent-failure mode), the
+  // FIRST two assertions above both go red:
+  //   - "keys the FIRST array element at 1, not 0": .get(1) returns
+  //     "shot-a" (the SECOND element) instead of "shot-z" - AssertionError:
+  //     expected 'shot-a' to be 'shot-z'.
+  //   - "has no entry at the 0-based key a wrong implementation would use":
+  //     .get(0) returns "shot-z" instead of undefined - AssertionError:
+  //     expected 'shot-z' to be undefined.
+  // Restoring the `i + 1` body turns both green again. Not re-run
+  // automatically here (that would require editing source mid-suite); see
+  // the wave report for the actual before/after command output.
 });

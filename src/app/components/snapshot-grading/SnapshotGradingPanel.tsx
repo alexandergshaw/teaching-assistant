@@ -220,38 +220,6 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     full: SNAP_TABLE_FULL_MESSAGE,
   });
 
-  // F1 (A4d/A4b): tracks rows GRADED BEFORE THE MOST RECENT PER-STUDENT SHOT
-  // CLEAR - either because the row was already in storage at mount (U10
-  // guarantees zero live shots exist at mount, so a restored row was
-  // necessarily graded before whatever shots exist now) or because a later
-  // Next-student transition cleared the shots it was graded against
-  // (handleNextStudentConfirm below). Either way, the row's shot-index
-  // citations may no longer point at the shot they name - not because the
-  // shot is gone, but because kept (stable-role) shots shift position once
-  // per-student shots are removed from around them, so even a citation
-  // naming a KEPT shot can end up pointing at the wrong index. There is
-  // deliberately no removal branch: activeRowIdRef starts null on every
-  // mount and is set ONLY inside handleGrade's own isNewRow branch when
-  // minting a brand-new row id - nothing ever points it at an id already in
-  // this set, so no row already in this set can ever become the `existing`
-  // target of an in-place update.
-  //
-  // NOTE (this seat's own scoping): this set tracks rows restored at mount,
-  // or graded before the most recent per-student clear - it does not, and
-  // cannot, track every event that can invalidate a shot-index citation
-  // (deleting or reordering a shot in the tray also does, and neither
-  // feeds this set). Widening it to cover those is out of scope for this
-  // chunk; see the report.
-  const [rowsGradedBeforeLastShotChange, setRowsGradedBeforeLastShotChange] = useState<ReadonlySet<string>>(
-    // Reads `sessionRows` (a plain value, already resolved by
-    // useAssessmentRowStore's own lazy initializer earlier in this same
-    // render), not `sessionRowsRef.current` - the react-hooks/refs lint rule
-    // forbids reading a ref's value during render, even from inside another
-    // hook's own lazy initializer. Equivalent on mount: both are the same
-    // array, freshly deserialized from storage.
-    () => new Set(sessionRows.map((r) => r.id))
-  );
-
   const activeRowIdRef = useRef<string | null>(null);
   const [splitNotice, setSplitNotice] = useState<string | null>(null);
   const [nextStudentArmed, setNextStudentArmed] = useState(false);
@@ -403,29 +371,6 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   // upsertSnapshotRow would silently overwrite it, destroying a completed,
   // persisted assessment.
   const handleNextStudentConfirm = useCallback(() => {
-    // Guard on the QUANTITY that matters - the number of shots this clear
-    // actually removes (nextStudentCountsRef.current.clearedTotal), not on
-    // the length of sessionRowsRef.current (the session's row list, which is
-    // unrelated and only coincidentally zero at the same time the tray is
-    // empty on a fresh mount). Reads the ref, not the closed-over
-    // `nextStudentCounts` variable, for the same reason the keydown effect
-    // above does: this callback's own identity is stable across renders (see
-    // its dep array), so a direct reference here would freeze at whatever
-    // count was live when this callback was created.
-    if (nextStudentCountsRef.current.clearedTotal > 0) {
-      // Every row currently in the session list has its shot-index
-      // numbering invalidated by this clear, not only rows that cited a
-      // per-student shot - see the declaration comment on
-      // rowsGradedBeforeLastShotChange above for why kept (stable-role)
-      // shots are equally affected once per-student shots are removed from
-      // around them.
-      setRowsGradedBeforeLastShotChange((prev) => {
-        const rowsToFlag = sessionRowsRef.current;
-        const next = new Set(prev);
-        rowsToFlag.forEach((r) => next.add(r.id));
-        return next;
-      });
-    }
     clearPerStudentShots();
     setShotReads(new Map());
     setTranscriptText("");
@@ -436,7 +381,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     activeRowIdRef.current = null; // the NEXT successful Grade mints a fresh row, never updates a finished one
     setNextStudentArmed(false);
     announce("Cleared this student's shots. Assignment and rubric shots are kept.");
-  }, [clearPerStudentShots, announce, sessionRowsRef]);
+  }, [clearPerStudentShots, announce]);
 
   const [encodeNotice, setEncodeNoticeState] = useState<string | null>(null);
 
@@ -593,14 +538,37 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       if ("error" in result) {
         setReadError(result.error);
         for (const { shot, globalIndex } of batch) {
-          nextReads.set(globalIndex, { shotIndex: globalIndex, role: shot.role, transcript: "", status: "not-read", reason: result.error });
+          nextReads.set(globalIndex, {
+            shotIndex: globalIndex,
+            shotId: shot.id,
+            role: shot.role,
+            transcript: "",
+            status: "not-read",
+            reason: result.error,
+          });
         }
       } else {
         for (const r of result.results) {
           const matched = batch.find((b) => b.globalIndex === r.shotIndex);
           const role = matched ? matched.shot.role : "other";
           const status: SnapshotShotReadStatus = r.readable ? "read" : r.transcript.trim() ? "partly-read" : "not-read";
-          nextReads.set(r.shotIndex, { shotIndex: r.shotIndex, role, transcript: r.transcript, status, reason: r.unreadableReason });
+          // RULING R1-E: shotId is captured here, from the SAME `shot` this
+          // batch read from - not re-derived later from a numeric index,
+          // which is exactly the position that can drift out from under
+          // `r.shotIndex` if the tray is edited between Read and Grade.
+          // `matched` is always found in practice (r.shotIndex always names
+          // a shot in this batch); the fallback below only avoids a crash on
+          // a malformed action response.
+          if (matched) {
+            nextReads.set(r.shotIndex, {
+              shotIndex: r.shotIndex,
+              shotId: matched.shot.id,
+              role,
+              transcript: r.transcript,
+              status,
+              reason: r.unreadableReason,
+            });
+          }
         }
       }
       if (mountedRef.current) setShotReads(new Map(nextReads));
@@ -871,7 +839,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
               onEditField={handleEditRowField}
               onEditStudentName={handleEditStudentName}
               onCopyError={setGradeError}
-              citationsUnavailable={rowsGradedBeforeLastShotChange.has(sessionRow.id)}
+              shots={shots}
             />
           ))}
         </div>

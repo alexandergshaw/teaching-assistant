@@ -321,7 +321,7 @@ describe("confirmedRubricAreas resets ONLY at the rubric-replace onSubmit site (
 
   it("handleNextStudentConfirm's body contains NEITHER setConfirmedRubricAreas nor setConfirmedRubricAreasError - the confirmed list survives Next student", () => {
     const start = panelSource.indexOf("const handleNextStudentConfirm = useCallback(() => {");
-    const end = panelSource.indexOf("}, [clearPerStudentShots, announce, sessionRowsRef]);", start);
+    const end = panelSource.indexOf("}, [clearPerStudentShots, announce]);", start);
     expect(start, "expected to find handleNextStudentConfirm's own body").toBeGreaterThan(-1);
     expect(end, "expected to find its own closing dependency array").toBeGreaterThan(start);
     const body = panelSource.slice(start, end);

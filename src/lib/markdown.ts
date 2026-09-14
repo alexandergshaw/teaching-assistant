@@ -1,7 +1,17 @@
 // Pragmatic HTML <-> Markdown conversion for syncing assignment instructions
 // between Canvas (HTML) and a repo file (Markdown). Covers the elements that show
 // up in instructions — headings, paragraphs, lists, links, emphasis, code — not
-// the full CommonMark/HTML spec. Server-only (uses node-html-parser).
+// the full CommonMark/HTML spec.
+//
+// NOT server-only, despite what this header said until 2026-09-13. It imports
+// node-html-parser, whose own dependencies are css-select and entities - a scan
+// of both for fs/path/crypto/os/node: comes back clean - so it bundles for the
+// client fine, and four shipped client components already import it:
+// CourseIntelAnswer.tsx, CourseIntelHistory.tsx, knowledge-overview-storage.ts
+// and PageBody.tsx (`grep -rln 'from "@/lib/markdown"' src/app/components/`).
+// The stale claim mattered: a design pass reported it as a tree-vs-doc conflict
+// rather than reconciling it, and a reader who believed the header would either
+// avoid a safe import or "fix" four working files.
 
 import { parse, HTMLElement, NodeType, type Node } from "node-html-parser";
 

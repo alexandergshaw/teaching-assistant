@@ -41741,3 +41741,34 @@ user sees "Loading your saved formats..." forever. An error state only a
 rejection can reach is not coverage for a hang.
 
 This entry states what exists; it decides nothing about what G3 should do.
+
+### 413d - draft slots deliberately do NOT persist (backlog 5.2, closed)
+
+Recorded because the entry had already been rediscovered twice: nothing about
+the announcement draft SLOTS survives a reload, and that is deliberate.
+
+Measured 2026-09-14: `grep -c "localStorage\|ta-rec"` returns **0** for all
+three of `useAnnouncementDraftSlots.ts`, `announcement-draft-slots.ts` and
+`AnnouncementDraftSlot.tsx`. The reducer always seeds one empty slot; nothing
+reads storage. The five `ta-` keys on this surface -
+`ta-rec-wta-course`, `ta-rec-wta-module`, `ta-rec-wta-notes`,
+`ta-rec-wta-emoji`, `ta-rec-wta-resources` - are all genuine SETTINGS, and
+`walkthrough-announcement.structure.test.ts:111` asserts exactly that set.
+
+**The rule and why it does not bind here.** The standing repo rule is that
+every new CONTROL persists across reloads. The slot set, each slot's template
+choice, and the drafted text are task-in-progress CONTENT, not control
+settings, so the rule does not reach them. That distinction is the decision:
+a control describes how the tool is configured, and survives; content
+describes one piece of work in flight, and does not.
+
+**If this is ever reversed**, three things bite, all recorded so the next
+attempt does not rediscover them:
+- the exact-set `ta-` canary must be bumped in the SAME change;
+- a `localStorage`-seeded `useState` initializer does NOT show its restored
+  value on reload on an SSR'd surface - React only warns on the hydration
+  mismatch - so it needs a mount effect (the G3 toggles already do this
+  correctly at `WalkthroughAnnouncementPanel.tsx:210-228`);
+- persisting DRAFT TEXT is a privacy question, not just a storage one: it is
+  model output about a named course sitting indefinitely in browser storage.
+  That is the owner's call, and it is flagged here rather than decided.

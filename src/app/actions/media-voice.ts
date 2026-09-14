@@ -3,7 +3,7 @@
 import { splitNarrationText } from "@/lib/narration-chunks";
 import { saveRecordingFile, getRecordingFileUrl } from "@/lib/recording-files";
 import { createServiceClient } from "@/lib/supabase/server";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { getUserStyle, saveUserStyle, clearVoiceClone } from "@/lib/user-style";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 
@@ -15,7 +15,7 @@ import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 /** Whether the ElevenLabs voice API is configured (for the UI to gate buttons). */
 export async function voiceConfiguredAction(): Promise<{ configured: boolean }> {
   try {
-    await requireOwner();
+    await requireUser();
     return { configured: !!process.env.ELEVENLABS_API_KEY?.trim() };
   } catch {
     return { configured: false };
@@ -27,7 +27,7 @@ export async function listElevenVoicesAction(): Promise<
   { voices: Array<{ voiceId: string; name: string; category: string }> } | { error: string }
 > {
   try {
-    await requireOwner();
+    await requireUser();
     const key = process.env.ELEVENLABS_API_KEY?.trim();
     if (!key) return { error: "Voice generation is not configured. Set ELEVENLABS_API_KEY." };
     const res = await fetch("https://api.elevenlabs.io/v1/voices", {
@@ -57,7 +57,7 @@ export async function getUserStyleAction(): Promise<
   { style: { voiceId: string | null; voiceSampleName: string | null; hasVoiceSample: boolean; writingSample: string | null } } | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const style = await getUserStyle(supabase, user.id);
     return {
@@ -76,7 +76,7 @@ export async function getUserStyleAction(): Promise<
 /** Save or update the writing sample (capped at 20k chars; empty clears it). */
 export async function saveWritingSampleAction(text: string): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const trimmed = text.trim();
     if (trimmed.length > 20_000) {
@@ -101,7 +101,7 @@ export async function setVoiceCloneAction(
   files: Array<{ base64: string; mimeType: string; fileName: string }>
 ): Promise<{ voiceId: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
 
     // Use the existing createVoiceCloneAction flow
@@ -164,7 +164,7 @@ export async function setVoiceCloneAction(
 /** Remove the cloned voice and clear the sample. */
 export async function removeVoiceCloneAction(): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
 
     const style = await getUserStyle(supabase, user.id);
@@ -210,7 +210,7 @@ export async function removeVoiceCloneAction(): Promise<{ ok: true } | { error: 
 /** Get a signed URL for the stored voice sample (3600s expiration). */
 export async function getVoiceSampleUrlAction(): Promise<{ url: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
 
     const style = await getUserStyle(supabase, user.id);
@@ -293,7 +293,7 @@ export async function synthesizeNarrationAction(
   voiceIdOverride?: string
 ): Promise<{ base64: string; mimeType: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const key = process.env.ELEVENLABS_API_KEY?.trim();
     if (!key) return { error: "Voice generation is not configured. Set ELEVENLABS_API_KEY (and ELEVENLABS_VOICE_ID for your cloned voice)." };
     const t = text.trim();
@@ -318,7 +318,7 @@ export async function synthesizeLongNarrationAction(
   voiceIdOverride?: string
 ): Promise<{ base64: string; mimeType: string; segments: number } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const key = process.env.ELEVENLABS_API_KEY?.trim();
     if (!key) return { error: "Voice generation is not configured. Set ELEVENLABS_API_KEY (and ELEVENLABS_VOICE_ID for your cloned voice)." };
     const t = text.trim();
@@ -358,7 +358,7 @@ export async function createVoiceCloneAction(
   files: Array<{ base64: string; mimeType: string; fileName: string }>
 ): Promise<{ voiceId: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     const key = process.env.ELEVENLABS_API_KEY?.trim();
     if (!key) return { error: "Set ELEVENLABS_API_KEY to create a voice clone." };
     if (!name.trim()) return { error: "Name the voice (e.g. your own name)." };

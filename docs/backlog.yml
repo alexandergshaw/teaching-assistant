@@ -105,7 +105,7 @@
   note: 'Blocked by V3 (formerly 1.3) (pre-migration queue note)'
 - id: 'R1'
   state: 'unscoped'
-  title: 'Key snapshot-grading citations by shot ID, not array position. Deleting or reordering a shot silently re-points every citation naming a later index - citations key on a numeric shotIndex (src/app/components/snapshot-grading/snapshot-citations.ts:24,63), and SnapshotGradingPanel.tsx:177-183 documents in its own comment that delete and reorder are uncovered. The current flag tracks only restored-at-mount and cleared-by-Next-student. The mechanism needs replacing, not another patch.'
+  title: 'Key snapshot-grading citations by shot ID, not array position. Deleting or reordering a shot silently re-points every citation naming a later index - citations key on a numeric shotIndex (src/app/components/snapshot-grading/snapshot-citations.ts:24,63), and SnapshotGradingPanel.tsx:239-244 documents in its own comment that delete and reorder are uncovered (this citation read :177-183 until 2026-09-14; the surface moved and :177-183 is now an unrelated localStorage comment - re-measured, not retyped). The current flag tracks only restored-at-mount and cleared-by-Next-student. The mechanism needs replacing, not another patch.'
   owns: []
   verify: null
   blocked_by: []

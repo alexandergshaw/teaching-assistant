@@ -2,13 +2,13 @@
 
 // Avatar Studio server actions: Tavus-backed likeness training and
 // prompt-driven video generation. Every action is owner-gated with the
-// existing requireOwner() (AC5.3). Shared constants and pure helpers live in
+// existing requireAppOwner() (AC5.3). Shared constants and pure helpers live in
 // src/lib/tavus.ts and src/lib/avatar-likeness.ts, never here - a "use
 // server" module may export nothing but async functions (enforced by
 // src/lib/use-server-exports.test.ts), so there is nowhere else to put them.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { createSignedUrl } from "@/lib/supabase/storage";
 import type { Database } from "@/lib/supabase/types";
@@ -67,7 +67,7 @@ const NOT_CONFIGURED_MESSAGE =
  * disable train/generate rather than erroring on click (AC5.2). */
 export async function avatarStudioConfiguredAction(): Promise<{ configured: boolean }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     return { configured: !!tavusApiKey() };
   } catch {
     return { configured: false };
@@ -76,7 +76,7 @@ export async function avatarStudioConfiguredAction(): Promise<{ configured: bool
 
 export async function listAvatarLikenessesAction(): Promise<{ likenesses: AvatarLikeness[] } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const supabase = createServiceClient();
     const likenesses = await listAvatarLikenesses(supabase, user.id);
     return { likenesses };
@@ -200,7 +200,7 @@ export async function startAvatarTrainingAction(
   acknowledgement: string
 ): Promise<{ likeness: AvatarLikeness } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const apiKey = tavusApiKey();
     if (!apiKey) return { error: NOT_CONFIGURED_MESSAGE };
 
@@ -283,7 +283,7 @@ export async function refreshAvatarLikenessAction(
   id: string
 ): Promise<{ likeness: AvatarLikeness } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const supabase = createServiceClient();
     const likeness = await getAvatarLikenessById(supabase, user.id, id);
     if (!likeness) return { error: "That likeness could not be found." };
@@ -345,7 +345,7 @@ export async function refreshAvatarLikenessAction(
  * unique index in the migration; this just avoids tripping it mid-swap). */
 export async function setDefaultAvatarLikenessAction(id: string): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const supabase = createServiceClient();
     const likeness = await getAvatarLikenessById(supabase, user.id, id);
     if (!likeness) return { error: "That likeness could not be found." };
@@ -362,7 +362,7 @@ export async function setDefaultAvatarLikenessAction(id: string): Promise<{ ok: 
  * default if the deleted one was the default (AC7.4). */
 export async function deleteAvatarLikenessAction(id: string): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const supabase = createServiceClient();
     const likeness = await getAvatarLikenessById(supabase, user.id, id);
     if (!likeness) return { ok: true };
@@ -412,7 +412,7 @@ export async function deleteAvatarLikenessAction(id: string): Promise<{ ok: true
  */
 export async function sampleInUseAction(sampleFileId: string): Promise<{ inUse: boolean }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const supabase = createServiceClient();
     const inUse = await isSampleFileInUseByLikeness(supabase, user.id, sampleFileId);
     return { inUse };
@@ -447,7 +447,7 @@ export async function generateAvatarScriptAction(input: {
   purpose?: AvatarVideoPurpose | null;
 }): Promise<{ script: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const trimmed = input.prompt.trim();
     if (!trimmed) return { error: "Describe the video you want before generating a script." };
 
@@ -491,7 +491,7 @@ export async function listAvatarCourseOptionsAction(): Promise<
   { courses: Array<{ id: string; label: string }> } | { error: string }
 > {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const courses = await listCourses(user.id);
     return {
       courses: courses.map((c) => ({
@@ -511,7 +511,7 @@ export async function listAvatarCourseOptionsAction(): Promise<
  * provider id. */
 export async function startAvatarVideoAction(script: string, name: string): Promise<{ jobId: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const apiKey = tavusApiKey();
     if (!apiKey) return { error: NOT_CONFIGURED_MESSAGE };
 
@@ -562,7 +562,7 @@ export async function refreshAvatarVideoAction(
   jobId: string
 ): Promise<{ status: string; fileId: string | null; error?: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireAppOwner();
     const supabase = createServiceClient();
     const video = await getAvatarVideoById(supabase, user.id, jobId);
     if (!video) return { error: "That video job could not be found." };

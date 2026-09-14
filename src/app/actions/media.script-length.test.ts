@@ -23,7 +23,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // bad length costs nothing.
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/office-edit", () => ({
@@ -40,7 +40,7 @@ vi.mock("@/lib/llm", () => ({
   callLlm: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./shared";
 import { callLlm } from "@/lib/llm";
 import {
@@ -75,7 +75,7 @@ function lastPromptText(): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
+  vi.mocked(requireUser).mockResolvedValue(OWNER as never);
   vi.mocked(getWritingStyleBlock).mockResolvedValue("" as never);
   mockScriptResponse();
 });
@@ -98,7 +98,7 @@ describe("generateLectureScriptAction - out-of-range length", () => {
   it("refuses every out-of-range length rather than substituting one", async () => {
     for (const minutes of [0, -5, 31, 45, 120, Number.NaN, Number.POSITIVE_INFINITY]) {
       vi.clearAllMocks();
-      vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
+      vi.mocked(requireUser).mockResolvedValue(OWNER as never);
       vi.mocked(getWritingStyleBlock).mockResolvedValue("" as never);
       mockScriptResponse();
 
@@ -129,7 +129,7 @@ describe("generateLectureScriptAction - accepted length", () => {
   it("accepts both bounds", async () => {
     for (const minutes of [LECTURE_SCRIPT_MIN_MINUTES, LECTURE_SCRIPT_MAX_MINUTES]) {
       vi.clearAllMocks();
-      vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
+      vi.mocked(requireUser).mockResolvedValue(OWNER as never);
       vi.mocked(getWritingStyleBlock).mockResolvedValue("" as never);
       mockScriptResponse();
 

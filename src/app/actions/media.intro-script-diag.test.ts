@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // pattern media.script-length.test.ts already established for
 // generateLectureScriptAction in this same file.
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/office-edit", () => ({
@@ -32,7 +32,7 @@ vi.mock("@/lib/llm", () => ({
   callLlm: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./shared";
 import { callLlm } from "@/lib/llm";
 import { generateModuleIntroScriptAction } from "./media";
@@ -53,7 +53,7 @@ const CREDENTIAL_SHAPED_BODY =
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
+  vi.mocked(requireUser).mockResolvedValue(OWNER as never);
   vi.mocked(getWritingStyleBlock).mockResolvedValue("" as never);
 });
 

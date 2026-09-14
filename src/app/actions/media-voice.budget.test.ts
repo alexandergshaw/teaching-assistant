@@ -14,15 +14,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // The fix budgets the COMBINED WIRE size (sumBase64WireBytes) against the
 // shared UPLOAD_WIRE_BUDGET_BYTES ceiling (checkWireBudget, from
 // @/lib/upload-budget), the same budget every other upload path in this repo
-// uses. requireOwner (auth) and global fetch (the ElevenLabs call) are
+// uses. requireUser (auth) and global fetch (the ElevenLabs call) are
 // mocked so the guard's placement - strictly BEFORE any network call - is
 // directly observable.
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { UPLOAD_WIRE_BUDGET_BYTES } from "@/lib/upload-budget";
 import { createVoiceCloneAction } from "./media-voice";
 
@@ -44,7 +44,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
+  vi.mocked(requireUser).mockResolvedValue(OWNER as never);
   vi.stubEnv("ELEVENLABS_API_KEY", "test-key");
   fetchMock = vi.fn(async () => ({
     ok: true,

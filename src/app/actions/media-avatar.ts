@@ -1,6 +1,6 @@
 "use server";
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 
 // ── HeyGen avatar video ──────────────────────────────────────────────────
 // Split out of media.ts (which was pushing the 1000-line cap) with no
@@ -10,7 +10,7 @@ import { requireOwner } from "@/lib/supabase/auth";
 /** Whether the HeyGen avatar API is configured (for the UI to gate buttons). */
 export async function avatarConfiguredAction(): Promise<{ configured: boolean }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     return { configured: !!process.env.HEYGEN_API_KEY?.trim() && !!process.env.HEYGEN_AVATAR_ID?.trim() };
   } catch {
     return { configured: false };
@@ -26,7 +26,7 @@ export async function generateAvatarVideoAction(
   script: string
 ): Promise<{ videoId: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const key = process.env.HEYGEN_API_KEY?.trim();
     const avatarId = process.env.HEYGEN_AVATAR_ID?.trim();
     if (!key || !avatarId) return { error: "Avatar generation is not configured. Set HEYGEN_API_KEY and HEYGEN_AVATAR_ID (your avatar's id)." };
@@ -62,7 +62,7 @@ export async function getAvatarVideoStatusAction(
   videoId: string
 ): Promise<{ status: string; videoUrl: string | null } | { error: string }> {
   try {
-    await requireOwner();
+    await requireAppOwner();
     const key = process.env.HEYGEN_API_KEY?.trim();
     if (!key) return { error: "Avatar generation is not configured." };
     if (!videoId.trim()) return { error: "Missing video id." };

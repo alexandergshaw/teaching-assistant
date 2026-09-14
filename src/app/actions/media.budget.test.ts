@@ -22,7 +22,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // was never reached for an over-budget payload.
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireUser: vi.fn(),
 }));
 
 vi.mock("@/lib/office-edit", () => ({
@@ -39,7 +39,7 @@ vi.mock("@/lib/llm", () => ({
   callLlm: vi.fn(),
 }));
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { parseOfficeParagraphs } from "@/lib/office-edit";
 import { extractTextbookInfoFromImages } from "./shared";
 import { callLlm } from "@/lib/llm";
@@ -64,7 +64,7 @@ function base64OfWireBytes(wireBytes: number): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requireOwner).mockResolvedValue(OWNER as never);
+  vi.mocked(requireUser).mockResolvedValue(OWNER as never);
 });
 
 describe("extractPptxSlidesAction - wire-size budget", () => {

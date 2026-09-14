@@ -12,7 +12,7 @@ import { DECK_PRESETS } from "@/lib/decks/presets";
 import { buildSlidesPptx, type PptxSlide, type PptxTheme } from "@/lib/pptx";
 import { saveRecordingFile } from "@/lib/recording-files";
 import { createServiceClient } from "@/lib/supabase/server";
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/supabase/auth";
 import { createPresentationDraft, markPresentationDraftReviewed, updatePresentationDraft, type PresentationDraftPayload } from "@/lib/presentation-drafts";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
 import {
@@ -41,7 +41,7 @@ export async function savePresentationDraftAction(
   workflowName?: string
 ): Promise<{ id: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const draft = await createPresentationDraft(supabase, user.id, {
       summary,
@@ -64,7 +64,7 @@ export async function markPresentationDraftReviewedAction(
   id: string
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     await markPresentationDraftReviewed(supabase, user.id, id);
     return { ok: true };
@@ -81,7 +81,7 @@ export async function updatePresentationDraftPayloadAction(
   payload: PresentationDraftPayload
 ): Promise<{ ok: true } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     await updatePresentationDraft(supabase, user.id, id, { payload });
     return { ok: true };
@@ -97,7 +97,7 @@ export async function updatePresentationDraftPayloadAction(
 /** List all saved deck templates for the owner. */
 export async function listDeckTemplatesAction(): Promise<{ templates: DeckTemplate[] } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     return { templates: await listDeckTemplates(supabase, user.id) };
   } catch (err) {
@@ -110,7 +110,7 @@ export async function getDeckTemplateAction(
   idOrName: string
 ): Promise<{ template: DeckTemplate } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     const all = await listDeckTemplates(supabase, user.id);
     const key = String(idOrName ?? "").trim();
@@ -135,7 +135,7 @@ export async function generateSlidesAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ presentationTitle: string; slides: Array<{ title: string; bullets: string[] }> } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!prompt.trim()) {
       return { error: "Describe the slides to generate first." };
     }
@@ -221,7 +221,7 @@ export async function extractTextbookInfoAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ text: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!images || images.length === 0) return { error: "Upload at least one image." };
     // Budget the COMBINED wire size of every image, not each one alone -
     // several individually-fine images can still add up to a request body
@@ -253,7 +253,7 @@ export async function generateLectureScriptAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ script: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     if (!topic.trim()) return { error: "Enter a lecture topic." };
     const checked = checkLectureScriptMinutes(targetMinutes);
     if (!checked.ok) return { error: checked.error };
@@ -327,7 +327,7 @@ export async function generateModuleIntroScriptAction(
   provider: LlmProvider = "gemini"
 ): Promise<({ script: string } | { error: string }) & { diag: ScriptGenerationLlmDiag }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     if (!moduleLabel.trim()) {
       return { error: "Select a module to introduce first.", diag: unattemptedLlmDiag(provider) };
     }
@@ -391,7 +391,7 @@ export async function extractPptxSlidesAction(
   base64: string
 ): Promise<{ slides: Array<{ slide: number; title: string; text: string }> } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!base64) return { error: "Upload a .pptx file." };
     // Guards all six production callers of this action (Slide Studio deck
     // mode, file preview, and four workflow steps) - none of them capped the
@@ -420,7 +420,7 @@ export async function extractDocxTextAction(
   base64: string
 ): Promise<{ text: string } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!base64) return { error: "Upload a .docx file." };
     const sizeCheck = checkWireBudget(base64.length, "That Word document");
     if (!sizeCheck.ok) return { error: sizeCheck.error ?? "That Word document is too large to upload in one request." };
@@ -438,7 +438,7 @@ export async function generateSlideNarrationAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ narrations: SlideNarration[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!slides.length) return { error: "Extract slides first." };
     if (slides.length > 60) return { error: "That deck is too large (60 slide limit)." };
     const parts: LlmPart[] = [
@@ -480,7 +480,7 @@ export async function describeScreenRecordingAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ captions: ScreenCaption[] } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!frames.length) return { error: "No frames were extracted from the video." };
     if (frames.length > 30) return { error: "Too many frames; sample the video more sparsely." };
     // The 30-frame cap above bounds COUNT, not size - 30 keyframes can still
@@ -529,7 +529,7 @@ export async function generateVideoNarrationAction(
   provider: LlmProvider = "gemini"
 ): Promise<{ segments: Array<{ start: number; end: number; text: string }> } | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!frames.length) return { error: "No frames were extracted from the video." };
     if (frames.length > 30) return { error: "Too many frames; sample the video more sparsely." };
     const sizeCheck = checkWireBudget(sumBase64WireBytes(frames.map((f) => f.base64)), "These video frames");
@@ -570,7 +570,7 @@ export async function generateDeckFromTemplateAction(
   provider: LlmProvider
 ): Promise<GeneratedDeck | { error: string }> {
   try {
-    await requireOwner();
+    await requireUser();
     if (!template || !Array.isArray(template.slides) || template.slides.length === 0)
       return { error: "Add at least one slide to the template first." };
     return await generateDeckFromTemplate(template, ctx, provider);
@@ -597,7 +597,7 @@ export async function savePresentationFileAction(input: {
   workflowRunId?: string;
 }): Promise<{ id: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
     if (!Array.isArray(input.slides) || input.slides.length === 0) {
       return { error: "No slides to save." };
@@ -651,7 +651,7 @@ export async function saveLibraryFileAction(input: {
   workflowRunId?: string;
 }): Promise<{ id: string } | { error: string }> {
   try {
-    const user = await requireOwner();
+    const user = await requireUser();
     const supabase = createServiceClient();
 
     if (input.base64.length > 15_000_000) {

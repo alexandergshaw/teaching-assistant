@@ -295,7 +295,77 @@ const OWNER_ONLY: Record<string, string> = {
     "Grants another account owner-level control over every account in this workspace, including the acting owner's own; only the owner may grant that.",
   demoteAccountAction:
     "Removes another account's owner-level control over the workspace; only the owner may revoke that standing.",
+
+  // Media cohort (R3, splitting R2): reclassified from the deprecated
+  // requireOwner() alias. These reach an owner-private identity - HeyGen's
+  // single configured avatar (media-avatar.ts) or a Tavus-trained likeness
+  // that is owner-gated by design (media-likeness.ts's own header comment,
+  // AC5.3) - not merely a shared billing key. The rest of the media cohort
+  // (media.ts, media-voice.ts) reaches only per-user data or a shared LLM/TTS
+  // key without an owner-private identity behind it, so those 27 call sites
+  // were reclassified to requireUser() instead and are NOT listed here - see
+  // "media actions are owner-only" below for what proves that split holds.
+  avatarConfiguredAction:
+    "Reports whether HEYGEN_AVATAR_ID/HEYGEN_API_KEY are set; that avatar id is the owner's own face, configured once for the whole deployment.",
+  generateAvatarVideoAction:
+    "Renders a HeyGen video using the owner's single configured avatar id and voice; only the owner may spend their own likeness this way.",
+  getAvatarVideoStatusAction:
+    "Polls a HeyGen render job against the owner's single HEYGEN_API_KEY; part of the same owner-only avatar feature as generateAvatarVideoAction.",
+  avatarStudioConfiguredAction:
+    "Reports whether Avatar Studio (Tavus) is configured; every action in this file is owner-gated by design (media-likeness.ts header, AC5.3).",
+  listAvatarLikenessesAction:
+    "Lists trained Tavus likenesses; Avatar Studio trains and renders the owner's own likeness only (AC5.3).",
+  startAvatarTrainingAction:
+    "Starts training a new Tavus face from the owner's own sample recording, spending a paid Tavus training slot (AC5.3).",
+  refreshAvatarLikenessAction:
+    "Polls and can retire the owner's Tavus likeness rows, including provider-side deletion; owner-only by the same AC5.3 design.",
+  setDefaultAvatarLikenessAction:
+    "Changes which trained likeness renders as the owner's default avatar; owner-only by the same AC5.3 design.",
+  deleteAvatarLikenessAction:
+    "Deletes the owner's trained likeness, local row and provider-side face alike; owner-only by the same AC5.3 design.",
+  sampleInUseAction:
+    "Reads whether the owner's training sample is still in use by a Tavus job; owner-only by the same AC5.3 design.",
+  generateAvatarScriptAction:
+    "Writes a script for the owner's Avatar Studio video, spending the shared LLM key on the owner's likeness feature (AC5.3).",
+  listAvatarCourseOptionsAction:
+    "Lists courses for the Avatar Studio course picker, a control surface scoped to the same owner-only feature (AC5.3).",
+  startAvatarVideoAction:
+    "Starts rendering a video against the owner's default Tavus likeness; owner-only by the same AC5.3 design.",
+  refreshAvatarVideoAction:
+    "Polls and downloads the owner's rendered Tavus video server-side; owner-only by the same AC5.3 design.",
 };
+
+/**
+ * The 14 media OWNER_ONLY entries above, kept as its own list (rather than
+ * filtering OWNER_ONLY by file) so the closure test below is pinned to
+ * exactly the R3 cohort and cannot silently start passing vacuously if an
+ * unrelated future OWNER_ONLY entry is added or removed.
+ */
+const MEDIA_OWNER_ONLY_ACTIONS = [
+  "avatarConfiguredAction",
+  "generateAvatarVideoAction",
+  "getAvatarVideoStatusAction",
+  "avatarStudioConfiguredAction",
+  "listAvatarLikenessesAction",
+  "startAvatarTrainingAction",
+  "refreshAvatarLikenessAction",
+  "setDefaultAvatarLikenessAction",
+  "deleteAvatarLikenessAction",
+  "sampleInUseAction",
+  "generateAvatarScriptAction",
+  "listAvatarCourseOptionsAction",
+  "startAvatarVideoAction",
+  "refreshAvatarVideoAction",
+];
+
+/** The four R3 media files, keyed the same way ActionExport.file is - relative
+ * to APP_DIR (src/app), forward slashes. */
+const MEDIA_FILES = new Set([
+  "actions/media.ts",
+  "actions/media-voice.ts",
+  "actions/media-avatar.ts",
+  "actions/media-likeness.ts",
+]);
 
 /**
  * Checks one OWNER_ONLY entry against the collected action exports. Pulled
@@ -496,5 +566,72 @@ describe("owner-only guard ratchet (BUG 2(b))", () => {
       byName
     );
     expect(result.ok, result.message).toBe(true);
+  });
+});
+
+/**
+ * R3 (splitting R2): the media cohort. requireOwner() is a bare
+ * `return requireUser()` alias (src/lib/supabase/auth.ts) - any active
+ * account passes - so its four remaining `@deprecated` call sites in this
+ * cohort (media.ts, media-voice.ts, media-avatar.ts, media-likeness.ts) were
+ * migrated to the correct one of requireUser()/requireAppOwner() rather than
+ * left on the alias. Only the HeyGen avatar (media-avatar.ts, the owner's
+ * single configured face) and Tavus Avatar Studio (media-likeness.ts,
+ * owner-gated by its own header comment, AC5.3) reach an owner-private
+ * identity and became requireAppOwner(); media.ts and media-voice.ts reach
+ * only per-user data or a shared LLM/TTS key with no owner-private identity
+ * behind it and became requireUser() instead - see the comment above
+ * MEDIA_OWNER_ONLY_ACTIONS for the classification.
+ */
+describe("media actions are owner-only", () => {
+  it("every media OWNER_ONLY action calls requireAppOwner directly, never requireOwner/requireUser", () => {
+    const byName = new Map(collectActionExports().map((a) => [a.name, a]));
+    expect(MEDIA_OWNER_ONLY_ACTIONS.length).toBe(14);
+    for (const name of MEDIA_OWNER_ONLY_ACTIONS) {
+      const reason = OWNER_ONLY[name];
+      expect(reason, `${name} must be listed in OWNER_ONLY`).toBeTruthy();
+      const result = checkOwnerOnlyEntry(name, reason, byName);
+      expect(result.ok, result.message).toBe(true);
+    }
+  });
+
+  it("no action in the four R3 media files still relies on requireOwner() or a bare requireUser() where requireAppOwner() is owed", () => {
+    // Belt-and-braces on top of the per-name check above: scans by FILE, so an
+    // owner-only action added to one of these four files later and left off
+    // MEDIA_OWNER_ONLY_ACTIONS would still be caught if it reverted to the
+    // deprecated alias - it just would not yet be proven to need
+    // requireAppOwner() specifically (that judgment call is per-name, not
+    // per-file, per the R3 brief's "classify each call site" rule).
+    const inMediaFiles = collectActionExports().filter((a) => MEDIA_FILES.has(a.file));
+    expect(inMediaFiles.length).toBeGreaterThanOrEqual(41);
+    const stillOnAlias = inMediaFiles
+      .filter((a) => BARE_REQUIRE_OWNER_CALL.test(a.body))
+      .map((a) => `${a.file}:${a.line} ${a.name}`);
+    expect(
+      stillOnAlias,
+      "these media actions still call the deprecated requireOwner() alias instead of requireUser()/requireAppOwner()"
+    ).toEqual([]);
+  });
+
+  it("no media action outside MEDIA_OWNER_ONLY_ACTIONS calls requireAppOwner (would silently widen the owner-only set)", () => {
+    const byName = new Map(collectActionExports().map((a) => [a.name, a]));
+    const mediaOwnerOnly = new Set(MEDIA_OWNER_ONLY_ACTIONS);
+    const inMediaFiles = collectActionExports().filter((a) => MEDIA_FILES.has(a.file));
+    const unexpectedlyOwnerOnly = inMediaFiles
+      .filter((a) => !mediaOwnerOnly.has(a.name) && REQUIRE_APP_OWNER_CALL.test(a.body))
+      .map((a) => `${a.file}:${a.line} ${a.name}`);
+    expect(
+      unexpectedlyOwnerOnly,
+      "an action outside MEDIA_OWNER_ONLY_ACTIONS now calls requireAppOwner() - add it to that list with a reason, or use requireUser() instead"
+    ).toEqual([]);
+    for (const name of byName.keys()) {
+      if (mediaOwnerOnly.has(name)) continue;
+      const action = byName.get(name)!;
+      if (!MEDIA_FILES.has(action.file)) continue;
+      expect(
+        BARE_REQUIRE_USER_CALL.test(action.body),
+        `${action.file}:${action.line} ${name} should call requireUser() directly, having been classified as not owner-only`
+      ).toBe(true);
+    }
   });
 });

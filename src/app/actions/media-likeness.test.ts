@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 //      PERMANENTLY if the new attempt then failed. Retirement must happen
 //      only once the new likeness actually reaches "ready".
 //
-// requireOwner (auth), createServiceClient (db handle), every DB accessor in
+// requireAppOwner (auth), createServiceClient (db handle), every DB accessor in
 // @/lib/avatar-likeness, every network call in @/lib/tavus, and the
 // recording-files / storage seams are all mocked so this pipeline logic runs
 // for real without a Supabase session, a live database, or the Tavus API.
@@ -27,7 +27,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // pure helpers.
 
 vi.mock("@/lib/supabase/auth", () => ({
-  requireOwner: vi.fn(),
+  requireAppOwner: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -106,7 +106,7 @@ vi.mock("./shared", async () => {
   };
 });
 
-import { requireOwner } from "@/lib/supabase/auth";
+import { requireAppOwner } from "@/lib/supabase/auth";
 import { createSignedUrl } from "@/lib/supabase/storage";
 import { getRecordingFileById } from "@/lib/recording-files";
 import { createTavusFace, getTavusFace, deleteTavusFace } from "@/lib/tavus";
@@ -158,7 +158,7 @@ function likeness(overrides: Partial<AvatarLikeness> = {}): AvatarLikeness {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requireOwner).mockResolvedValue(OWNER);
+  vi.mocked(requireAppOwner).mockResolvedValue(OWNER);
   // Default happy-path plumbing for startAvatarTrainingAction, overridden per test.
   vi.mocked(findNonTerminalAvatarLikeness).mockResolvedValue(null);
   vi.mocked(getRecordingFileById).mockResolvedValue({
@@ -235,8 +235,8 @@ describe("sampleInUseAction - fail-closed guard", () => {
     expect(result).toEqual({ inUse: true });
   });
 
-  it("FAILS CLOSED (inUse: true) when requireOwner throws (e.g. an auth blip)", async () => {
-    vi.mocked(requireOwner).mockRejectedValueOnce(new Error("auth blip"));
+  it("FAILS CLOSED (inUse: true) when requireAppOwner throws (e.g. an auth blip)", async () => {
+    vi.mocked(requireAppOwner).mockRejectedValueOnce(new Error("auth blip"));
     const result = await sampleInUseAction("sample-1");
     expect(result).toEqual({ inUse: true });
   });

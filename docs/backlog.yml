@@ -130,15 +130,6 @@
   instrument: ''
   from: 'docs/multi-user-login-acceptance-criteria.md A6'
   note: 'Its own wave (pre-migration Trigger column)'
-- id: 'V7'
-  state: 'verification'
-  title: 'Confirm the Stop guard actually BLOCKS. The decision logic is pure and unit-tested (8 cases, sabotage-verified) and the CLI exits 2 with the reason on stderr, but nothing here has observed a real hook invocation consuming that exit code. backlog-automation.md B1: a hook that silently never fires is worse than its absence, because its presence is taken as proof. Until this is confirmed, the guard is NOT a gate and no document may call it one.'
-  owns: []
-  verify: null
-  blocked_by: []
-  instrument: 'With an actionable item in the queue, end a session normally and confirm the stop is refused with the R-item reason on screen. Then run: npm run backlog:stop-guard (expect exit 2) and echo {"stop_hook_active":true} | npm run backlog:stop-guard (expect exit 0, no loop).'
-  from: 'the Stop guard commit'
-  note: 'If it does NOT block, say so - the correct response is to remove .claude/settings.json rather than leave a gate nobody enforces.'
 - id: 'G5'
   state: 'owner'
   title: 'What should Generate DO when clicked while the exemplar fetch has timed out? Created by ruling G1-D. Once G1 bounds the fetch, Generate re-enables with savedExemplars still null - so a click drafts with no format to match. The G1 criteria raised this and declined to answer it, which is legitimate, but it belongs in the queue rather than inside a criterion. Recommended default: draft anyway, with the draft slot stating plainly that no saved format was matched - consistent with the zero-area rubric precedent, where grading unpinned with honest copy beat blocking.'

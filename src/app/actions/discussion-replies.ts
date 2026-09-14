@@ -35,16 +35,19 @@ import { videoLengthPreferenceSentence } from "@/lib/video-length-preference";
 // implementation, two callers, never a second copy of the redaction rule.
 import { redactAuthorNameFromPost, redactAuthorNameFromText } from "@/lib/discussion-reply-redact";
 // docs/reply-resource-search-yield-acceptance-criteria.md Y5/Y8: the outcome
-// kind/counts/shape types, `ConceptOutcome`, and the frozen zero-counts
-// object are all owned by the neutral, dependency-free leaf
-// src/lib/resource-search-outcome.ts - reached from here directly rather
-// than through discussion-serialization.ts. `ZERO_RESOURCE_SEARCH_COUNTS` is
-// a plain value import from a leaf with no "use server"/"use client"
-// directive of its own, which this "use server" module's own export-shape
-// rule (only async functions/types may be exported from HERE) does not
-// constrain - that rule is about what this module exports, not what it
-// imports.
-import { ZERO_RESOURCE_SEARCH_COUNTS, type ResourceSearchOutcome, type ResourceSearchOutcomeKind, type ResourceSearchCounts, type ConceptOutcome } from "@/lib/resource-search-outcome";
+// kind/counts/shape types, `ConceptOutcome`, and the decision functions
+// themselves (`resourceSearchOutcomeFor`/`resourceSearchOutcomeText`) are all
+// owned by the neutral, dependency-free leaf src/lib/resource-search-outcome.ts
+// - reached from here directly rather than through
+// discussion-serialization.ts. `resourceSearchOutcomeFor` is a plain function
+// import from a leaf with no "use server"/"use client" directive of its own,
+// which this "use server" module's own export-shape rule (only async
+// functions/types may be exported from HERE) does not constrain - that rule
+// is about what this module exports, not what it imports. Moved here from a
+// private declaration in this same file, per Ruling 15 - the G3 chunk's own
+// need for the same vocabulary is what forced the export in the first place,
+// rather than let a second copy grow beside it.
+import { resourceSearchOutcomeFor, type ResourceSearchOutcome, type ConceptOutcome } from "@/lib/resource-search-outcome";
 import {
   EXTRACT_BATCH_SIZE,
   DRAFT_BATCH_SIZE,
@@ -569,83 +572,6 @@ function effectiveResourceKinds(resourceKinds?: readonly ResourceKind[]): readon
   if (!resourceKinds || resourceKinds.length === 0) return RESOURCE_KINDS;
   const allowed = new Set(resourceKinds);
   return RESOURCE_KINDS.filter((k) => allowed.has(k));
-}
-
-/** Y8: `{ kind, text, counts }` for a post whose search returned NO resources
- *  at all. Callers only reach this for a post with a REAL (non-empty)
- *  concept - an empty-concept post gets no outcome at all (see the two call
- *  sites above), so `co` is `undefined` here only when that non-empty
- *  concept was dropped past MAX_CONCEPTS_PER_RUN's bound, which is precisely
- *  the "unknown (no entry)" case the AC names. */
-function resourceSearchOutcomeFor(co: ConceptOutcome | undefined): ResourceSearchOutcome {
-  if (!co) {
-    return {
-      kind: "unknown",
-      text: "No links came back for these terms.",
-      counts: ZERO_RESOURCE_SEARCH_COUNTS,
-    };
-  }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- rest-sibling destructure to exclude concept/failed from `counts`; pre-existing pattern, unrelated to this feature.
-  const { concept: _concept, failed: _failed, ...counts } = co;
-  let kind: ResourceSearchOutcomeKind;
-  if (co.failed !== undefined) kind = "failed";
-  else if (counts.sources === 0) kind = "no-sources";
-  else if (counts.candidates === 0) kind = "no-candidates";
-  else if (counts.kept === 0) kind = "all-dropped";
-  // kept > 0 but this post still has no resources: every kept link for this
-  // concept was a kind the instructor deselected, dropped by THIS action's
-  // own result-side filter (see `allowedKinds` below) - not anything Group A
-  // itself could have reported a reason for.
-  else kind = "unknown";
-  return { kind, text: resourceSearchOutcomeText(kind, counts, co.failed), counts };
-}
-
-/** Y8: the first sentence of a thrown-error message, clamped to 60
- *  characters - never the whole (potentially long, multi-sentence) message,
- *  so `The search failed: {reason}` always stays under the AC's 90-character
- *  budget for every outcome sentence. */
-function clampFailedReason(failed: string): string {
-  const match = failed.match(/^[^.!?]*[.!?]?/);
-  const sentence = match ? match[0] : failed;
-  return sentence.length > 60 ? sentence.slice(0, 60) : sentence;
-}
-
-/** Y8: the exact, frozen sentence for each outcome kind - each one under 90
- *  characters, "Search for resources" matching the row button's exact label.
- *  `counts` decides the two `all-dropped` variants and the `unknown` variant;
- *  `failedReason` is used only for `kind === "failed"`. */
-function resourceSearchOutcomeText(
-  kind: ResourceSearchOutcomeKind,
-  counts: Pick<ResourceSearchCounts, "candidates" | "droppedUnreachable" | "droppedUncorroborated" | "kept">,
-  failedReason?: string
-): string {
-  switch (kind) {
-    case "failed":
-      return `The search failed: ${clampFailedReason(failedReason ?? "")}`;
-    case "no-sources":
-      return "No web pages came back this time. Search for resources again - it usually works.";
-    case "no-candidates":
-      return "Pages were searched, but none matched these terms. Editing the reply changes the terms.";
-    case "all-dropped":
-      // A concept whose candidates were ALL placeholders (droppedPlaceholder
-      // === candidates, both other drop counts 0) must not read as "did not
-      // open" - that sentence requires at least one actual unreachable drop;
-      // otherwise (including the 0/0 placeholder-only case) it is "none
-      // traced back to a real site", which is true whenever nothing was ever
-      // corroborated or fetched.
-      return counts.droppedUnreachable > 0 && counts.droppedUnreachable >= counts.droppedUncorroborated
-        ? `Found ${counts.candidates} links, but the pages did not open. Search for resources again.`
-        : `Found ${counts.candidates} links, but none traced back to a real site. Editing the reply changes the terms.`;
-    case "unknown":
-      // `kept > 0` means links WERE found for this concept but every one was
-      // a resource kind the instructor deselected in Eligible resource kinds
-      // (this action's own result-side filter, `allowedKinds` above) - a
-      // different reason from "nothing was ever kept", which stays the
-      // generic sentence.
-      return counts.kept > 0
-        ? "Links were found, but not in the resource kinds you picked in Eligible resource kinds."
-        : "No links came back for these terms.";
-  }
 }
 
 /**

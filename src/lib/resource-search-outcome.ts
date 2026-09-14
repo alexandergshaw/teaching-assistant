@@ -73,3 +73,110 @@ export const ZERO_RESOURCE_SEARCH_COUNTS: Readonly<ResourceSearchCounts> = Objec
   kept: 0,
   retried: false,
 });
+
+// The decision functions below were moved here from
+// src/app/actions/discussion-replies.ts (Ruling 15: this leaf, not the "use
+// server" action, is the accepted home for the outcome vocabulary - forcing
+// a second copy into announcement-draft-slots.ts, as AC3-6 originally named,
+// would duplicate exactly what AC3-5 forbids duplicating). Moved verbatim,
+// exported, and with no behavior change: discussion-replies.ts now imports
+// them from here instead of declaring them privately.
+
+/** Y8: `{ kind, text, counts }` for a post whose search returned NO resources
+ *  at all. Callers only reach this for a post with a REAL (non-empty)
+ *  concept - an empty-concept post gets no outcome at all, so `co` is
+ *  `undefined` here only when that non-empty concept was dropped past a
+ *  per-run concept cap, which is precisely the "unknown (no entry)" case the
+ *  acceptance criteria name. */
+export function resourceSearchOutcomeFor(co: ConceptOutcome | undefined): ResourceSearchOutcome {
+  if (!co) {
+    return {
+      kind: "unknown",
+      text: "No links came back for these terms.",
+      counts: ZERO_RESOURCE_SEARCH_COUNTS,
+    };
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- rest-sibling destructure to exclude concept/failed from `counts`; pre-existing pattern, unrelated to this feature.
+  const { concept: _concept, failed: _failed, ...counts } = co;
+  let kind: ResourceSearchOutcomeKind;
+  if (co.failed !== undefined) kind = "failed";
+  else if (counts.sources === 0) kind = "no-sources";
+  else if (counts.candidates === 0) kind = "no-candidates";
+  else if (counts.kept === 0) kind = "all-dropped";
+  // kept > 0 but this post still has no resources: every kept link for this
+  // concept was a kind the instructor deselected, dropped by the caller's
+  // own result-side filter - not anything the search step itself could have
+  // reported a reason for.
+  else kind = "unknown";
+  return { kind, text: resourceSearchOutcomeText(kind, counts, co.failed), counts };
+}
+
+/** Y8: the first sentence of a thrown-error message, clamped to 60
+ *  characters - never the whole (potentially long, multi-sentence) message,
+ *  so `The search failed: {reason}` always stays under the 90-character
+ *  budget for every outcome sentence. */
+function clampFailedReason(failed: string): string {
+  const match = failed.match(/^[^.!?]*[.!?]?/);
+  const sentence = match ? match[0] : failed;
+  return sentence.length > 60 ? sentence.slice(0, 60) : sentence;
+}
+
+/** Y8: the exact, frozen sentence for each outcome kind - each one under 90
+ *  characters, "Search for resources" matching the row button's exact label.
+ *  `counts` decides the two `all-dropped` variants and the `unknown` variant;
+ *  `failedReason` is used only for `kind === "failed"`. */
+export function resourceSearchOutcomeText(
+  kind: ResourceSearchOutcomeKind,
+  counts: Pick<ResourceSearchCounts, "candidates" | "droppedUnreachable" | "droppedUncorroborated" | "kept">,
+  failedReason?: string
+): string {
+  switch (kind) {
+    case "failed":
+      return `The search failed: ${clampFailedReason(failedReason ?? "")}`;
+    case "no-sources":
+      return "No web pages came back this time. Search for resources again - it usually works.";
+    case "no-candidates":
+      return "Pages were searched, but none matched these terms. Editing the reply changes the terms.";
+    case "all-dropped":
+      // A concept whose candidates were ALL placeholders (droppedPlaceholder
+      // === candidates, both other drop counts 0) must not read as "did not
+      // open" - that sentence requires at least one actual unreachable drop;
+      // otherwise (including the 0/0 placeholder-only case) it is "none
+      // traced back to a real site", which is true whenever nothing was ever
+      // corroborated or fetched.
+      return counts.droppedUnreachable > 0 && counts.droppedUnreachable >= counts.droppedUncorroborated
+        ? `Found ${counts.candidates} links, but the pages did not open. Search for resources again.`
+        : `Found ${counts.candidates} links, but none traced back to a real site. Editing the reply changes the terms.`;
+    case "unknown":
+      // `kept > 0` means links WERE found for this concept but every one was
+      // a resource kind the instructor deselected - a different reason from
+      // "nothing was ever kept", which stays the generic sentence.
+      return counts.kept > 0
+        ? "Links were found, but not in the resource kinds you picked in Eligible resource kinds."
+        : "No links came back for these terms.";
+  }
+}
+
+/**
+ * Ruling 19: any `failed` member forces the whole batch to `failed`. A
+ * per-concept batch (e.g. every concept behind one G3 walkthrough-
+ * announcement slot) must never collapse a real failure into "unknown" just
+ * because it disagreed with the other concepts' outcomes - "No links came
+ * back for these terms" is a materially different, and materially less
+ * actionable, message than "the search failed".
+ *
+ * When every concept agrees on a kind other than `failed`, that shared kind
+ * is returned as-is. When they disagree on anything other than a shared
+ * failure, there is no single honest sentence for the mix, so this falls
+ * back to the same "unknown, no entry" shape `resourceSearchOutcomeFor`
+ * itself returns for a concept with no per-concept accounting at all.
+ */
+export function aggregateResourceOutcome(perConcept: readonly ConceptOutcome[]): ResourceSearchOutcome {
+  if (perConcept.length === 0) return resourceSearchOutcomeFor(undefined);
+  const outcomes = perConcept.map(resourceSearchOutcomeFor);
+  const failed = outcomes.find((o) => o.kind === "failed");
+  if (failed) return failed;
+  const firstKind = outcomes[0].kind;
+  const allSameKind = outcomes.every((o) => o.kind === firstKind);
+  return allSameKind ? outcomes[0] : resourceSearchOutcomeFor(undefined);
+}

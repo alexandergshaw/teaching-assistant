@@ -151,14 +151,12 @@ function renderOutlineSection(section: OutlineSection): string {
  * gets its own instruction rather than an empty section list silently
  * producing no guidance at all.
  */
-function renderOutlineBlock(outline: AnnouncementOutline): string {
+export function renderOutlineBlock(outline: AnnouncementOutline): string {
   if (outline.sections.length === 0) {
-    return "The exemplar had no discernible structure (a single unheaded paragraph, or an empty document). Write the announcement as one or two plain paragraphs, with no headings and no lists (bold and italic emphasis are still fine where the content warrants it).";
+    return "The exemplar had no discernible structure (a single unheaded paragraph, or an empty document). Write the announcement as plain paragraphs, with no headings and no lists (bold and italic emphasis are still fine where the content warrants it) - THE ANNOUNCEMENT FLOOR above still governs how many paragraphs: one per distinct item, plus the greeting and sign-off.";
   }
 
   const lines = outline.sections.map(renderOutlineSection);
-  lines.push(`Opens with a greeting: ${outline.hasGreeting ? "yes" : "no"}.`);
-  lines.push(`Closes with a sign-off: ${outline.hasSignOff ? "yes" : "no"}.`);
   lines.push(
     outline.dueDateSectionIndex !== null
       ? `Has a due-date block, in section ${outline.dueDateSectionIndex}.`
@@ -225,13 +223,21 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
       "FORMAT VERSUS VOICE",
       "- The outline below governs FORMAT: section order, whether each section opens with a heading or a paragraph break, whether its body is prose or a list (and if a list, ordered or unordered), and roughly how long each section runs.",
       "- The writing-style sample at the end (if present) governs VOICE: word choice, sentence rhythm, and tone.",
-      "- When the two would pull in different directions - for example the outline is terse and the style sample is chatty - FORMAT WINS ON STRUCTURE and VOICE WINS ON WORDING. Follow the outline's shape exactly, written in the style sample's voice.",
+      "- When the two would pull in different directions - for example the outline is terse and the style sample is chatty - FORMAT WINS ON STRUCTURE and VOICE WINS ON WORDING. Follow the outline's shape exactly, written in the style sample's voice - except where THE ANNOUNCEMENT FLOOR above requires more paragraphs than the outline's own section count; that carve-out is the one place structure yields.",
       "- Markdown emphasis (bold/italic) is FORMAT, not wording; a style sample that happens to contain none does not cancel it.",
     ].join("\n"),
 
     [
       "WRITE IN MARKDOWN",
-      "- Use Markdown headings, bullet lists, and ordered lists wherever the outline below calls for them. This is a formatted document that should visibly match the outline's structure, not a plain-text paragraph.",
+      "- Use Markdown headings, bullet lists, and ordered lists wherever the outline below calls for them. This is a formatted document that should visibly match the outline's structure, not a plain-text paragraph - a section split into more paragraphs than the outline shows, solely to give each distinct item its own paragraph per THE ANNOUNCEMENT FLOOR, still counts as matching that structure.",
+    ].join("\n"),
+
+    [
+      "THE ANNOUNCEMENT FLOOR (applies on every branch, and outranks the outline below on these three points only)",
+      "- Open with a greeting to the students.",
+      "- Close with a sign-off.",
+      "- Give each distinct item, topic, or piece of news its own paragraph - never run more than one item together in the same paragraph.",
+      "- The outline below still governs section order, headings, and whether a section is prose or a list. It does NOT override the three rules above: if following the outline's own paragraph/section count would merge two distinct items into one paragraph, split them anyway. A section may be rendered as MORE paragraphs than the outline's own section count for this reason alone.",
     ].join("\n"),
 
     [
@@ -253,9 +259,10 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
 
     UNTRUSTED_CONTENT_FRAMING,
 
-    ["EXEMPLAR STRUCTURE (outline only - reproduce this shape, never any wording or dates from the original)", renderOutlineBlock(args.outline)].join(
-      "\n"
-    ),
+    [
+      "EXEMPLAR STRUCTURE (outline only - reproduce this shape, never any wording or dates from the original, EXCEPT the greeting/sign-off/one-item-per-paragraph floor above, which applies regardless of what this shape does or does not show)",
+      renderOutlineBlock(args.outline),
+    ].join("\n"),
   ];
 
   const notes = args.notes.trim();

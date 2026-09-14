@@ -1,6 +1,6 @@
 import { courseKindContract, courseKindNoun, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
-import { callLlm, type LlmProvider } from "@/lib/llm";
+import { callLlm, describeLlmFailure, type LlmProvider } from "@/lib/llm";
 import { stripModelUrls } from "@/lib/urls";
 import { toBullets, keyPhrases, ensureSentence, capitalizeFirst } from "@/lib/embedded/scaffold";
 import { parseDeckConcepts, clampDeckConcepts, type DeckConcept } from "@/lib/workflows/deck-concepts";
@@ -156,14 +156,23 @@ const CONCEPT_EXTRACTION_MAX_TOKENS = 512;
  * "deck" in their file's name (they were built for the lecture-deck concept
  * extractor, but nothing about them is deck-specific).
  *
- * Never throws: a transport failure, a malformed response, or an empty
- * result all degrade to `[]`, which downstream (buildResourcesSection) is a
- * normal, renderable case - "no concepts were identified" - not a fatal one.
- * The prose page above this call has already been confirmed good by the time
- * this runs, so this step's failure must never turn a good page into an
- * error.
+ * Never throws: a transport failure, a malformed response, or a genuinely
+ * empty result all resolve rather than reject. But they are NOT the same
+ * outcome to a caller (Ruling 21 / G3): a transport failure and "the model
+ * found nothing worth surfacing" used to both collapse to `[]`, which reads
+ * to an instructor as "no concepts were identified" even when the call never
+ * ran at all. The return type below distinguishes them - `{ ok: true,
+ * concepts: [] }` is the genuine-emptiness case, `{ ok: false, error }` is a
+ * transport or parse failure - so a caller that needs to tell them apart
+ * (G3's `gatherWalkthroughResourcesAction`) can, while this file's own
+ * caller below (`generateLearningResourcesForSelection`) still degrades a
+ * failure to an empty concept list, exactly as before, because that caller's
+ * own contract never needed to distinguish the two in the first place.
  */
-async function deriveResourceConcepts(materialsText: string, provider: LlmProvider): Promise<DeckConcept[]> {
+export async function deriveResourceConcepts(
+  materialsText: string,
+  provider: LlmProvider
+): Promise<{ ok: true; concepts: DeckConcept[] } | { ok: false; error: string }> {
   try {
     const prompt = `Read the module materials below and identify up to ${MAX_RESOURCE_CONCEPTS} concepts or skills a student would benefit from finding outside resources (official documentation, video tutorials, or written tutorials) for.
 
@@ -183,10 +192,11 @@ No markdown fences, no commentary. If nothing in the materials warrants an outsi
       provider
     );
 
-    if (!result.ok || !result.text.trim()) return [];
-    return parseDeckConcepts(result.text, clampDeckConcepts(MAX_RESOURCE_CONCEPTS));
-  } catch {
-    return [];
+    if (!result.ok) return { ok: false, error: describeLlmFailure(result, "Concept extraction") };
+    if (!result.text.trim()) return { ok: true, concepts: [] };
+    return { ok: true, concepts: parseDeckConcepts(result.text, clampDeckConcepts(MAX_RESOURCE_CONCEPTS)) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "The concept-extraction call failed." };
   }
 }
 
@@ -479,11 +489,12 @@ Do not restate this module's instructions in full - point to what to review and 
   // that chain from the critical path. Each promise fails independently:
   // callLlm never throws (it resolves to `{ ok: false, ... }` on failure, and
   // that failure is handled below exactly as before), and
-  // deriveResourceConcepts has its own try/catch that degrades to `[]` rather
-  // than rejecting - so a concept-derivation problem can never reject this
-  // Promise.all and can never fail the prose, and a prose failure below never
-  // touches `concepts` (already resolved independently by the time it's read).
-  const [result, concepts] = await Promise.all([
+  // deriveResourceConcepts has its own try/catch that resolves to
+  // `{ ok: false, error }` rather than rejecting - so a concept-derivation
+  // problem can never reject this Promise.all and can never fail the prose,
+  // and a prose failure below never touches `concepts` (already resolved
+  // independently by the time it's read).
+  const [result, conceptResult] = await Promise.all([
     callLlm(
       {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -493,6 +504,14 @@ Do not restate this module's instructions in full - point to what to review and 
     ),
     deriveResourceConcepts(materialsText, provider),
   ]);
+  // This caller's own contract (see deriveResourceConcepts' doc comment)
+  // never needed to distinguish a transport failure from a genuinely empty
+  // concept list - a resources page with no concepts is already a
+  // documented, useful degraded case (buildResourcesSection's own
+  // `concepts.length === 0` branch) - so a failure here degrades to an
+  // empty list exactly as `[]` did before this function's return type
+  // widened.
+  const concepts = conceptResult.ok ? conceptResult.concepts : [];
 
   if (!result.ok) {
     return { error: `LLM API error for learning resources "${moduleLabel}": HTTP ${result.status} — ${result.body.slice(0, 200)}` };

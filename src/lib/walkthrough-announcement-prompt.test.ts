@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   buildWalkthroughAnnouncementPrompt,
+  renderOutlineBlock,
   truncateMaterialsForPrompt,
   WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP,
   type WalkthroughAnnouncementPromptArgs,
@@ -233,6 +234,72 @@ describe("buildWalkthroughAnnouncementPrompt - tolerates absent optional inputs"
     const styleBlock = "\n\nMATCH THE INSTRUCTOR'S PERSONAL WRITING STYLE (tone, rhythm, vocabulary) shown in this sample:\nHi folks.";
     const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ styleBlock }));
     expect(prompt.endsWith(styleBlock)).toBe(true);
+  });
+});
+
+describe("renderOutlineBlock - AC1-0 export", () => {
+  it("is exported (a compile-time property proven by this import succeeding, and re-asserted at runtime)", () => {
+    expect(typeof renderOutlineBlock).toBe("function");
+  });
+});
+
+describe("buildWalkthroughAnnouncementPrompt - AC1-1 the announcement floor (Ruling 1/16)", () => {
+  it("states an explicit, unconditional precedence statement naming the floor", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
+    expect(prompt).toContain("THE ANNOUNCEMENT FLOOR");
+    expect(prompt).toContain("Open with a greeting to the students.");
+    expect(prompt).toContain("Close with a sign-off.");
+    expect(prompt).toContain("its own paragraph");
+  });
+
+  it("the floor block is present on the structureless (EMPTY_ANNOUNCEMENT_OUTLINE) branch too - it is unconditional, not gated on having sections", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ outline: EMPTY_ANNOUNCEMENT_OUTLINE }));
+    expect(prompt).toContain("THE ANNOUNCEMENT FLOOR");
+  });
+
+  it("amends the FORMAT VERSUS VOICE sentence with the floor's carve-out", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
+    expect(prompt).toContain("except where THE ANNOUNCEMENT FLOOR above requires more paragraphs");
+  });
+
+  it("amends the WRITE IN MARKDOWN sentence to allow extra paragraphs for the floor", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
+    expect(prompt).toContain("solely to give each distinct item its own paragraph per THE ANNOUNCEMENT FLOOR");
+  });
+
+  it("amends the EXEMPLAR STRUCTURE heading to except the floor from 'never any wording or dates from the original'", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
+    expect(prompt).toContain("EXCEPT the greeting/sign-off/one-item-per-paragraph floor above");
+  });
+
+  it("amends the zero-section branch's paragraph-count clause to defer to the floor, rather than stating a fixed 'one or two' budget", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ outline: EMPTY_ANNOUNCEMENT_OUTLINE }));
+    expect(prompt).not.toContain("one or two plain paragraphs");
+    expect(prompt).toContain("THE ANNOUNCEMENT FLOOR above still governs how many paragraphs");
+  });
+
+  it("sabotage check: removing the floor block would leave no precedence statement at all - this test would catch that", () => {
+    // Documents the failure mode this describe block exists to catch: a
+    // model reading a prompt with no "THE ANNOUNCEMENT FLOOR" section (or
+    // one of the four un-amended colliding sentences) has no unconditional
+    // instruction to open with a greeting, close with a sign-off, or give
+    // each item its own paragraph.
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
+    expect(prompt.split("THE ANNOUNCEMENT FLOOR").length - 1).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("renderOutlineBlock - AC1-1b (stops reporting greeting/sign-off)", () => {
+  it("does not report the exemplar's own greeting/sign-off state on the non-empty branch", () => {
+    const block = renderOutlineBlock(baseOutline());
+    expect(block).not.toContain("Opens with a greeting");
+    expect(block).not.toContain("Closes with a sign-off");
+  });
+
+  it("still reports the other structural facts (due-date, todo, links) unchanged", () => {
+    const block = renderOutlineBlock(baseOutline({ dueDateSectionIndex: 1, hasLinks: true }));
+    expect(block).toContain("due-date");
+    expect(block).toContain("links: yes");
   });
 });
 

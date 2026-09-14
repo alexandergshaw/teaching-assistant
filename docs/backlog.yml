@@ -103,6 +103,15 @@
   instrument: ''
   from: ''
   note: 'Blocked by V3 (formerly 1.3) (pre-migration queue note)'
+- id: 'N4'
+  state: 'unscoped'
+  title: 'Per-institution, per-assignment list of students with accommodations or extensions. Owner''s ask, 2026-09-14. Maintain, for each institution and each assignment, the students who have an accommodation or a deadline extension, so grading and deadline-sensitive work can account for them instead of the instructor holding it in their head.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Reuse survey run 2026-09-14, each search paired with a canary. NOTHING like this exists: grep -rlic accommodat over src/ returns two files and BOTH are the ordinary English word in unrelated prose (slide-prompt.ts:88,266; course-calendar-checklist-events.test.ts:23). Canary: rubric returns 382 files, so the search machinery works. BUT the scaffolding does exist: institution is already a first-class field (string | null, threaded through automation-manual-run.ts:26,32,46), and supabase/migrations already ship institution-scoped tables - institution_fields, institution_knowledge_overview, institution_knowledge_questions - so there is a shaped precedent for institution-scoped storage rather than a green field.'
+  from: 'owner ask, 2026-09-14'
+  note: 'THREE things the criteria must settle before any build, none of them obvious. (1) SENSITIVITY: an accommodations list is disability-related and among the most sensitive data this app would hold. This repo already refuses to persist rubric and assignment text to localStorage on sensitivity grounds alone (the U10 rule, asserted by a test) - an accommodations list is strictly more sensitive, so where it may live, who may read it, and whether it may appear in any prompt sent to a model are CRITERIA, not implementation details. Default to NOT sending it to a model unless the owner rules otherwise. (2) STUDENT IDENTITY: this repo already records that the student-to-identity link lives in two unsynced places, so which student is a real question, not a foreign key that already exists. (3) ASSIGNMENT IDENTITY: per-assignment means a Canvas assignment id, which is per-course - so per-institution-per-assignment needs its uniqueness rule stated, not assumed.'
 - id: 'R1'
   state: 'unscoped'
   title: 'Key snapshot-grading citations by shot ID, not array position. Deleting or reordering a shot silently re-points every citation naming a later index - citations key on a numeric shotIndex (src/app/components/snapshot-grading/snapshot-citations.ts:24,63), and SnapshotGradingPanel.tsx:239-244 documents in its own comment that delete and reorder are uncovered (this citation read :177-183 until 2026-09-14; the surface moved and :177-183 is now an unrelated localStorage comment - re-measured, not retyped). The current flag tracks only restored-at-mount and cleared-by-Next-student. The mechanism needs replacing, not another patch.'

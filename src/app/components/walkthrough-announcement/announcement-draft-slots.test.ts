@@ -35,7 +35,12 @@ import { escapeForCopyTitle } from "./useAnnouncementDraftSlots";
 const OUTLINE_A: AnnouncementOutline = { ...EMPTY_ANNOUNCEMENT_OUTLINE, hasGreeting: true };
 const OUTLINE_B: AnnouncementOutline = { ...EMPTY_ANNOUNCEMENT_OUTLINE, hasSignOff: true };
 
-const DRAFTED: Drafted = { title: "Week 3", message: "Hello", builtFrom: { kind: "pasted" } };
+const DRAFTED: Drafted = {
+  title: "Week 3",
+  message: "Hello",
+  builtFrom: { kind: "pasted" },
+  researchNotice: { kind: "off" },
+};
 
 function drafted(id: string, overrides: Partial<DraftSlot> = {}): DraftSlot {
   return { ...makeSlot(id, { kind: "default" }), draft: { phase: "drafted", draft: DRAFTED, error: null }, ...overrides };

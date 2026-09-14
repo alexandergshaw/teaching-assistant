@@ -33,6 +33,19 @@ vi.mock("@/lib/announcement-exemplars", () => ({
 vi.mock("@/lib/canvas", () => ({
   createAnnouncementFromMarkdown: vi.fn(),
 }));
+// gatherWalkthroughResourcesAction (G3 Ask 3) is a PORT of the shipped
+// gatherReplyResourcesAction's shape (Ruling 8) - mocking these two
+// boundaries, rather than letting them run for real, mirrors
+// discussion-replies-resources.test.ts's own
+// `vi.mock("./learning-resource-links", ...)` pattern exactly, and keeps
+// this file from making a real (network-blocked, per vitest.setup.ts) LLM
+// or reachability call.
+vi.mock("./learning-resources-generator", () => ({
+  deriveResourceConcepts: vi.fn(),
+}));
+vi.mock("./learning-resource-links", () => ({
+  findResourceLinksForConceptsAction: vi.fn(),
+}));
 
 import { requireUser } from "@/lib/supabase/auth";
 import { getWritingStyleBlock } from "./writing-style-block";
@@ -47,6 +60,7 @@ import { createAnnouncementFromMarkdown } from "@/lib/canvas";
 import {
   draftWalkthroughAnnouncementAction,
   draftWalkthroughVideoScriptAction,
+  gatherWalkthroughResourcesAction,
   listAnnouncementExemplarsAction,
   getMostRecentAnnouncementExemplarAction,
   saveAnnouncementExemplarAction,
@@ -56,6 +70,8 @@ import {
 import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
 import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announcement-bounds";
 import { EMPTY_ANNOUNCEMENT_OUTLINE } from "@/lib/announcement-outline-types";
+import { deriveResourceConcepts } from "./learning-resources-generator";
+import { findResourceLinksForConceptsAction } from "./learning-resource-links";
 
 const USER = { id: "user-1", email: "user@example.edu" };
 
@@ -72,6 +88,12 @@ const REALISTIC_OUTLINE = deriveAnnouncementOutline(
   "Hi everyone,\n\nDue This Week\n- Homework 3\n- Quiz 2\n\nBest,\nProf."
 );
 
+// Ruling 11: emojiPolicy/researchedResources/researchOutcome are now
+// REQUIRED fields on WalkthroughAnnouncementDraftInput - shared no-op values
+// for tests that are not exercising the research/emoji features themselves.
+const NO_RESEARCH = { kind: "off" as const };
+const NO_RESEARCHED_RESOURCES: ReadonlyArray<{ title: string; url: string }> = [];
+
 describe("draftWalkthroughAnnouncementAction", () => {
   it("drafts successfully, threading a real prompt and an OUTLINE-SIZED token budget (P7: never the fixed 1024 draftAnnouncementAction uses)", async () => {
     vi.mocked(callLlm).mockResolvedValue({
@@ -87,6 +109,9 @@ describe("draftWalkthroughAnnouncementAction", () => {
       outline: REALISTIC_OUTLINE,
       coverageBlock: "[P1] Week 4 Overview",
       notes: "Mention the exam date.",
+      emojiPolicy: "forbidden",
+      researchedResources: NO_RESEARCHED_RESOURCES,
+      researchOutcome: NO_RESEARCH,
     });
 
     expect(result).toMatchObject({ title: "Week 4 update", message: "## Due This Week\n- Homework 3" });
@@ -127,6 +152,9 @@ describe("draftWalkthroughAnnouncementAction", () => {
       outline: REALISTIC_OUTLINE,
       coverageBlock: "[P1] Week 4 Overview",
       notes: "Mention the exam date.",
+      emojiPolicy: "forbidden",
+      researchedResources: NO_RESEARCHED_RESOURCES,
+      researchOutcome: NO_RESEARCH,
     });
 
     const [request] = vi.mocked(callLlm).mock.calls[0];
@@ -173,6 +201,9 @@ describe("draftWalkthroughAnnouncementAction", () => {
       outline: EMPTY_ANNOUNCEMENT_OUTLINE,
       coverageBlock: "",
       notes: "",
+      emojiPolicy: "forbidden",
+      researchedResources: NO_RESEARCHED_RESOURCES,
+      researchOutcome: NO_RESEARCH,
     });
 
     expect(result).toHaveProperty("error");
@@ -190,6 +221,9 @@ describe("draftWalkthroughAnnouncementAction", () => {
       outline: EMPTY_ANNOUNCEMENT_OUTLINE,
       coverageBlock: "",
       notes: "",
+      emojiPolicy: "forbidden",
+      researchedResources: NO_RESEARCHED_RESOURCES,
+      researchOutcome: NO_RESEARCH,
     });
 
     expect(result).toHaveProperty("error");
@@ -209,10 +243,165 @@ describe("draftWalkthroughAnnouncementAction", () => {
       outline: EMPTY_ANNOUNCEMENT_OUTLINE,
       coverageBlock: "",
       notes: "",
+      emojiPolicy: "forbidden",
+      researchedResources: NO_RESEARCHED_RESOURCES,
+      researchOutcome: NO_RESEARCH,
     });
 
     expect(result).toHaveProperty("error");
     if ("error" in result) expect(result.error).toMatch(/no announcement/i);
+  });
+
+  it("Ruling 14/2b: researchNotice is derived from researchOutcome and threaded onto a successful draft", async () => {
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: '{"title": "T", "message": "M"}',
+    } as never);
+
+    const result = await draftWalkthroughAnnouncementAction({
+      courseLabel: "PSYC 101",
+      moduleLabel: null,
+      materialsText: "Some materials.",
+      outline: EMPTY_ANNOUNCEMENT_OUTLINE,
+      coverageBlock: "",
+      notes: "",
+      emojiPolicy: "forbidden",
+      researchedResources: [{ title: "MDN Arrays", url: "https://developer.mozilla.org/arrays" }],
+      researchOutcome: {
+        kind: "found",
+        links: [{ title: "MDN Arrays", url: "https://developer.mozilla.org/arrays" }],
+      } as never,
+    });
+
+    if (!("researchNotice" in result)) throw new Error("expected a success result with researchNotice");
+    expect(result.researchNotice).toEqual({
+      kind: "found",
+      text: expect.stringContaining("1"),
+    });
+  });
+
+  it("Ruling 2/20: the permitted-URL enforcer strips a URL the model fabricated, but never touches one the model was actually given", async () => {
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: JSON.stringify({
+        title: "T",
+        message:
+          "See [MDN](https://developer.mozilla.org/arrays) and also [a scam site](https://evil.example/phish).",
+      }),
+    } as never);
+
+    const result = await draftWalkthroughAnnouncementAction({
+      courseLabel: "PSYC 101",
+      moduleLabel: null,
+      materialsText: "Some materials.",
+      outline: EMPTY_ANNOUNCEMENT_OUTLINE,
+      coverageBlock: "",
+      notes: "",
+      emojiPolicy: "forbidden",
+      researchedResources: [{ title: "MDN", url: "https://developer.mozilla.org/arrays" }],
+      researchOutcome: { kind: "off" } as never,
+    });
+
+    if (!("message" in result)) throw new Error("expected a success result");
+    // The permitted link (a researched resource) survives byte-for-byte.
+    expect(result.message).toContain("[MDN](https://developer.mozilla.org/arrays)");
+    // The unpermitted link construct is reduced to its own visible text
+    // (Ruling 20's per-match splice - the link, not the surrounding
+    // sentence, is what changes).
+    expect(result.message).not.toContain("evil.example");
+    expect(result.message).toContain("a scam site");
+  });
+});
+
+describe("gatherWalkthroughResourcesAction (G3 Ask 3, Ruling 8/19/21)", () => {
+  it("Ruling 21: a transport failure in the concept-derivation step is routed to failed, never empty", async () => {
+    vi.mocked(deriveResourceConcepts).mockResolvedValue({ ok: false, error: "The model call failed." });
+
+    const result = await gatherWalkthroughResourcesAction("Some materials.", "PSYC 101", "gemini");
+
+    expect(result).toEqual({ kind: "failed", reason: "The model call failed." });
+    expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
+  });
+
+  it("a genuinely empty concept list (the model ran and found nothing) is empty, not failed", async () => {
+    vi.mocked(deriveResourceConcepts).mockResolvedValue({ ok: true, concepts: [] });
+
+    const result = await gatherWalkthroughResourcesAction("Some materials.", "PSYC 101", "gemini");
+
+    expect(result).toMatchObject({ kind: "empty" });
+    expect(findResourceLinksForConceptsAction).not.toHaveBeenCalled();
+  });
+
+  it("Ruling 8: findResourceLinksForConceptsAction's resolved { error } is handled first - not read as a rejected promise", async () => {
+    vi.mocked(deriveResourceConcepts).mockResolvedValue({
+      ok: true,
+      concepts: [{ concept: "closures", evidence: "..." }] as never,
+    });
+    vi.mocked(findResourceLinksForConceptsAction).mockResolvedValue({ error: "The search failed." });
+
+    const result = await gatherWalkthroughResourcesAction("Some materials.", "PSYC 101", "gemini");
+
+    expect(result).toEqual({ kind: "failed", reason: "The search failed." });
+  });
+
+  it("Ruling 19: any failed member of perConcept forces the whole batch to failed, even with zero links", async () => {
+    vi.mocked(deriveResourceConcepts).mockResolvedValue({
+      ok: true,
+      concepts: [{ concept: "closures", evidence: "..." }] as never,
+    });
+    vi.mocked(findResourceLinksForConceptsAction).mockResolvedValue({
+      links: [],
+      degraded: false,
+      droppedUncorroborated: 0,
+      droppedPlaceholder: 0,
+      droppedUnreachable: 0,
+      notes: [],
+      perConcept: [
+        {
+          concept: "closures",
+          sources: 0,
+          resolvedSources: 0,
+          candidates: 0,
+          droppedPlaceholder: 0,
+          droppedUncorroborated: 0,
+          droppedDuplicate: 0,
+          droppedUnreachable: 0,
+          kept: 0,
+          retried: false,
+          failed: "timed out",
+        },
+      ],
+    } as never);
+
+    const result = await gatherWalkthroughResourcesAction("Some materials.", "PSYC 101", "gemini");
+
+    expect(result.kind).toBe("empty");
+    if (result.kind === "empty") expect(result.outcome.kind).toBe("failed");
+  });
+
+  it("real links come back as a found outcome, narrowed to title/url only", async () => {
+    vi.mocked(deriveResourceConcepts).mockResolvedValue({
+      ok: true,
+      concepts: [{ concept: "closures", evidence: "..." }] as never,
+    });
+    vi.mocked(findResourceLinksForConceptsAction).mockResolvedValue({
+      links: [{ concept: "closures", title: "MDN Closures", url: "https://developer.mozilla.org/closures", kind: "doc", whatYouGet: "..." }],
+      degraded: false,
+      droppedUncorroborated: 0,
+      droppedPlaceholder: 0,
+      droppedUnreachable: 0,
+      notes: [],
+      perConcept: [],
+    } as never);
+
+    const result = await gatherWalkthroughResourcesAction("Some materials.", "PSYC 101", "gemini");
+
+    expect(result).toEqual({
+      kind: "found",
+      links: [{ title: "MDN Closures", url: "https://developer.mozilla.org/closures" }],
+    });
   });
 });
 

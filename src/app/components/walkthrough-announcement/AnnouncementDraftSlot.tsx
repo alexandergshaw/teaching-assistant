@@ -125,6 +125,15 @@ export default function AnnouncementDraftSlot({
       {phase === "drafted" && slot.draft.phase === "drafted" && (
         <>
           <p className={styles.fieldHint}>{receiptLabel(slot.draft.draft.builtFrom)}</p>
+          {/* G3 Ruling 5/14/30: "off", "found", "ran and found nothing", and
+              "failed" must be distinguishable to the instructor - researchNotice
+              carries the real text; "off" renders nothing here since the
+              toggle's own state already communicates that choice. */}
+          {slot.draft.draft.researchNotice.kind !== "off" && (
+            <p role="status" aria-live="polite" className={styles.fieldHint}>
+              {slot.draft.draft.researchNotice.text}
+            </p>
+          )}
           {staleChoice && (
             <p className={styles.fieldHint}>
               This draft was made from a different format - Regenerate to apply your new choice.

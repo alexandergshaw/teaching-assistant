@@ -39,6 +39,14 @@ import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline } from "@/lib/anno
 import { buildWalkthroughAnnouncementPrompt } from "@/lib/walkthrough-announcement-prompt";
 import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announcement-bounds";
 import { composeWalkthroughScriptPrompt } from "@/lib/walkthrough-script-prompt";
+import { collectPermittedUrls, stripUnpermittedUrls } from "@/lib/walkthrough-announcement-link-guard";
+import {
+  resourceSearchOutcomeFor,
+  aggregateResourceOutcome,
+  type ResourceSearchOutcome,
+} from "@/lib/resource-search-outcome";
+import { deriveResourceConcepts } from "./learning-resources-generator";
+import { findResourceLinksForConceptsAction } from "./learning-resource-links";
 import {
   listAnnouncementExemplars,
   getMostRecentAnnouncementExemplar,
@@ -188,6 +196,116 @@ export async function deleteAnnouncementExemplarAction(id: string): Promise<{ ok
   }
 }
 
+// ── Research (Ruling 2/8/19/21) ─────────────────────────────────────────────
+
+/**
+ * The per-slot research result (G3 Ask 3). A local, unexported type - this
+ * is a "use server" file, so only async functions may be exported (see this
+ * file's own header); a caller still gets full structural type-checking on
+ * this shape at the call site, exactly as WalkthroughAnnouncementDraftInput
+ * below already relies on.
+ *
+ * `"off"` - the research toggle was off; `"found"` - real, reachability-
+ * checked links came back; `"empty"` - the search ran (or the concept step
+ * ran) and came back with nothing, with the FULL ResourceSearchOutcome
+ * carried through (Ruling 14: "thread the real inputs... or the implementer
+ * will invent parallel prose", since resourceSearchOutcomeText's own prose
+ * needs `counts`, not just a kind); `"failed"` - a transport/LLM failure at
+ * either the concept-derivation step or the resource-search step (Ruling 19/
+ * 21: a transport failure must never read as "found nothing"). `reason` is
+ * an internal diagnostic string and is NEVER shown to the user raw (see
+ * researchNoticeFor below) - only its presence, not its content, crosses
+ * into user-facing text.
+ */
+type ResourceOutcome =
+  | { kind: "off" }
+  | { kind: "found"; links: readonly { title: string; url: string }[] }
+  | { kind: "empty"; outcome: ResourceSearchOutcome }
+  | { kind: "failed"; reason: string };
+
+/**
+ * The user-facing notice derived from a ResourceOutcome (Ruling 5/14): "off",
+ * "found", "ran and found nothing", and "failed" (timeout or error) must be
+ * distinguishable to the instructor - a silently unwired toggle is
+ * indistinguishable from a broken one. `text` on the "failed" branch is a
+ * FIXED, non-raw string (never ResourceOutcome's own `reason`, which may
+ * carry a raw transport/LLM error message - see draftWalkthroughAnnouncementAction's
+ * own diag redaction argument for why raw failure text never reaches the
+ * user directly).
+ */
+type ResearchNotice =
+  | { kind: "off" }
+  | { kind: "found"; text: string }
+  | { kind: "empty"; text: string }
+  | { kind: "failed"; text: string };
+
+function researchNoticeFor(outcome: ResourceOutcome): ResearchNotice {
+  switch (outcome.kind) {
+    case "off":
+      return { kind: "off" };
+    case "found": {
+      const n = outcome.links.length;
+      return {
+        kind: "found",
+        text: `Found ${n} resource link${n === 1 ? "" : "s"} and added ${n === 1 ? "it" : "them"} to the draft.`,
+      };
+    }
+    case "empty":
+      // resourceSearchOutcomeFor/aggregateResourceOutcome (resource-search-
+      // outcome.ts, Ruling 15's accepted home for this vocabulary) already
+      // computed `.text` from the real `counts` - reused here verbatim
+      // rather than re-deriving parallel prose (Ruling 14).
+      return { kind: "empty", text: outcome.outcome.text };
+    case "failed":
+      return { kind: "failed", text: "Could not research resources for this announcement." };
+  }
+}
+
+/**
+ * Gathers real, reachability-checked resource links for one walkthrough
+ * slot (G3 Ask 3) - a port of the shipped gatherReplyResourcesAction's shape
+ * (discussion-replies.ts), not a new build (Ruling 8): derive a small
+ * concept list from the materials, then reuse
+ * findResourceLinksForConceptsAction's own grounded-search pipeline.
+ *
+ * findResourceLinksForConceptsAction NEVER REJECTS (Ruling 8) - it resolves
+ * `{ error: string }` on failure, so `"error" in result` is checked FIRST,
+ * with a try/catch as the outer belt only (matching useReplyResources.ts's
+ * own shape). deriveResourceConcepts likewise never throws; its `{ ok:
+ * false, error }` branch is a transport/LLM failure and is routed to
+ * `"failed"`, never `"empty"` (Ruling 19/21) - collapsing the two would tell
+ * the instructor "no links came back for these terms" when the search never
+ * even ran.
+ */
+export async function gatherWalkthroughResourcesAction(
+  materialsText: string,
+  courseLabel: string,
+  provider: LlmProvider
+): Promise<ResourceOutcome> {
+  try {
+    await requireUser();
+
+    const conceptResult = await deriveResourceConcepts(materialsText, provider);
+    if (!conceptResult.ok) return { kind: "failed", reason: conceptResult.error };
+    if (conceptResult.concepts.length === 0) {
+      return { kind: "empty", outcome: resourceSearchOutcomeFor(undefined) };
+    }
+
+    const result = await findResourceLinksForConceptsAction(
+      conceptResult.concepts.map((c) => c.concept),
+      courseLabel,
+      provider
+    );
+    if ("error" in result) return { kind: "failed", reason: result.error };
+    if (result.links.length === 0) {
+      return { kind: "empty", outcome: aggregateResourceOutcome(result.perConcept) };
+    }
+    return { kind: "found", links: result.links.map((l) => ({ title: l.title, url: l.url })) };
+  } catch (err) {
+    return { kind: "failed", reason: err instanceof Error ? err.message : "Could not research resources." };
+  }
+}
+
 // ── Drafting (AC2-AC8, decisions P1/P7/P11) ─────────────────────────────────
 
 interface WalkthroughAnnouncementDraftInput {
@@ -207,6 +325,39 @@ interface WalkthroughAnnouncementDraftInput {
   /** Free-text notes entered before capture (AC3). */
   notes: string;
   provider?: LlmProvider;
+  /**
+   * Ruling 11: REQUIRED, not optional - an optional field lets a caller omit
+   * it with every gate green (the dead-control failure mode this chunk
+   * exists to close). "requested" asks the model to use emojis in the
+   * drafted announcement; "forbidden" matches every other announcement
+   * drafter in this app.
+   *
+   * G3 wave 3 closed the wave-boundary gap this comment used to describe:
+   * buildWalkthroughAnnouncementPrompt (walkthrough-announcement-prompt.ts)
+   * now has an emojiPolicy parameter (Ruling 12), and this field is forwarded
+   * into it below.
+   */
+  emojiPolicy: "requested" | "forbidden";
+  /**
+   * Ruling 11/2: the resources gatherWalkthroughResourcesAction found for
+   * this slot (its `"found"` outcome's links, or `[]` otherwise) - the RAW
+   * list, unfiltered by the permitted-URL enforcer below. The enforcer's own
+   * permitted set already includes this list by construction (a researched
+   * link is always permitted to be cited), so pre-filtering it here would be
+   * circular.
+   *
+   * G3 wave 3: also forwarded into buildWalkthroughAnnouncementPrompt below
+   * (Ruling 12), in addition to its use here as an input to the
+   * permitted-URL enforcer (Ruling 2: the enforcer runs inside this action,
+   * the only site that sees every carrier).
+   */
+  researchedResources: readonly { title: string; url: string }[];
+  /**
+   * Ruling 14/2b: the full research outcome for this slot, carried through
+   * so `researchNotice` (below) can be computed from real counts rather than
+   * invented prose.
+   */
+  researchOutcome: ResourceOutcome;
 }
 
 /**
@@ -229,7 +380,11 @@ interface WalkthroughAnnouncementDraftInput {
  */
 export async function draftWalkthroughAnnouncementAction(
   input: WalkthroughAnnouncementDraftInput
-): Promise<({ title: string; message: string } | { error: string }) & { diag: ScriptGenerationLlmDiag }> {
+): Promise<
+  ({ title: string; message: string; researchNotice: ResearchNotice } | { error: string }) & {
+    diag: ScriptGenerationLlmDiag;
+  }
+> {
   const provider: LlmProvider = input.provider ?? "gemini";
   try {
     const user = await requireUser();
@@ -246,6 +401,14 @@ export async function draftWalkthroughAnnouncementAction(
       coverageBlock: input.coverageBlock,
       notes: input.notes,
       styleBlock,
+      // G3 wave 3 (walkthrough-announcement-prompt.ts): the wave-boundary
+      // gap this file's own header comments named for emojiPolicy and
+      // researchedResources - both parameters now exist on the composer, so
+      // both fields (already REQUIRED on this action's own input type per
+      // Ruling 11) are forwarded here instead of silently reaching this
+      // action and going nowhere.
+      emojiPolicy: input.emojiPolicy,
+      researchedResources: input.researchedResources,
     });
 
     const prompt = [
@@ -307,7 +470,28 @@ export async function draftWalkthroughAnnouncementAction(
       return { error: "Generated announcement is empty. Try again.", diag: diagBase };
     }
 
-    return { title, message, diag: diagBase };
+    // Ruling 2: the permitted-URL enforcer runs HERE, inside the draft
+    // action - the only site that already sees every carrier (course/module
+    // label, materials text, the outline's own heading strings, the coverage
+    // block, notes, the writing-style sample, and the researched-resource
+    // links). Ruling 20: the enforcer never rewrites text it did not decide
+    // to strip - it returns the model's own message with per-match splices
+    // only, so this is not a post-processing pass over the whole document.
+    const permitted = collectPermittedUrls({
+      courseLabel: input.courseLabel,
+      moduleLabel: input.moduleLabel,
+      materialsText: input.materialsText,
+      outline: input.outline,
+      coverageBlock: input.coverageBlock,
+      notes: input.notes,
+      styleBlock,
+      researchedResources: input.researchedResources,
+    });
+    const { text: enforcedMessage } = stripUnpermittedUrls(message, permitted);
+
+    const researchNotice = researchNoticeFor(input.researchOutcome);
+
+    return { title, message: enforcedMessage, researchNotice, diag: diagBase };
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Could not draft the announcement.",

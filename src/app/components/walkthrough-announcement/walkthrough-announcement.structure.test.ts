@@ -103,8 +103,12 @@ describe("directory-wide ta- key ordinal canary (this directory has no canary an
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("finds exactly three distinct ta- keys across every non-test file in this directory today (ta-rec-wta-course, ta-rec-wta-module, ta-rec-wta-notes)", () => {
-    expect(distinctKeys.size).toBe(3);
+  it("finds exactly five distinct ta- keys across every non-test file in this directory today (ta-rec-wta-course, ta-rec-wta-module, ta-rec-wta-notes, ta-rec-wta-emoji, ta-rec-wta-resources)", () => {
+    // G3 Ruling 4/G: bumped from 3 to 5 in the same change that added the
+    // emoji and resource-research toggles - the canary this comment sits
+    // next to is the only gate in this repo that can see a persisted key
+    // added anywhere in this directory.
+    expect(distinctKeys.size).toBe(5);
   });
 
   it("the exemplar's raw text is NOT among the persisted keys (decision P3: Supabase, not localStorage)", () => {
@@ -216,5 +220,86 @@ describe("B2: AnnouncementDraftSlot.tsx itself renders the markdownToHtml previe
 
   it("previewHtml is derived from markdownToHtml(...)", () => {
     expect(slotSource).toMatch(/markdownToHtml\(/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G3 Ruling 14/30: the research notice ("off"/"found"/"empty"/"failed") must
+// reach the user, not just compile through Drafted's required field. Three
+// assertions, files named, exactly as Ruling 30 requires - the wiring table
+// an earlier round shipped had eight control-hop assertions and NOT ONE
+// named researchNotice, announcement-draft-slots.ts, or
+// AnnouncementDraftSlot.tsx, which is precisely how this requirement shipped
+// dead once already. Hop 6 (the actual RENDER) cannot be reached by any gate
+// in this repo - vitest here is node-env and renders nothing - so a source-
+// text match is a proxy for "the hop was attempted," not a data-flow proof.
+// The render itself was verified by reading the diff, not by this test.
+// ---------------------------------------------------------------------------
+
+describe("G3 Ruling 14/30: researchNotice reaches the draft-slot seam by name, not just by type", () => {
+  const draftSlotsSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "announcement-draft-slots.ts"),
+    "utf-8"
+  );
+  const slotComponentSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"),
+    "utf-8"
+  );
+
+  it("announcement-draft-slots.ts's Drafted shape carries researchNotice", () => {
+    expect(draftSlotsSource).toMatch(/researchNotice/);
+  });
+
+  it("AnnouncementDraftSlot.tsx reads researchNotice off the drafted slot", () => {
+    expect(slotComponentSource).toMatch(/researchNotice/);
+  });
+
+  it("AnnouncementDraftSlot.tsx renders the notice's own text, not just the field name (sabotage-checked: renaming the rendered field back to .text alone still requires this exact access path)", () => {
+    expect(slotComponentSource).toMatch(/researchNotice\.text/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G3 Correction M5 (tightened hop-3 assertions): a bare token match on
+// `emojiOn`/`researchOutcome` anywhere in the panel (for example inside
+// fetchResources's own definition) would stay green even if draftOne
+// silently dropped the field before calling the action - this is the exact
+// failure mode M5 was opened to close. Pinning the READ, not just the name.
+// ---------------------------------------------------------------------------
+
+describe("G3 Correction M5: draftOne actually forwards emojiOn/researchOutcome into the action call", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it("emojiPolicy is computed FROM ctx.emojiOn (not merely present as a field name elsewhere in the file)", () => {
+    expect(panelSource).toMatch(/emojiPolicy:\s*ctx\.emojiOn/);
+  });
+
+  it("researchOutcome is forwarded from ctx.researchOutcome (not merely present as a field name elsewhere in the file)", () => {
+    expect(panelSource).toMatch(/researchOutcome:\s*ctx\.researchOutcome/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// backlog 4.1's extraction: the same G2-shaped reachability canary this file
+// already applies to AnnouncementDraftSlot.tsx, applied to the NEW
+// AnnouncementCourseFieldset.tsx - an import alone proves nothing.
+// ---------------------------------------------------------------------------
+
+describe("backlog 4.1: the panel actually mounts AnnouncementCourseFieldset, not just imports it", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it("renders <AnnouncementCourseFieldset - an import alone proves nothing", () => {
+    expect(panelSource).toMatch(/<AnnouncementCourseFieldset\b/);
+  });
+
+  it("passes emojiOn/researchOn through to the fieldset, not just the pre-existing course/module/notes props", () => {
+    expect(panelSource).toMatch(/emojiOn=\{emojiOn\}/);
+    expect(panelSource).toMatch(/researchOn=\{researchOn\}/);
   });
 });

@@ -9,8 +9,38 @@
 // overwrites a drafted slot; there is no batch server action.
 
 import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline } from "@/lib/announcement-outline-types";
+import type { ResourceSearchOutcome } from "@/lib/resource-search-outcome";
 
 export const MAX_ANNOUNCEMENT_BATCH_SIZE = 3;
+
+/**
+ * G3 Ruling 5/14: "research off", "ran and found nothing", and "research
+ * failed" must be distinguishable to the instructor - this is the user-
+ * facing half of that requirement. Structurally identical to (but NOT
+ * imported from - walkthrough-announcement.ts is a "use server" file and may
+ * export only async functions, per that file's own header) the local
+ * `ResearchNotice` type computed there by researchNoticeFor. TypeScript's
+ * structural typing means the two unify at every call site without either
+ * file importing the other.
+ */
+export type ResearchNotice =
+  | { readonly kind: "off" }
+  | { readonly kind: "found"; readonly text: string }
+  | { readonly kind: "empty"; readonly text: string }
+  | { readonly kind: "failed"; readonly text: string };
+
+/**
+ * G3 Ruling 9/14: the once-per-Generate research result threaded alongside a
+ * draft request. Structurally identical to (not imported from, same reason
+ * as ResearchNotice above) the local `ResourceOutcome` type
+ * gatherWalkthroughResourcesAction (walkthrough-announcement.ts) actually
+ * returns.
+ */
+export type ResourceOutcome =
+  | { readonly kind: "off" }
+  | { readonly kind: "found"; readonly links: readonly { readonly title: string; readonly url: string }[] }
+  | { readonly kind: "empty"; readonly outcome: ResourceSearchOutcome }
+  | { readonly kind: "failed"; readonly reason: string };
 export const FIRST_SLOT_ID = "wta-slot-1";
 
 /** What a slot is set to draft FROM, before a draft exists (or before a
@@ -36,6 +66,10 @@ export interface Drafted {
   readonly title: string;
   readonly message: string;
   readonly builtFrom: ResolvedTemplate;
+  /** G3 Ruling 14/30: REQUIRED, not optional - an optional field lets a
+   * caller omit it with every gate green, which is exactly how this notice
+   * shipped dead in an earlier round. Rendered by AnnouncementDraftSlot.tsx. */
+  readonly researchNotice: ResearchNotice;
 }
 
 export type SlotDraft =

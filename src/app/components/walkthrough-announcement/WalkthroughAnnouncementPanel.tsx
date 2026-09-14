@@ -33,11 +33,10 @@
 // is safer than a whole screen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, MenuItem, TextField } from "@mui/material";
+import { Button, TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import { variantFor } from "../ui/buttonVariant";
-import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
 import { LegibilityProbeModal } from "../grading-recording/LegibilityProbeModal";
 import { triggerFileDownload } from "../course-planning/utils";
@@ -54,6 +53,7 @@ import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
 import type { AnnouncementOutline } from "@/lib/announcement-outline-types";
 import { WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP } from "@/lib/walkthrough-announcement-prompt";
 import { WALKTHROUGH_SCRIPT_MATERIALS_CAP } from "@/lib/walkthrough-script-prompt";
+import { fnv1aHash } from "@/lib/lms-generation/generation-diag";
 import {
   getMostRecentAnnouncementExemplarAction,
   listAnnouncementExemplarsAction,
@@ -62,11 +62,22 @@ import {
   draftWalkthroughAnnouncementAction,
   draftWalkthroughVideoScriptAction,
   postWalkthroughAnnouncementAction,
+  gatherWalkthroughResourcesAction,
 } from "@/app/actions/walkthrough-announcement";
-import { useAnnouncementDraftSlots, type AnnouncementDraftRequestContext } from "./useAnnouncementDraftSlots";
+import {
+  useAnnouncementDraftSlots,
+  type AnnouncementDraftRequestContext,
+  type AnnouncementDraftDispatchContext,
+} from "./useAnnouncementDraftSlots";
 import AnnouncementDraftSlot from "./AnnouncementDraftSlot";
+import AnnouncementCourseFieldset, {
+  type AnnouncementExemplarSummary,
+  type WtaCourseOption,
+} from "./AnnouncementCourseFieldset";
 import {
   MAX_ANNOUNCEMENT_BATCH_SIZE,
+  type ResearchNotice,
+  type ResourceOutcome,
   type TemplateCandidate,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
@@ -83,29 +94,19 @@ import {
 const STORAGE_KEY_COURSE = "ta-rec-wta-course";
 const STORAGE_KEY_MODULE = "ta-rec-wta-module";
 const STORAGE_KEY_NOTES = "ta-rec-wta-notes";
+// G3 Ruling 4/G: two new persisted format toggles.
+const STORAGE_KEY_EMOJI = "ta-rec-wta-emoji";
+const STORAGE_KEY_RESOURCES = "ta-rec-wta-resources";
 
 const MAX_NOTES_CHARS = 2000;
 
-/** The client-facing shape of one saved exemplar. Deliberately a SEPARATE
- * declaration from the (unexported, since a "use server" file may export
- * only async functions) shape walkthrough-announcement.ts's own actions
- * return - TypeScript checks the two structurally at every call site,
- * mirroring how AnnCourseOption (useTakeAnnouncement.ts) is its own local
- * type rather than an import of CourseHub. */
-interface AnnouncementExemplarSummary {
-  id: string;
-  label: string | null;
-  createdAt: string;
-  outline: AnnouncementOutline;
-  exemplarPreview: string;
-}
-
-interface WtaCourseOption {
-  id: string;
-  name: string;
-  canvasUrl: string;
-  institution: string | null;
-}
+// AnnouncementExemplarSummary/WtaCourseOption now live in
+// AnnouncementCourseFieldset.tsx (backlog 4.1's extraction) and are imported
+// above - still deliberately SEPARATE declarations from the (unexported,
+// since a "use server" file may export only async functions) shape
+// walkthrough-announcement.ts's own actions return, mirroring how
+// AnnCourseOption (useTakeAnnouncement.ts) is its own local type rather than
+// an import of CourseHub.
 
 interface Notice {
   id: string;
@@ -197,6 +198,48 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       // it does not lose anything already captured or drafted.
     }
   }, [notesText]);
+
+  // G3 Ruling 4/G: emoji and resource-research toggles, persisted. Unlike
+  // courseId/moduleLabel/notesText above, these are BOOLEANS rendered as a
+  // checked/unchecked control - a localStorage-seeded useState initializer
+  // does not show its restored value on reload on an SSR'd surface (the
+  // server-rendered markup always reflects the default, and a lazy
+  // initializer reading localStorage on the client's first render disagrees
+  // with it), so restoration happens in a mount effect instead
+  // (persisted-details-open-hydration.md's own fix shape).
+  const [emojiOn, setEmojiOn] = useState(false);
+  const [researchOn, setResearchOn] = useState(false);
+  useEffect(() => {
+    // setState-in-effect idiom (AGENTS.md/CLAUDE.md guidance, this repo's own
+    // useCourseIntel.ts precedent): every setState below is reached only
+    // after an await, never synchronously from the effect body - eslint's
+    // react-hooks/set-state-in-effect rejects the latter.
+    void (async () => {
+      await Promise.resolve();
+      try {
+        const storedEmoji = window.localStorage.getItem(STORAGE_KEY_EMOJI);
+        if (storedEmoji !== null) setEmojiOn(storedEmoji === "true");
+        const storedResearch = window.localStorage.getItem(STORAGE_KEY_RESOURCES);
+        if (storedResearch !== null) setResearchOn(storedResearch === "true");
+      } catch {
+        // Best-effort - falls back to the defaults above.
+      }
+    })();
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY_EMOJI, String(emojiOn));
+    } catch {
+      // Best-effort.
+    }
+  }, [emojiOn]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY_RESOURCES, String(researchOn));
+    } catch {
+      // Best-effort.
+    }
+  }, [researchOn]);
 
   const selectedCourse = (courses ?? []).find((c) => c.id === courseId) ?? null;
 
@@ -458,7 +501,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     [exemplarText, mostRecentExemplar, savedExemplars, savedExemplarsLoading, savedExemplarsFailed]
   );
 
-  const buildRequest = useCallback(() => {
+  const buildRequest = useCallback((): AnnouncementDraftRequestContext => {
     const reduction = reduceCaptureToMaterials(batchBlocksRef.current, WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP);
     const coverageBlock = renderWalkthroughCoverageBlock(deriveWalkthroughPageCoverage(reduction.blocks));
     return {
@@ -468,19 +511,52 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       coverageBlock,
       notes: notesText,
       provider,
+      emojiOn,
+      researchOn,
     };
-  }, [selectedCourse, moduleLabel, notesText, provider]);
+  }, [selectedCourse, moduleLabel, notesText, provider, emojiOn, researchOn]);
 
   const resolveLive = useCallback(
     () => ({ pastedOutline, mostRecent: optionSource.mostRecent }),
     [pastedOutline, optionSource.mostRecent]
   );
 
+  // G3 Ruling 2/9: the actual research call - the only site (per blocker 5)
+  // that may call a server action directly. gatherWalkthroughResourcesAction
+  // never rejects on its own known failure paths, but the hook's own
+  // in-flight handling still treats a thrown error as "failed" as an outer
+  // belt (mirroring useReplyResources.ts's own shape).
+  const fetchResources = useCallback(
+    (ctx: AnnouncementDraftRequestContext): Promise<ResourceOutcome> =>
+      gatherWalkthroughResourcesAction(ctx.materialsText, ctx.courseLabel, ctx.provider),
+    []
+  );
+
+  // G3 Ruling 17/33: a control-character-free fingerprint over every input
+  // the research result depends on - course, module, a hash+length of the
+  // materials text (never the full text itself, which can run to tens of
+  // thousands of characters), and researchOn. JSON.stringify's own quoting
+  // keeps the fields unambiguous without a literal delimiter character.
+  const researchFingerprint = useCallback((ctx: AnnouncementDraftRequestContext): string => {
+    return JSON.stringify([
+      ctx.courseLabel,
+      ctx.moduleLabel ?? "",
+      ctx.materialsText.length,
+      fnv1aHash(ctx.materialsText),
+      ctx.researchOn,
+    ]);
+  }, []);
+
   const draftOne = useCallback(
     async (
-      ctx: AnnouncementDraftRequestContext,
+      ctx: AnnouncementDraftDispatchContext,
       outline: AnnouncementOutline
-    ): Promise<{ title: string; message: string } | { error: string }> => {
+    ): Promise<{ title: string; message: string; researchNotice: ResearchNotice } | { error: string }> => {
+      // G3 Ruling 9/M3.3: the derivation from the once-per-Generate research
+      // OUTCOME to the RAW resource list the composer/enforcer actually
+      // consume - any outcome other than "found" contributes zero citable
+      // resources.
+      const researchedResources = ctx.researchOutcome.kind === "found" ? ctx.researchOutcome.links : [];
       const result = await draftWalkthroughAnnouncementAction({
         courseLabel: ctx.courseLabel,
         moduleLabel: ctx.moduleLabel,
@@ -489,9 +565,12 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         coverageBlock: ctx.coverageBlock,
         notes: ctx.notes,
         provider: ctx.provider,
+        emojiPolicy: ctx.emojiOn ? "requested" : "forbidden",
+        researchedResources,
+        researchOutcome: ctx.researchOutcome,
       });
       if ("error" in result) return { error: result.error };
-      return { title: result.title, message: result.message };
+      return { title: result.title, message: result.message, researchNotice: result.researchNotice };
     },
     []
   );
@@ -514,6 +593,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
   const {
     slots,
     readyToDraftCount,
+    researching,
     addSlot,
     removeSlot,
     chooseTemplate,
@@ -526,7 +606,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     armRegenerate,
     cancelRegenerate,
     postSignatureFor,
-  } = useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft });
+  } = useAnnouncementDraftSlots({ buildRequest, resolveLive, draftOne, postDraft, fetchResources, researchFingerprint });
 
   const anyDrafting = slots.some((s) => s.draft.phase === "drafting");
 
@@ -604,139 +684,53 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         </div>
       )}
 
-      {/* AC1/AC3: course, module, exemplar and notes - all reachable BEFORE
-          the record button, all persisted where the standing rule requires
-          it (course/module/notes under ta- keys; the exemplar itself in
-          Supabase, per decision P3, never localStorage). */}
-      <fieldset className={controls.section}>
-        <legend className={controls.sectionLegend}>Course and format</legend>
-        <div className={styles.adaptRow}>
-          <TextField
-            select
-            size="small"
-            label="Course"
-            className={controls.fieldMd}
-            value={courseId}
-            onChange={(e) => setCourseId(e.target.value)}
-          >
-            {(courses ?? []).map((c) => (
-              <MenuItem key={c.id} value={c.id}>
-                {c.name}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            size="small"
-            label="Module or week (optional)"
-            className={controls.fieldMd}
-            value={moduleLabel}
-            onChange={(e) => setModuleLabelState(e.target.value)}
-          />
-        </div>
-        {coursesError && (
-          <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
-            {coursesError}
-          </div>
-        )}
-        <p className={styles.fieldHint}>Only courses linked to Canvas can be posted to.</p>
-
-        <TextField
-          size="small"
-          label="Paste a previous announcement to match its format (optional)"
-          value={exemplarText}
-          onChange={(e) => setExemplarText(e.target.value)}
-          multiline
-          minRows={4}
-          fullWidth
-        />
-        <div className={styles.adaptRow}>
-          <TextField
-            size="small"
-            label="Label (optional)"
-            className={controls.fieldMd}
-            value={exemplarLabel}
-            onChange={(e) => setExemplarLabel(e.target.value)}
-            disabled={!exemplarText.trim()}
-          />
-        </div>
-        <div className={styles.ghActions}>
-          <Button
-            size="small"
-            variant="outlined"
-            disabled={!exemplarText.trim() || !courseId || savingExemplar}
-            loading={savingExemplar}
-            loadingPosition="start"
-            onClick={() => void handleSaveExemplar()}
-          >
-            {savingExemplar ? "Saving…" : "Save for reuse"}
-          </Button>
-          <Button size="small" variant="text" disabled={!courseId} onClick={handleToggleExemplarPicker}>
-            {showExemplarPicker ? "Hide saved exemplars" : "Browse saved exemplars"}
-          </Button>
-        </div>
-        {exemplarSaved && <p className={styles.fieldHint}>Saved.</p>}
-        {exemplarError && (
-          <div role="alert" className={`${controls.notice} ${controls.noticeDanger}`}>
-            {exemplarError}
-          </div>
-        )}
-
-        {showExemplarPicker && (
-          <div className={controls.stack}>
-            {savedExemplarsLoading && <p className={styles.fieldHint}>Loading…</p>}
-            {!savedExemplarsLoading && (savedExemplars ?? []).length === 0 && (
-              <p className={styles.fieldHint}>No saved exemplars for this course yet.</p>
-            )}
-            {(savedExemplars ?? []).map((ex) => (
-              <div key={ex.id} className={styles.adaptRow}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  disabled={slots.length >= MAX_ANNOUNCEMENT_BATCH_SIZE}
-                  onClick={() =>
-                    addSlot({
-                      kind: "saved",
-                      exemplarId: ex.id,
-                      label: ex.label || new Date(ex.createdAt).toLocaleDateString(),
-                      outline: ex.outline,
-                    })
-                  }
-                >
-                  Add a draft from this
-                </Button>
-                <span className={styles.fieldHint}>{ex.label || new Date(ex.createdAt).toLocaleDateString()}</span>
-                <span className={styles.fieldHint}>{ex.exemplarPreview}</span>
-                <ConfirmArmButtons
-                  armed={removeArmedId === ex.id}
-                  idleLabel="Remove"
-                  confirmLabel="Confirm remove"
-                  tone="danger"
-                  idleVariant="text"
-                  onArm={() => setRemoveArmedId(ex.id)}
-                  onConfirm={() => void handleRemoveExemplar(ex.id)}
-                  onCancel={() => setRemoveArmedId(null)}
-                  consequenceId={`wta-remove-exemplar-${ex.id}`}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        <TextField
-          size="small"
-          label={`Notes for this walkthrough - optional (${notesText.length}/${MAX_NOTES_CHARS})`}
-          value={notesText}
-          onChange={(e) => setNotesText(e.target.value)}
-          multiline
-          minRows={2}
-          fullWidth
-        />
-
-        <p className={styles.fieldHint}>
-          Frames from your screen are sent to a third-party AI provider to be read while you record. Share a single
-          window rather than your whole screen, and close any gradebook, inbox, or student submission first.
-        </p>
-      </fieldset>
+      {/* AC1/AC3: course, module, exemplar, format toggles and notes - all
+          reachable BEFORE the record button, all persisted where the
+          standing rule requires it (course/module/notes/emoji/resources
+          under ta- keys; the exemplar itself in Supabase, per decision P3,
+          never localStorage). Extracted to AnnouncementCourseFieldset.tsx
+          (backlog 4.1) - every literal server-action call stays here in the
+          panel (blocker 5); the fieldset only renders and reports upward. */}
+      <AnnouncementCourseFieldset
+        courses={courses}
+        courseId={courseId}
+        onCourseIdChange={setCourseId}
+        coursesError={coursesError}
+        moduleLabel={moduleLabel}
+        onModuleLabelChange={setModuleLabelState}
+        exemplarText={exemplarText}
+        onExemplarTextChange={setExemplarText}
+        exemplarLabel={exemplarLabel}
+        onExemplarLabelChange={setExemplarLabel}
+        savingExemplar={savingExemplar}
+        onSaveExemplar={() => void handleSaveExemplar()}
+        exemplarSaved={exemplarSaved}
+        exemplarError={exemplarError}
+        showExemplarPicker={showExemplarPicker}
+        onToggleExemplarPicker={handleToggleExemplarPicker}
+        savedExemplarsLoading={savedExemplarsLoading}
+        savedExemplars={savedExemplars}
+        canAddSlotFromExemplar={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE}
+        onAddSlotFromExemplar={(ex) =>
+          addSlot({
+            kind: "saved",
+            exemplarId: ex.id,
+            label: ex.label || new Date(ex.createdAt).toLocaleDateString(),
+            outline: ex.outline,
+          })
+        }
+        removeArmedId={removeArmedId}
+        onArmRemoveExemplar={(id) => setRemoveArmedId(id)}
+        onConfirmRemoveExemplar={(id) => void handleRemoveExemplar(id)}
+        onCancelRemoveExemplar={() => setRemoveArmedId(null)}
+        notesText={notesText}
+        maxNotesChars={MAX_NOTES_CHARS}
+        onNotesTextChange={setNotesText}
+        emojiOn={emojiOn}
+        onEmojiOnChange={setEmojiOn}
+        researchOn={researchOn}
+        onResearchOnChange={setResearchOn}
+      />
 
       <p className={styles.fieldHint}>
         A capture in progress does not survive a reload or a closed tab: anything not yet read off the screen, and any
@@ -791,7 +785,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           loading={anyDrafting}
           loadingPosition="start"
           disabled={capturing || extracting || !hasMaterial || anyDrafting || savedExemplarsLoading || readyToDraftCount === 0}
-          onClick={() => generate()}
+          onClick={() => void generate()}
         >
           {anyDrafting ? "Generating…" : "Generate announcement"}
         </Button>
@@ -807,6 +801,15 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           {scriptGenerating ? "Generating…" : "Generate video script"}
         </Button>
       </div>
+      {/* G3 Ruling 24/34: Generate awaits research before any slot enters
+          "drafting" and stays enabled throughout the wait (a second click
+          reuses the in-flight research call) - this is the only feedback the
+          instructor gets during that wait. */}
+      {researching && (
+        <p role="status" aria-live="polite" className={styles.fieldHint}>
+          Researching resources for this module…
+        </p>
+      )}
       {!hasMaterial && <p className={styles.fieldHint}>Record and stop a walkthrough first - nothing has been read yet.</p>}
       {hasMaterial && readyToDraftCount === 0 && !anyDrafting && (
         <p className={styles.fieldHint}>

@@ -41,6 +41,8 @@ function baseArgs(overrides: Partial<WalkthroughAnnouncementPromptArgs> = {}): W
     coverageBlock: "[Page 1] Syllabus overview\n[Page 2] Grading policy",
     notes: "Mention the new office hours.",
     styleBlock: "\n\nMATCH THE INSTRUCTOR'S PERSONAL WRITING STYLE (tone, rhythm, vocabulary) shown in this sample:\nHi folks, quick update.",
+    emojiPolicy: "forbidden",
+    researchedResources: [],
     ...overrides,
   };
 }
@@ -93,8 +95,84 @@ describe("buildWalkthroughAnnouncementPrompt - containment (P11)", () => {
     // file is itself part of the containment proof.
     const args = baseArgs();
     expect(Object.keys(args).sort()).toEqual(
-      ["courseLabel", "moduleLabel", "materialsText", "outline", "coverageBlock", "notes", "styleBlock"].sort()
+      [
+        "courseLabel",
+        "moduleLabel",
+        "materialsText",
+        "outline",
+        "coverageBlock",
+        "notes",
+        "styleBlock",
+        "emojiPolicy",
+        "researchedResources",
+      ].sort()
     );
+  });
+});
+
+describe("buildWalkthroughAnnouncementPrompt - G3 emoji policy (Ruling 3/4/11/12)", () => {
+  it("emoji ON and emoji OFF produce different prompt text", () => {
+    const on = buildWalkthroughAnnouncementPrompt(baseArgs({ emojiPolicy: "requested" }));
+    const off = buildWalkthroughAnnouncementPrompt(baseArgs({ emojiPolicy: "forbidden" }));
+    expect(on).not.toBe(off);
+  });
+
+  it("forbidden policy instructs against emojis in plain English (no literal emoji character)", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ emojiPolicy: "forbidden" }));
+    expect(prompt).toContain("Do not use emojis anywhere in this announcement.");
+  });
+
+  it("requested policy instructs the model that emojis are welcome, in plain English", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ emojiPolicy: "requested" }));
+    expect(prompt).toContain("Emojis are welcome in this announcement");
+  });
+});
+
+describe("buildWalkthroughAnnouncementPrompt - G3 resource citation and framing (Ruling 12/18b)", () => {
+  it("omits the RESEARCHED RESOURCES section entirely when there are no researched resources", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ researchedResources: [] }));
+    expect(prompt).not.toContain("RESEARCHED RESOURCES");
+  });
+
+  it("includes a RESEARCHED RESOURCES section, framed as data AFTER the untrusted-content notice, when resources are present", () => {
+    const researchedResources = [{ title: "Grading rubric guide", url: "https://example.edu/rubric" }];
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ researchedResources }));
+
+    const framingIndex = prompt.indexOf("untrusted content");
+    const resourcesIndex = prompt.indexOf("RESEARCHED RESOURCES");
+    const titleIndex = prompt.indexOf("Grading rubric guide");
+
+    expect(framingIndex).toBeGreaterThan(-1);
+    expect(resourcesIndex).toBeGreaterThan(-1);
+    expect(titleIndex).toBeGreaterThan(-1);
+    expect(framingIndex).toBeLessThan(resourcesIndex);
+    expect(resourcesIndex).toBeLessThan(titleIndex);
+  });
+
+  it("the RESOURCE CITATION instruction sentence comes BEFORE the untrusted-content framing, not after it", () => {
+    const researchedResources = [{ title: "Grading rubric guide", url: "https://example.edu/rubric" }];
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ researchedResources }));
+    const citationIndex = prompt.indexOf("RESOURCE CITATION");
+    const framingIndex = prompt.indexOf("untrusted content");
+    expect(citationIndex).toBeGreaterThan(-1);
+    expect(framingIndex).toBeGreaterThan(-1);
+    expect(citationIndex).toBeLessThan(framingIndex);
+  });
+
+  it("the untrusted-content framing's own inventory sentence now names resource titles found by a web search", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
+    expect(prompt).toContain("resource titles found by a web search");
+    // The substring existing tests key off must survive this amendment.
+    expect(prompt).toContain("untrusted content");
+  });
+
+  it("a present vs. absent researched-resources list produces different RESOURCE CITATION instruction text", () => {
+    const withResources = buildWalkthroughAnnouncementPrompt(
+      baseArgs({ researchedResources: [{ title: "A", url: "https://example.edu/a" }] })
+    );
+    const withoutResources = buildWalkthroughAnnouncementPrompt(baseArgs({ researchedResources: [] }));
+    expect(withResources).toContain("you may cite them");
+    expect(withoutResources).toContain("do not invent citations or URLs");
   });
 });
 

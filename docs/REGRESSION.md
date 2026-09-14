@@ -41662,3 +41662,82 @@ its storage key should live, and what its codec should look like are
 architect/data-seat decisions, not baseline findings - this entry states only
 what exists today and what today's tests will and will not notice when it
 changes.
+
+## 413. Area baseline: the walkthrough announcement drafting surface, before G3
+
+G3 adds an unconditional announcement shape floor, an emoji toggle and a
+resource-research toggle. It edits the prompt composer, the draft action, the
+panel, the slot hook and the slot component. This entry records what those
+pieces do TODAY, measured this session, and - more usefully - what today's
+tests will NOT notice when they change.
+
+**It exists partly because the previous wave skipped it.** `b3701cd` shipped
+1872 insertions across ten files (multi-draft slots, the rendered preview, the
+rich clipboard flavour) and touched `docs/REGRESSION.md` not at all
+(`git show --stat b3701cd`). So entry 409 describes the feature's arrival under
+`ad3c035` and nothing describes the surface as it stands now.
+
+### 413a - what is measured true today
+
+- `WalkthroughAnnouncementPanel.tsx` is **900** lines
+  (`@(Get-Content <file>).Count`), against `LIMIT = 1000` at
+  `src/file-size-ceiling.structure.test.ts:30`, and is not in `ALLOWED_OVERAGE`.
+  The "Course and format" fieldset is `:611-739`, 129 lines.
+- **Exactly three `ta-` keys** exist in non-test files in that directory:
+  `ta-rec-wta-course`, `ta-rec-wta-module`, `ta-rec-wta-notes`.
+  `walkthrough-announcement.structure.test.ts:107` asserts `distinctKeys.size`
+  is 3, and `:111` asserts the source does NOT contain `ta-rec-wta-exemplar` -
+  the exemplar persists in Supabase, never localStorage. That fourth string
+  appears in the directory exactly once, at `:111`, asserting its own absence.
+- **The surface mentions emoji nowhere.** `grep -rni "emoji"` across
+  `walkthrough-announcement-prompt.ts`, `walkthrough-announcement.ts` and the
+  component directory returns **0**. So the emoji toggle's OFF arm is NOT a
+  no-op restoring today's behaviour - today there is no instruction either way,
+  and OFF adds a forbidding sentence. Whoever ships it should expect the OFF
+  prompt to differ from today's, deliberately.
+- **No resource research happens here.** `grep -rn
+  "findResourceLinksForConcepts"` across the component directory and the action
+  returns **0**.
+- `buildRequest` (`:461-471`) returns six fields and is SYNCHRONOUS.
+  `draftOne` (`:479-497`) re-enumerates seven named fields into the action and
+  then **discards everything except title and message** at `:493-494`.
+  `regenerate` (`:131-141` of `useAnnouncementDraftSlots.ts`) calls
+  `buildRequest()` again, so anything cached across the two must be
+  invalidated deliberately.
+- The prompt composer's `blocks` is an ARRAY LITERAL
+  (`walkthrough-announcement-prompt.ts:221-259`) with
+  `UNTRUSTED_CONTENT_FRAMING` as an element at `:254`; the first `blocks.push`
+  is `:263`. Anything pushed lands AFTER the untrusted framing, inside the
+  region the prompt declares must never be followed as instructions.
+- The preview renders through `markdownToHtml` into `dangerouslySetInnerHTML`
+  (`AnnouncementDraftSlot.tsx:19,73,151`), and the same renderer supplies the
+  `text/html` clipboard flavour (`useAnnouncementDraftSlots.ts:11,197`). Both
+  paths are pinned by source-text assertions in the directory's structure test.
+
+### 413b - what today's tests will not notice
+
+No component is rendered by any test in this repo (vitest is node-env and
+collects only `src/**/*.test.ts`), so nothing here notices markup, focus,
+keyboard behaviour, or whether a control is visible at all. Specifically:
+
+- A control added inside the `{showExemplarPicker && (` conditional at `:684`
+  renders only after the instructor opens the exemplar picker. Every gate stays
+  green.
+- A value added to `buildRequest`'s returned literal but not to `draftOne`'s
+  seven-field call reaches `ctx` and stops. Nothing fails.
+- A field added to the action's result but not threaded through `draftOne`,
+  the hook's injected signature and the reducer never reaches the user. The
+  `ta-` key canary passing at a higher count proves only that names exist in
+  source text.
+
+### 413c - a live defect on this surface, unfixed
+
+Backlog 5.1: a hung exemplar fetch disables Generate indefinitely.
+`WalkthroughAnnouncementPanel.tsx:793` disables it on `savedExemplarsLoading`,
+and the `Promise.all` at `:241-244` has no timeout, so EITHER call hanging does
+it. `AnnouncementDraftSlot.tsx:103` does render an error arm with a Retry
+button - but only on a REJECTION; on a hang `savedFailed` stays false and the
+user sees "Loading your saved formats..." forever. An error state only a
+rejection can reach is not coverage for a hang.
+
+This entry states what exists; it decides nothing about what G3 should do.

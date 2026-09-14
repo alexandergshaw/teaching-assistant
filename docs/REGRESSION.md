@@ -41742,6 +41742,24 @@ rejection can reach is not coverage for a hang.
 
 This entry states what exists; it decides nothing about what G3 should do.
 
+**Citations RE-MEASURED 2026-09-14, at G1 hand-off.** Every line number in
+413c above was stale - the surface moved after this entry was written, and the
+numbers were never re-run. Corrected here rather than in place, so the drift
+itself stays on the record: the disable clause is `:787`, not `:793`; the
+unguarded `Promise.all` is `:284-287`, not `:241-244`; the slot's error arm is
+`AnnouncementDraftSlot.tsx:101-113`, not `:103` alone. The panel is **903**
+lines, not 900 (`@(Get-Content src/app/components/walkthrough-announcement/WalkthroughAnnouncementPanel.tsx).Count`,
+run this session), so 413a's count is stale by three as well. The declaration
+site of `savedExemplarsLoading` is `:256`
+(`grep -n "savedExemplarsLoading" <panel>` returns :256, :498, :501, :711, :787
+- five hits, run this session).
+
+The DEFECT itself is unchanged and still live: a hang leaves `savedLoading`
+true forever, and the Retry affordance is gated on `savedFailed`, which only a
+REJECTION sets. G1 is now `actionable` in `docs/backlog.yml` and is being
+worked; this note exists so the regression pass that closes it compares
+against the lines that exist rather than the lines that used to.
+
 ### 413d - draft slots deliberately do NOT persist (backlog 5.2, closed)
 
 Recorded because the entry had already been rediscovered twice: nothing about

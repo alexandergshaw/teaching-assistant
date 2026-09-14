@@ -42261,6 +42261,42 @@ seen fail is not a scan, and this repo has been burned by exactly that before.
 - **Backlog G6**: the sibling exemplar actions return an empty SUCCESS for a
   blank `courseId` before querying. Same false-claim family, different feature.
 
+### 416h - the two escalated questions, ANSWERED by the owner 2026-09-14
+
+The owner resolved both with their default, in response to a direct escalation.
+This was a ONE-TIME resolution of the questions then open - explicitly NOT a
+standing instruction to take defaults in future, which the owner stated in the
+same breath. Future questions of this kind still get asked.
+
+**Retention: the default stands - no retention policy, manual deletion only.**
+
+What that means, stated plainly because it is now an ACCEPTED RISK rather than
+an unanswered question: accommodations records persist indefinitely. Nothing in
+this app ever deletes a user (`grep -rniE "delete_?user|removeUser|deleteAccount|admin\.delete" src`
+returns nothing; the account lifecycle is `pending|active|suspended`), the DDL
+carries no cascade claim because such a claim would be false, and the only
+deletion is the owner removing a row by hand. That control is reachable only
+through a cascade fed by a LIVE teacher-enrollment listing, so **an instructor
+who has lost enrollment cannot reach the delete control for rows they
+created** - which is precisely when retention matters most. The owner has
+accepted this knowingly.
+
+If it is ever revisited, the cheapest real fix is a deletion path that does not
+depend on a live Canvas enrollment - not a scheduled sweep, which would need its
+own authority to decide what has expired.
+
+**Access: the default stands - `requireOwner()`, as shipped.**
+
+`requireOwner()` delegates to `requireUser()`, so any ACTIVE account passes.
+Tenant isolation still holds, by the `user_id` filter on every read, update and
+delete plus RLS under the session client - each account sees only its own rows.
+The stricter `requireAppOwner()` was declined because it would lock
+`role === "instructor"` accounts out of this feature for their own courses,
+which is the population the feature exists for. No code change; the row was
+already built this way and the caveat comment in
+`src/app/actions/accommodations.ts` now records a decision rather than an open
+question.
+
 ## 417. N5: ZIP intake for a snapshot-grading submission
 
 Backlog N5, the owner's ask of 2026-09-14. **Two of its three parts were
@@ -42316,6 +42352,12 @@ operating systems.
 
 Intake is drop-ONLY. No file picker was added; the panel has none for any file
 type today. That is a recorded scope call, not an omission.
+
+**Discoverability, ANSWERED by the owner 2026-09-14 with the default:** N5's
+other two parts (the repeat loop, and multiple captures per role) are shipped,
+and the open question was whether the built UI makes that obvious. The owner
+took the default - it reads adequately, no discoverability work is queued. A
+one-time resolution of a then-open question, not a standing preference.
 
 ### 417d - what is measured true today
 

@@ -42357,3 +42357,129 @@ ArrayBuffer-backed view rather than casting, because a cast would assert
 something about the backing buffer JSZip does not promise. **Third time this
 session that `tsc` caught what a green suite hid** - see entry 415 and the
 walkthrough-announcement wave for the other two.
+
+## 418. N1: the read pass proposes a role, the instructor confirms it
+
+Backlog N1, from Ruling H1-E. With H1 wave 1 removing the taught Read click,
+per-shot ROLE ARMING was the last per-shot cost in the owner's original
+complaint.
+
+### 418a - why this item is delicate rather than cosmetic
+
+Role is not a caption. Measured: it labels the image to the model
+(`snapshot-grade.ts:91`), sets image-budget priority via
+`selectShotsForGradeCall` (`:84`), drives `partitionShotsForNextStudent` through
+`STABLE_SNAPSHOT_ROLES` (`snapshot-shot.ts:228,230`) - so role decides what
+SURVIVES Next student, a data-lifecycle effect - and drives `missingRoles`
+(`snapshot-grade-prompt.ts:68`).
+
+**So a wrong role changes the SCORE and the DATA LIFECYCLE.** That is why H1-E
+banned inferring role from pixels and why suggest-and-confirm was the only
+acceptable shape.
+
+### 418b - the safety property, and the instrument that can actually see it
+
+**A suggested role never becomes the effective role without an explicit
+instructor action.** No confidence threshold, no "only when it is still the
+default", no exceptions.
+
+The first version of this criterion instrumented itself with a test over one
+reducer - and `setRole` is exported from `useSnapshotShots.ts`, so a read
+handler calling it directly would have shipped the banned auto-apply with that
+test green and nothing rendering a component to notice. The instrument was
+scoped to one module while the claim was quantified over all of them.
+
+**So `setRole`'s CALL SITES are PINNED** by
+`snapshot-role-setrole-callsites.structure.test.ts` (71 lines) - the repo's own
+canary idiom, as with the `ta-` exact-set scan. Adding a caller means bumping
+the pinned set deliberately, which is the moment someone has to justify it.
+Sabotage-proven: adding `setRole(matched.shot.id, r.roleSuggestion)` inside
+`handleRead` turned it RED ("expected 3 to be 2").
+
+`acceptAllSuggestions(shots, suggestions)` is the ONE function that ever writes
+a suggested role into `shot.role`, and `applyRoleSuggestions` deliberately does
+NOT build on `setRole`.
+
+### 418c - the trap this nearly fell into, named because naming it is the fix
+
+Suggestions attach via the existing `ShotReadEntry.shotId` -
+required, captured at read time, added THAT SAME MORNING by Ruling R1-E in
+`cb4851a`. The criteria's first draft asked for a mapping that already existed.
+
+The dangerous attractor is `buildIdByGlobalIndex` (`snapshot-shot.ts:184`):
+`new Map(shots.map((shot, i) => [i + 1, shot.id]))` - pure array position, safe
+only synchronously at grade time. It is the obvious-looking export, it compiles,
+and using it here would reintroduce the exact defect `cb4851a` fixed, in a
+feature whose failure mode is a mis-scored submission. It is FORBIDDEN in the
+suggestion path and appears in `snapshot-role-suggestion.ts:41` only as a
+comment saying so.
+
+**If this is ever extended:** prefer `shotId` over any index-derived map, and
+treat a function taking `(shot, i)` as a smell in this directory.
+
+### 418d - the model is allowed to decline, and that is load-bearing
+
+`READ_JSON_SHAPE` (`snapshot-read-prompt.ts`) offers the six roles PLUS
+`"unsure"`, and `normalizeRoleSuggestion` (`snapshot-parse.ts`) maps anything
+unrecognised, `"unsure"`, or absent to `undefined` - never to `"other"`, never
+to the armed role.
+
+A model forced to choose among six roles produces a confident wrong answer, and
+a confident wrong answer is exactly what an instructor clicking through
+accepts. Batch-accept does NOT resolve unsure shots; they stay visibly
+unresolved.
+
+### 418e - one action, with evidence, or the item delivers nothing
+
+Accepting is ONE action for the whole batch, because this item exists to remove
+a per-shot cost - a design replacing per-shot arming with per-shot confirming
+delivers nothing. Proven by a test asserting one call resolves every pending
+suggestion; sabotage-proven by making it resolve only the first, which went RED.
+
+Per-shot correction reuses the tray's existing select-then-set path, not a
+duplicate.
+
+**And each suggestion renders WITH ITS BASIS** (a truncated transcript
+fragment), not a bare role label. One-click bulk accept plus no evidence is a
+rubber stamp, which would maximise the exact risk 418d exists to reduce.
+
+### 418f - a withdrawn question, recorded so it is not re-asked
+
+An earlier open question asked whether to skip suggesting for shots whose role
+the instructor had "already set deliberately". **That distinction does not
+exist**: `SnapshotShot` has no provenance field, and `addShot`'s
+`role ?? armedRole` writes a value byte-identical to `setRole`'s. Inventing a
+provenance field - with its lifecycle and serialization - to serve a nicety was
+declined. Suggestions are offered for every shot; the instructor's accept is
+what makes any of them real.
+
+### 418g - what is measured true today
+
+`@(Get-Content <path>).Count`: `snapshot-role-suggestion.ts` 92,
+`snapshot-role-suggestion.test.ts` 90, `SnapshotRoleSuggestions.tsx` 47,
+`snapshot-role-setrole-callsites.structure.test.ts` 71, and
+**`SnapshotGradingPanel.tsx` 921 -> 952** against the executing 1000-line
+ceiling.
+
+**That is 48 lines of headroom, down from 79 this morning.** The new SURFACE
+went into a child component as required, but the WIRING still cost the panel 31
+lines. Two features landed in this file today (N5's ZIP intake, then this). The
+next feature to touch it should plan to split it, sized against its own
+additions rather than against the ceiling.
+
+CSS orphans stayed at 120 while defined classes rose by 5 - every new class is
+used.
+
+### 418h - what today's tests will NOT notice
+
+`SnapshotRoleSuggestions.tsx` and the panel wiring are rendered by NO test -
+vitest is node-env here. So whether the suggestion is legible, whether it reads
+as distinct from a confirmed role, and whether "Accept all" is discoverable are
+all READING claims.
+
+**And the residual that could sink the feature:** whether the model's role
+suggestions are ACCURATE enough to be worth the surface area is unmeasurable
+here - the network is blocked and no fixture exercises a real vision model. If
+accuracy is poor in use, the right response is to REVERT this rather than tune
+it, because an inaccurate suggestion accepted in bulk is worse than no
+suggestion at all.

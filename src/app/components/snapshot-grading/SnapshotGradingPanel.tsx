@@ -62,6 +62,8 @@ import { RubricInputModal } from "../grading-recording/RubricInputModal";
 import SnapshotResultCard from "./SnapshotResultCard";
 import SnapshotCaptureBar from "./SnapshotCaptureBar";
 import SnapshotShotTray from "./SnapshotShotTray";
+import SnapshotRoleSuggestions from "./SnapshotRoleSuggestions";
+import { buildPendingRoleSuggestions, type PendingRoleSuggestion } from "./snapshot-role-suggestion";
 import ConfirmedRubricAreasEditor from "./ConfirmedRubricAreasEditor";
 import { useSnapshotGrade } from "./useSnapshotGrade";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
@@ -110,10 +112,17 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     addShot,
     removeShotById,
     setRole,
+    applyRoleSuggestions,
     setNote,
     moveShot,
     clearPerStudentShots,
   } = useSnapshotShots();
+
+  // N1 (suggest-and-confirm shot roles): ephemeral, per-read state - never
+  // persisted (item 11/Q4) and cleared alongside shotReads at every site
+  // that clears shotReads, so a suggestion never survives past the read
+  // pass it came from.
+  const [pendingSuggestions, setPendingSuggestions] = useState<PendingRoleSuggestion[]>([]);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const liveRegionRef = useRef<HTMLParagraphElement | null>(null);
@@ -374,6 +383,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   const handleNextStudentConfirm = useCallback(() => {
     clearPerStudentShots();
     setShotReads(new Map());
+    setPendingSuggestions([]); // N1 (item 11/Q4): suggestions do not survive Next student
     setTranscriptText("");
     setSplitNotice(null); // a notice naming the previous student must not survive into the next student's pass
     setReadError(null); // a failure from the previous student's Read must not survive into the next student's pass
@@ -606,6 +616,10 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
               transcript: r.transcript,
               status,
               reason: r.unreadableReason,
+              // N1: carried straight from the read result - a SUGGESTION
+              // only, never applied to matched.shot.role here or anywhere
+              // else in this function.
+              roleSuggestion: r.roleSuggestion,
             });
           }
         }
@@ -616,11 +630,26 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     if (!mountedRef.current) return;
     setReading(false);
     setTranscriptText(buildTranscriptBlock(Array.from(nextReads.values())));
+    // N1: derived fresh from this read pass's own results - replaces
+    // whatever suggestions (if any) were pending from a previous read,
+    // never merged with them.
+    setPendingSuggestions(buildPendingRoleSuggestions(nextReads));
     // H1-A: Read is optional, not a required first step - Grade already
     // works directly from the tray. This is a status update on what Read
     // produced, not an instruction to review it before grading.
     announce("Finished reading the shots. You can review or edit the transcription below, or grade now.");
   }, [shots, announce]);
+
+  // N1 (item 6/AC-4): ONE action for the whole batch - applyRoleSuggestions
+  // resolves every pending suggestion in a single call (never a loop of
+  // per-shot calls), and pendingSuggestions is cleared immediately after so
+  // the suggestions box disappears once accepted.
+  const handleAcceptAllSuggestions = useCallback(() => {
+    if (pendingSuggestions.length === 0) return;
+    applyRoleSuggestions(pendingSuggestions);
+    announce(`Accepted ${pendingSuggestions.length} suggested role${pendingSuggestions.length === 1 ? "" : "s"}.`);
+    setPendingSuggestions([]);
+  }, [pendingSuggestions, applyRoleSuggestions, announce]);
 
   // D: THE GRADE PASS. Extracted to useSnapshotGrade.ts (backlog 3.5's
   // line-budget note under Ruling B35-9, amended) so this panel's new state
@@ -727,6 +756,8 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         onSetNote={setNote}
         onMove={moveShot}
       />
+
+      <SnapshotRoleSuggestions suggestions={pendingSuggestions} onAcceptAll={handleAcceptAllSuggestions} />
 
       <p id="snap-next-student-consequence" className={styles.fieldHint}>
         {describeNextStudentCounts(nextStudentCounts)}

@@ -23,6 +23,23 @@ describe("buildSnapshotReadPromptHeader", () => {
     expect(header).toMatch(/"transcript"/);
     expect(header).toMatch(/"unreadableReason"/);
   });
+
+  // N1 (item 2/AC-2): the allowed roleSuggestion values are stated, and the
+  // model is explicitly given a way to decline rather than being forced to
+  // pick one of the six roles.
+  it("requires a roleSuggestion field naming all six roles plus an explicit unsure option", () => {
+    expect(header).toMatch(/"roleSuggestion"/);
+    expect(header).toMatch(/assignment/);
+    expect(header).toMatch(/rubric/);
+    expect(header).toMatch(/post/);
+    expect(header).toMatch(/replies/);
+    expect(header).toMatch(/submission/);
+    expect(header).toMatch(/unsure/);
+  });
+
+  it("frames roleSuggestion as a suggestion for the instructor to confirm, not a decision", () => {
+    expect(header).toMatch(/suggestion for the instructor to confirm/);
+  });
 });
 
 describe("snapshotShotLabelLine", () => {

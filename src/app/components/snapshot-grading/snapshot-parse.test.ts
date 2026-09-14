@@ -76,6 +76,38 @@ describe("parseSnapshotReadResponse", () => {
   it("returns null when shots is missing or not an array", () => {
     expect(parseSnapshotReadResponse(JSON.stringify({ shots: "nope" }))).toBeNull();
   });
+
+  // N1 (suggest-and-confirm shot roles, item 2/AC-2): the model may decline,
+  // and anything unrecognised never becomes a role.
+  it("parses a recognised roleSuggestion value", () => {
+    const raw = JSON.stringify({
+      shots: [{ shotIndex: 1, readable: true, transcript: "x", roleSuggestion: "rubric" }],
+    });
+    const result = parseSnapshotReadResponse(raw);
+    expect(result?.[0].roleSuggestion).toBe("rubric");
+  });
+
+  it('maps "unsure" to no suggestion, never to a role', () => {
+    const raw = JSON.stringify({
+      shots: [{ shotIndex: 1, readable: true, transcript: "x", roleSuggestion: "unsure" }],
+    });
+    const result = parseSnapshotReadResponse(raw);
+    expect(result?.[0].roleSuggestion).toBeUndefined();
+  });
+
+  it("maps an unrecognised roleSuggestion string to no suggestion, never to \"other\"", () => {
+    const raw = JSON.stringify({
+      shots: [{ shotIndex: 1, readable: true, transcript: "x", roleSuggestion: "banana" }],
+    });
+    const result = parseSnapshotReadResponse(raw);
+    expect(result?.[0].roleSuggestion).toBeUndefined();
+  });
+
+  it("maps a missing roleSuggestion field to no suggestion", () => {
+    const raw = JSON.stringify({ shots: [{ shotIndex: 1, readable: true, transcript: "x" }] });
+    const result = parseSnapshotReadResponse(raw);
+    expect(result?.[0].roleSuggestion).toBeUndefined();
+  });
 });
 
 describe("parseSnapshotGradeResponse", () => {

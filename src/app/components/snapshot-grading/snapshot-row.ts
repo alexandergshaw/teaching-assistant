@@ -53,6 +53,15 @@ export interface ShotReadEntry {
    *  from two different arrays matched only by coincidentally-equal
    *  position. */
   shotId: string;
+  /** N1 (suggest-and-confirm shot roles, Ruling H1-E): the read pass's own
+   *  role SUGGESTION for this shot, captured from the SAME read response
+   *  this entry's transcript came from - never applied to shot.role by
+   *  anything that reads this field (snapshot-role-suggestion.ts's
+   *  acceptAllSuggestions is the ONLY writer, and only on an explicit
+   *  instructor action). Absent when the model declined ("unsure") or named
+   *  anything outside the closed SnapshotRole set - snapshot-parse.ts is the
+   *  only place that string is validated. */
+  roleSuggestion?: SnapshotRole;
 }
 
 export interface SnapshotShotReadReport {

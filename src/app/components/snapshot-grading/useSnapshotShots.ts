@@ -32,6 +32,7 @@ import {
   type SnapshotShot,
   type SnapshotSource,
 } from "./snapshot-shot";
+import { acceptAllSuggestions, type PendingRoleSuggestion } from "./snapshot-role-suggestion";
 
 const ARMED_ROLE_KEY = "ta-snap-armed-role";
 
@@ -79,6 +80,12 @@ export interface UseSnapshotShotsReturn {
   addShot: (base64: string, source: SnapshotSource, role?: SnapshotRole) => SnapshotShot | null;
   removeShotById: (id: string) => void;
   setRole: (id: string, role: SnapshotRole) => void;
+  /** N1 (item 4/AC-1): the ONE bulk-accept action, deliberately NOT built on
+   *  top of setRole - it calls acceptAllSuggestions directly and writes the
+   *  result with a single setShots, so setRole's own call sites (pinned by
+   *  snapshot-role-suggestion-callsites.structure.test.ts) stay exactly the
+   *  tray's select-then-set path, unchanged by this item. */
+  applyRoleSuggestions: (suggestions: readonly PendingRoleSuggestion[]) => void;
   setNote: (id: string, note: string) => void;
   moveShot: (id: string, direction: -1 | 1) => void;
   /** F1 (A4b): clears every PER-STUDENT shot (post/replies/submission/other)
@@ -150,6 +157,13 @@ export function useSnapshotShots(): UseSnapshotShotsReturn {
     setShots((prev) => setShotRolePure(prev, id, role));
   }, []);
 
+  // N1 (item 4/AC-1): applies every pending suggestion in ONE setShots call,
+  // via acceptAllSuggestions - never via a loop of setRole calls, which
+  // would multiply the exact call site the pinned canary below watches.
+  const applyRoleSuggestions = useCallback((suggestions: readonly PendingRoleSuggestion[]) => {
+    setShots((prev) => acceptAllSuggestions(prev, suggestions));
+  }, []);
+
   const setNote = useCallback((id: string, note: string) => {
     setShots((prev) => setShotNotePure(prev, id, note));
   }, []);
@@ -175,6 +189,7 @@ export function useSnapshotShots(): UseSnapshotShotsReturn {
     addShot,
     removeShotById,
     setRole,
+    applyRoleSuggestions,
     setNote,
     moveShot,
     clearPerStudentShots,

@@ -4,6 +4,14 @@
 // any shot reaches the model. Pure, DOM-free, React-free - vitest here is
 // node-env and renders nothing, so this is where every parsing/validation
 // decision that needs a unit test has to live.
+//
+// N1 (item 2/AC-2): normalizeReadEntry below maps any unrecognised or
+// absent roleSuggestion value to NO suggestion (undefined) - never to
+// "other", and never to a default role. This is the ONLY place the model's
+// raw string is validated against the closed SnapshotRole set, so it is the
+// one place a forced choice or a silent default could be smuggled in.
+
+import { SNAPSHOT_ROLES, type SnapshotRole } from "./snapshot-shot";
 
 /**
  * A7e: `isGeminiInlineSupported` (src/lib/llm-files.ts) is NOT a MIME check
@@ -73,6 +81,17 @@ export interface SnapshotReadResult {
   readable: boolean;
   transcript: string;
   unreadableReason?: string;
+  /** N1 (suggest-and-confirm shot roles): a SUGGESTION only - never applied
+   *  to a shot's actual role by anything in this file or its callers. Set
+   *  only when the model named one of the six closed SnapshotRole values;
+   *  "unsure", an unrecognised string, or a missing field all normalize to
+   *  undefined below. */
+  roleSuggestion?: SnapshotRole;
+}
+
+function normalizeRoleSuggestion(value: unknown): SnapshotRole | undefined {
+  if (typeof value !== "string") return undefined;
+  return (SNAPSHOT_ROLES as readonly string[]).includes(value) ? (value as SnapshotRole) : undefined;
 }
 
 function normalizeReadEntry(value: unknown): SnapshotReadResult | null {
@@ -83,7 +102,8 @@ function normalizeReadEntry(value: unknown): SnapshotReadResult | null {
   const readable = v.readable === true;
   const transcript = typeof v.transcript === "string" ? v.transcript : "";
   const unreadableReason = typeof v.unreadableReason === "string" && v.unreadableReason.trim() ? v.unreadableReason.trim() : undefined;
-  return { shotIndex, readable, transcript, unreadableReason };
+  const roleSuggestion = normalizeRoleSuggestion(v.roleSuggestion);
+  return { shotIndex, readable, transcript, unreadableReason, roleSuggestion };
 }
 
 /**

@@ -165,3 +165,42 @@
   font: inherit;
   font-size: var(--font-size-sm);
 }
+
+/* N1 (suggest-and-confirm shot roles): a DASHED border, distinct from every
+   confirmed-state box in this file, so a suggestion is never visually
+   confusable with a role the instructor actually set (AC-5/item 8). */
+.suggestionsBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px dashed var(--field-border);
+  border-radius: var(--radius-sm);
+}
+
+.suggestionsList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.suggestionItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.suggestionRole {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.suggestionBasis {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-style: italic;
+}

@@ -31,14 +31,32 @@
 // inline renderer at src/app/components/courses/useCourseImportActions.ts:
 // 494-502 (AC item 61): serializeRubric indents every criterion line (two
 // leading spaces are baked into its per-criterion output), and
-// extractRubricCriteria treats ANY indented line as a rating/subcategory
-// line and skips it (rubric.ts:14) - so serializeRubric's output round-trips
-// to ZERO criteria. The useCourseImportActions.ts renderer emits
-// `(${points})` with no unit suffix; extractRubricCriteria only assigns
-// non-null points when the captured unit starts with "p" (rubric.ts:24-26),
-// so every criterion it produces parses back with `points: null` and never
-// pins the grading scale. Both are confirmed traps, not merely unused code -
-// see this module's test file for the canary that proves the first one.
+// extractRubricCriteriaStrict - the FIRST pass extractRubricCriteria always
+// runs, unchanged since before backlog 4.3 - treats ANY indented line as a
+// rating/subcategory line and skips it (rubric.ts:14), so on its own
+// serializeRubric's output still round-trips to ZERO criteria through that
+// pass. AS OF BACKLOG 4.3 (ruling B43-7, scratchpad/b43-rulings.md) this is
+// no longer the whole story: extractRubricCriteria falls back to a second,
+// widened pass (rubric.ts, extractRubricCriteriaWidened) whenever the strict
+// pass recovers nothing AT ALL for the text - and serializeRubric's exact
+// colonless shape (`  ${description} (${points}pt)`) is precisely what that
+// widened pass targets. So a rubric built ONLY from serializeRubric's
+// renderer now recovers its criteria (via fallback), while a rubric that
+// mixes serializeRubric-shaped lines into text that already parses some
+// other way still recovers zero from those lines, because the widened pass
+// never runs once the strict pass found anything. This module keeps its own
+// renderer (renderPickedRubricText) rather than switching to
+// serializeRubric regardless: renderPickedRubricText's output always parses
+// on the FIRST, safe pass (see the grammar rules below), so it never
+// depends on fallback mode's known limits (rubric.ts's widened-pass comment:
+// it cannot distinguish a rating tier from a criterion). The
+// useCourseImportActions.ts renderer emits `(${points})` with no unit
+// suffix; extractRubricCriteriaStrict only assigns non-null points when the
+// captured unit starts with "p" (rubric.ts:24-26), so every criterion it
+// produces still parses back with `points: null` and never pins the grading
+// scale - that trap is untouched by 4.3. See this module's test file for
+// the canary proving serializeRubric's shape - as rendered with colons in
+// that fixture, not fallback mode's colonless target - still recovers zero.
 //
 // PURITY: no I/O, no clock, no randomness, and no import of anything
 // server-only. In particular this module must NEVER import

@@ -7,7 +7,33 @@ import { normalizeGeminiError } from "./parsing";
 import { rubricTierPromptLines } from "./rubric-tiers";
 import type { RubricCriterion, InferredFileNameLookup, InferredFileNameParts } from "./types";
 
+// FALLBACK MODE (backlog 4.3, ruling B43-7 in scratchpad/b43-rulings.md): the
+// owner grades by screenshotting a rubric, and a flattened screenshot often
+// loses indentation and colons together, so extractRubricCriteriaStrict
+// below - unchanged - recovers nothing for it. Rather than loosen that
+// matcher in place (measured, twice, to invent rubric areas - see B43-1 and
+// B43-6: "Thesis (20 pts)" and "Excellent (20 pts)" are byte-identical in
+// grammar, so no punctuation-only rule can ever tell a criterion from a
+// rating tier), this runs the strict matcher first and reaches for the
+// widened one ONLY when the strict pass recovered ZERO criteria. That
+// ordering makes the regression class unrepresentable rather than merely
+// tested against: no rubric that parses today can change behaviour, which
+// matters because engine.ts feeds this into a bulk unattended loop with no
+// human visibility - a false positive there mis-scores every student before
+// anyone sees it. B43-2 through B43-5 are superseded/withdrawn; do not
+// reintroduce an end-of-line-only regex as the SOLE discriminator - it was
+// measured unsafe on its own, on exactly the flattened input this exists
+// for.
 export function extractRubricCriteria(rubric: string): RubricCriterion[] {
+  const strict = extractRubricCriteriaStrict(rubric);
+  if (strict.length > 0) return strict;
+  return extractRubricCriteriaWidened(rubric);
+}
+
+// The original matcher. UNCHANGED by backlog 4.3 - indent-skip and mandatory
+// colon and all - per ruling B43-7: no rubric this already parses may ever
+// change behaviour.
+function extractRubricCriteriaStrict(rubric: string): RubricCriterion[] {
   const out: RubricCriterion[] = [];
   const seen = new Set<string>();
   for (const raw of rubric.split(/\r?\n/)) {
@@ -15,6 +41,66 @@ export function extractRubricCriteria(rubric: string): RubricCriterion[] {
     const line = raw.trim();
     if (!line) continue;
     const match = line.match(/^(.+?)\s*\(\s*(\d+(?:\.\d+)?)\s*(pts?|points?|%)?\s*\)\s*:/i);
+    if (!match) continue;
+    const name = match[1].trim();
+    if (!name) continue;
+    const key = normalizeAreaName(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const unit = (match[3] ?? "").toLowerCase();
+    const value = Number(match[2]);
+    out.push({ name, points: unit.startsWith("p") && Number.isFinite(value) ? value : null });
+  }
+  return out;
+}
+
+// The widened pass (backlog 4.3, ruling B43-7). Only ever reached when
+// extractRubricCriteriaStrict above recovered nothing at all for the whole
+// rubric text. Two changes from the strict pass:
+//
+//   1. No indent-skip - a criterion line may start with leading whitespace.
+//      This targets serializeRubric's real, shipped criterion shape
+//      (src/lib/submission-archive-sniff.ts:50:
+//      `  ${criterion.description} (${criterion.points}pt)`), which is
+//      indented two spaces and today recovers zero criteria (see the canary
+//      test in rubric-render.test.ts).
+//   2. The colon is not just optional, it is DISALLOWED after the points
+//      parenthetical - the parenthetical must end the line. This is the
+//      discriminator: prose that merely mentions a count in parentheses
+//      continues past it ("The class average (85) was posted", "Question 4
+//      (10 points) Explain the algorithm"), a rubric criterion heading does
+//      not. It also means a rating/description line that still carries its
+//      own trailing colon-and-detail text (the shape this repo's own test
+//      fixtures use to simulate the "indented serializeRubric-like" case)
+//      still does NOT match here - only a bare, colonless, parenthetical at
+//      end of line does.
+//
+// KNOWN, ACCEPTED LIMIT - do not "fix" this with a better regex (ruling
+// B43-6): this pass cannot distinguish a rating TIER line from a CRITERION
+// line. "Thesis (20 pts)" and "Excellent (20 pts)" are byte-identical in
+// grammar. On a flattened rubric where a rating tier lands on its own
+// indented line, "  Excellent (20 pts)" WILL be read as a criterion named
+// "Excellent". This is accepted here because the widened pass only ever
+// runs on a rubric that today parses to NOTHING - a false-positive
+// criterion is strictly better than the current total failure - but it is a
+// real limit, not a rounding error. The actual fix is ruling B43-8 (turning
+// the rendered pinned-area list into an editable confirm/remove list before
+// grading), queued separately; this pass is a stopgap, not a substitute.
+//
+// ALSO NOT FIXED HERE, named so it is not silently rediscovered (ruling
+// B43-9): a real criterion written as "(1,000 pts)" or as a range like
+// "(18-20 pts)" is rejected by this pass too, for the same reason the
+// strict pass above has always rejected it - `\d+` stops at the first comma
+// or dash, so nothing after it can complete the match. Every regex variant
+// measured during backlog 4.3, including today's shipped matcher, has this
+// gap.
+function extractRubricCriteriaWidened(rubric: string): RubricCriterion[] {
+  const out: RubricCriterion[] = [];
+  const seen = new Set<string>();
+  for (const raw of rubric.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const match = line.match(/^(.+?)\s*\(\s*(\d+(?:\.\d+)?)\s*(pts?|points?|%)?\s*\)\s*$/i);
     if (!match) continue;
     const name = match[1].trim();
     if (!name) continue;

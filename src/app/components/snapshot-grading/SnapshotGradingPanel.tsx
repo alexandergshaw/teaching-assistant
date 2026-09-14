@@ -28,7 +28,7 @@ import styles from "../../page.module.css";
 import { extractPastedImageFiles, isFileDragTypes } from "@/lib/chat/attachments";
 import { DEFAULT_PROVIDER } from "@/lib/llm";
 import { TextField, Button } from "@mui/material";
-import { editAssessmentField, applyAssessmentResult } from "../assessment-shared/assessment-row";
+import { editAssessmentField } from "../assessment-shared/assessment-row";
 import type { AssessmentFeedbackField } from "../assessment-shared/assessment-row";
 import { useSnapshotCapture } from "./useSnapshotCapture";
 import { useSnapshotShots } from "./useSnapshotShots";
@@ -38,22 +38,22 @@ import {
   computeNextStudentCounts,
   describeNextStudentCounts,
   MAX_SHOTS,
-  SNAPSHOT_ROLES,
   type SnapshotRole,
 } from "./snapshot-shot";
 import { snapshotReadBatchAction } from "@/app/actions/snapshot-read";
-import { snapshotGradeAction } from "@/app/actions/snapshot-grade";
-import { verifySnapshotCitations } from "./snapshot-citations";
+import { snapshotParseRubricAction } from "@/app/actions/snapshot-parse-rubric";
 import {
-  mintSnapshotRowId,
-  computeSnapshotTotalScore,
   buildTranscriptBlock,
-  upsertSnapshotRow,
-  resolveGradeTarget,
+  nextParseRequestId,
+  isStaleParseResult,
+  isConfirmedAreasReady,
+  removeConfirmedArea,
+  addConfirmedArea,
   READ_BATCH_SIZE,
   type SnapshotAssessmentRow,
-  type SnapshotShotReadReport,
   type SnapshotShotReadStatus,
+  type ShotReadEntry,
+  type ConfirmedRubricArea,
 } from "./snapshot-row";
 import { useAssessmentRowStore } from "../assessment-shared/useAssessmentRowStore";
 import { snapshotRowCodec } from "./snapshot-row-serialization";
@@ -61,17 +61,11 @@ import { RubricInputModal } from "../grading-recording/RubricInputModal";
 import SnapshotResultCard from "./SnapshotResultCard";
 import SnapshotCaptureBar from "./SnapshotCaptureBar";
 import SnapshotShotTray from "./SnapshotShotTray";
+import ConfirmedRubricAreasEditor from "./ConfirmedRubricAreasEditor";
+import { useSnapshotGrade } from "./useSnapshotGrade";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import controls from "../recording/RecordingControls.module.css";
 import panelStyles from "./SnapshotGrading.module.css";
-
-interface ShotReadEntry {
-  shotIndex: number;
-  role: SnapshotRole;
-  transcript: string;
-  status: SnapshotShotReadStatus;
-  reason?: string;
-}
 
 const ROLE_BY_DIGIT: Record<string, SnapshotRole> = {
   "1": "assignment",
@@ -284,6 +278,21 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   // `rubricText`.
   const [pinnedRubricAreas, setPinnedRubricAreas] = useState<{ name: string; points: number | null }[] | null>(null);
 
+  // Backlog 3.5 (scratchpad/b35-rulings.md): the CONFIRMED rubric-area list -
+  // editable before grading, taking the parser's precision out of the
+  // grading path. A different piece of state from `pinnedRubricAreas` above
+  // (which is a POST-GRADE readout of what was actually sent) and with a
+  // different lifetime: `confirmedRubricAreas` resets ONLY when rubricText
+  // itself changes (Ruling B35-1 - the rubric-replace `onSubmit` below), and
+  // deliberately SURVIVES Next student, since a rubric is per-assignment and
+  // re-confirming it every student would recreate the per-student cost this
+  // control exists to remove. Never persisted (Ruling B35-3 - U10's caution
+  // on rubric content, same as rubricText/assignmentText above).
+  const [confirmedRubricAreas, setConfirmedRubricAreas] = useState<ConfirmedRubricArea[] | null>(null);
+  const [confirmedRubricAreasError, setConfirmedRubricAreasError] = useState<string | null>(null);
+  const [addAreaError, setAddAreaError] = useState<string | null>(null);
+  const parseRequestIdRef = useRef(0);
+
   // A6c: a single in-flight guard on each of Read/Grade - double-clicking
   // must not produce two calls or two committed results. A reload/unmount
   // mid-call loses that one attempt and nothing else (the shots stay in the
@@ -299,6 +308,64 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       gradeAbortRef.current?.abort();
     };
   }, []);
+
+  // gradeAbortRef.current is written HERE, in the same file as the cleanup
+  // effect above - not inside useSnapshotGrade.ts - so eslint's
+  // react-hooks/exhaustive-deps can see this ref is a manually-managed
+  // mutable value (read AND written in this component), not merely read in
+  // a cleanup function. Passing the raw ref into the hook to be mutated
+  // THERE instead triggers a spurious "ref value will likely have changed"
+  // warning (verified: moving the `gradeAbortRef.current = controller`
+  // write into useSnapshotGrade.ts alone raised the lint baseline from 4 to
+  // 5 warnings on this exact, otherwise-unchanged cleanup effect).
+  const beginGradeAbort = useCallback(() => {
+    gradeAbortRef.current?.abort();
+    const controller = new AbortController();
+    gradeAbortRef.current = controller;
+    return controller;
+  }, []);
+
+  // THE PRODUCER for confirmedRubricAreas (Ruling B35-2). Async with no
+  // cancellation on its own, so two rubric submissions can resolve out of
+  // order - Ruling B35-8/B35-15's staleness guard: the pre-await reset (a
+  // fresh start for the new rubric, unconditional) is NOT itself guarded by
+  // the request-id comparison, which is structurally impossible at that
+  // point (its own inputs do not exist yet); the two POST-await setState
+  // calls ARE guarded, so an out-of-order resolution from a superseded
+  // parse is discarded rather than seeded into state.
+  const seedConfirmedAreas = useCallback(async (text: string) => {
+    const requestId = nextParseRequestId(parseRequestIdRef);
+    setConfirmedRubricAreas(null);
+    setConfirmedRubricAreasError(null);
+    const result = await snapshotParseRubricAction(text);
+    if (!mountedRef.current || isStaleParseResult(requestId, parseRequestIdRef.current)) return;
+    if ("error" in result) {
+      setConfirmedRubricAreasError(result.error);
+      return;
+    }
+    setConfirmedRubricAreas(result.areas);
+  }, []);
+
+  const handleRemoveConfirmedArea = useCallback((index: number) => {
+    setConfirmedRubricAreas((prev) => (prev ? removeConfirmedArea(prev, index) : prev));
+  }, []);
+
+  const handleAddConfirmedArea = useCallback(
+    (name: string, points: number | null) => {
+      const result = addConfirmedArea(confirmedRubricAreas ?? [], name, points);
+      if ("error" in result) {
+        setAddAreaError(result.error);
+        return;
+      }
+      setAddAreaError(null);
+      setConfirmedRubricAreas(result.areas);
+    },
+    [confirmedRubricAreas]
+  );
+
+  const handleRetryParse = useCallback(() => {
+    void seedConfirmedAreas(rubricText);
+  }, [seedConfirmedAreas, rubricText]);
 
   // U6: not throttled, deliberately diverging from the recording grader's
   // capture live region - a snap is discrete and user-initiated, so the
@@ -548,137 +615,30 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     announce("Finished reading the shots. You can review or edit the transcription below, or grade now.");
   }, [shots, announce]);
 
-  // D: THE GRADE PASS. One call, guarded the same way (A6c).
-  const handleGrade = useCallback(async () => {
-    if (shots.length === 0 && !transcriptText.trim()) {
-      // H1-A: this only ever fires when there is truly nothing at all (no
-      // shots AND no transcript) - Read is not required before Grade, so the
-      // message must not imply it is.
-      setGradeError("There is nothing to grade yet - add at least one shot to the tray.");
-      return;
-    }
-    gradeAbortRef.current?.abort();
-    const controller = new AbortController();
-    gradeAbortRef.current = controller;
-    setGrading(true);
-    setGradeError(null);
-
-    const shotsForGrade = shots.map((shot, i) => ({ globalIndex: i + 1, role: shot.role, base64: shot.base64 }));
-
-    const result = await snapshotGradeAction(
-      {
-        assignmentText,
-        rubricText,
-        transcriptBlock: transcriptText,
-        shots: shotsForGrade,
-        provider: DEFAULT_PROVIDER,
-      },
-      instructorInstructions
-    );
-
-    if (controller.signal.aborted || !mountedRef.current) return;
-    setGrading(false);
-
-    if ("error" in result) {
-      setGradeError(result.error);
-      return;
-    }
-
-    setPinnedRubricAreas(result.pinnedRubricAreas);
-    // MAJOR-3 fix: this is the only channel that reveals a rubric area was
-    // dropped from grading, and it renders asynchronously after Grade
-    // completes - a screen-reader user checking the page at that moment
-    // hears nothing unless this panel's own announce() helper is used, the
-    // same as every other state change in this file.
-    if (result.pinnedRubricAreas.length > 0) {
-      announce(
-        `Pinned rubric areas: ${result.pinnedRubricAreas.map((a) => a.name).join(", ")}. Other rubric areas, if any, were not graded.`
-      );
-    } else if (rubricText.trim()) {
-      announce("No rubric areas could be parsed from the rubric text - the model chose its own areas.");
-    }
-
-    const transcriptsByShotIndex = new Map<number, string>();
-    shotReads.forEach((entry, idx) => transcriptsByShotIndex.set(idx, entry.transcript));
-    // The DEDICATED corpus a `source: "pasted"` citation verifies against -
-    // never consulted for a "shot" or "unknown" citation (RULING A).
-    const pastedTextCorpus = `${rubricText}\n\n${assignmentText}`;
-    const verified = verifySnapshotCitations(
-      result.answer.rubricResults,
-      transcriptsByShotIndex,
-      transcriptText,
-      pastedTextCorpus
-    );
-
-    const suppliedRoles = new Set(shots.map((shot) => shot.role));
-    const hasRubricText = rubricText.trim().length > 0;
-    const hasAssignmentText = assignmentText.trim().length > 0;
-    const missingRoles = result.answer.missingRoles
-      .filter((r): r is SnapshotRole => (SNAPSHOT_ROLES as readonly string[]).includes(r))
-      .filter((r) => {
-        if (r === "rubric") return !suppliedRoles.has("rubric") && !hasRubricText;
-        if (r === "assignment") return !suppliedRoles.has("assignment") && !hasAssignmentText;
-        return !suppliedRoles.has(r);
-      });
-
-    const shotReports: SnapshotShotReadReport[] = shots.map((shot, i) => {
-      const idx = i + 1;
-      const entry = shotReads.get(idx);
-      return { shotIndex: idx, role: shot.role, status: entry ? entry.status : "not-read", reason: entry?.reason };
-    });
-
-    const totalScore = computeSnapshotTotalScore(result.answer.rubricResults);
-
-    const { base, isNewRow, supersededEditedRow } = resolveGradeTarget(
-      sessionRowsRef.current,
-      activeRowIdRef.current,
-      () => mintSnapshotRowId(Date.now())
-    );
-    if (isNewRow) activeRowIdRef.current = base.id;
-
-    const scored = applyAssessmentResult(base, {
-      state: "ready",
-      totalScore,
-      strengths: "",
-      improvements: result.answer.improvements,
-      overallComment: result.answer.overallComment,
-    });
-    const merged: SnapshotAssessmentRow = {
-      ...scored,
-      shotReports,
-      rubricAreas: verified,
-      missingRoles,
-      instructionLikeContent: result.answer.instructionLikeContent,
-      instructionLikeContentQuote: result.answer.instructionLikeContentQuote,
-      imageFallbackNote: result.imageFallbackNote,
-      evidenceDropped: false, // a fresh grade always carries full evidence in memory
-    };
-    commitSessionRows(upsertSnapshotRow(sessionRowsRef.current, merged));
-    // No `rowsGradedBeforeLastShotChange` update needed here: `merged.id` is
-    // never already a member of that set, because a row once added to it can
-    // never again be `resolveGradeTarget`'s `existing` (activeRowIdRef never
-    // points at an id already in that set).
-
-    if (supersededEditedRow) {
-      const name = supersededEditedRow.studentName || "this student";
-      setSplitNotice(
-        `Kept the earlier edited feedback for ${name} as its own entry - this new grade was saved alongside it, not over it.`
-      );
-      announce("Saved as a new entry next to the earlier edited one, so your edits were not overwritten.");
-    } else {
-      setSplitNotice(null);
-    }
-  }, [
+  // D: THE GRADE PASS. Extracted to useSnapshotGrade.ts (backlog 3.5's
+  // line-budget note under Ruling B35-9, amended) so this panel's new state
+  // and control does not push the file over the repo-wide 1000-line ceiling
+  // (src/file-size-ceiling.structure.test.ts). Same logic, same guard (A6c)
+  // - this panel still owns every piece of state involved, passed in below.
+  const { handleGrade } = useSnapshotGrade({
     shots,
     transcriptText,
     assignmentText,
     rubricText,
+    confirmedRubricAreas,
     instructorInstructions,
     shotReads,
     sessionRowsRef,
+    activeRowIdRef,
+    mountedRef,
+    beginGradeAbort,
     commitSessionRows,
     announce,
-  ]);
+    setGrading,
+    setGradeError,
+    setPinnedRubricAreas,
+    setSplitNotice,
+  });
 
   const handleEditRowField = useCallback(
     (id: string, field: AssessmentFeedbackField, value: string) => {
@@ -826,42 +786,53 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         <Button variant="outlined" onClick={() => void handleRead()} disabled={reading || shots.length === 0}>
           {reading ? "Reading..." : "Read shots"}
         </Button>
-        <Button variant="contained" onClick={() => void handleGrade()} disabled={grading || (!transcriptText.trim() && shots.length === 0)}>
+        <Button
+          variant="contained"
+          onClick={() => void handleGrade()}
+          disabled={
+            grading ||
+            (!transcriptText.trim() && shots.length === 0) ||
+            !isConfirmedAreasReady(rubricText, confirmedRubricAreas)
+          }
+        >
           {grading ? "Grading..." : "Grade"}
         </Button>
       </div>
 
+      {rubricText.trim() && (
+        <ConfirmedRubricAreasEditor
+          confirmedRubricAreas={confirmedRubricAreas}
+          confirmedRubricAreasError={confirmedRubricAreasError}
+          addAreaError={addAreaError}
+          rubricText={rubricText}
+          onRemove={handleRemoveConfirmedArea}
+          onAdd={handleAddConfirmedArea}
+          onRetryParse={handleRetryParse}
+        />
+      )}
+
       {pinnedRubricAreas !== null && (
-        // BLOCKER 1: the only channel that reveals what extractRubricCriteria
-        // actually parsed out of rubricText - a prose rubric with mixed
-        // formatting (e.g. "Correctness - 10 points." next to "Participation
-        // (10 pts):") can parse PARTIALLY, and the grade prompt then pins the
-        // model to grade ONLY the recognized areas and instructs it to omit
-        // every other area, silently dropping real rubric areas from the
-        // total. This line is the instructor's only way to see that.
+        // Backlog 3.5 (Ruling B35-22): rewritten. `pinnedRubricAreas` now
+        // echoes exactly `request.confirmedRubricAreas` (snapshot-grade.ts) -
+        // the list the INSTRUCTOR confirmed/edited in ConfirmedRubricAreasEditor
+        // above, not a raw parse result. The old copy ("they were not parsed
+        // and were NOT graded") described a parse failure; once the readout
+        // reflects a deliberately-edited list, an area the instructor
+        // REMOVED on purpose must not be reported as a parse failure.
         //
-        // MAJOR-1(b) fix: `pinnedRubricAreas` is ALSO `[]` when no rubric
-        // text was ever supplied - the normal, expected case for the
-        // rubric-as-a-shot path (A3a). Branch on whether rubric TEXT exists,
-        // not just on the parsed-areas length, so an instructor who never
-        // typed rubric text is never told their rubric "failed to parse".
-        //
-        // MAJOR-3 fix: a dropped rubric area changes the score, so the
-        // non-empty case is a warning notice (this codebase's own
-        // controls.notice/noticeWarning shape, matching RubricInputModal's
-        // partial-extraction notice) with role="status"/aria-live, not a
-        // silent fieldHint indistinguishable from the Gemini-privacy
-        // boilerplate above it. The no-rubric-text case is genuinely just
-        // information, so it stays a hint.
+        // `pinnedRubricAreas` is `[]` both when no rubric text was ever
+        // supplied (the rubric-as-a-shot path, A3a) and when the instructor
+        // confirmed zero areas - branch on rubric TEXT, not just length, so
+        // the "no rubric text" case keeps its own honest, distinct copy.
         pinnedRubricAreas.length > 0 ? (
           <p className={`${controls.notice} ${controls.noticeWarning}`} role="status" aria-live="polite">
-            {`Pinned rubric areas: ${pinnedRubricAreas
+            {`Graded these confirmed rubric areas: ${pinnedRubricAreas
               .map((a) => (a.points != null ? `${a.name} (out of ${a.points})` : a.name))
-              .join(", ")}. The model was required to grade exactly these areas and no others - if your rubric has more areas than this, they were not parsed and were NOT graded.`}
+              .join(", ")}. The model was required to grade exactly this list and no others.`}
           </p>
         ) : rubricText.trim() ? (
           <p className={`${controls.notice} ${controls.noticeWarning}`} role="status" aria-live="polite">
-            No rubric areas could be parsed from the rubric text - the model chose its own areas.
+            No rubric areas were confirmed - the model chose its own areas.
           </p>
         ) : (
           <p className={styles.fieldHint}>No rubric text was supplied - the model chose its own areas.</p>
@@ -916,6 +887,13 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
             // already does, so the instructor never sees a parse result
             // that no longer describes what is in the box.
             setPinnedRubricAreas(null);
+            // Ruling B35-1 (BINDING): the confirmed-areas list resets HERE,
+            // and ONLY here - a new rubric invalidates every prior
+            // confirmation. Passes the modal's own `text` argument, NOT the
+            // closure's `rubricText` (which is not updated synchronously at
+            // this point - Ruling B35-19): seeding from the stale closure
+            // value would parse the PREVIOUS rubric again.
+            void seedConfirmedAreas(text);
             setRubricModalOpen(false);
           }}
           onClose={() => setRubricModalOpen(false)}

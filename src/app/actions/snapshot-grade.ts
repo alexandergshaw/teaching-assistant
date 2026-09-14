@@ -21,7 +21,6 @@
 import { requireUser } from "@/lib/supabase/auth";
 import { callLlm, describeLlmFailure, describeEmptyLlmText, type LlmPart } from "@/lib/llm";
 import { checkWireBudget, sumBase64WireBytes } from "@/lib/upload-budget";
-import { extractRubricCriteria } from "@/lib/grade/rubric";
 import { buildSnapshotGradeSystemPrompt } from "@/app/components/snapshot-grading/snapshot-grade-prompt";
 import { parseSnapshotGradeResponse, detectImageMimeFromBase64, type SnapshotGradeAnswer } from "@/app/components/snapshot-grading/snapshot-parse";
 import { selectShotsForGradeCall, type SnapshotGradeRequestInput } from "@/app/components/snapshot-grading/snapshot-row";
@@ -31,20 +30,16 @@ interface SnapshotGradeActionResult {
   /** Set when the image budget cut some shots' images from this call - see
    *  this file's own header. Rendered next to the score, never buried. */
   imageFallbackNote?: string;
-  /** BLOCKER 1 fix: the rubric areas `extractRubricCriteria` actually
-   *  derived from `rubricText`, returned so the caller can show the
-   *  instructor exactly what got pinned into the grading prompt's "you MUST
-   *  return exactly one rubricResults item for each required area listed
-   *  above... do not omit areas" instruction (prompts.ts:38). A prose rubric
-   *  that this parser only partially recognizes (see this file's own
-   *  extractRubricCriteria call below) silently pins the model to the
-   *  recognized areas ONLY and tells it to omit the rest - there is no other
-   *  channel that reveals this, because `criteria` was never returned before
-   *  this fix. Empty when no rubric text was supplied, or when none of it
-   *  parsed as `Name (N pts):`-shaped criteria - the caller renders these two
-   *  empty cases distinctly from each other (no rubric text at all, vs.
-   *  rubric text that failed to parse), since only the latter is the model
-   *  choosing its own areas because of a parse failure.
+  /** Backlog 3.5 (scratchpad/b35-rulings.md): the rubric areas the instructor
+   *  confirmed before this call (`request.confirmedRubricAreas`, see
+   *  snapshot-row.ts), echoed back so the caller can show exactly what got
+   *  pinned into the grading prompt's "you MUST return exactly one
+   *  rubricResults item for each required area listed above... do not omit
+   *  areas" instruction (prompts.ts). Empty when the instructor confirmed no
+   *  areas at all (no rubric text supplied, or every parsed area was
+   *  deliberately removed before grading) - both are legitimate "grade
+   *  unpinned" states, not a parse failure, so the caller must not render
+   *  this as "areas failed to parse".
    */
   pinnedRubricAreas: { name: string; points: number | null }[];
 }
@@ -63,7 +58,7 @@ export async function snapshotGradeAction(
 ): Promise<SnapshotGradeActionResult | { error: string }> {
   await requireUser();
   try {
-    const { shots, transcriptBlock, provider, assignmentText, rubricText } = request;
+    const { shots, transcriptBlock, provider, assignmentText, rubricText, confirmedRubricAreas } = request;
 
     if (shots.length === 0 && !transcriptBlock.trim()) {
       // H1-A: this only ever fires when there is truly nothing at all (no
@@ -72,11 +67,13 @@ export async function snapshotGradeAction(
       return { error: "There is nothing to grade yet - add at least one shot to the tray." };
     }
 
-    // Derived HERE, not on the client: extractRubricCriteria reaches
-    // node:crypto via ../research/rubric-bank, and the panel that builds
-    // this request is "use client". Matches grading-feedback-prompt.ts's own
-    // shape (criteria derived from the rubric text right before prompting).
-    const criteria = extractRubricCriteria(rubricText);
+    // Backlog 3.5 (Ruling B35-20): this action no longer derives criteria
+    // from rubricText itself - the instructor-confirmed list on the request
+    // IS the criteria. snapshot-parse-rubric.ts owns the parse (and the
+    // node:crypto-reaching extractRubricCriteria import) now, server-side,
+    // called by the panel BEFORE grading so the instructor can edit the
+    // result first.
+    const criteria = confirmedRubricAreas;
 
     for (const shot of shots) {
       if (!detectImageMimeFromBase64(shot.base64)) {

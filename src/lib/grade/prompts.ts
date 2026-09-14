@@ -27,7 +27,19 @@ export function normalizeAreaName(name: string): string {
 export function buildSystemPrompt(
   assignmentInstructions: string,
   rubric: string,
-  criteria: RubricCriterion[] = []
+  criteria: RubricCriterion[] = [],
+  /** Backlog 3.5 (scratchpad/b35-rulings.md, Ruling B35-11/B35-12). Snapshot
+   *  grading is the only caller that passes "every" - an instructor there can
+   *  see and edit which confirmed areas carry points before grading, so
+   *  requiring ALL of them to carry points before emitting the numeric-
+   *  scoring instruction is safe there. engine.ts's unattended Canvas bulk
+   *  path and grading-feedback-prompt.ts's recording path have no such review
+   *  surface and keep the default "some" (today's behaviour, unchanged) so a
+   *  mixed-points rubric on either of those paths keeps getting a Total Score
+   *  line rather than silently losing it - deriveTotalScore (./parsing.ts)
+   *  returns "" when no area carries points, and formatFeedback omits the
+   *  Total Score line entirely when that happens. See docs/REGRESSION.md. */
+  scoringInstructionMode: "some" | "every" = "some"
 ): string {
   const pinned =
     criteria.length > 0
@@ -37,7 +49,9 @@ REQUIRED RUBRIC AREAS (use these EXACTLY, one rubricResults item each, in this o
 ${criteria.map((c) => `- ${c.name}${c.points != null ? ` (out of ${c.points})` : ""}`).join("\n")}
 
 You MUST return exactly one rubricResults item for each required area listed above, using the area name VERBATIM (identical spelling, capitalization, and punctuation). Do not rename, merge, split, reorder, add, or omit areas.${
-          criteria.some((c) => c.points != null)
+          (scoringInstructionMode === "every"
+            ? criteria.every((c) => c.points != null)
+            : criteria.some((c) => c.points != null))
             ? " Score each area out of the points shown for it, formatted earned/possible."
             : ""
         }`

@@ -163,6 +163,59 @@ describe("buildSystemPrompt - a missing required behavior is an explicit violati
   });
 });
 
+// Backlog 3.5 (scratchpad/b35-rulings.md, Ruling B35-11/B35-12). The owner
+// decided that a MIXED-points criteria list (some areas with points, some
+// without) should get NO numeric-scoring instruction, rather than one that
+// invites the model to invent denominators for the unscored areas - but only
+// on the snapshot-grading path, which reviews the list before grading. This
+// is threaded as a 4th parameter, `scoringInstructionMode`, defaulted to
+// "some" (today's behaviour) so engine.ts and grading-feedback-prompt.ts -
+// the two OTHER buildSystemPrompt callers, neither with a review surface -
+// are byte-for-byte unaffected. Test (2) below is the actual regression
+// guard for that: without it, a change that silently widened "every" to the
+// default would delete every Total Score line on a real Canvas bulk-grading
+// run over a mixed-points rubric (parsing.ts's deriveTotalScore returns ""
+// when nothing sums, and formatFeedback omits the line entirely) - and no
+// other test in this file would catch it, since every existing test above
+// uses uniform criteria lists.
+describe("buildSystemPrompt - scoringInstructionMode scopes the some/every scoring instruction (Ruling B35-12)", () => {
+  const mixedCriteria = [
+    { name: "Thesis", points: 20 },
+    { name: "Grammar", points: null },
+  ];
+
+  it("(1) a uniform all-points list still gets the scoring sentence with no 4th argument (unaffected base case)", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.", [
+      { name: "Thesis", points: 20 },
+      { name: "Grammar", points: 10 },
+    ]);
+    expect(prompt).toMatch(/Score each area out of the points shown for it/);
+  });
+
+  it("(2) a MIXED-points list still gets the scoring sentence with no 4th argument - engine.ts/grading-feedback-prompt.ts's default is unchanged by this backlog", () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.", mixedCriteria);
+    expect(prompt).toMatch(/Score each area out of the points shown for it/);
+  });
+
+  it('(3) the SAME mixed-points list called with "every" omits the scoring sentence - the snapshot path\'s own protection', () => {
+    const prompt = buildSystemPrompt("Instructions.", "Rubric.", mixedCriteria, "every");
+    expect(prompt).not.toMatch(/Score each area out of the points shown for it/);
+  });
+
+  it('a uniform all-points list called with "every" still gets the scoring sentence (every area DOES carry points)', () => {
+    const prompt = buildSystemPrompt(
+      "Instructions.",
+      "Rubric.",
+      [
+        { name: "Thesis", points: 20 },
+        { name: "Grammar", points: 10 },
+      ],
+      "every"
+    );
+    expect(prompt).toMatch(/Score each area out of the points shown for it/);
+  });
+});
+
 describe("buildSystemPrompt - enumerate stated requirements and cite evidence", () => {
   it("requires enumerating each rubric area's stated requirements and checking the submission against each one before scoring", () => {
     const prompt = buildSystemPrompt("Instructions.", "Rubric.");

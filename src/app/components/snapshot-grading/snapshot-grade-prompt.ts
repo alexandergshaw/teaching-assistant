@@ -87,7 +87,11 @@ export function buildSnapshotGradeSystemPrompt(
    *  are unaffected. */
   instructorInstructions?: string
 ): string {
-  const base = buildSystemPrompt(assignmentText, rubricText, criteria);
+  // Backlog 3.5 (Ruling B35-11/B35-12): snapshot grading is the ONLY caller
+  // that opts into "every" - the instructor here can see and edit the
+  // confirmed area list before grading, so a mixed-points list means the
+  // instructor deliberately left some areas unscored, not a parse gap.
+  const base = buildSystemPrompt(assignmentText, rubricText, criteria, "every");
   const trimmedInstructions = instructorInstructions?.trim() ?? "";
   const instructorBlock = trimmedInstructions
     ? [INSTRUCTOR_INSTRUCTIONS_HEADER, "", `INSTRUCTOR INSTRUCTIONS:\n${trimmedInstructions}`, ""]

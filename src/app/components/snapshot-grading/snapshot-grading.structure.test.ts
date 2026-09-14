@@ -102,6 +102,13 @@ describe('"snapgrade" is a member of the RecordingLaunchView union AND the RECOR
 describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY from a click handler", () => {
   const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
   const panelSource = fs.readFileSync(panelPath, "utf-8");
+  // Backlog 3.5's line-budget extraction (Ruling B35-9, amended) moved
+  // handleGrade - and its snapshotGradeAction call - out of the panel into
+  // its own hook file, so this file's own scan needs to cover it too, or the
+  // whole "calls both actions somewhere" assertion would go dark rather than
+  // red the moment the extraction happened.
+  const hookPath = path.join(SNAPSHOT_GRADING_DIR, "useSnapshotGrade.ts");
+  const hookSource = fs.readFileSync(hookPath, "utf-8");
 
   function extractEffectBodies(source: string): string[] {
     const bodies: string[] = [];
@@ -133,9 +140,9 @@ describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY 
     expect(extractEffectBodies(panelSource).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("calls both actions somewhere in the file - a check that neither is called anywhere proves nothing", () => {
+  it("calls both actions somewhere - snapshotReadBatchAction in the panel, snapshotGradeAction in the extracted grade hook - a check that neither is called anywhere proves nothing", () => {
     expect(panelSource).toMatch(/snapshotReadBatchAction\(/);
-    expect(panelSource).toMatch(/snapshotGradeAction\(/);
+    expect(hookSource).toMatch(/snapshotGradeAction\(/);
   });
 
   it("no useEffect block in the panel calls snapshotReadBatchAction or snapshotGradeAction", () => {
@@ -144,6 +151,10 @@ describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY 
       expect(body).not.toMatch(/snapshotReadBatchAction\(/);
       expect(body).not.toMatch(/snapshotGradeAction\(/);
     }
+  });
+
+  it("the extracted grade hook contains no useEffect at all - snapshotGradeAction is reachable only through the handleGrade it returns, never auto-fired", () => {
+    expect(hookSource).not.toMatch(/useEffect\(/);
   });
 
   it("handleRead and handleGrade are wired to onClick, not to a dependency-array effect", () => {
@@ -238,5 +249,120 @@ describe("ModalShell actually emits aria-modal=\"true\" (the fact the snapshot p
 
   it('ModalShell.tsx contains aria-modal="true"', () => {
     expect(modalShellSource).toContain('aria-modal="true"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Backlog 3.5 (scratchpad/b35-rulings.md, Ruling B35-15). The staleness
+// guard's pass condition, split at the `await` so it cannot be satisfied by
+// deleting either half (round 1's single "every setState is guarded"
+// assertion COULD be satisfied by deleting the pre-await reset, which
+// reintroduces Ruling B35-1's exact danger). Two SEPARATE assertions on the
+// SAME extracted `seedConfirmedAreas` body.
+// ---------------------------------------------------------------------------
+
+describe("seedConfirmedAreas's staleness guard, split at the await (Ruling B35-15)", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+
+  const start = panelSource.indexOf("const seedConfirmedAreas = useCallback(async (text: string) => {");
+  const end = panelSource.indexOf("}, []);", start);
+  const body = start > -1 && end > -1 ? panelSource.slice(start, end) : "";
+
+  it("finds seedConfirmedAreas's own function body - a check over an empty string proves nothing", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(body.length).toBeGreaterThan(0);
+  });
+
+  it("Assertion A: the PRE-await reset (both setConfirmedRubricAreas(null) and setConfirmedRubricAreasError(null)) is present and appears BEFORE the await", () => {
+    const awaitIndex = body.indexOf("await snapshotParseRubricAction(");
+    const resetAreasIndex = body.indexOf("setConfirmedRubricAreas(null)");
+    const resetErrorIndex = body.indexOf("setConfirmedRubricAreasError(null)");
+    expect(awaitIndex).toBeGreaterThan(-1);
+    expect(resetAreasIndex).toBeGreaterThan(-1);
+    expect(resetErrorIndex).toBeGreaterThan(-1);
+    expect(resetAreasIndex).toBeLessThan(awaitIndex);
+    expect(resetErrorIndex).toBeLessThan(awaitIndex);
+  });
+
+  it("Assertion B: the two POST-await setState calls are each preceded, after the await, by the request-id staleness guard", () => {
+    const awaitIndex = body.indexOf("await snapshotParseRubricAction(");
+    const guardIndex = body.indexOf(
+      "isStaleParseResult(requestId, parseRequestIdRef.current)",
+      awaitIndex
+    );
+    const setAreasIndex = body.indexOf("setConfirmedRubricAreas(result.areas)", awaitIndex);
+    const setErrorIndex = body.indexOf("setConfirmedRubricAreasError(result.error)", awaitIndex);
+    expect(guardIndex).toBeGreaterThan(awaitIndex);
+    expect(setAreasIndex).toBeGreaterThan(guardIndex);
+    expect(setErrorIndex).toBeGreaterThan(guardIndex);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Backlog 3.5 (Ruling B35-1). The confirmed-areas list resets EXACTLY at the
+// rubric-replace onSubmit site, and deliberately SURVIVES Next student.
+// ---------------------------------------------------------------------------
+
+describe("confirmedRubricAreas resets ONLY at the rubric-replace onSubmit site (Ruling B35-1)", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+
+  it("the rubric-replace onSubmit body contains BOTH setPinnedRubricAreas(null) and a seedConfirmedAreas( call", () => {
+    const start = panelSource.indexOf("onSubmit={(text) => {");
+    const end = panelSource.indexOf("setRubricModalOpen(false);", start);
+    expect(start, "expected to find the rubric-replace onSubmit body").toBeGreaterThan(-1);
+    expect(end, "expected to find its own setRubricModalOpen(false) close").toBeGreaterThan(start);
+    const body = panelSource.slice(start, end);
+    expect(body).toMatch(/setPinnedRubricAreas\(null\)/);
+    expect(body).toMatch(/seedConfirmedAreas\(/);
+  });
+
+  it("handleNextStudentConfirm's body contains NEITHER setConfirmedRubricAreas nor setConfirmedRubricAreasError - the confirmed list survives Next student", () => {
+    const start = panelSource.indexOf("const handleNextStudentConfirm = useCallback(() => {");
+    const end = panelSource.indexOf("}, [clearPerStudentShots, announce, sessionRowsRef]);", start);
+    expect(start, "expected to find handleNextStudentConfirm's own body").toBeGreaterThan(-1);
+    expect(end, "expected to find its own closing dependency array").toBeGreaterThan(start);
+    const body = panelSource.slice(start, end);
+    expect(body).not.toMatch(/setConfirmedRubricAreas\(/);
+    expect(body).not.toMatch(/setConfirmedRubricAreasError\(/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Backlog 3.5 (Ruling B35-20). The delete-not-guard assertion, narrowed to
+// the import and the live call (comment-stripped) so the REWRITTEN doc
+// comments in snapshot-grade.ts (which explain what USED to happen there, in
+// prose, and legitimately still mention the identifier by name) do not fail
+// this check - only an import or a live call would.
+// ---------------------------------------------------------------------------
+
+describe("snapshot-grade.ts no longer imports or calls extractRubricCriteria (Ruling B35-20)", () => {
+  const actionPath = path.resolve(process.cwd(), "src/app/actions/snapshot-grade.ts");
+  const actionSource = fs.readFileSync(actionPath, "utf-8");
+
+  function stripComments(source: string): string {
+    return source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, ""))
+      .join("\n");
+  }
+
+  it("the doc comments still mention extractRubricCriteria by name (proving the file was not simply gutted, and that the check below is meaningful)", () => {
+    expect(actionSource).toMatch(/extractRubricCriteria/);
+  });
+
+  it("no import statement in this file names extractRubricCriteria", () => {
+    const importLines = actionSource.split("\n").filter((line) => /^\s*import\b/.test(line));
+    for (const line of importLines) {
+      expect(line).not.toMatch(/extractRubricCriteria/);
+    }
+  });
+
+  it("comment-stripped, the file contains no LIVE CALL extractRubricCriteria(", () => {
+    const stripped = stripComments(actionSource);
+    expect(stripped).not.toMatch(/extractRubricCriteria\(/);
   });
 });

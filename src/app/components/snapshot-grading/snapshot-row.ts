@@ -28,6 +28,18 @@ import { deriveTotalScore } from "@/lib/grade/parsing";
 
 export type SnapshotShotReadStatus = "read" | "partly-read" | "not-read";
 
+/** The read pass's own per-shot entry (WAVE 5). Declared here, not inline in
+ *  SnapshotGradingPanel.tsx, so it can be shared with useSnapshotGrade.ts
+ *  (backlog 3.5's line-budget extraction) without either file importing
+ *  from the other - a leaf both can depend on, avoiding a cycle. */
+export interface ShotReadEntry {
+  shotIndex: number;
+  role: SnapshotRole;
+  transcript: string;
+  status: SnapshotShotReadStatus;
+  reason?: string;
+}
+
 export interface SnapshotShotReadReport {
   shotIndex: number;
   role: SnapshotRole;
@@ -272,6 +284,14 @@ export interface SnapshotGradeRequestInput {
    *  image made it into the grade call. */
   transcriptBlock: string;
   shots: GradeShotCandidate[];
+  /** Backlog 3.5 (scratchpad/b35-rulings.md, Ruling B35-7/B35-14): the
+   *  instructor-confirmed rubric-area list, sent EXACTLY as edited - REQUIRED
+   *  (never optional, never falls back to a server-side parse of rubricText).
+   *  The panel is the sole caller and always passes `confirmedRubricAreas ??
+   *  []` (Ruling B35-17), so `[]` here means either no rubric text was
+   *  supplied at all, or the instructor removed every confirmed area - both
+   *  are legitimate "grade unpinned" states, not a control failure. */
+  confirmedRubricAreas: { name: string; points: number | null }[];
   provider: LlmProvider;
 }
 
@@ -320,4 +340,71 @@ export function selectShotsForGradeCall(
       excluded.length === 1 ? "" : "s"
     } (role${excludedRoles.length === 1 ? "" : "s"}: ${excludedRoles.join(", ")}) were sent as transcription text only, not as images.`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Backlog 3.5 (scratchpad/b35-rulings.md): the confirmed-rubric-areas
+// control's own pure functions. This repo renders no component in any test
+// (docs/loop/this-repo.md section 2), so this logic lives in a plain leaf,
+// never inline in SnapshotGradingPanel.tsx, or none of it could be tested.
+// ---------------------------------------------------------------------------
+
+export type ConfirmedRubricArea = { name: string; points: number | null };
+
+/** Ruling B35-19: a pure, unit-tested increment-and-return helper so a
+ *  non-incrementing staleness guard (`const id = ref.current;`, which reads
+ *  without advancing) cannot be written where this is used - the shape is
+ *  made unrepresentable rather than merely pinned by a source-text regex,
+ *  which failed three times on this exact control (see the ruling). */
+export function nextParseRequestId(ref: { current: number }): number {
+  ref.current += 1;
+  return ref.current;
+}
+
+/** `true` when `requestId` is no longer the LATEST id issued - i.e. a newer
+ *  rubric submission has already superseded the parse this result belongs
+ *  to, and the result must be discarded rather than seeded into state. */
+export function isStaleParseResult(requestId: number, latestRequestId: number): boolean {
+  return requestId !== latestRequestId;
+}
+
+/** Ruling B35-13: the Grade button's gate is a function of BOTH pieces of
+ *  state, not `confirmedRubricAreas` alone - an instructor who never opens
+ *  the rubric modal has `rubricText === ""` and `confirmedRubricAreas ===
+ *  null` forever, and grading with no rubric text is a first-class, shipped
+ *  path that must stay enabled. Only when rubric text actually exists does a
+ *  `null` confirmed list (parse pending, or parse errored) block Grade. */
+export function isConfirmedAreasReady(
+  rubricText: string,
+  confirmedRubricAreas: ConfirmedRubricArea[] | null
+): boolean {
+  return rubricText.trim() === "" || confirmedRubricAreas !== null;
+}
+
+/** Removes the area at `index`. Out-of-range indexes are a no-op (the array
+ *  is returned unchanged) rather than throwing - the caller's index always
+ *  comes from a render of the same array, but a stale closure must not crash
+ *  the panel. */
+export function removeConfirmedArea(
+  areas: readonly ConfirmedRubricArea[],
+  index: number
+): ConfirmedRubricArea[] {
+  return areas.filter((_, i) => i !== index);
+}
+
+/** Ruling B35-11: an added area may carry `null` points - requiring points on
+ *  add was withdrawn once the scoring instruction itself was scoped to
+ *  "every area has points" (src/lib/grade/prompts.ts), since a null-points
+ *  added area no longer risks an invented denominator. Only the NAME is
+ *  validated. */
+export function addConfirmedArea(
+  areas: readonly ConfirmedRubricArea[],
+  name: string,
+  points: number | null
+): { areas: ConfirmedRubricArea[] } | { error: string } {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return { error: "Enter a name for the rubric area before adding it." };
+  }
+  return { areas: [...areas, { name: trimmed, points }] };
 }

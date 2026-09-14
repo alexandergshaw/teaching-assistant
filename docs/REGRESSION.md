@@ -41772,3 +41772,57 @@ attempt does not rediscover them:
 - persisting DRAFT TEXT is a privacy question, not just a storage one: it is
   model output about a named course sitting indefinitely in browser storage.
   That is the owner's call, and it is flagged here rather than decided.
+
+## 414. The rubric areas become editable, and numeric scoring gets stricter on one path only
+
+The owner grades by screenshotting a rubric. Parsing cannot be made reliable:
+`"Thesis (20 pts)"` and `"Excellent (20 pts)"` are byte-identical in grammar,
+so no punctuation rule separates a criterion from a rating tier, and the
+owner's rubrics include points in a column that no line-based matcher ever
+sees. So the parser's precision is removed from the grading path: the parsed
+areas are now editable before grading, and what the model is pinned to is the
+CONFIRMED list.
+
+### 414a - `some` -> `every`, scoped to the snapshot path deliberately
+
+`buildSystemPrompt` gained a fourth parameter,
+`scoringInstructionMode: "some" | "every" = "some"`. Only
+`snapshot-grade-prompt.ts` passes `"every"`.
+
+**This is a deliberate behaviour change and a future reader will otherwise
+file it as a bug.** Previously the instruction "Score each area out of the
+points shown for it" was emitted whenever ANY area carried points
+(`criteria.some(...)`), while the per-area bullet prints `(out of X)` only for
+areas that HAVE points. So a mixed list told the model to score everything out
+of shown points while showing points for only some - and the rest received
+model-invented denominators, which `deriveTotalScore` then summed into an
+authoritative-looking total. Under `"every"` the instruction is emitted only
+when every confirmed area carries points. The owner chose no numbers over
+wrong numbers.
+
+**Why it is scoped rather than global.** `buildSystemPrompt` has three
+production callers. Tracing past the prompt: `deriveTotalScore` returns `""`
+when nothing parses (`parsing.ts:175-203`) and `formatFeedback` omits the
+`Total Score:` line entirely when it is falsy (`:249-250`). So applying
+`"every"` to `engine.ts`'s unattended Canvas bulk run would silently drop the
+Total Score line for EVERY student in a run over a mixed-points rubric. That
+consequence was never agreed, so the default preserves today's behaviour for
+`engine.ts` and `grading-feedback-prompt.ts`, and a test pins the DEFAULT path
+on a MIXED list specifically.
+
+### 414b - what the suite cannot see here
+
+No component is rendered by any test in this repo, so the editor's remove, add
+and retry controls, their focus and keyboard behaviour, and whether the model
+actually obeys the scoping instruction are all read-verified only. The pure
+decisions were pushed into `snapshot-row.ts` (`isConfirmedAreasReady`,
+`removeConfirmedArea`, `addConfirmedArea`, `nextParseRequestId`,
+`isStaleParseResult`) precisely because that is the half a node-env suite can
+hold.
+
+Two design choices exist because a source-text assertion could not carry them:
+`nextParseRequestId` is a pure helper so the non-incrementing shape
+(`const id = ref.current`, which makes the staleness guard always false) cannot
+be written; and grading with NO rubric stays enabled, because a null-guard
+added "defensively" for that state would have silently disabled Grade for
+every instructor who does not use a rubric.

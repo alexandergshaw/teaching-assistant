@@ -9,6 +9,11 @@ import {
   buildTranscriptBlock,
   upsertSnapshotRow,
   resolveGradeTarget,
+  nextParseRequestId,
+  isStaleParseResult,
+  isConfirmedAreasReady,
+  removeConfirmedArea,
+  addConfirmedArea,
   GRADE_PASS_IMAGE_BUDGET_BYTES,
   READ_BATCH_SIZE,
   type SnapshotShotReadReport,
@@ -318,6 +323,111 @@ describe("COMPOSED: contested value 1 (fromWire's userEdited default) x resolveG
     expect(restored.userEdited).toBe(false);
     const result = resolveGradeTarget([restored], restored.id, makeMintId());
     expect(result.isNewRow).toBe(false); // merges - no false split
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Backlog 3.5 (scratchpad/b35-rulings.md): the confirmed-rubric-areas
+// control's own pure functions.
+// ---------------------------------------------------------------------------
+
+describe("nextParseRequestId (Ruling B35-19: the increment cannot be skipped by construction)", () => {
+  it("increments on every call, returning the new value", () => {
+    const ref = { current: 0 };
+    expect(nextParseRequestId(ref)).toBe(1);
+    expect(nextParseRequestId(ref)).toBe(2);
+    expect(nextParseRequestId(ref)).toBe(3);
+  });
+
+  it("mutates the passed ref object's own .current (not a copy)", () => {
+    const ref = { current: 5 };
+    nextParseRequestId(ref);
+    expect(ref.current).toBe(6);
+  });
+});
+
+describe("isStaleParseResult", () => {
+  it("is false when the ids match (not stale)", () => {
+    expect(isStaleParseResult(1, 1)).toBe(false);
+  });
+
+  it("is true when a newer request has superseded this one", () => {
+    expect(isStaleParseResult(1, 2)).toBe(true);
+  });
+
+  it("is true when checked against an OLDER latest id too (any mismatch is stale)", () => {
+    expect(isStaleParseResult(2, 1)).toBe(true);
+  });
+});
+
+describe("isConfirmedAreasReady (Ruling B35-13: rubric-text-aware, not a blanket null-check)", () => {
+  it("is ready with no rubric text at all, even if nothing has ever been confirmed - the no-rubric grading path must stay enabled", () => {
+    expect(isConfirmedAreasReady("", null)).toBe(true);
+  });
+
+  it("is NOT ready when rubric text exists but the parse has not resolved yet", () => {
+    expect(isConfirmedAreasReady("Some rubric", null)).toBe(false);
+  });
+
+  it("is ready once the parse resolved, even to an empty confirmed list", () => {
+    expect(isConfirmedAreasReady("Some rubric", [])).toBe(true);
+  });
+
+  it("is ready with a populated confirmed list", () => {
+    expect(isConfirmedAreasReady("Some rubric", [{ name: "X", points: null }])).toBe(true);
+  });
+
+  it("treats whitespace-only rubric text the same as no rubric text", () => {
+    expect(isConfirmedAreasReady("   ", null)).toBe(true);
+  });
+});
+
+describe("removeConfirmedArea", () => {
+  it("removes the area at the given index", () => {
+    const areas = [
+      { name: "Thesis", points: 20 },
+      { name: "Grammar", points: 10 },
+    ];
+    expect(removeConfirmedArea(areas, 0)).toEqual([{ name: "Grammar", points: 10 }]);
+  });
+
+  it("does not mutate the input array", () => {
+    const areas = [{ name: "Thesis", points: 20 }];
+    removeConfirmedArea(areas, 0);
+    expect(areas).toHaveLength(1);
+  });
+
+  it("is a no-op for an out-of-range index", () => {
+    const areas = [{ name: "Thesis", points: 20 }];
+    expect(removeConfirmedArea(areas, 5)).toEqual(areas);
+  });
+});
+
+describe("addConfirmedArea (Ruling B35-11: an added area may carry null points)", () => {
+  it("appends a trimmed name with null points", () => {
+    const result = addConfirmedArea([], "  Voice  ", null);
+    expect(result).toEqual({ areas: [{ name: "Voice", points: null }] });
+  });
+
+  it("appends a name with points", () => {
+    const result = addConfirmedArea([{ name: "Thesis", points: 20 }], "Grammar", 10);
+    expect(result).toEqual({
+      areas: [
+        { name: "Thesis", points: 20 },
+        { name: "Grammar", points: 10 },
+      ],
+    });
+  });
+
+  it("rejects a blank name with an error, not a silently-added blank area", () => {
+    const result = addConfirmedArea([], "   ", null);
+    expect("error" in result).toBe(true);
+  });
+
+  it("does not mutate the input array", () => {
+    const areas = [{ name: "Thesis", points: 20 }];
+    addConfirmedArea(areas, "Grammar", 10);
+    expect(areas).toHaveLength(1);
   });
 });
 

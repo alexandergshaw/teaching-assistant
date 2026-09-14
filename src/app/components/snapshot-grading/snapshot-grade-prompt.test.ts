@@ -112,3 +112,28 @@ describe("buildSnapshotGradeSystemPrompt with instructor-authored grading instru
     expect(blankPrompt).not.toContain(INSTRUCTOR_INSTRUCTIONS_HEADER);
   });
 });
+
+// Backlog 3.5 (scratchpad/b35-rulings.md, Ruling B35-11/B35-12). This is the
+// end-to-end version of prompts.test.ts's own scoringInstructionMode test
+// (3), verified through the actual entry point an instructor's own Grade
+// call goes through - buildSnapshotGradeSystemPrompt, not buildSystemPrompt
+// directly - so a regression that dropped the "every" argument from
+// snapshot-grade-prompt.ts's own internal call would be caught here even if
+// prompts.test.ts stayed green.
+describe("buildSnapshotGradeSystemPrompt scopes to scoringInstructionMode=\"every\" (Ruling B35-12)", () => {
+  it("a MIXED-points confirmed-areas list does NOT produce the numeric scoring instruction", () => {
+    const prompt = buildSnapshotGradeSystemPrompt("Write a function.", "Rubric.", [
+      { name: "Thesis", points: 20 },
+      { name: "Grammar", points: null },
+    ]);
+    expect(prompt).not.toMatch(/Score each area out of the points shown for it/);
+  });
+
+  it("a uniform all-points confirmed-areas list still produces the numeric scoring instruction", () => {
+    const prompt = buildSnapshotGradeSystemPrompt("Write a function.", "Rubric.", [
+      { name: "Thesis", points: 20 },
+      { name: "Grammar", points: 10 },
+    ]);
+    expect(prompt).toMatch(/Score each area out of the points shown for it/);
+  });
+});

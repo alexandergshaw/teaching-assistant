@@ -59,14 +59,14 @@
   from: 'c25bdec'
   note: ''
 - id: 'N1'
-  state: 'unscoped'
+  state: 'actionable'
   title: 'Suggest-and-confirm roles for snapshot shots. Created by ruling H1-E. With H1 wave 1 removing the taught Read click, per-shot ROLE ARMING is the only remaining per-shot cost in the owner''s original complaint - the criteria banned inferring roles and used that ban to avoid touching arming. The ban on inferring from PIXELS stands and is correct: role is not a caption, it selects the prompt''s framing block, drives image-budget priority (snapshot-grade.ts:75), drives the Next-student keep/clear partition (snapshot-shot.ts:210) and drives missingRoles, so a mis-inference changes the score and the data lifecycle. The right shape is SUGGEST-AND-CONFIRM: the read pass already sends every shot to a vision model and returns per-shot results, and the tray already supports select-then-set re-roling, so a PROPOSED role the instructor confirms costs no extra model call and keeps role an instructor attribution. Do not build it blind.'
-  owns: []
-  verify: null
+  owns: ['src/app/components/snapshot-grading/**', 'src/app/actions/snapshot-read.ts']
+  verify: 'npx vitest run src/app/components/snapshot-grading/'
   blocked_by: []
-  instrument: ''
+  instrument: 'SCOPED 2026-09-14, every claim in the title re-verified against the tree because H1-E predates two waves that moved these lines. CONFIRMED: the read pass returns PER-SHOT results but carries NO role - SnapshotReadResult is { shotIndex, readable, transcript, unreadableReason? } (snapshot-parse.ts:71-76) - so this item EXTENDS the read schema and prompt rather than consuming something already there, which the title implies is free and is not. CONFIRMED what role drives, all three: it labels the image to the model (snapshot-grade.ts:91, `role: ${shot.role}`) and sets image-budget priority (:11); STABLE_SNAPSHOT_ROLES = [assignment, rubric] (snapshot-shot.ts:228) drives partitionShotsForNextStudent (:230), so role decides what SURVIVES Next student - a data-lifecycle effect, not a display one; and missingRoles is a reported field in the grade prompt (snapshot-grade-prompt.ts:68). A wrong role confirmed by a distracted instructor therefore changes the score AND the data lifecycle, which is why H1-E banned inferring from pixels and why suggest-and-confirm is the only acceptable shape.'
   from: 'ruling H1-E'
-  note: 'Its own chunk (pre-migration queue note)'
+  note: 'THE SAFETY PROPERTY, which is the whole item: a suggested role must NEVER become the effective role without an explicit instructor action. Role stays an INSTRUCTOR ATTRIBUTION - the suggestion is a default the instructor accepts, never a value the app assigns. A build that auto-applies a confident suggestion has not implemented this item, it has implemented the pixel-inference H1-E banned. TECHNICAL CONSTRAINT, learned the hard way this same day: suggestions must key on SHOT IDENTITY, not array position. cb4851a fixed exactly this bug for citations - shotReads is now keyed by shot id (useSnapshotGrade.ts:153, entry.shotId) precisely because deleting or reordering a shot silently re-pointed everything keyed by index. A position-keyed role suggestion would reintroduce that defect in a place where the consequence is a mis-scored submission. Its own chunk (pre-migration queue note).'
 - id: 'N3'
   state: 'unscoped'
   title: 'Flip failedCount to gating in .github/workflows/sweep-orphan-uploads.yml. A one-line edit an agent makes here; blocked on V3''s (formerly 1.3''s) INPUT, not on capability. Until the semantics are known, a wrong guess in either direction poisons the only outbound alert this deployment has.'

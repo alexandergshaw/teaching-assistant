@@ -130,6 +130,15 @@
   instrument: 'With an actionable item in the queue, end a session normally and confirm the stop is refused with the R-item reason on screen. Then run: npm run backlog:stop-guard (expect exit 2) and echo {"stop_hook_active":true} | npm run backlog:stop-guard (expect exit 0, no loop).'
   from: 'the Stop guard commit'
   note: 'If it does NOT block, say so - the correct response is to remove .claude/settings.json rather than leave a gate nobody enforces.'
+- id: 'G5'
+  state: 'owner'
+  title: 'What should Generate DO when clicked while the exemplar fetch has timed out? Created by ruling G1-D. Once G1 bounds the fetch, Generate re-enables with savedExemplars still null - so a click drafts with no format to match. The G1 criteria raised this and declined to answer it, which is legitimate, but it belongs in the queue rather than inside a criterion. Recommended default: draft anyway, with the draft slot stating plainly that no saved format was matched - consistent with the zero-area rubric precedent, where grading unpinned with honest copy beat blocking.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Decide, then the G1 architect binds it. No repo-local measurement can settle a product question.'
+  from: 'ruling G1-D'
+  note: 'Do not let an implementer settle this by accident: with the eight consumers unfixed, that click drafts silently against a list the user was just told does not exist.'
 - id: 'G1'
   state: 'unscoped'
   title: 'A hung exemplar fetch disables Generate indefinitely. WalkthroughAnnouncementPanel.tsx:787 disables Generate on savedExemplarsLoading, set by an unguarded Promise.all at :284-287 whose TWO calls mean either one hanging strands the button. AnnouncementDraftSlot.tsx:101-113 does render an error arm with a Retry button, but only on a REJECTION - on a HANG savedFailed stays false and the user watches Loading forever, so an error state only a rejection can reach is not coverage for a hang. Criteria authored 2026-09-14 (scratchpad g1-acceptance-criteria.md).'

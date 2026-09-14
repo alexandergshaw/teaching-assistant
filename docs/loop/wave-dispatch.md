@@ -147,6 +147,42 @@ when proposing it.
 
 ---
 
+## A second measured instance: the cost is not only duplication
+
+Chunk G3, 2026-09-13. The orchestrator fanned architect, security, reliability
+and user experience out CONCURRENTLY - the pattern this card exists to prevent.
+The artifacts landed at 20:58 (architect, UX), 21:00 (security) and 21:01
+(reliability), so the UX seat finished three minutes BEFORE the reliability
+seat it needed to read.
+
+What it produced was not a duplicate. It was a **direct contradiction on the
+central user-facing decision**: the UX pass recommended no notice at all when
+resource research fails ("a silent degrade ... I recommend no additional UI
+element for this case"), while the reliability pass required a neutral notice
+for "found nothing" and a categorically DIFFERENT one for a timeout or error.
+Both artifacts were internally sound. Only one can ship.
+
+Three things make this worse than the duplicate-discovery cost above:
+
+- **It is invisible to every gate.** The UX recommendation implemented verbatim
+  is one fewer line of JSX. Lint, tsc, `Compiled successfully` and vitest all
+  pass. The instructor flips the toggle, the search times out, and the draft is
+  byte-identical to research-off with nothing said.
+- **Resolving it DELETES a checked artifact's conclusion.** That is a disposal
+  and needs recording with an owner (`iteration-caps.md`), which is pure added
+  cost - the wall-clock "saved" by parallel dispatch is spent again on the
+  ruling, plus the backlog write.
+- **Re-running the late seat does not fix it.** The cause is the dispatch, not
+  the seat. Re-dispatching UX alone leaves the pattern that produced it intact.
+
+The standing order in `DEV_LOOP.md` already covers this - experience is wave 3,
+downstream of constraints. The failure was compliance, not the rule. If you are
+about to fan every seat out at once because the waves feel slow, this is the
+instance to re-read: the 2.6x wall-clock above is the PRICE, and a contradiction
+that no gate can catch is what you are buying out of.
+
+---
+
 ## How to verify it is working
 
 Instrument the thing the change is meant to fix. After each design stage, count:

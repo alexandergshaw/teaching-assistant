@@ -3,9 +3,18 @@ import fs from "fs";
 import path from "path";
 import { countLines } from "./lib/count-lines";
 
-// docs/DEV_LOOP.md: "The 1000-line ceiling on every touched file... audited,
-// not assumed... A file over 1000 lines does not get a follow-up ticket; the
-// wave is not verified until it is split." That rule has exactly one
+// The rule: the 1000-line ceiling on every touched file is audited, not
+// assumed. A file over 1000 lines does not get a follow-up ticket; the wave
+// is not verified until it is split.
+//
+// That wording was quoted from docs/DEV_LOOP.md until 338962a rewrote that
+// card, and the citation here outlived the sentence it pointed at
+// (`grep -c "1000" docs/DEV_LOOP.md` returns 0). Its documented home is now
+// docs/loop/this-repo.md:110, which describes this gate and its ratchet. The
+// rule below is the enforcement, so THIS FILE is the authority either way -
+// a doc citation that can rot silently is not what a gate should rest on.
+//
+// That rule has exactly one
 // mechanical gate today: src/app/components/recording/recording-split.structure.test.ts,
 // which scans one directory (src/app/components/recording/) plus two named
 // files (RecordingTab.tsx, TabShell.tsx), non-recursively. Everywhere else
@@ -121,7 +130,7 @@ describe("repo-wide file size ceiling (honours DEV_LOOP.md's 1000-line rule)", (
         violations.push(
           override
             ? `${relPath}: ${lineCount} lines (allow-listed ratchet ceiling ${limit} - ${override.reason}). It must not grow further. Extract a cohesive piece into its own leaf module to shrink it back toward the repo-wide ${LIMIT}-line limit; see discussion-serialization.ts, takeAnnouncementTranscription.ts, or useDiscussionNotices.ts for shipped examples of this split.`
-            : `${relPath}: ${lineCount} lines, exceeding the repo-wide ${LIMIT}-line ceiling (docs/DEV_LOOP.md, "The 1000-line ceiling on every touched file"). Extract a cohesive piece into its own leaf module rather than growing this file further; see discussion-serialization.ts, takeAnnouncementTranscription.ts, or useDiscussionNotices.ts for shipped examples of this split.`
+            : `${relPath}: ${lineCount} lines, exceeding the repo-wide ${LIMIT}-line ceiling (docs/loop/this-repo.md:110; the wave is not verified until it is split). Extract a cohesive piece into its own leaf module rather than growing this file further; see discussion-serialization.ts, takeAnnouncementTranscription.ts, or useDiscussionNotices.ts for shipped examples of this split.`
         );
       }
     }

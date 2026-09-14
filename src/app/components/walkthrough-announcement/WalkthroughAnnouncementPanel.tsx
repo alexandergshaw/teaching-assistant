@@ -162,8 +162,12 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     };
   }, [active]);
 
+  // G6: .trim() is load-bearing. A whitespace-only stored value is TRUTHY, so it
+  // would pass the `if (!courseId)` guards below and reach both exemplar
+  // actions, whose `!courseId.trim()` arms return an empty SUCCESS before
+  // querying. Full rationale: REGRESSION 419 and this directory's structure test.
   const [courseId, setCourseId] = useState<string>(() =>
-    typeof window === "undefined" ? "" : (window.localStorage.getItem(STORAGE_KEY_COURSE) ?? "")
+    typeof window === "undefined" ? "" : (window.localStorage.getItem(STORAGE_KEY_COURSE) ?? "").trim()
   );
   useEffect(() => {
     if (typeof window === "undefined") return;

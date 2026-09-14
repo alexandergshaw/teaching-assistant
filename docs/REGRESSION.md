@@ -42525,3 +42525,72 @@ here - the network is blocked and no fixture exercises a real vision model. If
 accuracy is poor in use, the right response is to REVERT this rather than tune
 it, because an inaccurate suggestion accepted in bulk is worse than no
 suggestion at all.
+
+## 419. G6: the courseId seed is trimmed, and the fix moved to get there
+
+Backlog G6, deferred out of G1 and closed here. Both announcement-exemplar
+actions return an empty SUCCESS for a blank `courseId`, BEFORE querying
+(`src/app/actions/walkthrough-announcement.ts:122,141`, each above its
+`createServiceClient()` call), so "I did not query" reaches the client in the
+same shape as "I queried and this course has none".
+
+### 419a - the reachability answer, which is what the row was blocked on
+
+**Not reachable through the UI.** The course control is a MUI `Select` over the
+fetched courses list (`AnnouncementCourseFieldset.tsx:124-127` - `onChange`
+passes `e.target.value` from a `MenuItem` whose value is `c.id`), so it can only
+ever emit a real course id.
+
+**Reachable only through localStorage.** `courseId` was seeded by an
+unvalidated, untrimmed read - `localStorage.getItem(STORAGE_KEY_COURSE) ?? ""`,
+key `ta-rec-wta-course` - and a whitespace-only stored value is TRUTHY. It would
+pass the panel's own `if (!courseId) return` guards, reach both actions, and come
+back empty-but-successful.
+
+So this was LATENT, not live: producing it required hand-editing one's own
+localStorage, and the only person affected was that user.
+
+**The realistic neighbour is NOT this defect**, and conflating them would waste
+the next reader's time: a STALE but non-blank course id does reach the query,
+returns zero rows honestly, and is a correct empty result.
+
+### 419b - the fix relocated on the evidence
+
+When G6 was filed, its note said the cheap fix was a distinct non-success arm on
+both actions. **Once reachability was traced, that became the EXPENSIVE fix** -
+it changes the RETURN UNION of two server actions, touching every caller, to
+close a state only a hand-edit can produce.
+
+The cheap correct fix is at the SEED: `.trim()` the stored value, so a
+whitespace-only entry becomes `""` and is caught by guards that already exist.
+One expression, no union change, no new obligations on callers - and it makes the
+bad state UNREPRESENTABLE rather than handled.
+
+The boundary arms stay on record as hardening if a second, unguarded caller ever
+appears. Today the panel is the only caller.
+
+### 419c - proven able to fail
+
+`walkthrough-announcement.structure.test.ts` pins the trim, and it was
+sabotage-checked: removing `.trim()` turned that test RED, restoring it went
+green (142 tests). A canary test asserts there is exactly ONE
+`STORAGE_KEY_COURSE` read in the panel, so the assertion cannot drift onto a
+different `getItem` call.
+
+### 419d - a note on the panel's size, which this change nearly made worse
+
+`WalkthroughAnnouncementPanel.tsx` is **979** lines
+(`@(Get-Content <path>).Count`) against the executing 1000-line ceiling -
+**21 lines of headroom.**
+
+The first version of this one-word fix carried a 12-line justifying comment,
+which took the file to 988 and left 12. That was disproportionate and was cut to
+four lines, with the reasoning kept here and in the structure test instead. The
+lesson is worth recording because the file is at its limit and the next edit will
+face the same temptation: in a file this close to a hard ceiling, prose belongs
+in the test that enforces the behaviour and in this document, not beside the
+code.
+
+Three features touched this panel in one day (G1's bound, then this). Whoever
+touches it next should plan to split it, sized against their own additions rather
+than against the ceiling.

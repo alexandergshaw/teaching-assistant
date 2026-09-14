@@ -425,3 +425,33 @@ describe("G1: the old savedExemplarsLoading/savedExemplarsFailed booleans are go
     expect(panelSource).toMatch(/useState<SavedFormatsState>\("loaded"\)/);
   });
 });
+
+describe("G6: the courseId seed from localStorage is TRIMMED", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  // Why this is pinned rather than left to review: the course control is a
+  // Select over real course ids, so this seed is the ONLY path that can put a
+  // non-course string into courseId. A whitespace-only stored value is truthy,
+  // so it would pass the `if (!courseId)` guards and reach both exemplar
+  // actions, whose own `!courseId.trim()` arms return an empty SUCCESS BEFORE
+  // querying - making "I did not query" indistinguishable from "this course has
+  // none". Trimming at the seed makes that unrepresentable.
+  it("reads the stored course id through .trim(), so a blank-but-truthy value cannot reach the actions", () => {
+    const seed = /localStorage\.getItem\(STORAGE_KEY_COURSE\)\s*\?\?\s*""\)\.trim\(\)/;
+    expect(
+      panelSource,
+      "the courseId useState initializer must trim the localStorage value - see this describe block's comment"
+    ).toMatch(seed);
+  });
+
+  // Canary: proves the assertion above is reading the seed and not some other
+  // getItem call. If this ever fails, the key or the initializer moved and the
+  // test above may be matching the wrong line.
+  it("canary: there is exactly one STORAGE_KEY_COURSE read in the panel", () => {
+    const reads = panelSource.match(/localStorage\.getItem\(STORAGE_KEY_COURSE\)/g) ?? [];
+    expect(reads.length).toBe(1);
+  });
+});

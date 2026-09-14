@@ -170,14 +170,27 @@ nothing in the suite reads `docs/`.
 
 ## Standing rules
 
-- **Never stop for permission while ACTIONABLE work remains** - that is,
-  `docs/BACKLOG.md`'s "next chunk" section, not the whole file. The owner-only
-  and owner-decision sections are never empty by construction (no `.env`, no
-  rendered component, no network under vitest), so binding the rule to "a
-  backlog exists" would make its precondition permanently true while the
-  entries keeping it true are exactly the ones an agent must NOT start. Finish
-  a chunk, push it, and start the next in the same turn. Details and the failure behind it in
-  `traps-orchestration.md`.
+- **While `docs/BACKLOG.md` has ANY item in it, the loop does not stop.**
+  Owner's rule, 2026-09-13, and it supersedes the narrower "actionable work"
+  wording this line used to carry. Finish a chunk, push it, and start the next
+  in the same turn. A push is not a checkpoint.
+
+  The narrower version existed for a real reason and the reason still holds -
+  the owner-only and owner-decision sections are never empty by construction
+  (no `.env`, no rendered component, no network under vitest), and those
+  entries are exactly the ones an agent must NOT start. So the rule resolves
+  that tension by DRAINING rather than stopping:
+
+  - An item you cannot start is **escalated in the same turn you continue
+    other work** - batched into one message, never as a gate.
+  - The owner-only section is not a parking lot. An entry sitting there that
+    nobody has escalated is a queue that has quietly stopped.
+  - **The one legitimate stop** is when every remaining item is owner-blocked.
+    Then say so plainly, list what each one needs, and stop - continuing would
+    mean starting work the rule forbids. That is a stop WITH the backlog
+    reported, not a stop asking what to do next.
+
+  Details and the failure behind it in `traps-orchestration.md`.
 - **The backlog is the queue, not a diary.** It records what is OWED and by
   whom, never what happened - `docs/REGRESSION.md` holds behaviour and the git
   log holds history. The instance behind this rule: the first version of

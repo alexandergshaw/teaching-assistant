@@ -84,14 +84,32 @@ that way and it is auditable. Record nothing and it is a hole.
 
 ## Never stall
 
-**While ACTIONABLE work remains - `docs/BACKLOG.md`'s "next chunk" section, not
-the whole file, whose owner-only sections are never empty by construction - do
-not end a turn without work already started on the
-next item.** This is the single most repeated correction in this project's
-history. Announcing the next item is not starting it. Do not ask "should I
-proceed?", do not close with an offer to change course, and do not pause the
-queue to report a finding - report it and act on the obvious reading of it in
-the same turn. A push is not a checkpoint.
+**While `docs/BACKLOG.md` has ANY item in it, do not end a turn without work
+already started on the next item.** This is the single most repeated correction
+in this project's history, and the owner restated it in the strong form on
+2026-09-13: the backlog having entries is itself the condition. Announcing the
+next item is not starting it. Do not ask "should I proceed?", do not close with
+an offer to change course, and do not pause the queue to report a finding -
+report it and act on the obvious reading of it in the same turn. A push is not
+a checkpoint.
+
+This wording replaced a narrower one scoped to the "next chunk" section. That
+narrower version was answering a real problem: the owner-only and
+owner-decision sections are never empty by construction here (no `.env`, no
+rendered component, no network under vitest), and those entries are precisely
+the ones an agent must not start - so "a backlog exists" is a precondition that
+is permanently true. The strong form handles that by DRAINING, not by
+narrowing:
+
+- An item you cannot start is **escalated in the same turn you continue other
+  work**, batched into one message, never as a gate. Escalating is an action;
+  it counts as work started.
+- The owner-only section is not a parking lot. An unescalated entry sitting
+  there is a queue that has quietly stopped while looking full.
+- **The only legitimate stop** is when every remaining item is owner-blocked.
+  Say so, list what each needs, and stop. That is a stop that REPORTS the
+  backlog, not one that asks what to do next - and it is the one case where
+  continuing would mean starting work the rule itself forbids.
 
 This governs the top-level session only. A subagent handed a scoped brief
 finishes that brief and reports back, including what it could not do.

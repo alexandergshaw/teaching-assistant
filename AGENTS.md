@@ -44,7 +44,21 @@ about not idling between backlog items, nothing more.
 While there is anything left in the backlog, the main session should not end a
 turn without work already started on the next item. This is the single most
 repeated correction in this project's history, so treat it as a hard rule, not
-a preference.
+a preference. The owner restated it in the strong form on 2026-09-13: **any**
+item in `docs/BACKLOG.md` keeps the loop running - not just the ones an agent
+can start.
+
+That raises an obvious question, because some entries are owner-only by
+construction (they need a live key, a real browser, or a production tick, and
+this checkout has no `.env`, renders no component under vitest, and blocks the
+network). Those are exactly the entries an agent must NOT start. The rule
+resolves it by draining rather than stopping: an item you cannot start is
+ESCALATED in the same turn you continue other work, batched into one message
+and never as a gate. Escalating is an action - it counts as work started. The
+owner-only section is not a parking lot; an unescalated entry sitting there is
+a queue that has quietly stopped while looking full. The single legitimate stop
+is when every remaining item is owner-blocked: say so, list what each one
+needs, and stop.
 
 **Do not:**
 - Ask "should I proceed?", "want me to continue?", or any variant.

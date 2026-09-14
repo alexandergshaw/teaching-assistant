@@ -14,7 +14,9 @@ Closing an item DELETES its row from `docs/backlog.yml` - there is no
 
 Worked by an agent. Leaves this section when `verify` exits 0 and actually runs at least one assertion (Ruling BA-2).
 
-_None._
+| id | title | owns | verify | blocked_by | instrument | from | note |
+|---|---|---|---|---|---|---|---|
+| R3 | First wave of R2: reclassify the media-file cohort from requireOwner() to requireAppOwner(). These four files are the one cohort where call-site and resource-level assertion coincide, because no deeper layer exists to assert at - so this does NOT contradict the architecture doc RESOLVED 3 / SUPERSEDES decision that rejected per-call-site classification for the Canvas/GitHub cohort. Split out by orchestrator ruling so the judgment-heavy remainder stays in R2. | src/app/actions/media.ts, src/app/actions/media-voice.ts, src/app/actions/media-avatar.ts, src/app/actions/media-likeness.ts, src/app/actions/action-guard-coverage.test.ts | npx vitest run src/app/actions/action-guard-coverage.test.ts -t "media actions are owner-only" | - | Cohort measured 2026-09-14: grep -coE over the four files gives 17 + 10 + 3 + 11 = 41 call sites (the scoping pass said 42; 41 is the measured figure). OWNER_ONLY map exists at action-guard-coverage.test.ts:287. VERIFY PROVEN TO FAIL NOW: the command exits 0 but reports Tests 12 skipped (12) - zero passed - which closure-runner.ts treats as failure; the same file without the -t filter reports 12 passed, as the canary. | orchestrator ruling, splitting R2 | The named test does not exist yet; writing it is part of the work. The two wrong directions cost differently: a wrong requireUser silently exposes an owner-private resource, a wrong requireAppOwner loudly locks out an instructor. |
 
 ## Owner decision
 

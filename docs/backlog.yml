@@ -132,13 +132,13 @@
   note: 'If it does NOT block, say so - the correct response is to remove .claude/settings.json rather than leave a gate nobody enforces.'
 - id: 'G1'
   state: 'unscoped'
-  title: 'A hung exemplar fetch disables Generate indefinitely. WalkthroughAnnouncementPanel.tsx:793 disables it on savedExemplarsLoading, and the Promise.all at :241-244 has no timeout - either call in it hanging does this, so a fix that times out only one leaves the hole open. Two loading signals exist. CORRECTION, measured: an earlier version of this entry said "neither of which is an error state", which is FALSE for AnnouncementDraftSlot.tsx:103 - that line is a ternary whose false arm renders "Could not load your saved formats." with a Retry button at :104-108. The substance survives anyway, and that is the point worth keeping: on a HANG rather than a rejection, savedFailed stays false, so the error arm never renders and the user sees "Loading your saved formats..." forever. An error state that only a rejection can reach is not coverage for a hang. WalkthroughAnnouncementPanel.tsx:686 has no error arm at all.'
+  title: 'A hung exemplar fetch disables Generate indefinitely. WalkthroughAnnouncementPanel.tsx:787 disables Generate on savedExemplarsLoading, set by an unguarded Promise.all at :284-287 whose TWO calls mean either one hanging strands the button. AnnouncementDraftSlot.tsx:101-113 does render an error arm with a Retry button, but only on a REJECTION - on a HANG savedFailed stays false and the user watches Loading forever, so an error state only a rejection can reach is not coverage for a hang. Criteria authored 2026-09-14 (scratchpad g1-acceptance-criteria.md).'
   owns: []
   verify: null
   blocked_by: []
-  instrument: ''
+  instrument: 'Line numbers RE-MEASURED 2026-09-14 against the current tree - every citation this entry previously carried was stale (pre-0ef6fb8). Confirmed by direct read: :787 disable clause, :284-287 Promise.all, panel 903 lines via @(Get-Content).Count.'
   from: 'b3701cd'
-  note: 'Green suite, dead button (pre-migration Note column)'
+  note: 'Unscoped because the fix lives in .tsx, which vitest here neither collects nor renders - so a timeout written in the panel is untestable by construction. The criteria move the decision into a pure .ts leaf so it can be tested at all.'
 - id: 'G2'
   state: 'unscoped'
   title: 'Snapshot grading''s restored list is seeded from a localStorage-reading useState initializer on an SSR''d surface. The identical initializer already ships elsewhere and a structural mismatch recovers by re-render, so this is inherited rather than new.'

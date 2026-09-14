@@ -105,6 +105,71 @@ describe("markdownToHtml - link href security", () => {
     expect(html).toBe("<p>Bad</p>");
   });
 
+  it.each([
+    ["TAB", 9],
+    ["CR", 13],
+  ])(
+    "rejects /%s/host, where the character the URL parser DELETES hides a protocol-relative target",
+    (_label, code) => {
+      // The two tests above block `//host` and `/\host`. Both exclusions are a
+      // LOOKAHEAD, so they only inspect the character immediately after the
+      // first slash - while the WHATWG URL parser REMOVES every ASCII tab, LF
+      // and CR from the input before parsing. So `/<TAB>/evil.example/x` passes
+      // the allowlist (second character is a tab, not a slash), and the browser
+      // then deletes the tab and resolves `//evil.example/x` - the exact target
+      // the sibling test exists to block, reached by adding one character
+      // rather than changing one.
+      //
+      // Built with String.fromCharCode for the same reason as the backslash
+      // test: a raw control character in this file would not survive editing
+      // tools intact, and the test would go vacuous about the character it is
+      // entirely about.
+      const c = String.fromCharCode(code);
+      const html = markdownToHtml(`[Bad](/${c}/evil.example/x)`);
+      expect(html).not.toContain("<a ");
+      expect(html).toBe("<p>Bad</p>");
+    }
+  );
+
+  it("blocks the LF form too, but by a DIFFERENT mechanism - the link never parses", () => {
+    // LF belongs to the same parser-strips-it family as TAB and CR, but it
+    // cannot reach the href guard at all: markdownToHtml splits the source into
+    // lines before inline rendering, so a newline inside `[text](href)` means
+    // the link pattern never matches and the whole thing stays literal text
+    // with a <br> at the break. The outcome is safe either way, and this test
+    // is separate from its TAB/CR siblings precisely so the REASON is recorded.
+    // Folding it into that table would assert the normalizer handles a case the
+    // normalizer never sees - a passing test that proves the wrong thing, and
+    // one that would keep passing if the normalizer were deleted outright.
+    const lf = String.fromCharCode(10);
+    const html = markdownToHtml(`[Bad](/${lf}/evil.example/x)`);
+    expect(html).not.toContain("<a ");
+    expect(html).not.toContain("evil.example/x\"");
+  });
+
+  it("rejects the TAB-then-BACKSLASH form, which combines both evasions", () => {
+    // Neither exclusion alone catches this: the tab defeats the lookahead, and
+    // the backslash is what the parser turns into the second slash once the tab
+    // is removed.
+    const tab = String.fromCharCode(9);
+    const backslash = String.fromCharCode(92);
+    const html = markdownToHtml(`[Bad](/${tab}${backslash}evil.example/x)`);
+    expect(html).not.toContain("<a ");
+    expect(html).toBe("<p>Bad</p>");
+  });
+
+  it("emits the NORMALIZED href, never the raw one, when a stripped-character href is allowed", () => {
+    // The guard tests one string and the browser parses another, so the
+    // rendered attribute must be the normalized value. If the guard checked the
+    // stripped form but emitted the raw one, every test above would still pass
+    // while the browser received the dangerous string - which is how this class
+    // of bug survives a green suite.
+    const tab = String.fromCharCode(9);
+    const html = markdownToHtml(`[Docs](https://ok.example/a${tab}b)`);
+    expect(html).toBe('<p><a href="https://ok.example/ab">Docs</a></p>');
+    expect(html).not.toContain(tab);
+  });
+
   it("still allows an ordinary site-relative path, which is what the single-slash case is FOR", () => {
     // The guard against over-tightening. Narrowing the exclusion to cover a
     // backslash must not start rejecting the real links this rule exists to

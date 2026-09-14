@@ -155,18 +155,41 @@ export function htmlToMarkdown(html: string): string {
 // specified to post through this renderer rather than textToHtml, which
 // would put model output derived from a user-pasted document in front of
 // every student in a course.
+//
+// AND AN ASCII TAB, LF OR CR DEFEATS BOTH EXCLUSIONS ABOVE unless the href is
+// normalized first. The lookahead only inspects the NEXT character, while the
+// WHATWG URL parser REMOVES every ASCII tab, LF and CR from the input before
+// it parses. So `/<TAB>/evil.example/x` satisfies `\/(?![/\\])` - the second
+// character is a tab, not a slash - and the browser then deletes the tab and
+// resolves exactly `//evil.example/x`: the protocol-relative case the comment
+// above says is blocked. The same holds for CR, for LF, and for the backslash
+// form `/<TAB>\evil.example/x`. Measured against the regex extracted from this
+// file (never retyped) and the platform URL parser: four bypasses, all
+// resolving to https://evil.example/x.
+//
+// The fix is to normalize the way the parser will, then apply the allowlist to
+// what the BROWSER will actually see, and to emit that same normalized string.
+// Testing one value and emitting another is how this class of bug survives a
+// green test. No legitimate href contains a raw tab, LF or CR.
+const URL_PARSER_STRIPPED = /[\t\n\r]/g;
+
+function normalizeHrefForGuard(href: string): string {
+  return href.replace(URL_PARSER_STRIPPED, "");
+}
+
 const ALLOWED_LINK_HREF = /^(https?:|mailto:|attachment:|#|\/(?![/\\]))/i;
 
 function renderInlineMd(text: string): string {
   let s = escapeHtml(text);
   // Inline code first so its contents aren't re-processed.
   s = s.replace(/`([^`]+)`/g, (_m, c: string) => `<code>${c}</code>`);
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, t: string, href: string) =>
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, t: string, href: string) => {
     // Anything outside the allowlist is not merely left unlinked but
     // rendered as its own plain visible text - content is never dropped,
     // only the dangerous href.
-    ALLOWED_LINK_HREF.test(href) ? `<a href="${href}">${t}</a>` : t
-  );
+    const normalized = normalizeHrefForGuard(href);
+    return ALLOWED_LINK_HREF.test(normalized) ? `<a href="${normalized}">${t}</a>` : t;
+  });
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
   return s;

@@ -1,0 +1,159 @@
+# GENERATED SOURCE OF TRUTH. Hand-edit THIS file (docs/backlog.yml) -
+# never docs/BACKLOG.md, which is rendered from it by
+# `npm run backlog:render` and checked by `npm run backlog:check-generated`.
+#
+# Schema: src/tools/backlog/types.ts (BacklogItem). Read/write path:
+# src/tools/backlog/yaml-codec.ts.
+- id: 'V1'
+  state: 'verification'
+  title: 'Look at the announcement preview. Its appearance is a reading claim - the styling is ported from course-intel.module.css and reviewed by eye, which is how the unstyled version passed review the first time. Check that bullets indent, paragraphs separate, and links look like links.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Open the walkthrough announcement panel'
+  from: 'b3701cd'
+  note: ''
+- id: 'V2'
+  state: 'verification'
+  title: 'Paste a copied draft into Canvas''s editor. Whether a real browser accepts the multi-type clipboard write, and whether the rich flavour arrives as bold rather than asterisks, cannot be tested here: of the 9 it( blocks in src/app/components/ui/clipboard.test.ts (grep -c "  it(" ), the ones exercising ClipboardItem install a stub class, and one deliberately stubs it as undefined to pin the fallback.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Copy a draft, paste into Canvas'
+  from: 'b3701cd'
+  note: ''
+- id: 'V3'
+  state: 'verification'
+  title: 'Read the orphan sweep''s first production tick''s raw body. The delete accounting ships OBSERVATIONAL ONLY because what remove() returns for a named delete is unmeasured; matchedByLeafName / matchedByFullPath exist to settle it in one tick. Unblocks N3 (formerly 3.2).'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'The first run''s JSON body in the Actions log'
+  from: 'c25bdec'
+  note: ''
+- id: 'V4'
+  state: 'verification'
+  title: 'Confirm the sweep''s prefix form matches. A ruling pinned ${userId}/${segment} with no trailing slash; only a live listing proves Supabase agrees. Signature of a wrong guess: a positive scannedUserPrefixes with every other count at zero.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Same tick as V3 (formerly 1.3)'
+  from: 'c25bdec'
+  note: ''
+- id: 'V5'
+  state: 'verification'
+  title: 'Confirm the scheduled workflow fires.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'The Actions web UI after merge'
+  from: 'c25bdec'
+  note: ''
+- id: 'V6'
+  state: 'verification'
+  title: 'Check whether a killed tick leaves its start-of-tick line. src/app/api/cron/sweep-orphan-uploads/route.ts:92 logs it; the sibling run-schedules/ route chose a durable DB write instead, precisely because a tick killed at the platform cap never runs finally.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: 'Vercel function logs after the first timeout'
+  from: 'c25bdec'
+  note: ''
+- id: 'D1'
+  state: 'owner'
+  title: 'How should a researched resource link look to a student? An inline [label](url) sentence is the current default. A trailing "Related resources" LIST is ruled out: the zero-section branch of src/lib/walkthrough-announcement-prompt.ts forbids lists outright, so the presentation must be branch-independent or explicitly branch-aware. Why it is blocked: product judgment; changes what the architect designs.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: ''
+  note: ''
+- id: 'D2'
+  state: 'owner'
+  title: 'Should a terse template stay terse? I ruled that the announcement floor (greeting, sign-off, one item per paragraph) outranks an exemplar carrying none, because "announcement-shaped by default" was the ask. It is a deliberate override of exemplar fidelity and it is reversible. Why it is blocked: a product call I made on the owner''s behalf.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: ''
+  note: ''
+- id: 'N1'
+  state: 'unscoped'
+  title: 'Suggest-and-confirm roles for snapshot shots. Created by ruling H1-E. With H1 wave 1 removing the taught Read click, per-shot ROLE ARMING is the only remaining per-shot cost in the owner''s original complaint - the criteria banned inferring roles and used that ban to avoid touching arming. The ban on inferring from PIXELS stands and is correct: role is not a caption, it selects the prompt''s framing block, drives image-budget priority (snapshot-grade.ts:75), drives the Next-student keep/clear partition (snapshot-shot.ts:210) and drives missingRoles, so a mis-inference changes the score and the data lifecycle. The right shape is SUGGEST-AND-CONFIRM: the read pass already sends every shot to a vision model and returns per-shot results, and the tray already supports select-then-set re-roling, so a PROPOSED role the instructor confirms costs no extra model call and keeps role an instructor attribution. Do not build it blind.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: 'ruling H1-E'
+  note: 'Its own chunk (pre-migration queue note)'
+- id: 'N2'
+  state: 'unscoped'
+  title: 'Make the pinned rubric areas EDITABLE before grading (ruling B43-8). The real fix for rubric parsing, and the owner''s own answer forces it: their rubrics include points in a separate column or on their own line, which after flattening may not share a line with the criterion at all - no line-based matcher can ever recover that. Measured proof that the parser cannot be made reliable: "Thesis (20 pts)" and "Excellent (20 pts)" are byte-identical in grammar, so no punctuation rule separates a criterion from a rating tier; an end-of-line variant invented Excellent/Good/Poor as scored areas and read "See Figure 3 (2019)" as a 2019-point criterion. So stop making the parser''s precision load-bearing on a grade: snapshot-grade.ts:121 already computes and returns pinnedRubricAreas and SnapshotGradingPanel.tsx:834-858 already renders them in a live region - turn that display into a confirm/remove list so BOTH over-parse and under-parse are visible and correctable before grading. Disposal by construction (iteration-caps.md:16), not another guard. Copy must also name OVER-parse; today it warns only that missing areas were not graded.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: 'ruling B43-8'
+  note: 'Its own chunk; needs criteria (pre-migration queue note)'
+- id: 'N3'
+  state: 'unscoped'
+  title: 'Flip failedCount to gating in .github/workflows/sweep-orphan-uploads.yml. A one-line edit an agent makes here; blocked on V3''s (formerly 1.3''s) INPUT, not on capability. Until the semantics are known, a wrong guess in either direction poisons the only outbound alert this deployment has.'
+  owns: []
+  verify: null
+  blocked_by: ['V3']
+  instrument: ''
+  from: ''
+  note: 'Blocked by V3 (formerly 1.3) (pre-migration queue note)'
+- id: 'R1'
+  state: 'unscoped'
+  title: 'Key snapshot-grading citations by shot ID, not array position. Deleting or reordering a shot silently re-points every citation naming a later index - citations key on a numeric shotIndex (src/app/components/snapshot-grading/snapshot-citations.ts:24,63), and SnapshotGradingPanel.tsx:177-183 documents in its own comment that delete and reorder are uncovered. The current flag tracks only restored-at-mount and cleared-by-Next-student. The mechanism needs replacing, not another patch.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: '82f5bde'
+  note: 'Its own chunk (pre-migration Trigger column)'
+- id: 'R2'
+  state: 'unscoped'
+  title: 'Reclassify every requireOwner() call site into requireUser() or requireAppOwner(). requireOwner is `return requireUser()` (src/lib/supabase/auth.ts:451-452) - any active account passes - across 446 invocations (grep -roE "await requireOwner\(\)" src/ | wc -l). Its @deprecated block calls this "DELIBERATELY LESS RESTRICTIVE ... a tracked, temporary state". CORRECTION, measured 2026-09-14: an earlier version of this entry said requireAppOwner() has ZERO call sites. That is FALSE and I had copied it from docs/multi-user-login-acceptance-criteria.md:889 without opening the tree - the same defect this file''s own header rule exists to prevent. requireAppOwner appears in 15 files (grep -rcE "requireAppOwner\(\)" src/ | grep -v ":0" | wc -l), with 9 direct await requireAppOwner() invocations by my count; the scoping pass counted more by a broader pattern, so re-measure before relying on either number. Group C wired it into the account-admin actions, gated by action-guard-coverage.test.ts''s OWNER_ONLY map. The scoping pass also found the bigger constraint: the architecture doc''s RESOLVED 3 / SUPERSEDES section already TRIED per-call-site classification for the Canvas/GitHub cohort and REJECTED it, choosing resource-level assertions inside canvas-core.ts''s resolvers and github.repos.ts''s ghFetch instead - and I confirmed both files have zero guard calls today, so that replacement design is on record but UNBUILT. A literal call-site reclassification there would contradict a decision this repo already made. Scoping in scratchpad b44-scope.md; first wave proposed is the media-file cohort (42 call sites, 4 files) where call-site and resource-level assertion coincide.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: 'docs/multi-user-login-acceptance-criteria.md A6'
+  note: 'Its own wave (pre-migration Trigger column)'
+- id: 'G1'
+  state: 'unscoped'
+  title: 'A hung exemplar fetch disables Generate indefinitely. WalkthroughAnnouncementPanel.tsx:793 disables it on savedExemplarsLoading, and the Promise.all at :241-244 has no timeout - either call in it hanging does this, so a fix that times out only one leaves the hole open. Two loading signals exist. CORRECTION, measured: an earlier version of this entry said "neither of which is an error state", which is FALSE for AnnouncementDraftSlot.tsx:103 - that line is a ternary whose false arm renders "Could not load your saved formats." with a Retry button at :104-108. The substance survives anyway, and that is the point worth keeping: on a HANG rather than a rejection, savedFailed stays false, so the error arm never renders and the user sees "Loading your saved formats..." forever. An error state that only a rejection can reach is not coverage for a hang. WalkthroughAnnouncementPanel.tsx:686 has no error arm at all.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: 'b3701cd'
+  note: 'Green suite, dead button (pre-migration Note column)'
+- id: 'G2'
+  state: 'unscoped'
+  title: 'Snapshot grading''s restored list is seeded from a localStorage-reading useState initializer on an SSR''d surface. The identical initializer already ships elsewhere and a structural mismatch recovers by re-render, so this is inherited rather than new.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: '82f5bde'
+  note: ''
+- id: 'G3'
+  state: 'unscoped'
+  title: 'The sweep''s per-call latency assumption (~250ms, src/lib/orphan-upload-sweep.ts:46,55) underpins both MAX_USER_PREFIXES_PER_TICK and PHASE1_ROOT_LISTING_BUDGET_MS. A wrong assumption makes the sweep UNDER-clean, which is the safe direction.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: 'c25bdec'
+  note: 'First tick''s timing (pre-migration Note column)'
+- id: 'G4'
+  state: 'unscoped'
+  title: 'An LLM call with no timeout runs under the platform default, not 60s. callLlm takes no AbortSignal, so nothing bounds a first attempt; learning-resource-links.ts:55-66 documents a 90-100s case and says the mitigation is RETRY_BUDGET_MS = 32_000 (:121), which gates RETRY decisions and does not bound the first attempt. Compounding it: src/app/page.tsx exports NO maxDuration (grep -n maxDuration src/app/page.tsx returns nothing), and this repo already records in its own comments (src/app/api/automations/run-now/route.ts:35-37, course-intel/ask/route.ts:48-59) that Next honours maxDuration for Server Actions only at the PAGE level. So these actions run under the platform default rather than the 60s Hobby figure. When the platform kills the invocation the action''s own catch never runs, so the client gets a raw transport failure instead of the {error} string the action would have returned. Reachable today via discussion-replies.ts:786 and learning-resources-generator.ts:229. Recorded because two separate G3 design passes found it and filed it nowhere.'
+  owns: []
+  verify: null
+  blocked_by: []
+  instrument: ''
+  from: 'c25bdec-era, pre-existing'
+  note: 'Its own chunk; needs an owner decision on page-level maxDuration vs a call-level bound (pre-migration Note column)'

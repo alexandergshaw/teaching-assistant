@@ -71,8 +71,12 @@ export interface UseSnapshotShotsReturn {
   atCapacity: boolean;
   /** Returns the new shot, or null when the tray is already at MAX_SHOTS -
    *  the caller (the panel) is responsible for the snap-time wire-budget
-   *  pre-flight (checkShotWireBudget) BEFORE calling this, per A7f. */
-  addShot: (base64: string, source: SnapshotSource) => SnapshotShot | null;
+   *  pre-flight (checkShotWireBudget) BEFORE calling this, per A7f.
+   *  `role` defaults to the currently armed role; N5 passes "submission"
+   *  explicitly for a shot extracted from a ZIP, since that must always
+   *  land as a submission shot regardless of what role happens to be
+   *  armed. */
+  addShot: (base64: string, source: SnapshotSource, role?: SnapshotRole) => SnapshotShot | null;
   removeShotById: (id: string) => void;
   setRole: (id: string, role: SnapshotRole) => void;
   setNote: (id: string, note: string) => void;
@@ -118,11 +122,11 @@ export function useSnapshotShots(): UseSnapshotShotsReturn {
   }, []);
 
   const addShot = useCallback(
-    (base64: string, source: SnapshotSource): SnapshotShot | null => {
+    (base64: string, source: SnapshotSource, role?: SnapshotRole): SnapshotShot | null => {
       if (shotsRef.current.length >= MAX_SHOTS) return null;
       const shot: SnapshotShot = {
         id: mintShotId(Date.now()),
-        role: armedRole,
+        role: role ?? armedRole,
         base64,
         previewUrl: base64ToObjectUrl(base64),
         source,

@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "../../page.module.css";
 import { extractPastedImageFiles, isFileDragTypes } from "@/lib/chat/attachments";
+import { extractSubmissionImageFiles } from "@/lib/submission-archive-sniff";
 import { DEFAULT_PROVIDER } from "@/lib/llm";
 import { TextField, Button } from "@mui/material";
 import { editAssessmentField } from "../assessment-shared/assessment-row";
@@ -386,13 +387,13 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   const [encodeNotice, setEncodeNoticeState] = useState<string | null>(null);
 
   const addEncodedShot = useCallback(
-    (base64: string, source: "capture" | "paste" | "drop") => {
+    (base64: string, source: "capture" | "paste" | "drop", role?: SnapshotRole) => {
       const budget = checkShotWireBudget(base64);
       if (!budget.ok) {
         setEncodeNoticeState(budget.error ?? "That shot was too large to add.");
         return;
       }
-      const shot = addShot(base64, source);
+      const shot = addShot(base64, source, role);
       if (!shot) {
         setEncodeNoticeState(`Already at the ${MAX_SHOTS}-shot limit - delete a shot to add another.`);
         return;
@@ -428,6 +429,44 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       }
     },
     [encodeFile, addEncodedShot]
+  );
+
+  // N5: a student submission ZIP as an alternative to a screenshot for the
+  // "submission" role. extractSubmissionImageFiles (src/lib/submission-
+  // archive-sniff.ts) does the caps/classify/refuse-vs-accept decision
+  // BEFORE decompressing anything past what the decision needs; every image
+  // it returns is re-encoded through the SAME canvas as any other file (the
+  // encodeFile call below is byte-for-byte the same call handleFiles above
+  // makes), and always lands with role "submission" regardless of what role
+  // happens to be armed - a ZIP is never a rubric or an assignment shot.
+  const handleZipFile = useCallback(
+    async (file: File) => {
+      const remainingSlots = MAX_SHOTS - shots.length;
+      const result = await extractSubmissionImageFiles(file, remainingSlots);
+      if (result.status !== "ok") {
+        // Not a zip / too many entries / too large / refused over budget /
+        // nothing usable - each reads differently (AC-F3), and none of them
+        // silently drops the archive.
+        setEncodeNoticeState(result.message);
+        announce(result.message);
+        return;
+      }
+      for (const image of result.images) {
+        const base64 = await encodeFile(image.file);
+        if (!base64) {
+          setEncodeNoticeState(`Could not read "${image.name}" from "${file.name}" as an image.`);
+          continue;
+        }
+        addEncodedShot(base64, "drop", "submission");
+      }
+      if (result.ignoredNames.length > 0) {
+        // AC-F2: unusable entries are reported even when the archive
+        // otherwise succeeded - never silently dropped.
+        setEncodeNoticeState(result.message);
+      }
+      announce(result.message);
+    },
+    [shots.length, encodeFile, addEncodedShot, announce]
   );
 
   // A1c: paste attached to the panel's own root element, NEVER document -
@@ -638,8 +677,17 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       onDrop={(e) => {
         if (!isFileDragTypes(e.dataTransfer.types)) return;
         e.preventDefault();
-        const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
-        if (files.length > 0) void handleFiles(files, "drop");
+        const dropped = Array.from(e.dataTransfer.files);
+        const images = dropped.filter((f) => f.type.startsWith("image/"));
+        // N5: a .zip is silently discarded by the image-only filter above -
+        // this is the line that makes the archive path reachable at all
+        // (drop is the only intake surface a .zip has; MIME sniffing on a
+        // zip is unreliable across browsers/OSes, so the extension decides).
+        const zips = dropped.filter(
+          (f) => !f.type.startsWith("image/") && f.name.toLowerCase().endsWith(".zip")
+        );
+        if (images.length > 0) void handleFiles(images, "drop");
+        for (const zip of zips) void handleZipFile(zip);
       }}
     >
       <p className={styles.fieldHint}>

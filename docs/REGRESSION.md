@@ -42260,3 +42260,100 @@ seen fail is not a scan, and this repo has been burned by exactly that before.
   an agent.
 - **Backlog G6**: the sibling exemplar actions return an empty SUCCESS for a
   blank `courseId` before querying. Same false-claim family, different feature.
+
+## 417. N5: ZIP intake for a snapshot-grading submission
+
+Backlog N5, the owner's ask of 2026-09-14. **Two of its three parts were
+already SHIPPED** and the item was narrowed to ZIP intake before any code was
+written - the repeat loop (assignment + rubric surviving Next student) at
+`snapshot-shot.ts:228,230`, and multiple captures per role at `:156`. H1 had
+taught that lesson directly: the owner reported this workflow as missing when
+it was merely hidden. What remained of those two is a DISCOVERABILITY question,
+escalated to the owner rather than rebuilt.
+
+### 417a - the invariant that decided the design
+
+Measured: `snapshot-grade.ts:92` and `snapshot-read.ts:52` both push
+`{ inlineData: { mimeType: "image/jpeg", data: shot.base64 } }` - HARD-CODED -
+while `detectImageMimeFromBase64` accepts jpeg/png/webp. The validator is
+WIDER than anything any producer emits, and the hard-coded mime is correct only
+because every existing producer re-encodes to JPEG
+(`useSnapshotCapture.ts:187,204` via `toDataURL("image/jpeg", SNAP_JPEG_QUALITY)`).
+
+**An extracted PNG would have passed validation and been handed to the model
+labelled as JPEG.** So extracted images are re-encoded to JPEG client-side
+through the SAME `encodeFile` path every other producer uses, and **neither
+server action was touched**. The security criteria are satisfied by
+construction rather than by a new check. Cost, stated: JPEG re-encoding is
+lossy and drops alpha - which is already true of every shot this panel takes.
+
+**If this is ever revisited:** the hard-coded `mimeType` is load-bearing and
+undocumented at its own call sites. A future producer that does NOT re-encode
+silently mislabels its bytes to the model.
+
+### 417b - the two caps, and why they are shaped this way
+
+- **Entry count and uncompressed bytes are checked BEFORE decompression.**
+  `entry._data.uncompressedSize` is readable from a loaded zip without
+  expanding it - verified in-process with a throwaway probe. An earlier
+  criterion of mine would have tallied bytes WHILE decompressing, which pays
+  the exact cost the cap exists to avoid.
+- **At the shot budget the intake REFUSES and states both numbers**, never
+  truncates. `MAX_SHOTS = 12` (`snapshot-shot.ts:43`), `canAddShot` (`:97-99`)
+  and `snapshot-read.ts:38` already treat exceeding the cap as an ERROR. My own
+  first recommendation was to take the first N and report the rest; that would
+  have scored a PARTIAL submission as if it were whole, with no way for the
+  instructor to tell - the same false-claim family as entries 415 and 416.
+
+### 417c - reachability, which this nearly shipped without
+
+`SnapshotGradingPanel.tsx`'s `onDrop` filtered dropped files to
+`f.type.startsWith("image/")`, so a `.zip` was SILENTLY DISCARDED. Without
+changing that line the whole feature would have shipped dead with every gate
+green, which this repo has done before. Drop now splits images from `.zip`s **by
+extension**, because drag MIME for archives is unreliable across browsers and
+operating systems.
+
+Intake is drop-ONLY. No file picker was added; the panel has none for any file
+type today. That is a recorded scope call, not an omission.
+
+### 417d - what is measured true today
+
+`@(Get-Content <path>).Count`: `submission-zip-intake.ts` 158,
+`submission-zip-intake.test.ts` 184, `submission-archive-sniff.ts` 355 -> 468,
+`submission-archive-sniff.test.ts` 619, `SnapshotGradingPanel.tsx` 873 -> 921
+(ceiling 1000, so **79 lines of headroom** - the next feature to touch this
+panel should expect to split it), `useSnapshotShots.ts` 179 -> 182.
+
+Exactly one module in this repo imports JSZip for submissions:
+`extractSubmissionImageFiles` was added as a SIBLING EXPORT inside
+`submission-archive-sniff.ts` rather than as a new module.
+`sniffSubmissionArchive` could not be reused as-is - it reads entries as
+`async("string")` and returns sniffed metadata - and `sniffEntries`'s contract
+(LMS metadata fingerprinting) is a different question from "which entries are
+images and do they fit the budget". All decision logic lives in the new pure
+leaf, so it is testable without touching JSZip's runtime shape.
+
+### 417e - what today's tests will NOT notice
+
+`handleZipFile`, the `onDrop` split, and the role wiring are in `.tsx`/`.ts`
+React files that NO test exercises - vitest is node-env and renders no
+component. Every decision that could be moved to the pure side was; the panel
+holds thin glue only. Whether the intake control is discoverable, and whether
+the report of unread entries actually renders, are reading claims.
+
+Proven able to fail: the byte cap was sabotaged (check removed, 2 tests went
+red, restored, 21/21 green), and the fixture tests build real archives
+in-process with JSZip - not-a-zip, happy path with a reported `.docx`,
+over-budget refusal stating both numbers, and empty-but-valid all covered.
+
+### 417f - one defect only the type gate caught
+
+The build's own vitest run was fully green while `tsc` failed: JSZip types
+`async("uint8array")` as `Uint8Array<ArrayBufferLike>`, and `BlobPart` requires
+`ArrayBufferView<ArrayBuffer>` - `ArrayBufferLike` also admits
+`SharedArrayBuffer`, which `File` cannot take. Fixed by copying into a fresh
+ArrayBuffer-backed view rather than casting, because a cast would assert
+something about the backing buffer JSZip does not promise. **Third time this
+session that `tsc` caught what a green suite hid** - see entry 415 and the
+walkthrough-announcement wave for the other two.

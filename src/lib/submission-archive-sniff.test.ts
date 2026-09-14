@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { sniffEntries, mergeSniffedValues, type ArchiveEntry } from "./submission-archive-sniff";
+import JSZip from "jszip";
+import {
+  sniffEntries,
+  mergeSniffedValues,
+  extractSubmissionImageFiles,
+  type ArchiveEntry,
+} from "./submission-archive-sniff";
 
 describe("sniffEntries", () => {
   // Canvas bulk export pattern: <name>_<digits>_<digits>_<rest>
@@ -555,5 +561,59 @@ describe("mergeSniffedValues", () => {
     expect(result.assignmentLabel).toBe("My Assignment");
     expect(result.pointsPossible).toBe(50);
     expect(result.rubricText).toBe("My rubric");
+  });
+});
+
+// N5: extractSubmissionImageFiles. Real archives built in-process with
+// JSZip - per n5-acceptance-criteria.md's Ruling N5-A, the JSZip round trip
+// (generateAsync -> loadAsync -> async(...)) and File.arrayBuffer() both run
+// in this node-env vitest suite with no network, so this is a real fixture
+// test, not a mock of one.
+describe("extractSubmissionImageFiles", () => {
+  async function zipFile(entries: Record<string, string>, name = "submission.zip"): Promise<File> {
+    const zip = new JSZip();
+    for (const [path, content] of Object.entries(entries)) {
+      zip.file(path, content);
+    }
+    const arrayBuffer = await zip.generateAsync({ type: "arraybuffer" });
+    return new File([arrayBuffer], name);
+  }
+
+  it("not a zip: a corrupt file is reported as invalid, not thrown", async () => {
+    const notAZip = new File([new Uint8Array([1, 2, 3, 4, 5])], "notazip.zip");
+    const result = await extractSubmissionImageFiles(notAZip, 12);
+    expect(result.status).toBe("not-a-zip");
+    expect(result.message).toContain("not a valid zip archive");
+  });
+
+  it("happy path: images become Files and non-image entries are reported, not dropped", async () => {
+    const file = await zipFile({
+      "a.jpg": "fake-jpeg-bytes",
+      "b.png": "fake-png-bytes",
+      "essay.docx": "fake-docx-bytes",
+    });
+    const result = await extractSubmissionImageFiles(file, 12);
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.images.map((i) => i.name).sort()).toEqual(["a.jpg", "b.png"]);
+      expect(result.images.every((i) => i.file instanceof File)).toBe(true);
+      expect(result.ignoredNames).toEqual(["essay.docx"]);
+      expect(result.message).toContain("essay.docx");
+    }
+  });
+
+  it("boundary: more usable images than remaining slots REFUSES and states both numbers, never truncates", async () => {
+    const file = await zipFile({ "a.jpg": "1", "b.jpg": "2", "c.jpg": "3" });
+    const result = await extractSubmissionImageFiles(file, 2);
+    expect(result.status).toBe("refused");
+    expect(result.message).toContain("3 image(s)");
+    expect(result.message).toContain("2 submission slot(s)");
+  });
+
+  it("an archive with nothing usable in it reads differently from a corrupt archive", async () => {
+    const file = await zipFile({ "essay.docx": "x", "notes.pdf": "y" });
+    const result = await extractSubmissionImageFiles(file, 12);
+    expect(result.status).toBe("empty");
+    expect(result.message).not.toContain("not a valid zip archive");
   });
 });

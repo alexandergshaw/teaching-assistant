@@ -3,6 +3,7 @@
 // Cartridge archives (.imscc) reuse parseCartridgeBlob for title/rubrics/points.
 
 import { parseCartridgeBlob } from "@/lib/cartridge-import";
+import { decideZipIntake, describeZipIntakeDecision, type ArchiveEntryMeta } from "@/lib/submission-zip-intake";
 
 export interface SniffResult {
   lms?: "canvas" | "brightspace" | "blackboard" | "moodle";
@@ -352,4 +353,124 @@ export async function sniffSubmissionArchive(file: File): Promise<SniffResult> {
 
   // Use sniffEntries for plain zips
   return sniffEntries(entries, file.name, textOf);
+}
+
+// ---------------------------------------------------------------------------
+// N5: ZIP intake for a student SUBMISSION (as opposed to a course cartridge).
+//
+// Reuse decision, evaluated rather than assumed: `sniffEntries` above reads
+// entries as `{ name, dir }` and returns sniffed LMS METADATA (course label,
+// points, rubric text) - it fingerprints the same Canvas/Moodle/Brightspace/
+// Blackboard archive shapes this feature meets, but its return contract is
+// metadata, not "which entries are images and did the archive fit the shot
+// budget". That is a different question with a different answer shape, so it
+// is not reused directly. What IS reused is this module's role as the ONE
+// place that imports JSZip for submissions: `extractSubmissionImageFiles`
+// below is a SIBLING export in this same file, opening the same JSZip
+// dependency `sniffSubmissionArchive` above already does, with the same
+// "not a valid archive" catch shape - not a second module doing its own
+// zip-opening.
+//
+// The actual classification/cap/refuse-vs-accept DECISION is delegated to
+// `decideZipIntake` (src/lib/submission-zip-intake.ts), a pure leaf with no
+// JSZip import - that is where the caps are enforced and where the tests
+// that must not touch JSZip's runtime shape live.
+// ---------------------------------------------------------------------------
+
+export interface ExtractedSubmissionImage {
+  /** The entry's path inside the archive, for messages/notices only. */
+  name: string;
+  /** The extracted bytes, repackaged as a File so the existing
+   *  encodeFile(file) path (useSnapshotCapture.ts) re-encodes it to JPEG
+   *  through the SAME canvas a live snap or a dropped image goes through -
+   *  no new encoding path, no mimeType decision made here. */
+  file: File;
+}
+
+export type ExtractSubmissionImagesResult =
+  | { status: "not-a-zip"; message: string }
+  | { status: "refused"; message: string }
+  | { status: "empty"; message: string }
+  | { status: "ok"; images: ExtractedSubmissionImage[]; ignoredNames: string[]; message: string };
+
+/**
+ * Opens a submission archive and returns the images it holds as ordinary
+ * Files, ready for the existing capture path's encodeFile(). Caps are
+ * checked (via decideZipIntake) against the zip's DECLARED entry sizes
+ * BEFORE any entry is decompressed - only entries that survive the cap
+ * check, classification, and the remaining-shot-budget check are ever
+ * expanded.
+ *
+ * `remainingSlots` is the caller's MAX_SHOTS minus its current shot count;
+ * if the archive holds more usable images than that, this REFUSES rather
+ * than taking the first N (see decideZipIntake's own doc comment).
+ */
+export async function extractSubmissionImageFiles(
+  file: File,
+  remainingSlots: number
+): Promise<ExtractSubmissionImagesResult> {
+  const JSZip = (await import("jszip")).default;
+  const arrayBuffer = await file.arrayBuffer();
+
+  // JSZip's public types do not expose `_data` (it is how the library itself
+  // stores the parsed central-directory record), but it is readable on a
+  // loaded zip without decompressing anything - the fact this whole design
+  // rests on. Typed loosely and locally, matching this file's own ZipInstance
+  // cast pattern above.
+  type ZipEntry = {
+    dir: boolean;
+    _data?: { uncompressedSize?: number };
+    async: (type: "uint8array") => Promise<Uint8Array>;
+  };
+  type ZipInstance = {
+    forEach: (callback: (path: string, entry: ZipEntry) => void) => void;
+  };
+
+  let zip: ZipInstance;
+  try {
+    zip = (await JSZip.loadAsync(arrayBuffer)) as ZipInstance;
+  } catch {
+    // AC-F3: "not a zip" and "a zip with nothing usable in it" are different
+    // facts and must read differently - this must not throw out of the
+    // intake path, mirroring sniffSubmissionArchive's own catch above.
+    return { status: "not-a-zip", message: `"${file.name}" is not a valid zip archive - it was not read.` };
+  }
+
+  const entries: ArchiveEntryMeta[] = [];
+  const entryMap = new Map<string, ZipEntry>();
+  zip.forEach((path, entry) => {
+    entries.push({ name: path, dir: entry.dir, uncompressedSize: entry._data?.uncompressedSize ?? 0 });
+    entryMap.set(path, entry);
+  });
+
+  const decision = decideZipIntake(entries, remainingSlots);
+  const message = describeZipIntakeDecision(decision, file.name);
+
+  if (decision.status === "too-many-entries" || decision.status === "too-large" || decision.status === "refused-over-budget") {
+    return { status: "refused", message };
+  }
+  if (decision.status === "empty") {
+    return { status: "empty", message };
+  }
+
+  // decision.status === "ok" - only the entries the decision accepted are
+  // ever decompressed.
+  const images: ExtractedSubmissionImage[] = [];
+  for (const meta of decision.images) {
+    const entry = entryMap.get(meta.name);
+    if (!entry) continue;
+    const bytes = await entry.async("uint8array");
+    const baseName = meta.name.split("/").pop() || meta.name;
+    // Copy into a fresh, ArrayBuffer-backed view before handing it to File().
+    // JSZip types its result as Uint8Array<ArrayBufferLike>, and BlobPart
+    // requires ArrayBufferView<ArrayBuffer> - ArrayBufferLike also admits
+    // SharedArrayBuffer, which File cannot take. This is a real copy rather
+    // than a cast on purpose: a cast would assert something about the backing
+    // buffer that JSZip does not actually promise.
+    const owned = new Uint8Array(bytes.length);
+    owned.set(bytes);
+    images.push({ name: meta.name, file: new File([owned], baseName) });
+  }
+
+  return { status: "ok", images, ignoredNames: decision.ignoredNames, message };
 }

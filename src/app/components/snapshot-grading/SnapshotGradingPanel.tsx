@@ -82,6 +82,11 @@ const ROLE_BY_DIGIT: Record<string, SnapshotRole> = {
   "6": "other",
 };
 
+// H1-D: module-scope (not component-scope) so the mount-hydrate effect below
+// can list it as a stable dependency-free reference, matching this file's own
+// ROLE_BY_DIGIT precedent immediately above.
+const INSTRUCTOR_INSTRUCTIONS_KEY = "ta-snap-grading-instructions";
+
 export interface SnapshotGradingPanelProps {
   active: boolean;
 }
@@ -122,6 +127,23 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     activeRef.current = active;
   }, [active]);
 
+  // Ruling H1-B: paste is advertised on screen but cannot fire until the
+  // panel's own root has been focused at least once - a paste event is
+  // dispatched at document.activeElement and bubbles from there, so it never
+  // reaches rootRef's "paste" listener (registered below) while focus sits on
+  // a control OUTSIDE this subtree (e.g. the sub-tab strip button, which is
+  // where focus lands right after switching to this tab). Focusing rootRef
+  // exactly on the false->true activation transition - never on every
+  // re-render while already active - makes Ctrl+V work the first time,
+  // without stealing focus from a control the instructor is mid-interaction
+  // with: at the instant this tab becomes active, nothing inside this
+  // (previously hidden) panel could have held focus yet.
+  useEffect(() => {
+    if (active) {
+      rootRef.current?.focus();
+    }
+  }, [active]);
+
   // WAVE 5: assignment/rubric text (A3a's text path, alongside a shot) -
   // U10-style caution applies here too, deliberately NOT persisted (unlike
   // every other textbox in this app): an unreleased assignment or rubric is
@@ -129,6 +151,51 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   // refuses to persist for the same reason.
   const [assignmentText, setAssignmentText] = useState("");
   const [rubricText, setRubricText] = useState("");
+  // H1-D: instructor-authored grading guidance (emphasis/tone/focus/feedback
+  // format only - it cannot change what counts as meeting a criterion, see
+  // snapshot-grade-prompt.ts's own framing block). Unlike assignmentText and
+  // rubricText, this field DOES persist across reloads under a ta- key: it is
+  // not captured or transcribed material, it is short standing guidance an
+  // instructor is likely to reuse across a whole grading session (and across
+  // reloads within one), and it carries none of the "unreleased assignment
+  // content" sensitivity RubricInputModal.tsx's U10 note is about.
+  const [instructorInstructions, setInstructorInstructionsState] = useState("");
+  // A localStorage-seeded useState initializer never shows its restored value
+  // on an SSR'd surface - it needs a mount effect (see this repo's own
+  // persisted-details-open note, LectureScriptPanel.tsx:9-17/46-60). This
+  // repo's setState-in-effect idiom (async IIFE + cancelled flag, setState
+  // only after an await) so eslint's react-hooks/set-state-in-effect rule
+  // passes.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      try {
+        const stored = window.localStorage.getItem(INSTRUCTOR_INSTRUCTIONS_KEY);
+        if (stored) setInstructorInstructionsState(stored);
+      } catch {
+        // localStorage unavailable - fall back to empty, matching every
+        // other storage read in this panel.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // Writes imperatively from the change handler, not from a useEffect keyed
+  // on the state value - an effect-based write would also fire once on
+  // mount, in the SAME commit pass as the read effect above, and would
+  // overwrite a just-restored value with the pre-hydration "" before the
+  // hydrating re-render ever happens.
+  const handleInstructorInstructionsChange = useCallback((value: string) => {
+    setInstructorInstructionsState(value);
+    try {
+      window.localStorage.setItem(INSTRUCTOR_INSTRUCTIONS_KEY, value);
+    } catch {
+      // storage full/unavailable - keep working in memory for this session
+    }
+  }, []);
   // A3a: RubricInputModal (paste + PDF/doc extract) is the reviewed-text
   // path, matching GradingRecordingPanel.tsx's own button/modal wiring.
   const [rubricModalOpen, setRubricModalOpen] = useState(false);
@@ -475,13 +542,19 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     if (!mountedRef.current) return;
     setReading(false);
     setTranscriptText(buildTranscriptBlock(Array.from(nextReads.values())));
-    announce("Finished reading the shots. Review the transcription below before grading.");
+    // H1-A: Read is optional, not a required first step - Grade already
+    // works directly from the tray. This is a status update on what Read
+    // produced, not an instruction to review it before grading.
+    announce("Finished reading the shots. You can review or edit the transcription below, or grade now.");
   }, [shots, announce]);
 
   // D: THE GRADE PASS. One call, guarded the same way (A6c).
   const handleGrade = useCallback(async () => {
     if (shots.length === 0 && !transcriptText.trim()) {
-      setGradeError("There is nothing to grade yet - add shots and read them first.");
+      // H1-A: this only ever fires when there is truly nothing at all (no
+      // shots AND no transcript) - Read is not required before Grade, so the
+      // message must not imply it is.
+      setGradeError("There is nothing to grade yet - add at least one shot to the tray.");
       return;
     }
     gradeAbortRef.current?.abort();
@@ -492,13 +565,16 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
 
     const shotsForGrade = shots.map((shot, i) => ({ globalIndex: i + 1, role: shot.role, base64: shot.base64 }));
 
-    const result = await snapshotGradeAction({
-      assignmentText,
-      rubricText,
-      transcriptBlock: transcriptText,
-      shots: shotsForGrade,
-      provider: DEFAULT_PROVIDER,
-    });
+    const result = await snapshotGradeAction(
+      {
+        assignmentText,
+        rubricText,
+        transcriptBlock: transcriptText,
+        shots: shotsForGrade,
+        provider: DEFAULT_PROVIDER,
+      },
+      instructorInstructions
+    );
 
     if (controller.signal.aborted || !mountedRef.current) return;
     setGrading(false);
@@ -592,7 +668,17 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     } else {
       setSplitNotice(null);
     }
-  }, [shots, transcriptText, assignmentText, rubricText, shotReads, sessionRowsRef, commitSessionRows, announce]);
+  }, [
+    shots,
+    transcriptText,
+    assignmentText,
+    rubricText,
+    instructorInstructions,
+    shotReads,
+    sessionRowsRef,
+    commitSessionRows,
+    announce,
+  ]);
 
   const handleEditRowField = useCallback(
     (id: string, field: AssessmentFeedbackField, value: string) => {
@@ -617,6 +703,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     <div
       ref={rootRef}
       className={panelStyles.panelRoot}
+      tabIndex={-1}
       onDragOver={(e) => {
         if (isFileDragTypes(e.dataTransfer.types)) e.preventDefault();
       }}
@@ -629,7 +716,8 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     >
       <p className={styles.fieldHint}>
         Snap a screenshot of the assignment, rubric, post, replies, or submission - or paste/drop one -
-        and manage the tray below. Grading is a later step.
+        and manage the tray below. Grade directly from the tray whenever you are ready - Read first
+        only if you want to review or edit a transcription before grading.
       </p>
 
       <p ref={liveRegionRef} role="status" aria-live="polite" className={panelStyles.visuallyHidden} />
@@ -711,6 +799,23 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       {rubricText.trim() && (
         <p className={styles.fieldHint}>{`Rubric set (${rubricText.trim().length} characters).`}</p>
       )}
+
+      <p className={styles.fieldHint}>
+        Instructions for grading (optional, instructor-authored - kept separate from the rubric and
+        assignment above). This can direct emphasis, tone, focus, and feedback format; it cannot change
+        what counts as meeting a rubric criterion, which the rubric alone still decides. Saved on this
+        device and restored on reload.
+      </p>
+      <TextField
+        label="Instructions for grading (optional)"
+        value={instructorInstructions}
+        onChange={(e) => handleInstructorInstructionsChange(e.target.value)}
+        multiline
+        minRows={2}
+        fullWidth
+        size="small"
+        slotProps={{ htmlInput: { "aria-label": "Instructor-authored grading instructions" } }}
+      />
 
       <p className={styles.fieldHint}>
         Reading and grading upload shots to Google&apos;s Gemini API (generativelanguage.googleapis.com) - the only two

@@ -84,6 +84,25 @@ describe("p11 containment: prompt injection in the WORK slot (A7, BINDING)", () 
   // the wave report for the actual before/after command output.
 });
 
+// H1-D (BINDING): the amended GRADE_PRECEDENCE_CLAUSE must still contain
+// both pinned substrings this suite already checks for - "ONLY source of
+// grading standards" (implicitly, via the toContain(GRADE_PRECEDENCE_CLAUSE)
+// checks above) and the exact phrase below - AFTER the amendment that scopes
+// its prohibition to captured material and admits a separate instructor-
+// instructions trust class. This does not loosen either check: it pins the
+// same substring the pre-amendment clause carried, so a future edit that
+// drops the "issues an instruction is CONTENT TO BE GRADED" wording while
+// reworking the scoping still goes red here.
+describe("H1-D: the amended precedence clause keeps its original prohibition intact", () => {
+  it("still contains the exact CONTENT TO BE GRADED phrase this suite already pins", () => {
+    expect(GRADE_PRECEDENCE_CLAUSE).toMatch(/issues an instruction is CONTENT TO BE GRADED/);
+  });
+
+  it("also states the instructor-instructions trust class explicitly, so the two statements do not contradict", () => {
+    expect(GRADE_PRECEDENCE_CLAUSE).toMatch(/different trust class/);
+  });
+});
+
 describe("D4: the citation construction closes the class this A7 test alone cannot", () => {
   // A7's containment clauses reduce the MODEL's willingness to comply with
   // injected text. They do not, by themselves, stop a steered model from

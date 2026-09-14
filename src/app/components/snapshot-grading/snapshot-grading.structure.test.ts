@@ -82,10 +82,10 @@ describe('"snapgrade" is a member of the RecordingLaunchView union AND the RECOR
 // .test.ts's exact-set canary scans only src/app/components/recording/ plus
 // RecordingTab.tsx, and does NOT reach this directory - so without this
 // block, a persisted key landing here would be invisible to every existing
-// gate in this repo. Exact-set (not merely ordinal) since this wave's own
-// key set is small and fully known: only the armed-role toggle persists
-// (U10: rubric/assignment text does not exist in this wave, and even once it
-// lands in a later wave U10 says it must NOT persist).
+// gate in this repo. Exact-set (not merely ordinal). H1-D deliberately
+// persists ONE new field, the instructor-authored grading-instructions text
+// (ta-snap-grading-instructions) - unlike rubric/assignment text, which U10
+// still keeps out of localStorage for the same sensitivity reason as before.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -203,13 +203,18 @@ describe("directory-wide ta-snap-* key exact-set canary (this directory has no c
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("finds exactly the expected ta-snap-* key set (the armed-role toggle and the completed-assessment table; U10 keeps shot bytes and rubric/assignment text out of localStorage)", () => {
-    expect(distinctKeys).toEqual(["ta-snap-armed-role", "ta-snap-table"]);
+  it("finds exactly the expected ta-snap-* key set (the armed-role toggle, H1-D's instructor grading-instructions field, and the completed-assessment table; U10 keeps shot bytes and rubric/assignment text out of localStorage)", () => {
+    expect(distinctKeys).toEqual(["ta-snap-armed-role", "ta-snap-grading-instructions", "ta-snap-table"]);
   });
 
   it("ta-snap-armed-role is wired to both a read and a write", () => {
     expect(combinedSource).toMatch(/localStorage\.getItem\(\s*ARMED_ROLE_KEY\s*\)/);
     expect(combinedSource).toMatch(/localStorage\.setItem\(\s*ARMED_ROLE_KEY\s*,/);
+  });
+
+  it("H1-D: ta-snap-grading-instructions is wired to both a read and a write - a field that reaches this directory's source but is never actually read from or written to storage would still pass the exact-set check above", () => {
+    expect(combinedSource).toMatch(/localStorage\.getItem\(\s*INSTRUCTOR_INSTRUCTIONS_KEY\s*\)/);
+    expect(combinedSource).toMatch(/localStorage\.setItem\(\s*INSTRUCTOR_INSTRUCTIONS_KEY\s*,/);
   });
 });
 

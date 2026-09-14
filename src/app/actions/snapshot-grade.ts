@@ -50,14 +50,26 @@ interface SnapshotGradeActionResult {
 }
 
 export async function snapshotGradeAction(
-  request: SnapshotGradeRequestInput
+  request: SnapshotGradeRequestInput,
+  /** H1-D: instructor-authored grading guidance, typed directly into this
+   *  app - a different trust class from `assignmentText`/`rubricText`, which
+   *  can also carry text copied from captured work material. Optional
+   *  second parameter rather than a field on `SnapshotGradeRequestInput`
+   *  (shared with the read pass via snapshot-row.ts) so this feature's own
+   *  files stay the only ones touched by this change. Threaded straight into
+   *  buildSnapshotGradeSystemPrompt below - see that file for how it is
+   *  framed and how GRADE_PRECEDENCE_CLAUSE scopes it. */
+  instructorInstructions?: string
 ): Promise<SnapshotGradeActionResult | { error: string }> {
   await requireUser();
   try {
     const { shots, transcriptBlock, provider, assignmentText, rubricText } = request;
 
     if (shots.length === 0 && !transcriptBlock.trim()) {
-      return { error: "There is nothing to grade yet - add shots and read them first." };
+      // H1-A: this only ever fires when there is truly nothing at all (no
+      // shots AND no transcript) - Read is not required before Grade, so the
+      // message must not imply it is.
+      return { error: "There is nothing to grade yet - add at least one shot to the tray." };
     }
 
     // Derived HERE, not on the client: extractRubricCriteria reaches
@@ -75,7 +87,7 @@ export async function snapshotGradeAction(
     const selection = selectShotsForGradeCall(shots);
 
     const parts: LlmPart[] = [
-      { text: buildSnapshotGradeSystemPrompt(assignmentText, rubricText, criteria) },
+      { text: buildSnapshotGradeSystemPrompt(assignmentText, rubricText, criteria, instructorInstructions) },
       { text: `TRANSCRIPTION (role-labeled; the instructor may have corrected it before grading):\n${transcriptBlock}` },
     ];
     for (const shot of selection.included) {

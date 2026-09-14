@@ -50,8 +50,9 @@ export default function SnapshotCaptureBar({
   return (
     <div className={bar.captureBar}>
       <p className={bar.disclosure}>
-        Nothing here leaves this device until you grade. Reloading clears the shots; completed
-        assessments are not kept across a reload in this build.
+        Nothing here leaves this device until you press Read or Grade - both send shots to Google&apos;s
+        Gemini API. Reloading clears the shots in the tray, but completed assessments are kept and shown
+        again after a reload.
       </p>
 
       {shareError && (

@@ -14,6 +14,7 @@ the orchestrator's output is the most expensive text in the system.
 | `docs/loop/traps-spec.md` | Specification and measurement |
 | `docs/loop/traps-search.md` | Search and false absence |
 | `docs/loop/traps-orchestration.md` | Orchestration, spend, and the orchestrator's own rulings |
+| `docs/BACKLOG.md` | The queue: what is owed, by whom, and measured how. Read at step 0, appended at disposal, reconciled at the push |
 | `.claude/agents/` | Tier definitions. Tier lives here, never in a per-call override |
 
 ---
@@ -61,6 +62,12 @@ any particular run.
 
 ## Step 0, before anything else
 
+0. **Read `docs/BACKLOG.md` first.** It is the only durable record of what is
+   queued, so "compare against work already queued" is not answerable without
+   it. A residual, a relocated finding or an owed debt that is not in it does
+   not exist - `iteration-caps.md` already rules that a residual without an
+   owner, an instrument and a step is a deletion, and a residual with all three
+   that lives only in a scratchpad is the same deletion with extra steps.
 1. **Compare against work already done, queued, or in flight.** The requested
    feature is sometimes already built and merely unreachable - if so, say that
    and start the reachability work in the same turn.
@@ -128,15 +135,54 @@ never per feature and never several groups rolled together.
 **Root-cause analysis** for anything that failed, then fix and re-run until
 clean.
 
-**Push.** The loop ends at the push.
+**Record disposals as they happen; reconcile the backlog at the push.** A
+disposal is not recorded until it is in `docs/BACKLOG.md` - residuals and
+relocations are created during the check rounds, often many waves before the
+push, and step 0 already rules that one living only in a scratchpad is a
+deletion with extra steps. So append at disposal time. The push then reconciles
+and closes, pushed no later than the chunk's own push:
+
+- **Confirm every residual the chunk produced is present**, each with its
+  owner, its instrument and its step. A design pass that ends with five residuals and a
+  push that records none has deleted five requirements while reporting success.
+- **Add what was relocated or deferred** - findings routed out of scope, items
+  a disposal handed to a later chunk, and debts a ruling created ("the next
+  feature touching this file owes the extraction before its own code").
+- **Strike what this chunk closed**, and name the discharging commit in the
+  push's own commit message - not in the backlog, which holds no history. An
+  entry that stays open after the work landed teaches the next session to redo
+  it; a "closed" section teaches them to read a changelog nobody trims.
+- **Record what only the owner can settle**, separately from what an agent can:
+  anything that needs a live key, a real browser, a production tick or a
+  product decision. This environment has no `.env`, renders no component and
+  blocks the network, so that list is never empty and pretending otherwise is
+  how a residual becomes a silent assumption.
+
+**Every backlog entry names the commit that created it, and every quantity and
+quoted rule in it names the command or `file:line` that produced it.** The
+commit hash alone is an auditability token nobody is required to spend: the
+first version of this file named a commit on an entry whose line count was
+remembered rather than measured (891 against a real 900) and whose quoted rule
+had been deleted from the document it cited. Both passed every gate, because
+nothing in the suite reads `docs/`.
 
 ---
 
 ## Standing rules
 
-- **Never stop for permission while a backlog exists.** Finish a chunk, push it,
-  and start the next in the same turn. Details and the failure behind it in
+- **Never stop for permission while ACTIONABLE work remains** - that is,
+  `docs/BACKLOG.md`'s "next chunk" section, not the whole file. The owner-only
+  and owner-decision sections are never empty by construction (no `.env`, no
+  rendered component, no network under vitest), so binding the rule to "a
+  backlog exists" would make its precondition permanently true while the
+  entries keeping it true are exactly the ones an agent must NOT start. Finish
+  a chunk, push it, and start the next in the same turn. Details and the failure behind it in
   `traps-orchestration.md`.
+- **The backlog is the queue, not a diary.** It records what is OWED and by
+  whom, never what happened - `docs/REGRESSION.md` holds behaviour and the git
+  log holds history. The instance behind this rule: the first version of
+  `BACKLOG.md` shipped a "closed this session" section, which duplicated the
+  commit bodies badly and had no rule telling anyone to trim it.
 - **Minimize clicks** on any user surface, without trading away confirmation
   steps.
 - **Regression always happens.** Scale the effort; never scale it to zero.

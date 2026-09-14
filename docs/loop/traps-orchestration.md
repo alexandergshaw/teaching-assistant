@@ -84,7 +84,9 @@ that way and it is auditable. Record nothing and it is a hole.
 
 ## Never stall
 
-**While a backlog exists, do not end a turn without work already started on the
+**While ACTIONABLE work remains - `docs/BACKLOG.md`'s "next chunk" section, not
+the whole file, whose owner-only sections are never empty by construction - do
+not end a turn without work already started on the
 next item.** This is the single most repeated correction in this project's
 history. Announcing the next item is not starting it. Do not ask "should I
 proceed?", do not close with an offer to change course, and do not pause the

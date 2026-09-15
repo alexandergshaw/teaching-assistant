@@ -43503,3 +43503,588 @@ actually shown" assertion (a different property, Ruling N14-11) and by
 reading - no test in this repo renders a component, so the disclosure
 sentences' actual on-screen wording is a reading claim, per
 docs/loop/this-repo.md section 6.
+
+## 428. Area baseline - the recording grading page's capture-to-table path, before A9 and A10
+
+Written BEFORE hand-off for backlog A9 (`docs/BACKLOG.md:53`, "Deleted assessments
+come back on the recording grading page") and A10 (`docs/BACKLOG.md:49`, the
+Copy feedback duplication), per `docs/DEV_LOOP.md`'s Baseline paragraph and
+`docs/loop/seats.md`'s baseline section. This entry records what the code DOES
+today, read out of the source. It is an oracle, not a requirement: if either fix
+changes a line below that it was not filed to change, that is a regression.
+
+**Read at commit `10115a4`** (`git rev-parse --short HEAD`), working tree clean
+(`git status --short` returns nothing). The area's last CODE change is `fd8fa18`
+(`git log --oneline -3 -- src/app/components/grading-recording
+src/app/components/assessment-shared` returns `fd8fa18` / `540c088` / `b9cbcdc`,
+the three waves of the assessment-shared extraction); everything since is
+docs-only. Nothing below was executed. This repo's vitest is node-env and
+renders no component (`docs/loop/this-repo.md` section 2), so every claim below
+about the Copy feedback button, the Clear table confirm, focus or the clipboard
+is a READING CLAIM - no test in this repo has ever seen any of it run.
+
+### The coverage check, and a correction to the premise this baseline was filed on
+
+The design pass that filed this baseline reported that `docs/REGRESSION.md` has
+**ZERO** coverage of this area. That is not what `grep -a` says, and the
+difference is load-bearing: entry 411 (`:41233`) is an existing oracle over three
+of the functions on this path, and a later pass that believed the area was
+virgin could re-derive it wrongly.
+
+Measured with `grep -ac "<term>" docs/REGRESSION.md` on 2026-09-15, against this
+file as it stood at 43,505 lines (`@(Get-Content docs/REGRESSION.md).Count`)
+before this entry was appended. `grep -a` is mandatory here - this file carries a
+raw NUL byte, so plain `grep` classifies it as binary and reports nothing while
+exiting 0 (`docs/loop/this-repo.md` section 4):
+
+| term | matching lines before this entry |
+|---|---|
+| `grading-recording` | 9 |
+| `assessment-shared` | 18 |
+| `GradingRecordingPanel` | 3 |
+| `useGradingRows` | 3 |
+| `ta-rec-grade-table` | 1 |
+| `composeOverallComment` | 8 |
+| `AssessmentFeedbackFields` | 2 |
+| `Copy feedback` | 1 |
+| `removeGradingRow` | 1 |
+| `clearTable` | 2 |
+| `runExtraction` | **0** |
+| `extractedRef` | **0** |
+| `mergeExtractedSubmissions` | **0** |
+| `syncGradingRowsFromExtracted` | **0** |
+| `grading-capture-sync` | **0** |
+| `removeAssessmentRow` | **0** |
+| `joinAssessmentFeedback` | **0** |
+| `clearTableSignature` | **0** |
+
+So the accurate statement is narrower and more useful than "zero": **the
+capture-to-table path itself has no coverage at all** - not one line in this file
+mentions the extraction loop, the shadow submission array, the merge, or the sync
+- while three of its downstream row mutators DO have an oracle, at addresses that
+have since moved.
+
+What entry 411 (`:41233`) covers, and its disposition here. It baselined five
+functions before the assessment-shared extraction. Three are on this path, and
+all three MOVED in `b9cbcdc`/`540c088`/`fd8fa18`:
+
+| 411's claim | disposition | current address |
+|---|---|---|
+| `removeGradingRow` returns the SAME array reference when the id is absent (`411` cites `grading-rows.ts:271-274`) | KEPT, behaviour verbatim | `grading-rows.ts:279` is now a one-line wrapper over `removeAssessmentRow` (`assessment-shared/assessment-row.ts:170-173`), which holds the identical `if (!rows.some(...)) return rows` guard |
+| `gradingClearTableSignature(totalCount)` is `String(totalCount)` (`411` cites `grading-rows.ts:288-290`) | KEPT, behaviour verbatim | `grading-rows.ts:299` wraps `clearTableSignature` (`assessment-row.ts:180-182`) |
+| `joinFeedback(row)` joins the three feedback fields with `"\n\n"`, `totalScore` excluded, blanks omitted (`411` cites `grading-row.ts:228-230`) | KEPT, behaviour verbatim, and it is now the site of defect 4 below | `joinAssessmentFeedback`, `assessment-row.ts:108-110` |
+| `editGradingRowField` / `applyGradingResultToRow` | KEPT, off this path except as the `userEdited` source | `grading-rows.ts:124` / `:155`, wrapping `editAssessmentField` / `applyAssessmentResult` (`assessment-row.ts:120`, `:146`) |
+| `applyRosterMatchToRow` "must NOT move" | HELD - it did not move; it is still `grading-rows.ts`'s own, and `assessment-shared.structure.test.ts` (`:45`, "no file in assessment-shared/ carries per-surface semantics") is the standing enforcer | `grading-rows.ts` |
+
+411's behavioural claims are NOT superseded. Only its addresses are stale, and
+this table is the index correction.
+
+One other partial hit, so a later pass does not mistake it for coverage of A10:
+`docs/REGRESSION.md:36670-36678` (inside entry 376, `:36606`) records a
+**different** control on a **different** surface - a "Copy all feedback" button
+that was changed to stop copying `overall` because `composeOverallComment` joins
+with a single space and pasted as a run-on paragraph. It does not describe this
+page's Copy feedback control, and it does not describe the duplication.
+
+### File sizes on the path
+
+`@(Get-Content <path>).Count`, 2026-09-15, at `10115a4`. Never
+`Measure-Object -Line`, which reads 42 low on the first file in this table
+(`docs/loop/this-repo.md` section 3):
+
+| file | lines |
+|---|---|
+| `src/app/components/grading-recording/GradingRecordingPanel.tsx` | 964 |
+| `src/app/components/grading-recording/grading-submission-merge.ts` | 414 |
+| `src/app/components/grading-recording/grading-capture-sync.ts` | 83 |
+| `src/app/components/grading-recording/useGradingRows.ts` | 475 |
+| `src/app/components/grading-recording/grading-rows.ts` | 301 |
+| `src/app/components/grading-recording/GradingTable.tsx` | 256 |
+| `src/app/components/assessment-shared/assessment-row.ts` | 182 |
+| `src/app/components/assessment-shared/useAssessmentRowStore.ts` | 133 |
+| `src/app/components/assessment-shared/assessment-row-store.ts` | 102 |
+| `src/app/components/assessment-shared/AssessmentFeedbackFields.tsx` | 191 |
+| `src/lib/grade/types.ts` | 252 |
+
+`GradingRecordingPanel.tsx` at 964 is 36 lines under the repo-wide 1000-line
+ceiling (`src/file-size-ceiling.structure.test.ts`, `LIMIT = 1000` at `:30`).
+Either fix that adds more than 36 lines to that file turns the suite red.
+
+### 428a - the path, hop by hop, as the code runs it
+
+The seam order is stated in `GradingRecordingPanel.tsx:42-48`'s own header:
+capture -> extraction -> `mergeExtractedSubmissions` -> rows via `setAllRows` ->
+roster match via `applyRosterMatch` -> grading -> `applyGradingResult`. The code
+follows it literally.
+
+1. **`runExtraction`** - `GradingRecordingPanel.tsx:406-462`, a `useCallback`.
+   Pulls a frame batch (`takeFrameBatch(GRADING_EXTRACT_BATCH_SIZE,
+   EXTRACT_BATCH_WIRE_BUDGET)`, `:407`) and returns immediately on an empty batch
+   (`:408`). `await Promise.resolve()` at `:416` is a real gate, not a no-op - its
+   own comment at `:409-415` records that it is what keeps every later `setState`
+   strictly after the calling effect's body returns, satisfying
+   `react-hooks/set-state-in-effect`.
+2. It is driven by a drain effect at `:475-487`, which fires whenever
+   `pendingFrames !== 0` and `extracting` is false, through an inline async IIFE
+   with a `cancelled` flag. The loop **outlives capturing** - the comment at
+   `:464-466` says it keeps draining after Stop.
+3. **The shadow array.** `const extractedRef = useRef<ExtractedSubmission[]>([])`
+   at `:370`. `:431` merges the batch into it
+   (`mergeExtractedSubmissions(extractedRef.current, result.submissions)`) and
+   `:432` writes the result straight back (`extractedRef.current =
+   merge.submissions`). **Those are the only three occurrences of the identifier
+   in production code anywhere in `src/`** (`Get-ChildItem -Recurse -Include
+   *.ts,*.tsx src | Select-String -Pattern "extractedRef"` returns exactly
+   `GradingRecordingPanel.tsx:370`, `:431`, `:432`, plus one mention inside a
+   comment at `grading-capture-sync.test.ts:109`). Nothing prunes it, nothing
+   persists it, nothing resets it, nothing scopes it.
+4. **`mergeExtractedSubmissions`** - `grading-submission-merge.ts:382-414`. A
+   linear scan: an incoming submission with no `isSameSubmission` match is
+   **appended** (`:394`, `addedCount++`); a match either joins a continuation
+   splice in place (`:402-404`), replaces the entry's text in place when the
+   incoming reading is strictly longer (`:405-406`), or changes nothing at all
+   and keeps the entry's object identity (`:408-410`). It **never reorders and
+   never removes**.
+5. **`syncGradingRowsFromExtracted`** - `grading-capture-sync.ts:67-83`, called
+   at `GradingRecordingPanel.tsx:448` as
+   `syncGradingRowsFromExtracted(merge.submissions, rawRowsRef.current)`. Note
+   `docs/BACKLOG.md:53` cites this call as `:454`; the measured line at `10115a4`
+   is **`:448`** (`grep -n "syncGradingRowsFromExtracted"
+   src/app/components/grading-recording/GradingRecordingPanel.tsx`). The body is
+   one `extracted.map((sub, i) => ...)`:
+   - `rows[i]` exists: returns `{ ...existing, studentName: sub.name,
+     submissionText: sub.text }` (`:75-79`). Exactly two fields are taken from
+     the submission. Everything else - `id`, `state`, `error`, `userEdited`,
+     `totalScore`, `strengths`, `improvements`, `overallComment`, `nameMatch`,
+     `rosterCandidates`, `course`, `assessment`, `submissionTimeStatus`,
+     `submittedAt` - is carried forward from the row at that index.
+   - `rows[i]` is absent: mints a blank row (`blankGradingRow`, `:41-56`) with
+     `mintId()` (default `crypto.randomUUID`, `:70`), `state: "pending"`, all
+     four scored fields `""`, `userEdited: false`, and the neutral
+     `nameMatch: "no-roster"` / `rosterCandidates: []`.
+   - **The returned array's length is always `extracted.length`.** Any row beyond
+     that index is dropped without being read.
+6. **`rawRowsRef`** - `GradingRecordingPanel.tsx:318`, `useRef(gradingRows.rawRows)`,
+   refreshed by an effect at `:319-321`. `gradingRows.rawRows` is the
+   COURSE-SCOPED slice (`useGradingRows.ts:460`, `rawRows: scopedRawRows`), not
+   the whole stored table. Because it is written in an effect, it is one commit
+   behind at the instant of any row mutation and current by the next render.
+7. **`setAllRows`** - `useGradingRows.ts:339-367`. It replaces only this course's
+   slice: it filters `rowsRef.current` into `previousScoped` (`:350`), stamps
+   course (`:351`) then assessment (`:362`) onto rows `previousScoped` does not
+   already know by id, and commits `[...otherScopes, ...stamped]` (`:364`). Within
+   a scope, the stored order is `stamped`'s order, which is `extracted`'s order.
+8. **The roster pass** - `GradingRecordingPanel.tsx:454-458`, immediately after
+   `setAllRows`. `parseRosterNames(selectedRosterText)` once, then
+   `matchNameAgainstRoster(row.studentName, rosterNames)` and
+   `gradingRows.applyRosterMatch(row.id, match)` for every row in `nextRows`.
+   It matches on the row's **post-sync** `studentName`, i.e. the name that came
+   from `extracted[i]`. A second, separate effect at `:332-345` re-matches every
+   row whenever `selectedRosterText` changes, guarded per-row so an unchanged
+   verdict produces no call.
+9. **Grading**, for completeness, since it is what puts feedback into the rows
+   that steps 3-5 then shuffle: `:530-534` maps `gradingRows.rawRows` to
+   `{id, studentName, submissionText}`, `:535` calls
+   `gradeCapturedSubmissionsAction`, and `:567-572` runs each result through
+   `classifyGradingResult` (`grading-rows.ts:239-260`) into
+   `gradingRows.applyGradingResult(r.id, classified)` - **by id, not by index**.
+   Grading is the one hop on this path that is id-correlated.
+
+### 428b - the positional alignment invariant, and exactly what it promises
+
+`grading-capture-sync.ts:8-19`, verbatim in substance: because
+`mergeExtractedSubmissions` never reorders `existing`, and only updates in place
+or appends past the end, "index i of the merged array is ALWAYS either the same
+submission as index i of the previous merge (an update) or brand new (an append
+past the previous length)... `rows[i]` IS the row for `extracted[i]` whenever
+`i < rows.length`".
+
+**What it actually promises, stated as the conditional it is.** The invariant is
+sound, and it is conditional on a precondition the header states one clause
+earlier and the code does not enforce: *"as long as this file's caller always
+feeds the FULL, previously-merged `ExtractedSubmission[]` back in as `existing`
+on the next merge"* (`:11-13`). It says nothing at all about the OTHER argument.
+Written out, the invariant holds only while all three of these are true:
+
+1. `extracted` is the running merge of every batch, unbroken - the precondition
+   the header names.
+2. `rows` is the array the PREVIOUS sync returned, unchanged in length and order.
+3. Consequently `rows.length <= extracted.length`, with `rows[i]` and
+   `extracted[i]` describing the same submission for every `i < rows.length`.
+
+The file has no guard for any of the three, and no way to detect a violation: it
+carries no row/submission identity of its own, by design (`:15-19`, "it never has
+to invent or track its own row/submission identity"). A violation of (2) or (3)
+is therefore silent and produces well-formed output.
+
+**Every mutation on this page that violates (2) or (3) violates it silently:**
+per-row Remove, Clear table, a course switch, and a reload. Those are 428f's four
+defects.
+
+### 428c - row persistence: `ta-rec-grade-table`
+
+- The key literal lives at `useGradingRows.ts:184`
+  (`const STORAGE_KEY_TABLE = "ta-rec-grade-table"`). Two independent source-text
+  canaries pin that exact spelling from outside - `courseIntelOfflineTables.test.ts`
+  requires the `const STORAGE_KEY_\w+ = "ta-rec-grade-table"` binding to remain in
+  `useGradingRows.ts`, and `grading-rows.test.ts`'s own persisted-key canary
+  requires the same identifier text at the actual `localStorage` call site
+  (`useGradingRows.ts:172-183` and `useAssessmentRowStore.ts:35-52` both record
+  this).
+- The two sibling keys are `ta-rec-grade-filter` (`:170`) and `ta-rec-grade-sort`
+  (`:171`), each written best-effort in its own setter (`:319-337`) with a
+  swallowed `catch`.
+- **The actual read and write** live in `assessment-shared/useAssessmentRowStore.ts`.
+  Rehydration is read-once-in-the-initializer, `typeof window` guarded:
+  `deserializeAssessmentRows(window.localStorage.getItem(STORAGE_KEY_TABLE),
+  codec)` at `:96-99`. `rowsRef` is seeded from that same value at `:102`.
+- **`commitRows`** (`:123-130`) does three things in order, synchronously, with no
+  debounce: `rowsRef.current = next`, `setRawRows(next)`, `persistRows(next)`.
+  Every mutator in `useGradingRows.ts` goes through it.
+- **`persistRows`** (`:104-121`) is a two-tier quota fallback: full write; on any
+  throw, retry with `dropBulk: true`; on a second throw, set `persistError`.
+  Caught by catching, never by `err.name`.
+- `dropBulk` for this surface drops `submissionText` only
+  (`grading-row-serialization.ts:142`, `submissionText: opts.dropBulk ? "" :
+  r.submissionText`), keeping every feedback field and `userEdited`.
+- `deserializeAssessmentRows` (`assessment-row-store.ts:75-101`) **never throws**:
+  a top-level try/catch, `obj.v !== codec.version` degrades to `[]`, a non-array
+  `rows` degrades to `[]`, and a single unrecoverable row is dropped individually
+  via `fromWire` returning null. `GRADING_TABLE_VERSION = 1`
+  (`grading-row-serialization.ts:84`).
+- **What is NOT persisted, and this is the whole of defect 3:** `extractedRef`
+  (a `useRef`, `GradingRecordingPanel.tsx:370`), `totalReadingsCount` (`:387`),
+  `extracting` (`:371`), and the log batches. Rows rehydrate; the submission
+  array they were derived from does not.
+
+### 428d - deletion and Clear table
+
+- **Per-row Remove.** `GradingTable.tsx:133` routes it through
+  `useRemoveFocusRefs(rows, onRemoveRow)`; the panel passes
+  `onRemoveRow={gradingRows.removeRow}` at `GradingRecordingPanel.tsx:946`.
+  `useGradingRows.ts:423-431` reads `rowsRef.current`, calls
+  `removeGradingRow(raw, id)`, returns early if the result is the same reference
+  (`:427`), else commits.
+- `removeGradingRow` (`grading-rows.ts:279-281`) is a wrapper over
+  `removeAssessmentRow` (`assessment-row.ts:170-173`):
+  `if (!rows.some((r) => r.id === id)) return rows as R[]; return rows.filter((r)
+  => r.id !== id);` - **same array reference on a miss**, a real filter otherwise.
+  Neither function touches anything but the row array.
+- **Clear table.** `GradingRecordingPanel.tsx:948` passes
+  `onClearTable={gradingRows.clearTable}` with no wrapper.
+  `useGradingRows.ts:433-439` commits
+  `rowsRef.current.filter((r) => !gradingRowMatchesCourse(r, courseScope))` -
+  it clears only the current course's slice and never resets to `[]`.
+- **The arming mechanism.** `GradingTable.tsx:122-124`:
+  `clearArmedFor` is a `useState<string | null>`, `clearSignature =
+  gradingClearTableSignature(totalCount)`, `clearArmed = isConfirmArmed(clearArmedFor,
+  clearSignature)`. The signature is `String(totalCount)`
+  (`assessment-row.ts:180-182`). It is signature-based, not a timer: arming stores
+  WHAT it was armed for, so a row landing or leaving mid-session disarms a stale
+  confirmation by construction. `totalCount` is the UNFILTERED, course-scoped count
+  (`useGradingRows.ts:459`), so the search box cannot disarm it.
+  `ConfirmArmButtons` (`GradingTable.tsx:181-194`) swaps one Button in place -
+  `"Clear table"` outlined, `"Confirm clear"` danger - and `onConfirm` calls
+  `onClearTable()` then `setClearArmedFor(null)`. While armed, a `role="status"
+  aria-live="polite"` paragraph at `:197-201` reads `This permanently removes all
+  ${totalCount} row${...}. This cannot be undone.`
+- **Neither Remove nor Clear table touches `extractedRef`.** Measured: the
+  identifier does not appear at either call site, and its only three production
+  occurrences are the three listed in 428a step 3.
+
+### 428e - the feedback fields and the Copy feedback control
+
+- `AssessmentFeedback` (`assessment-row.ts:64-69`) is exactly four `string`
+  fields: `totalScore`, `strengths`, `improvements`, `overallComment`. **There is
+  no `resubmitNotice` field.**
+- `joinAssessmentFeedback` (`assessment-row.ts:108-110`):
+  `[row.strengths, row.improvements, row.overallComment].filter((field) =>
+  field.trim() !== "").join("\n\n")`. `totalScore` is deliberately excluded; a
+  blank field is omitted entirely rather than leaving a bare blank line.
+- `GradingTableRow.tsx:263-266` renders `<AssessmentFeedbackFields ... feedback={row} />`
+  - the whole row object is passed as the four-field feedback.
+- `AssessmentFeedbackFields.tsx:102-121` is `handleCopyFeedback`: it calls
+  `joinAssessmentFeedback(feedback)` at `:108`; an empty result is REFUSED before
+  reaching the clipboard, with `onCopyError(`There is no feedback to copy for
+  ${displayName} yet.`)` and no icon swap (`:109-112`); otherwise
+  `writeClipboardText(text)`, then `setCopied(true)` and a `COPY_RESET_MS` timer
+  cleared on unmount (`:126-130`).
+- The control itself (`:167-178`) is a `Button` whose **visible label is the
+  stable string `Copy feedback`** (WCAG 2.5.3 Label in Name); only the icon and
+  the `title` swap. `aria-label` is `Copy feedback for ${displayName}`. On success
+  a visually-hidden `role="status" aria-live="polite"` span renders
+  `Copied feedback for ${displayName}` (`:184-188`).
+- The panel routes a copy failure into its own notice channel:
+  `handleCopyFeedbackError` at `GradingRecordingPanel.tsx:365-368`, pushing an
+  `"error"`-kind notice.
+- **Where `overallComment` comes from on this surface.**
+  `composeOverallComment(strengths, improvements, resubmitNotice)`
+  (`src/lib/grade/types.ts:20-29`) filters blank parts and joins with a single
+  **space**. `grading-feedback-prompt.ts:153` builds every successfully graded
+  recording row that way - `overallComment = composeOverallComment(strengths,
+  improvements, resubmitNotice)`, where `resubmitNotice` is `RESUBMIT_NOTICE`
+  (`types.ts:7-8`) when points were deducted and `""` otherwise. The failure
+  composer does the same with two empty parts (`grading-feedback-prompt.ts:184`,
+  `composeOverallComment(strengths, "", "")`). `types.ts:10-19` records the rule:
+  `overallComment` is **derived, never authored**, by every producer in this repo.
+
+### 428f - the four defects, as CURRENT behaviour
+
+All four were checked against the tree at `10115a4` before being written down.
+**All four reproduce from a direct read.** None is softened below, because a
+later pass has to be able to prove each one gone.
+
+**Defect 1 - a deleted row's submission survives in `extractedRef`, so the next
+batch re-mints it.** `removeGradingRow` filters the ROW array only
+(`grading-rows.ts:279`, `assessment-row.ts:170-173`); `extractedRef.current` is
+untouched by it (the identifier's only three production occurrences are `:370`,
+`:431`, `:432`). So the deleted submission is still in `extractedRef.current`;
+the next batch merges into it at `:431`, `merge.submissions` still contains the
+deleted entry, and `syncGradingRowsFromExtracted` maps over it at `:448` and
+mints a fresh row for whatever index now has no row. **The student does not have
+to reappear on screen** - one further batch of any content is enough, because the
+shadow array is what the row list is rebuilt from. This is the owner's reported
+symptom in `docs/BACKLOG.md:53` ("the previous ones that i deleted come back").
+
+Same mechanism, same file, at two more triggers, both verified by the same read
+and neither named in A9's filing:
+
+- **Clear table restores the whole table.** `clearTable`
+  (`useGradingRows.ts:433-439`) filters the scoped rows away and does not touch
+  `extractedRef`. The next extraction syncs `merge.submissions` (still N entries)
+  against 0 scoped rows and mints N brand-new rows - every one of them blank,
+  `state: "pending"`, `userEdited: false`. The confirm dialogue's promise, "This
+  permanently removes all N rows. This cannot be undone."
+  (`GradingTable.tsx:199`), is false in both halves.
+- **A course switch carries the previous course's submissions across.**
+  `extractedRef` has no course scope at all, while `rawRowsRef` is the scoped
+  slice (`useGradingRows.ts:460`). Switch course, and the next extraction syncs
+  the OLD course's accumulated submissions against the new course's (empty)
+  slice, minting rows for them and stamping them with the NEW course
+  (`setAllRows`, `useGradingRows.ts:351`).
+
+**Defect 2 - a deletion shifts the index correlation, and the next sync pairs each
+surviving row's id, score, feedback and `userEdited` flag with a DIFFERENT
+submission.** `syncGradingRowsFromExtracted` correlates by index only
+(`grading-capture-sync.ts:72-73`, `extracted.map((sub, i) => { const existing =
+rows[i]; ... })`). Deleting row 0 of `[A, B, C]` leaves rows `[B, C]` while
+`extractedRef` stays `[A, B, C]`. The next sync produces:
+
+| index | submission | row fields carried forward |
+|---|---|---|
+| 0 | A | B's `id`, `state`, `error`, `userEdited`, `totalScore`, `strengths`, `improvements`, `overallComment`, `course`, `assessment` |
+| 1 | B | C's, same list |
+| 2 | C | none - minted fresh |
+
+and the update branch (`:75-79`) overwrites `studentName` and `submissionText`
+from the submission. So the row **displays submission A's name and text over row
+B's grade and instructor-typed feedback**, and the roster pass at
+`GradingRecordingPanel.tsx:454-458` then re-matches the roster verdict to the NEW
+name - so `nameMatch` follows the name while the score and feedback do not. Every
+row after the deleted one is affected. `applyGradingResult` is id-correlated
+(`:571`), so a re-grade writes into the same misassembled row rather than
+correcting it. This is the more serious of A9's two defects and it is a
+**silent** one: nothing throws, the table is well-formed, and every gate stays
+green.
+
+**Defect 3 - `extractedRef` is a `useRef` that never persists while rows DO
+rehydrate, so after a reload with a saved table the next batch collapses the
+table to the new batch's length.** Rows rehydrate from `ta-rec-grade-table` in
+`useAssessmentRowStore`'s initializer (`:96-99`); `extractedRef` re-initialises to
+`[]` (`GradingRecordingPanel.tsx:370`) because a `useRef` holds no storage. After
+a reload with N saved rows, the first batch of M submissions merges into `[]`,
+giving `merge.submissions` of length M, and `syncGradingRowsFromExtracted` returns
+an array of **exactly M** rows (`:72`, the map is over `extracted`). `setAllRows`
+replaces the whole scoped slice with it (`useGradingRows.ts:364`), and
+`commitRows` persists immediately (`useAssessmentRowStore.ts:123-130`). For
+M < N the table shrinks and **the loss is written to localStorage in the same
+tick**; for the M rows that remain, defect 2's mispairing applies, because the
+saved rows at indices 0..M-1 are whichever rows survived, not the ones those M
+submissions describe.
+
+**Defect 4 - copying feedback yields strengths and improvements TWICE.**
+`joinAssessmentFeedback` (`assessment-row.ts:108-110`) joins `[strengths,
+improvements, overallComment]`, and on this surface `overallComment` already
+contains `strengths` and `improvements`, because
+`grading-feedback-prompt.ts:153` builds it with `composeOverallComment(strengths,
+improvements, resubmitNotice)` (`src/lib/grade/types.ts:20-29`). So for a row
+graded by the machine and not hand-edited, the clipboard receives:
+
+```
+<strengths>
+
+<improvements>
+
+<strengths> <improvements> <RESUBMIT_NOTICE>
+```
+
+- Each of `strengths` and `improvements` appears twice: once as its own
+  blank-line-separated block, once inside the space-joined composed paragraph.
+- The scope of the defect, stated precisely so a fix is not over-claimed:
+  - A **failed** row does not reproduce it - `classifyGradingResult`
+    (`grading-rows.ts:244-251`) blanks all four fields on `failed: true`, so
+    `joinAssessmentFeedback` returns `""` and the copy is refused at
+    `AssessmentFeedbackFields.tsx:109-112`.
+  - A **hand-edited** row still reproduces it, and worse: `editAssessmentField`
+    (`assessment-row.ts:120-129`) writes one named field and leaves the others,
+    so editing `strengths` leaves the stale pre-edit text still embedded inside
+    `overallComment`. The copy then carries both the new and the old wording.
+  - `RESUBMIT_NOTICE` (`types.ts:7-8`) reaches the clipboard **only** through
+    `overallComment` - `AssessmentFeedback` has no field for it
+    (`assessment-row.ts:64-69`). Dropping `overallComment` from the join would
+    silently delete the resubmission offer from every copied comment.
+- **The origin is a stale contract, and this is the reusable part.**
+  `joinAssessmentFeedback`'s own doc comment (`assessment-row.ts:98-107`) cites
+  `docs/recording-controls-ux-acceptance-criteria.md` CC14 as requiring exactly
+  those three fields. That rule was written while `overallComment` was
+  independently authored. `src/lib/grade/types.ts:10-19` records the later change
+  that made it derived. The join was correct under the old contract and nobody
+  revisited it. `grep -rn "joinAssessmentFeedback" src --include=*.ts
+  --include=*.tsx` is the check for other readers standing on the same stale rule.
+- **What was NOT executed:** no component renders under this repo's vitest, there
+  is no clipboard in a node environment, and no test in this repo calls
+  `handleCopyFeedback`. The duplication above is derived by composing two
+  functions that were each read at the lines cited. It is a reading claim.
+
+### 428g - what has a test today, and what rests on reading alone
+
+Instrument for this section: `grep -rn "<symbol>" src --include=*.test.ts`, plus
+`grep -n "describe(\|it("` over each named test file, 2026-09-15.
+
+| behaviour | pinned by |
+|---|---|
+| `syncGradingRowsFromExtracted` mints a row when no row exists at that index | `grading-capture-sync.test.ts:31` |
+| a minted row defaults to `no-roster` / `[]` | `grading-capture-sync.test.ts:41` |
+| an existing row at the same index is updated in place, id/score/`userEdited` preserved | `grading-capture-sync.test.ts:47` |
+| an update at index 0 plus a fresh mint at index 1 in one call | `grading-capture-sync.test.ts:80` |
+| the input rows array and its entries are not mutated | `grading-capture-sync.test.ts:97` |
+| a two-batch continuation folds to ONE row with progress preserved | `grading-capture-sync.test.ts:116` |
+| `joinAssessmentFeedback` order, `totalScore` excluded, blanks omitted, all-empty is `""` | `assessment-row.test.ts:42`, `:52`, `:57` |
+| `removeAssessmentRow` removes the right row / returns the SAME reference on a miss / does not mutate | `assessment-row.test.ts:145`, `:150`, `:155` |
+| `removeGradingRow` (the wrapper), same three properties | `grading-rows.test.ts:383`, `:388`, `:393` |
+| `clearTableSignature` / `gradingClearTableSignature` is the count alone, changes with the count, stable for the same count | `assessment-row.test.ts:164`, `:170`, `:174`; `grading-rows.test.ts:402`, `:408`, `:412` |
+| `editAssessmentField` / `applyAssessmentResult` and the `userEdited` refusal | `assessment-row.test.ts:64`-`:137` |
+| `setAllRows` stamps course then assessment and recombines with other scopes; `clearTable` filters rather than empties | `useGradingRows.wiring.test.ts:30`, `:36`, `:40` (source-text assertions, not execution) |
+| `ta-rec-grade-*` is exactly six keys, and the literal binding plus the read/write call both appear | `grading-rows.test.ts`'s "grading-recording persisted key canary" describe block (`:479`), scanning `grading-recording/` and `assessment-shared/` non-recursively |
+| `useAssessmentRowStore` passes its key parameter to both `localStorage.getItem` and `localStorage.setItem` | `snapshot-grading.structure.test.ts:261` (a sibling surface's test, asserting on this shared file) |
+| the persisted wire row's exact key set, round trip, coercion, quota fallback | `grading-row-serialization.test.ts:92`, `:190`, `:342`, `:387`, `:615` |
+
+**Unpinned - every one of these rests on code reading alone:**
+
+- **`extractedRef`'s entire lifecycle.** No test names it outside one comment
+  (`grading-capture-sync.test.ts:109`). Nothing pins that it is merged into, that
+  it is never pruned on deletion, that it is not persisted, or that it is not
+  course-scoped. **Unpinned.**
+- **`runExtraction` and the drain effect.** `grep -rn "runExtraction" src
+  --include=*.test.ts` returns one comment line and no assertion. The batch/merge/
+  sync/`setAllRows`/roster ordering at `GradingRecordingPanel.tsx:431-458` has no
+  wiring test - `GradingRecordingPanel.wiring.test.ts`'s four `it()` blocks are
+  all about the dropped-frame accumulator (`:39`, `:43`, `:53`, `:58`).
+  **Unpinned.**
+- **Defect 2's shape.** Every case in `grading-capture-sync.test.ts` feeds a
+  `rows` array that is already index-aligned with `extracted`. No test ever
+  passes a `rows` array with a hole in the middle, which is the only input that
+  exhibits the defect. **Unpinned.**
+- **Defect 3's shape.** No test feeds a non-empty `rows` array against a SHORTER
+  `extracted` array. `grading-capture-sync.test.ts:80` is the only
+  length-mismatch case and it goes the other way (1 row, 2 submissions).
+  **Unpinned.**
+- **Defect 4.** No test composes `composeOverallComment` with
+  `joinAssessmentFeedback`. `assessment-row.test.ts:42` pins the join against
+  hand-written field values that do not model the derived `overallComment` this
+  surface actually produces - which is the "fixtures must match emitted shape"
+  class: the assertion is green and describes an input the app never emits.
+  **Unpinned.**
+- **Everything about the rendered UI.** The Copy feedback button's label, its
+  icon swap, its live region, the Clear table arm/confirm swap, its consequence
+  paragraph, focus after Remove (`useRemoveFocusRefs`), and any keyboard
+  behaviour: **no component is rendered by any test in this repo**
+  (`docs/loop/this-repo.md` sections 2 and 6), there is no jsdom and no
+  testing-library, and `.test.tsx` is not even collected. Nothing in this class
+  can be pinned by a test here, now or after either fix. **Unpinnable, not merely
+  unpinned.**
+- **The clipboard itself.** `writeClipboardText` has no clipboard to write to
+  under a node environment, and `vitest.setup.ts` throws on real `fetch`.
+  **Unpinnable here.**
+
+### 428h - how a later pass proves each defect is gone
+
+Each condition names the object compared, the instrument for each quantity, and
+the direction that is a failure.
+
+1. **Defect 1.** Object: the row array returned by the sync that follows a
+   removal. Instrument: a unit test in `grading-capture-sync.test.ts` (or its
+   successor) that removes a row, runs one more merge+sync, and compares the
+   returned array against a frozen expected array. FAILS if the returned array
+   contains a row whose `studentName`/`submissionText` are the removed
+   submission's, or if its length exceeds the surviving-row count plus the count
+   of genuinely new submissions in that batch. Same condition with the removal
+   replaced by `clearTable` and by a course switch.
+2. **Defect 2.** Object: the `(submission, carried-forward row fields)` pairing
+   after a removal at index 0 of a three-entry table. Instrument: a unit test
+   asserting a frozen expected array, with the three rows given DISTINCT
+   `totalScore`/`strengths`/`id` values so a shift is visible. FAILS if any
+   row's `id`, `totalScore`, `strengths`, `improvements`, `overallComment` or
+   `userEdited` appears alongside a `studentName`/`submissionText` that did not
+   belong to it before the removal.
+3. **Defect 3.** Object: the row count and per-row pairing after a simulated
+   reload. Instrument: a unit test that seeds rows without seeding the submission
+   array, then syncs a shorter batch. FAILS if the resulting array is shorter
+   than the seeded row count, or if any seeded row's feedback lands on a
+   different submission. Note the state under test must be reachable from a plain
+   `.ts` leaf - if the fix leaves the reload behaviour inside
+   `GradingRecordingPanel.tsx`, it cannot be tested at all here, and that is a
+   residual, not a pass.
+4. **Defect 4.** Object: the exact string returned by the copy path for a row
+   built by the REAL producer. Instrument: a unit test that builds the row with
+   `composeGradingRowResult` (or at minimum `composeOverallComment`) rather than
+   hand-written fields, then asserts the copied string against a frozen literal.
+   FAILS if `strengths` or `improvements` occurs more than once in the result, and
+   FAILS if `RESUBMIT_NOTICE` is absent from a row whose grading deducted points.
+   Both halves are required: a fix that removes the duplication by dropping
+   `overallComment` from the join passes the first and fails the second.
+5. **The regression floor for all four.** Object: `docs/REGRESSION.md` 428a-428e.
+   Instrument: reading the diff against those sections. FAILS if any statement in
+   428a-428e that neither A9 nor A10 was filed to change is no longer true -
+   specifically the `userEdited` refusal, `removeAssessmentRow`'s same-reference
+   return, `clearTableSignature`'s `String(totalCount)`, `setAllRows`'s
+   other-scope preservation, the `dropBulk` field choice, the six-key
+   `ta-rec-grade-*` set, and `totalScore`'s exclusion from the copied text.
+
+### 428i - residual register: what this baseline could NOT determine
+
+Each entry names an owner, an instrument, and the step that will measure it.
+None of these is filled in by inference.
+
+1. **Whether the owner's exported log corroborates the mechanism.**
+   `docs/BACKLOG.md:53` cites
+   `C:\Users\alexa\Downloads\grading-recording-log-automated-testing-20260915-161441.csv`.
+   It is outside this repository and was not opened for this baseline. Owner: the
+   repo owner. Instrument: opening that CSV and comparing its Batches section
+   (Added/Merged per batch) against its Rows section count. Step: the A9
+   verification pass, if the owner supplies the file.
+2. **Whether the duplication is visible exactly as written above in a real
+   browser.** No component renders under vitest and there is no clipboard here
+   (`docs/loop/this-repo.md` section 6). Owner: the repo owner. Instrument: a
+   real browser against a deployed build with a real `GEMINI_API_KEY`, copying a
+   graded row and pasting it. Step: the owner's own check after A10 ships.
+3. **Real localStorage quota behaviour on a thirty-row table.** No byte figure was
+   measured for this entry; `useGradingRows.ts:58-59` asserts the risk in prose.
+   Owner: the data seat on whichever chunk next touches this key. Instrument:
+   `JSON.stringify(serializeGradingRows(rows)).length` over a realistic fixture.
+   Step: the next chunk that changes what is persisted under
+   `ta-rec-grade-table`.
+4. **Whether other readers of `overallComment` also read `strengths` or
+   `improvements` in the same breath.** `docs/BACKLOG.md:49` asks for this grep
+   and this baseline did not run it repo-wide - it was scoped to the copy path.
+   Owner: the A10 scoping pass. Instrument: `grep -rn "overallComment" src
+   --include=*.ts --include=*.tsx`, classifying each hit as producer, reader, or
+   joiner. Step: A10's architecture pass, before any file list.
+5. **The exact behaviour when a batch arrives DURING a removal.**
+   `rawRowsRef.current` is written in an effect (`GradingRecordingPanel.tsx:319-321`)
+   and is therefore one commit stale at the instant of a mutation. Whether an
+   in-flight `runExtraction` can read the pre-removal array was not proven - it
+   needs a render-ordering argument this environment cannot execute. Owner: the
+   A9 implementer. Instrument: a reading argument over React's effect ordering,
+   stated explicitly in the fix's own notes, since no test here can render.
+   Step: A9's design pass.

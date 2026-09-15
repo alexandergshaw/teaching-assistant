@@ -42820,3 +42820,83 @@ Layers B (LLM concept insight) and C (copyable, not postable, drafted message) a
 filed as N10 and N11 with their designs intact. Layer A ships alone on purpose: it
 is deterministic and useful by itself, and a reliable half held behind an
 expensive half is the G1 defect in a new place.
+
+## 422. N12: the class-trends feature becomes reachable
+
+Backlog N12, filed as a self-audit after N10. **Two items had shipped with nothing
+in the app touching either**: `src/lib/grade/class-trends.ts` (N9 layer A, the
+counted engine) had no caller anywhere, and `src/app/api/class-trends-insight/route.ts`
+(N10 layer B) was a live endpoint nothing posted to. Both items' `verify` commands
+passed legitimately. This entry records the fix and the process failure behind it.
+
+### 422a - the failure was in SCOPING, which no verify pass could catch
+
+`docs/REGRESSION.md`'s own earlier lesson (and this repo's standing rule) is that
+a capability can ship dead with every gate green, and that the verify pass must
+trace it from the control to the code. That rule is written for a dead BRANCH
+inside a feature.
+
+This was different and the rule did not reach it: the feature was split into
+layers - counted, inferred, drafted - and **the SURFACE was never scoped as one of
+them.** Each layer was individually complete and correctly tested. The absence was
+BETWEEN the items, not inside any of them, so no per-item verification could have
+found it.
+
+**The rule added:** when splitting a feature into layers, the surface IS a layer -
+either in the same item, or filed at the same time with the others blocked on it,
+never implicit. And the closing report answers "what can the owner OPEN now?"
+rather than describing the item as delivering the feature.
+
+### 422b - what closes the chain, measured
+
+`grep -rln "class-trends\|ClassTrendsPanel" src/ --include=*.ts --include=*.tsx`
+excluding tests now returns four files, and the specific links are:
+
+- `DraftedGradesTab.tsx:19` imports the panel and `:627` mounts
+  `<ClassTrendsPanel entry={entry} />`;
+- `ClassTrendsPanel.tsx:7,10` imports `computeClassTrends` from
+  `@/lib/grade/class-trends` and calls it before any `fetch`;
+- the panel POSTs to the literal `/api/class-trends-insight`.
+
+**Reachability is asserted, not assumed.** `classTrends.wiring.test.ts` pins the
+mount, the layer-A call ordering, the route path, the reuse of
+`containsForbiddenCompletenessPhrase`, and that `.student` is never read.
+Sabotage-proven: deleting the mount line (leaving the import) turned 2 of 11 tests
+RED. **That is the test this feature needed and did not have** - a test over the
+panel's internals would have passed while the panel was mounted nowhere, which is
+the same green-looking nothing one level up.
+
+### 422c - the layering survives into the UI
+
+- Layer A renders **first and always**, computed synchronously on render. It does
+  not depend on the network, so an unavailable or failed layer B leaves the
+  counted trends on screen. A reliable half held hostage to an expensive half is a
+  defect this repo has fixed twice.
+- Layer B is **opt-in** behind a button and rendered in a separate block headed
+  "AI reading of the submissions graded so far - a model's inference, not a
+  counted fact". Its observations carry `kind: "inferred"` structurally, so a
+  consumer cannot present them as counted.
+- Every observation is **re-validated** with `containsForbiddenCompletenessPhrase`
+  at the render boundary, imported from layer A rather than re-derived - so the
+  no-"the class" rule holds even if the model returns something the route's parser
+  let through.
+
+### 422d - what is measured true today
+
+`@(Get-Content <path>).Count`: `ClassTrendsPanel.tsx` 194,
+`classTrends.wiring.test.ts` 133, `DraftedGradesTab.tsx` **868 -> 870** against the
+executing 1000-line ceiling - two lines, one import and one mount, with all panel
+logic in the child component. No CSS module change was needed; the panel reuses
+existing classes following `AssignmentChecklistPanel.tsx`'s pattern, so the
+repo-wide orphan ratchet did not move.
+
+### 422e - what today's tests still will NOT notice
+
+vitest here is node-env and renders no component, so the panel's JSX, its click
+handler, and its fetch-error rendering are exercised by NOTHING - only its source
+text is asserted. Every decidable behaviour that could be moved to the pure side
+already lives in `class-trends.ts`, which is directly tested.
+
+So "the trends appear on the drafted-grades tab, and the AI reading is visibly
+separate" remains an owner reading claim. It is one click to check: open a drafted
+grades run and expand the trends block.

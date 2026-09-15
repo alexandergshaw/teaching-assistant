@@ -90,7 +90,16 @@ export async function extractGradingSubmissionsAction(
     await requireOwner();
 
     if (frames.length === 0) return { error: "No frames were captured from the screen." };
-    if (frames.length > GRADING_EXTRACT_BATCH_SIZE) return { error: "Too many frames in one batch." };
+    // N8: state BOTH numbers. A refusal the instructor cannot act on is close to
+    // no refusal - they cannot tell whether to retry with fewer frames or that
+    // something upstream is wrong. The caller clamps before calling
+    // (takeFrameBatch), so this branch is defence in depth today; it says the
+    // numbers anyway, because the reason it exists is the day a caller stops
+    // clamping.
+    if (frames.length > GRADING_EXTRACT_BATCH_SIZE)
+      return {
+        error: `Too many frames in one batch: ${frames.length} supplied, at most ${GRADING_EXTRACT_BATCH_SIZE} per batch.`,
+      };
 
     const sizeCheck = checkWireBudget(sumBase64WireBytes(frames.map((f) => f.base64)), "These screen frames");
     if (!sizeCheck.ok) return { error: sizeCheck.error ?? "These screen frames are too large to upload in one request." };

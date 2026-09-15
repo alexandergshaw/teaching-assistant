@@ -40,7 +40,11 @@ export async function probeFrameLegibilityAction(
     await requireOwner();
 
     if (frames.length === 0) return { error: "No frames were captured from the screen." };
-    if (frames.length > PROBE_MAX_FRAMES) return { error: "Too many frames in one probe batch." };
+    // N8: state BOTH numbers - see grading-submission-extract.ts's own note.
+    if (frames.length > PROBE_MAX_FRAMES)
+      return {
+        error: `Too many frames in one probe batch: ${frames.length} supplied, at most ${PROBE_MAX_FRAMES} per probe.`,
+      };
 
     const sizeCheck = checkWireBudget(sumBase64WireBytes(frames.map((f) => f.base64)), "These screen frames");
     if (!sizeCheck.ok) return { error: sizeCheck.error ?? "These screen frames are too large to upload in one request." };

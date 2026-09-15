@@ -76,15 +76,6 @@
   instrument: ''
   from: 'docs/multi-user-login-acceptance-criteria.md A6'
   note: 'Its own wave (pre-migration Trigger column)'
-- id: 'N8'
-  state: 'unscoped'
-  title: 'Two frame-cap refusals do not state both numbers. grading-submission-extract.ts:91 returns "Too many frames in one batch." and legibility-probe.ts:43 returns "Too many frames in one probe batch." - both correctly REFUSE rather than truncate, but neither names the actual count or the cap, unlike N5''s ZIP-intake refusal which states both (REGRESSION 417b). The only finding the N6 grading-path sweep rated MISSING.'
-  owns: []
-  verify: null
-  blocked_by: []
-  instrument: 'From the N6 survey (docs/grading-path-survey.md row 3), which examined 23 files and rated 7 NOT-APPLICABLE, 1 MISSING, 0 HIDDEN. REACHABILITY CHECKED AND IT IS LATENT, NOT LIVE: the sole callers already clamp before calling - takeFrameBatch(GRADING_EXTRACT_BATCH_SIZE, EXTRACT_BATCH_WIRE_BUDGET) at GradingRecordingPanel.tsx:406 and takeFrameBatch(PROBE_MAX_FRAMES, ...) at LegibilityProbeModal.tsx:183 - so both branches are defence in depth rather than paths a user can reach. Same shape as G6 (REGRESSION 419a): worth fixing cheaply, not worth urgency.'
-  from: 'N6 survey, 2026-09-14'
-  note: 'TWO LINES OF COPY, and the value is entirely in what it prevents LATER rather than now. The reason to do it at all: if a future caller stops clamping, a refusal that names neither the count nor the cap leaves the user unable to act on it - and this repo has just shipped the opposite discipline twice (N5''s ZIP refusal, and G1''s timed-out state) on the argument that a message which cannot be acted on is close to no message. Size it as a single small chunk with the two other frame-cap strings if the implementer finds more; do NOT widen it into a message-copy sweep across the repo.'
 - id: 'N10'
   state: 'actionable'
   title: 'Layer B of the class-trends feature: an LLM layer that surfaces CONCEPT-level insight the rubric''s own area names cannot express. Owner ask, 2026-09-14 ("incorporate an llm to get additional insights"), after N9 layer A established the counted layer. Designed in full already - see instrument.'

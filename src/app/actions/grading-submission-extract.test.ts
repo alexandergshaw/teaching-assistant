@@ -64,7 +64,15 @@ describe("extractGradingSubmissionsAction - ownership, frame-cap, wire-budget re
   it("refuses a batch over GRADING_EXTRACT_BATCH_SIZE without calling the model", async () => {
     const frames = Array.from({ length: GRADING_EXTRACT_BATCH_SIZE + 1 }, () => ({ base64: "x" }));
     const result = await extractGradingSubmissionsAction(frames, "gemini");
-    expect(result).toEqual({ error: "Too many frames in one batch." });
+    // N8: assert the FACTS the refusal must carry - that it refused, and that it
+    // names BOTH the supplied count and the cap - never the exact prose. Pinning
+    // the spelling is what made this test fail when the message was improved,
+    // and a test that resists an improvement to the thing it guards is working
+    // against its own purpose.
+    expect("error" in result).toBe(true);
+    const message = (result as { error: string }).error;
+    expect(message).toContain(String(GRADING_EXTRACT_BATCH_SIZE + 1));
+    expect(message).toContain(String(GRADING_EXTRACT_BATCH_SIZE));
     expect(callLlm).not.toHaveBeenCalled();
   });
 

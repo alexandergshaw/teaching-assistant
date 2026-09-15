@@ -53,7 +53,11 @@ describe("probeFrameLegibilityAction", () => {
   it("refuses a batch over PROBE_MAX_FRAMES without calling the model", async () => {
     const frames = Array.from({ length: PROBE_MAX_FRAMES + 1 }, () => ({ base64: "x" }));
     const result = await probeFrameLegibilityAction(frames, "prompt", "gemini");
-    expect(result).toEqual({ error: "Too many frames in one probe batch." });
+    // N8: assert the facts, not the prose - see grading-submission-extract.test.ts.
+    expect("error" in result).toBe(true);
+    const message = (result as { error: string }).error;
+    expect(message).toContain(String(PROBE_MAX_FRAMES + 1));
+    expect(message).toContain(String(PROBE_MAX_FRAMES));
     expect(callLlm).not.toHaveBeenCalled();
   });
 

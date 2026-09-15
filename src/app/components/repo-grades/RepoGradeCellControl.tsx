@@ -43,6 +43,11 @@ import TextField from "@mui/material/TextField";
 // this exact action.
 import Button from "@mui/material/Button";
 import { repoGradePostability } from "@/lib/repo-grade-postability";
+// A13: the live-defect guard - relative path, not the "@/lib/grade" alias:
+// repoGradesFeedbackAndFiles.wiring.test.ts bans that alias prefix outright
+// for this file (even for a safe submodule) to keep this client bundle away
+// from @/lib/grade's server-only barrel.
+import { checkRowPostability } from "../../../lib/grade/postable";
 // B4: the shipped two-click "arm, then confirm" idiom, reused VERBATIM (not
 // reimplemented) - see draftPostArming.ts's header comment for the same
 // reuse on the Drafted Grades surface. The signature built below (see
@@ -266,7 +271,7 @@ export default function RepoGradeCellControl({
   };
   // Always folderPresent: true - see the module header for why that is safe
   // for every cell this component is ever asked to render.
-  const postability = repoGradePostability({
+  const scorePostability = repoGradePostability({
     bindingState: row.binding.state,
     canvasUserId: row.binding.canvasUserId,
     assignmentId: column.assignmentId,
@@ -274,6 +279,24 @@ export default function RepoGradeCellControl({
     score: edit.score,
     pointsPossible,
   });
+  // A13: repoGradePostability only gates on the score - a hand-typed score
+  // over an untouched, unreviewed comment would otherwise show this button
+  // as postable while buildRepoGradePostPlan (repoGradesPosting.ts) silently
+  // drops the row, the exact enabled-state-vs-actual-payload disagreement
+  // AC5 item 28 exists to prevent. Checked ONLY once scorePostability itself
+  // already passed, so this never overrides a more specific reason above.
+  const rowPostability = scorePostability.postable
+    ? checkRowPostability({
+        producer: {
+          totalScore: edit.generatedScore ?? "",
+          rubricAreas: edit.rubricAreas,
+          overallComment: edit.generatedComment ?? "",
+        },
+        submittedScore: edit.score,
+        submittedComment: edit.comment,
+      })
+    : { postable: true as const };
+  const postability = rowPostability.postable ? scorePostability : rowPostability;
   // U12.52: shown only once every OTHER postability gate has already passed -
   // describePostScore only looks at score/pointsPossible, so showing it
   // whenever the binding/assignment/folder gates are still failing would

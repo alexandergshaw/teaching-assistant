@@ -14,6 +14,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { requireOwner } from "@/lib/supabase/auth";
 import { listPendingGradingDrafts, getGradingDraft, createGradingDraft, markGradingDraftReviewed, updateGradingDraft, deleteGradingDraft, findPendingGradingDraftForWorkflow, type GradingDraft, type GradingDraftPayload, type GradingDraftSource } from "@/lib/grading-drafts";
 import { buildZeroGradingEntry } from "@/lib/grade-zeros";
+import { checkRowPostability } from "@/lib/grade/postable";
 import { gradingApiToRun } from "./grading-run-mapping";
 import {
   parseCourseIdFromCanvasUrl,
@@ -507,18 +508,40 @@ export async function postGradingDraftAction(
 
     for (const entry of draft.payload.runs) {
       if (entry.offline || !entry.canvasUrl) continue;
-      const grades = entry.run.results
-        .filter((r) => typeof r.userId === "number")
-        .map((r) => {
-          const m = r.totalScore.match(fractionRegex);
-          const grade = m ? m[1] : (r.totalScore.match(/-?\d+(?:\.\d+)?/) ?? [])[0] ?? "";
-          return {
-            userId: r.userId as number,
-            grade,
-            comment: r.overallComment,
-            rubricAreas: r.rubricAreas,
-          };
+      const grades: Array<{
+        userId: number;
+        grade: string;
+        comment: string;
+        rubricAreas: typeof entry.run.results[number]["rubricAreas"];
+      }> = [];
+      for (const r of entry.run.results) {
+        if (typeof r.userId !== "number") continue;
+        const m = r.totalScore.match(fractionRegex);
+        const grade = m ? m[1] : (r.totalScore.match(/-?\d+(?:\.\d+)?/) ?? [])[0] ?? "";
+        // A13: refuse a row no human has touched (blank producer score/areas,
+        // blank submitted score, comment identical to the producer's own
+        // overallComment) rather than posting the grader's internal error
+        // text or raw model output to the student. Counted as `skipped`, not
+        // `failed` - Canvas is never called for it, matching the same
+        // "not attempted" semantics postCanvasGradesAction's own skip uses,
+        // which is what keeps this draft from being auto-marked reviewed
+        // (see the failed === 0 && skipped === 0 gate below).
+        const postability = checkRowPostability({
+          producer: { totalScore: r.totalScore, rubricAreas: r.rubricAreas, overallComment: r.overallComment },
+          submittedScore: grade,
+          submittedComment: r.overallComment,
         });
+        if (!postability.postable) {
+          skipped += 1;
+          continue;
+        }
+        grades.push({
+          userId: r.userId,
+          grade,
+          comment: r.overallComment,
+          rubricAreas: r.rubricAreas,
+        });
+      }
       if (grades.length === 0) continue;
       attempted += grades.length;
       const res = await postCanvasGradesAction(entry.canvasUrl, grades);

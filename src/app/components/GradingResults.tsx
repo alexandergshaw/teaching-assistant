@@ -43,6 +43,15 @@ import {
 // src/lib/repo-grade-postability.ts and useLmsAssignmentPull.ts already
 // import other repo-grades helpers the same way.
 import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeScoreDisplay";
+// A13: the live-defect guard that stops an untouched, unreviewed grading
+// result (blank score, comment identical to the grader's own output) from
+// posting to a student as though it were a real grade. Plain leaf, no
+// server-only or model-calling imports - see that file's own header comment.
+// Relative path, not the "@/lib/grade" alias - this file's own
+// gradingResultsHelpers.test.ts bans that alias prefix outright (even for a
+// safe submodule) to keep this client bundle away from @/lib/grade's
+// server-only barrel.
+import { checkRowPostability } from "../../lib/grade/postable";
 
 // CopyIcon/EyeIcon/DownloadIcon moved to ./grading-results/icons.tsx (this
 // file's line-budget extraction). ExpandIcon moved to
@@ -263,7 +272,34 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       return null;
     }
 
-    const payload = gradableResults.map((r) => {
+    // A13: refuse a row no human has touched (blank producer score/areas,
+    // blank submitted score, comment identical to the producer's own
+    // overallComment) BEFORE it ever reaches the payload - never post the
+    // grader's internal error text or raw model output to a student. Every
+    // refusal carries its own reason, never dropped silently.
+    const refusals: Record<string, string> = {};
+    for (const r of gradableResults) {
+      const edit = edits[r.student] ?? defaultRowEdit(r);
+      const check = checkRowPostability({
+        producer: r,
+        submittedScore: parseEarnedPoints(edit.total),
+        submittedComment: edit.overall,
+      });
+      if (!check.postable) refusals[r.student] = check.reason;
+    }
+    const postableResults = gradableResults.filter((r) => !refusals[r.student]);
+
+    if (postableResults.length === 0) {
+      setPostStatus(() => {
+        const next: Record<string, PostState> = {};
+        for (const r of gradableResults) next[r.student] = { status: "skipped", message: refusals[r.student] };
+        return next;
+      });
+      setPostSummary(`0 of ${gradableResults.length} attempted - every row was refused (unreviewed grading result).`);
+      return { posted: 0, failed: 0, skipped: gradableResults.length };
+    }
+
+    const payload = postableResults.map((r) => {
       const edit = edits[r.student] ?? defaultRowEdit(r);
       return {
         userId: r.userId as number,
@@ -280,7 +316,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     setPostSummary("");
     setPostStatus(() => {
       const next: Record<string, PostState> = {};
-      for (const r of gradableResults) next[r.student] = { status: "posting" };
+      for (const r of gradableResults) {
+        next[r.student] = refusals[r.student] ? { status: "skipped", message: refusals[r.student] } : { status: "posting" };
+      }
       return next;
     });
 
@@ -291,10 +329,14 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       setPostSummary(result.error);
       setPostStatus(() => {
         const next: Record<string, PostState> = {};
-        for (const r of gradableResults) next[r.student] = { status: "error", message: result.error };
+        for (const r of gradableResults) {
+          next[r.student] = refusals[r.student]
+            ? { status: "skipped", message: refusals[r.student] }
+            : { status: "error", message: result.error };
+        }
         return next;
       });
-      return { posted: 0, failed: gradableResults.length, skipped: 0 };
+      return { posted: 0, failed: postableResults.length, skipped: gradableResults.length - postableResults.length };
     }
 
     // B1: the shared, independently-tested decision (gradingResultsHelpers.ts's
@@ -304,7 +346,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     setPostStatus(() => {
       const next: Record<string, PostState> = {};
       for (const r of gradableResults) {
-        next[r.student] = fanout[r.student] ?? { status: "posted" };
+        next[r.student] = refusals[r.student]
+          ? { status: "skipped", message: refusals[r.student] }
+          : fanout[r.student] ?? { status: "posted" };
       }
       return next;
     });
@@ -312,12 +356,19 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     // apart from a partial failure - "Posted 28." used to be indistinguishable
     // from a 30-student class where 2 were silently dropped.
     setPostSummary(
-      `Posted ${result.posted} of ${gradableResults.length} attempted.` +
+      `Posted ${result.posted} of ${postableResults.length} attempted.` +
         (result.failures.length ? ` ${result.failures.length} failed.` : "") +
-        (result.skipped.length ? ` ${result.skipped.length} skipped (no grade or comment to send).` : "")
+        (result.skipped.length ? ` ${result.skipped.length} skipped (no grade or comment to send).` : "") +
+        (Object.keys(refusals).length
+          ? ` ${Object.keys(refusals).length} refused (unreviewed grading result).`
+          : "")
     );
     onPosted?.();
-    return { posted: result.posted, failed: result.failures.length, skipped: result.skipped.length };
+    return {
+      posted: result.posted,
+      failed: result.failures.length,
+      skipped: result.skipped.length + Object.keys(refusals).length,
+    };
   }, [gradableResults, edits, canvasUrl, onPosted]);
 
   // Expose post-all so the Live Feed pane's "Post & Next" can drive it.
@@ -330,6 +381,12 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const handlePostOne = async (row: GradeRow) => {
     if (typeof row.userId !== "number") return;
     const edit = edits[row.student] ?? defaultRowEdit(row);
+    // A13 guard.
+    const check = checkRowPostability({ producer: row, submittedScore: parseEarnedPoints(edit.total), submittedComment: edit.overall });
+    if (!check.postable) {
+      setPostStatus((prev) => ({ ...prev, [row.student]: { status: "skipped", message: check.reason } }));
+      return;
+    }
     const payload = [
       {
         userId: row.userId,

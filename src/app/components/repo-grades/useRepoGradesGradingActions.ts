@@ -338,6 +338,11 @@ export function useRepoGradesGradingActions(
         resubmitNotice: first?.resubmitNotice ?? "",
         rubricAreas: first?.rubricAreas ?? [],
         generatedScore: first?.totalScore ?? null,
+        // A13: the producer's own comment, set at the SAME time as
+        // generatedScore - repoGradesPosting.ts's postability guard compares
+        // the CURRENT comment against this to tell an untouched row apart
+        // from a reviewed one.
+        generatedComment: first?.overallComment ?? null,
         // docs/grading-results-file-viewer-acceptance-criteria.md, brought to
         // this surface after it shipped on GradingResults.tsx first
         // (REGRESSION entries 356/357/359): the files this call ACTUALLY

@@ -21,10 +21,13 @@
 //   - buildRepoGradePostPlan: BEFORE the call. Turns one column's (already
 //     selection-scoped) rows into the exact `grades` array
 //     postCanvasGradesAction will receive, filtering through
-//     repoGradePostability (src/lib/repo-grade-postability.ts) - and ONLY
-//     through that predicate, never a second hand-rolled condition, so the
-//     button's enabled state (driven by the same plan's `postable.length`)
-//     and the actual payload can never disagree (AC5 item 28). This mirrors
+//     repoGradePostability (src/lib/repo-grade-postability.ts) and, for a row
+//     that passes it, A13's checkRowPostability (src/lib/grade/postable.ts) -
+//     the two predicates this module ever gates a row on, never a third
+//     hand-rolled condition. RepoGradeCellControl.tsx runs the SAME two
+//     predicates in the SAME order for its own per-cell button/reason, so
+//     the button's enabled state and the actual payload can never disagree
+//     (AC5 item 28) even with a second gate added. This mirrors
 //     GradingResults.tsx:301-313's `payload = gradableResults.map(...)`. A3
 //     (see repoGradeScoreWasEdited below): a postable row's `rubricAreas` is
 //     included only when the instructor has not hand-edited the score away
@@ -46,6 +49,11 @@
 //     with that one message (GradingResults.tsx:326-334).
 
 import { repoGradePostability, type PostabilityInput } from "@/lib/repo-grade-postability";
+// A13: the live-defect guard that stops an untouched, unreviewed grading
+// result (blank score, comment identical to the grader's own output) from
+// posting to a student as though it were a real grade. Plain leaf, no
+// server-only or model-calling imports - see that file's own header comment.
+import { checkRowPostability } from "@/lib/grade/postable";
 import { resolvePostScore } from "./repoGradePostScore";
 // docs/rubric-criteria-breakdown-acceptance-criteria.md B1/B2: the SAME
 // parseScoreFraction repoGradeScoreDisplay.ts already owns for reading a
@@ -112,6 +120,12 @@ export interface RepoGradePostCandidateRow {
    * `score` above by repoGradeScoreWasEdited to decide whether `rubricAreas`
    * is still trustworthy to post. */
   generatedScore: string | null;
+  /** A13: `comment` exactly as gradeRepoAction's last successful grading call
+   * for this cell produced it (first.overallComment), or null when this cell
+   * has never been graded. Compared against the CURRENT `comment` above by
+   * the postability guard below to tell an untouched, unreviewed comment
+   * apart from one the instructor actually edited. */
+  generatedComment: string | null;
 }
 
 /** One grade actually going out in this call - the exact shape
@@ -283,6 +297,7 @@ export function repoGradePostCandidateRows(
       comment: edit.comment,
       rubricAreas: edit.rubricAreas,
       generatedScore: edit.generatedScore,
+      generatedComment: edit.generatedComment,
     };
   });
 }
@@ -324,6 +339,21 @@ export function buildRepoGradePostPlan(
     });
     if (!result.postable) {
       skipped.push({ repo: row.repo, reason: result.reason });
+      continue;
+    }
+    // A13: refuse a row no human has touched (blank producer score/areas,
+    // blank submitted score, comment identical to the producer's own
+    // overallComment) - repoGradePostability above only gates on a numeric
+    // score, so a hand-typed score over an untouched, unreviewed comment
+    // would otherwise post the grader's internal error text or raw model
+    // output to the student.
+    const postability = checkRowPostability({
+      producer: { totalScore: row.generatedScore ?? "", rubricAreas: row.rubricAreas, overallComment: row.generatedComment ?? "" },
+      submittedScore: row.score,
+      submittedComment: row.comment,
+    });
+    if (!postability.postable) {
+      skipped.push({ repo: row.repo, reason: postability.reason });
       continue;
     }
     const trimmedComment = row.comment.trim();

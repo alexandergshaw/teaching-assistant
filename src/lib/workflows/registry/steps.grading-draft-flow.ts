@@ -23,6 +23,7 @@ import {
   countPostableResults,
   stripGradingRunEntriesForDraft,
 } from "@/lib/workflows/grading-review-rows";
+import { checkRowPostability } from "@/lib/grade/postable";
 
 export const gradingDraftFlowSteps: StepDefinition[] = [
   {
@@ -591,6 +592,24 @@ export const gradingDraftFlowSteps: StepDefinition[] = [
             }
 
             const comment = approvedRow.comment ?? result.overallComment;
+
+            // A13: refuse a row no human has touched (blank producer
+            // score/areas, blank submitted grade, comment identical to the
+            // producer's own overallComment) - never post the grader's
+            // internal error text or raw model output to the student.
+            // A13: refuse a row no human has touched (blank producer
+            // score/areas, blank submitted grade, comment identical to the
+            // producer's own overallComment) - never post the grader's
+            // internal error text or raw model output to the student.
+            const postability = checkRowPostability({
+              producer: result,
+              submittedScore: grade,
+              submittedComment: comment,
+            });
+            if (!postability.postable) {
+              lines.push(`${approvedRow.student}: ${postability.reason}`);
+              continue;
+            }
 
             // When the reviewer edited the total, the AI's per-criterion
             // breakdown no longer adds up to it - post the total alone rather

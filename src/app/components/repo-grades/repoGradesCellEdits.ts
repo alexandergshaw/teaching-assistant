@@ -108,6 +108,14 @@ export interface RepoGradeCellEdit {
    * repoGradesPosting.ts's repoGradeScoreWasEdited before trusting
    * `rubricAreas` enough to post it. */
   generatedScore: string | null;
+  /** A13: `comment` exactly as gradeRepoAction's last successful grading call
+   * for this cell produced it (first.overallComment) - null until this cell
+   * has been graded. Set at the SAME time as `generatedScore`/`rubricAreas`,
+   * never by a box edit, so repoGradesPosting.ts's postability guard can tell
+   * an untouched, unreviewed comment (current `comment` still equal to this
+   * field) apart from one the instructor has actually edited - the same role
+   * `generatedScore` already plays for the score. */
+  generatedComment: string | null;
   /** docs/grading-results-file-viewer-acceptance-criteria.md, brought to this
    * surface by this feature: the files gradeRepoAction's last successful
    * grading call for this cell ACTUALLY read, with their contents - the
@@ -161,6 +169,7 @@ export function defaultRepoGradeCellEdit(): RepoGradeCellEdit {
     postMessage: null,
     rubricAreas: [],
     generatedScore: null,
+    generatedComment: null,
     submittedFiles: [],
     submissionTruncated: false,
     codeExecution: null,

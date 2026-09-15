@@ -248,6 +248,11 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
         // row must set it too or it will misreport as "edited" the
         // moment it is graded.
         generatedScore: first?.totalScore ?? null,
+        // A13: matches useRepoGradesGradingActions.ts's handleGradeCell -
+        // the producer's own comment, set alongside generatedScore, so the
+        // postability guard can tell an untouched row apart from a reviewed
+        // one.
+        generatedComment: first?.overallComment ?? null,
         // docs/grading-results-file-viewer-acceptance-criteria.md, brought to
         // this surface after it shipped on GradingResults.tsx first
         // (REGRESSION entries 356/357/359) - the files THIS call actually

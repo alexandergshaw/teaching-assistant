@@ -39,6 +39,7 @@ function row(overrides: Partial<RepoGradePostCandidateRow> = {}): RepoGradePostC
     comment: "",
     rubricAreas: [],
     generatedScore: null,
+    generatedComment: null,
     ...overrides,
   };
 }
@@ -152,6 +153,7 @@ describe("repoGradePostCandidateRows - assembles one column's rows from the grid
         comment: "",
         rubricAreas: [],
         generatedScore: null,
+        generatedComment: null,
       },
     ]);
   });

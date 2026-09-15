@@ -4,6 +4,7 @@ import AiChatWindow from "./AiChatWindow";
 import LiveClassWindow, { LIVE_CLASS_WINDOW_W, LIVE_CLASS_WINDOW_H } from "./live-class/LiveClassWindow";
 import WeeklyChecklistOverviewModal from "./courses/WeeklyChecklistOverviewModal";
 import { LegibilityProbeModal } from "./grading-recording/LegibilityProbeModal";
+import AccommodationsPanel from "./accommodations/AccommodationsPanel";
 import { useLiveClassSession } from "./live-class/useLiveClassSession";
 import {
   isLiveClassSessionActive,
@@ -103,6 +104,20 @@ export default function AiChatFab() {
   // there is nothing sensitive in "was this diagnostic left open", so it
   // persists the same boolean way every other dial-opened surface here does.
   const [legibilityProbeOpen, setLegibilityProbeOpen] = useState<boolean>(() => readLS("legibility-probe-open", false));
+
+  // N7: accommodations panel, moved in from the deleted standalone
+  // AccommodationsAmbientControl.tsx. DELIBERATELY NOT the readLS(...)
+  // idiom every other panel above uses - AC-S3 requires default-collapsed
+  // with the open state never persisted (an auto-reopening disability-data
+  // panel is visible over a shoulder, in a screen share, and in any
+  // recording made while grading). A literal `false` initializer, same as
+  // the ambient control's own state before this move.
+  const [accommodationsOpen, setAccommodationsOpen] = useState(false);
+  // Focus-restoration target for AccommodationsPanel's ModalShell (N7 item
+  // 7): the opening MenuItem in FabQuickActionsMenu unmounts as soon as the
+  // menu closes, so it cannot be the target - the Fab trigger itself is,
+  // which FabQuickActionsMenu now exposes via forwardRef.
+  const accommodationsTriggerRef = useRef<HTMLButtonElement>(null);
 
   // HOISTED above the window body (H3): this is the one and only instance of
   // the live-class session controller for the whole app, owned by this
@@ -404,6 +419,12 @@ export default function AiChatFab() {
 
   const handleOpenLegibilityProbe = useCallback(() => {
     setLegibilityProbeOpen(true);
+  }, []);
+
+  // F2, same as every handler above: OPENS the panel, never toggles one
+  // already open closed.
+  const handleOpenAccommodations = useCallback(() => {
+    setAccommodationsOpen(true);
   }, []);
 
   // F4: the three former recording-variant entries (Discussions,
@@ -760,6 +781,7 @@ export default function AiChatFab() {
           into one). Every handler here OPENS its destination (F2) - see
           each handleOpen* above for why none of them toggle. */}
       <FabQuickActionsMenu
+        ref={accommodationsTriggerRef}
         bottom={DIAL_BOTTOM}
         right={DIAL_RIGHT}
         onOpenChat={handleOpenChat}
@@ -767,6 +789,7 @@ export default function AiChatFab() {
         onOpenChecklist={handleOpenChecklist}
         onOpenLegibilityProbe={handleOpenLegibilityProbe}
         onOpenRecordingTools={handleOpenRecordingTools}
+        onOpenAccommodations={handleOpenAccommodations}
         liveClassDisabledReason={liveClassDisabledReason}
         legibilityProbeDisabledReason={legibilityProbeDisabledReason}
       />
@@ -880,6 +903,20 @@ export default function AiChatFab() {
           only controls whether the dialog is on screen at all. */}
       {legibilityProbeOpen && (
         <LegibilityProbeModal onClose={() => setLegibilityProbeOpen(false)} />
+      )}
+
+      {/* N7: mounted only while open, same as WeeklyChecklistOverviewModal
+          and LegibilityProbeModal above - this is what still makes "holds no
+          data until opened, fetches on open, drops it on close" true
+          (AC-S3/AC-5): the panel's own data-fetch state is discarded by
+          React on unmount, not by any bespoke cleanup here. restoreFocusRef
+          is the Fab trigger exposed by FabQuickActionsMenu above (item 7),
+          since the opening MenuItem itself unmounts before this closes. */}
+      {accommodationsOpen && (
+        <AccommodationsPanel
+          onClose={() => setAccommodationsOpen(false)}
+          restoreFocusRef={accommodationsTriggerRef}
+        />
       )}
     </>
   );

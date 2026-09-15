@@ -4,7 +4,6 @@ import "./globals.css";
 import SelectionChatWidget from "./components/SelectionChatWidget";
 import AiChatFab from "./components/AiChatFab";
 import ContextMenu from "./components/ContextMenu";
-import AccommodationsAmbientControl from "./components/accommodations/AccommodationsAmbientControl";
 import { InstitutionCountsProvider } from "./components/InstitutionCounts";
 import { VcCountsProvider } from "./components/VcCounts";
 import { FilesInboxProvider } from "./components/FilesInbox";
@@ -168,9 +167,13 @@ export default async function RootLayout({
               </VcCountsProvider>
             </InstitutionCountsProvider>
             <SelectionChatWidget />
+            {/* N7: the accommodations entry moved into AiChatFab's quick-
+                actions menu (FabQuickActionsMenu.tsx) - the standalone
+                AccommodationsAmbientControl mount that used to live here was
+                deleted, so there is exactly one entry point to this
+                disability-data surface, not two. */}
             <AiChatFab />
             <ContextMenu />
-            <AccommodationsAmbientControl />
           </SupabaseProvider>
         </AppThemeProvider>
       </body>

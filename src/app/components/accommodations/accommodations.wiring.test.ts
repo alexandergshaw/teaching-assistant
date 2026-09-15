@@ -33,7 +33,15 @@ const DIR = path.join(__dirname);
 const CSS_SOURCE = readFileSync(path.join(DIR, "AccommodationsPanel.module.css"), "utf8");
 const TEXT_SOURCE = readFileSync(path.join(DIR, "AccommodationsText.tsx"), "utf8");
 const PANEL_SOURCE = readFileSync(path.join(DIR, "AccommodationsPanel.tsx"), "utf8");
-const AMBIENT_SOURCE = readFileSync(path.join(DIR, "AccommodationsAmbientControl.tsx"), "utf8");
+// N7: AccommodationsAmbientControl.tsx was deleted (the standalone control
+// is replaced by a FAB menu entry) - RETARGETED, not dropped, per the ROUND
+// 2 ruling N7-R1: dropping this source from the loop at the bottom of this
+// file would silently HALVE the only executing AC-S5-adjacent guard. The
+// loop below still iterates the same two sources it always did.
+const AMBIENT_SOURCE = readFileSync(
+  path.join(process.cwd(), "src", "app", "components", "FabQuickActionsMenu.tsx"),
+  "utf8"
+);
 
 describe("accommodations unselectable mechanism wiring", () => {
   it("defines .entryText with user-select: none, anchored on the selector and property together", () => {

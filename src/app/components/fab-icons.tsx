@@ -72,6 +72,26 @@ export function RecordingToolsIcon() {
   );
 }
 
+// N7: the accommodations entry's glyph - a shield, distinct from the four
+// shapes above (bubble, eye, camera, sparkle) and from LiveClassIcon/
+// ChecklistIcon (each exported from the component it belongs to, per this
+// file's own header note). Constant across every render regardless of
+// accommodations state (AC-2 / AC-S5) - this function takes no props and
+// reads no state.
+export function AccommodationsIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
 // The FAB's own trigger glyph, replacing MUI's default `Add` ("+") mark
 // (F5): a "+" promises "create something new", and nothing in this menu
 // creates anything - AM17 exempts brand marks like LogoMark from the icon

@@ -1,10 +1,12 @@
 "use client";
 
 // The accommodations/extensions panel (backlog N4). Mounted only while open
-// (see AccommodationsAmbientControl.tsx, which conditionally renders this
-// component rather than always mounting it hidden) - unmounting on close is
-// this file's mechanism for "drops the data on close" (requirement 7 of the
-// build brief): there is no state left to drop, because React discards it.
+// (see AiChatFab.tsx, which conditionally renders this component from its
+// quick-actions menu entry - N7 moved the mount point here from the deleted
+// standalone AccommodationsAmbientControl.tsx, rather than always mounting
+// it hidden) - unmounting on close is this file's mechanism for "drops the
+// data on close" (requirement 7 of the build brief): there is no state left
+// to drop, because React discards it.
 //
 // THIS IS DISABILITY-RELATED STUDENT DATA. Read this file's imports' own
 // headers (src/lib/accommodations.ts, src/app/actions/accommodations.ts)
@@ -74,8 +76,9 @@ const ASSIGNMENT_ID_KEY = "ta-accom-assignment-id";
 
 // Constant, generic accessible name for ModalShell's required `label` prop -
 // never built from a name, note, or count (build brief requirement 2).
-// Mirrors AccommodationsAmbientControl.tsx's own LABEL constant, which is
-// the fixed aria-label/title on the button that opens this panel.
+// Mirrors the accommodations entry's own literal label in
+// FabQuickActionsMenu.tsx (N7), the fixed label on the menu item that opens
+// this panel.
 const PANEL_LABEL = "Accommodations and extensions";
 
 function readPersisted(key: string): string {
@@ -124,10 +127,13 @@ export default function AccommodationsPanel({
 }: {
   onClose: () => void;
   /** The opening button, captured by the caller at the moment it opened
-   * this panel - forwarded unchanged to ModalShell/useModalDismiss. See
-   * AccommodationsAmbientControl.tsx's `triggerRef`, the exact precedent
-   * (AttachmentsPanel.tsx's `previewTriggerRef`) this mirrors. Omitted only
-   * when there is no sensible opener to return focus to. */
+   * this panel - forwarded unchanged to ModalShell/useModalDismiss. N7:
+   * this is now the Fab element itself, exposed by FabQuickActionsMenu via
+   * forwardRef (the opening MenuItem unmounts before this panel closes, so
+   * it cannot be the target) - see AiChatFab.tsx's
+   * accommodationsTriggerRef. Same precedent (AttachmentsPanel.tsx's
+   * `previewTriggerRef`) as before. Omitted only when there is no sensible
+   * opener to return focus to. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { active: institution } = useInstitutionSelection();

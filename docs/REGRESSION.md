@@ -42594,3 +42594,119 @@ code.
 Three features touched this panel in one day (G1's bound, then this). Whoever
 touches it next should plan to split it, sized against their own additions rather
 than against the ceiling.
+
+## 420. N7: accommodations moves into the FAB, past a host that violates its rules
+
+Backlog N7, owner ask: "accommodations should be in the fab". The surface shipped
+in 48e8dd8 as its own floating control; it is now the sixth entry in the FAB's
+quick-actions dial, and the standalone control is deleted.
+
+**The move was wiring. The work was surviving the destination.** This is
+disability-related student data, and the FAB's own idioms break two of N4's
+disclosure rules by default - so most of what follows is about what did NOT
+happen.
+
+### 420a - the destination's unanimous idiom is FORBIDDEN here
+
+`AiChatFab.tsx` persists open state for FOUR panels out of four -
+`readLS("chat-open")` `:84`, `"live-class-open"` `:85`,
+`"checklist-overview-open"` `:93`, `"legibility-probe-open"` `:105`.
+
+N4's **AC-S3** requires default-collapsed with open state NOT persisted, because
+an auto-reopening disability-data panel is visible over a shoulder, in a screen
+share, and in any recording made while grading - and this app records
+walkthroughs. So `accommodationsOpen` is a literal `useState(false)`
+(`AiChatFab.tsx:115`), deliberately departing from the local convention, with the
+reason written at `:109`.
+
+**The existing scan could not have caught a violation:** `writeLS` prefixes keys
+with `ta:`, a different namespace from the `ta-accom-*` exact-set scan. The new
+assertion covers both, and was sabotage-proven - adding
+`writeLS("accommodations-open", ...)` turned it RED.
+
+**A cross-link recorded but deliberately NOT relied on:** those four `readLS`
+seeds are the same localStorage-seeded-initializer pattern G2 is about, so if
+G2's premise holds they may not restore at all - meaning copying the idiom might
+have been harmless BY ACCIDENT. Privacy must never rest on a bug being present,
+and if G2 is fixed the accident disappears.
+
+### 420b - the entry is unconditional, and cannot be disabled
+
+`FabQuickActionsMenu.tsx:177` is a static member of the `actions` array literal
+with a literal label and a constant icon. Two rules, both measured:
+
+- **Unconditional**, because an entry appearing only when accommodations exist
+  discloses existence perfectly - AC-S5 names that the strongest channel of all.
+  Sabotage-proven: wrapping it in `...(hasData ? [...] : [])` turned the AC-1
+  test RED.
+- **No `disabledReason`, not even a constant one.** `:199` reads
+  `disabled={Boolean(action.disabledReason)}`, so a constant one would ship the
+  entry PERMANENTLY DEAD. Two sibling entries use data-varying disabled reasons,
+  so local convention actively tempts this. An earlier version of the criterion
+  forbade it for a speculative reason ("a disabled entry invites why?"); the real
+  reason is mechanical, and there is no state where disabled would be honest
+  since the panel renders its own institution picker with a "No institution
+  configured" option.
+
+### 420c - the guard that was nearly halved during the move
+
+`AccommodationsAmbientControl.tsx` was read at MODULE TOP LEVEL by both guards
+(`accommodations.structure.test.ts:22`, `accommodations.wiring.test.ts:36`) and
+consumed in their source loops (`:41` and `:81`). Deleting it without fixing
+those throws ENOENT at COLLECTION - which would also have broken N7's own
+`verify` command.
+
+**The obvious minimal fix was the dangerous one:** dropping `AMBIENT_SOURCE` from
+the arrays would have silently HALVED `wiring.test.ts:81`'s two-element source
+set - shrinking the only executing AC-S5-adjacent guard at the exact moment the
+data moved into a hostile host. Instead the constant was RETARGETED at
+`FabQuickActionsMenu.tsx`. Counted before and after: structure loop **3 -> 3**,
+wiring loop **2 -> 2**. Neither shrank.
+
+**The general lesson, which is why this has its own section:** when a guard's
+source set names a file a change deletes, retarget it. A guard that gets quietly
+smaller during a refactor is worse than one that fails loudly, because the
+failure is what tells you to look.
+
+### 420d - focus restoration, which would have shipped broken and green
+
+The opening `MenuItem` unmounts before the panel closes, so it cannot be the
+restore target. The correct target is the `Fab`, which was PRIVATE to
+`FabQuickActionsMenu`. And `ModalShell`'s `restoreFocusRef` is OPTIONAL, so
+omitting it is silently green and NO gate catches a lost focus path.
+
+Fixed by making `FabQuickActionsMenu` a `forwardRef<HTMLButtonElement>` with the
+ref on the `Fab`, threaded through to the panel's `restoreFocusRef`.
+
+### 420e - what is measured true today
+
+`@(Get-Content <path>).Count`: `AiChatFab.tsx` **887 -> 924** (ceiling 1000, so
+76 lines of headroom - N4 had deliberately avoided this file for that reason, and
+this item reverses that decision knowingly), `FabQuickActionsMenu.tsx` 234 -> 260,
+`fab-icons.tsx` 95 -> 115, `layout.tsx` 179 -> 182, `AccommodationsPanel.tsx`
+602 -> 608 (comments only), `AccommodationsPanel.module.css` 250 -> 228,
+`accommodations.structure.test.ts` 96 -> 192, `accommodations.wiring.test.ts`
+130 -> 138.
+
+The CSS shrank because deleting the ambient control orphaned `.fab`/`.fab:hover`,
+which pushed the repo-wide orphan ratchet to 121 against its pinned 120. Removing
+the dead rules was required, not tidying.
+
+No code references the deleted component. Three COMMENTS name it, recording why
+the mount moved - which matches this repo's convention of writing down WHY, and
+is the reading of AC-4's "grep returns nothing" instrument I ruled correct.
+
+### 420f - what today's tests will NOT notice
+
+Nothing here renders a component. So whether the dial entry is discoverable,
+whether the panel actually opens from it, and whether focus really returns to the
+`Fab` are all READING claims. The owner opening the dial settles all three in
+seconds.
+
+**And one question the owner has not yet answered**, recorded because the answer
+could invert this item: is "accommodations should be in the fab" a RELOCATION
+request or a DISCOVERABILITY complaint? The move COSTS A CLICK - a persistent
+control becomes an entry inside a dial - against this project's standing rule
+that click cost is first-class. Built under the literal relocation reading. If
+the real problem was that the standalone control went unnoticed, burying it in a
+menu makes that worse, and this should be revisited rather than defended.

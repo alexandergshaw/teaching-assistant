@@ -50,7 +50,7 @@
 // its own labelled tab strip - see AiChatFab.tsx's own comment on
 // handleOpenRecordingTools for why a plain navigate was chosen over a
 // nested submenu.
-import { useState } from "react";
+import { forwardRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import Fab from "@mui/material/Fab";
 import Menu from "@mui/material/Menu";
@@ -58,7 +58,7 @@ import MenuItem from "@mui/material/MenuItem";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import Tooltip from "@mui/material/Tooltip";
-import { ChatIcon, LegibilityProbeIcon, RecordingToolsIcon, MenuTriggerIcon } from "./fab-icons";
+import { ChatIcon, LegibilityProbeIcon, RecordingToolsIcon, MenuTriggerIcon, AccommodationsIcon } from "./fab-icons";
 import { LiveClassIcon } from "./live-class/LiveClassWindow";
 import { ChecklistIcon } from "./courses/WeeklyChecklistOverviewModal";
 
@@ -72,6 +72,11 @@ export interface FabQuickActionsMenuProps {
   onOpenChecklist: () => void;
   onOpenLegibilityProbe: () => void;
   onOpenRecordingTools: () => void;
+  /** N7: opens the accommodations panel. Backlog N4's standalone
+   * AccommodationsAmbientControl.tsx was deleted; this is the entry's only
+   * remaining entry point. Never disabled, never conditional (AC-1/AC-2/
+   * AC-S5) - see the `actions` array below. */
+  onOpenAccommodations: () => void;
   /** Present (a human-readable reason) disables the Live Class entry;
    * absent/undefined leaves it enabled. Computed by the caller from
    * fab-menu-logic.ts's supportsMicrophone - gating a control BEFORE the
@@ -90,7 +95,13 @@ interface QuickAction {
   disabledReason?: string;
 }
 
-export default function FabQuickActionsMenu({
+// N7: forwardRef so the caller (AiChatFab.tsx) can pass the Fab element
+// itself as AccommodationsPanel's `restoreFocusRef` - the opening MenuItem
+// unmounts as soon as the menu closes (keepMounted stays false, see this
+// file's header), so it can never be the focus-restoration target; the Fab
+// trigger below is the only element that is still mounted when the panel
+// closes.
+const FabQuickActionsMenu = forwardRef<HTMLButtonElement, FabQuickActionsMenuProps>(function FabQuickActionsMenu({
   bottom,
   right,
   onOpenChat,
@@ -98,9 +109,10 @@ export default function FabQuickActionsMenu({
   onOpenChecklist,
   onOpenLegibilityProbe,
   onOpenRecordingTools,
+  onOpenAccommodations,
   liveClassDisabledReason,
   legibilityProbeDisabledReason,
-}: FabQuickActionsMenuProps) {
+}: FabQuickActionsMenuProps, fabRef) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
 
@@ -152,11 +164,23 @@ export default function FabQuickActionsMenu({
       icon: <RecordingToolsIcon />,
       onClick: onOpenRecordingTools,
     },
+    // N7: the accommodations entry, moved in from the deleted standalone
+    // AccommodationsAmbientControl.tsx. AC-1: a plain, static member of this
+    // array literal - never pushed, spread, filtered, or wrapped in a
+    // conditional, because an entry that only appears when accommodations
+    // data exists would disclose that fact (AC-S5, the strongest disclosure
+    // channel there is). AC-2: `label` is a literal string and this object
+    // carries no `disabledReason` key at all - a constant one would ship the
+    // entry permanently dead (`disabled={Boolean(action.disabledReason)}`
+    // below), and there is no state in which disabling this entry would be
+    // honest (the panel has its own "No institution configured" option).
+    { key: "accommodations", label: "Accommodations and extensions", icon: <AccommodationsIcon />, onClick: onOpenAccommodations },
   ];
 
   return (
     <>
       <Fab
+        ref={fabRef}
         aria-label="Quick actions"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -231,4 +255,6 @@ export default function FabQuickActionsMenu({
       </Menu>
     </>
   );
-}
+});
+
+export default FabQuickActionsMenu;

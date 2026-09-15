@@ -21,33 +21,11 @@
   -webkit-user-select: none;
 }
 
-/* The collapsed ambient control (AccommodationsAmbientControl.tsx) only -
-   kept in this module rather than a separate stylesheet since this wave's
-   file list does not include a third CSS file. Positioned opposite
-   AiChatFab's dial (DIAL_BOTTOM/DIAL_RIGHT = 24, AiChatFab.tsx:41-42) to
-   avoid overlapping its 56px click target. */
-.fab {
-  position: fixed;
-  left: 24px;
-  bottom: 24px;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  border: 1px solid var(--card-border);
-  background: var(--field-background);
-  color: var(--text-secondary);
-  box-shadow: var(--shadow-md);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 1200;
-}
-
-.fab:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
+/* N7: the .fab / .fab:hover rules for the standalone
+   AccommodationsAmbientControl.tsx are gone - that component was deleted
+   when the accommodations entry moved into AiChatFab's quick-actions menu,
+   which is why these would otherwise be orphans the moment this comment is
+   read (page-module-css-orphan-classes.test.ts). */
 
 /* The panel now adopts ModalShell (ModalShell.tsx), which renders its own
    `.previewBackdrop`/`.previewModal` (page.module.css) - this component no

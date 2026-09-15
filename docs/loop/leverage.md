@@ -122,9 +122,10 @@ human who scoped it, never defaulted by the agent writing the criteria:
 
 Silence is the one illegal answer: shipping this shape while the criteria
 narrate it as "integrated" is the failure mode this whole card exists to
-catch. This is a named, real instance in the current tree, not a hypothetical
-- it is deliberately left unresolved here; see `docs/BACKLOG.md` entry L5 for
-the disposal choice.
+catch. This is a named, real instance in the current tree, not a hypothetical.
+The owner has decided the disposal: keep the feature and find it a real
+mechanism, the "Redesign" option above - see `docs/BACKLOG.md` entry L7, which
+holds the candidate advantage until one is designed, checked and scoped.
 
 ## The removal test
 

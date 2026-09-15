@@ -13,6 +13,14 @@ import { jsonObjectSlice, propagateExampleCodeToFollowups, toSlideData } from ".
 import { TEST_QUESTION_KINDS, type TestQuestionKind } from "@/lib/artifact-templates/types";
 import { courseKindContract, APPLIED_REAL_TOOL_RULE, COMMITTED_TOOLSET_RULE, type CourseKind } from "@/lib/course-kind";
 import { PLAIN_LANGUAGE_CONTRACT } from "@/lib/artifact-voice";
+import {
+  currentCourseWeek,
+  courseProgressStatus,
+  daysUntilTermEnd,
+  matchAskAiQuestionShape,
+  SCHEDULE_ANSWER_MARKER,
+  type CourseProgressStatus,
+} from "@/lib/week-numbering";
 
 
 
@@ -765,16 +773,89 @@ Requirements:
 }
 
 /**
+ * Renders a computed answer for a matched current-week question, or null
+ * when the required course field is missing/unparseable (the caller falls
+ * through to the model in that case). Never states a raw week number for
+ * the not-started or complete states - those are recognizably different
+ * messages, not "week 0" or a week number past the course's own length.
+ */
+function renderCurrentWeekAnswer(rawWeek: number, status: CourseProgressStatus): string {
+  if (status === "not-started") {
+    return `The course has not started yet - week 1 begins once the term starts.\n\n${SCHEDULE_ANSWER_MARKER}`;
+  }
+  if (status === "complete") {
+    return `The course has finished all of its scheduled weeks.\n\n${SCHEDULE_ANSWER_MARKER}`;
+  }
+  return `We are currently in week ${rawWeek} of the course.\n\n${SCHEDULE_ANSWER_MARKER}`;
+}
+
+/** Renders a computed answer for a matched term-end question. The sign
+ * convention after the term has ended: a non-positive day count reads as
+ * "already ended" rather than a negative number or "0 days". */
+function renderTermEndAnswer(daysLeft: number): string {
+  if (daysLeft <= 0) {
+    return `The term has already ended.\n\n${SCHEDULE_ANSWER_MARKER}`;
+  }
+  const weeksLeft = Math.ceil(daysLeft / 7);
+  return `There are ${daysLeft} day(s) left in the term (about ${weeksLeft} week(s)).\n\n${SCHEDULE_ANSWER_MARKER}`;
+}
+
+/**
+ * Computes a deterministic schedule-arithmetic answer for a closed list of
+ * question shapes, from typed Course date fields - never from parsing the
+ * rendered courseFacts text, which would silently duplicate
+ * renderCourseFacts's own formatting. Returns null when the question does
+ * not match the closed list, or when the matched shape's required field is
+ * missing, unparseable, or internally inconsistent (end before start) - in
+ * every such case the caller falls through to the model unchanged.
+ */
+function computeDeterministicScheduleAnswer(
+  question: string,
+  courseDates: { startDate: string | null; endDate: string | null; weeks: number | null },
+  now: number
+): string | null {
+  const shape = matchAskAiQuestionShape(question);
+  if (shape === "current-week") {
+    const rawWeek = currentCourseWeek(courseDates.startDate, now);
+    if (rawWeek === null) return null;
+    const status = courseProgressStatus(rawWeek, courseDates.weeks);
+    return renderCurrentWeekAnswer(rawWeek, status);
+  }
+  if (shape === "term-end") {
+    if (courseDates.startDate) {
+      const start = Date.parse(courseDates.startDate);
+      const end = courseDates.endDate ? Date.parse(courseDates.endDate) : NaN;
+      if (!Number.isNaN(start) && !Number.isNaN(end) && end < start) {
+        return null;
+      }
+    }
+    const daysLeft = daysUntilTermEnd(courseDates.endDate, now);
+    if (daysLeft === null) return null;
+    return renderTermEndAnswer(daysLeft);
+  }
+  return null;
+}
+
+/**
  * Answer a free-form question about one course, grounded in the facts the app
  * already holds for it. Backs the "Ask AI" button on each course row.
  *
  * The facts are passed in as a pre-rendered block rather than as a Course
  * object so this action stays free of the Supabase row shape - the caller
  * already has the course loaded and decides what is worth sending.
+ *
+ * courseDates carries the course's own recorded start/end/length. A closed
+ * list of schedule questions (see matchAskAiQuestionShape in
+ * src/lib/week-numbering.ts) is answered from these computed values with NO
+ * model call, guaranteed - and that branch runs BEFORE any provider dispatch,
+ * including the "embedded" no-model-configured branch, which is why a
+ * matched question still gets answered even when no model is configured (see
+ * Ruling A2-4).
  */
 export async function askAboutCourseAction(
   courseFacts: string,
   question: string,
+  courseDates: { startDate: string | null; endDate: string | null; weeks: number | null },
   provider: LlmProvider = "gemini"
 ): Promise<{ answer: string } | { error: string }> {
   try {
@@ -782,6 +863,18 @@ export async function askAboutCourseAction(
     if (!ask) return { error: "Ask a question first." };
 
     const facts = courseFacts.trim();
+
+    // Deterministic schedule-arithmetic answers, computed from the course's
+    // own recorded dates with no model call. This runs BEFORE any provider
+    // dispatch - including the "embedded" no-model-configured branch right
+    // below - because the guarantee holds regardless of what the model
+    // would have returned, and "embedded" is exactly the configuration
+    // where a computed answer is worth the most (see Ruling A2-4).
+    const now = Date.now();
+    const deterministicAnswer = computeDeterministicScheduleAnswer(ask, courseDates, now);
+    if (deterministicAnswer !== null) {
+      return { answer: deterministicAnswer };
+    }
 
     // Embedded Deterministic Engine: no model to ask, so the question is
     // echoed back with the facts on hand rather than a fabricated answer.

@@ -5,6 +5,13 @@
 // folder is a legitimate no-deliverable week). Folders without digits fall back to
 // their position in the list, affecting only themselves. No IO — safe on client or
 // server.
+//
+// Also home to the Ask AI schedule-question matcher: the closed-list question
+// strings, the marker string stamped on every computed answer, and
+// daysUntilTermEnd. They live in this pure module rather than in
+// src/app/actions/llm-content.ts because that file is a "use server" action
+// module - a "use server" file may only export async functions, so a string
+// array or a plain marker constant cannot be exported from it.
 
 import { composeModuleTitle } from "./module-title";
 
@@ -101,6 +108,88 @@ export function courseProgressStatus(
   }
   return "in-progress";
 }
+
+/**
+ * Days remaining until the course's end date, or a negative count once it has
+ * passed. Uses the SAME Date.parse/epoch-ms/Math.floor convention as
+ * currentCourseWeek above (never a calendar-string comparison, never a
+ * timezone-sensitive Date-object subtraction). Returns null when the end
+ * date is missing/invalid. `now` is passed in (epoch ms) so the function
+ * stays pure and testable - it never reads a clock itself.
+ */
+export function daysUntilTermEnd(
+  endDateIso: string | null | undefined,
+  now: number
+): number | null {
+  if (!endDateIso) return null;
+  const end = Date.parse(endDateIso);
+  if (Number.isNaN(end)) return null;
+  return Math.floor((end - now) / 86_400_000);
+}
+
+/**
+ * The closed list of schedule-arithmetic questions AskAiModal answers from a
+ * computed value with no model call (see askAboutCourseAction in
+ * src/app/actions/llm-content.ts). Exact-match only, deliberately: a
+ * substring or fuzzy match would let a near-miss question ("what week should
+ * I move the midterm to") collide with a real match. Each entry is already
+ * lowercase, trimmed, with no trailing punctuation - normalizeAskAiQuestion
+ * puts an incoming question into this same shape before comparing.
+ */
+export const ASK_AI_CURRENT_WEEK_QUESTIONS: readonly string[] = [
+  "what week are we in",
+  "what week is it",
+  "what week is this",
+  "what week of the course are we in",
+];
+
+export const ASK_AI_TERM_END_QUESTIONS: readonly string[] = [
+  "how many days until the term ends",
+  "how many days until the course ends",
+  "how many days are left in the term",
+  "how many days are left in the course",
+  "how many weeks are left",
+  "how many weeks are left in the course",
+  "how many weeks are left in the term",
+  "when does the term end",
+  "when does the course end",
+  "is the course over",
+  "has the course ended",
+  "has the term ended",
+];
+
+/** The full closed list, both shapes combined - exported so a UI call site
+ * can be checked for membership (see AskAiModal.tsx's suggestion chips)
+ * without either list drifting silently out of sync with the other. */
+export const ASK_AI_CLOSED_LIST_QUESTIONS: readonly string[] = [
+  ...ASK_AI_CURRENT_WEEK_QUESTIONS,
+  ...ASK_AI_TERM_END_QUESTIONS,
+];
+
+export type AskAiQuestionShape = "current-week" | "term-end";
+
+/** Trim whitespace, lowercase, and strip at most one trailing ?/./! before
+ * comparing a question against the closed list above. */
+export function normalizeAskAiQuestion(question: string): string {
+  return question.trim().toLowerCase().replace(/[?.!]$/, "");
+}
+
+/** Classifies a question by exact match (after normalizing) against the
+ * closed list above, or null when it does not match either shape. */
+export function matchAskAiQuestionShape(question: string): AskAiQuestionShape | null {
+  const normalized = normalizeAskAiQuestion(question);
+  if (ASK_AI_CURRENT_WEEK_QUESTIONS.includes(normalized)) return "current-week";
+  if (ASK_AI_TERM_END_QUESTIONS.includes(normalized)) return "term-end";
+  return null;
+}
+
+/** Shown alongside every deterministic schedule-arithmetic answer so the
+ * instructor knows it came from the course's own recorded dates, not from
+ * the model's reading of them, and therefore cannot be wrong the way the
+ * model's other answers in the same modal can be. Production and test share
+ * this exact literal - see askAboutCourseAction and its test. */
+export const SCHEDULE_ANSWER_MARKER =
+  "This answer was computed directly from this course's own recorded dates - not read or guessed by a model - so it cannot be wrong the way the model's other answers here can be.";
 
 export interface CartridgeModulePlan {
   week: number;

@@ -18,6 +18,14 @@ const SUGGESTIONS = [
   "Suggest three assessments that fit this schedule.",
   "Where is this schedule too heavy or too light?",
   "Draft a welcome announcement for this course.",
+  // This chip's text is a literal member of the closed list of
+  // schedule-arithmetic questions askAboutCourseAction answers from a
+  // computed value with no model call (see week-numbering.ts's
+  // ASK_AI_CLOSED_LIST_QUESTIONS) - kept here so that mechanism is always
+  // reachable from the UI, not just from a test. Pinned by a source-text
+  // structure test in llm-content.test.ts; if this string and the closed
+  // list ever drift apart, that test fails.
+  "What week are we in?",
 ];
 
 export default function AskAiModal({
@@ -47,6 +55,7 @@ export default function AskAiModal({
     const result = await askAboutCourseAction(
       renderCourseFacts(course, { includeStudentData: true }),
       trimmed,
+      { startDate: course.startDate, endDate: course.endDate, weeks: course.weeks },
       getStoredProvider()
     );
     setBusy(false);

@@ -8,6 +8,12 @@ import {
   parseWeekToken,
   currentWeekFromDeadlines,
   findModuleForWeek,
+  daysUntilTermEnd,
+  normalizeAskAiQuestion,
+  matchAskAiQuestionShape,
+  ASK_AI_CURRENT_WEEK_QUESTIONS,
+  ASK_AI_TERM_END_QUESTIONS,
+  ASK_AI_CLOSED_LIST_QUESTIONS,
 } from "./week-numbering";
 
 describe("currentCourseWeek", () => {
@@ -620,5 +626,77 @@ describe("findModuleForWeek", () => {
     ];
     const result = findModuleForWeek(modules, 1);
     expect(result).toBeNull();
+  });
+});
+
+describe("daysUntilTermEnd", () => {
+  it("returns null for a missing or invalid end date", () => {
+    expect(daysUntilTermEnd(null, Date.now())).toBeNull();
+    expect(daysUntilTermEnd(undefined, Date.now())).toBeNull();
+    expect(daysUntilTermEnd("not-a-date", Date.now())).toBeNull();
+  });
+
+  it("uses the same Date.parse/epoch-ms/Math.floor convention as currentCourseWeek", () => {
+    const end = "2026-12-15";
+    const now = Date.parse("2026-12-05");
+    expect(daysUntilTermEnd(end, now)).toBe(10);
+  });
+
+  it("returns a negative count once the end date has passed", () => {
+    const end = "2026-12-15";
+    const now = Date.parse("2026-12-20");
+    expect(daysUntilTermEnd(end, now)).toBe(-5);
+  });
+
+  it("returns 0 exactly at the end date", () => {
+    const end = "2026-12-15";
+    expect(daysUntilTermEnd(end, Date.parse(end))).toBe(0);
+  });
+});
+
+describe("normalizeAskAiQuestion", () => {
+  it("trims, lowercases, and strips at most one trailing ?/./!", () => {
+    expect(normalizeAskAiQuestion("  What Week Are We In?  ")).toBe("what week are we in");
+    expect(normalizeAskAiQuestion("Is the course over.")).toBe("is the course over");
+    expect(normalizeAskAiQuestion("Has the term ended!")).toBe("has the term ended");
+  });
+
+  it("strips only ONE trailing punctuation mark, not two", () => {
+    expect(normalizeAskAiQuestion("what week are we in??")).toBe("what week are we in?");
+  });
+});
+
+describe("matchAskAiQuestionShape", () => {
+  it("matches every current-week closed-list string, case/whitespace/one-trailing-punctuation insensitive", () => {
+    for (const q of ASK_AI_CURRENT_WEEK_QUESTIONS) {
+      expect(matchAskAiQuestionShape(`  ${q.toUpperCase()}? `)).toBe("current-week");
+    }
+  });
+
+  it("matches every term-end closed-list string", () => {
+    for (const q of ASK_AI_TERM_END_QUESTIONS) {
+      expect(matchAskAiQuestionShape(q)).toBe("term-end");
+    }
+  });
+
+  it("does not match a near-miss that merely mentions 'week' or 'term'", () => {
+    expect(matchAskAiQuestionShape("what week should I move the midterm to")).toBeNull();
+    expect(matchAskAiQuestionShape("how many students are left in the course")).toBeNull();
+  });
+
+  it("the combined closed list is exactly the union of the two shape lists", () => {
+    expect(ASK_AI_CLOSED_LIST_QUESTIONS.length).toBe(
+      ASK_AI_CURRENT_WEEK_QUESTIONS.length + ASK_AI_TERM_END_QUESTIONS.length
+    );
+  });
+
+  // A count canary, not the compliance oracle (that is AC-SHAPE-1's frozen
+  // literal table in llm-content.test.ts). Without a pinned count, the two
+  // loop-based tests above would silently pass with zero iterations if this
+  // list were ever emptied. Bump this number in the same change as any
+  // addition/removal to ASK_AI_CURRENT_WEEK_QUESTIONS/ASK_AI_TERM_END_QUESTIONS.
+  it("closed-list size canary: 4 current-week + 12 term-end = 16", () => {
+    expect(ASK_AI_CURRENT_WEEK_QUESTIONS.length).toBe(4);
+    expect(ASK_AI_TERM_END_QUESTIONS.length).toBe(12);
   });
 });

@@ -276,7 +276,18 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // site, on the same terms as AccountPeopleList.tsx before it - it adopts
     // ModalShell from birth rather than needing a name on one of the three
     // allowlists.
-    expect(DIALOG_SITES.length).toBe(52);
+    //
+    // 53, not 52, as of the snapshot-grading rubric-capture chunk (7c1c63f,
+    // "Alt+R turns a screen capture into the rubric"):
+    // snapshot-grading/SnapshotRubricCaptureReview.tsx is one more new dialog
+    // site, on the same terms as AccommodationsPanel.tsx before it - it adopts
+    // ModalShell from birth rather than needing a name on one of the three
+    // allowlists. THIS PIN WENT RED ON MAIN rather than being bumped in the
+    // chunk that added the site; found 2026-09-15 while gating an unrelated
+    // wave, whose own .tsx edits were ruled out first (neither changed a
+    // dialog import or any dialog markup against HEAD). The count is the
+    // canary working - a new adopter must be named here, deliberately.
+    expect(DIALOG_SITES.length).toBe(53);
   });
 
   it("splits into the adopting sites and all three non-adopting allowlists' combined length", () => {
@@ -339,7 +350,12 @@ describe("inventory sanity - the scan is not vacuous", () => {
     // 37 as of the accommodations/extensions panel chunk (backlog N4) - the
     // thirty-six described above plus accommodations/AccommodationsPanel.tsx,
     // which likewise adopts ModalShell from birth.
-    expect(ADOPTING_PATHS.size).toBe(37);
+    // 38 as of the snapshot-grading rubric-capture chunk (7c1c63f) - the
+    // thirty-seven described above plus
+    // snapshot-grading/SnapshotRubricCaptureReview.tsx, which likewise adopts
+    // ModalShell from birth. See DIALOG_SITES.length's comment above for why
+    // this pin was bumped here rather than in the chunk that added the site.
+    expect(ADOPTING_PATHS.size).toBe(38);
     expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(
       PERMANENT_EXCLUSIONS.length + DEFERRED_CLASS_MISMATCH.length + PENDING_ADOPTION.length,
     );

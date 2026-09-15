@@ -94,9 +94,14 @@ export default function SnapshotCaptureBar({
         )}
       </div>
 
+      {/* N14 WAVE 1 (Ruling N14-16): rewritten, not appended to - the old
+          wording applied its "no modifier" qualifier to the whole list, which
+          would read false the instant a chord existed. The bare keys keep
+          their own qualifier; Alt+G gets its own, separate one. */}
       <p className={bar.keyHint}>
-        Keyboard (no Ctrl, Alt, or Cmd/Win key held): S to snap, N for next student, 1-6 to arm a
-        role (Assignment, Rubric, Post, Replies, Submission, Other).
+        Keyboard: S to snap, N for next student, 1-6 to arm a role (Assignment, Rubric, Post,
+        Replies, Submission, Other) - none of these take Ctrl, Alt, or Cmd/Win. Alt+G also arms
+        Next Student (Space confirms) - Alt alone, not Ctrl+Alt (AltGr) or Cmd/Win.
       </p>
 
       <p aria-live="polite" role="status" className={bar.wireFigure}>

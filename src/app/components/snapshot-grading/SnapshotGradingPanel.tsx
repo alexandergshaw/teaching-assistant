@@ -66,10 +66,10 @@ import SnapshotRoleSuggestions from "./SnapshotRoleSuggestions";
 import { buildPendingRoleSuggestions, type PendingRoleSuggestion } from "./snapshot-role-suggestion";
 import ConfirmedRubricAreasEditor from "./ConfirmedRubricAreasEditor";
 import { useSnapshotGrade } from "./useSnapshotGrade";
+import { useSnapshotKeyboardShortcuts } from "./useSnapshotKeyboardShortcuts";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import controls from "../recording/RecordingControls.module.css";
 import panelStyles from "./SnapshotGrading.module.css";
-import { isSnapshotShortcutEligible, matchSnapshotKeyEvent } from "./snapshot-keys";
 
 // H1-D: module-scope (not component-scope) so the mount-hydrate effect below
 // can list it as a stable dependency-free reference, matching this file's own
@@ -344,13 +344,22 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     if (liveRegionRef.current) liveRegionRef.current.textContent = message;
   }, []);
 
-  // F1 (A4b): the panel's existing keydown effect closes over its dependency
-  // array once; a value read directly inside the handler from a variable
-  // recomputed every render (like nextStudentCounts) freezes at whatever it
-  // was on the render that last re-registered the listener. Mirrors this
-  // exact file's own `activeRef` idiom rather than adding
-  // `nextStudentCounts` to the keydown effect's own deps, which would tear
-  // down and re-add the global listener on every shot add/remove.
+  // F1 (A4b): also rendered directly below (the
+  // "snap-next-student-consequence" hint), so this value itself cannot move
+  // out of the panel (n14-architecture.md section 0a's M2 correction). The
+  // ref-freshness cache stays HERE too - not because the keydown effect it
+  // originally served still lives in this file (it moved to
+  // useSnapshotKeyboardShortcuts.ts), but because removing this useRef/
+  // useEffect pair from the panel entirely was verified, empirically, to
+  // break `eslint`'s react-compiler `preserve-manual-memoization` check on
+  // the UNRELATED handleNextStudentConfirm callback below - a whole-
+  // component memoization-inference quirk sensitive to this component's
+  // hook count/shape, not a real dependency bug (confirmed by toggling only
+  // this block and re-running `npx eslint` on this file in isolation). The
+  // hook now receives the REF (not the raw value) and reads `.current`
+  // itself, so the cache still exists in exactly one place - it is
+  // constructed here because that is the only place that keeps lint clean,
+  // not duplicated.
   const nextStudentCounts = computeNextStudentCounts(shots);
   const nextStudentCountsRef = useRef(nextStudentCounts);
   useEffect(() => {
@@ -505,53 +514,21 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     return () => el.removeEventListener("paste", handlePaste);
   }, [handleFiles]);
 
-  // U4/X6: THE keyboard binding, gated by all three guards, in order (entry
-  // 424a pins this order - active, then editable-target, then modal). The
-  // three guards still read the DOM here (activeRef, target.closest,
-  // document.querySelector) and are resolved to plain booleans, then handed
-  // to isSnapshotShortcutEligible (snapshot-keys.ts) so the eligibility
-  // decision itself is testable. What the eligible keystroke MEANS is
-  // decided by matchSnapshotKeyEvent (also snapshot-keys.ts), which is where
-  // this wave's defect fix lives (a modifier held now matches nothing).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const eligible = isSnapshotShortcutEligible({
-        isActive: activeRef.current,
-        // This selector is copied from useRecorder.ts:882-884 and must not
-        // drift from it independently.
-        isInsideEditableTarget: !!target.closest("input, textarea, select, [contenteditable]"),
-        isModalOpen: !!document.querySelector('[aria-modal="true"]'),
-      });
-      if (!eligible) return;
-
-      const match = matchSnapshotKeyEvent(e);
-      if (match.type === "snap") {
-        handleSnap();
-        return;
-      }
-      if (match.type === "arm-next-student") {
-        setNextStudentArmed(true); // arms only - never auto-confirms
-        // MAJOR-3: move focus onto the control so the keyboard can then
-        // cancel (Escape) or confirm (Enter) it - see nextStudentButtonRef's
-        // own declaration comment above for why this is safe to do
-        // immediately rather than in an effect keyed off nextStudentArmed.
-        nextStudentButtonRef.current?.focus();
-        // Reads the ref, not the closed-over `nextStudentCounts` - this
-        // effect's own dependency array is unchanged by this branch, so a
-        // direct reference here would freeze at whatever count was live on
-        // the render that registered this listener.
-        announce(describeNextStudentCounts(nextStudentCountsRef.current));
-        return;
-      }
-      if (match.type === "arm-role") {
-        setArmedRole(match.role);
-        announce(`Armed ${match.role}.`);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [handleSnap, setArmedRole, announce]);
+  // U4/X6/N14 WAVE 1: THE keyboard binding, extracted into its own hook
+  // (Ruling N14-1/N14-4/N14-17) - see useSnapshotKeyboardShortcuts.ts for the
+  // guard order, the DOM reads, and the Alt+G chord (Ruling N14-8). This call
+  // is what the wiring canary in snapshot-grading.structure.test.ts asserts
+  // exists: without it, every bare binding (s/n/1-6) and the new chord die
+  // together, silently, with every other gate green.
+  useSnapshotKeyboardShortcuts({
+    activeRef,
+    handleSnap,
+    setArmedRole,
+    setNextStudentArmed,
+    nextStudentButtonRef,
+    nextStudentCountsRef,
+    announce,
+  });
 
   // D: THE READ PASS. Calls snapshotReadBatchAction ONCE PER BATCH from this
   // explicit for-await loop - never one action looping internally, and never

@@ -1,6 +1,21 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { SNAPSHOT_ROLE_LABELS } from "./snapshot-shot";
+
+// Shared by every canary below that asserts a call or a registration is
+// LIVE (not merely mentioned). A bare regex over raw source text matches
+// equally well inside `//` or `/* */` comments, so a call that is commented
+// out - dead code - would still satisfy a raw-source match. Comment-stripping
+// first closes that hole. Kept single-line-safe (no /s or /gs dotAll flag,
+// which vitest accepts but tsc rejects with TS1501).
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
 
 // THE WIRING WAVE'S OWN REACHABILITY CANARY (docs/snapshot-grading-
 // acceptance-criteria.md section 5, X5/X6). Copies module-deck-capture's own
@@ -141,8 +156,10 @@ describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY 
   });
 
   it("calls both actions somewhere - snapshotReadBatchAction in the panel, snapshotGradeAction in the extracted grade hook - a check that neither is called anywhere proves nothing", () => {
-    expect(panelSource).toMatch(/snapshotReadBatchAction\(/);
-    expect(hookSource).toMatch(/snapshotGradeAction\(/);
+    // Comment-stripped: same class of hole as the N14 keyboard canary - a
+    // commented-out call would otherwise still satisfy a raw-source match.
+    expect(stripComments(panelSource)).toMatch(/snapshotReadBatchAction\(/);
+    expect(stripComments(hookSource)).toMatch(/snapshotGradeAction\(/);
   });
 
   it("no useEffect block in the panel calls snapshotReadBatchAction or snapshotGradeAction", () => {
@@ -184,14 +201,17 @@ describe("A4d: SnapshotGradingPanel is actually wired to useAssessmentRowStore f
   });
 
   it("SnapshotGradingPanel.tsx actually calls useAssessmentRowStore<SnapshotAssessmentRow>(STORAGE_KEY_TABLE, snapshotRowCodec, ...) - declaring the key literal alone proves nothing", () => {
-    expect(panelSource).toMatch(
+    // Comment-stripped: same class of hole as the N14 keyboard canary.
+    expect(stripComments(panelSource)).toMatch(
       /useAssessmentRowStore<SnapshotAssessmentRow>\(\s*STORAGE_KEY_TABLE,\s*snapshotRowCodec/
     );
   });
 
   it("useAssessmentRowStore.ts passes its STORAGE_KEY_TABLE parameter through to both localStorage.getItem and localStorage.setItem", () => {
-    expect(storeSource).toMatch(/localStorage\.getItem\(STORAGE_KEY_TABLE\)/);
-    expect(storeSource).toMatch(/localStorage\.setItem\(\s*STORAGE_KEY_TABLE,/);
+    // Comment-stripped: same class of hole as the N14 keyboard canary.
+    const strippedStoreSource = stripComments(storeSource);
+    expect(strippedStoreSource).toMatch(/localStorage\.getItem\(STORAGE_KEY_TABLE\)/);
+    expect(strippedStoreSource).toMatch(/localStorage\.setItem\(\s*STORAGE_KEY_TABLE,/);
   });
 });
 
@@ -218,14 +238,21 @@ describe("directory-wide ta-snap-* key exact-set canary (this directory has no c
     expect(distinctKeys).toEqual(["ta-snap-armed-role", "ta-snap-grading-instructions", "ta-snap-table"]);
   });
 
+  // Comment-stripped once for the wiring checks below: same class of hole as
+  // the N14 keyboard canary - a commented-out getItem/setItem call would
+  // still satisfy a raw-source match. The exact-set key scan above
+  // deliberately keeps scanning raw combinedSource (it is inventorying every
+  // key mention, including documentation, not asserting liveness).
+  const strippedCombinedSource = stripComments(combinedSource);
+
   it("ta-snap-armed-role is wired to both a read and a write", () => {
-    expect(combinedSource).toMatch(/localStorage\.getItem\(\s*ARMED_ROLE_KEY\s*\)/);
-    expect(combinedSource).toMatch(/localStorage\.setItem\(\s*ARMED_ROLE_KEY\s*,/);
+    expect(strippedCombinedSource).toMatch(/localStorage\.getItem\(\s*ARMED_ROLE_KEY\s*\)/);
+    expect(strippedCombinedSource).toMatch(/localStorage\.setItem\(\s*ARMED_ROLE_KEY\s*,/);
   });
 
   it("H1-D: ta-snap-grading-instructions is wired to both a read and a write - a field that reaches this directory's source but is never actually read from or written to storage would still pass the exact-set check above", () => {
-    expect(combinedSource).toMatch(/localStorage\.getItem\(\s*INSTRUCTOR_INSTRUCTIONS_KEY\s*\)/);
-    expect(combinedSource).toMatch(/localStorage\.setItem\(\s*INSTRUCTOR_INSTRUCTIONS_KEY\s*,/);
+    expect(strippedCombinedSource).toMatch(/localStorage\.getItem\(\s*INSTRUCTOR_INSTRUCTIONS_KEY\s*\)/);
+    expect(strippedCombinedSource).toMatch(/localStorage\.setItem\(\s*INSTRUCTOR_INSTRUCTIONS_KEY\s*,/);
   });
 });
 
@@ -338,17 +365,87 @@ describe("confirmedRubricAreas resets ONLY at the rubric-replace onSubmit site (
 // this check - only an import or a live call would.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// N14 WAVE 1 (Ruling N14-17): the keydown-wiring reachability canary. Wave 1
+// moves the live window keydown listener out of SnapshotGradingPanel.tsx and
+// into useSnapshotKeyboardShortcuts.ts. If the panel's own call into that
+// hook is omitted, mistyped, or later deleted by an unrelated edit, the
+// ENTIRE keyboard layer dies - every bare binding (s/n/1-6) alongside the
+// new Alt+G chord - while tsc, lint, the build's compile line, and every
+// other test (including the pure matcher tests in snapshot-keys.test.ts)
+// stay green, because nothing else in this repo asserts a keydown listener
+// is actually attached to `window`. Mirrors the existing A4d canary's own
+// two-part technique (import/declare is not enough; the actual wiring call
+// must be present too).
+// ---------------------------------------------------------------------------
+
+describe("N14 wave 1: SnapshotGradingPanel is actually wired to useSnapshotKeyboardShortcuts (the reachability canary for the whole keyboard layer)", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+  const hookPath = path.join(SNAPSHOT_GRADING_DIR, "useSnapshotKeyboardShortcuts.ts");
+  const hookSource = fs.readFileSync(hookPath, "utf-8");
+
+  it("SnapshotGradingPanel.tsx imports useSnapshotKeyboardShortcuts from ./useSnapshotKeyboardShortcuts", () => {
+    expect(panelSource).toMatch(
+      /import\s*\{\s*useSnapshotKeyboardShortcuts\s*\}\s*from\s*"\.\/useSnapshotKeyboardShortcuts"/
+    );
+  });
+
+  it("SnapshotGradingPanel.tsx actually CALLS useSnapshotKeyboardShortcuts( - an import alone proves nothing", () => {
+    // Comment-stripped: a commented-out call would still satisfy a raw-
+    // source match and silently pass while the hook is never invoked.
+    expect(stripComments(panelSource)).toMatch(/useSnapshotKeyboardShortcuts\(\s*\{/);
+  });
+
+  it("useSnapshotKeyboardShortcuts.ts itself registers the window keydown listener - the hook existing and being imported proves nothing if its own body never wires anything", () => {
+    // Comment-stripped: this is the exact hole a sabotage check found - a
+    // commented-out `window.addEventListener("keydown", ...)` line, with the
+    // matching removeEventListener left intact, matched this assertion on
+    // raw source and passed while the whole keyboard layer was dead.
+    const strippedHookSource = stripComments(hookSource);
+    expect(strippedHookSource).toMatch(/window\.addEventListener\(\s*"keydown"/);
+    expect(strippedHookSource).toMatch(/window\.removeEventListener\(\s*"keydown"/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N14 WAVE 1 (Ruling N14-16): the hint-text pass condition. The old wording
+// applied its "no Ctrl, Alt, or Cmd/Win" qualifier to the WHOLE bound-key
+// list; adding Alt+G without rewriting it would ship a sentence that
+// contradicts itself on screen the instant this wave lands, with nothing in
+// this repo asserting on that string before now. This test pins the new
+// two-clause shape and cross-checks the bare-key role labels against
+// SNAPSHOT_ROLE_LABELS as data (not re-typed prose), so a role rename would
+// fail this test rather than silently drift from the on-screen hint.
+// ---------------------------------------------------------------------------
+
+describe("N14 wave 1: SnapshotCaptureBar's keyboard hint is rewritten, not appended to (Ruling N14-16)", () => {
+  const barPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotCaptureBar.tsx");
+  const barSource = fs.readFileSync(barPath, "utf-8");
+
+  it("does not apply the old 'no Ctrl, Alt, or Cmd/Win key held' qualifier to the whole bound-key list", () => {
+    expect(barSource).not.toMatch(/Keyboard \(no Ctrl, Alt, or Cmd\/Win key held\)/);
+  });
+
+  it("the bare-key clause still states its own no-modifier qualifier", () => {
+    expect(barSource).toMatch(/none of these take Ctrl, Alt, or Cmd\/Win/);
+  });
+
+  it("every SNAPSHOT_ROLE_LABELS value still appears in the hint text (the bare 1-6 role list, checked as data)", () => {
+    for (const label of Object.values(SNAPSHOT_ROLE_LABELS)) {
+      expect(barSource).toContain(label);
+    }
+  });
+
+  it("Alt+G is documented as arming Next Student, with its own exclusive-Alt qualifier separate from the bare keys' clause", () => {
+    expect(barSource).toMatch(/Alt\+G also arms\s+Next Student/);
+    expect(barSource).toMatch(/Alt alone, not Ctrl\+Alt \(AltGr\) or Cmd\/Win/);
+  });
+});
+
 describe("snapshot-grade.ts no longer imports or calls extractRubricCriteria (Ruling B35-20)", () => {
   const actionPath = path.resolve(process.cwd(), "src/app/actions/snapshot-grade.ts");
   const actionSource = fs.readFileSync(actionPath, "utf-8");
-
-  function stripComments(source: string): string {
-    return source
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split("\n")
-      .map((line) => line.replace(/\/\/.*$/, ""))
-      .join("\n");
-  }
 
   it("the doc comments still mention extractRubricCriteria by name (proving the file was not simply gutted, and that the check below is meaningful)", () => {
     expect(actionSource).toMatch(/extractRubricCriteria/);

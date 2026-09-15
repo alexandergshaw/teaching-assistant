@@ -43405,3 +43405,48 @@ matches):
 Both changes are covered in `snapshot-keys.test.ts` (the modifier describe
 block, extended to the product of ctrl/alt/meta x a representative digit
 set, and a dedicated key-repeat describe block for s, n, and a digit).
+
+## 426. N14 wave 1: Alt+G opens the modifier block for one key, and the
+keydown wiring moves to its own hook
+
+Amends entry 425's item 1: that entry's "a keystroke held with Ctrl, Alt, or
+Meta now matches nothing, for every binding" is no longer true without
+qualification. This wave (Ruling N14-8, ledger Ruling N14-16) opens a single
+exception:
+
+1. **Alt+G (exclusive Alt - `altKey && !ctrlKey && !metaKey` - only) now
+   arms Next Student**, the same `{type: "arm-next-student"}` match bare `n`
+   already produces (`snapshot-keys.ts`'s `matchSnapshotKeyEvent`). Every
+   other key held with exclusive Alt, including `s`, `n`, `1`-`6`, and `r`
+   (not yet bound - N14 Wave 2 adds it), still matches nothing, and the
+   wave-0 blanket block is unchanged for every non-exclusive-Alt modifier
+   combination.
+2. **AltGr still matches nothing, by name.** On non-US Windows keyboard
+   layouts AltGr sets both `ctrlKey` and `altKey` on the resulting
+   `KeyboardEvent`; a naive relaxation of the wave-0 block to `ctrlKey ||
+   metaKey` would have made Ctrl+Alt+G fire the chord. The exclusivity check
+   keeps Ctrl+Alt+G (and Ctrl+Alt+ any other key) matching nothing, asserted
+   by name in `snapshot-keys.test.ts`'s new "Alt+G chord" describe block.
+3. **The key-repeat guard (entry 425 item 2) still applies to the new
+   chord** - a repeating Alt+G matches nothing, same as every other binding.
+4. **The keydown-wiring effect that used to live in
+   `SnapshotGradingPanel.tsx` moved into a new file,
+   `useSnapshotKeyboardShortcuts.ts`.** No behaviour changed by the move
+   itself (guard order, the DOM reads, the `announce()` strings are all
+   unchanged) - this is a Ruling N14-1/N14-4 line-budget and testability
+   extraction, not a third behaviour change. Because nothing in this repo
+   renders a component, an omitted or later-deleted call to this hook from
+   the panel would silently kill every keyboard binding (bare and chorded
+   alike) with every other gate green - `snapshot-grading.structure.test.ts`
+   now carries a named wiring canary for this (Ruling N14-17), mirroring the
+   existing A4d canary's technique.
+5. **`SnapshotCaptureBar.tsx`'s keyboard hint sentence was rewritten, not
+   appended to** (Ruling N14-16): the old wording applied its "no Ctrl, Alt,
+   or Cmd/Win" qualifier to the whole bound-key list, which would have read
+   false the instant Alt+G existed. The bare keys keep that qualifier in
+   their own clause; Alt+G's own clause states its own exclusivity rule
+   separately.
+
+Alt+R ("capture-rubric") does not exist yet; this entry will be AMENDED (not
+superseded) by N14 Wave 2 to extend item 1's description to `r` once that
+chord lands.

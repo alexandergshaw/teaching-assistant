@@ -50,8 +50,26 @@ describe("matchSnapshotKeyEvent - bare bindings", () => {
     expect(matchSnapshotKeyEvent(key({ key: "0" }))).toEqual({ type: "none" });
   });
 
-  it("an unrelated key matches nothing", () => {
+  it("bare g (no modifier) matches nothing - see the alt+g case below for the bound chord", () => {
     expect(matchSnapshotKeyEvent(key({ key: "g" }))).toEqual({ type: "none" });
+  });
+});
+
+describe("matchSnapshotKeyEvent - the Alt+G chord (Ruling N14-8, N14 WAVE 1)", () => {
+  it("alt+g arms next student, the same match type bare n produces", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "g", altKey: true }))).toEqual({ type: "arm-next-student" });
+  });
+
+  it("ctrl+alt+g (AltGr on a non-US layout) matches nothing - exclusive Alt only", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "g", altKey: true, ctrlKey: true }))).toEqual({ type: "none" });
+  });
+
+  it("meta+alt+g matches nothing - exclusive Alt only", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "g", altKey: true, metaKey: true }))).toEqual({ type: "none" });
+  });
+
+  it("a repeating alt+g matches nothing (Ruling N14-7 still applies to chords)", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "g", altKey: true, repeat: true }))).toEqual({ type: "none" });
   });
 });
 

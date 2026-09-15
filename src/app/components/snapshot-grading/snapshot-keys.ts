@@ -63,8 +63,10 @@ export function isSnapshotShortcutEligible({
 
 // ---------------------------------------------------------------------------
 // The matcher - what a (guard-eligible) keystroke means. Bare "s", bare "n",
-// bare "1"-"6" only; no chord is bound by this wave, and none of the design
-// still being written for the chord layer is anticipated here.
+// bare "1"-"6", and (N14 WAVE 1) the Alt+G chord, which arms Next Student the
+// same way bare "n" does. Alt+R ("capture-rubric") is N14 WAVE 2 and does not
+// exist yet - see snapshot-keys.ts's own N14 wave-1 comment below for why
+// this file does not forward-reference it.
 // ---------------------------------------------------------------------------
 
 export type SnapshotKeyMatch =
@@ -122,9 +124,30 @@ export function matchSnapshotKeyEvent(event: SnapshotKeyLike): SnapshotKeyMatch 
   // while a key is held) matches nothing, for every binding below including
   // the bare keys - see the SnapshotKeyLike.repeat doc-comment.
   if (event.repeat) return NO_MATCH;
-  if (event.ctrlKey || event.altKey || event.metaKey) return NO_MATCH;
 
   const key = event.key.toLowerCase();
+
+  // Ruling N14-8: a chord matches only on EXCLUSIVE Alt - altKey with
+  // neither ctrlKey nor metaKey also held. This is not a detail: on non-US
+  // Windows keyboard layouts, AltGr (used to type many accented/special
+  // characters) sets BOTH ctrlKey AND altKey on the resulting KeyboardEvent.
+  // A naive `altKey` check alone would make Ctrl+Alt+G (AltGr+G) fire the
+  // chord; requiring the other two modifiers to be absent is what keeps
+  // AltGr matching nothing, same as the bare-key blanket block below.
+  const exclusiveAlt = event.altKey && !event.ctrlKey && !event.metaKey;
+  if (exclusiveAlt) {
+    if (key === "g") return { type: "arm-next-student" };
+    // Every other exclusive-Alt key - including s/n/1-6, and r (not yet
+    // bound; N14 WAVE 2 adds it) - stays blocked, matching the bare
+    // bindings' own "no reserved-modifier chord" rule.
+    return NO_MATCH;
+  }
+
+  // Wave-0 blanket block, unchanged: any OTHER ctrl/alt/meta combination
+  // (including AltGr on a key other than g) matches nothing for the bare
+  // bindings below.
+  if (event.ctrlKey || event.altKey || event.metaKey) return NO_MATCH;
+
   if (key === "s") return { type: "snap" };
   if (key === "n") return { type: "arm-next-student" };
 

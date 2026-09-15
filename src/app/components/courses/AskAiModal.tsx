@@ -44,7 +44,11 @@ export default function AskAiModal({
     setBusy(true);
     setError(null);
     setAnswer("");
-    const result = await askAboutCourseAction(renderCourseFacts(course), trimmed, getStoredProvider());
+    const result = await askAboutCourseAction(
+      renderCourseFacts(course, { includeStudentData: true }),
+      trimmed,
+      getStoredProvider()
+    );
     setBusy(false);
     if ("error" in result) {
       setError(result.error);
@@ -82,6 +86,11 @@ export default function AskAiModal({
             onChange={(e) => setQuestion(e.target.value)}
             disabled={busy}
           />
+          <p className={`${styles.previewMeta} ${tableStyles.mt2}`}>
+            Answers are grounded in this course&apos;s own recorded facts - its schedule, dates,
+            textbook, and description, plus its roster, weekly checklist, and grades-due date,
+            each only when set.
+          </p>
           <div className={`${tableStyles.rowSm} ${tableStyles.mt2}`}>
             {SUGGESTIONS.map((s) => (
               <button
@@ -123,15 +132,10 @@ export default function AskAiModal({
         </div>
 
         <div className={styles.previewContent} style={{ overflow: "auto" }}>
-          {answer ? (
+          {answer && (
             <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "var(--font-size-md)" }}>
               {answer}
             </pre>
-          ) : (
-            <p className={styles.previewMeta}>
-              Answers are grounded in this course&apos;s own recorded facts - its schedule, dates,
-              textbook, and description.
-            </p>
           )}
         </div>
     </ModalShell>

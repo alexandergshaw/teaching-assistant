@@ -1,7 +1,33 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 import { emptyCourseProject } from "@/lib/course-project";
 import { renderCourseFacts } from "./course-facts";
 import type { Course } from "@/lib/supabase/courses";
+import type { WeeklyChecklistItem } from "@/lib/weekly-checklist";
+
+function checklistItem(overrides: Partial<WeeklyChecklistItem> & Pick<WeeklyChecklistItem, "label" | "checked">): WeeklyChecklistItem {
+  return {
+    id: "item-1",
+    checkedAt: null,
+    deadline: null,
+    ...overrides,
+  };
+}
+
+// AC-REACH-1 (Ruling A1-9): a source-text assertion that AskAiModal's
+// renderCourseFacts call passes the opt-in, following the live precedent at
+// src/app/components/snapshot-grading/snapshot-role-setrole-callsites.structure.test.ts.
+// Without this, flipping the includeStudentData boolean at the call site
+// ships the feature completely dead while every other criterion, tsc, lint,
+// and build stay green.
+function readAskAiModalSource(): string {
+  const filePath = path.resolve(
+    process.cwd(),
+    "src/app/components/courses/AskAiModal.tsx"
+  );
+  return fs.readFileSync(filePath, "utf-8");
+}
 
 function baseCourse(overrides: Partial<Course> = {}): Course {
   return {
@@ -103,11 +129,208 @@ describe("renderCourseFacts", () => {
     expect(renderCourseFacts(baseCourse({ csvData: "   " }))).not.toContain("Schedule of topics");
   });
 
-  it("returns a plain empty string for a course with nothing set", () => {
+  it("returns a plain empty string for a course with nothing set, even with the opt-in enabled", () => {
+    // AC-EMPTY: weeklyChecklist and gradesDueDate are left absent (their
+    // natural, already-untyped state in baseCourse()) - roster is already
+    // null there. includeStudentData: true confirms the empty-course
+    // contract holds even when the caller asks for student data that does
+    // not exist.
     const bare = renderCourseFacts(
-      baseCourse({ name: "", courseCode: null })
+      baseCourse({ name: "", courseCode: null }),
+      { includeStudentData: true }
     );
     expect(bare).toBe("");
+  });
+});
+
+describe("renderCourseFacts - student data gate (AC-GATE-1/2, Rulings A1-3/A1-4/A1-7/A1-8)", () => {
+  // The all-fields-set fixture used by AC-GATE-1/2: roster, weeklyChecklist,
+  // and gradesDueDate/gradesDueTime are all set, everything else at
+  // baseCourse()'s defaults (Name: CS 101, Course code: CS101, nothing else).
+  const allStudentFieldsSet = () =>
+    baseCourse({
+      roster: "Ada Lovelace | ada\nGrace Hopper",
+      weeklyChecklist: [
+        checklistItem({ label: "Email Grace Hopper about the late lab", checked: false }),
+      ],
+      gradesDueDate: "2026-12-15",
+      gradesDueTime: "17:00",
+    });
+
+  // AC-GATE-1: this literal was captured BEFORE course-facts.ts was changed
+  // to add the opt-in, by calling today's committed renderCourseFacts(course)
+  // (single argument, exactly as every non-Ask-AI call site already calls
+  // it) on the fixture above and recording its exact output. Per Ruling
+  // A1-8, this is the oracle - "byte-identical to today's committed
+  // behaviour" names no oracle once the pre-change function no longer
+  // exists to compare against, so the literal is written down instead of
+  // computed. Under Ruling A1-7 there is no permitted delta: grades-due is
+  // gated the same as roster/checklist, so calling with no opt-in at all
+  // must reproduce this exact string.
+  const PRE_CHANGE_NO_OPT_IN_OUTPUT = "Name: CS 101\nCourse code: CS101";
+
+  it("AC-GATE-1: called with exactly the arguments every non-Ask-AI call site uses (no opt-in) produces the pinned pre-change literal, unchanged", () => {
+    const text = renderCourseFacts(allStudentFieldsSet());
+    expect(text).toBe(PRE_CHANGE_NO_OPT_IN_OUTPUT);
+    expect(text).not.toContain("Roster");
+    expect(text).not.toContain("Weekly checklist");
+    expect(text).not.toContain("Grades due");
+  });
+
+  it("AC-GATE-2: called with the opt-in enabled, the same fixture DOES include the Roster and Weekly checklist blocks", () => {
+    const text = renderCourseFacts(allStudentFieldsSet(), { includeStudentData: true });
+    expect(text).toContain("Roster:");
+    expect(text).toContain("Weekly checklist:");
+    expect(text).toContain("Grades due:");
+  });
+
+  it("an explicit includeStudentData: false behaves exactly like omitting the option", () => {
+    const text = renderCourseFacts(allStudentFieldsSet(), { includeStudentData: false });
+    expect(text).toBe(PRE_CHANGE_NO_OPT_IN_OUTPUT);
+  });
+});
+
+describe("renderCourseFacts - roster (AC-ROSTER-1/2)", () => {
+  it("AC-ROSTER-1: opt-in enabled, a non-blank roster produces a Roster block with the field's raw text verbatim", () => {
+    const roster = "Ada Lovelace | ada\nGrace Hopper";
+    const text = renderCourseFacts(baseCourse({ roster }), { includeStudentData: true });
+    expect(text).toContain(`Roster:\n${roster}`);
+  });
+
+  it("AC-ROSTER-2: opt-in enabled, a null roster omits the block", () => {
+    const text = renderCourseFacts(baseCourse({ roster: null }), { includeStudentData: true });
+    expect(text).not.toContain("Roster");
+  });
+
+  it("AC-ROSTER-2: opt-in enabled, a whitespace-only roster omits the block", () => {
+    const text = renderCourseFacts(baseCourse({ roster: "   " }), { includeStudentData: true });
+    expect(text).not.toContain("Roster");
+  });
+
+  it("without the opt-in, a set roster never appears at all", () => {
+    const text = renderCourseFacts(baseCourse({ roster: "Ada Lovelace | ada" }));
+    expect(text).not.toContain("Roster");
+    expect(text).not.toContain("Ada Lovelace");
+  });
+});
+
+describe("renderCourseFacts - weekly checklist (AC-CHECKLIST-1/2)", () => {
+  it("AC-CHECKLIST-1: opt-in enabled, each item's label appears, one line per item, with no done-state", () => {
+    const text = renderCourseFacts(
+      baseCourse({
+        weeklyChecklist: [
+          checklistItem({ label: "Email Grace Hopper about the late lab", checked: false }),
+          checklistItem({ label: "Post this week's slides", checked: true, checkedAt: 1_700_000_000_000 }),
+        ],
+      }),
+      { includeStudentData: true }
+    );
+    expect(text).toContain("Weekly checklist:");
+    expect(text).toContain("Email Grace Hopper about the late lab");
+    expect(text).toContain("Post this week's slides");
+  });
+
+  // Guards against reintroducing item.checked (or any done-state marker) into
+  // the emitted block. Per weekly-checklist.ts:280-288, a daily/monthly
+  // item's checked state EXPIRES at read-time with no write path, so a raw
+  // "checked"/"unchecked" flag written into a facts blob (a display site)
+  // would go stale and be asserted to the instructor as fact - the ruling
+  // was to drop the done-state entirely rather than thread a clock through.
+  it("AC-CHECKLIST-1: the emitted block never contains a done-state marker, checked or not", () => {
+    const text = renderCourseFacts(
+      baseCourse({
+        weeklyChecklist: [
+          checklistItem({ label: "Email Grace Hopper about the late lab", checked: false }),
+          checklistItem({ label: "Post this week's slides", checked: true, checkedAt: 1_700_000_000_000 }),
+        ],
+      }),
+      { includeStudentData: true }
+    );
+    expect(text).not.toContain("checked");
+    expect(text).not.toContain("unchecked");
+  });
+
+  it("AC-CHECKLIST-2: opt-in enabled, an empty weeklyChecklist omits the block", () => {
+    const text = renderCourseFacts(baseCourse({ weeklyChecklist: [] }), { includeStudentData: true });
+    expect(text).not.toContain("Weekly checklist");
+  });
+
+  it("AC-CHECKLIST-2: opt-in enabled, an absent weeklyChecklist omits the block", () => {
+    const text = renderCourseFacts(baseCourse(), { includeStudentData: true });
+    expect(text).not.toContain("Weekly checklist");
+  });
+
+  it("without the opt-in, a set weeklyChecklist never appears at all", () => {
+    const text = renderCourseFacts(
+      baseCourse({ weeklyChecklist: [checklistItem({ label: "Email Grace Hopper about the late lab", checked: false })] })
+    );
+    expect(text).not.toContain("Weekly checklist");
+    expect(text).not.toContain("Grace Hopper");
+  });
+});
+
+describe("renderCourseFacts - grades due (AC-GRADESDUE-1/2/4)", () => {
+  it("AC-GRADESDUE-4: a valid gradesDueDate/gradesDueTime produces a Grades due line matching the pinned describeGradesDue literal", () => {
+    // Pinned literal, not a call to describeGradesDue inside this test (per
+    // Ruling A1-8/M3): reused from src/lib/grades-due.test.ts's own already-
+    // pinned pair ("2026-12-15", "17:00") -> "Dec 15, 2026 at 5:00 PM".
+    const text = renderCourseFacts(
+      baseCourse({ gradesDueDate: "2026-12-15", gradesDueTime: "17:00" }),
+      { includeStudentData: true }
+    );
+    expect(text).toContain("Grades due: Dec 15, 2026 at 5:00 PM");
+  });
+
+  it("AC-GRADESDUE-2: a null gradesDueDate omits the line", () => {
+    const text = renderCourseFacts(baseCourse({ gradesDueDate: null }), { includeStudentData: true });
+    expect(text).not.toContain("Grades due");
+  });
+
+  it("AC-GRADESDUE-2: an invalid gradesDueDate omits the line", () => {
+    const text = renderCourseFacts(
+      baseCourse({ gradesDueDate: "not-a-date" }),
+      { includeStudentData: true }
+    );
+    expect(text).not.toContain("Grades due");
+  });
+
+  it("AC-GRADESDUE-1: gradesDueDate is gated the same as roster/checklist - without the opt-in it never appears", () => {
+    const text = renderCourseFacts(baseCourse({ gradesDueDate: "2026-12-15", gradesDueTime: "17:00" }));
+    expect(text).not.toContain("Grades due");
+  });
+});
+
+describe("renderCourseFacts - ordering (AC-ORDER-1)", () => {
+  it("places the Roster and Weekly checklist blocks after the Schedule of topics block", () => {
+    const text = renderCourseFacts(
+      baseCourse({
+        csvData: "Week,Topic\n1,Intro",
+        roster: "Ada Lovelace | ada",
+        weeklyChecklist: [checklistItem({ label: "Post slides", checked: false })],
+      }),
+      { includeStudentData: true }
+    );
+    const scheduleIndex = text.indexOf("Schedule of topics:");
+    const rosterIndex = text.indexOf("Roster:");
+    const checklistIndex = text.indexOf("Weekly checklist:");
+    expect(scheduleIndex).toBeGreaterThanOrEqual(0);
+    expect(rosterIndex).toBeGreaterThan(scheduleIndex);
+    expect(checklistIndex).toBeGreaterThan(scheduleIndex);
+  });
+});
+
+describe("AskAiModal call site is reachable (AC-REACH-1, Ruling A1-9)", () => {
+  const source = readAskAiModalSource();
+
+  it("passes includeStudentData: true to its renderCourseFacts call - flipping this boolean must fail this test", () => {
+    const callMatch = source.match(/renderCourseFacts\(\s*course\s*,\s*\{[^}]*\}\s*\)/);
+    expect(callMatch).not.toBeNull();
+    expect(callMatch![0]).toMatch(/includeStudentData:\s*true/);
+  });
+
+  it("calls renderCourseFacts exactly once", () => {
+    const matches = source.match(/renderCourseFacts\(/g) ?? [];
+    expect(matches.length).toBe(1);
   });
 });
 

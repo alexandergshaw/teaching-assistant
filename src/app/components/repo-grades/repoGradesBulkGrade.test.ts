@@ -32,6 +32,7 @@ function row(repo: string, cells: Record<string, RepoGradeCell>): RepoGradeRow {
   return {
     repo,
     htmlUrl: `https://github.com/${repo}`,
+    defaultBranch: "main",
     binding: POISON_BINDING,
     folders: Object.keys(cells),
     folderError: null,

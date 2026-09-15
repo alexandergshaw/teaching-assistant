@@ -28,8 +28,8 @@ import type { RepoFolderRow } from "@/lib/repo-grade-tree-scan";
 import type { CourseStudentRepo } from "@/lib/supabase/courses";
 import type { RepoBindingRosterEntry, RepoBindingSuggestion } from "@/lib/repo-student-bindings";
 
-function repoRow(repo: string, folders: string[] | null, error: string | null = null): RepoFolderRow {
-  return { repo, htmlUrl: `https://github.com/${repo}`, folders, error };
+function repoRow(repo: string, folders: string[] | null, error: string | null = null, defaultBranch = "main"): RepoFolderRow {
+  return { repo, htmlUrl: `https://github.com/${repo}`, defaultBranch, folders, error };
 }
 
 describe("buildRepoGradeColumns", () => {
@@ -97,6 +97,17 @@ describe("buildRepoGradeRows - AC3 item 15: missing-folder vs ungraded vs scan-e
 
   it("throws when a repo has no matching binding (misuse guard - buildRepoGradeGridModel never triggers this)", () => {
     expect(() => buildRepoGradeRows([repoRow("org/a", [])], [], columns)).toThrow(/no binding suggestion/);
+  });
+
+  // A5 provenance (Ruling A5-7): a repoRow fixture carrying
+  // defaultBranch: "develop" must produce a RepoGradeRow whose defaultBranch
+  // is exactly "develop", proving buildRepoGradeRows COPIES the field rather
+  // than re-deriving or hardcoding it. The same value as
+  // repo-grade-tree-scan.test.ts's own provenance case, so a hardcode is
+  // caught by the identical string in both places.
+  it("copies defaultBranch from the scan row onto the RepoGradeRow, never hardcoding or re-deriving it", () => {
+    const rows = buildRepoGradeRows([repoRow("org/a", ["week-1"], null, "develop")], [binding("org/a")], columns);
+    expect(rows[0].defaultBranch).toBe("develop");
   });
 });
 
@@ -184,6 +195,7 @@ describe("sortRepoGradeRows", () => {
     return {
       repo,
       htmlUrl: `https://github.com/${repo}`,
+      defaultBranch: "main",
       binding: { repo, state, canvasUserId: state === "confirmed" ? "1" : null, student: null, candidates: [], derivedHandle: null },
       folders: [],
       folderError: null,
@@ -247,6 +259,7 @@ describe("sortRepoGradeRows", () => {
     return {
       repo,
       htmlUrl: `https://github.com/${repo}`,
+      defaultBranch: "main",
       binding: { repo, state: "unbound", canvasUserId: null, student: null, candidates: [], derivedHandle: null, ...binding },
       folders: [],
       folderError: null,

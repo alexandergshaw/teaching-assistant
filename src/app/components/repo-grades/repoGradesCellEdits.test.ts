@@ -156,6 +156,7 @@ describe("mergeRepoGradeLiveScores", () => {
     return {
       repo,
       htmlUrl: `https://github.com/${repo}`,
+      defaultBranch: "main",
       binding: { repo, state: "unbound", canvasUserId: null, student: null, candidates: [], derivedHandle: null },
       folders: Object.keys(cells),
       folderError: null,

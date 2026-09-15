@@ -130,6 +130,7 @@ function gridRow(repo: string, bindingState: RepoGradeRow["binding"]["state"], c
   return {
     repo,
     htmlUrl: `https://github.com/${repo}`,
+    defaultBranch: "main",
     binding: { repo, state: bindingState, canvasUserId, student: null, candidates: [], derivedHandle: null },
     folders: folderStatus === "scan-error" ? null : folderStatus === "ungraded" ? ["week-1"] : [],
     folderError: folderStatus === "scan-error" ? "boom" : null,

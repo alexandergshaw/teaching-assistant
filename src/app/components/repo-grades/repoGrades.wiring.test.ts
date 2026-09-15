@@ -53,6 +53,10 @@ const indexSource = readFileSync(INDEX_PATH, "utf8");
 // since that wiring did not move.
 const HOOK_PATH = join(process.cwd(), "src/app/components/repo-grades/useRepoGradesGradingActions.ts");
 const hookSource = readFileSync(HOOK_PATH, "utf8");
+// A5 - the disclosure sentence for the row link's branch approximation
+// (Ruling A5-9) lives here, not in RepoGradesGrid.tsx or index.tsx.
+const CONTROLS_PATH = join(process.cwd(), "src/app/components/repo-grades/RepoGradesControls.tsx");
+const controlsSource = readFileSync(CONTROLS_PATH, "utf8");
 
 /**
  * Starting at `openBraceIdx` (which must point at a `{`), walks forward
@@ -942,5 +946,92 @@ describe("handleConfirmAllSuggested records a log entry only when confirmSuggest
     const body = indexSource.slice(defIdx, nextFnIdx);
     expect(body).toContain('buildLogEntry("binding-confirmed"');
     expect(isCallSiteWithinIfBlock(body, 'if (!("error" in result))', 'buildLogEntry("binding-confirmed"')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A5 (the owner's request: "for the links that are generated on the repo
+// grading screen, link them out to the branch and folder specified that were
+// just graded" - Ruling A5-5: repoint the existing row link, no per-cell
+// links). Three risks a node-env test of repoGradeTreeLink.ts's pure
+// functions cannot see on its own: (1) the row-link call site might import
+// and call both builders (satisfying a naive "is it called" check) while
+// leaving the anchor's actual `href` still bound to the old `row.htmlUrl` -
+// the shipped-dead shape this repo has recorded before; (2) the branch
+// argument might be a literal like "main" instead of the row's own recorded
+// value, which every leaf/row-shape fixture using "main" would never catch
+// (Ruling A5-7); (3) RepoGradesGridProps might gain `selectedFolder` as an
+// OPTIONAL prop, which would compile against every existing call site
+// unchanged and ship the whole feature dead with tsc, lint and every listed
+// vitest command green (Ruling A5-7's "the wiring" section, fixing the
+// check's M2 finding).
+
+describe("the row-link call site (RepoGradesGrid.tsx) never leaves href bound to the bare row.htmlUrl", () => {
+  const startAnchor =
+    "const nameParts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);";
+  const endAnchor = '{row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}';
+
+  function linkWindow(): string {
+    const startIdx = gridSource.indexOf(startAnchor);
+    expect(startIdx).toBeGreaterThan(-1);
+    const endIdx = gridSource.indexOf(endAnchor, startIdx);
+    expect(endIdx).toBeGreaterThan(startIdx);
+    return gridSource.slice(startIdx, endIdx);
+  }
+
+  it("canary: both anchors exist in the real file, in the expected order", () => {
+    expect(() => linkWindow()).not.toThrow();
+  });
+
+  it("calls buildRepoGradeRowLinkHref with the row's OWN recorded branch (row.defaultBranch) - never a literal like \"main\", which every leaf/row-shape fixture using \"main\" would otherwise fail to catch (Ruling A5-7)", () => {
+    const window = linkWindow();
+    expect(window).toContain("buildRepoGradeRowLinkHref(");
+    // The exact call shape, not merely "contains row.defaultBranch somewhere
+    // in this window" - this is what a hardcoded-branch sabotage
+    // (buildRepoGradeRowLinkHref(row.htmlUrl, "main", selectedFolder)) fails.
+    expect(window).toContain("buildRepoGradeRowLinkHref(row.htmlUrl, row.defaultBranch, selectedFolder)");
+  });
+
+  it("calls buildRepoGradeRowLinkText at least once in the same window", () => {
+    expect(linkWindow()).toContain("buildRepoGradeRowLinkText(");
+  });
+
+  it("the literal href={row.htmlUrl} does not appear anywhere in this file - the sabotage-catching assertion for an implementation that imports/calls both builders but leaves the anchor's actual href unchanged", () => {
+    expect(gridSource).not.toContain("href={row.htmlUrl}");
+  });
+});
+
+describe("RepoGradesGridProps.selectedFolder is REQUIRED, and index.tsx actually passes it (Ruling A5-7's M2 fix)", () => {
+  it("RepoGradesGridProps declares `selectedFolder: string;` and never `selectedFolder?: string` - an optional prop would compile against every existing call site unchanged and ship this feature dead with every gate green", () => {
+    const propsIdx = gridSource.indexOf("export interface RepoGradesGridProps {");
+    expect(propsIdx).toBeGreaterThan(-1);
+    const braceStart = gridSource.indexOf("{", propsIdx);
+    const braceEnd = findMatchingBraceEnd(gridSource, braceStart);
+    expect(braceEnd).toBeGreaterThan(braceStart);
+    const body = gridSource.slice(braceStart, braceEnd);
+    expect(body).toContain("selectedFolder: string;");
+    expect(body).not.toContain("selectedFolder?: string");
+  });
+
+  it("index.tsx passes selectedFolder={currentSelectedFolder} to <RepoGradesGrid>, never inferred from columns.length", () => {
+    const tagIdx = indexSource.indexOf("<RepoGradesGrid");
+    expect(tagIdx).toBeGreaterThan(-1);
+    const closeIdx = indexSource.indexOf("/>", tagIdx);
+    expect(closeIdx).toBeGreaterThan(tagIdx);
+    const propsBlock = indexSource.slice(tagIdx, closeIdx);
+    expect(propsBlock).toContain("selectedFolder={currentSelectedFolder}");
+  });
+});
+
+describe("RepoGradesControls.tsx states the branch approximation, only while a specific folder is selected (Ruling A5-9)", () => {
+  it("contains the exact disclosure sentence", () => {
+    expect(controlsSource).toContain("Links open the branch recorded when the repos were scanned.");
+  });
+
+  it("the sentence is gated on selectedFolder !== ALL_FOLDERS - in the ALL_FOLDERS view the href pins no branch, so stating one would be false", () => {
+    const sentenceIdx = controlsSource.indexOf("Links open the branch recorded when the repos were scanned.");
+    expect(sentenceIdx).toBeGreaterThan(-1);
+    const before = controlsSource.slice(Math.max(0, sentenceIdx - 300), sentenceIdx);
+    expect(before).toContain("selectedFolder !== ALL_FOLDERS");
   });
 });

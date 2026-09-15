@@ -16,8 +16,8 @@ const NOW_MS = 1_700_000_000_000;
 /** NOW_MS + 10 minutes, expressed as the UNIX SECONDS value GitHub sends. */
 const RESET_UNIX_SECONDS = "1700000600";
 
-function fakeRepo(fullName: string) {
-  return { fullName, htmlUrl: `https://github.com/${fullName}` };
+function fakeRepo(fullName: string, defaultBranch = "main") {
+  return { fullName, htmlUrl: `https://github.com/${fullName}`, defaultBranch };
 }
 
 /** A failure shaped exactly like the one ghFetch now throws: ghError's real
@@ -51,6 +51,7 @@ describe("a 403 that IS a primary-quota rate limit", () => {
         {
           repo: "org/alice-repo",
           htmlUrl: "https://github.com/org/alice-repo",
+          defaultBranch: "main",
           folders: null,
           error: "GitHub's API rate limit was hit (HTTP 403, 0 requests remaining); it resets in about 10 minutes.",
         },
@@ -181,7 +182,15 @@ describe("the message-parsing fallback still carries non-ghFetch failures", () =
     const result = await scanOrgRepoTrees("org", undefined, undefined, fetchers, { now: () => NOW_MS });
 
     expect(result).toEqual({
-      repos: [{ repo: "org/alice-repo", htmlUrl: "https://github.com/org/alice-repo", folders: null, error: "fetch failed" }],
+      repos: [
+        {
+          repo: "org/alice-repo",
+          htmlUrl: "https://github.com/org/alice-repo",
+          defaultBranch: "main",
+          folders: null,
+          error: "fetch failed",
+        },
+      ],
       truncated: false,
       rateLimit: null,
     });

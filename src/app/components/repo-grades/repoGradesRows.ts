@@ -112,6 +112,10 @@ export interface RepoGradeColumn {
 export interface RepoGradeRow {
   repo: string;
   htmlUrl: string;
+  /** A5 - copied verbatim from the scan's RepoFolderRow.defaultBranch
+   * (src/lib/repo-grade-tree-scan.ts), never re-derived or hardcoded here.
+   * Feeds repoGradeTreeLink.ts's row-link builder in RepoGradesGrid.tsx. */
+  defaultBranch: string;
   binding: RepoBindingSuggestion;
   /** This repo's assignment folders, or null when its tree fetch failed
    * (scanOrgRepoTrees's per-repo isolation - AC3 item 17c). */
@@ -174,6 +178,7 @@ export function buildRepoGradeRows(
     return {
       repo: repo.repo,
       htmlUrl: repo.htmlUrl,
+      defaultBranch: repo.defaultBranch,
       binding,
       folders: repo.folders,
       folderError: repo.error,

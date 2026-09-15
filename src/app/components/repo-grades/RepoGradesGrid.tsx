@@ -47,6 +47,8 @@ import { getRepoGradeCellEdit, mergeRepoGradeLiveScores, type RepoGradeCellEdits
 import { deriveRepoGradeStudentName, repoGradeLastNameCellText } from "./repoGradeStudentName";
 import { buildRepoGradePostPlan, repoGradePostCandidateRows, scopeRepoGradeRowsToSelection } from "./repoGradesPosting";
 import { buildBulkGradePlan } from "./repoGradesBulkGrade";
+import { buildRepoGradeRowLinkHref, buildRepoGradeRowLinkText } from "./repoGradeTreeLink";
+import { ALL_FOLDERS } from "./repoGradesFolderSelection";
 import type { FeedbackField } from "../grading-results/gradingResultsHelpers";
 // Type-only import - see useRepoGradesData.ts's header comment for why this
 // is safe from a "use client" module even though CanvasAssignmentBrief is
@@ -143,6 +145,17 @@ export interface RepoGradesGridProps {
   columns: RepoGradeColumn[];
   rows: RepoGradeRow[];
   roster: RepoBindingRosterEntry[];
+  /** A5 - the folder this view is currently scoped to, exactly as
+   * index.tsx's resolveSelectedFolder produced it (a raw folder name, or
+   * repoGradesFolderSelection.ts's ALL_FOLDERS sentinel), threaded straight
+   * from index.tsx's `currentSelectedFolder`. Required, never optional and
+   * never inferred from `columns.length`: an ALL_FOLDERS selection whose
+   * displayed column set happens to have length 1 must still fall back to
+   * the repo root (repoGradeTreeLink.ts's buildRepoGradeRowLinkHref), not a
+   * folder-specific link. Drives both the row link's href and whether its
+   * accessible name states a branch at all (Ruling A5-9: stating one in the
+   * ALL_FOLDERS view would be false, since that href pins no branch). */
+  selectedFolder: string;
   /** N4 (docs/repo-grades-name-columns-and-sorting-acceptance-criteria.md) -
    * the sort every header button below reflects and toggles. index.tsx owns
    * the state (uiState.sort) and already resolves a stale folder sort before
@@ -431,6 +444,7 @@ export default function RepoGradesGrid({
   columns,
   rows,
   roster,
+  selectedFolder,
   sort,
   onSortChange,
   selected,
@@ -529,6 +543,19 @@ export default function RepoGradesGrid({
             // something other than what these two cells display (N5 item 16;
             // repoGradesSliceB.guards.test.ts pins this with a canary).
             const nameParts = deriveRepoGradeStudentName(row.binding.student, row.binding.studentSortable);
+            // A5 - the row link points at the folder currently selected, on
+            // the branch recorded when this repo was scanned (never a
+            // literal like "main" - repo-grades.wiring.test.ts pins that the
+            // branch argument is row.defaultBranch). `null` (an empty
+            // htmlUrl, Ruling A5-3) renders the repo name as plain text
+            // instead of a same-origin link that would navigate inside this
+            // app. The accessible name states the branch only while a
+            // specific folder is selected (Ruling A5-9) - in the
+            // ALL_FOLDERS view the href pins no branch, so announcing one
+            // would be false.
+            const repoLinkHref = buildRepoGradeRowLinkHref(row.htmlUrl, row.defaultBranch, selectedFolder);
+            const isFolderScoped = selectedFolder !== ALL_FOLDERS && selectedFolder !== "";
+            const repoLinkAccessibleName = isFolderScoped ? buildRepoGradeRowLinkText(row.repo, row.defaultBranch) : undefined;
             return (
               <tr role="row" key={row.repo}>
                 <td role="cell">
@@ -540,9 +567,20 @@ export default function RepoGradesGrid({
                   />
                 </td>
                 <td role="cell">
-                  <a href={row.htmlUrl} target="_blank" rel="noopener noreferrer" className={styles.repoLink}>
-                    {row.repo}
-                  </a>
+                  {repoLinkHref ? (
+                    <a
+                      href={repoLinkHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.repoLink}
+                      aria-label={repoLinkAccessibleName}
+                      title={repoLinkAccessibleName}
+                    >
+                      {row.repo}
+                    </a>
+                  ) : (
+                    row.repo
+                  )}
                   {row.folderError && <div className={pageStyles.error}>{row.folderError}</div>}
                 </td>
                 <td role="cell">{nameParts.firstName}</td>

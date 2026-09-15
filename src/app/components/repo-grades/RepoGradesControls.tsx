@@ -401,6 +401,16 @@ export default function RepoGradesControls({
               </MenuItem>
             ))}
           </TextField>
+          {/* A5 (Ruling A5-6/A5-9) - the only place this page states that a
+              row's GitHub link opens the branch RECORDED AT SCAN TIME, not
+              necessarily the org's current default branch (see
+              repoGradeTreeLink.ts's header comment for the full staleness
+              note). Conditional on a specific folder being selected: in the
+              ALL_FOLDERS view the link falls back to the bare repo root and
+              pins no branch at all, so this sentence would be false there. */}
+          {selectedFolder !== ALL_FOLDERS && (
+            <p className={styles.fieldHint}>Links open the branch recorded when the repos were scanned.</p>
+          )}
           {folderOptions.length === 0 && (
             <p className={styles.fieldHint}>No assignment folders were found in this course&apos;s scanned repos.</p>
           )}

@@ -863,6 +863,7 @@ export default function RepoGradesTab() {
           columns={displayedColumns}
           rows={displayedRows}
           roster={roster}
+          selectedFolder={currentSelectedFolder}
           sort={uiState.sort}
           onSortChange={(value) => setUiState((prev) => ({ ...prev, sort: value }))}
           selected={selected}

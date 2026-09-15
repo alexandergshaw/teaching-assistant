@@ -98,8 +98,8 @@ describe("pickOverallVerdict", () => {
 
 // ── scanOrgRepoTrees ─────────────────────────────────────────────────────
 
-function fakeRepo(fullName: string) {
-  return { fullName, htmlUrl: `https://github.com/${fullName}` };
+function fakeRepo(fullName: string, defaultBranch = "main") {
+  return { fullName, htmlUrl: `https://github.com/${fullName}`, defaultBranch };
 }
 
 describe("scanOrgRepoTrees", () => {
@@ -114,11 +114,57 @@ describe("scanOrgRepoTrees", () => {
 
     expect(result).toEqual({
       repos: [
-        { repo: "org/alice-repo", htmlUrl: "https://github.com/org/alice-repo", folders: ["week-1", "week-2"], error: null },
-        { repo: "org/bob-repo", htmlUrl: "https://github.com/org/bob-repo", folders: ["week-1"], error: null },
+        {
+          repo: "org/alice-repo",
+          htmlUrl: "https://github.com/org/alice-repo",
+          defaultBranch: "main",
+          folders: ["week-1", "week-2"],
+          error: null,
+        },
+        {
+          repo: "org/bob-repo",
+          htmlUrl: "https://github.com/org/bob-repo",
+          defaultBranch: "main",
+          folders: ["week-1"],
+          error: null,
+        },
       ],
       truncated: false,
       rateLimit: null,
+    });
+  });
+
+  // A5 provenance (Ruling A5-7): a fixture repo with defaultBranch: "develop"
+  // (not "main") must produce a RepoFolderRow whose defaultBranch is exactly
+  // "develop" - the case that fails against a hardcoded "main" and passes
+  // only against a real plumb-through of listRepos's own returned value.
+  it("carries each repo's own defaultBranch through to its RepoFolderRow, never hardcoding it", async () => {
+    const fetchers: OrgRepoTreeFetchers = {
+      listRepos: async () => [fakeRepo("org/alice-repo", "develop")],
+      fetchTreePaths: async () => ["week-1/main.py"],
+    };
+
+    const result = await scanOrgRepoTrees("org", undefined, undefined, fetchers, { now: () => NOW_MS });
+
+    expect(result).toMatchObject({ repos: [{ repo: "org/alice-repo", defaultBranch: "develop" }] });
+  });
+
+  // A5 (Ruling A5-7's "the value's provenance" - failure mode 6): defaultBranch
+  // comes from the org-level listing, which succeeds independently of any one
+  // repo's own tree fetch - so a scan-error row still carries a real
+  // defaultBranch, never empty, alongside folders: null and a non-null error.
+  it("a repo whose tree scan failed still carries its own defaultBranch (the org-level listing succeeded independently of the failed per-repo fetch)", async () => {
+    const fetchers: OrgRepoTreeFetchers = {
+      listRepos: async () => [fakeRepo("org/alice-repo", "develop")],
+      fetchTreePaths: async () => {
+        throw new Error("GitHub resource not found (404). Check the owner/repo and the token's access.");
+      },
+    };
+
+    const result = await scanOrgRepoTrees("org", undefined, undefined, fetchers, { now: () => NOW_MS });
+
+    expect(result).toMatchObject({
+      repos: [{ repo: "org/alice-repo", defaultBranch: "develop", folders: null, error: expect.any(String) }],
     });
   });
 
@@ -136,14 +182,27 @@ describe("scanOrgRepoTrees", () => {
 
       expect(result).toEqual({
         repos: [
-          { repo: "org/alice-repo", htmlUrl: "https://github.com/org/alice-repo", folders: ["week-1"], error: null },
+          {
+            repo: "org/alice-repo",
+            htmlUrl: "https://github.com/org/alice-repo",
+            defaultBranch: "main",
+            folders: ["week-1"],
+            error: null,
+          },
           {
             repo: "org/bob-repo",
             htmlUrl: "https://github.com/org/bob-repo",
+            defaultBranch: "main",
             folders: null,
             error: "GitHub request failed (HTTP 404).",
           },
-          { repo: "org/carol-repo", htmlUrl: "https://github.com/org/carol-repo", folders: ["week-1"], error: null },
+          {
+            repo: "org/carol-repo",
+            htmlUrl: "https://github.com/org/carol-repo",
+            defaultBranch: "main",
+            folders: ["week-1"],
+            error: null,
+          },
         ],
         truncated: false,
         rateLimit: null,
@@ -163,10 +222,17 @@ describe("scanOrgRepoTrees", () => {
 
       expect(result).toEqual({
         repos: [
-          { repo: "org/alice-repo", htmlUrl: "https://github.com/org/alice-repo", folders: ["week-1"], error: null },
+          {
+            repo: "org/alice-repo",
+            htmlUrl: "https://github.com/org/alice-repo",
+            defaultBranch: "main",
+            folders: ["week-1"],
+            error: null,
+          },
           {
             repo: "org/bob-repo",
             htmlUrl: "https://github.com/org/bob-repo",
+            defaultBranch: "main",
             folders: null,
             error: "Could not read this repository's file tree.",
           },
@@ -199,6 +265,7 @@ describe("scanOrgRepoTrees", () => {
           {
             repo: "org/alice-repo",
             htmlUrl: "https://github.com/org/alice-repo",
+            defaultBranch: "main",
             folders: null,
             error:
               "GitHub returned 403 Forbidden. GitHub reported no rate-limit headers, so this is not confirmed as a " +
@@ -233,6 +300,7 @@ describe("scanOrgRepoTrees", () => {
       expect(result.repos[1]).toEqual({
         repo: "org/bob-repo",
         htmlUrl: "https://github.com/org/bob-repo",
+        defaultBranch: "main",
         folders: null,
         error: "GitHub's API rate limit was hit (HTTP 429, no remaining count reported); GitHub did not report when it resets.",
       });

@@ -125,6 +125,18 @@ export interface RepoFolderRow {
   /** The repo's "owner/name" full name, exactly as listOrgRepos returned it. */
   repo: string;
   htmlUrl: string;
+  /** A5 (repointing the row-level GitHub link at the branch + folder that was
+   * actually scanned): the repo's default branch, exactly as listOrgRepos's
+   * own mapRepo (src/lib/github.repos.ts:90) recorded it at scan time.
+   * Required, not optional - an optional field would compile against every
+   * existing fixture unchanged and ship `href=".../tree/undefined/..."` for
+   * any row a fixture forgot to update, silently. Populated from the
+   * org-level listing alone, so it is present even for a repo whose own tree
+   * fetch failed (see the `folders === null` branch below) - a per-grade
+   * branch cannot exist for an ungraded cell, so this scan-time value is the
+   * required fallback (see repoGradeTreeLink.ts's header comment for the
+   * link this field feeds). */
+  defaultBranch: string;
   /** This repo's assignment folders (AC3 items 13-14), or null when this
    * repo's tree fetch failed - never both. */
   folders: string[] | null;
@@ -152,7 +164,7 @@ export interface OrgRepoTreesResult {
  * list assignmentFoldersFromTree needs, so a fake never has to fabricate a
  * full RepoTreeEntry. */
 export interface OrgRepoTreeFetchers {
-  listRepos: (org: string, prefix?: string) => Promise<Pick<GithubRepo, "fullName" | "htmlUrl">[]>;
+  listRepos: (org: string, prefix?: string) => Promise<Pick<GithubRepo, "fullName" | "htmlUrl" | "defaultBranch">[]>;
   fetchTreePaths: (fullName: string) => Promise<string[]>;
 }
 
@@ -206,7 +218,7 @@ export async function scanOrgRepoTrees(
   const concurrency = Math.max(1, options.concurrency ?? DEFAULT_TREE_SCAN_CONCURRENCY);
   const ignore = options.ignore ?? DEFAULT_IGNORED_REPO_FOLDERS;
 
-  let allRepos: Pick<GithubRepo, "fullName" | "htmlUrl">[];
+  let allRepos: Pick<GithubRepo, "fullName" | "htmlUrl" | "defaultBranch">[];
   try {
     allRepos = await fetchers.listRepos(org, prefix);
   } catch (err) {
@@ -222,14 +234,26 @@ export async function scanOrgRepoTrees(
   const rows = await mapWithConcurrency(scanned, concurrency, async (repo): Promise<RepoFolderRow> => {
     try {
       const paths = await fetchers.fetchTreePaths(repo.fullName);
-      return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: assignmentFolderPathsFromTree(paths, ignore), error: null };
+      return {
+        repo: repo.fullName,
+        htmlUrl: repo.htmlUrl,
+        defaultBranch: repo.defaultBranch,
+        folders: assignmentFolderPathsFromTree(paths, ignore),
+        error: null,
+      };
     } catch (err) {
       const verdict = classifyScanFailure(err, nowMs);
       if (verdict) {
         verdicts.push(verdict);
-        return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: null, error: verdict.message };
+        return { repo: repo.fullName, htmlUrl: repo.htmlUrl, defaultBranch: repo.defaultBranch, folders: null, error: verdict.message };
       }
-      return { repo: repo.fullName, htmlUrl: repo.htmlUrl, folders: null, error: describeNonGithubError(err) };
+      return {
+        repo: repo.fullName,
+        htmlUrl: repo.htmlUrl,
+        defaultBranch: repo.defaultBranch,
+        folders: null,
+        error: describeNonGithubError(err),
+      };
     }
   });
 

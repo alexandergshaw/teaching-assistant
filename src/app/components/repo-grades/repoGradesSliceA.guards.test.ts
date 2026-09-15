@@ -52,6 +52,7 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 const REPO_GRADES = "src/app/components/repo-grades";
 const indexSource = read(`${REPO_GRADES}/index.tsx`);
 const bindingControlSource = read(`${REPO_GRADES}/RepoBindingControl.tsx`);
+const controlsSource = read(`${REPO_GRADES}/RepoGradesControls.tsx`);
 const gridCss = read(`${REPO_GRADES}/repo-grades.module.css`);
 const pageCss = read("src/app/page.module.css");
 
@@ -388,5 +389,93 @@ describe("U9.36/U9.37: both confirm paths call the guard, not merely import it",
 
   it("the batch confirm path calls partitionConfirmableBindings (U9.37)", () => {
     expect(usesSharedFunction(indexSource, "partitionConfirmableBindings", CONFIRM_MODULE)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A6 (docs/BACKLOG.md; scratchpad/a6-ac.md RULING A6-4) - the course picker
+// must actually RENDER `Typeahead`, not merely import it.
+//
+// `usesSharedFunction` above does not fit this shape: it requires a NAMED
+// import called as `symbol(...)`, but `Typeahead` is a DEFAULT export
+// (`ui/Typeahead.tsx`, `export default function Typeahead`) rendered as JSX
+// (`<Typeahead ... />`), never called as `Typeahead(`. Applied verbatim,
+// `usesSharedFunction` would assert `false` against even a correct
+// implementation - a stronger failure than the "pure guard nothing calls"
+// defect it exists to prevent. RULING A6-4 replaces it here with a plain
+// source-text assertion, in the shape this file already uses elsewhere for
+// non-`usesSharedFunction` checks: an import present AND a JSX use present.
+// An import with no JSX use is exactly the "shipped dead" state this guard
+// exists to catch - a `hint`-only, non-rendering wiring (the shape RULING
+// A6-1 rejected) would have imported `Typeahead` without ever using it the
+// way this control needs.
+// ---------------------------------------------------------------------------
+
+const TYPEAHEAD_IMPORT = /import\s+Typeahead\s+from\s*["']\.\.\/ui\/Typeahead["']/;
+const TYPEAHEAD_JSX_USE = /<Typeahead[\s/>]/;
+
+function importsTypeahead(source: string): boolean {
+  return TYPEAHEAD_IMPORT.test(stripJsComments(source));
+}
+
+function rendersTypeahead(source: string): boolean {
+  return TYPEAHEAD_JSX_USE.test(stripJsComments(source));
+}
+
+describe("A6: the course picker imports AND renders Typeahead, not merely imports it", () => {
+  it("canary: an import with no JSX use is the shipped-dead state this guard must catch", () => {
+    const deadImport = 'import Typeahead from "../ui/Typeahead";\nconst x = 1;';
+    expect(importsTypeahead(deadImport)).toBe(true);
+    expect(rendersTypeahead(deadImport)).toBe(false);
+  });
+
+  it("canary: an import plus a JSX use passes both halves", () => {
+    const wired = 'import Typeahead from "../ui/Typeahead";\nreturn <Typeahead options={[]} value="" onChange={() => {}} />;';
+    expect(importsTypeahead(wired)).toBe(true);
+    expect(rendersTypeahead(wired)).toBe(true);
+  });
+
+  it("canary (present-but-wrong): a commented-out JSX use does not count", () => {
+    const commented = 'import Typeahead from "../ui/Typeahead";\n// return <Typeahead options={[]} value="" onChange={() => {}} />;';
+    expect(rendersTypeahead(commented)).toBe(false);
+  });
+
+  it("RepoGradesControls.tsx imports Typeahead", () => {
+    expect(importsTypeahead(controlsSource)).toBe(true);
+  });
+
+  it("RepoGradesControls.tsx renders Typeahead as JSX, not merely importing it", () => {
+    expect(rendersTypeahead(controlsSource)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A6 follow-up - the course picker's placeholder must state ALL THREE of its
+// states (loading, empty, ready), not collapse to two.
+//
+// The control this replaced showed a dedicated "Loading courses…" string
+// (the old MenuItem ternary); the first cut of the Typeahead replacement
+// collapsed the branch to loading-vs-not, which meant on first load - the
+// common case, where `courses` is still empty AND `coursesLoading` is true -
+// the control was disabled and spinning while its placeholder read "Choose a
+// course…", as if it were ready and merely empty. `CoursePicker.tsx:353-369`
+// is the precedent (scratchpad/a6-ac.md section 4a item 4): loading checked
+// first, then empty-and-not-loading, then ready. No gate asserts on
+// placeholder TEXT elsewhere in this repo, which is exactly why this class of
+// regression passed every other check silently - pinning the three literal
+// strings here is cheap insurance against collapsing the branch again.
+// ---------------------------------------------------------------------------
+
+describe("A6 follow-up: the course picker's placeholder names all three states", () => {
+  it("RepoGradesControls.tsx contains the loading placeholder string", () => {
+    expect(controlsSource.includes("Loading courses…")).toBe(true);
+  });
+
+  it("RepoGradesControls.tsx contains the empty placeholder string", () => {
+    expect(controlsSource.includes("No courses found")).toBe(true);
+  });
+
+  it("RepoGradesControls.tsx contains the ready placeholder string", () => {
+    expect(controlsSource.includes("Choose a course…")).toBe(true);
   });
 });

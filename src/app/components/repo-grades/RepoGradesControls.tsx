@@ -40,6 +40,8 @@ import type { Course } from "@/lib/supabase/courses";
 import type { RepoGradeSortState } from "./repoGradesRows";
 import { parseRepoGradeSortSelectValue, repoGradeSortSelectValue } from "./repoGradesRows";
 import { ALL_FOLDERS, describeFolderOption, type FolderOption } from "./repoGradesFolderSelection";
+import { buildCourseOptions } from "./repoGradesCoursePicker";
+import Typeahead from "../ui/Typeahead";
 import {
   parseRepoGradeRubricValue,
   type RepoGradeRubricOption,
@@ -333,24 +335,25 @@ export default function RepoGradesControls({
     <>
       <div className={styles.field}>
         <label htmlFor="repo-grades-course">Course</label>
-        <TextField
-          select
-          size="small"
-          fullWidth
+        <Typeahead
           id="repo-grades-course"
+          options={buildCourseOptions(courses)}
           value={courseId}
-          disabled={coursesLoading}
-          onChange={(e) => onCourseIdChange(e.target.value)}
-        >
-          <MenuItem value="">{coursesLoading ? "Loading courses…" : "Choose a course…"}</MenuItem>
-          {courses.map((c) => (
-            <MenuItem key={c.id} value={c.id}>
-              {c.name}
-            </MenuItem>
-          ))}
-        </TextField>
+          onChange={onCourseIdChange}
+          disabled={coursesLoading || courses.length === 0}
+          loading={coursesLoading}
+          placeholder={
+            coursesLoading
+              ? "Loading courses…"
+              : courses.length === 0
+              ? "No courses found"
+              : "Choose a course…"
+          }
+          noOptionsText="No courses found"
+          aria-describedby={coursesError ? "repo-grades-course-error" : undefined}
+        />
         {coursesError && (
-          <p className={styles.error} role="alert">
+          <p id="repo-grades-course-error" className={styles.error} role="alert">
             {coursesError}
           </p>
         )}

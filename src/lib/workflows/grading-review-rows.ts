@@ -11,6 +11,13 @@
 // Plain module (no server actions, no DOM) so it is trivially unit-testable.
 
 import type { GradeResult, GradingRun, GradingRunEntry } from "@/lib/grade";
+// isUngraded is a VALUE import - imported from the leaf (grade/types.ts),
+// never from the "@/lib/grade" barrel, which this file's own header above
+// says must stay type-only: the barrel's engine.ts transitively reaches
+// server-only code, and this module is value-imported by the client-side
+// step registry (canvas-client-boundary.transitive.test.ts guards exactly
+// this).
+import { isUngraded } from "@/lib/grade/types";
 
 export type GradingReviewRow = Record<string, string>;
 
@@ -31,7 +38,13 @@ export type GradingReviewRow = Record<string, string>;
  * field is excluded by default.
  */
 export function stripGradeResultForDraft(result: GradeResult): GradeResult {
-  return {
+  // N13a Ruling 3: userId and ungraded are mutually exclusive on the type -
+  // a single object literal cannot carry both (TS2322, "Types of property
+  // 'userId' are incompatible"), so this branches rather than spreading a
+  // union-typed value into one literal. The cheap fix here would be
+  // `as GradeResult`, which would re-open exactly the hole the union exists
+  // to close - never do that.
+  const shared = {
     student: result.student,
     overallComment: result.overallComment,
     // docs/grading-results-feedback-boxes-acceptance-criteria.md A5 item 16:
@@ -48,7 +61,6 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
     feedback: result.feedback,
     mergedFileCount: result.mergedFileCount,
     submittedFiles: [],
-    userId: result.userId,
     // Kept (not bulky, and grade-relevant): which repo/ref a GitHub-URL
     // submission was actually graded against, so the draft can defend the
     // grade to a student (AC2.4) even after this run's process exits.
@@ -68,6 +80,10 @@ export function stripGradeResultForDraft(result: GradeResult): GradeResult {
     // restored run does.
     submissionTruncated: result.submissionTruncated,
   };
+  if (isUngraded(result)) {
+    return { ...shared, ungraded: result.ungraded };
+  }
+  return { ...shared, userId: result.userId };
 }
 
 /** Apply stripGradeResultForDraft to every result in a run. */

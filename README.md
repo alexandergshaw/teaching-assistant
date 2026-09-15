@@ -26,14 +26,14 @@ Set these values in your local `.env.local` and in your deployment provider:
 - `GEMINI_MODEL` (optional, default: `gemini-3.1-flash-lite`)
 - `GEMINI_SEARCH_MODEL` (optional, default: the `GEMINI_MODEL` value; used only for web-search-grounded calls; `gemini-2.5-flash` is the recommended value when the lite model keeps answering without searching)
 - `GEMINI_MAX_OUTPUT_TOKENS` (optional, default: `700`)
-- `GRADE_MAX_SUBMISSIONS` (optional, default: `5`)
+- `GRADE_MAX_SUBMISSIONS` (optional, default: `40`; a rarely-touched sanity ceiling, not the working limit - a wall-clock deadline, not this count, is what keeps an unattended run inside its platform time budget)
 - `GRADE_MAX_CHARS_PER_SUBMISSION` (optional, default: `12000`)
 - `GRADE_INTER_REQUEST_DELAY_MS` (optional, default: `1200`)
 - `GEMINI_ALLOW_LOW_TEMPERATURE` (optional, default: `false`)
 - `GEMINI_THINKING_LEVEL` (optional, default: unset)
 - `GEMINI_MIN_OUTPUT_TOKENS` (optional, default: `512`)
 
-The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests. Per-call temperatures below 1.0 are dropped for Gemini 3.x models on Google's recommendation; set `GEMINI_ALLOW_LOW_TEMPERATURE=1` to restore the previous behavior.
+The grading pipeline uses these limits to reduce free-tier quota spikes by capping per-run workload and pacing requests. A run that hits either the submission-count bound or an unattended run's wall-clock deadline reports the remaining students as not-graded (re-run to grade them) rather than silently dropping them. Per-call temperatures below 1.0 are dropped for Gemini 3.x models on Google's recommendation; set `GEMINI_ALLOW_LOW_TEMPERATURE=1` to restore the previous behavior.
 
 - `TAVUS_API_KEY` (optional) — enables Avatar Studio (the Recording tab's likeness training and prompt-driven video generation). Server-side only; sent as `x-api-key` to `https://tavusapi.com`. Without it, the Avatar view explains what to set and disables training/generation instead of erroring on click. Note that custom face training also requires a paid Tavus plan — the free tier cannot train a likeness at all.
 

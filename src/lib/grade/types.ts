@@ -2,6 +2,14 @@ import type { CodeRunResult } from "../code-runner";
 
 export const MAX_NESTED_ZIP_DEPTH = 3;
 
+// N13a: the exact prefix a grading-failure's `strengths` opens with. Lives
+// here (not in a component directory) because src/lib/grade/engine.ts, the
+// producer, must never import from src/app/components - that layer inversion
+// is exactly what this seam forbids. grading-rows.ts (the display consumer)
+// imports and re-exports this same binding rather than declaring its own, so
+// there remains exactly one copy of a user-visible string.
+export const GRADING_FAILURE_PREFIX = "This submission could not be graded: ";
+
 // Appended to overall feedback whenever a student lost points, so every graded
 // student is offered a penalty-free resubmission in identical wording.
 export const RESUBMIT_NOTICE =
@@ -117,7 +125,67 @@ export interface SubmittedFileInfo {
   mimeType?: string;
 }
 
-export interface GradeResult {
+/**
+ * Why a grading run produced a row with NO grade in it. Two facts, one
+ * mechanism, separate members rather than one member with a boolean, because
+ * they lead the instructor to different actions: "not-attempted" means
+ * re-run it and it will probably work; "grading-failed" means something
+ * about THIS submission broke and re-running it unchanged may break again.
+ *
+ * NOT the same as GradeDetermination. `determination` records a real,
+ * POSTABLE outcome (a zero for a student who submitted nothing). This
+ * records that the tool produced nothing at all. A third reason adds a
+ * member HERE, never a new independent field on GradeResult.
+ */
+export interface NotAttemptedOutcome {
+  readonly kind: "not-attempted";
+  readonly stoppedBy: "submission-count-bound" | "run-deadline";
+  // The zero-based position of this student's entry in the array
+  // gradeStudentEntries received - NOT an index into any caller's own input
+  // array. For example on the GitHub path this indexes `entries` (built from
+  // `digests`, itself `rawDigests` minus unparseable refs minus empty
+  // digests), not `repos`. Used for ordering and for the
+  // results[i] <-> studentSubmissions[i] invariant; a caller that treats it
+  // as a re-run key re-runs the wrong student.
+  readonly sourceIndex: number;
+  // Byte-identical to the row's own `student` field below.
+  readonly student: string;
+  // The Canvas id, deliberately never spelled `userId` - fifteen call sites
+  // decide postability by `typeof x.userId === "number"`, and carrying the
+  // id under a name none of them reads is what keeps this row out of every
+  // identity-gated Canvas door without asking any of them to change.
+  readonly canvasUserId?: number;
+  // The single authored, human-readable explanation.
+  readonly message: string;
+}
+
+export interface GradingFailedOutcome {
+  readonly kind: "grading-failed";
+  readonly sourceIndex: number;
+  readonly student: string;
+  readonly canvasUserId?: number;
+  /** The GRADING_FAILURE_PREFIX-prefixed thrown message. Display and
+   *  diagnosis only - nothing in this repo branches on its text. */
+  readonly message: string;
+}
+
+export type UngradedOutcome = NotAttemptedOutcome | GradingFailedOutcome;
+
+/** The one place any consumer asks the question. Never `!r.totalScore`,
+ *  never a prefix test on prose. */
+export function isUngraded(result: GradeResult): result is UngradedResult {
+  return result.ungraded !== undefined;
+}
+
+export function gradedResults(results: readonly GradeResult[]): GradedResult[] {
+  return results.filter((r): r is GradedResult => r.ungraded === undefined);
+}
+
+export function ungradedResults(results: readonly GradeResult[]): UngradedResult[] {
+  return results.filter(isUngraded);
+}
+
+interface GradeResultBase {
   student: string;
   // overallComment is the COMPOSITION of strengths + improvements +
   // resubmitNotice (see composeOverallComment above), never authored on its
@@ -127,7 +195,9 @@ export interface GradeResult {
   // What the student did well. Required (not optional) so a producer that
   // forgets to populate it fails at compile time (tsc) rather than silently
   // dropping a third of the feedback at runtime. May be "" when a producer
-  // genuinely has nothing to say (e.g. a zero for a non-submission).
+  // genuinely has nothing to say (e.g. a zero for a non-submission). On an
+  // ungraded row this is the row's own `ungraded.message`, never blank -
+  // see the ungraded factory in engine.ts.
   strengths: string;
   // What the student could do better - guidance the LLM prompt used to
   // forbid (prompts.ts) until the instructor asked for it explicitly. "" when
@@ -145,8 +215,6 @@ export interface GradeResult {
   feedback: string;
   mergedFileCount: number;
   submittedFiles: SubmittedFileInfo[];
-  // Canvas user id, present when graded from a Canvas URL; enables write-back.
-  userId?: number;
   // Result of running the submission's code in the sandbox, when it had runnable
   // code. Display-only on the Gemini path; the embedded engine also scores it.
   codeExecution?: CodeRunResult;
@@ -162,7 +230,10 @@ export interface GradeResult {
   // in ../gemini) and was cut down before being sent to the model - see
   // truncateSubmission in ./utils. Previously this fact only existed as a
   // sentence inside the prompt text that no instructor ever saw; this field
-  // lets a UI say "this submission was truncated" instead.
+  // lets a UI say "this submission was truncated" instead. N13a: has NO
+  // production rule for a not-attempted row (StudentSubmissionEntry carries
+  // no such field and truncateSubmission never runs for an entry that was
+  // never started), so it is simply left undefined there.
   submissionTruncated?: boolean;
   // The fact that this is a 0 for a missing submission, as its OWN field -
   // never encoded into totalScore or overallComment (G1a: six sites in this
@@ -173,6 +244,65 @@ export interface GradeResult {
   // (composeOverallComment) - this field exists so nothing downstream has to
   // parse that prose to learn the same fact.
   determination?: GradeDetermination;
+}
+
+/**
+ * A row that produced a real grade. `userId`, when present, is the Canvas id
+ * that enables write-back.
+ */
+export interface GradedResult extends GradeResultBase {
+  readonly userId?: number;
+  readonly ungraded?: undefined;
+}
+
+/**
+ * A row with NO grade in it - the tool did not produce one, for the reason
+ * named in `ungraded`. N13a Ruling 3: no construction anywhere in this tree
+ * may produce an object carrying both `userId` and `ungraded` - not by cast,
+ * not by Object.assign, not by assignment through a loosely-typed alias. The
+ * sanctioned repairs are a branch or a conditional spread, never a cast back
+ * to `GradeResult`.
+ */
+export interface UngradedResult extends GradeResultBase {
+  readonly userId?: never;
+  readonly ungraded: UngradedOutcome;
+}
+
+export type GradeResult = GradedResult | UngradedResult;
+
+/**
+ * Validates an arbitrary (untrusted/persisted) value against UngradedOutcome,
+ * returning the narrowed value when it is well-formed and undefined for
+ * anything else - the same degrade-rather-than-invalidate shape as
+ * coerceGradeDetermination above, shared by grading-drafts.ts's
+ * coerceGradeResult (which degrades any bad optional field to undefined) and
+ * github-grading-run-store.ts's parseGradeResult (which checks PRESENCE of
+ * `raw.ungraded` separately, the same way it already does for
+ * `raw.determination`, so a present-but-corrupt descriptor invalidates the
+ * whole result rather than silently discarding the fact that this row was
+ * ungraded).
+ */
+export function coerceUngradedOutcome(value: unknown): UngradedOutcome | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const v = value as Record<string, unknown>;
+  if (typeof v.sourceIndex !== "number") return undefined;
+  if (typeof v.student !== "string") return undefined;
+  if (typeof v.message !== "string") return undefined;
+  const canvasUserId = typeof v.canvasUserId === "number" ? v.canvasUserId : undefined;
+  if (v.kind === "grading-failed") {
+    return { kind: "grading-failed", sourceIndex: v.sourceIndex, student: v.student, canvasUserId, message: v.message };
+  }
+  if (v.kind === "not-attempted" && (v.stoppedBy === "submission-count-bound" || v.stoppedBy === "run-deadline")) {
+    return {
+      kind: "not-attempted",
+      stoppedBy: v.stoppedBy,
+      sourceIndex: v.sourceIndex,
+      student: v.student,
+      canvasUserId,
+      message: v.message,
+    };
+  }
+  return undefined;
 }
 
 export interface GradingRun {

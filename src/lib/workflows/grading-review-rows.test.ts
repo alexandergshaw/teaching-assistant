@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { buildGradingReviewRows, countPostableResults } from "./grading-review-rows";
-import type { GradeResult, GradingRunEntry } from "@/lib/grade";
+import type { GradeResult, GradedResult, GradingRunEntry } from "@/lib/grade";
 
-function makeResult(overrides: Partial<GradeResult> = {}): GradeResult {
+function makeResult(overrides: Partial<GradedResult> = {}): GradeResult {
   return {
     student: "Jane Doe",
     overallComment: "Nice work.",

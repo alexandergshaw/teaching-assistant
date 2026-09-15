@@ -4,9 +4,9 @@ import {
   stripGradingRunForDraft,
   stripGradingRunEntriesForDraft,
 } from "./workflows/grading-review-rows";
-import { RESUBMIT_NOTICE, type GradeResult, type GradingRun, type GradingRunEntry } from "./grade";
+import { RESUBMIT_NOTICE, type GradeResult, type GradedResult, type GradingRun, type GradingRunEntry } from "./grade";
 
-function makeResult(overrides: Partial<GradeResult> = {}): GradeResult {
+function makeResult(overrides: Partial<GradedResult> = {}): GradeResult {
   return {
     student: "Jane Doe",
     overallComment: "Nice work.",

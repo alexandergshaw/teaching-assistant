@@ -24,6 +24,7 @@ import {
   stripGradingRunEntriesForDraft,
 } from "@/lib/workflows/grading-review-rows";
 import { checkRowPostability } from "@/lib/grade/postable";
+import { repoGradingStopAt } from "@/lib/workflows/registry/steps.grading-repos.grade-repo";
 
 export const gradingDraftFlowSteps: StepDefinition[] = [
   {
@@ -256,6 +257,12 @@ export const gradingDraftFlowSteps: StepDefinition[] = [
               "Grade each submission against the rubric."
           );
           formData.set("institution", row.institution ?? "");
+          // N13a Ruling 1/2: getGeminiMaxSubmissions is read ONCE on the
+          // shared path, so raising it to 40 raises it here too, inside this
+          // cron tick's maxDuration=60s budget. The wall-clock deadline
+          // (reusing the repo-grading loop's own reserve) is what keeps this
+          // step from attempting up to 40 students in one invocation.
+          formData.set("runDeadlineMs", String(repoGradingStopAt(helpers.deadlineMs, Date.now())));
 
           // gradeAction only reads from Canvas and scores with the LLM - it
           // never writes back. Posting only ever happens in the post-grades
@@ -580,6 +587,10 @@ export const gradingDraftFlowSteps: StepDefinition[] = [
 
             const result = entry.run.results[resultIndex];
             const userId = result.userId;
+            // N13a: this gate is exactly what keeps an ungraded row (result.ungraded
+            // set) out of this step's postCanvasGradesAction call below - the
+            // union type makes userId and ungraded mutually exclusive, so an
+            // ungraded row always fails this typeof check by construction.
             if (typeof userId !== "number") {
               lines.push(`${approvedRow.student}: no Canvas user id - skipped`);
               continue;

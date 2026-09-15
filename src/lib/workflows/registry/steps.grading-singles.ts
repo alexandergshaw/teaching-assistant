@@ -23,6 +23,8 @@ import {
   buildMoodleGradebookCsv,
 } from "@/lib/gradebook-csv";
 import type { GradingRun } from "@/lib/grade";
+import { isUngraded } from "@/lib/grade/types";
+import { checkRowPostability } from "@/lib/grade/postable";
 import { parseCanvasCourseId } from "@/lib/canvas-url";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
 import { courseProgressStatus, parseWeekToken } from "@/lib/week-numbering";
@@ -590,6 +592,26 @@ export const gradingSinglesSteps: StepDefinition[] = [
           const result = entry.run.results[resultIndex];
           const grade = (approvedRow.grade ?? "").trim();
           if (!grade || !grade.match(/^-?\d+(\.\d+)?$/)) continue;
+
+          // N13a Ruling 2: refuse only isUngraded(row) AND
+          // checkRowPostability(...).postable === false - never isUngraded
+          // alone. A reviewer who typed a real numeric grade over an
+          // ungraded row (a RESCUED row, A13 clause c) must still export -
+          // the regex check above already guarantees the submitted score is
+          // non-blank, so this compound check is a no-op in practice today,
+          // but it is the explicit statement of the rule rather than an
+          // implicit consequence of an unrelated check, so a future edit to
+          // the regex above cannot silently reopen this door.
+          if (
+            isUngraded(result) &&
+            checkRowPostability({
+              producer: result,
+              submittedScore: grade,
+              submittedComment: result.overallComment,
+            }).postable === false
+          ) {
+            continue;
+          }
 
           scores.push({
             name: approvedRow.student,

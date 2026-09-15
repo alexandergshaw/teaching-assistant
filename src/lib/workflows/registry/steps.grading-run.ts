@@ -19,6 +19,7 @@ import {
   countPostableResults,
 } from "@/lib/workflows/grading-review-rows";
 import { resolveInstitution } from "@/lib/institution-resolution";
+import { repoGradingStopAt } from "@/lib/workflows/registry/steps.grading-repos.grade-repo";
 
 export const gradingRunSteps: StepDefinition[] = [
   {
@@ -469,6 +470,12 @@ export const gradingRunSteps: StepDefinition[] = [
               "Grade each submission against the rubric."
           );
           formData.set("institution", row.institution ?? "");
+          // N13a Ruling 1/2: getGeminiMaxSubmissions is read ONCE, on the
+          // shared path, so raising it to 40 raises it here too - inside a
+          // cron tick with maxDuration=60s. The wall-clock deadline is what
+          // keeps this from attempting up to 40 students in one invocation;
+          // reuse the same reserve the repo-grading loop already uses.
+          formData.set("runDeadlineMs", String(repoGradingStopAt(helpers.deadlineMs, Date.now())));
 
           const gradeResult = await gradeAction({ run: null, error: null }, formData);
 
@@ -529,6 +536,7 @@ export const gradingRunSteps: StepDefinition[] = [
               "assignmentInstructions",
               "Grade each student submission against the rubric."
             );
+            formData.set("runDeadlineMs", String(repoGradingStopAt(helpers.deadlineMs, Date.now())));
 
             const gradeResult = await gradeAction({ run: null, error: null }, formData);
 

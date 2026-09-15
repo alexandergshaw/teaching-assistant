@@ -6,7 +6,7 @@
 // restores the previous globals afterward, matching
 // src/app/components/repo-grades/repoGradesUiState.test.ts's own pattern.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { GradeResult, GradingRun } from "@/lib/grade";
+import type { GradeResult, GradedResult, GradingRun } from "@/lib/grade";
 import { GRADE_DETERMINATIONS } from "@/lib/grade/types";
 import {
   describeGithubGradingNoSubmission,
@@ -19,7 +19,7 @@ import {
   serializeGithubGradingRun,
 } from "./github-grading-run-store";
 
-function fixtureResult(overrides: Partial<GradeResult> = {}): GradeResult {
+function fixtureResult(overrides: Partial<GradedResult> = {}): GradeResult {
   return {
     student: "Jane Doe",
     overallComment: "Nice work.",

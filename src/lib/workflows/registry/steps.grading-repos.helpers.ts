@@ -306,8 +306,16 @@ export async function gradeTileRepos(opts: {
       }
 
       gr.student = student.student || gr.student;
-      gr.userId = student.canvasUserId && /^\d+$/.test(student.canvasUserId) ? Number(student.canvasUserId) : undefined;
-      results.push(gr);
+      // N13a Ruling 3: userId/ungraded are readonly and mutually exclusive -
+      // an ungraded row must never have a Canvas identity bound onto it, so
+      // this rebuilds rather than mutating gr.userId in place.
+      if (gr.ungraded) {
+        results.push({ ...gr, student: gr.student });
+      } else {
+        const userId =
+          student.canvasUserId && /^\d+$/.test(student.canvasUserId) ? Number(student.canvasUserId) : undefined;
+        results.push({ ...gr, student: gr.student, userId });
+      }
       logEntries.push(
         buildRepoGradingLogEntry({
           repo: student.repo,

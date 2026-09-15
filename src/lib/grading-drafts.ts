@@ -22,7 +22,7 @@ import type {
   RubricAreaResult,
   SubmittedFileInfo,
 } from "./grade";
-import { coerceGradeDetermination } from "./grade/types";
+import { coerceGradeDetermination, coerceUngradedOutcome } from "./grade/types";
 import { coerceRepoGradingRunLog, type RepoGradingRunLog } from "./repo-grading-log";
 
 export type GradingDraftStatus = "pending" | "reviewed";
@@ -106,7 +106,7 @@ function coerceGradeResult(value: unknown): GradeResult | null {
         .filter((f): f is SubmittedFileInfo => f !== null)
     : [];
 
-  return {
+  const shared = {
     student: o.student,
     overallComment: typeof o.overallComment === "string" ? o.overallComment : "",
     // Same degrade-to-default idiom as github-grading-run-store.ts's
@@ -123,7 +123,6 @@ function coerceGradeResult(value: unknown): GradeResult | null {
     feedback: typeof o.feedback === "string" ? o.feedback : "",
     mergedFileCount: typeof o.mergedFileCount === "number" ? o.mergedFileCount : 0,
     submittedFiles,
-    userId: typeof o.userId === "number" ? o.userId : undefined,
     // codeExecution is display-only and never persisted - see
     // stripGradeResultForDraft.
     gradedRepo: typeof o.gradedRepo === "string" ? o.gradedRepo : null,
@@ -145,6 +144,18 @@ function coerceGradeResult(value: unknown): GradeResult | null {
     // undefined.
     submissionTruncated: typeof o.submissionTruncated === "boolean" ? o.submissionTruncated : undefined,
   };
+
+  // N13a Ruling 3: userId and ungraded cannot both live on one object
+  // literal (TS2322) - branch rather than spread a union-typed value, and
+  // never `as GradeResult`. Stored-both-keys rule (a corrupt/hand-edited
+  // blob carrying both): ungraded WINS - the identity door stays closed
+  // across a restore, which is the one thing the type cannot otherwise
+  // guarantee across a serialization boundary.
+  const ungraded = coerceUngradedOutcome(o.ungraded);
+  if (ungraded !== undefined) {
+    return { ...shared, ungraded };
+  }
+  return { ...shared, userId: typeof o.userId === "number" ? o.userId : undefined };
 }
 
 function coerceGradingRun(value: unknown): GradingRun | null {

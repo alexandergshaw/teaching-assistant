@@ -6,7 +6,19 @@ import {
 } from "../gemini";
 import { callLlm, type LlmPart, type LlmProvider } from "../llm";
 import { runSubmittedCode, type CodeRunResult } from "../code-runner";
-import { RESUBMIT_NOTICE, composeOverallComment, type GradeResult, type GradingRun, type StudentSubmissionEntry, type RubricAreaResult, type SubmittedFileInfo } from "./types";
+import {
+  RESUBMIT_NOTICE,
+  GRADING_FAILURE_PREFIX,
+  composeOverallComment,
+  type GradeResult,
+  type GradedResult,
+  type UngradedResult,
+  type UngradedOutcome,
+  type GradingRun,
+  type StudentSubmissionEntry,
+  type RubricAreaResult,
+  type SubmittedFileInfo,
+} from "./types";
 import { GEMINI_IMAGE_MIME_TYPES } from "./constants";
 import { truncateSubmission, sleep, buildCodeExecutionNote } from "./utils";
 import { parseRubricResponse, pointsWereDeducted, deriveTotalScore, scaleResultToPoints, formatFeedback, normalizeGeminiError } from "./parsing";
@@ -29,7 +41,7 @@ async function gradeSubmission(
   // requirement by comparing two lists instead of noticing names buried in
   // the "--- FILE: path ---" headers inside `content`.
   submittedFiles: SubmittedFileInfo[] = []
-): Promise<GradeResult> {
+): Promise<GradedResult> {
   const maxOutputTokens = getGeminiMaxOutputTokens();
 
   const imageNote =
@@ -107,6 +119,58 @@ async function gradeSubmission(
 }
 
 /**
+ * N13a: options threaded through the whole gradeStudentEntries/gradeEntries/
+ * gradeSubmissions/gradeCanvasUrl call chain. Optional and trailing so every
+ * existing call site compiles unchanged.
+ */
+export interface GradingRunOptions {
+  /** Absolute epoch-ms. The loop refuses to START a student at or past this.
+   *  Undefined on the attended browser path, which keeps today's behaviour.
+   *  A forged/too-generous value can only make the run do LESS work, so
+   *  there is no authorization consequence to threading it through
+   *  unauthenticated-looking layers like FormData. */
+  readonly deadlineMs?: number;
+}
+
+/**
+ * Builds a row that carries NO grade, for one of the two reasons in
+ * UngradedOutcome. N13a section 2/5: the display fields are DERIVED from
+ * `outcome.message`, never independently authored or blanked, so the reason
+ * a submission has no grade is never silently lost from the cell an
+ * instructor is looking at. Ruling 5: codeExecution/gradedRepo/gradedRef are
+ * carried UNCHANGED from whatever the caller already has for this entry
+ * (both may be unset - e.g. a not-attempted entry never ran any code) so a
+ * failed or skipped repo grade never loses the evidence (which repo, which
+ * commit, which sandbox run) that exists to defend a grade to a student.
+ */
+function buildUngradedRow(
+  entry: Pick<StudentSubmissionEntry, "student" | "mergedFileCount" | "submittedFiles" | "gradedRepo" | "gradedRef">,
+  outcome: UngradedOutcome,
+  codeRun: CodeRunResult | null = null,
+  submissionTruncated: boolean | undefined = undefined
+): UngradedResult {
+  const strengths = outcome.message;
+  const overallComment = composeOverallComment(strengths, "", "");
+  return {
+    student: entry.student,
+    overallComment,
+    strengths,
+    improvements: "",
+    resubmitNotice: "",
+    rubricAreas: [],
+    totalScore: "",
+    feedback: formatFeedback(overallComment, [], ""),
+    mergedFileCount: entry.mergedFileCount,
+    submittedFiles: entry.submittedFiles,
+    codeExecution: codeRun ?? undefined,
+    gradedRepo: entry.gradedRepo,
+    gradedRef: entry.gradedRef,
+    submissionTruncated,
+    ungraded: outcome,
+  };
+}
+
+/**
  * Grade a list of per-student submissions against the rubric. Shared by the zip
  * upload path and the Canvas discussion path so both produce identical runs.
  */
@@ -117,8 +181,10 @@ async function gradeStudentEntries(
   provider: LlmProvider,
   // Canvas points_possible, when grading from a Canvas URL — anchors each
   // student's total to the assignment's real scale. Null for zip uploads.
-  pointsPossible: number | null = null
+  pointsPossible: number | null = null,
+  options: GradingRunOptions = {}
 ): Promise<GradingRun> {
+  const { deadlineMs } = options;
   const maxSubmissions = getGeminiMaxSubmissions();
   const maxCharsPerSubmission = getGeminiMaxCharsPerSubmission();
   const interRequestDelayMs = getGeminiInterRequestDelayMs();
@@ -131,7 +197,17 @@ async function gradeStudentEntries(
   const systemPrompt = buildSystemPrompt(assignmentInstructions, rubric, criteria);
   const results: GradeResult[] = [];
 
+  // N13a: entry 0 always STARTS (it does not follow that results[0] is a
+  // GRADED row - a started entry can throw, and then results[0] is
+  // kind: "grading-failed"). The i > 0 guard is load-bearing: without it, a
+  // deadline already past at loop start would grade nobody at all, which
+  // every .run.results[0] consumer in this repo is not written to expect.
+  let deadlineStoppedAt: number | undefined;
   for (let i = 0; i < limitedEntries.length; i += 1) {
+    if (i > 0 && deadlineMs !== undefined && Date.now() >= deadlineMs) {
+      deadlineStoppedAt = i;
+      break;
+    }
     const { student, content, mergedFileCount, submittedFiles, userId, codeRun: precomputedCodeRun, gradedRepo, gradedRef } = limitedEntries[i];
     const { text: truncatedContent, truncated: submissionTruncated } = truncateSubmission(
       content,
@@ -175,38 +251,75 @@ async function gradeStudentEntries(
       // A grading failure has no improvement guidance or resubmit policy to
       // offer - the whole message lives in strengths, and overallComment is
       // still composed (not authored directly) so it can never drift from it.
-      const strengths = `This submission could not be graded: ${message}`;
-      const overallComment = composeOverallComment(strengths, "", "");
-      const fallbackRubricAreas: RubricAreaResult[] = [
-        {
-          area: "Overall",
-          score: "",
-          comment: overallComment,
-        },
-      ];
-
-      results.push({
-        student,
-        overallComment,
-        strengths,
-        improvements: "",
-        resubmitNotice: "",
-        rubricAreas: fallbackRubricAreas,
-        totalScore: "",
-        mergedFileCount,
-        submittedFiles,
-        feedback: formatFeedback(overallComment, fallbackRubricAreas, ""),
-        userId,
-        codeExecution: codeRun ?? undefined,
-        gradedRepo,
-        gradedRef,
-        submissionTruncated,
-      });
+      // N13a Ruling 1: the message CARRIES GRADING_FAILURE_PREFIX (this is
+      // byte-identical to the pre-union failure row's strengths text).
+      results.push(
+        buildUngradedRow(
+          { student, mergedFileCount, submittedFiles, gradedRepo, gradedRef },
+          {
+            kind: "grading-failed",
+            sourceIndex: i,
+            student,
+            canvasUserId: userId,
+            message: `${GRADING_FAILURE_PREFIX}${message}`,
+          },
+          codeRun,
+          submissionTruncated
+        )
+      );
     }
 
-    if (interRequestDelayMs > 0 && i < limitedEntries.length - 1) {
+    // Skip the inter-request sleep when the next iteration would be refused
+    // by the deadline anyway - that would spend exactly the budget the
+    // deadline exists to protect.
+    const nextRefused = deadlineMs !== undefined && Date.now() >= deadlineMs;
+    if (interRequestDelayMs > 0 && i < limitedEntries.length - 1 && !nextRefused) {
       await sleep(interRequestDelayMs);
     }
+  }
+
+  // N13a section 3: not-attempted rows are appended here - after the loop
+  // closes, in ascending sourceIndex order - and MUST land before canonical-
+  // column reconciliation below, never after it. Appended after, an empty-
+  // canonical run (see class-trends.ts's exclusion) raises totalResults
+  // without raising any area's resultsWithArea and silently switches every
+  // counted class-trends clause off. Because the loop only ever attempts a
+  // PREFIX of studentSubmissions and everything from the stop point onward
+  // is not-attempted, results[i] corresponds to studentSubmissions[i] for
+  // every i, and results.length === studentSubmissions.length - strictly
+  // stronger than the pre-N13a contract, where results was truncated at
+  // maxSubmissions.
+  //
+  // Two tails, both ascending, so the combined order stays ascending: the
+  // run-deadline tail (indices the loop refused to start once the deadline
+  // passed) always precedes the submission-count-bound tail (indices sliced
+  // off before the loop ever began).
+  const deadlineTailStart = deadlineStoppedAt ?? limitedEntries.length;
+  for (let i = deadlineTailStart; i < limitedEntries.length; i += 1) {
+    const entry = limitedEntries[i];
+    results.push(
+      buildUngradedRow(entry, {
+        kind: "not-attempted",
+        stoppedBy: "run-deadline",
+        sourceIndex: i,
+        student: entry.student,
+        canvasUserId: entry.userId,
+        message: "Not graded: the grading run's time budget ran out before this submission could be started. Re-run to grade it.",
+      })
+    );
+  }
+  for (let i = limitedEntries.length; i < studentSubmissions.length; i += 1) {
+    const entry = studentSubmissions[i];
+    results.push(
+      buildUngradedRow(entry, {
+        kind: "not-attempted",
+        stoppedBy: "submission-count-bound",
+        sourceIndex: i,
+        student: entry.student,
+        canvasUserId: entry.userId,
+        message: `Not graded: this run is limited to ${maxSubmissions} submissions. Re-run to grade the rest.`,
+      })
+    );
   }
 
   // Pin every student to ONE shared set of criteria so the results table never
@@ -284,7 +397,8 @@ export async function gradeSubmissions(
   zipBuffer: ArrayBuffer,
   assignmentInstructions: string,
   rubric: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  options: GradingRunOptions = {}
 ): Promise<GradingRun> {
   const { extractSubmissions } = await import("./extraction");
   const { inferFileNameConvention } = await import("./rubric");
@@ -321,7 +435,9 @@ export async function gradeSubmissions(
     studentSubmissions,
     assignmentInstructions,
     rubric,
-    provider
+    provider,
+    null,
+    options
   );
 }
 
@@ -335,9 +451,10 @@ export async function gradeEntries(
   assignmentInstructions: string,
   rubric: string,
   provider: LlmProvider = "gemini",
-  pointsPossible: number | null = null
+  pointsPossible: number | null = null,
+  options: GradingRunOptions = {}
 ): Promise<GradingRun> {
-  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider, pointsPossible);
+  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider, pointsPossible, options);
 }
 
 /**
@@ -349,7 +466,8 @@ export async function gradeCanvasUrl(
   url: string,
   assignmentInstructions: string,
   rubric: string,
-  provider: LlmProvider = "gemini"
+  provider: LlmProvider = "gemini",
+  options: GradingRunOptions = {}
 ): Promise<GradingRun> {
   const { fetchCanvasWork, fetchAssignmentPointsPossible } = await import("../canvas");
   const { canvasWorkToEntry } = await import("./extraction");
@@ -368,5 +486,5 @@ export async function gradeCanvasUrl(
     entries.push(await canvasWorkToEntry(work));
   }
 
-  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider, pointsPossible);
+  return gradeStudentEntries(entries, assignmentInstructions, rubric, provider, pointsPossible, options);
 }

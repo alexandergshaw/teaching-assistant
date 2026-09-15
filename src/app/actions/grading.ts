@@ -1,7 +1,7 @@
 "use server";
 
 import type { GradeActionState, MissingAssignmentReport } from "../actions-types";
-import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, type GradingRun, type GradingRunEntry } from "@/lib/grade";
+import { gradeSubmissions, gradeCanvasUrl, synthesizeFullCreditChecklist, deriveFullCreditChecklist, generateSampleAnswer, extractStudentEntries, extractCanvasEntries, generateRubric, gradeEntries, canvasWorkToEntry, type GradingRun, type GradingRunEntry, type GradingRunOptions } from "@/lib/grade";
 import { runSubmittedCode, attachCodeRuns, type CodeRunResult } from "@/lib/code-runner";
 import { buildEmbeddedRubric, gradeEntriesEmbedded, renderRubricText, buildDiscussionRubric, gradeDiscussion, renderDiscussionRubric } from "@/lib/embedded-grader";
 import { rememberRubric } from "@/lib/research/rubric-bank";
@@ -716,6 +716,18 @@ export async function gradeAction(
   // Optional institution acronym (Live Feed Auto Grade) — routes the
   // deterministic grader to that school's endpoint; blank uses the global one.
   const institution = ((formData.get("institution") as string | null) ?? "").trim() || undefined;
+  // N13a: absolute epoch-ms, supplied only by unattended (workflow) callers
+  // that already know their own budget (see steps.grading-run.ts,
+  // steps.grading-draft-flow.ts, steps.grading-cartridge.ts, each via
+  // repoGradingStopAt). Passed as a FormData field rather than a new
+  // exported parameter so gradeAction's "use server" signature — pinned by
+  // useActionState at src/app/page.tsx — does not change. A forged or
+  // over-generous value can only make the run do LESS work, so there is no
+  // authorization consequence to trusting it as given.
+  const runDeadlineMsRaw = formData.get("runDeadlineMs") as string | null;
+  const parsedRunDeadlineMs = runDeadlineMsRaw ? Number.parseInt(runDeadlineMsRaw, 10) : NaN;
+  const runDeadlineMs = Number.isFinite(parsedRunDeadlineMs) ? parsedRunDeadlineMs : undefined;
+  const gradingRunOptions: GradingRunOptions = runDeadlineMs !== undefined ? { deadlineMs: runDeadlineMs } : {};
 
   try {
     await requireOwner();
@@ -798,7 +810,7 @@ export async function gradeAction(
       // No rubric synthesis on the Canvas path: grade with whatever rubric was
       // retrieved from Canvas (may be empty), using the instructions otherwise.
       const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
-        gradeCanvasUrl(canvasUrl, assignmentInstructions, rubric, provider),
+        gradeCanvasUrl(canvasUrl, assignmentInstructions, rubric, provider, gradingRunOptions),
         synthesizeFullCreditChecklist(assignmentInstructions, rubric, provider),
         generateSampleAnswer(assignmentInstructions, rubric, provider),
       ]);
@@ -856,7 +868,7 @@ export async function gradeAction(
 
     const zipBuffer = await file.arrayBuffer();
     const [run, fullCreditChecklist, sampleAnswer] = await Promise.all([
-      gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric, provider),
+      gradeSubmissions(zipBuffer, assignmentInstructions, effectiveRubric, provider, gradingRunOptions),
       synthesizeFullCreditChecklist(assignmentInstructions, effectiveRubric, provider),
       generateSampleAnswer(assignmentInstructions, effectiveRubric, provider),
     ]);

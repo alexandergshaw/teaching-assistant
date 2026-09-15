@@ -12,10 +12,12 @@ import {
   buildMoodleGradebookCsv,
 } from "@/lib/gradebook-csv";
 import type { GradingRunEntry } from "@/lib/grade";
+import { isUngraded } from "@/lib/grade/types";
 import {
   stripGradingRunEntriesForDraft,
 } from "@/lib/workflows/grading-review-rows";
 import { buildWorkflowFileName } from "@/lib/workflows/file-names";
+import { repoGradingStopAt } from "@/lib/workflows/registry/steps.grading-repos.grade-repo";
 
 export const gradingCartridgeSteps: StepDefinition[] = [
   {
@@ -95,6 +97,12 @@ export const gradingCartridgeSteps: StepDefinition[] = [
             formData.append("rubric", takeResult.rubricText);
           }
           formData.append("provider", helpers.provider);
+          // N13a Ruling 1/2: getGeminiMaxSubmissions is read ONCE on the
+          // shared path, so raising it to 40 raises it here too, inside this
+          // cron tick's maxDuration=60s budget. The wall-clock deadline
+          // (reusing the repo-grading loop's own reserve) is what keeps this
+          // step from attempting up to 40 students in one invocation.
+          formData.append("runDeadlineMs", String(repoGradingStopAt(helpers.deadlineMs, Date.now())));
 
           // Grade the zip
           const gradeResult = await gradeAction({ run: null, error: null }, formData);
@@ -109,7 +117,15 @@ export const gradingCartridgeSteps: StepDefinition[] = [
           }
 
           // Extract student names from grading results
-          const allResults = gradeResult.run.results;
+          // N13a section 4: this CSV door is gated on NOTHING today - it
+          // reads no identity and no postability field, so an ungraded row
+          // (a not-attempted or grading-failed submission) would otherwise
+          // post a blank/error score straight into the gradebook CSV. This
+          // build has no reviewer-edit step (the CSV is built directly from
+          // the unedited grading run), so isUngraded alone is the correct
+          // refusal here - there is no rescued/edited value that could
+          // legitimately override it.
+          const allResults = gradeResult.run.results.filter((r) => !isUngraded(r));
 
           // For Moodle: filter to only students with '@' in their identity
           let students: Array<{ name?: string; externalId?: string; email?: string }>;

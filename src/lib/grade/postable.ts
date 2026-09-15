@@ -25,6 +25,21 @@
 // fields that already exist survives the seam untouched - the seam's own
 // contract asks for exactly this shape and swaps only the body.
 //
+// N13a LANDED (docs/backlog.yml note "SEAM DISPOSAL AND SIX RULINGS"): the
+// union now exists (GradeResult.ungraded, src/lib/grade/types.ts) and this
+// predicate was NOT deleted or replaced by it. The two compose rather than
+// compete: this predicate was the right shape for a live, student-facing fix
+// under time pressure (no allowlist/tsc/vitest dependency), and `ungraded`
+// is the right shape for the durable discriminator (persisted, type-closed
+// against carrying a Canvas identity). checkRowPostability still covers the
+// two doors the type cannot reach on its own - the repo-grades postings,
+// which key off the roster's canvasUserId rather than GradeResult.userId
+// (see repoGradesPosting.ts) - and every ungraded row is refused by BOTH
+// mechanisms today (an ungraded row's totalScore/areas are always blank, so
+// clause (a)/(b) hold; an unedited submission leaves clauses (c)/(d) intact
+// too). Do not delete this predicate when reading the field - it is not
+// redundant.
+//
 // THE FOUR CLAUSES (A13's ruling 2) are ALL required before a row is refused
 // - this is deliberately narrower than "the producer failed," because two
 // real, reachable cases must NOT be refused:

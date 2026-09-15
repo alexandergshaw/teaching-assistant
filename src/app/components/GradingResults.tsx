@@ -253,6 +253,11 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
       return { ...prev, [student]: applyFeedbackFieldEdit(row, field, value) };
     });
 
+  // N13a: this typeof-userId gate is exactly what keeps an ungraded row
+  // (GradeResult.ungraded set) out of this file's two postCanvasGradesAction
+  // call sites below - the union type makes `userId` and `ungraded` mutually
+  // exclusive, so an ungraded row is filtered out here by construction,
+  // never by an explicit isUngraded check in this file.
   const gradableResults = useMemo(
     () => run.results.filter((r) => typeof r.userId === "number"),
     [run]

@@ -206,12 +206,19 @@ export function applyRosterMatchToRow(
 // ---------------------------------------------------------------------------
 
 /** The exact prefix composeFailedGradingRow (grading-feedback-prompt.ts) and
- *  gradeSubmission's own catch branch (src/lib/grade/engine.ts:178) both use
- *  to open a per-item grading failure's `strengths` field. No longer the
+ *  the ungraded factory in src/lib/grade/engine.ts both use to open a
+ *  per-item grading failure's `strengths` field. No longer the
  *  CLASSIFICATION signal (see this section's own header above for FIX 2) -
  *  kept only so classifyGradingResult can strip it off a known-failed row's
- *  `strengths` to produce a clean `error` message. */
-export const GRADING_FAILURE_PREFIX = "This submission could not be graded: ";
+ *  `strengths` to produce a clean `error` message.
+ *
+ * N13a: the literal now lives in src/lib/grade/types.ts (a leaf
+ * src/lib/grade/engine.ts can import without reaching into a component
+ * directory). Imported and re-exported here - rather than declared locally -
+ * so there is exactly one copy of the literal, and existing importers of
+ * THIS module (grading-rows.test.ts) are unaffected. */
+import { GRADING_FAILURE_PREFIX } from "@/lib/grade/types";
+export { GRADING_FAILURE_PREFIX };
 
 /** gradeCapturedSubmissionsAction's own per-result shape (minus `id`) -
  *  declared locally rather than imported, since that action's own types live

@@ -1,5 +1,5 @@
 import { normalizeAreaName } from "./prompts";
-import type { GradingRunEntry } from "./types";
+import { gradedResults, ungradedResults, type GradingRunEntry } from "./types";
 
 /**
  * Layer A of backlog N9 (see the architect pass, revision 4): a pure,
@@ -156,6 +156,12 @@ export interface ClassTrendsReport {
   /** The graded results this report covers - stated once, reused by every
    * area's coverage denominator. */
   totalResults: number;
+  /** N13a section 7: rows this run emitted instead of grading, counted
+   * NEVER folded into totalResults or into any area's unscoredCount. This
+   * layer only counts; a later, student-facing layer decides whether and
+   * how to disclose them. Production rule: the counts of
+   * ungradedResults(entry.run.results) by ungraded.kind. */
+  ungraded: { notAttempted: number; gradingFailed: number };
   areas: AreaTrend[];
   /** Areas whose graded results scored consistently high - first-class,
    * not an afterthought (requirement 5). Same AreaTrend shape as struggles. */
@@ -222,6 +228,12 @@ function buildAreaSummary(trend: Omit<AreaTrend, "summary">): string {
       break;
   }
 
+  // N13a section 7: with the exclusion above, an ungraded row never
+  // contributes a raw score to any area, so unscoredCount here never counts
+  // one and "unparseable" stays true of every score it does count. If this
+  // module ever starts including ungraded rows in `results`, THIS SENTENCE
+  // MUST CHANGE FIRST - it would otherwise describe a not-attempted or
+  // grading-failed submission as merely "unparseable".
   const unscoredText =
     trend.unscoredCount > 0
       ? ` ${trend.unscoredCount} of those had an unscored (unparseable) score.`
@@ -245,8 +257,25 @@ interface AreaAccumulator {
  * here (requirement 6) - that belongs to a later, student-facing layer.
  */
 export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
-  const results = entry.run.results;
+  // N13a section 7 / N13b: this module's cohort is "the graded results in
+  // hand", stated in this file's own header above - a not-attempted or
+  // grading-failed row is not a graded submission, and counting it here
+  // would be a false completeness claim in the exact register
+  // FORBIDDEN_COMPLETENESS_PHRASES exists to prevent (class-trends-draft.ts
+  // interpolates totalResults into a sentence addressed to students: "based
+  // on the N submissions graded so far"). This exclusion is NOT optional:
+  // reconciliation in engine.ts only fills every result's rubricAreas when
+  // canonical.length > 0; when the rubric parsed no criteria and no result
+  // carried a real area, an ungraded row's rubricAreas stays [], so
+  // INCLUDING it here would raise totalResults without raising any area's
+  // resultsWithArea and silently suppress every counted class-trends clause.
+  const results = gradedResults(entry.run.results);
   const totalResults = results.length;
+  const ungraded = ungradedResults(entry.run.results);
+  const ungradedCounts = {
+    notAttempted: ungraded.filter((r) => r.ungraded.kind === "not-attempted").length,
+    gradingFailed: ungraded.filter((r) => r.ungraded.kind === "grading-failed").length,
+  };
 
   const areaMap = new Map<string, AreaAccumulator>();
 
@@ -317,6 +346,7 @@ export function computeClassTrends(entry: GradingRunEntry): ClassTrendsReport {
 
   return {
     totalResults,
+    ungraded: ungradedCounts,
     areas,
     strengths: areas.filter((trend) => trend.direction === "high"),
     struggles: areas.filter((trend) => trend.direction === "low"),

@@ -18,7 +18,7 @@
 // for the component to call.
 
 import type { GradeResult, GradingRun, RubricAreaResult } from "@/lib/grade";
-import { coerceGradeDetermination } from "@/lib/grade/types";
+import { coerceGradeDetermination, coerceUngradedOutcome } from "@/lib/grade/types";
 import { stripGradingRunForDraft } from "@/lib/workflows/grading-review-rows";
 
 const RUN_KEY = "ta-github-grading-run";
@@ -228,7 +228,17 @@ function parseGradeResult(raw: unknown): GradeResult | null {
   }
   const determination = coerceGradeDetermination(raw.determination);
 
-  return {
+  // N13a: same strict-validation idiom as `determination` just above - a
+  // PRESENT but malformed `ungraded` descriptor invalidates this result
+  // (and therefore the whole run, see parseGradingRun) rather than silently
+  // discarding the fact that this row had no grade; an ABSENT field
+  // restores as undefined (a run persisted before this field existed).
+  if (raw.ungraded !== undefined && coerceUngradedOutcome(raw.ungraded) === undefined) {
+    return null;
+  }
+  const ungraded = coerceUngradedOutcome(raw.ungraded);
+
+  const shared = {
     student: raw.student,
     overallComment: raw.overallComment,
     strengths,
@@ -241,12 +251,20 @@ function parseGradeResult(raw: unknown): GradeResult | null {
     // R2.4: never restored from the stored blob, regardless of what it
     // contains - see this file's header.
     submittedFiles: [],
-    userId,
     gradedRepo,
     gradedRef,
     submissionTruncated,
     determination,
   };
+
+  // N13a Ruling 3: userId and ungraded cannot both live on one object
+  // literal (TS2322) - branch rather than spread, never `as GradeResult`.
+  // Stored-both-keys rule: ungraded wins, and the stored userId is dropped
+  // rather than reopening the identity door across a restore.
+  if (ungraded !== undefined) {
+    return { ...shared, ungraded };
+  }
+  return { ...shared, userId };
 }
 
 function parseGradingRun(raw: unknown): GradingRun | null {

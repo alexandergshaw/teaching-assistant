@@ -22,7 +22,14 @@ const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
  */
 const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image";
 const DEFAULT_MAX_OUTPUT_TOKENS = 700;
-const DEFAULT_MAX_SUBMISSIONS = 5;
+// N13a, owner decision 2026-09-15 (verbatim: "we need to raise that to at
+// least 20", then "raise it to 40 - we'll rarely go that high"): 40 is a
+// rarely-touched sanity ceiling, not the working limit. It no longer
+// protects the unattended (cron) path from the platform's invocation ceiling
+// by itself - see the wall-clock deadline threaded through
+// src/lib/grade/engine.ts's GradingRunOptions and into the three
+// server-side registry steps that call gradeAction inside a 60s cron tick.
+const DEFAULT_MAX_SUBMISSIONS = 40;
 
 /**
  * gemini-3.1-flash-lite (the default model above) has a 1,048,576-token input

@@ -25,6 +25,10 @@ function makeArea(overrides: Partial<AreaTrend> & { direction: AreaTrendDirectio
 function makeReport(areas: AreaTrend[], totalResults = FLOOR): ClassTrendsReport {
   return {
     totalResults,
+    // N13a: rows this run emitted instead of grading - none, for this
+    // fixture's fixtures, which build reports directly rather than through
+    // computeClassTrends.
+    ungraded: { notAttempted: 0, gradingFailed: 0 },
     areas,
     strengths: areas.filter((a) => a.direction === "high"),
     struggles: areas.filter((a) => a.direction === "low"),

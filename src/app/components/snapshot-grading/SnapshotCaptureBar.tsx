@@ -95,7 +95,8 @@ export default function SnapshotCaptureBar({
       </div>
 
       <p className={bar.keyHint}>
-        Keyboard: S to snap, 1-6 to arm a role (Assignment, Rubric, Post, Replies, Submission, Other).
+        Keyboard (no Ctrl, Alt, or Cmd/Win key held): S to snap, N for next student, 1-6 to arm a
+        role (Assignment, Rubric, Post, Replies, Submission, Other).
       </p>
 
       <p aria-live="polite" role="status" className={bar.wireFigure}>

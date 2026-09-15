@@ -43369,3 +43369,39 @@ to the criteria seat) and no claim about browser-reserved combinations (Ctrl+
 Shift+R, Alt+D) beyond what the backlog entry already names - verifying those
 against a real browser is outside what this environment can do (no rendered
 component, `docs/loop/this-repo.md` section 6).
+
+## 425. N14 wave 0: two deliberate behaviour changes against entry 424's baseline
+
+Written after the wave 0 fix round (verifier ruled FIX FIRST on two copy/
+citation defects, both now corrected; this entry records the behaviour, not
+the fix round itself). See entry 424 for the pre-existing keyboard layer this
+wave extracted from `SnapshotGradingPanel.tsx` into `snapshot-keys.ts` -
+guard order, bound keys, and `announce()` strings are all unchanged from 424
+and not restated here.
+
+Two deliberate behaviour changes against 424's baseline, both invisible to
+the suite before this wave because no test in this repo asserted on the
+keyboard layer at all (424a itself: `grep -n
+"ctrlKey|altKey|metaKey|shiftKey"` over the pre-wave panel returned zero
+matches):
+
+1. **A keystroke held with Ctrl, Alt, or Meta now matches nothing**, for
+   every binding (`snapshot-keys.ts`'s `matchSnapshotKeyEvent`, the early
+   `if (event.ctrlKey || event.altKey || event.metaKey) return NO_MATCH;`).
+   Authorised as a defect fix against 424a's own finding that no modifier was
+   ever checked. Shift is deliberately excluded from this check (ruled on the
+   merits during the fix round: no reserved OS/browser meaning to protect,
+   and blocking it would make the one-handed bindings flicker on incidental
+   pinky contact) - `shift+s` still snaps.
+2. **A repeating keystroke (`KeyboardEvent.repeat`) now matches nothing**,
+   for every binding including the bare keys. Authorised by Ruling N14-7
+   (`scratchpad/n14-ledger.md`). Before this wave, holding S down filed shots
+   until `MAX_SHOTS` because nothing checked `.repeat`; this wave's rule
+   deliberately overrides the N14 backlog row's "do not silently change the
+   bare bindings" clause, on the reasoning that the clause exists to stop an
+   unrelated chord wave from re-specifying the bare keys, not to protect a
+   defect of the same class as the modifier bug this wave already fixed.
+
+Both changes are covered in `snapshot-keys.test.ts` (the modifier describe
+block, extended to the product of ctrl/alt/meta x a representative digit
+set, and a dedicated key-repeat describe block for s, n, and a digit).

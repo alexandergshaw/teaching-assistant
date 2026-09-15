@@ -69,19 +69,11 @@ import { useSnapshotGrade } from "./useSnapshotGrade";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import controls from "../recording/RecordingControls.module.css";
 import panelStyles from "./SnapshotGrading.module.css";
-
-const ROLE_BY_DIGIT: Record<string, SnapshotRole> = {
-  "1": "assignment",
-  "2": "rubric",
-  "3": "post",
-  "4": "replies",
-  "5": "submission",
-  "6": "other",
-};
+import { isSnapshotShortcutEligible, matchSnapshotKeyEvent } from "./snapshot-keys";
 
 // H1-D: module-scope (not component-scope) so the mount-hydrate effect below
 // can list it as a stable dependency-free reference, matching this file's own
-// ROLE_BY_DIGIT precedent immediately above.
+// former ROLE_BY_DIGIT precedent (now moved to snapshot-keys.ts).
 const INSTRUCTOR_INSTRUCTIONS_KEY = "ta-snap-grading-instructions";
 
 export interface SnapshotGradingPanelProps {
@@ -513,27 +505,32 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     return () => el.removeEventListener("paste", handlePaste);
   }, [handleFiles]);
 
-  // U4/X6: THE keyboard binding, gated by all three guards, in order.
+  // U4/X6: THE keyboard binding, gated by all three guards, in order (entry
+  // 424a pins this order - active, then editable-target, then modal). The
+  // three guards still read the DOM here (activeRef, target.closest,
+  // document.querySelector) and are resolved to plain booleans, then handed
+  // to isSnapshotShortcutEligible (snapshot-keys.ts) so the eligibility
+  // decision itself is testable. What the eligible keystroke MEANS is
+  // decided by matchSnapshotKeyEvent (also snapshot-keys.ts), which is where
+  // this wave's defect fix lives (a modifier held now matches nothing).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Guard 1 (X6): the panel may be mounted but hidden behind another
-      // sub-tab - without this, every keypress anywhere in the app would
-      // silently snap or re-arm this panel's tray.
-      if (!activeRef.current) return;
-      // Guard 2 (U4, verbatim from useRecorder.ts:882-884): typing in any
-      // field must never be interpreted as a shortcut.
       const target = e.target as HTMLElement;
-      if (target.closest("input, textarea, select, [contenteditable]")) return;
-      // Guard 3 (U4): a modal (e.g. a future rubric modal) open elsewhere in
-      // the app is exactly when a stray keystroke is most likely.
-      if (document.querySelector('[aria-modal="true"]')) return;
+      const eligible = isSnapshotShortcutEligible({
+        isActive: activeRef.current,
+        // This selector is copied from useRecorder.ts:882-884 and must not
+        // drift from it independently.
+        isInsideEditableTarget: !!target.closest("input, textarea, select, [contenteditable]"),
+        isModalOpen: !!document.querySelector('[aria-modal="true"]'),
+      });
+      if (!eligible) return;
 
-      const key = e.key.toLowerCase();
-      if (key === "s") {
+      const match = matchSnapshotKeyEvent(e);
+      if (match.type === "snap") {
         handleSnap();
         return;
       }
-      if (key === "n") {
+      if (match.type === "arm-next-student") {
         setNextStudentArmed(true); // arms only - never auto-confirms
         // MAJOR-3: move focus onto the control so the keyboard can then
         // cancel (Escape) or confirm (Enter) it - see nextStudentButtonRef's
@@ -547,10 +544,9 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         announce(describeNextStudentCounts(nextStudentCountsRef.current));
         return;
       }
-      const role = ROLE_BY_DIGIT[e.key];
-      if (role) {
-        setArmedRole(role);
-        announce(`Armed ${role}.`);
+      if (match.type === "arm-role") {
+        setArmedRole(match.role);
+        announce(`Armed ${match.role}.`);
       }
     };
     window.addEventListener("keydown", onKey);

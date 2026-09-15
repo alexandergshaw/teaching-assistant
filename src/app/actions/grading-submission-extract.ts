@@ -58,15 +58,24 @@ import type { ExtractedSubmission } from "@/app/components/grading-recording/gra
  * Read the student submissions visible across a batch of screen-capture
  * frames. frames.length must be 1..GRADING_EXTRACT_BATCH_SIZE.
  *
- * NOT YET WIRED TO A PRODUCTION CALLER: this action has no caller in this
- * change. It is built to be called by the capture loop / row state machine
- * a sibling file set owns (any file named *table* or *rows* under
- * src/app/components/grading-recording/, per this task's own file-lane
- * split) - that layer is expected to call this action per frame batch, feed
- * the returned `submissions` through mergeExtractedSubmissions
- * (grading-submission-merge.ts), and turn the merged result into GradingRow
- * entries (grading-row.ts), minting each row's id there. See this file's own
- * report for the explicit statement of what is and is not reachable today.
+ * WIRED AND LIVE. This comment used to say "NOT YET WIRED TO A PRODUCTION
+ * CALLER: this action has no caller in this change", which was true when the
+ * action was built ahead of its consumer and false from the moment that
+ * consumer landed. Corrected 2026-09-15 after an A8 scoping pass reasoned
+ * from it and reached a wrong conclusion about what this tree contains.
+ * MEASURED, and re-measure rather than trusting this line too: `grep -rn
+ * "extractGradingSubmissionsAction" src --include=*.ts --include=*.tsx`
+ * shows the caller at GradingRecordingPanel.tsx:89 (import) and :419 (call).
+ *
+ * The consumer is the capture loop in GradingRecordingPanel.tsx: it calls
+ * this action per frame batch, feeds the returned `submissions` through
+ * mergeExtractedSubmissions (grading-submission-merge.ts), and turns the
+ * merged result into GradingRow entries (grading-row.ts), minting each row's
+ * id there.
+ *
+ * A "not yet wired" note is a claim with an expiry date and no gate to
+ * enforce it - docs/loop/traps-spec.md's brief-from-the-tree-not-the-doc
+ * class, in a source comment rather than a design doc.
  */
 export async function extractGradingSubmissionsAction(
   frames: Array<{ base64: string }>,

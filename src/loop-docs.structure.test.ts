@@ -244,6 +244,37 @@ describe("parallel-disjointness.md: the owns-list procedure extends the file-set
   });
 });
 
+describe("this-repo.md: the SnapshotGradingPanel hook-extraction lint trap is recorded near the lint gate", () => {
+  const source = readDoc("docs/loop/this-repo.md");
+  const baselineIdx = source.indexOf("The four lint warnings are the baseline");
+  const trapIdx = source.indexOf("SnapshotGradingPanel", baselineIdx);
+  const testsSectionIdx = source.indexOf("## 2. Tests", baselineIdx);
+
+  it("the trap entry exists, after the lint-warnings baseline and before the Tests section", () => {
+    expect(baselineIdx, "expected the lint-warnings baseline paragraph").toBeGreaterThan(-1);
+    expect(trapIdx, "expected an entry naming SnapshotGradingPanel").toBeGreaterThan(baselineIdx);
+    expect(testsSectionIdx, "expected section 2 (Tests) to follow").toBeGreaterThan(trapIdx);
+  });
+
+  const trapSection = trapIdx > -1 ? source.slice(trapIdx, testsSectionIdx > -1 ? testsSectionIdx : undefined) : "";
+
+  it("names the actual rule and records that the plan predicted the wrong one", () => {
+    expect(trapSection).toContain("preserve-manual-memoization");
+    expect(trapSection).toContain("exhaustive-deps");
+  });
+
+  it("states the failure signature: the other gates pass and only lint fails", () => {
+    expect(trapSection.toLowerCase()).toMatch(/tsc/);
+    expect(trapSection.toLowerCase()).toMatch(/green/);
+  });
+
+  it("records the shipped workaround: passing the ref itself into the new hook, citing both files", () => {
+    expect(trapSection).toContain("useSnapshotKeyboardShortcuts.ts");
+    expect(trapSection).toContain("SnapshotGradingPanel.tsx");
+    expect(trapSection.toLowerCase()).toContain("parameter");
+  });
+});
+
 // NOT COVERED HERE, AND SAID PLAINLY: whether a checker actually applies the
 // leverage-claim question well on any given feature is not gateable by a
 // structure test - it can prove the taxonomy and the negative example exist,

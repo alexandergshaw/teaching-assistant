@@ -65,6 +65,23 @@ and two in `canvas-modules/new-quiz.test.ts`. Zero errors. A fifth warning is a
 regression introduced by the current change; say so rather than letting the
 count drift.
 
+### Extracting a hook out of SnapshotGradingPanel.tsx can fail lint on a callback you never touched
+
+Measured in N14 wave 1: moving a ref-freshness cache out of
+`SnapshotGradingPanel.tsx` typechecked and passed all 311 tests, then
+`npm run lint` failed 2 new errors naming `handleNextStudentConfirm` - a
+callback that touches none of the moved code. tsc and the suite stay green,
+so this reads as someone else's regression. The rule is React Compiler's
+`preserve-manual-memoization`, not `exhaustive-deps` (the wave's plan
+predicted the wrong rule) - it reacts to the whole component's hook
+count/shape. It will recur on any wave that removes hooks from this panel,
+which is in tension with the standing ruling that the panel must shrink on
+every wave that touches it (N14-1). Shipped workaround: keep the ref and its
+effect declared in the panel and pass the ref itself into the new hook as a
+parameter, instead of letting the hook build its own
+(`useSnapshotKeyboardShortcuts.ts`'s `nextStudentCountsRef` parameter and its
+call site in `SnapshotGradingPanel.tsx`).
+
 ---
 
 ## 2. Tests

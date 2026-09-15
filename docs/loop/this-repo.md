@@ -165,7 +165,7 @@ newline, which once failed a 1000-line file that was exactly at the wall.
   This card used to say the file contains a raw NUL byte (from the first
   occurrence of the source-bytes defect, item 10) so plain `grep` classifies
   it as binary and silently reports nothing. MEASURED 2026-09-15 by the A9
-  baseline seat: `tr -d -c ' ' < docs/REGRESSION.md | wc -c` returns 0, and
+  baseline seat: `tr -d -c '\000' < docs/REGRESSION.md | wc -c` returns 0, and
   the same over `git show HEAD:docs/REGRESSION.md` returns 0. The NUL is gone
   and plain `grep` now works. Keep `-a` anyway - it costs nothing and a single
   reintroduced NUL would make every later search silently false-negative on

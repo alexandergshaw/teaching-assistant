@@ -67,3 +67,37 @@ rather than empty. Trace value flow end to end before patching a branch.
 be acted on in the same turn.** When a checker finds that the requested
 capability is already built and merely unreachable, the real job is reachability
 - state that and start it, rather than continuing to spec a second copy.
+
+**A design can state a constraint in bold and then violate it in a later
+section, and nobody notices because both halves read as correct.** The A9 seam
+round 1 ruled, in bold, that a frozen `{name, text}` tombstone list must not be
+stored beside the accumulator, and gave the mechanism: `findContinuationOverlap`
+matches the TAIL of the earlier text, so a frozen tail stops abutting once the
+capture scrolls on. Four sections later the persistence layer defined exactly
+that list and wrote it ONCE, at removal. Every sentence in both sections was
+individually defensible. Together they reintroduced the owner's original bug
+across a reload - the fix for the defect restoring the defect.
+
+Two things make this class survive a normal read. First, the contradiction is
+between a RULING and a DATA STRUCTURE, which live in different registers and
+different sections. Second, every acceptance test ran inside one session, and
+the contradiction only shows up across a process boundary. When a design bans a
+shape, grep the rest of that same design for the shape - and check whether any
+acceptance criterion crosses the boundary the ban was about.
+
+The fix that held was not a patch: the tombstone stopped being a RECORD and
+became a PROJECTION of the live accumulator entry, re-derived on every advance.
+Prefer the construction that makes the banned state unrepresentable over the
+assertion that it is absent - `seats.md` already says this, and this is what it
+looks like in practice.
+
+**A pass condition narrower than the defect it closes goes green on a partial
+fix.** A8's embedded-grader chunk tabulated eleven signals, found seven reading
+a flattened union, then wrote its direction of failure as "RED if the two
+fixtures produce the same Quality proxies score" - one column of four. Its own
+prose meanwhile declared two columns clean that its own table marked flattened.
+Implemented exactly as specified it would fix four signals, leave three
+flattened, and pass. When a spec contains a table of instances, the pass
+condition must range over the table, and any prose that exempts part of it is a
+contradiction to resolve before hand-off, not a summary.
+

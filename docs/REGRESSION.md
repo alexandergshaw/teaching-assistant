@@ -37638,7 +37638,7 @@ brand-new surfaces at the same ratio - one carrying a permissions disclosure
 Two agents made opposite calls on identically-named classes with identical
 roles, which is what proved it was an unforced choice rather than a constraint.
 
-### Dead tokens: seven of them, and the fallback was the only thing rendering
+### Dead tokens: thirteen of them, and the fallback was the only thing rendering
 
 `--warning-bg`, `--error`, `--error-color`, `--error-bg`, `--muted-text`,
 `--border-color`, `--bg-secondary`, `--color-border`, `--color-text-secondary`,

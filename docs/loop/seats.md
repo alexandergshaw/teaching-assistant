@@ -26,6 +26,17 @@ that does not. When unsure, the seat runs. The verifier later rules on every
 triaged-out seat's trigger against the built diff, so a wrong triage is caught
 rather than silently accepted.
 
+**Documentation-only chunks.** A chunk in which every changed path is under
+`docs/` changes no behaviour a user experiences, so Acceptance criteria and
+Test seat triage OUT; record that as the fired trigger. This is their only
+exemption. Any change outside `docs/` - including `supabase/migrations/` and
+`.github/workflows/` - is a runtime change and both seats run. Note it is NOT
+true that no test can catch a failure in such a chunk: `src/lib/no-emojis.
+test.ts:243` scans `docs/` (`roots = ["src", "docs"]`, extensions including
+`.md` at `:226`) and `src/tools/backlog/check-generated.ts:49-50` reads
+`docs/backlog.yml` and `docs/BACKLOG.md` - a documentation-only chunk is still
+gated by both.
+
 **Seats run in dependency waves, not all at once** - `wave-dispatch.md` has the
 rule, the measured cost, and the duplication it prevents. The wave column below
 is the default assignment; re-sort with that card's input test if a chunk's
@@ -34,6 +45,7 @@ lands, or the sequencing is pure wall-clock for no benefit.
 
 | Seat | Wave | Trigger |
 |---|---|---|
+| Acceptance criteria | - | Always. Never triaged out. |
 | Architect + reuse | 1 | Any new module, any new directory, or any change touching more than two existing files. Effectively always. |
 | User experience | 3 | Any change a user can see, click, or hear read aloud. |
 | Data / storage | 1 | Anything persisted: a `ta-` localStorage key, a Supabase table, a migration, a file in Storage, or a change to what a persisted shape contains. |
@@ -44,6 +56,65 @@ lands, or the sequencing is pure wall-clock for no benefit.
 | Accessibility | 3 | Any change to markup, focus, or keyboard behaviour. Note the ceiling: **no component is rendered by any test here**, so this seat's findings are reading claims, and it must say so. |
 | External-facts research | 1 | The plan rests on anything outside this repo: a library's behaviour, a platform limit, an API's contract, a browser quirk. |
 | Baseline | 1 | The area being changed has no coverage in `docs/REGRESSION.md`. Runs BEFORE hand-off, not after. |
+| Test seat | - | Always. Never triaged out. Constructs the oracle the implementer's tests are written from. Runs AFTER Build and Verify, not with the design waves. |
+
+---
+
+## Acceptance criteria
+
+**Produces:** criteria written from the owner's words, each meeting
+`iteration-caps.md`'s entry gates 2 and 3 (`:112-119`) and its Residual
+definition (`:36-37`) - this card does not restate what those already define,
+only that a criteria round must satisfy them.
+
+**Must not produce:** mechanism, global-invariant accounting, or oracle
+construction - `DEV_LOOP.md`'s "The loop / Criteria" paragraph already rules
+whose seat each belongs to; this card does not repeat it. A criteria document
+that reads as a reuse survey or an architecture pass is scope creep, not
+thoroughness, and it duplicates work a concurrently running seat is already
+doing - `traps-spec.md:40-41` records one chunk's criteria going from 748
+lines to 268 and getting better once mechanism moved to the architect and
+oracle construction moved to the test seat.
+
+**Its checker must ask:**
+- Does a rule inherited from an upstream design carry every clause it had
+  there, or only the one with an existing instrument? A two-clause rule
+  ("states the set it covers AND never implies completeness") shipped with
+  only its negative half enforced - the affirmative half had no criterion at
+  all, so a claim that passed every stated check still asserted completeness
+  about a class from a slice of its submissions.
+- Does an instrument exist in this repo that can compute the pass condition,
+  or only assert it? A style property of arbitrary model prose ("register",
+  "no hedging") has none here - no component renders, and `vitest.setup.ts`
+  throws on real fetch. Where none exists, a weaker check standing in for the
+  criterion is the defect - and `iteration-caps.md:13-16` records all three
+  moves that have ever ended a chain here, none of which is strengthening the
+  same mechanism: RELOCATE the claim to the party that can measure it,
+  ESCALATE a scope question to the owner, or replace the assertion with a
+  CONSTRUCTION that makes the bad state unrepresentable - a discriminated type
+  the model cannot widen (`class-trends-insight.ts:171-185`), or a whole
+  string asserted against a computed expectation. Ask which of the three
+  applies, not whether the prose check can be tightened.
+- Is a structural boundary ("must never reach X") expressed as an enumerated
+  denylist, or does it name the actual walled set - a directory, a module
+  boundary, a transitive-import test - that stays closed when a new export
+  appears? A denylist of Canvas-posting actions was lengthened 1 -> 3 -> 6 ->
+  9 across rounds, and the real set was still materially larger and unbounded
+  by construction: a barrel re-export and a writers object injected as a
+  parameter - reachable with no value import at all - defeated every
+  name-based version.
+- Does every numeric floor or cap get checked against every other numeric
+  floor or cap that bounds the same quantity elsewhere in the tree? A privacy
+  floor of 5 was set against a grading cap that defaults to 5 (`gemini.ts:25`,
+  applied at `grade/engine.ts:126`), so the analysed set holds exactly five for
+  every class of five or more - the floor's guarantee is satisfied only at its
+  own boundary, forever, and naming the colliding knob as a design precedent is
+  not the same as resolving the collision.
+- Is anything here properly the architect's, the reuse survey's, or the test
+  seat's - especially when one of those is running in the same wave? Two
+  concurrently authored documents over the same ground reaching different
+  counts for what should be the same set is the visible symptom of this
+  failure, not its cause.
 
 ---
 
@@ -123,6 +194,92 @@ mapper. Retention and cleanup, including what happens to an abandoned session.
   collapses to `never` here.
 - What deletes this data, and when? "Nothing" is an answer, but it must be
   stated.
+
+---
+
+## Visual / aesthetic
+
+**Produces:** the surface's layout, spacing and colour decisions measured
+against this repo's existing visual language - which existing class or inline
+pattern is reused versus reinvented, every size named as a token or an
+explicit px/rem value instead of "looks right," and colour usage justified
+per-theme against a real nearby instance rather than asserted to "match."
+Includes how the surface behaves against its actual container constraints, not
+an assumed one - check the real anchor (a resizable chat window, a fixed panel,
+a full viewport) rather than assuming any single shape is typical; measured,
+this repo's largest stylesheet has only 7 `resize:` declarations in 7010 lines
+(`@(Get-Content src/app/page.module.css).Count`; `resize: both` at `:4053` and
+`:5030`), so a resizable container is the exception here, not the default.
+
+**Must not produce:** user-facing copy or click-path counts - that is User
+experience's job - or focus order, keyboard reachability, and ARIA naming -
+that is Accessibility's job. Wave 3 runs these three seats together precisely
+so a layout decision here and a keyboard story there do not silently diverge;
+restating either here is scope creep, not thoroughness.
+
+**Its checker must ask:**
+- Does any dimension resolve as a percentage against a container the surface
+  does not control? The chat window's institution typeahead is the measured
+  incident: a percentage max-height would have resolved against the anchor's
+  own ~55px, not the window, producing a one-row sliver - so the popup pins a
+  fixed `max-height: 160px` (`.institutionTypeaheadPopup`,
+  `src/app/page.module.css:4490,4496`) and the anchor is marked
+  `flex-shrink: 0` (`.institutionTypeaheadAnchor`, `:4481,4483`) so a wrapping
+  row cannot collapse it - the rule is stated in full in the CSS comment at
+  `:4486-4489`. (`docs/REGRESSION.md:39566-39570`, entry 397.) Any new
+  percentage-based sizing needs the same check against its real anchor, not an
+  assumed one.
+- Does the layout reuse the house pattern, or reinvent an inline style this
+  repo already has a name for? `.adaptRow` and `.ghActions` are the house
+  pattern for control-row layout, referenced 66 and 100 times respectively
+  across `src/app/**/*.tsx,*.css` (`Get-ChildItem -Recurse -Include *.tsx,*.css
+  src/app | Select-String -Pattern adaptRow` / `-Pattern ghActions`, matches
+  summed). Inline `display:flex` on the recording sub-tab surfaces is now only
+  15 occurrences across five files - `TeleprompterPanel.tsx` 8, `StagePanel.
+  tsx` 4, `WalkthroughPanel.tsx` 1, `AddKnowledgePages.tsx` 1, `caption-studio/
+  CaptionStudio.tsx` 1 (per file: grep for a quoted `flex` value after
+  `display:` and count the matching lines) - and `RecordingTab.tsx:592`'s
+  tab-literal array now holds TWELVE
+  `[key, label]` pairs, not nine. `docs/REGRESSION.md:863-865`'s "roughly forty
+  sites across the nine views" is the PRE-pass baseline, dated by its own
+  heading at `docs/REGRESSION.md:795` ("... before the controls UX pass") - a
+  pass that has since shipped. Never restate a baseline figure in the present
+  tense without re-measuring it against the current tree.
+- Is every colour and spacing value in the brief named as a token or a
+  measured pixel value, or asserted as "matches the existing style" without
+  saying which existing instance it was compared against? Field widths alone
+  are ten unreconciled magic numbers - `sx={{ minWidth: N }}` / `style={{
+  width: N }}` at 80/100/120/170/180/200/220/240/260/320px, never rationalised
+  into a shared scale (`docs/REGRESSION.md:866-867`). A brief that adds an
+  eleventh arbitrary width without checking that list repeats the drift rather
+  than fixing it.
+- Does colour usage account for a token that CHANGES value between themes, not
+  just whether a hex looks acceptable in the one theme someone happened to
+  view? `--danger` was DOCUMENTED as theme-invariant in its own token comment,
+  which agents read and complied with - and it is not: it is redefined from
+  `#dc2626` in light (`src/app/globals.css:60`) to `#f87171` inside the
+  `html[data-theme="dark"]` block opened at `:283` (`src/app/globals.css:301`).
+  A comment at `:210-217` records that this silently took two
+  `white-on---danger` rules from 4.83:1 to 2.77:1 in dark theme, on the
+  smallest text in the app, and that it passed `tsc`, `eslint`, 16318 tests
+  and `next build`
+  (`docs/REGRESSION.md:37602-37614`, "The four defects nothing could see").
+  Related, same repo: a list of tokens with no definition at all rendered only
+  via a hex fallback that never adapted to dark mode
+  (`docs/REGRESSION.md:37643-37647`; the list itself names thirteen tokens,
+  though the section heading at `:37641` says "seven of them" - a discrepancy
+  in that document, not resolved here); a decorative indicator measured at
+  1.14:1 light / 1.90:1 dark against a 3:1 requirement
+  (`docs/REGRESSION.md:19761-19765`); and `html[data-theme="dark"]` is the
+  app's ONLY route to the dark theme - there is no `prefers-color-scheme`
+  block - so a dark override written any other way silently never applies
+  (`docs/REGRESSION.md:23255-23259`). No test in this repo renders a component
+  or computes contrast, so this is verified by opening BOTH theme definitions
+  of every token the brief touches and stating the resulting ratio in each,
+  not by reading the light one and assuming the dark one matches. Two theme
+  definitions is the FLOOR, not the whole procedure - print, forced-colors and
+  a UA `color-scheme` default are further resolution contexts, and a brief that
+  touches one of them owes it the same treatment.
 
 ---
 

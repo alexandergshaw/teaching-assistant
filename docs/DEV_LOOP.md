@@ -88,7 +88,14 @@ any particular run.
 **Criteria.** Write acceptance criteria from the owner's words. Keep only what a
 user experiences and the failures the tests must catch - mechanism belongs to
 the architect, global-invariant accounting to the plan, oracle construction to
-the test seat.
+the test seat. When the chunk builds or changes a capability a user reaches -
+not a bug fix, a refactor, a doc correction or an owner verification - the
+document opens with a LEVERAGE CLAIM: one paragraph naming which advantage
+class it claims, what the user does instead today, and what that costs them.
+"Saves time" is not a claim. The claim refuses nothing and gates nothing: it
+produces a claim, a removal test (the test seat's, below) and, at Verify, a
+finding. Classes derived from this tree, the classes deliberately struck as
+inherited, and the worked negative example are in `docs/loop/leverage.md`.
 
 **Design seats, in DEPENDENCY WAVES - never all at once.** Wave 1 is structure
 and state (architect + reuse survey, data and storage) plus anything that only
@@ -121,7 +128,12 @@ a check that no `.claude/worktrees` copy was edited instead of the real tree. A
 report is not evidence.
 
 **Verify.** A different agent reads the diff, runs the gates, exercises every
-criterion, and rules on every triaged-out seat's trigger against the built diff.
+criterion, rules on every triaged-out seat's trigger against the built diff,
+and re-judges the leverage claim against what actually shipped - a feature is
+usually conceived WITH a real advantage and ships without it, which is why
+this half is the load-bearing one. A claim the built diff no longer supports
+is a FINDING, recorded like any other residual with the scope decision
+belonging to the owner. It is never a refusal and never silently dropped.
 
 **Follow-up design seats** against the as-built diff, not the plan.
 

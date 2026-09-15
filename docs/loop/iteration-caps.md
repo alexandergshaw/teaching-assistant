@@ -62,7 +62,10 @@ kind and is forbidden.
   carries.
 - **(b) Reduce** - put a scope, cost or risk question to the human owner. A
   blocker that is really a product decision is not a defect, and no number of
-  rounds will resolve it.
+  rounds will resolve it. A leverage claim the built diff does not support is
+  the canonical (b): ship the thin version, redesign it, or drop it is a
+  product call, and no number of rounds resolves it. Restating the same
+  benefit more emphatically is not a disposal.
 - **(c) Residual** - record it with an owner, an instrument, and the step that
   will measure it. It must appear in the shipping report.
 - **(d) Delete** - withdraw the requirement, naming any existing enforcer it was

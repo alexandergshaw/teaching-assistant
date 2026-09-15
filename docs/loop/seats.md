@@ -63,9 +63,16 @@ lands, or the sequencing is pure wall-clock for no benefit.
 ## Acceptance criteria
 
 **Produces:** criteria written from the owner's words, each meeting
-`iteration-caps.md`'s entry gates 2 and 3 (`:112-119`) and its Residual
+`iteration-caps.md`'s "Entry gates" section, gates 2 and 3, and its Residual
 definition (`:36-37`) - this card does not restate what those already define,
 only that a criteria round must satisfy them.
+
+A criteria document for feature work opens with the LEVERAGE CLAIM -
+`DEV_LOOP.md`, "The loop / Criteria" - capped at ONE paragraph plus ONE
+acceptance criterion, which is the removal test the test seat owns. Classes
+and the worked negative example are in `docs/loop/leverage.md`. On a bug fix,
+a refactor, a doc correction or an owner verification there is no claim to
+make; record that as the fired trigger and move on.
 
 **Must not produce:** mechanism, global-invariant accounting, or oracle
 construction - `DEV_LOOP.md`'s "The loop / Criteria" paragraph already rules
@@ -115,6 +122,15 @@ oracle construction moved to the test seat.
   concurrently authored documents over the same ground reaching different
   counts for what should be the same set is the visible symptom of this
   failure, not its cause.
+- Does the leverage claim name a class from `docs/loop/leverage.md` and say
+  what the user does instead today and what that costs - or is it a benefit
+  ("it saves time", "it is integrated") that describes nearly everything? Is
+  the class EARNED by this feature or INHERITED from the platform: if the
+  comparable modules all get it from a shared import, it describes the app,
+  not this feature. And is there exactly one acceptance criterion that goes
+  RED when the advantage is removed, rather than one a chat merely could not
+  satisfy? A criterion about a database row passes the second test trivially
+  and proves nothing.
 
 ---
 
@@ -386,6 +402,13 @@ plus the notes the implementer writes tests from.
 whose generator and expected-value table share the same hardcoded axes has a
 branch that can never fire, and it will pass forever.
 
+When the criteria document carries a leverage claim, the oracle includes its
+REMOVAL TEST: one assertion that goes red when the claimed advantage is
+REMOVED from the feature. Not one a chat could not satisfy - that is
+unfalsifiable. Where no removal test is buildable here - anything whose
+advantage is clicks, latency or attention, since no component is rendered by
+any test in this repo - say so and record a residual with an owner and a step.
+
 **Its checker must ask:**
 - Can each assertion fail? Name the mutation that breaks it.
 - Is coverage a property of construction - a constructor, a type, an enumerated
@@ -393,3 +416,10 @@ branch that can never fire, and it will pass forever.
 - Does any assertion read a hardcoded value that the implementation also reads?
 - Does any test import a helper from another `*.test.ts`? That re-runs the other
   file's describe blocks. Duplicate instead.
+- Does the removal test fail on REMOVAL, or only on breakage? Name the edit
+  that removes the advantage and the assertion that goes red. The worked case
+  is a miss: layer C's advantage is that it makes no model call
+  (`docs/REGRESSION.md` entry 423), and
+  `classTrendsDraft.not-postable.test.ts:50` bans `app/actions`, `lib/canvas`
+  and `lib/lms-generation` - not `lib/llm` - so that advantage shipped with no
+  removal test at all.

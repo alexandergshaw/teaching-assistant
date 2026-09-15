@@ -27,6 +27,12 @@ Two rules from it that apply to every agent, not just the orchestrator:
   about markup, focus, or keyboard behaviour.
 <!-- END:dev-loop-pointer -->
 
+<!-- BEGIN:leverage-question -->
+# Feature work asks one question
+
+Before a feature ships, ask what this app does that a chat with an LLM cannot; the classes and the mechanism live in `docs/loop/leverage.md`.
+<!-- END:leverage-question -->
+
 <!-- BEGIN:never-stall-the-loop -->
 # Never stall the loop (applies to the MAIN session only)
 

@@ -4,12 +4,20 @@ import { join, dirname, normalize, relative, sep } from "node:path";
 
 /**
  * Layer C's own NOT-POSTABLE boundary: no file layer C's real panels reach
- * may value-import anything under `src/app/actions`, `src/lib/canvas*`, or
- * `src/lib/lms-generation` - the capability to write to Canvas, or to commit
- * anything anywhere. This is a capability boundary, not a name list: a
- * three-prefix STRING test on the resolved path relative to `src`, so it
+ * may value-import anything under `src/app/actions`, `src/lib/canvas*`,
+ * `src/lib/lms-generation`, `src/lib/llm*`, or `src/lib/gemini*` - the
+ * capability to write to Canvas or commit anything anywhere, OR the
+ * capability to make a model call. This is a capability boundary, not a name
+ * list: a prefix STRING test on the resolved path relative to `src`, so it
  * cannot be defeated by adding a new file under an already-forbidden
  * directory.
+ *
+ * `lib/llm` and `lib/gemini` were ADDED 2026-09-15 (backlog L4): layer C's
+ * entire advantage (REGRESSION.md entry 423) is that it makes no model call -
+ * every claim it drafts was already typed by layers A and B. Without these
+ * two prefixes, re-introducing a model call into class-trends-draft.ts left
+ * this guard - and every other gate - green, which is the precise failure
+ * this test exists to catch. See canary 3 below for the sabotage proof.
  *
  * DUPLICATED, not imported, from canvas-client-boundary.transitive.test.ts -
  * this repo's own rule forbids cross-test-file imports (re-running that
@@ -47,7 +55,7 @@ import { join, dirname, normalize, relative, sep } from "node:path";
 
 const SRC = join(process.cwd(), "src");
 
-const FORBIDDEN_PATH_PREFIXES = ["app/actions", "lib/canvas", "lib/lms-generation"];
+const FORBIDDEN_PATH_PREFIXES = ["app/actions", "lib/canvas", "lib/lms-generation", "lib/llm", "lib/gemini"];
 
 function toPosix(p: string): string {
   return relative(process.cwd(), p).split(sep).join("/");
@@ -153,6 +161,9 @@ describe("canary 1 - isForbiddenPath predicate discrimination (no file I/O)", ()
       join(SRC, "lib/canvas-core.ts"),
       join(SRC, "lib/canvas-modules/fetch-helpers.ts"),
       join(SRC, "lib/lms-generation/commit-execute.ts"),
+      join(SRC, "lib/llm.ts"),
+      join(SRC, "lib/llm-json.ts"),
+      join(SRC, "lib/gemini.ts"),
     ];
     for (const p of positives) {
       expect(isForbiddenPath(p), `expected forbidden: ${toPosix(p)}`).toBe(true);

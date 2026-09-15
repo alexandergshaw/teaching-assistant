@@ -95,9 +95,13 @@ call site in `SnapshotGradingPanel.tsx`).
   suite proves nothing about any of it. This single fact shapes the whole
   architecture: logic that needs testing must live in a plain `.ts` leaf, never
   inline in a `.tsx`, or it cannot be tested at all.
-- **Source-text tests** are therefore load-bearing here: 64 `*.wiring.test.ts`
-  files and 12 `*.structure.test.ts` files assert things by reading source with
-  `readFileSync`. They are the only mechanism that can check wiring.
+- **Source-text tests** are therefore load-bearing here: 68 `*.wiring.test.ts`
+  files and 17 `*.structure.test.ts` files assert things by reading source with
+  `readFileSync`. They are the only mechanism that can check wiring. MEASURE
+  THESE RATHER THAN QUOTING THEM - `find src -name "*.wiring.test.ts" | wc -l`
+  and the same for `*.structure.test.ts`, re-measured 2026-09-15 from a stale
+  64 and 12. An A8 checker caught a seat citing this card's own 64 as a
+  measured quantity, which is the entry-gate the caps card forbids.
 - **The network is blocked.** `vitest.setup.ts` replaces `fetch` with a stub
   that throws. This exists because a sabotage check once stayed green for the
   wrong reason: the sabotage escaped a mock on `canvasFetch`, made a REAL
@@ -152,13 +156,21 @@ newline, which once failed a 1000-line file that was exactly at the wall.
 
 - `docs/REGRESSION.md`, 41,543 lines (`@(Get-Content docs/REGRESSION.md).Count`,
   2026-09-13), entries numbered to **412**.
-- `grep -ac "^## " docs/REGRESSION.md` returns **366**, not 412 - the heading
-  count and the entry count do not agree, so do not use one to infer the other.
-  Find the next entry number by reading the tail, not by counting.
-- **`grep -a` is required on this file.** It contains a raw NUL byte (from the
-  first occurrence of the source-bytes defect, recorded as item 10), so plain
-  `grep` classifies it as binary and reports nothing while exiting cleanly.
-  That is a silent false-absence on the repo's own memory.
+- `grep -ac "^## " docs/REGRESSION.md` returns **382** (re-measured
+  2026-09-15; this card said 366), while the newest entry is numbered 428 - the
+  heading count and the entry count do not agree, so do not use one to infer
+  the other, and do not trust either number as written here. Find the next
+  entry number by reading the tail, not by counting.
+- **`grep -a` stays the default on this file, but the reason has changed.**
+  This card used to say the file contains a raw NUL byte (from the first
+  occurrence of the source-bytes defect, item 10) so plain `grep` classifies
+  it as binary and silently reports nothing. MEASURED 2026-09-15 by the A9
+  baseline seat: `tr -d -c ' ' < docs/REGRESSION.md | wc -c` returns 0, and
+  the same over `git show HEAD:docs/REGRESSION.md` returns 0. The NUL is gone
+  and plain `grep` now works. Keep `-a` anyway - it costs nothing and a single
+  reintroduced NUL would make every later search silently false-negative on
+  the repo's own memory - but do not repeat the stale justification, and do
+  not infer from it that a plain `grep` result here must be wrong.
 - No test reads `REGRESSION.md`; there is no integrity gate over it. Its
   accuracy is entirely a matter of discipline, which is why the baseline seat
   exists.

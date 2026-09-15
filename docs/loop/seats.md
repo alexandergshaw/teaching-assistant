@@ -385,8 +385,12 @@ recalled? Open the file.
 
 **Produces:** an entry in `docs/REGRESSION.md` describing the target area's
 CURRENT behaviour, written before any code is handed off. Skip only if the doc
-already covers that area - and check with `grep -a`, because that file contains
-a raw NUL byte and plain `grep` reports nothing while exiting cleanly.
+already covers that area - and check with `grep -a`, which is the default for
+that file (`this-repo.md` explains why the NUL-byte justification this card
+used to give is no longer true). Check for PARTIAL coverage too: the A9
+baseline found an existing entry pinning the same behaviours at addresses that
+had since moved, and wrote a disposition table mapping each old claim to its
+current address rather than superseding it.
 
 **Its checker must ask:** does the baseline describe what the code does, or what
 the code is supposed to do? Only the first is a baseline.

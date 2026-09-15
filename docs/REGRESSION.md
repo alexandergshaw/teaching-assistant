@@ -43133,3 +43133,239 @@ Byte-level scan of all ten changed files for a BOM or a CR byte (Node reading
 each file as a `Buffer` and checking for `0xEF 0xBB 0xBF` at the start and any
 `0x0D` byte anywhere - not `grep -c $'\r'`, which is broken in this repo):
 no BOM, no CR in any of the ten.
+
+## 424. Area baseline - the snapshot-grading keyboard layer and the rubric-text path, before N14's left-hand chords
+
+Written BEFORE hand-off for backlog N14 (`docs/BACKLOG.md:19`, "one-handed
+grading chords for snapshot grading"), per `docs/DEV_LOOP.md`'s Baseline
+paragraph and `docs/loop/seats.md`'s baseline section. Coverage check first,
+per that section's instruction to use `grep -a` because this file carries a
+raw NUL byte: `grep -a -n -i "ROLE_BY_DIGIT\|keyHint\|handleNextStudentConfirm\|
+seedConfirmedAreas" docs/REGRESSION.md` returns no hits before this entry -
+none of N14's four subjects has prior coverage here. Entry 412 (`:41343`)
+baselined the same file's result-row lifecycle before A4d and predates the
+"Next student" control entirely (it states the control "does not exist in the
+shipped code" at `:41422-41427`); it is not duplicated below.
+
+Everything below is read out of the source at commit `590f13a` on 2026-09-15,
+not recalled and not the acceptance criteria's stated intent. Every claim about
+keyboard behaviour, modifier keys, or focus is a READING CLAIM, not an observed
+one: `docs/loop/this-repo.md` and `docs/loop/seats.md`'s Accessibility section
+both state that no component is rendered by any test in this repo, so nothing
+below was ever seen running by anything that executes.
+
+### 424a - the keyboard layer, verbatim, before any chord is added
+
+The whole handler is one `useEffect` in `SnapshotGradingPanel.tsx:516-558`,
+introduced under rulings "U4" and "X6" per its own leading comment at `:516`.
+
+**The three guards, in the order the code runs them (`:518-529`):**
+
+1. `if (!activeRef.current) return;` (`:522`) - the panel may be mounted but
+   hidden behind another sub-tab; `activeRef` is a ref mirroring the `active`
+   prop, written in its own effect at `SnapshotGradingPanel.tsx:129-131`.
+2. `const target = e.target as HTMLElement; if (target.closest("input,
+   textarea, select, [contenteditable]")) return;` (`:525-526`) - typing in any
+   field must never be interpreted as a shortcut; the comment at `:523-524`
+   marks this as verbatim from `useRecorder.ts:882-884`, not re-derived.
+3. `if (document.querySelector('[aria-modal="true"]')) return;` (`:529`) - a
+   modal open anywhere in the app is exactly when a stray keystroke is most
+   likely.
+
+**Every key the effect binds, past all three guards (`:531-554`):**
+
+- `key === "s"` (`e.key.toLowerCase()`, `:531`) calls `handleSnap()` and
+  returns (`:532-535`).
+- `key === "n"` (`:536`) arms Next student: `setNextStudentArmed(true)`
+  (`:537`, its own comment reads "arms only - never auto-confirms"), then
+  `nextStudentButtonRef.current?.focus()` (`:542`) to move focus onto the
+  control so Escape/Enter can cancel or confirm it, then
+  `announce(describeNextStudentCounts(nextStudentCountsRef.current))` (`:547`)
+  - the comment at `:543-546` records this reads a ref rather than the closed-
+  over `nextStudentCounts` on purpose, because the effect's own dependency
+  array does not include it.
+- `ROLE_BY_DIGIT[e.key]` (`:550`, the raw `e.key`, not lower-cased) - if the
+  raw key matches a digit `"1"`-`"6"` in the map, `setArmedRole(role)` and
+  `announce(\`Armed ${role}.\`)` run (`:551-554`).
+
+**The dependency array is `[handleSnap, setArmedRole, announce]`
+(`SnapshotGradingPanel.tsx:558`)** - `setNextStudentArmed` and
+`nextStudentButtonRef` are a `useState` setter and a ref respectively, both
+identity-stable across renders, so their absence from the array is not a stale-
+closure risk by React's own contract for those two primitives.
+
+**`ROLE_BY_DIGIT`, verbatim (`SnapshotGradingPanel.tsx:73-80`):**
+
+```
+const ROLE_BY_DIGIT: Record<string, SnapshotRole> = {
+  "1": "assignment",
+  "2": "rubric",
+  "3": "post",
+  "4": "replies",
+  "5": "submission",
+  "6": "other",
+};
+```
+
+**The bindings are bare keys, with no modifier check anywhere in this effect
+or this file, confirmed by reading the code rather than assumed from the
+absence of a comment about it:** `grep -n "ctrlKey|altKey|metaKey|shiftKey"
+src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` returns no
+matches at all in this file. The handler's only conditions on the event are
+the three guards quoted above (`:522`, `:525-526`, `:529`) plus the two
+key-value comparisons (`:531`, `:536`) and the map lookup (`:550`) - none of
+which inspects `e.ctrlKey`, `e.altKey`, `e.metaKey`, or `e.shiftKey`. So the
+effect fires identically whether or not any modifier is held: pressing
+Ctrl+S, Alt+S, or Shift+S while the guards pass all call `handleSnap()`
+exactly as a bare `s` does, because `e.key` for a letter key is unaffected by
+Ctrl/Alt/Meta and `.toLowerCase()` also absorbs Shift's case change. This is
+the precise fact N14 is filed against (`docs/BACKLOG.md:19`: "it binds BARE
+keys ... none of the three is a combo").
+
+### 424b - what the user is told about the keyboard today
+
+`SnapshotCaptureBar.tsx:97-99`, verbatim:
+
+```
+<p className={bar.keyHint}>
+  Keyboard: S to snap, 1-6 to arm a role (Assignment, Rubric, Post, Replies, Submission, Other).
+</p>
+```
+
+This paragraph names only `s` and the six digits. It says nothing about `n`
+(Next student) and nothing about any modifier - consistent with 424a's finding
+that none of the three bindings currently checks one. Any chord N14 adds must
+either extend this sentence or explain why it deliberately does not, since this
+is the only in-app documentation of the keyboard layer found by this baseline.
+
+### 424c - the rubric-text path: one producer, one consumer, and the wall a rubric-role shot cannot cross
+
+**Producer.** `grep -n "setRubricText" src/app/components/snapshot-grading/
+SnapshotGradingPanel.tsx` returns exactly two lines: the `useState` declaration
+itself (`:157`) and one call site, `setRubricText(text)` at `:930`, inside
+`RubricInputModal`'s `onSubmit` (`:927-945`). That modal is opened by the
+"Add rubric" / "Replace rubric" button: `<Button ... onClick={() =>
+setRubricModalOpen(true)}>{rubricText.trim() ? "Replace rubric" : "Add
+rubric"}</Button>` (`:800-801`). No other call site sets `rubricText`
+anywhere in this file - it has exactly one producer, and that producer only
+accepts typed or pasted text (`RubricInputModal` has its own `useState("")`
+per the comment at `:791-793`; it renders no image/upload control this
+baseline found in this file).
+
+**Consumer.** `grep -n "seedConfirmedAreas\|snapshot-parse-rubric"
+src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` shows
+`seedConfirmedAreas` defined at `:314-325`, calling
+`snapshotParseRubricAction` (imported at `:45` from
+`@/app/actions/snapshot-parse-rubric`) at `:318`, and setting
+`confirmedRubricAreas` from its result at `:324`. It has two call sites: the
+rubric-replace `onSubmit` itself, `void seedConfirmedAreas(text)` at `:943`
+(passing the modal's own argument, not the stale closure - Ruling B35-19 per
+the comment at `:939-942`), and `handleRetryParse`,
+`void seedConfirmedAreas(rubricText)` at `:344-346`. Both paths run through
+the same producer/consumer pair; there is no third route into
+`confirmedRubricAreas`.
+
+**The wall.** A rubric-role shot (`ROLE_BY_DIGIT["2"] === "rubric"`, 424a)
+is read by the same Read pass as every other shot,
+`snapshotReadBatchAction` called from `handleRead`
+(`SnapshotGradingPanel.tsx:564-641`). `grep -n "rubricText"
+src/app/components/snapshot-grading/SnapshotGradingPanel.tsx` lists lines
+157, 161, 256, 263, 268, 345-346, 663, 801, 806-807, 842, 849, 854, 880, 940 -
+none of them falls inside `handleRead`'s own body (`:564-641`). The pass's
+only state write for its results is `setTranscriptText(buildTranscriptBlock(
+Array.from(nextReads.values())))` at `:632`, unconditional on shot role.
+So a rubric-role shot's OCR output lands only in `transcriptText`
+(`useState` at `:211`) and never in `rubricText` - confirming N14's own
+framing (`docs/BACKLOG.md:19`) that "(c) does not exist in any form" today:
+capturing a rubric as a screenshot produces transcript text, not a value
+`seedConfirmedAreas` will ever see, because that function is only ever called
+with `rubricText` or the modal's own text argument (424c above), neither of
+which `handleRead` writes to.
+
+### 424d - the "Next student" control: what renders it, its arm-then-confirm contract, and what survives it
+
+**Renders it.** `ConfirmArmButtons` (imported at `:69` from
+`../ui/ConfirmArmButtons`), invoked at `SnapshotGradingPanel.tsx:765-775`
+with `armed={nextStudentArmed}`, `idleLabel="Next student"`,
+`confirmLabel="Confirm - clear this student's shots"`, `onArm={() =>
+setNextStudentArmed(true)}`, `onConfirm={handleNextStudentConfirm}`,
+`onCancel={() => setNextStudentArmed(false)}`, and `buttonRef=
+{nextStudentButtonRef}` - the same ref the keydown effect's `n` binding
+focuses (424a, `:542`), which is how pressing `n` and then Enter reaches
+`onConfirm` through one shared DOM node (comment at `:236-245` confirms idle
+and armed states are "the SAME `<Button>` DOM node").
+
+**Arm-then-confirm.** `nextStudentArmed` starts `false` (`:235`); `n` or a
+click on the idle button sets it `true` without calling
+`handleNextStudentConfirm` (comment at `:537`: "arms only - never auto-
+confirms"); only `onConfirm` - a second explicit action - calls
+`handleNextStudentConfirm`.
+
+**What `handleNextStudentConfirm` clears, read from its own body
+(`SnapshotGradingPanel.tsx:383-395`):** `clearPerStudentShots()` (`:384`),
+`setShotReads(new Map())` (`:385`), `setPendingSuggestions([])` (`:386`),
+`setTranscriptText("")` (`:387`), `setSplitNotice(null)` (`:388`),
+`setReadError(null)` (`:389`), `setGradeError(null)` (`:390`),
+`setPinnedRubricAreas(null)` (`:391`), `activeRowIdRef.current = null`
+(`:392`), and `setNextStudentArmed(false)` (`:393`) - nine effects, matching
+the leading comment's own enumeration of seven numbered responsibilities at
+`:368-374` plus the pinned-areas reset and the re-arm reset it does not
+number.
+
+**What it deliberately preserves: `confirmedRubricAreas` (and
+`confirmedRubricAreasError`) are not in that list**, and this is enforced by a
+structure test, not left to prose: `snapshot-grading.structure.test.ts:322-330`,
+inside `describe("confirmedRubricAreas resets ONLY at the rubric-replace
+onSubmit site (Ruling B35-1)"` (`:308`), the `it` at `:322` slices
+`handleNextStudentConfirm`'s own source body (from `"const
+handleNextStudentConfirm = useCallback(() => {"` to its own closing `"},
+[clearPerStudentShots, announce]);"`, `:323-324`) and asserts that slice
+`.not.toMatch(/setConfirmedRubricAreas\(/)` and
+`.not.toMatch(/setConfirmedRubricAreasError\(/)` (`:328-329`). The state's own
+declaration comment (`SnapshotGradingPanel.tsx:263-268`) states the reason:
+`confirmedRubricAreas` "resets ONLY when rubricText itself changes ... and
+deliberately SURVIVES Next student, since a rubric is per-assignment and
+re-confirming it every student would recreate the per-student cost this
+control exists to remove." `rubricText`, `assignmentText`, and
+`instructorInstructions` are likewise absent from `handleNextStudentConfirm`'s
+body and so also survive, though only the `confirmedRubricAreas` survival has
+a structure test asserting it.
+
+### 424e - existing tests touching any of the above, and the test count in this directory
+
+- `snapshot-grading.structure.test.ts:322-330` - the Next-student-preserves-
+  `confirmedRubricAreas` assertion quoted in full in 424d. This is the one
+  test a later wave changing `handleNextStudentConfirm` or the rubric-reset
+  rule would be adopting or invalidating.
+- `snapshot-grading.structure.test.ts:308-320` - a sibling `it` in the same
+  `describe` asserting the rubric-replace `onSubmit` body contains both
+  `setPinnedRubricAreas(null)` and a `seedConfirmedAreas(` call (424c's
+  producer/consumer pair, from the other side).
+- No test file in this directory was found, by name or by grep, asserting on
+  the keydown effect's guards, its key bindings, `ROLE_BY_DIGIT`, or the
+  `keyHint` paragraph: `grep -rn "ROLE_BY_DIGIT\|addEventListener(\"keydown\"\|
+  keyHint" src/app/components/snapshot-grading/*.test.ts` returns no matches.
+  424a and 424b are therefore unprotected by any existing assertion - a wave
+  that changes them breaks nothing green today, which is exactly the gap a
+  chord feature reusing this effect needs its own new tests for, not an
+  inherited one.
+
+**Test count in this directory:** `grep -rEo "^\s*(it|test)\(" src/app/
+components/snapshot-grading/*.test.ts | wc -l` returns 239 top-of-line
+`it(`/`test(` call sites across 13 files (`ls src/app/components/
+snapshot-grading/*.test.ts | wc -l`). This is a count of call sites, not of
+tests actually executed: `grep -rn "it\.each\|test\.each" src/app/components/
+snapshot-grading/*.test.ts | wc -l` finds 8 `.each(` sites in that same set,
+each of which expands to more than one run at execution time, and this
+baseline did not run the suite (out of scope for this seat, and the brief
+says not to run `npm test`) so the true executed-test count is not stated
+here - only the two grep counts that produced the 239 and the 8.
+
+### 424f - what this baseline does not cover
+
+This entry describes the code as it reads today; it makes no claim about
+which chord letters N14 should pick (`docs/BACKLOG.md:19` itself defers that
+to the criteria seat) and no claim about browser-reserved combinations (Ctrl+
+Shift+R, Alt+D) beyond what the backlog entry already names - verifying those
+against a real browser is outside what this environment can do (no rendered
+component, `docs/loop/this-repo.md` section 6).

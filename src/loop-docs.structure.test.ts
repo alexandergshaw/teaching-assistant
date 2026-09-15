@@ -198,6 +198,18 @@ describe("docs/loop/leverage.md: the taxonomy card exists with its worked exampl
     expect(removalSection).toContain("classTrendsDraft.not-postable.test.ts");
     expect(removalSection.toLowerCase()).toContain("sabotage");
   });
+
+  it("the removal-test section carries a self-check procedure for an author's own draft, after the section's opening", () => {
+    const removalSection = source.slice(removalTestIdx, disposalIdx);
+    // The opening defines what a removal test is (it must go RED when the
+    // advantage is removed). The self-check procedure - telling an author how
+    // to test their OWN draft against that definition - must come after it,
+    // not be the first thing the section says.
+    const openingIdx = removalSection.search(/goes red/i);
+    const selfCheckIdx = removalSection.search(/state the deletion/i);
+    expect(openingIdx, "expected the removal-test definition to exist").toBeGreaterThan(-1);
+    expect(selfCheckIdx, "expected a self-check procedure").toBeGreaterThan(openingIdx);
+  });
 });
 
 describe("AGENTS.md: every session is asked the leverage question", () => {

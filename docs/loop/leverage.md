@@ -135,6 +135,19 @@ the claimed advantage is REMOVED from the feature. Not one a chat merely could
 not satisfy - that is unfalsifiable, since almost any criterion about a
 database row passes it trivially.
 
+**Checking your own draft.** An author cannot eyeball whether their own test is
+a removal test - three of four candidates from the ideation pass that first
+used this taxonomy (2026-09-15, `AskAiModal.tsx`) looked like removal tests
+and were not: one asserted a row was written while leaving the read-back that
+makes it CORPUS unguarded, another asserted a pure function's return value
+while leaving the routing that reaches it unguarded. Run this before calling a
+removal test done:
+
+State the deletion, then trace the assertion. Name the exact line or call you
+would delete to remove the advantage, then say which assertion's observed
+value changes as a result. If the assertion's value is unchanged by that
+deletion, the test is not a removal test.
+
 **Worked instance, found already shipped with no removal test.** REGRESSION
 423 / commit c988963's whole advantage is GUARANTEED: layer C
 (`src/lib/grade/class-trends-draft.ts`) makes no model call. Its guard,

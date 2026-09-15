@@ -33,6 +33,24 @@ A rule that only prevents (1) will feel like it works, and will not.
 **An item's file set is the files it edits PLUS the tests that assert on the
 behaviour it changes.**
 
+That definition is correct and has been quoted at people while it was still
+missed five times in one day (all five in `docs/BACKLOG.md`, item L10) -
+because nobody applied it to the CALLERS. The gap is not the principle, it is
+the missing procedure: **before writing an owns list, grep for the symbol
+being changed and for the module's own path; for every hit, ask whether this
+change reaches it; include the file if it does.** Do this for the change
+itself, not for a summary of it - an owns list built from the description
+("add the roster to the facts blob") skips exactly the callers a grep would
+have found.
+
+State the failure signature plainly, because it is what makes the procedure
+worth running: **a missing caller is never a red test.** It is a green one -
+either a capability that ships dead behind an untouched caller, or a wave gate
+that passes while the suite goes red on a stale fixture nobody's list
+included. In this repo that second failure is invisible to every command an
+implementer runs, because vitest does not typecheck; only `tsc` sees it, and
+`tsc` has exactly one caller (section 5 below).
+
 The second clause is where this fails. A one-line change to a shared helper
 edits one file and can break forty test files - and those belong to whoever is
 working in them right now.

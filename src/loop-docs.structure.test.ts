@@ -221,6 +221,29 @@ describe("AGENTS.md: every session is asked the leverage question", () => {
   });
 });
 
+describe("parallel-disjointness.md: the owns-list procedure extends the file-set definition", () => {
+  const source = readDoc("docs/loop/parallel-disjointness.md");
+  const definitionIdx = source.search(/file set is the files it edits/i);
+  const secondClauseIdx = source.indexOf("The second clause is where this fails", definitionIdx);
+
+  it("the file-set definition exists, followed later by the second-clause paragraph", () => {
+    expect(definitionIdx, "expected the file-set definition").toBeGreaterThan(-1);
+    expect(secondClauseIdx, "expected the second-clause paragraph after it").toBeGreaterThan(definitionIdx);
+  });
+
+  const procedureSection = definitionIdx > -1 ? source.slice(definitionIdx, secondClauseIdx > -1 ? secondClauseIdx : undefined) : "";
+
+  it("names grepping for the changed symbol and the module's own path as a procedure, within or after the definition", () => {
+    expect(procedureSection.toLowerCase()).toMatch(/grep/);
+    expect(procedureSection.toLowerCase()).toContain("own path");
+  });
+
+  it("states the failure signature: a missing caller is a green result, not a red test", () => {
+    expect(procedureSection.toLowerCase()).toMatch(/never a red test/);
+    expect(procedureSection.toLowerCase()).toContain("green");
+  });
+});
+
 // NOT COVERED HERE, AND SAID PLAINLY: whether a checker actually applies the
 // leverage-claim question well on any given feature is not gateable by a
 // structure test - it can prove the taxonomy and the negative example exist,

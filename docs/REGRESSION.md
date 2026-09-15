@@ -42710,3 +42710,113 @@ control becomes an entry inside a dial - against this project's standing rule
 that click cost is first-class. Built under the literal relocation reading. If
 the real problem was that the standalone control went unnoticed, burying it in a
 menu makes that worse, and this should be revisited rather than defended.
+
+## 421. N9 layer A: trends across the submissions graded so far
+
+Backlog N9, owner ask: surface common trends, failures and points of strength
+across a class's submissions for one assignment, to inform future announcements.
+
+**This entry is mostly about what the feature does NOT claim**, because that is
+where four rounds of design went.
+
+### 421a - there is no "the class" in this system, and the fix was to stop saying it
+
+The original design tried to aggregate a CLASS's submissions. Measured, that unit
+does not exist:
+
+- `engine.ts:126` slices `studentSubmissions` to `DEFAULT_MAX_SUBMISSIONS = 5`
+  (`gemini.ts:25`), and `GradingRun` carries NO field for what was dropped.
+  `grading-submission-grade.ts:52-57` documents that silence deliberately, on the
+  premise that "its caller owns the whole result list" - and this feature is
+  exactly a caller that does not.
+- `canvas/submissions.ts:99,107` skip `unsubmitted` and already-`graded` work by
+  design, so one assignment becomes several run entries.
+- `grade-zeros.ts:112-120` puts non-submitters in a SEPARATE entry with
+  `rubricAreaNames: []`.
+- the repo grading path drops students by bare `continue`.
+
+**The collision nobody spotted until the check:** the default cap is 5 and the
+recommended cohort floor was also 5. At default configuration every LLM run holds
+exactly five results whether the class has five students or thirty - so the
+feature would have either always fired on a 5-of-30 slice, or never fired.
+
+**The owner's resolution was to narrow the CLAIM rather than hunt a better count:
+"trends across the submissions you have graded so far, said plainly."** That made
+`run.results.length` correct - not because it became more reliable, but because it
+stopped being asked to mean something it never meant. Two rounds of denominator
+engineering evaporated.
+
+### 421b - the copy rule IS the feature
+
+`FORBIDDEN_COMPLETENESS_PHRASES` in `class-trends.ts` blocks "the class", "all
+students", "every student" and "the cohort" from every output string, with
+`containsForbiddenCompletenessPhrase` exported so it is testable. Nothing in this
+design establishes that the graded set is the whole roster, so those phrases can
+never be honest here.
+
+"Across the 5 submissions graded so far, 4 scored below 60% on Thesis" is the
+shape. "Students commonly struggled with Thesis" is the claim the instructor
+cannot check and would act on with thirty people.
+
+### 421c - coverage is reported separately from parseability
+
+Two different reasons an area might not speak for the whole set, kept distinct:
+
+- **Coverage**: `resultsWithArea / totalResults`. An area present on 2 of 5
+  results is reported as 2 of 5, never averaged as though all five carried it.
+  Needed because per-folder rubrics are assembled into one entry whose area list
+  is `results[0]`'s, and `engine.ts:217-224` can fall back to one student's
+  model-invented list - so areas are NOT canonical within a run, contrary to what
+  an earlier architect pass claimed.
+- **Parseability**: `score` is a `string` (`RubricAreaResult:33`). Unparseable
+  values (blank, "N/A", "see comments", "8-10") are counted as `unscored` and
+  surfaced, never coerced to 0 (which invents a struggle) and never dropped
+  (which invents agreement).
+
+Areas are grouped by `normalizeAreaName` (reused from `prompts.ts:19`, not
+reimplemented) and deduped per result so one result cannot double-count an area.
+
+### 421d - the implementer's judgment call, which was the right one
+
+`RubricAreaResult.score` has no fixed scale - `prompts.ts:74` calls it a "numeric
+or text score". So a bare `"8"` is classified `raw-number` with
+`direction: "no-scale"` rather than guessed against an assumed denominator of 10
+or 100. Only `"N%"` and `"N/M"` forms, which state their own scale, get a
+high/low direction.
+
+That is the same discipline as the rest of the feature: a number whose meaning is
+unknown is reported as unknown rather than given a plausible one. The 70%/60%
+thresholds are a documented judgment call in the file, not derived from anything
+in this repo.
+
+### 421e - what is measured true today
+
+`class-trends.ts` 325 lines, `class-trends.test.ts` 333
+(`@(Get-Content <path>).Count`). Pure: imports only `./prompts` and `./types` - no
+React, no DOM, no network, no storage, no model call. **Which makes it the rare
+feature in this repo that is fully testable**, since nothing here renders a
+component.
+
+Sabotage-proven: changing `resultsWithArea` to report the total result count
+instead of the per-area count turned two tests RED (the partial-coverage test and
+its dedicated control), and reverting returned 106/106.
+
+Strengths get equal billing with struggles in the report shape
+(`report.strengths` / `report.struggles`) - the owner asked for "points of
+strength" as much as failures, and an earlier draft of the criteria had covered
+only difficulties.
+
+### 421f - no floor here, and why
+
+The instructor graded these submissions and knows who they are, so withholding a
+pattern across three of their own gradings hides useful information without
+protecting anyone. **A floor applies to the DRAFTED MESSAGE (N11) and nowhere
+else**, because that text is addressed to students. Conflating those two audiences
+into one floor was an error in the criteria, corrected in architect revision 4.
+
+### 421g - what is deliberately NOT here
+
+Layers B (LLM concept insight) and C (copyable, not postable, drafted message) are
+filed as N10 and N11 with their designs intact. Layer A ships alone on purpose: it
+is deterministic and useful by itself, and a reliable half held behind an
+expensive half is the G1 defect in a new place.

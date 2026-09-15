@@ -16,7 +16,7 @@
 // REACHABILITY: GradingRecordingPanel.tsx calls this hook once and renders
 // <GradingTable> with its fields - `setAllRows`/`applyGradingResult` are the
 // live seam the extraction/grading dispatch pipeline writes GradingRow
-// objects through (syncGradingRowsFromExtracted / classifyGradingResult in
+// objects through (advanceGradingCapture / classifyGradingResult in
 // grading-rows.ts), and `removeRow`/`clearTable` are the live seam
 // GradingTable/GradingTableRow's Remove and Clear table controls call
 // through.
@@ -339,7 +339,7 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
   const setAllRows = useCallback(
     (next: GradingRow[]) => {
       // D21d: `next` is a WHOLE replacement for this course's own slice
-      // (grading-capture-sync.ts's syncGradingRowsFromExtracted builds it
+      // (grading-capture-sync.ts's advanceGradingCapture builds it
       // from THIS hook's own scoped `rawRows` fed back in - see the file
       // header) - it must never replace rows belonging to a different
       // course or the unattributed bucket. `stampGradingRowsWithCourse`

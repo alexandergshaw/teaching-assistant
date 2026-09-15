@@ -327,8 +327,8 @@ export function isSameSubmission(
 // Merge: fold a batch of newly-extracted submissions into an existing list.
 // ---------------------------------------------------------------------------
 
-export interface MergeSubmissionsResult {
-  submissions: ExtractedSubmission[];
+export interface MergeSubmissionsResult<T extends ExtractedSubmission = ExtractedSubmission> {
+  submissions: T[];
   /** Count of `incoming` entries that did not match any existing submission
    *  and were appended as new. */
   addedCount: number;
@@ -361,12 +361,17 @@ function joinContinuationText(earlierText: string, laterText: string, overlapTok
 }
 
 /**
- * Pure; takes no `now`/id-minting concern (unlike mergeCapturedPosts) because
- * this leaf's output is not a row - see this file's header. A linear scan
- * with isSameSubmission, so an incoming submission is matched against
- * existing entries AND against entries already added earlier in this same
- * call, which covers "the same submission appears twice in one batch"
- * collapsing to one entry.
+ * Pure; takes no `now`/id-minting concern of its own (unlike
+ * mergeCapturedPosts) - `makeEntry` is how a caller mints whatever it needs
+ * for a brand-new entry (grading-capture-sync.ts's TrackedSubmission adds a
+ * `rowId`/`dismissed` pair via this hook, which is why it is REQUIRED, not
+ * optional: an optional form would let a caller keep feeding this function a
+ * bare ExtractedSubmission shape production can no longer emit once every
+ * accumulator entry must carry an owning row id). A linear scan with
+ * isSameSubmission, so an incoming submission is matched against existing
+ * entries AND against entries already added earlier in this same call, which
+ * covers "the same submission appears twice in one batch" collapsing to one
+ * entry.
  *
  * Fold behavior on a match now branches on WHY it matched:
  *  - a continuation splice (findContinuationOverlap on the existing entry's
@@ -378,11 +383,20 @@ function joinContinuationText(earlierText: string, laterText: string, overlapTok
  *    equal-or-shorter-text tie-break mergeCapturedPosts uses - the FIRST
  *    (or longer) reading wins, and a match whose fold changes nothing
  *    leaves the array entry at the same object reference.
+ *
+ * No identity rule changes here - isSameSubmission, nameMatchConfidence,
+ * submissionTextSimilarityDistance, findContinuationOverlap,
+ * joinContinuationText and all four thresholds above are untouched by
+ * `makeEntry`'s addition. Identity of a NEWLY minted entry flows through the
+ * factory itself (a caller that needs to know which ids it just minted can
+ * record them as `makeEntry` mints them), which is exact by construction and
+ * needs no separate "what did this call add" field on the result.
  */
-export function mergeExtractedSubmissions(
-  existing: ReadonlyArray<ExtractedSubmission>,
-  incoming: ReadonlyArray<ExtractedSubmission>
-): MergeSubmissionsResult {
+export function mergeExtractedSubmissions<T extends ExtractedSubmission>(
+  existing: ReadonlyArray<T>,
+  incoming: ReadonlyArray<ExtractedSubmission>,
+  makeEntry: (sub: ExtractedSubmission) => T
+): MergeSubmissionsResult<T> {
   let next = existing.slice();
   let addedCount = 0;
   let mergedCount = 0;
@@ -391,7 +405,7 @@ export function mergeExtractedSubmissions(
     const matchIndex = next.findIndex((s) => isSameSubmission(s, submission));
 
     if (matchIndex === -1) {
-      next = [...next, { name: submission.name, text: submission.text }];
+      next = [...next, makeEntry(submission)];
       addedCount++;
       continue;
     }

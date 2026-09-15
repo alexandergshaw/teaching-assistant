@@ -43,9 +43,19 @@
 // mergeExtractedSubmissions -> rows via setAllRows -> roster match via
 // applyRosterMatch -> grading via the sibling's action -> applyGradingResult
 // - followed literally below. grading-capture-sync.ts's
-// syncGradingRowsFromExtracted deliberately does NOT touch the roster verdict
+// advanceGradingCapture deliberately does NOT touch the roster verdict
 // (see its own header) - this file calls matchNameAgainstRoster and
 // applyRosterMatch itself, once per row, right after every setAllRows.
+//
+// A9 (docs/REGRESSION.md entry 428): the accumulator is id-correlated to the
+// row table (grading-capture-sync.ts's TrackedSubmission), not index-
+// correlated - a deleted row can no longer be silently re-minted or
+// misattribute a later row's score/feedback to the wrong submission. Wave 2
+// moved the accumulator, its Remove/Clear-table wiring, and its per-course
+// persisted tombstone set into useGradingCaptureTracking.ts /
+// grading-capture-tombstones.ts - see those files' own headers for the
+// seeding, ordering and quota-fallback rules a deletion surviving a reload
+// depends on.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Autocomplete, Button, MenuItem, TextField } from "@mui/material";
@@ -94,9 +104,9 @@ import { extractGradingSubmissionsAction } from "@/app/actions/grading-submissio
 // was being built - see this task's report for the confirmation.
 import { gradeCapturedSubmissionsAction } from "@/app/actions/grading-submission-grade";
 import { GRADING_EXTRACT_BATCH_SIZE } from "./grading-extraction-prompt";
-import { mergeExtractedSubmissions, type ExtractedSubmission } from "./grading-submission-merge";
 import { matchNameAgainstRoster } from "./grading-roster-match";
 import { useGradingRows } from "./useGradingRows";
+import type { GradingRow } from "./grading-row";
 import GradingTable from "./GradingTable";
 import { RubricInputModal } from "./RubricInputModal";
 import { useGradingCourses } from "./useGradingCourses";
@@ -107,7 +117,7 @@ import { parseRosterNames } from "./grading-course-roster";
 // reasoning (the key-matching trap in particular).
 import { useGradingAssessmentDeclarations } from "./useGradingAssessmentDeclarations";
 import GradingAssessmentDeclarationControls from "./GradingAssessmentDeclarationControls";
-import { syncGradingRowsFromExtracted } from "./grading-capture-sync";
+import { useGradingCaptureTracking } from "./useGradingCaptureTracking";
 import { checkGradingReadiness } from "./grading-dispatch";
 import { describeExtractionOutcome, isDangerNotice, type GradingExtractionOutcome } from "./grading-extraction-outcome";
 import { classifyGradingResult } from "./grading-rows";
@@ -367,23 +377,34 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     [pushNotices]
   );
 
-  const extractedRef = useRef<ExtractedSubmission[]>([]);
   const [extracting, setExtracting] = useState(false);
 
-  // FIX 1 (silent-fold visibility): mergeExtractedSubmissions already reports
+  // Wave 2 (docs/REGRESSION.md entry 428, RES-A9-7): the accumulator, its
+  // Remove/Clear-table wiring and its per-course persisted tombstone set all
+  // live in useGradingCaptureTracking.ts / grading-capture-tombstones.ts.
+  // courseScope mirrors useGradingRows.ts's own courseId collapse exactly,
+  // so a dismissal persists under the same scope a row does.
+  const courseScope = courseId.length > 0 ? courseId : undefined;
+  const capture = useGradingCaptureTracking(gradingRows.removeRow, gradingRows.clearTable, courseScope, gradingRows.rawRows);
+
+  // FIX 1 (silent-fold visibility): advanceGradingCapture already reports
   // addedCount/mergedCount per call - this is the running SESSION TOTAL of
   // every reading it has ever classified (added-as-new plus folded-into-
   // existing), summed across every extraction batch so far. Compared against
-  // gradingRows.totalCount (the live, currently-distinct row count - always
-  // equal to the most recent merge.submissions.length, since
-  // syncGradingRowsFromExtracted mints exactly one row per merged
-  // submission), this is what lets an instructor who recorded twelve
-  // students and sees eleven rows notice the gap: folding is normal (that is
-  // the whole point of merging overlapping frames), so the count alone is
-  // ordinary information, not a danger notice - but an unexpectedly LOW
-  // submission count relative to what was actually recorded is the signal a
-  // silent over-merge produces, and this makes that number impossible to
-  // miss.
+  // gradingRows.totalCount, this is what lets an instructor who recorded
+  // twelve students and sees eleven rows notice the gap: folding is normal
+  // (that is the whole point of merging overlapping frames), so the count
+  // alone is ordinary information, not a danger notice - but an unexpectedly
+  // LOW submission count relative to what was actually recorded is the
+  // signal a silent over-merge produces, and this makes that number
+  // impossible to miss.
+  //
+  // AC-A9-15: `gradingRows.totalCount` is NOT simply the most recent
+  // advanceGradingCapture call's row count any more - a dismissed entry
+  // mints no row and a preserved row (a divergence, or a row this call never
+  // touched) adds one with no tracked entry backing it. The true invariant
+  // is: `totalCount` equals the count of non-dismissed tracked entries plus
+  // any preserved rows.
   const [totalReadingsCount, setTotalReadingsCount] = useState(0);
 
   // Launch handoff (items 2/3) - see this file's own header for the full
@@ -428,25 +449,35 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         pushNotices(describeExtractionOutcome(result, 0));
         return;
       }
-      const merge = mergeExtractedSubmissions(extractedRef.current, result.submissions);
-      extractedRef.current = merge.submissions;
+      // A9/RES-A9-9: the RENDER value (gradingRows.rawRows), never
+      // rawRowsRef.current - the ref is one commit stale (see the effect
+      // above that writes it), and on the render where courseId/assessmentId
+      // change, gradingRows.rawRows is already the new scope's slice while
+      // the ref still holds the old one. Reading the ref here would feed a
+      // stale course's rows against this call's freshly-scoped accumulator,
+      // reproducing the course-switch misattribution REGRESSION.md entry 428f
+      // records. capture.advance persists the dismissed projection AFTER
+      // committing rows - see commitCaptureAdvance's own header for why the
+      // order matters.
+      let nextRows: GradingRow[] = [];
+      const advance = capture.advance(gradingRows.rawRows, result.submissions, (rows) => {
+        nextRows = rows;
+        gradingRows.setAllRows(rows);
+      });
       setLogBatches((prev) => [
         ...prev,
         makeGradingRecordingLogBatch({
           at: new Date().toISOString(),
           framesInBatch: frames.length,
           submissionsExtracted: result.submissions.length,
-          added: merge.addedCount,
-          merged: merge.mergedCount,
+          added: advance.addedCount,
+          merged: advance.mergedCount,
           skippedUnnamed: result.skippedUnnamed,
           confirmedEmpty: result.confirmedEmpty,
         }),
       ]);
-      pushNotices(describeExtractionOutcome(result, merge.addedCount));
-      setTotalReadingsCount((prev) => prev + merge.addedCount + merge.mergedCount);
-
-      const nextRows = syncGradingRowsFromExtracted(merge.submissions, rawRowsRef.current);
-      gradingRows.setAllRows(nextRows);
+      pushNotices(describeExtractionOutcome(result, advance.addedCount));
+      setTotalReadingsCount((prev) => prev + advance.addedCount + advance.mergedCount);
 
       // R3a: roster-match every row in THIS synced table right away, so a
       // newly-minted row never sits at the neutral "no-roster" default for
@@ -459,7 +490,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     } finally {
       setExtracting(false);
     }
-  }, [takeFrameBatch, provider, pushNotices, gradingRows, selectedRosterText]);
+  }, [takeFrameBatch, provider, pushNotices, gradingRows, selectedRosterText, capture]);
 
   // Drains the capture queue as frames arrive, and keeps draining after Stop
   // - mirroring useDiscussionCapture's own documented contract ("the
@@ -943,9 +974,9 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         sort={gradingRows.sort}
         setSort={gradingRows.setSort}
         onEditField={gradingRows.editField}
-        onRemoveRow={gradingRows.removeRow}
+        onRemoveRow={capture.onRemoveRow}
         onMarkLate={gradingRows.markSubmissionLate}
-        onClearTable={gradingRows.clearTable}
+        onClearTable={capture.onClearTable}
         onCopyError={handleCopyFeedbackError}
       />
 

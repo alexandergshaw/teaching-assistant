@@ -266,7 +266,7 @@ export function gradingRowMatchesCourse(row: GradingRow, courseScope: string | u
  * value exactly, regardless of what `next` happens to carry for it - useful
  * because `setAllRows` (useGradingRows.ts) receives a WHOLE replacement
  * array from an external merge (grading-capture-sync.ts's
- * syncGradingRowsFromExtracted) that this file never inspects, so an
+ * advanceGradingCapture) that this file never inspects, so an
  * already-attributed row's course can never be silently rewritten by
  * whatever that caller happened to build. Pure, so useGradingRows.ts's
  * setAllRows has a test surface this repo's node-env vitest can actually

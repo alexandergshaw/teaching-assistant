@@ -496,12 +496,20 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations, assessment)", () => {
+  it("has exactly the expected set of persisted keys (filter, sort, course, table, declarations, assessment, dismissed)", () => {
+    // A9 wave 2 (docs/REGRESSION.md entry 428/RES-A9-8): six keys became
+    // seven when a per-course dismissed-submission tombstone set (the fix
+    // that makes a deletion survive a reload) had to persist somewhere.
+    // 428h condition 5's own carve-out is "any statement in 428a-428e that
+    // neither A9 nor A10 was filed to change" - A9 cannot remember a
+    // deletion across a reload without persisting something, so this key
+    // count change is exactly that carve-out, not a falsified floor.
     const keys = Array.from(new Set(combined.match(/ta-rec-grade-[a-z-]*/g) ?? [])).sort();
     expect(keys).toEqual([
       "ta-rec-grade-assessment",
       "ta-rec-grade-course",
       "ta-rec-grade-declarations",
+      "ta-rec-grade-dismissed",
       "ta-rec-grade-filter",
       "ta-rec-grade-sort",
       "ta-rec-grade-table",
@@ -543,6 +551,7 @@ describe("grading-recording persisted key canary (self-contained - recording-spl
     "ta-rec-grade-table",
     "ta-rec-grade-declarations",
     "ta-rec-grade-assessment",
+    "ta-rec-grade-dismissed",
   ])(
     '"%s" has both a localStorage read and a localStorage write call wired to that key (directly, or via a const STORAGE_KEY_* binding)',
     (key) => {

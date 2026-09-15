@@ -43965,7 +43965,7 @@ Instrument for this section: `grep -rn "<symbol>" src --include=*.test.ts`, plus
 | `clearTableSignature` / `gradingClearTableSignature` is the count alone, changes with the count, stable for the same count | `assessment-row.test.ts:164`, `:170`, `:174`; `grading-rows.test.ts:402`, `:408`, `:412` |
 | `editAssessmentField` / `applyAssessmentResult` and the `userEdited` refusal | `assessment-row.test.ts:64`-`:137` |
 | `setAllRows` stamps course then assessment and recombines with other scopes; `clearTable` filters rather than empties | `useGradingRows.wiring.test.ts:30`, `:36`, `:40` (source-text assertions, not execution) |
-| `ta-rec-grade-*` is exactly six keys, and the literal binding plus the read/write call both appear | `grading-rows.test.ts`'s "grading-recording persisted key canary" describe block (`:479`), scanning `grading-recording/` and `assessment-shared/` non-recursively |
+| `ta-rec-grade-*` is exactly six keys, and the literal binding plus the read/write call both appear. AMENDED at A9's push (RES-A9-8): the set is now SEVEN. A9 adds `ta-rec-grade-dismissed`, the course-scoped tombstone key that makes a deletion survive an extraction batch and a reload. Six was correct for this baseline and is correct for anything before A9; a run against the post-A9 tree that reports six is a genuine regression, not a stale number. Both the exact-set list and the `it.each` wiring list were updated in the same commit, per the headless-count-canary discipline | `grading-rows.test.ts`'s "grading-recording persisted key canary" describe block (`:479`), scanning `grading-recording/` and `assessment-shared/` non-recursively |
 | `useAssessmentRowStore` passes its key parameter to both `localStorage.getItem` and `localStorage.setItem` | `snapshot-grading.structure.test.ts:261` (a sibling surface's test, asserting on this shared file) |
 | the persisted wire row's exact key set, round trip, coercion, quota fallback | `grading-row-serialization.test.ts:92`, `:190`, `:342`, `:387`, `:615` |
 
@@ -44048,8 +44048,10 @@ the direction that is a failure.
    428a-428e that neither A9 nor A10 was filed to change is no longer true -
    specifically the `userEdited` refusal, `removeAssessmentRow`'s same-reference
    return, `clearTableSignature`'s `String(totalCount)`, `setAllRows`'s
-   other-scope preservation, the `dropBulk` field choice, the six-key
-   `ta-rec-grade-*` set, and `totalScore`'s exclusion from the copied text.
+   other-scope preservation, the `dropBulk` field choice, the
+   `ta-rec-grade-*` set (six at this baseline, seven after A9 - see the
+   amendment in 428h condition 5), and `totalScore`'s exclusion from the
+   copied text.
 
 ### 428i - residual register: what this baseline could NOT determine
 

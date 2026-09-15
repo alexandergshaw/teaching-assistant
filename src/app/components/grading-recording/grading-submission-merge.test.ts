@@ -13,6 +13,11 @@ import {
   type ExtractedSubmission,
 } from "./grading-submission-merge";
 
+// mergeExtractedSubmissions's `makeEntry` factory is REQUIRED (SEAM-2) - every
+// call site below passes this identity factory, since none of these tests
+// need any field beyond ExtractedSubmission's own name/text.
+const identity = (sub: ExtractedSubmission): ExtractedSubmission => sub;
+
 describe("constants", () => {
   it("are positive, sane values", () => {
     expect(PREFIX_TOKENS).toBeGreaterThan(0);
@@ -117,7 +122,7 @@ describe("isSameSubmission - identity fields and their stability", () => {
 describe("mergeExtractedSubmissions", () => {
   it("adds a brand-new submission when nothing matches", () => {
     const existing: ExtractedSubmission[] = [];
-    const result = mergeExtractedSubmissions(existing, [{ name: "Maria Alvarez", text: "A real submission with enough words to compare" }]);
+    const result = mergeExtractedSubmissions(existing, [{ name: "Maria Alvarez", text: "A real submission with enough words to compare" }], identity);
     expect(result.submissions).toHaveLength(1);
     expect(result.addedCount).toBe(1);
     expect(result.mergedCount).toBe(0);
@@ -129,7 +134,7 @@ describe("mergeExtractedSubmissions", () => {
     ];
     const result = mergeExtractedSubmissions(existing, [
       { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration" },
-    ]);
+    ], identity);
     expect(result.submissions).toHaveLength(1);
     expect(result.addedCount).toBe(0);
     expect(result.mergedCount).toBe(1);
@@ -143,7 +148,7 @@ describe("mergeExtractedSubmissions", () => {
     ];
     const result = mergeExtractedSubmissions(existing, [
       { name: "David Chen", text: "The mitochondria is the powerhouse of the cell and produces ATP" },
-    ]);
+    ], identity);
     expect(result.submissions).toHaveLength(2);
     expect(result.addedCount).toBe(1);
     expect(result.mergedCount).toBe(0);
@@ -156,7 +161,7 @@ describe("mergeExtractedSubmissions", () => {
     const existingRef = existing[0];
     const result = mergeExtractedSubmissions(existing, [
       { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell" },
-    ]);
+    ], identity);
     expect(result.mergedCount).toBe(1);
     expect(result.submissions[0].text).toBe(existingRef.text);
     expect(result.submissions[0]).toBe(existingRef);
@@ -166,7 +171,7 @@ describe("mergeExtractedSubmissions", () => {
     const result = mergeExtractedSubmissions([], [
       { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell" },
       { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration" },
-    ]);
+    ], identity);
     expect(result.submissions).toHaveLength(1);
     expect(result.addedCount).toBe(1);
     expect(result.mergedCount).toBe(1);
@@ -175,7 +180,7 @@ describe("mergeExtractedSubmissions", () => {
 
   it("handles an empty incoming batch as a no-op", () => {
     const existing: ExtractedSubmission[] = [{ name: "Maria Alvarez", text: "Some submission text here" }];
-    const result = mergeExtractedSubmissions(existing, []);
+    const result = mergeExtractedSubmissions(existing, [], identity);
     expect(result.submissions).toEqual(existing);
     expect(result.addedCount).toBe(0);
     expect(result.mergedCount).toBe(0);
@@ -265,7 +270,7 @@ describe("shared-opening-template collision - two different students restating t
   });
 
   it("mergeExtractedSubmissions keeps both students as separate rows - the second student is never lost", () => {
-    const result = mergeExtractedSubmissions([johnsSubmission], [annasSubmissionCroppedName]);
+    const result = mergeExtractedSubmissions([johnsSubmission], [annasSubmissionCroppedName], identity);
     expect(result.submissions).toHaveLength(2);
     expect(result.addedCount).toBe(1);
     expect(result.mergedCount).toBe(0);
@@ -367,7 +372,7 @@ describe("continuation across batches - a body-only later reading rejoins its to
   });
 
   it("mergeExtractedSubmissions JOINS a continuation into ONE row, with the full text and no duplicated splice phrase", () => {
-    const result = mergeExtractedSubmissions([topOfSubmission], [bodyOfSubmission]);
+    const result = mergeExtractedSubmissions([topOfSubmission], [bodyOfSubmission], identity);
     expect(result.submissions).toHaveLength(1);
     expect(result.addedCount).toBe(0);
     expect(result.mergedCount).toBe(1);
@@ -382,7 +387,7 @@ describe("continuation across batches - a body-only later reading rejoins its to
   it("a continuation from a DIFFERENT student's name is never joined, even if the text happens to splice", () => {
     const differentStudentBody = { name: "David Chen", text: bodyOfSubmission.text };
     expect(isSameSubmission(topOfSubmission, differentStudentBody)).toBe(false);
-    const result = mergeExtractedSubmissions([topOfSubmission], [differentStudentBody]);
+    const result = mergeExtractedSubmissions([topOfSubmission], [differentStudentBody], identity);
     expect(result.submissions).toHaveLength(2);
   });
 

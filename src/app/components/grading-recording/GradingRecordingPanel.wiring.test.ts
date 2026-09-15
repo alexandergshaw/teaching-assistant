@@ -68,3 +68,32 @@ describe("dropped-frame accumulator (REGRESSION 383 fix)", () => {
     expect(total).toBe(9); // NOT 3
   });
 });
+
+// A9 wave 2 (docs/REGRESSION.md entry 428, RES-A9-10): intent to dismiss a
+// submission comes ONLY from useGradingCaptureTracking's composed handlers -
+// commitDismissal is the one place `dismissed` ever gets set. A second
+// removal path that bypassed the composed handler would resurrect on the
+// next reload (dismissTrackedRow never runs, nothing persists). Pinning the
+// FACT (exactly one binding, wired to the composed handler, not the bare
+// store method) and the ORDERING (the hook is given the store's own
+// mutators), never the spelling of the composed handlers' own bodies -
+// those are unit-tested directly in grading-capture-tombstones.test.ts.
+describe("Remove/Clear-table route through the one composed handler (RES-A9-10)", () => {
+  it("binds onRemoveRow exactly once, to capture.onRemoveRow - never the bare store mutator", () => {
+    const matches = source.match(/onRemoveRow=\{[^}]*\}/g) ?? [];
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toBe("onRemoveRow={capture.onRemoveRow}");
+  });
+
+  it("binds onClearTable exactly once, to capture.onClearTable - never the bare store mutator", () => {
+    const matches = source.match(/onClearTable=\{[^}]*\}/g) ?? [];
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toBe("onClearTable={capture.onClearTable}");
+  });
+
+  it("useGradingCaptureTracking is given the store's own removeRow and clearTable", () => {
+    expect(source).toMatch(
+      /useGradingCaptureTracking\(gradingRows\.removeRow,\s*gradingRows\.clearTable,/
+    );
+  });
+});

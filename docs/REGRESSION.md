@@ -42900,3 +42900,236 @@ already lives in `class-trends.ts`, which is directly tested.
 So "the trends appear on the drafted-grades tab, and the AI reading is visibly
 separate" remains an owner reading claim. It is one click to check: open a drafted
 grades run and expand the trends block.
+
+## 423. N11 layer C: a copyable, never-postable draft addressed to students
+
+Backlog N11, filed alongside N9/N10 in entry 421g: "layer C (copyable, not
+postable, drafted message)". This entry records that layer C has shipped and
+mounted, what it deliberately refuses to do, and the boundary that enforces the
+refusal.
+
+### 423a - what layer C does and, more importantly, does not do
+
+`composeClassTrendsDraft` (`src/lib/grade/class-trends-draft.ts:148-214`) turns
+layer A's counted `ClassTrendsReport` and layer B's optional
+`ClassTrendsInsightObservation[]` into one markdown string addressed to
+students. It makes **no model call of its own** - every claim it needs was
+already typed and computed by layers A and B before this function runs - so it
+is pure and synchronous: no `fetch`, no route, no `maxDuration`, no
+`requireUser()`, nothing that can time out or need auth. `ClassTrendsDraftPanel.tsx`
+(the only caller) confirms this at the call site: `handleDraft` calls
+`composeClassTrendsDraft` directly and sets state from its return value with no
+`await` (`ClassTrendsDraftPanel.tsx:42-48`) - the panel's own comment there says
+a loading state is not rendered because "a spinner for an instant, in-memory
+function call would misrepresent what is happening." The panel's only
+asynchronous action anywhere is the clipboard write in `handleCopy`
+(`:50-59`). It is explicitly **not postable**: nothing in layer C writes to
+Canvas or anywhere else - the instructor copies the text out and pastes it
+wherever they send announcements today.
+
+### 423b - the not-postable boundary, and why its instrument has the shape it does
+
+The boundary is enforced by `classTrendsDraft.not-postable.test.ts`, and it is
+**not** a denylist of posting-action names. That shape was tried in this repo's
+history and kept failing: the acceptance-criteria checker's own note
+(`docs/loop/seats.md:98-105`) records a denylist of Canvas-posting actions
+lengthened 1 -> 3 -> 6 -> 9 across rounds and still materially incomplete,
+because `src/app/actions/lms-generation-writers.ts:47` declares
+`export const LIVE_CANVAS_WRITERS: CanvasWriters = { ... }`, wiring nine
+individual writer functions into ONE object - so a file that imports
+`LIVE_CANVAS_WRITERS` and calls through it posts to Canvas while containing
+none of the nine writer names anywhere in its own source. A name-based scan of
+the importing file finds nothing to flag.
+
+The instrument layer C's guard uses instead is a **transitive import ban on
+path prefixes**, not names: `FORBIDDEN_PATH_PREFIXES = ["app/actions",
+"lib/canvas", "lib/lms-generation"]` (`classTrendsDraft.not-postable.test.ts:50`),
+checked by `isForbiddenPath` (`:56-62`) against the *resolved* import target's
+path relative to `src/`, walked transitively from layer C's four real files by
+`walkForForbiddenImports` (`:107-140`), rooted at exactly those four files in
+canary 3 (`:196-216`). A file reaching `LIVE_CANVAS_WRITERS` fails this guard
+not because the name `LIVE_CANVAS_WRITERS` appears anywhere, but because the
+resolved path `app/actions/lms-generation-writers.ts` starts with the forbidden
+prefix `app/actions` - true regardless of what the file imports by name.
+
+**`"app/actions"` carries no trailing slash, on purpose** (documented at
+`classTrendsDraft.not-postable.test.ts:38-45`). The first version of this
+prefix list used `"app/actions/"`, which misses `src/app/actions.ts` -
+a real file, a pure re-export barrel that fronts the whole actions directory -
+because `"app/actions.ts".startsWith("app/actions/")` is `false`. The same
+mechanism is why `"lib/canvas"` (no slash) is needed rather than `"lib/canvas/"`,
+to also catch `canvas-modules.ts` and not just files under `canvas-modules/`.
+
+**The inversion, and why this guard could not simply reuse the repo's existing
+transitive-import walker unmodified.** `src/lib/canvas-client-boundary.transitive.test.ts`
+already walks value-import graphs looking for a forbidden target
+(`canvas-core.ts`), and for THAT guard a `"use server"` module is correctly
+treated as a wall: its `walk()` function checks `hasDirective(source, "use
+server")` and returns `false` - "not reaching the target" - before descending
+into that node's own imports (`canvas-client-boundary.transitive.test.ts:147,212`),
+because Next replaces a `"use server"` module with an RPC stub at the client
+boundary, so nothing beyond it reaches the browser bundle regardless of what
+it imports.
+
+For layer C's guard, the shape is inverted: the `"use server"` modules under
+`app/actions` are not obstacles standing between layer C and the forbidden
+capability - **they are the forbidden capability itself.** `walkForForbiddenImports`
+therefore does no directive detection of any kind (documented as rule 1 of 3 at
+`classTrendsDraft.not-postable.test.ts:19-29`): it checks whether a resolved
+import target's own path is forbidden BEFORE it would ever consider descending
+into that node, so the "use server" question never arises for it. Reused
+unmodified, the original wall-first walker would have reported ZERO violations
+for a file that value-imports an `app/actions` module directly - not because
+the boundary held, but because the walker's own "use server" check would have
+short-circuited to "does not reach" before the forbidden-path check ever ran,
+passing **vacuously**.
+
+### 423c - the sabotage evidence
+
+A guard with no proof it can fail is this repo's recurring defect (`docs/loop/
+seats.md`'s Test seat checker question: "can each assertion fail?"). Verified
+live in this session, not merely asserted:
+
+- Adding `import { listAssignmentsAction } from "@/app/actions/accommodations";`
+  (a real `"use server"` file, confirmed at `src/app/actions/accommodations.ts:73`)
+  to `src/lib/grade/class-trends-draft.ts` and running
+  `npx vitest run src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts`
+  turned canary 3 RED (`1 failed | 4 passed (5)`). Reverting the import restored
+  `5 passed (5)`. This is the direct proof the inversion in 423b does not apply
+  to the guard as built - only to a hypothetical unmodified reuse of the older
+  walker.
+- Deleting the `<ClassTrendsDraftPanel ... />` mount block from
+  `ClassTrendsPanel.tsx` while leaving its `import ClassTrendsDraftPanel from
+  "./ClassTrendsDraftPanel"` line in place (the same shape as the N12 defect in
+  entry 422, a caller that imports but never renders) and running `npx vitest
+  run src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts` turned
+  1 of 9 tests RED - "renders `<ClassTrendsDraftPanel>` passing
+  report=/observations=/assignmentName=". Restoring the mount block returned
+  `9 passed (9)`, and `git diff -- src/app/components/drafted-grades/
+  ClassTrendsPanel.tsx` afterward matched the pre-sabotage diff byte for byte.
+- The build/test pass that preceded this regression check additionally reports
+  10 of 12 production mutations across layer C turning a named test red,
+  including stripping the model's-reading framing ("my own reading, not a
+  count") from `renderInferredClause` (`class-trends-draft.ts:141-146`). This
+  session re-verified the two mutations above directly rather than re-running
+  the full set of twelve; the aggregate 10-of-12 figure is carried forward from
+  that pass, not independently re-measured here.
+
+### 423d - the copy rule as built
+
+Only counted (layer A) trends are **asserted** as fact; inferred (layer B)
+material is always framed as a reading. Three separate mechanisms hold this,
+not one:
+
+- `renderCountedClause` (`class-trends-draft.ts:110-119`) is the only function
+  in the module allowed to turn an `AreaTrend` into draft text, and its
+  parameter type IS `AreaTrend` - an object - so a bare string (inferred text)
+  cannot be passed to it; that would be a compile error, not a runtime check.
+- A clause renders only when `area.resultsWithArea === report.totalResults`
+  (`areaFullyCovered`, `:79-97`), not merely when it clears the draft floor -
+  so every rendered clause's basis equals the SAME denominator the opening
+  line states. The header comment at `:79-94` explains why this is stricter
+  than a floor check: with `GRADE_MAX_SUBMISSIONS` and
+  `DEFAULT_CLASS_TRENDS_DRAFT_FLOOR` both defaulting to 5 today (`gemini.ts:25`
+  vs `class-trends-draft.ts:18`, the same collision noted in entry 421a), a
+  floor-only check happens to coincide with full coverage - but raising
+  `GRADE_MAX_SUBMISSIONS` alone would let a floor-only check draft a clause
+  backed by 5 of, say, 30 submissions while the opening line claims all 30.
+- The draft always opens with the coverage-disclosure sentence
+  (`class-trends-draft.ts:171`, "based on the N submissions graded so far"),
+  unconditional and the one place `report.totalResults` is interpolated -
+  matching the copy rule N9 already established (entry 421b) rather than
+  restating it.
+
+### 423e - the empty case
+
+When `bodyLines.length === 0` - no area cleared the coverage bar with a
+high/low direction, and no inferred observation survived
+`renderInferredClause` - `composeClassTrendsDraft` returns `{ status: "empty"
+}` (`class-trends-draft.ts:195-197`), a distinct variant of `ClassTrendsDraftResult`,
+not an empty-string markdown. `ClassTrendsDraftPanel.tsx`'s `state.status ===
+"empty"` branch (`:84-89`) renders only the explanation span - no `handleCopy`
+call and no `>Copy<` button anywhere in that branch. `classTrendsDraft.wiring.test.ts`
+pins this structurally for both the "empty" and "below-floor" branches
+(`:82-103`): it locates the branch's start and the next `state.status ===`
+sibling and asserts nothing between them references `handleCopy` or contains
+`>Copy<`. A message with nothing in it gets no copy control.
+
+### 423f - what this environment cannot verify
+
+No component is rendered by any test here (`vitest.config.ts`, `environment:
+"node"`, `include: ["src/**/*.test.ts"]`) - so `ClassTrendsDraftPanel.tsx`'s
+JSX, its button click handling, and its error rendering are exercised only by
+source-text assertions in `classTrendsDraft.wiring.test.ts`, never by an actual
+render. The real clipboard is never exercised - `writeClipboardText` is called
+from source but nothing here can drive a browser clipboard. Whether the rich
+(`markdownToHtml`) flavour this panel writes alongside the plain-text flavour
+actually pastes into Canvas's rich-text editor as bold rather than literal
+asterisks is owner verification **V2**, already open before this feature and
+unresolved by it - layer C reuses `writeClipboardText`/`markdownToHtml`
+unmodified rather than re-asking that question.
+
+### 423g - layer A and layer B are unchanged
+
+The one modified existing file is `ClassTrendsPanel.tsx`
+(`git diff -- src/app/components/drafted-grades/ClassTrendsPanel.tsx`, checked
+in this session), and its diff is exactly two hunks: one new import line
+(`:13`) and one new `<ClassTrendsDraftPanel ... />` mount (`:192-196`), appended
+**after** the existing layer B block and still inside the same `expanded &&`
+conditional every block in this panel has always rendered under. Confirmed
+against entry 422c's baseline:
+
+- Layer A (`:128-144`) still renders first, still unconditionally within
+  `expanded`, still computed synchronously via `useMemo(() =>
+  computeClassTrends(entry), [entry])` (`:80`) with no dependency on layer B's
+  fetch state.
+- Layer B (`:146-190`) is untouched and still opt-in behind the "Get AI reading
+  (optional)" button; a failed or unrequested layer B still leaves layer A on
+  screen, since layer C's own mount reads `insight.status === "done" ?
+  insight.observations : []` (`:194`) rather than gating on it.
+- `containsForbiddenCompletenessPhrase`, imported from `class-trends.ts` at
+  `:8`, is unchanged by this diff and still re-validates layer B's observations
+  at the render boundary in `toValidObservation` (`:43-53`), untouched by the
+  diff.
+- `.student` is never read: `grep -n "\.student\b"` across
+  `ClassTrendsPanel.tsx`, `ClassTrendsDraftPanel.tsx`, `classTrendsDraftState.ts`
+  and `class-trends-draft.ts` returns nothing.
+- `classTrends.wiring.test.ts` (the N12 reachability test from entry 422) is
+  absent from `git status --short` for this chunk - it was not touched, so its
+  assertions are unchanged by construction, not merely by inspection.
+- `HEADLESS_SAFE_STEP_TYPES.size` (`src/lib/workflows/headless.test.ts:186`)
+  is asserted at 154 and this chunk touches nothing under `src/lib/workflows/`
+  - `npx vitest run src/lib/workflows/headless.test.ts` returns `16 passed
+  (16)`, confirming the canary is unaffected.
+
+**Regression verdict: no behaviour entry 421 or 422 pinned has changed.** The
+object under comparison is `ClassTrendsPanel.tsx`'s rendering order and
+gating conditions for layers A and B, measured by `git diff` against the
+tracked file's pre-chunk content; the direction of failure would be layer A
+losing its unconditional-first render, or layer B's opt-in gate moving to
+gate layer A or C. Neither occurred.
+
+### 423h - what is measured true today
+
+`@(Get-Content <path>).Count`, run in this session:
+`src/lib/grade/class-trends-draft.ts` 214,
+`src/lib/grade/class-trends-draft.test.ts` 221,
+`src/app/components/drafted-grades/classTrendsDraftState.ts` 61,
+`src/app/components/drafted-grades/classTrendsDraftState.test.ts` 68,
+`src/app/components/drafted-grades/ClassTrendsDraftPanel.tsx` 123,
+`src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts` 110,
+`src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts` 216,
+`src/app/components/drafted-grades/__fixtures__/notPostableCanaryHopA.ts` 4,
+`src/app/components/drafted-grades/__fixtures__/notPostableCanaryHopB.ts` 5,
+`src/app/components/drafted-grades/ClassTrendsPanel.tsx` (modified) 201 - all
+well under the repo-wide 1000-line ceiling
+(`src/file-size-ceiling.structure.test.ts:30`).
+
+`npx vitest run` on the five directly relevant files (the four new test files
+plus `classTrends.wiring.test.ts`) in this session: `5 passed (5)`, `49 passed
+(49)`. `npx vitest run src/lib/no-emojis.test.ts`: `18 passed (18)` (this file
+scans `docs/` as well as `src/`, so this entry's own text is covered by it).
+Byte-level scan of all ten changed files for a BOM or a CR byte (Node reading
+each file as a `Buffer` and checking for `0xEF 0xBB 0xBF` at the start and any
+`0x0D` byte anywhere - not `grep -c $'\r'`, which is broken in this repo):
+no BOM, no CR in any of the ten.

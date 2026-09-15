@@ -10,6 +10,7 @@ import {
 } from "@/lib/grade/class-trends";
 import type { ClassTrendsInsightObservation } from "@/lib/grade/class-trends-insight";
 import type { GradingRunEntry } from "@/lib/grade";
+import ClassTrendsDraftPanel from "./ClassTrendsDraftPanel";
 
 // Backlog N12: the reachability surface for backlog N9/N10's class trends
 // feature. Two layers were shipped with no caller - src/lib/grade/class-trends.ts
@@ -187,6 +188,12 @@ export default function ClassTrendsPanel({ entry }: { entry: GradingRunEntry }) 
               </div>
             )}
           </div>
+
+          <ClassTrendsDraftPanel
+            report={report}
+            observations={insight.status === "done" ? insight.observations : []}
+            assignmentName={entry.assignmentName}
+          />
         </div>
       )}
     </>

@@ -1,27 +1,22 @@
 "use client";
 
-// Snapshot grading (docs/snapshot-grading-acceptance-criteria.md). WAVE 4
-// built the reachable capture surface: arm a role, snap the shared screen
-// (or paste/drop an image), and manage a tray of shots. WAVE 5 (below) adds
-// the read pass, the grade pass, and the result card. A0-2's no-write-back
-// ceiling still holds: nothing here ever posts a grade anywhere.
+// Snapshot grading (docs/snapshot-grading-acceptance-criteria.md). Arm a
+// role, snap the shared screen (or paste/drop/capture-and-OCR one), manage a
+// tray of shots, then read and grade. A0-2's no-write-back ceiling still
+// holds: nothing here ever posts a grade anywhere.
 //
 // A6d/X7: kept mounted, display:none'd by RecordingTab when another sub-tab
 // is active (the `active` prop below) - a live MediaStream keeps running
-// behind a hidden panel exactly like every sibling capture surface's does.
-// This panel does nothing special about that itself (no pause-on-hide): the
-// stream stays live so the instructor can switch tabs mid-session without
-// losing their share, matching A6d's "make it deliberate" instruction by
-// deliberately choosing to keep it running, the same choice every sibling
-// panel already makes.
+// behind a hidden panel (no pause-on-hide) exactly like every sibling
+// capture surface's does - deliberately (Ruling A6d's "make it deliberate").
 //
-// WAVE 5 adds the read pass and grade pass. D (client-orchestrated, load-
-// bearing): handleRead below calls snapshotReadBatchAction ONCE PER BATCH
-// from an explicit `for await` loop inside a click handler - never from a
-// useEffect, and never one action looping internally over every batch
-// (Vercel's 60s cap is per invocation). A7c: no effect in this file ever
-// calls snapshotReadBatchAction or snapshotGradeAction on its own - both are
-// reachable ONLY through handleRead/handleGrade, both bound to onClick.
+// D (client-orchestrated, load-bearing): handleRead calls
+// snapshotReadBatchAction ONCE PER BATCH from an explicit `for await` loop
+// inside a click handler - never from a useEffect, and never one action
+// looping internally over every batch (Vercel's 60s cap is per invocation).
+// A7c: no effect in this file calls snapshotReadBatchAction or
+// snapshotGradeAction on its own - both are reachable ONLY through
+// handleRead/handleGrade, both bound to onClick.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "../../page.module.css";
@@ -67,6 +62,8 @@ import { buildPendingRoleSuggestions, type PendingRoleSuggestion } from "./snaps
 import ConfirmedRubricAreasEditor from "./ConfirmedRubricAreasEditor";
 import { useSnapshotGrade } from "./useSnapshotGrade";
 import { useSnapshotKeyboardShortcuts } from "./useSnapshotKeyboardShortcuts";
+import { useSnapshotRubricCapture } from "./useSnapshotRubricCapture";
+import SnapshotRubricCaptureReview from "./SnapshotRubricCaptureReview";
 import ConfirmArmButtons from "../ui/ConfirmArmButtons";
 import controls from "../recording/RecordingControls.module.css";
 import panelStyles from "./SnapshotGrading.module.css";
@@ -204,9 +201,8 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
 
-  // F1 (A4d): matches every sibling <prefix>-table key exactly -
-  // ta-rec-grade-table, ta-rec-disc-table, ta-rec-msg-table - none carries a
-  // middle segment.
+  // F1 (A4d): matches every sibling <prefix>-table key exactly - ta-rec-grade-table,
+  // ta-rec-disc-table, ta-rec-msg-table - none carries a middle segment.
   const STORAGE_KEY_TABLE = "ta-snap-table";
   const SNAP_TABLE_REDUCED_MESSAGE =
     "Storage was almost full, so this assessment's evidence citations were not saved (the score and feedback were).";
@@ -344,22 +340,11 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     if (liveRegionRef.current) liveRegionRef.current.textContent = message;
   }, []);
 
-  // F1 (A4b): also rendered directly below (the
-  // "snap-next-student-consequence" hint), so this value itself cannot move
-  // out of the panel (n14-architecture.md section 0a's M2 correction). The
-  // ref-freshness cache stays HERE too - not because the keydown effect it
-  // originally served still lives in this file (it moved to
-  // useSnapshotKeyboardShortcuts.ts), but because removing this useRef/
-  // useEffect pair from the panel entirely was verified, empirically, to
-  // break `eslint`'s react-compiler `preserve-manual-memoization` check on
-  // the UNRELATED handleNextStudentConfirm callback below - a whole-
-  // component memoization-inference quirk sensitive to this component's
-  // hook count/shape, not a real dependency bug (confirmed by toggling only
-  // this block and re-running `npx eslint` on this file in isolation). The
-  // hook now receives the REF (not the raw value) and reads `.current`
-  // itself, so the cache still exists in exactly one place - it is
-  // constructed here because that is the only place that keeps lint clean,
-  // not duplicated.
+  // Computed here because also rendered directly in JSX below - the ref-freshness
+  // cache moved to useSnapshotKeyboardShortcuts.ts, but stays constructed here:
+  // removing it breaks eslint's react-compiler check on the unrelated
+  // handleNextStudentConfirm callback, confirmed by toggling this block and
+  // re-running npx eslint (docs/loop/this-repo.md section 1's hook-extraction entry).
   const nextStudentCounts = computeNextStudentCounts(shots);
   const nextStudentCountsRef = useRef(nextStudentCounts);
   useEffect(() => {
@@ -514,12 +499,26 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     return () => el.removeEventListener("paste", handlePaste);
   }, [handleFiles]);
 
-  // U4/X6/N14 WAVE 1: THE keyboard binding, extracted into its own hook
-  // (Ruling N14-1/N14-4/N14-17) - see useSnapshotKeyboardShortcuts.ts for the
-  // guard order, the DOM reads, and the Alt+G chord (Ruling N14-8). This call
-  // is what the wiring canary in snapshot-grading.structure.test.ts asserts
-  // exists: without it, every bare binding (s/n/1-6) and the new chord die
-  // together, silently, with every other gate green.
+  // N14 WAVE 2: Alt+R capture/OCR/review/commit - useSnapshotRubricCapture.ts.
+  const {
+    notice: rubricCaptureNotice,
+    review: rubricCaptureReview,
+    captureAndTranscribe,
+    confirmReview: confirmRubricCapture,
+    cancelReview: cancelRubricCapture,
+    applyReviewedRubricText,
+  } = useSnapshotRubricCapture({
+    sharing,
+    captureFrame,
+    activeRef,
+    mountedRef,
+    announce,
+    setRubricText,
+    setPinnedRubricAreas,
+    seedConfirmedAreas,
+  });
+
+  // U4/X6/N14 WAVE 1-2: THE keyboard binding - see useSnapshotKeyboardShortcuts.ts.
   useSnapshotKeyboardShortcuts({
     activeRef,
     handleSnap,
@@ -528,6 +527,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     nextStudentButtonRef,
     nextStudentCountsRef,
     announce,
+    onCaptureRubric: captureAndTranscribe,
   });
 
   // D: THE READ PASS. Calls snapshotReadBatchAction ONCE PER BATCH from this
@@ -613,10 +613,9 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     announce("Finished reading the shots. You can review or edit the transcription below, or grade now.");
   }, [shots, announce]);
 
-  // N1 (item 6/AC-4): ONE action for the whole batch - applyRoleSuggestions
-  // resolves every pending suggestion in a single call (never a loop of
-  // per-shot calls), and pendingSuggestions is cleared immediately after so
-  // the suggestions box disappears once accepted.
+  // N1 (item 6/AC-4): ONE action for the whole batch - applyRoleSuggestions resolves
+  // every pending suggestion in a single call (never a loop of per-shot calls), and
+  // pendingSuggestions is cleared immediately after so the box disappears once accepted.
   const handleAcceptAllSuggestions = useCallback(() => {
     if (pendingSuggestions.length === 0) return;
     applyRoleSuggestions(pendingSuggestions);
@@ -720,6 +719,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         wireBytes={wireBytes}
         shareError={shareError}
         encodeNotice={encodeNotice}
+        rubricCaptureNotice={rubricCaptureNotice}
       />
 
       <SnapshotShotTray
@@ -798,8 +798,9 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       />
 
       <p className={styles.fieldHint}>
-        Reading and grading upload shots to Google&apos;s Gemini API (generativelanguage.googleapis.com) - the only two
-        moments anything leaves this machine. Nothing is sent until you press Read or Grade.
+        Reading, grading, and the Alt+R rubric-capture chord each upload to Google&apos;s Gemini API
+        (generativelanguage.googleapis.com) - the only three moments anything leaves this machine. Nothing is sent
+        until you press Read or Grade, or press Alt+R while sharing a screen.
       </p>
 
       <div className={styles.ghActions}>
@@ -900,24 +901,22 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
       {rubricModalOpen && (
         <RubricInputModal
           onSubmit={(text) => {
-            setRubricText(text);
-            // MAJOR-1(a) fix: the pinned-areas readout below is a stale
-            // answer about the PREVIOUS rubric text once a new one is
-            // submitted - clear it here the same way the Next-student path
-            // already does, so the instructor never sees a parse result
-            // that no longer describes what is in the box.
-            setPinnedRubricAreas(null);
-            // Ruling B35-1 (BINDING): the confirmed-areas list resets HERE,
-            // and ONLY here - a new rubric invalidates every prior
-            // confirmation. Passes the modal's own `text` argument, NOT the
-            // closure's `rubricText` (which is not updated synchronously at
-            // this point - Ruling B35-19): seeding from the stale closure
-            // value would parse the PREVIOUS rubric again.
-            void seedConfirmedAreas(text);
+            // Ruling N14-10: the ONE producer, HERE and only here (useSnapshotRubricCapture.ts).
+            applyReviewedRubricText(text);
             setRubricModalOpen(false);
           }}
           onClose={() => setRubricModalOpen(false)}
           restoreFocusRef={rubricButtonRef}
+        />
+      )}
+
+      {rubricCaptureReview && (
+        <SnapshotRubricCaptureReview
+          base64={rubricCaptureReview.base64}
+          transcript={rubricCaptureReview.transcript}
+          onConfirm={confirmRubricCapture}
+          onCancel={cancelRubricCapture}
+          restoreFocusRef={rootRef}
         />
       )}
     </div>

@@ -73,6 +73,28 @@ describe("matchSnapshotKeyEvent - the Alt+G chord (Ruling N14-8, N14 WAVE 1)", (
   });
 });
 
+describe("matchSnapshotKeyEvent - the Alt+R chord (Ruling N14-8, N14 WAVE 2)", () => {
+  it("alt+r captures the rubric", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "r", altKey: true }))).toEqual({ type: "capture-rubric" });
+  });
+
+  it("ctrl+alt+r (AltGr on a non-US layout) matches nothing - exclusive Alt only", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "r", altKey: true, ctrlKey: true }))).toEqual({ type: "none" });
+  });
+
+  it("meta+alt+r matches nothing - exclusive Alt only", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "r", altKey: true, metaKey: true }))).toEqual({ type: "none" });
+  });
+
+  it("a repeating alt+r matches nothing (Ruling N14-7 still applies to chords)", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "r", altKey: true, repeat: true }))).toEqual({ type: "none" });
+  });
+
+  it("bare r (no modifier) matches nothing - r is never a bare binding, only the Alt+R chord", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "r" }))).toEqual({ type: "none" });
+  });
+});
+
 describe("matchSnapshotKeyEvent - the modifier defect fix", () => {
   it("ctrl+s matches nothing", () => {
     expect(matchSnapshotKeyEvent(key({ key: "s", ctrlKey: true }))).toEqual({ type: "none" });
@@ -92,6 +114,10 @@ describe("matchSnapshotKeyEvent - the modifier defect fix", () => {
 
   it("alt+n matches nothing", () => {
     expect(matchSnapshotKeyEvent(key({ key: "n", altKey: true }))).toEqual({ type: "none" });
+  });
+
+  it("alt+s matches nothing - Alt+S was struck (scratchpad/n14-architecture.md section 0); bare s stays the only snap binding", () => {
+    expect(matchSnapshotKeyEvent(key({ key: "s", altKey: true }))).toEqual({ type: "none" });
   });
 
   it("shift alone does not block a bare binding (deliberate, see snapshot-keys.ts comment)", () => {

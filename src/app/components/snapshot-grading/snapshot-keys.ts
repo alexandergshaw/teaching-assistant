@@ -1,8 +1,8 @@
-// Snapshot grading (docs/snapshot-grading-acceptance-criteria.md), N14 WAVE 0:
-// the keyboard layer's pure leaf. No React, no hooks, no `document`, no DOM
-// types - vitest here is node-env and renders nothing, so every behaviour
-// that needs a unit test lives here, matching this directory's own
-// snapshot-shot.ts precedent.
+// Snapshot grading (docs/snapshot-grading-acceptance-criteria.md), N14 WAVE 0
+// (extended N14 WAVE 1/2): the keyboard layer's pure leaf. No React, no
+// hooks, no `document`, no DOM types - vitest here is node-env and renders
+// nothing, so every behaviour that needs a unit test lives here, matching
+// this directory's own snapshot-shot.ts precedent.
 //
 // THE SPLIT (be honest about it, per Ruling N14-4): three of the panel's
 // guards are inherently DOM-shaped - activeRef.current (a ref), whether the
@@ -63,16 +63,16 @@ export function isSnapshotShortcutEligible({
 
 // ---------------------------------------------------------------------------
 // The matcher - what a (guard-eligible) keystroke means. Bare "s", bare "n",
-// bare "1"-"6", and (N14 WAVE 1) the Alt+G chord, which arms Next Student the
-// same way bare "n" does. Alt+R ("capture-rubric") is N14 WAVE 2 and does not
-// exist yet - see snapshot-keys.ts's own N14 wave-1 comment below for why
-// this file does not forward-reference it.
+// bare "1"-"6", the Alt+G chord (N14 WAVE 1, arms Next Student the same way
+// bare "n" does), and the Alt+R chord (N14 WAVE 2, "capture-rubric" - see
+// useSnapshotRubricCapture.ts for what consumes this match type).
 // ---------------------------------------------------------------------------
 
 export type SnapshotKeyMatch =
   | { type: "snap" }
   | { type: "arm-next-student" }
   | { type: "arm-role"; role: SnapshotRole }
+  | { type: "capture-rubric" }
   | { type: "none" };
 
 /**
@@ -137,9 +137,13 @@ export function matchSnapshotKeyEvent(event: SnapshotKeyLike): SnapshotKeyMatch 
   const exclusiveAlt = event.altKey && !event.ctrlKey && !event.metaKey;
   if (exclusiveAlt) {
     if (key === "g") return { type: "arm-next-student" };
-    // Every other exclusive-Alt key - including s/n/1-6, and r (not yet
-    // bound; N14 WAVE 2 adds it) - stays blocked, matching the bare
-    // bindings' own "no reserved-modifier chord" rule.
+    if (key === "r") return { type: "capture-rubric" };
+    // Every other exclusive-Alt key - including s/n/1-6 - stays blocked,
+    // matching the bare bindings' own "no reserved-modifier chord" rule.
+    // Alt+S was considered and struck (scratchpad/n14-architecture.md
+    // section 0): it removed zero hand-transitions over bare "s" and
+    // collided with a browser mnemonic, so bare "s" stays the only snap
+    // binding.
     return NO_MATCH;
   }
 

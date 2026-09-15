@@ -153,6 +153,19 @@ feature is honest. Offer it; do not make it mandatory.
 State this on screen - an instructor photographing an unreleased exam should
 know when it leaves the machine.
 
+**AMENDED (Ruling N14-13, N14 Wave 2):** the sentence above was true when
+written and is false the moment Alt+R ships - the screen-capture rubric chord
+sends a captured frame to Google's Gemini API on a keypress, a THIRD egress
+path alongside Read and Grade, not gated on either button. Ruling N14-13
+relocates the consent act to the chord itself (a deliberate, left-hand
+keypress aimed at exactly this purpose, while sharing a screen, reviewed
+before it can become the rubric - see `SnapshotRubricCaptureReview.tsx`) and
+requires the on-screen disclosure to name all three sending paths rather than
+"Grade" alone. The two shipped sentences: `SnapshotCaptureBar.tsx:58-62` and
+`SnapshotGradingPanel.tsx:800-804`, both worded "...the only three moments
+anything leaves this machine. Nothing is sent until you press Read or Grade,
+or press Alt+R while sharing a screen."
+
 ---
 
 ## 3. Grading

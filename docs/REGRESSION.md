@@ -43450,3 +43450,56 @@ exception:
 Alt+R ("capture-rubric") does not exist yet; this entry will be AMENDED (not
 superseded) by N14 Wave 2 to extend item 1's description to `r` once that
 chord lands.
+
+### AMENDMENT (N14 Wave 2, Ruling N14-16): item 1 now extends to `r`
+
+Alt+R now exists and is bound. Item 1 above is amended in place (not
+superseded, per Ruling N14-16 - the wave whose diff makes a statement false
+is the wave that fixes it): **Alt+G AND Alt+R (both exclusive Alt only -
+`altKey && !ctrlKey && !metaKey`) now match a chord**; Alt+G still arms Next
+Student, and Alt+R now returns `{type: "capture-rubric"}`, consumed by
+`useSnapshotRubricCapture.ts`'s `captureAndTranscribe`. Every other key held
+with exclusive Alt, including `s`, `n`, and `1`-`6`, still matches nothing -
+Alt+S was considered and struck before this wave (scratchpad/
+n14-architecture.md section 0: it removed zero hand-transitions over bare
+`s` and collided with a browser mnemonic), so bare `s` remains the only snap
+binding. AltGr (Ctrl+Alt) still matches nothing for either chord, by name,
+asserted in `snapshot-keys.test.ts`'s new "Alt+R chord" describe block. The
+key-repeat guard (entry 425 item 2) applies to Alt+R exactly as it does to
+every other binding.
+
+## 427. N14 Wave 2: Alt+R sends a frame to Google's Gemini API on a keypress -
+two disclosure sentences, and one acceptance-criteria document, amended
+
+Ruling N14-13: the Alt+R chord is a THIRD egress path (alongside Read and
+Grade), and it fires on a keypress while sharing a screen - not on a button
+press the instructor can see coming from the same paragraph that describes
+it. Two independent on-screen sentences claimed "the only two moments
+anything leaves this machine" before this wave, and both became false the
+moment Alt+R shipped:
+
+1. `SnapshotCaptureBar.tsx`'s disclosure paragraph (previously at `:52-56`)
+   - rewritten to name Read, Grade, and Alt+R as the three egress paths.
+2. `SnapshotGradingPanel.tsx`'s own, separately-worded disclosure paragraph
+   (previously at `:823-826`, first flagged as an uncited second instance of
+   the same defect by the architecture pass, n14-architecture.md section 6)
+   - rewritten the same way, in the same wave, so the shipped UI does not
+   contain one fixed and one still-false claim.
+3. `docs/snapshot-grading-acceptance-criteria.md`'s A2d (`:152`, "Nothing is
+   uploaded until Grade is pressed... State this on screen") carried the
+   identical now-false claim in document form. Amended in this wave, in the
+   same pass as the two on-screen rewrites, so the document and the two
+   screens it governs agree again.
+
+THE CONSENT MODEL (Ruling N14-13, same reasoning as Ruling N15-1 for the
+upload surfaces): the Alt+R keypress itself is the consent act - a
+deliberate, left-hand chord aimed at exactly this purpose - and the busy
+notice plus the review surface's own copy (`SnapshotRubricCaptureReview.tsx`)
+state where the image goes at the point of use, so the instructor is never
+told only after the fact.
+
+Covered by: `snapshot-grading.structure.test.ts`'s new "captured image is
+actually shown" assertion (a different property, Ruling N14-11) and by
+reading - no test in this repo renders a component, so the disclosure
+sentences' actual on-screen wording is a reading claim, per
+docs/loop/this-repo.md section 6.

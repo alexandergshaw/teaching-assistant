@@ -114,7 +114,7 @@ describe('"snapgrade" is a member of the RecordingLaunchView union AND the RECOR
 // snapshotReadBatchAction nor snapshotGradeAction is called from inside one.
 // ---------------------------------------------------------------------------
 
-describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY from a click handler", () => {
+describe("no auto-drain effect (A7c): the read/grade/OCR actions are reachable ONLY from a click handler or a chord", () => {
   const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
   const panelSource = fs.readFileSync(panelPath, "utf-8");
   // Backlog 3.5's line-budget extraction (Ruling B35-9, amended) moved
@@ -124,6 +124,23 @@ describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY 
   // red the moment the extraction happened.
   const hookPath = path.join(SNAPSHOT_GRADING_DIR, "useSnapshotGrade.ts");
   const hookSource = fs.readFileSync(hookPath, "utf-8");
+  // N14 WAVE 2 (Ruling N14-15/n14-architecture.md section 7): this plan moved
+  // the keydown dispatch into useSnapshotKeyboardShortcuts.ts and the new OCR
+  // call into useSnapshotRubricCapture.ts - a construction-based rewrite that
+  // kept scanning only the two hardcoded paths above would be blind to a
+  // useEffect in either new file. Generalized below to every non-test
+  // .ts/.tsx file in this directory, so a future file needs no fifth name.
+  const allNonTestFiles = fs
+    .readdirSync(SNAPSHOT_GRADING_DIR)
+    .filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
+  const allSources = allNonTestFiles.map((f) => ({
+    file: f,
+    source: fs.readFileSync(path.join(SNAPSHOT_GRADING_DIR, f), "utf-8"),
+  }));
+  const rubricCaptureHookSource = fs.readFileSync(
+    path.join(SNAPSHOT_GRADING_DIR, "useSnapshotRubricCapture.ts"),
+    "utf-8"
+  );
 
   function extractEffectBodies(source: string): string[] {
     const bodies: string[] = [];
@@ -177,6 +194,40 @@ describe("no auto-drain effect (A7c): the read/grade actions are reachable ONLY 
   it("handleRead and handleGrade are wired to onClick, not to a dependency-array effect", () => {
     expect(panelSource).toMatch(/onClick=\{\(\)\s*=>\s*void handleRead\(\)\}/);
     expect(panelSource).toMatch(/onClick=\{\(\)\s*=>\s*void handleGrade\(\)\}/);
+  });
+
+  // N14 WAVE 2 (Ruling N14-15): the OCR call is a NEW dedicated action
+  // (snapshotTranscribeRubricAction), reachable only through Alt+R's
+  // captureAndTranscribe, never a useEffect.
+  it("calls snapshotTranscribeRubricAction somewhere in the rubric-capture hook - a check that it is called nowhere proves nothing", () => {
+    expect(stripComments(rubricCaptureHookSource)).toMatch(/snapshotTranscribeRubricAction\(/);
+  });
+
+  it("the rubric-capture hook contains no useEffect at all - snapshotTranscribeRubricAction is reachable only through captureAndTranscribe, never auto-fired", () => {
+    expect(rubricCaptureHookSource).not.toMatch(/useEffect\(/);
+  });
+
+  it("BY CONSTRUCTION: no useEffect block in ANY non-test file in this directory calls snapshotReadBatchAction, snapshotGradeAction, or snapshotTranscribeRubricAction - generalized so a future file cannot pass this by not being on a hardcoded list (Ruling N14-15)", () => {
+    for (const { file, source } of allSources) {
+      const effectBodies = extractEffectBodies(source);
+      for (const body of effectBodies) {
+        expect(body, `${file} has a useEffect calling snapshotReadBatchAction`).not.toMatch(/snapshotReadBatchAction\(/);
+        expect(body, `${file} has a useEffect calling snapshotGradeAction`).not.toMatch(/snapshotGradeAction\(/);
+        expect(body, `${file} has a useEffect calling snapshotTranscribeRubricAction`).not.toMatch(
+          /snapshotTranscribeRubricAction\(/
+        );
+      }
+    }
+  });
+
+  it("useSnapshotKeyboardShortcuts.ts's own keydown effect never calls an action directly - only through the callback parameters it receives (captureAndTranscribe is passed in as onCaptureRubric, never imported)", () => {
+    const keyboardHookSource = fs.readFileSync(
+      path.join(SNAPSHOT_GRADING_DIR, "useSnapshotKeyboardShortcuts.ts"),
+      "utf-8"
+    );
+    expect(stripComments(keyboardHookSource)).not.toMatch(/snapshotReadBatchAction\(/);
+    expect(stripComments(keyboardHookSource)).not.toMatch(/snapshotGradeAction\(/);
+    expect(stripComments(keyboardHookSource)).not.toMatch(/snapshotTranscribeRubricAction\(/);
   });
 });
 
@@ -328,22 +379,68 @@ describe("seedConfirmedAreas's staleness guard, split at the await (Ruling B35-1
 });
 
 // ---------------------------------------------------------------------------
-// Backlog 3.5 (Ruling B35-1). The confirmed-areas list resets EXACTLY at the
-// rubric-replace onSubmit site, and deliberately SURVIVES Next student.
+// Backlog 3.5 / N14 WAVE 2 (Ruling B35-1, amended per Ruling N14-10). The
+// confirmed-areas list resets EXACTLY inside applyReviewedRubricText (the
+// ONE producer both the rubric-replace modal and the Alt+R review call), and
+// deliberately SURVIVES Next student.
+//
+// THE CONSTRUCTION (Ruling N14-10): the old version of this test sliced the
+// modal's own onSubmit body and regex-matched two of the three obligations
+// there - a slice-based check a SECOND producer elsewhere in the directory
+// would never touch, so it would pass while being covered by nothing. The
+// rewrite instead (1) locates applyReviewedRubricText's OWN body and asserts
+// all three identifiers appear inside it, and (2) asserts setRubricText( has
+// EXACTLY ONE call site across this directory's combined non-test source,
+// and that its one occurrence falls inside applyReviewedRubricText's body -
+// an assertion a third producer, anywhere in this directory, cannot pass by
+// merely not being on a list.
 // ---------------------------------------------------------------------------
 
-describe("confirmedRubricAreas resets ONLY at the rubric-replace onSubmit site (Ruling B35-1)", () => {
+describe("confirmedRubricAreas resets ONLY inside applyReviewedRubricText, the one producer (Ruling B35-1/N14-10)", () => {
   const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
   const panelSource = fs.readFileSync(panelPath, "utf-8");
+  const hookPath = path.join(SNAPSHOT_GRADING_DIR, "useSnapshotRubricCapture.ts");
+  const hookSource = fs.readFileSync(hookPath, "utf-8");
 
-  it("the rubric-replace onSubmit body contains BOTH setPinnedRubricAreas(null) and a seedConfirmedAreas( call", () => {
+  const producerStart = hookSource.indexOf("const applyReviewedRubricText = useCallback(");
+  const producerEnd = hookSource.indexOf("[setRubricText, setPinnedRubricAreas, seedConfirmedAreas]", producerStart);
+  const producerBody = producerStart > -1 && producerEnd > -1 ? hookSource.slice(producerStart, producerEnd) : "";
+
+  it("finds applyReviewedRubricText's own body - a check over an empty string proves nothing", () => {
+    expect(producerStart).toBeGreaterThan(-1);
+    expect(producerEnd).toBeGreaterThan(producerStart);
+    expect(producerBody.length).toBeGreaterThan(0);
+  });
+
+  it("applyReviewedRubricText's body contains all three obligations: setRubricText(, setPinnedRubricAreas(, seedConfirmedAreas(", () => {
+    expect(producerBody).toMatch(/setRubricText\(/);
+    expect(producerBody).toMatch(/setPinnedRubricAreas\(/);
+    expect(producerBody).toMatch(/seedConfirmedAreas\(/);
+  });
+
+  it("setRubricText( has exactly ONE call site across this directory's combined non-test source, and it is inside applyReviewedRubricText - a third producer cannot pass this", () => {
+    const files = fs.readdirSync(SNAPSHOT_GRADING_DIR).filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
+    const combined = files.map((f) => fs.readFileSync(path.join(SNAPSHOT_GRADING_DIR, f), "utf-8")).join("\n");
+    const stripped = stripComments(combined);
+    const callSites = stripped.match(/setRubricText\(/g) ?? [];
+    // Exactly two textual occurrences are expected: the useState declaration
+    // itself ("setRubricText") appears once as a plain identifier (no call
+    // parens) and is not matched by this regex at all; the only CALL is
+    // inside applyReviewedRubricText.
+    expect(callSites.length).toBe(1);
+    expect(stripComments(producerBody)).toMatch(/setRubricText\(/);
+  });
+
+  it("the rubric-replace onSubmit body calls applyReviewedRubricText, never the three obligations directly", () => {
     const start = panelSource.indexOf("onSubmit={(text) => {");
     const end = panelSource.indexOf("setRubricModalOpen(false);", start);
     expect(start, "expected to find the rubric-replace onSubmit body").toBeGreaterThan(-1);
     expect(end, "expected to find its own setRubricModalOpen(false) close").toBeGreaterThan(start);
     const body = panelSource.slice(start, end);
-    expect(body).toMatch(/setPinnedRubricAreas\(null\)/);
-    expect(body).toMatch(/seedConfirmedAreas\(/);
+    expect(body).toMatch(/applyReviewedRubricText\(/);
+    expect(body).not.toMatch(/setRubricText\(/);
+    expect(body).not.toMatch(/setPinnedRubricAreas\(/);
+    expect(body).not.toMatch(/seedConfirmedAreas\(/);
   });
 
   it("handleNextStudentConfirm's body contains NEITHER setConfirmedRubricAreas nor setConfirmedRubricAreasError - the confirmed list survives Next student", () => {
@@ -419,7 +516,7 @@ describe("N14 wave 1: SnapshotGradingPanel is actually wired to useSnapshotKeybo
 // fail this test rather than silently drift from the on-screen hint.
 // ---------------------------------------------------------------------------
 
-describe("N14 wave 1: SnapshotCaptureBar's keyboard hint is rewritten, not appended to (Ruling N14-16)", () => {
+describe("N14 wave 1/2: SnapshotCaptureBar's keyboard hint is rewritten, not appended to (Ruling N14-16)", () => {
   const barPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotCaptureBar.tsx");
   const barSource = fs.readFileSync(barPath, "utf-8");
 
@@ -440,6 +537,64 @@ describe("N14 wave 1: SnapshotCaptureBar's keyboard hint is rewritten, not appen
   it("Alt+G is documented as arming Next Student, with its own exclusive-Alt qualifier separate from the bare keys' clause", () => {
     expect(barSource).toMatch(/Alt\+G also arms\s+Next Student/);
     expect(barSource).toMatch(/Alt alone, not Ctrl\+Alt \(AltGr\) or Cmd\/Win/);
+  });
+
+  // N14 WAVE 2 (Ruling N14-16, extended - not a second, competing test).
+  it("Alt+R is documented as capturing/transcribing/reviewing the rubric, with its own exclusive-Alt qualifier", () => {
+    expect(barSource).toMatch(/Alt\+R captures/);
+    // Both chords state the SAME exclusivity qualifier text; two occurrences
+    // are expected once Alt+R's own clause exists.
+    const qualifierMatches = barSource.match(/Alt alone, not Ctrl\+Alt \(AltGr\) or Cmd\/Win/g) ?? [];
+    expect(qualifierMatches.length).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N14 WAVE 2 (Rulings N14-14.4/N14-17). "First in DOM order" is necessary,
+// NOT sufficient - orderTabbables (modalFocus.ts:94-99) filters disabled/
+// hidden elements out and sorts a positive tabIndex ahead of natural order
+// BEFORE DOM order is even consulted, so a Confirm rendered first still
+// loses first-tabbable if it is disabled, or if some other element carries a
+// stray positive tabIndex. All three checks read the same file.
+// ---------------------------------------------------------------------------
+
+describe("SnapshotRubricCaptureReview.tsx: Confirm is first in DOM order AND cannot lose first-tabbable to a disabled/positive-tabIndex element (Ruling N14-17)", () => {
+  const reviewPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotRubricCaptureReview.tsx");
+  const reviewSource = fs.readFileSync(reviewPath, "utf-8");
+
+  it("Confirm's own button text appears textually BEFORE any other button-shaped element in this file's JSX", () => {
+    const confirmIndex = reviewSource.indexOf("Confirm - use this transcript as the rubric");
+    expect(confirmIndex, "expected to find the Confirm button's own text").toBeGreaterThan(-1);
+    const firstButtonTagIndex = reviewSource.indexOf("<Button");
+    expect(firstButtonTagIndex, "expected to find at least one <Button").toBeGreaterThan(-1);
+    // The Confirm button's own <Button ...> opening tag must be that FIRST
+    // <Button occurrence - not merely that its text appears somewhere before
+    // some other button's text, which a differently-ordered JSX could still
+    // satisfy by accident.
+    const confirmButtonTagIndex = reviewSource.lastIndexOf("<Button", confirmIndex);
+    expect(confirmButtonTagIndex).toBe(firstButtonTagIndex);
+  });
+
+  it("the Confirm button carries no disabled or loading prop, anywhere in this file - Criterion 3 point 5 requires review even of a blank transcript", () => {
+    const confirmStart = reviewSource.indexOf("<Button variant=\"contained\"");
+    const confirmEnd = reviewSource.indexOf("</Button>", confirmStart);
+    expect(confirmStart, "expected to find the Confirm button's own opening tag").toBeGreaterThan(-1);
+    expect(confirmEnd).toBeGreaterThan(confirmStart);
+    const confirmMarkup = reviewSource.slice(confirmStart, confirmEnd);
+    expect(confirmMarkup).not.toMatch(/\bdisabled=/);
+    expect(confirmMarkup).not.toMatch(/\bloading=/);
+  });
+
+  it("no element anywhere in this file carries a positive tabIndex - only 0 or -1 (natural order / non-tabbable), matching ModalShell.tsx's own convention", () => {
+    const tabIndexValues = [...reviewSource.matchAll(/tabIndex=\{(-?\d+)\}/g)].map((m) => Number(m[1]));
+    for (const value of tabIndexValues) {
+      expect([0, -1]).toContain(value);
+    }
+  });
+
+  it("the captured image is actually shown (Ruling N14-11) - a review surface with no image to check the transcript against is silent loss", () => {
+    expect(reviewSource).toMatch(/<img\b/);
+    expect(reviewSource).toMatch(/data:image\/jpeg;base64,\$\{base64\}/);
   });
 });
 

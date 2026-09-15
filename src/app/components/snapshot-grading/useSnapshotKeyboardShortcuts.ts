@@ -49,6 +49,11 @@ export interface UseSnapshotKeyboardShortcutsParams {
    */
   nextStudentCountsRef: MutableRefObject<NextStudentCounts>;
   announce: (message: string) => void;
+  /** N14 WAVE 2: the Alt+R chord's own handler
+   *  (useSnapshotRubricCapture.ts's captureAndTranscribe) - never called
+   *  directly from here except through this parameter, matching every other
+   *  branch's own indirection through the panel's setters/callbacks. */
+  onCaptureRubric: () => void;
 }
 
 /**
@@ -70,6 +75,7 @@ export function useSnapshotKeyboardShortcuts({
   nextStudentButtonRef,
   nextStudentCountsRef,
   announce,
+  onCaptureRubric,
 }: UseSnapshotKeyboardShortcutsParams): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -106,6 +112,10 @@ export function useSnapshotKeyboardShortcuts({
       if (match.type === "arm-role") {
         setArmedRole(match.role);
         announce(`Armed ${match.role}.`);
+        return;
+      }
+      if (match.type === "capture-rubric") {
+        onCaptureRubric();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -118,5 +128,6 @@ export function useSnapshotKeyboardShortcuts({
     nextStudentButtonRef,
     nextStudentCountsRef,
     announce,
+    onCaptureRubric,
   ]);
 }

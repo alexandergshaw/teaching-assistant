@@ -10,6 +10,7 @@ import Button from "@mui/material/Button";
 import { formatMB } from "@/lib/upload-budget";
 import SegmentedToggle from "../ui/SegmentedToggle";
 import { SNAPSHOT_ROLES, SNAPSHOT_ROLE_LABELS, MAX_SHOTS, type SnapshotRole } from "./snapshot-shot";
+import type { RubricCaptureNotice } from "./useSnapshotRubricCapture";
 import controls from "../recording/RecordingControls.module.css";
 import bar from "./SnapshotGrading.module.css";
 
@@ -25,6 +26,10 @@ export interface SnapshotCaptureBarProps {
   wireBytes: number;
   shareError: string | null;
   encodeNotice: string | null;
+  /** N14 WAVE 2: the Alt+R chord's busy/failure notice, rendered here rather
+   *  than inlined in the panel (a line-budget win found in the reuse survey,
+   *  n14-architecture.md section 8) - same pattern as encodeNotice above. */
+  rubricCaptureNotice: RubricCaptureNotice;
 }
 
 export default function SnapshotCaptureBar({
@@ -39,6 +44,7 @@ export default function SnapshotCaptureBar({
   wireBytes,
   shareError,
   encodeNotice,
+  rubricCaptureNotice,
 }: SnapshotCaptureBarProps) {
   const atCapacity = shotCount >= MAX_SHOTS;
   const options = SNAPSHOT_ROLES.map((role) => ({
@@ -50,9 +56,9 @@ export default function SnapshotCaptureBar({
   return (
     <div className={bar.captureBar}>
       <p className={bar.disclosure}>
-        Nothing here leaves this device until you press Read or Grade - both send shots to Google&apos;s
-        Gemini API. Reloading clears the shots in the tray, but completed assessments are kept and shown
-        again after a reload.
+        Nothing here leaves this device until you press Read or Grade, or press Alt+R while sharing a screen -
+        those are the only three moments anything is sent to Google&apos;s Gemini API. Reloading clears the shots
+        in the tray, but completed assessments are kept and shown again after a reload.
       </p>
 
       {shareError && (
@@ -63,6 +69,15 @@ export default function SnapshotCaptureBar({
       {encodeNotice && (
         <p role="status" aria-live="polite" className={`${controls.notice} ${controls.noticeWarning}`}>
           {encodeNotice}
+        </p>
+      )}
+      {rubricCaptureNotice && (
+        <p
+          role={rubricCaptureNotice.kind === "failure" ? "alert" : "status"}
+          aria-live="polite"
+          className={`${controls.notice} ${rubricCaptureNotice.kind === "failure" ? controls.noticeDanger : controls.noticeWarning}`}
+        >
+          {rubricCaptureNotice.message}
         </p>
       )}
 
@@ -94,14 +109,18 @@ export default function SnapshotCaptureBar({
         )}
       </div>
 
-      {/* N14 WAVE 1 (Ruling N14-16): rewritten, not appended to - the old
+      {/* N14 WAVE 1/2 (Ruling N14-16): rewritten, not appended to - the old
           wording applied its "no modifier" qualifier to the whole list, which
           would read false the instant a chord existed. The bare keys keep
-          their own qualifier; Alt+G gets its own, separate one. */}
+          their own qualifier; each chord gets its own, separate one. Alt+S
+          was considered and struck (n14-architecture.md section 0) - bare
+          "s" stays the only snap binding. */}
       <p className={bar.keyHint}>
         Keyboard: S to snap, N for next student, 1-6 to arm a role (Assignment, Rubric, Post,
         Replies, Submission, Other) - none of these take Ctrl, Alt, or Cmd/Win. Alt+G also arms
-        Next Student (Space confirms) - Alt alone, not Ctrl+Alt (AltGr) or Cmd/Win.
+        Next Student (Space confirms) - Alt alone, not Ctrl+Alt (AltGr) or Cmd/Win. Alt+R captures
+        the shared screen, transcribes it, and opens it for review before it can become the rubric
+        - also Alt alone, not Ctrl+Alt (AltGr) or Cmd/Win.
       </p>
 
       <p aria-live="polite" role="status" className={bar.wireFigure}>

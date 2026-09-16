@@ -18,10 +18,41 @@
 // misrepresent what the field means everywhere else it is read.
 export type BacklogState = "actionable" | "owner" | "verification" | "unscoped";
 
+// `kind` is the render's top-level axis (plan-v2.md "KIND is the top-level
+// axis, not state"). It is REQUIRED - there is no null/"unclassified" value.
+// An earlier draft made it nullable so an agent would never have to guess
+// the row that is both a live defect and an open owner question; the owner
+// answered that directly instead of leaving it to guesswork: a row that is
+// BOTH a live defect and an open owner question reads as `kind: "bug"`
+// (owner ruling, 2026-09-15). With the human answer in hand, a nullable
+// field would just be dead capability plus an always-empty section, so
+// `kind` takes exactly one of the three values below on every row.
+export type BacklogKind = "bug" | "feature" | "chore";
+
+export const BACKLOG_KINDS: readonly BacklogKind[] = ["bug", "feature", "chore"];
+
+export function isBacklogKind(value: string): value is BacklogKind {
+  return (BACKLOG_KINDS as readonly string[]).includes(value);
+}
+
 export interface BacklogItem {
   /** Globally unique, namespaced (Ruling BA-4 / Blocker B3). Never a bare number. */
   id: string;
   state: BacklogState;
+  /** Bug, feature, or chore - the render's top-level axis. See BacklogKind's own comment for the owner ruling on the both-a-defect-and-an-open-question case. */
+  kind: BacklogKind;
+  /**
+   * A registry slug from src/tools/backlog/areas.ts, never free text. The
+   * registry is the single edit point for the cluster list AND its render
+   * order (plan-v2.md "GROUP ORDER is the registry array's own order",
+   * carried forward under the new name); a free-text area would let a typo
+   * silently mint a new singleton cluster, so yaml-codec.ts throws on any
+   * slug the registry does not recognise. Named "area", not "group":
+   * docs/DEV_LOOP.md already uses "backlog group" for a PUSH AND REGRESSION
+   * UNIT, a different thing than this topical tag - reusing the word would
+   * make a future reader conflate the two.
+   */
+  area: string;
   /** What is owed, in the author's own words. */
   title: string;
   /** File globs: files edited PLUS the tests asserting the changed behaviour. */

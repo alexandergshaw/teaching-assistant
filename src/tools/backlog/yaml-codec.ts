@@ -18,10 +18,11 @@
 // grammar below - one key: value pair per line - stays unambiguous. Long
 // free text is joined with spaces during migration rather than wrapped.
 
-import type { BacklogItem, BacklogState } from "./types";
-import { isBacklogState } from "./types";
+import type { BacklogItem, BacklogState, BacklogKind } from "./types";
+import { isBacklogState, isBacklogKind } from "./types";
+import { isBacklogArea } from "./areas";
 
-type StringKey = "id" | "state" | "title" | "verify" | "instrument" | "from" | "note";
+type StringKey = "id" | "state" | "kind" | "area" | "title" | "verify" | "instrument" | "from" | "note";
 type ArrayKey = "owns" | "blocked_by";
 
 function escapeScalar(value: string): string {
@@ -95,6 +96,8 @@ export function serializeBacklogYaml(items: BacklogItem[]): string {
   for (const item of items) {
     lines.push(`- id: ${escapeScalar(item.id)}`);
     lines.push(`  state: ${escapeScalar(item.state)}`);
+    lines.push(`  kind: ${escapeScalar(item.kind)}`);
+    lines.push(`  area: ${escapeScalar(item.area)}`);
     lines.push(`  title: ${escapeScalar(item.title)}`);
     lines.push(`  owns: ${serializeArray(item.owns)}`);
     lines.push(`  verify: ${item.verify === null ? "null" : escapeScalar(item.verify)}`);
@@ -159,9 +162,21 @@ export function parseBacklogYaml(text: string): BacklogItem[] {
       throw new Error(`yaml-codec: item ${id} has an unknown state "${stateRaw}"`);
     }
 
+    const kindRaw = get("kind");
+    if (!isBacklogKind(kindRaw)) {
+      throw new Error(`yaml-codec: item ${id} has an unknown kind "${kindRaw}"`);
+    }
+
+    const areaRaw = get("area");
+    if (!isBacklogArea(areaRaw)) {
+      throw new Error(`yaml-codec: item ${id} has an unregistered area "${areaRaw}" - add it to src/tools/backlog/areas.ts first`);
+    }
+
     items.push({
       id,
       state: stateRaw as BacklogState,
+      kind: kindRaw as BacklogKind,
+      area: areaRaw,
       title: get("title"),
       owns: getArray("owns"),
       verify,

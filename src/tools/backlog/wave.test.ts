@@ -6,6 +6,8 @@ function item(overrides: Partial<BacklogItem> = {}): BacklogItem {
   return {
     id: "X1",
     state: "actionable",
+    kind: "chore",
+    area: "loop-and-docs-maintenance",
     title: "t",
     owns: ["src/x.ts"],
     verify: "cmd",

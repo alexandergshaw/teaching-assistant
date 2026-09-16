@@ -7,6 +7,8 @@ import type { BacklogItem } from "./types";
 const scopedItem: BacklogItem = {
   id: "A1",
   state: "actionable",
+  kind: "chore",
+  area: "loop-and-docs-maintenance",
   title: "Do the thing",
   owns: ["src/a.ts"],
   verify: "npx vitest run src/a.test.ts",

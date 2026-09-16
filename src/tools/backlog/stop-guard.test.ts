@@ -6,6 +6,8 @@ function item(over: Partial<BacklogItem> & { id: string }): BacklogItem {
   return {
     id: over.id,
     state: over.state ?? "actionable",
+    kind: over.kind ?? "chore",
+    area: over.area ?? "loop-and-docs-maintenance",
     title: over.title ?? "t",
     owns: over.owns ?? ["src/x.ts"],
     verify: over.verify ?? "npx vitest run src/x.test.ts",

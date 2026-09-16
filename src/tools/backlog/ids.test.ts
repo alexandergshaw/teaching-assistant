@@ -6,6 +6,8 @@ function item(id: string): BacklogItem {
   return {
     id,
     state: "unscoped",
+    kind: "chore",
+    area: "loop-and-docs-maintenance",
     title: "t",
     owns: [],
     verify: null,

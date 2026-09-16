@@ -1,28 +1,47 @@
 // Generates docs/BACKLOG.md from a list of BacklogItem. Deterministic: the
 // same items array, regardless of input order, produces byte-identical
 // output - check-generated.ts's whole safety rests on that (Ruling BA-6).
+//
+// KIND is the top-level axis here, not state (plan-v2.md "KIND is the
+// top-level axis, not state"): three fixed sections, "## Bugs",
+// "## Features", "## Chores", bugs first, always all three present even when
+// empty. `state` moved from a section heading to a table COLUMN; the state
+// legend that used to live in each section's own description now lives once
+// in the header, below, so no information is lost.
+//
+// AREA is a column too, not a `####` heading per cluster - a heading per
+// area would force the table header to repeat once per cluster (the
+// registry has 11 areas, several with many rows, against rows whose `note`
+// runs long), so clustering is done by ADJACENCY plus a visible,
+// human-labelled column instead. Rows sort by (area's registry position,
+// then id), so the registry array in areas.ts - not alphabetical order -
+// decides adjacency; see areas.ts's own header for why.
+//
+// Field named "area", not "group": docs/DEV_LOOP.md:145-147 already uses
+// "backlog group" for a PUSH AND REGRESSION UNIT, a different thing than
+// this topical tag - reusing "group" would make a future reader mistake a
+// topical cluster for a push unit.
 
-import type { BacklogItem, BacklogState } from "./types";
+import type { BacklogItem, BacklogKind, BacklogState } from "./types";
+import { BACKLOG_KINDS } from "./types";
+import { areaLabel, areaIndex } from "./areas";
 
-const SECTION_ORDER: BacklogState[] = ["actionable", "owner", "verification", "unscoped"];
+const KIND_HEADING: Record<BacklogKind, string> = {
+  bug: "Bugs",
+  feature: "Features",
+  chore: "Chores",
+};
 
-const SECTION_META: Record<BacklogState, { heading: string; description: string }> = {
-  actionable: {
-    heading: "Actionable",
-    description: "Worked by an agent. Leaves this section when `verify` exits 0 and actually runs at least one assertion (Ruling BA-2).",
-  },
-  owner: {
-    heading: "Owner decision",
-    description: "Never worked by an agent. Needs a human decision; the owner answers.",
-  },
-  verification: {
-    heading: "Verification (owner)",
-    description: "Never worked by an agent. Needs a live system or a real credential; the owner reports.",
-  },
-  unscoped: {
-    heading: "Unscoped",
-    description: "Lacks `owns`/`verify` (or both). Nobody works it until someone gives it both - fabricating either is worse than leaving it here (Ruling BA-2).",
-  },
+// The four state meanings, carried here (rather than per-section, as the
+// pre-migration render had them) now that `state` is a column shared by
+// every kind section. Wording is taken from the old SECTION_META
+// descriptions verbatim so nothing is lost in the move (plan-v2.md "Design"
+// / B1).
+const STATE_LEGEND: Record<BacklogState, string> = {
+  actionable: "Worked by an agent. Leaves this section when `verify` exits 0 and actually runs at least one assertion (Ruling BA-2).",
+  owner: "Never worked by an agent. Needs a human decision; the owner answers.",
+  verification: "Never worked by an agent. Needs a live system or a real credential; the owner reports.",
+  unscoped: "Lacks `owns`/`verify` (or both). Nobody works it until someone gives it both - fabricating either is worse than leaving it here (Ruling BA-2).",
 };
 
 function escapeCell(value: string): string {
@@ -33,20 +52,26 @@ function cellList(values: string[]): string {
   return values.length === 0 ? "-" : escapeCell(values.join(", "));
 }
 
-function renderSection(state: BacklogState, items: BacklogItem[]): string {
-  const meta = SECTION_META[state];
-  const lines: string[] = [`## ${meta.heading}`, "", meta.description, ""];
+/** Total sort key: (area's registry position, then id). Never re-derived by a caller - this is the one place the order is decided. */
+function compareRows(a: BacklogItem, b: BacklogItem): number {
+  const areaDelta = areaIndex(a.area) - areaIndex(b.area);
+  if (areaDelta !== 0) return areaDelta;
+  return a.id.localeCompare(b.id);
+}
+
+function renderKindSection(kind: BacklogKind, items: BacklogItem[]): string {
+  const lines: string[] = [`## ${KIND_HEADING[kind]}`, ""];
   if (items.length === 0) {
     lines.push("_None._", "");
     return lines.join("\n");
   }
-  lines.push("| id | title | owns | verify | blocked_by | instrument | from | note |");
-  lines.push("|---|---|---|---|---|---|---|---|");
-  const sorted = [...items].sort((a, b) => a.id.localeCompare(b.id));
+  lines.push("| area | id | state | title | owns | verify | blocked_by | instrument | from | note |");
+  lines.push("|---|---|---|---|---|---|---|---|---|---|");
+  const sorted = [...items].sort(compareRows);
   for (const item of sorted) {
     lines.push(
-      `| ${escapeCell(item.id)} | ${escapeCell(item.title)} | ${cellList(item.owns)} | ` +
-        `${item.verify === null ? "-" : escapeCell(item.verify)} | ${cellList(item.blocked_by)} | ` +
+      `| ${escapeCell(areaLabel(item.area))} | ${escapeCell(item.id)} | ${escapeCell(item.state)} | ${escapeCell(item.title)} | ` +
+        `${cellList(item.owns)} | ${item.verify === null ? "-" : escapeCell(item.verify)} | ${cellList(item.blocked_by)} | ` +
         `${item.instrument === "" ? "-" : escapeCell(item.instrument)} | ${item.from === "" ? "-" : escapeCell(item.from)} | ` +
         `${item.note === "" ? "-" : escapeCell(item.note)} |`
     );
@@ -64,16 +89,24 @@ export function renderBacklogMarkdown(items: BacklogItem[]): string {
     "drifts from a fresh render (Ruling BA-6). Edit `docs/backlog.yml` instead,",
     "then re-render.",
     "",
-    "Four sections, one per `state` (backlog-automation.md section 3): who works",
-    "an item and how it leaves the queue depends only on which section it is in.",
     "Closing an item DELETES its row from `docs/backlog.yml` - there is no",
     "\"done\" state and no archive (Ruling BA-8); git history is the record.",
     "",
+    "Three sections, one per `kind`: Bugs, Features, Chores, in that order,",
+    "always all three even when empty. `area` (first column) clusters related",
+    "rows by adjacency, in the order fixed by `src/tools/backlog/areas.ts` -",
+    "never alphabetically. `state` (a column, not a section) is one of:",
+    ...(Object.keys(STATE_LEGEND) as BacklogState[]).map((state) => `- \`${state}\`: ${STATE_LEGEND[state]}`),
+    "",
+    "Owner ruling (2026-09-15): a row that is both a live defect and an open",
+    "owner question reads under Bugs - not under a separate section and never",
+    "left blank.",
+    "",
   ];
-  const sections = SECTION_ORDER.map((state) =>
-    renderSection(
-      state,
-      items.filter((i) => i.state === state)
+  const sections = BACKLOG_KINDS.map((kind) =>
+    renderKindSection(
+      kind,
+      items.filter((i) => i.kind === kind)
     )
   );
   return `${[...header, ...sections].join("\n").replace(/\n+$/, "")}\n`;

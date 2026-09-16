@@ -6,6 +6,8 @@ function item(overrides: Partial<BacklogItem> = {}): BacklogItem {
   return {
     id: "V1",
     state: "verification",
+    kind: "chore",
+    area: "loop-and-docs-maintenance",
     title: "Check the thing",
     owns: [],
     verify: null,
@@ -90,12 +92,22 @@ describe("yaml-codec round trip", () => {
   });
 
   it("throws on an unknown state rather than silently accepting it", () => {
-    const raw = "- id: 'V1'\n  state: 'bogus'\n  title: 't'\n  owns: []\n  verify: null\n  blocked_by: []\n  instrument: ''\n  from: ''\n  note: ''\n";
+    const raw = "- id: 'V1'\n  state: 'bogus'\n  kind: 'chore'\n  area: 'loop-and-docs-maintenance'\n  title: 't'\n  owns: []\n  verify: null\n  blocked_by: []\n  instrument: ''\n  from: ''\n  note: ''\n";
+    expect(() => parseBacklogYaml(raw)).toThrow();
+  });
+
+  it("throws on an unknown kind rather than silently accepting it", () => {
+    const raw = "- id: 'V1'\n  state: 'verification'\n  kind: 'bogus'\n  area: 'loop-and-docs-maintenance'\n  title: 't'\n  owns: []\n  verify: null\n  blocked_by: []\n  instrument: ''\n  from: ''\n  note: ''\n";
+    expect(() => parseBacklogYaml(raw)).toThrow();
+  });
+
+  it("throws on an unregistered area slug rather than silently minting a new cluster", () => {
+    const raw = "- id: 'V1'\n  state: 'verification'\n  kind: 'chore'\n  area: 'not-a-real-area'\n  title: 't'\n  owns: []\n  verify: null\n  blocked_by: []\n  instrument: ''\n  from: ''\n  note: ''\n";
     expect(() => parseBacklogYaml(raw)).toThrow();
   });
 
   it("throws when a required field is missing", () => {
-    const raw = "- id: 'V1'\n  state: 'owner'\n  title: 't'\n  owns: []\n  verify: null\n  blocked_by: []\n  instrument: ''\n  from: ''\n";
+    const raw = "- id: 'V1'\n  state: 'owner'\n  kind: 'chore'\n  area: 'loop-and-docs-maintenance'\n  title: 't'\n  owns: []\n  verify: null\n  blocked_by: []\n  instrument: ''\n  from: ''\n";
     expect(() => parseBacklogYaml(raw)).toThrow();
   });
 });

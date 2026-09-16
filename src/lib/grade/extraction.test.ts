@@ -11,9 +11,10 @@ vi.mock("./repo-content", () => ({
   fetchGradableRepoContent: vi.fn(),
 }));
 
-import { canvasWorkToEntry } from "./extraction";
+import { canvasWorkToEntry, extractSubmissions, extractStudentEntries } from "./extraction";
 import { fetchGradableRepoContent } from "./repo-content";
 import type { CanvasStudentWork } from "../canvas/discussions";
+import JSZip from "jszip";
 
 const mockFetchGradableRepoContent = vi.mocked(fetchGradableRepoContent);
 
@@ -145,5 +146,126 @@ describe("canvasWorkToEntry - submission URL", () => {
     expect(entry.content).toContain("Could not read the linked GitHub repository: network exploded.");
     expect(entry.gradedRepo).toBeNull();
     expect(entry.repoReadNote).toContain("network exploded");
+  });
+});
+
+// A14: extractSubmissions must record the whole zip-crossing chain a file
+// passed through (outermost first), and must NOT record anything for a file
+// that crossed no zip boundary at all - groupSubmissionsByStudent (./utils)
+// treats an absent key exactly like an empty chain, so this distinction is
+// what lets the fix reproduce today's behavior byte-for-byte on flat/
+// folder-only entries while still fixing the nested-zip case.
+//
+// Trap paid for by a prior pass: `generateAsync({ type: "nodebuffer" })`
+// returns a Node Buffer backed by a SHARED 8KB pool. Calling `.buffer` on it
+// hands JSZip that whole shared pool (with the buffer's own byteOffset/
+// byteLength ignored), which throws "End of data reached" the moment
+// anything else in the same test run dirties the pool. Passing the
+// nodebuffer directly (JSZip accepts it) - or generating with
+// `type: "arraybuffer"` - avoids this entirely.
+describe("extractSubmissions - zipParents (A14)", () => {
+  it("records the outermost zip entry name for a file that crossed a zip boundary, and omits it for one that didn't", async () => {
+    const inner = new JSZip();
+    inner.file("main.py", "print('jane')");
+    const innerBuffer = await inner.generateAsync({ type: "nodebuffer" });
+
+    const outer = new JSZip();
+    // A plain .txt leaf, not .docx: DOCUMENT_EXTENSIONS routes through a real
+    // Word-document parser (extractTextFromBuffer), which would reject this
+    // fixture's plain-string bytes as not-a-real-docx and report it as a
+    // failed extraction rather than a flat submission - unrelated to what
+    // this test checks (zipParents), so TEXT_EXTENSIONS's plain pass-through
+    // keeps the fixture focused on the zip-crossing bookkeeping.
+    outer.folder("Homework1")!.file("janedoe_2024-01-01_120000_report.txt", "flat text");
+    outer.file("janedoe_2024-01-01_120000_project.zip", innerBuffer);
+
+    const outerBuffer = await outer.generateAsync({ type: "arraybuffer" });
+    const { submissions, zipParents } = await extractSubmissions(outerBuffer);
+
+    expect(submissions["janedoe_2024-01-01_120000_project.zip/main.py"]).toBe("print('jane')");
+    expect(zipParents["janedoe_2024-01-01_120000_project.zip/main.py"]).toEqual([
+      "janedoe_2024-01-01_120000_project.zip",
+    ]);
+    expect(submissions["Homework1/janedoe_2024-01-01_120000_report.txt"]).toBe("flat text");
+    expect(zipParents["Homework1/janedoe_2024-01-01_120000_report.txt"]).toBeUndefined();
+  });
+
+  it("carries the whole outward-in chain through more than one layer of nested zips", async () => {
+    const perStudent = new JSZip();
+    perStudent.file("main.py", "print('jane')");
+    const perStudentBuffer = await perStudent.generateAsync({ type: "nodebuffer" });
+
+    const bulk = new JSZip();
+    bulk.file("janedoe_2024-01-01_120000_project.zip", perStudentBuffer);
+    const bulkBuffer = await bulk.generateAsync({ type: "nodebuffer" });
+
+    const wrapper = new JSZip();
+    wrapper.file("bulk.zip", bulkBuffer);
+    const wrapperBuffer = await wrapper.generateAsync({ type: "arraybuffer" });
+
+    const { zipParents } = await extractSubmissions(wrapperBuffer);
+    const key = "bulk.zip/janedoe_2024-01-01_120000_project.zip/main.py";
+    expect(zipParents[key]).toEqual(["bulk.zip", "bulk.zip/janedoe_2024-01-01_120000_project.zip"]);
+  });
+
+  // A14 rulings v2 CONDITION 1: the zipParents write on the IMAGE branch
+  // (extraction.ts's collectFromZip, the `if (isImage)` block) was entirely
+  // untested before this - every other zipParents test above goes through
+  // the text/document extraction branch instead. Same trap as the rest of
+  // this describe block applies: generate with type "nodebuffer" for the
+  // inner archive and pass it directly (or generate "arraybuffer") rather
+  // than reading `.buffer` off the resulting Node Buffer.
+  it("records the zip-crossing chain for an image file nested inside a per-student zip (the untested IMAGE branch)", async () => {
+    const inner = new JSZip();
+    // A minimal PNG signature is enough - the image branch never tries to
+    // decode the bytes, it only records a placeholder plus the raw base64.
+    inner.file("screenshot.png", Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const innerBuffer = await inner.generateAsync({ type: "nodebuffer" });
+
+    const outer = new JSZip();
+    outer.file("janedoe_2024-01-01_120000_project.zip", innerBuffer);
+    const outerBuffer = await outer.generateAsync({ type: "arraybuffer" });
+
+    const { submissions, rawData, zipParents } = await extractSubmissions(outerBuffer);
+    const key = "janedoe_2024-01-01_120000_project.zip/screenshot.png";
+
+    expect(submissions[key]).toBe("[Image file: screenshot.png]");
+    expect(rawData[key]).toBeTruthy();
+    expect(zipParents[key]).toEqual(["janedoe_2024-01-01_120000_project.zip"]);
+  });
+});
+
+// A14 rulings v2 CONDITION 2: the end-to-end path nobody had a test for -
+// a real nested JSZip going through extractSubmissions -> extractStudentEntries
+// (which itself calls groupSubmissionsByStudent, in ./extraction) with no
+// mocking anywhere in between. Every other A14 test either exercises
+// extractSubmissions alone (zipParents bookkeeping) or groupSubmissionsByStudent
+// alone (with a hand-built zipParents literal) - this is the one test proving
+// the two are actually glued together correctly on real archive bytes. It
+// passes today (executed per the ruling); this pins it so it stays passing.
+describe("extractStudentEntries - end to end through a real nested JSZip (A14 rulings v2 CONDITION 2)", () => {
+  it("groups two students' per-student zips into two separate entries, not one merged row", async () => {
+    const janeInner = new JSZip();
+    janeInner.file("main.py", "print('jane')");
+    const janeInnerBuffer = await janeInner.generateAsync({ type: "nodebuffer" });
+
+    const johnInner = new JSZip();
+    johnInner.file("main.py", "print('john')");
+    const johnInnerBuffer = await johnInner.generateAsync({ type: "nodebuffer" });
+
+    const outer = new JSZip();
+    outer.file("janedoe_2024-01-01_120000_project.zip", janeInnerBuffer);
+    outer.file("johndoe_2024-01-01_130000_project.zip", johnInnerBuffer);
+    const outerBuffer = await outer.generateAsync({ type: "arraybuffer" });
+
+    const entries = await extractStudentEntries(outerBuffer);
+
+    expect(entries.map((e) => e.student).sort()).toEqual(["janedoe", "johndoe"]);
+    const jane = entries.find((e) => e.student === "janedoe");
+    const john = entries.find((e) => e.student === "johndoe");
+    expect(jane?.content).toContain("print('jane')");
+    expect(jane?.content).not.toContain("print('john')");
+    expect(john?.content).toContain("print('john')");
+    expect(john?.content).not.toContain("print('jane')");
   });
 });

@@ -37,16 +37,26 @@ export async function extractSubmissions(
   rawData: Record<string, string>;
   attemptedSupportedFiles: number;
   failedSupportedFiles: string[];
+  // A14: for every key also present in `submissions`/`rawData`, the whole
+  // sequence of zip-archive entry names this file crossed to reach its
+  // current path, OUTERMOST FIRST. A file that never crossed a zip boundary
+  // (a flat Canvas entry, or a folder inside the single top-level zip) has
+  // no key here at all - groupSubmissionsByStudent (./utils) treats a
+  // missing key the same as an empty chain, which reproduces today's exact
+  // behavior for that file.
+  zipParents: Record<string, string[]>;
 }> {
   const submissions: Record<string, string> = {};
   const rawData: Record<string, string> = {};
+  const zipParents: Record<string, string[]> = {};
   let attemptedSupportedFiles = 0;
   const failedSupportedFiles: string[] = [];
 
   async function collectFromZip(
     zip: JSZip,
     depth: number,
-    parentPath: string
+    parentPath: string,
+    zipChain: string[]
   ): Promise<void> {
     await Promise.all(
       Object.entries(zip.files).map(async ([name, file]) => {
@@ -61,7 +71,7 @@ export async function extractSubmissions(
           try {
             const nestedBuffer = await file.async("arraybuffer");
             const nestedZip = await JSZip.loadAsync(nestedBuffer);
-            await collectFromZip(nestedZip, depth + 1, fullName);
+            await collectFromZip(nestedZip, depth + 1, fullName, [...zipChain, fullName]);
           } catch {
             // Continue when a nested archive cannot be opened.
           }
@@ -82,6 +92,7 @@ export async function extractSubmissions(
           const baseName = name.split("/").pop() ?? name;
           submissions[fullName] = `[Image file: ${baseName}]`;
           rawData[fullName] = await file.async("base64");
+          if (zipChain.length > 0) zipParents[fullName] = zipChain;
           return;
         }
 
@@ -92,6 +103,7 @@ export async function extractSubmissions(
           if (extractedText && extractedText.trim()) {
             submissions[fullName] = extractedText;
             rawData[fullName] = await file.async("base64");
+            if (zipChain.length > 0) zipParents[fullName] = zipChain;
           } else {
             failedSupportedFiles.push(fullName);
           }
@@ -103,13 +115,14 @@ export async function extractSubmissions(
   }
 
   const zip = await JSZip.loadAsync(zipBuffer);
-  await collectFromZip(zip, 0, "");
+  await collectFromZip(zip, 0, "", []);
 
   return {
     submissions,
     rawData,
     attemptedSupportedFiles,
     failedSupportedFiles,
+    zipParents,
   };
 }
 
@@ -121,8 +134,8 @@ export async function extractSubmissions(
 export async function extractStudentEntries(
   zipBuffer: ArrayBuffer
 ): Promise<StudentSubmissionEntry[]> {
-  const { submissions, rawData } = await extractSubmissions(zipBuffer);
-  return groupSubmissionsByStudent(submissions, undefined, rawData);
+  const { submissions, rawData, zipParents } = await extractSubmissions(zipBuffer);
+  return groupSubmissionsByStudent(submissions, undefined, rawData, zipParents);
 }
 
 /**

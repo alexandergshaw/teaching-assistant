@@ -65,9 +65,118 @@ export function toPreviewContent(content: string): {
   };
 }
 
+/**
+ * A14: the Canvas bulk-download naming convention this repo has always
+ * parsed (studentname_date_time_filename) and the synthetic convention
+ * canvasWorkToZipBase64 (../canvas/submissions.ts) builds for API-fetched
+ * work (sanitizedname_userId_seq_filename) share the same four-part shape.
+ * Both are matched by this one check - the function never knows or cares
+ * which convention produced a given name, only that it has the shape.
+ *
+ * A14 rulings v2, CORRECTION 2: parts[1] is deliberately NOT extracted or
+ * folded into the identity key here. The withdrawn M3 ruling cited
+ * ../canvas/submissions.ts:165-193 as proof parts[1] is a unique userId, but
+ * that file is this app's own synthetic packer, not the real Canvas
+ * bulk-download convention - for which this same comment says the second
+ * part is a DATE. Folding a date into the grouping key would split one
+ * student's own two submissions into two rows that look identical in the UI
+ * (studentDisplay stays bare) and share one edit entry and one grade. The
+ * sanitized-name collision M3 targeted is a known-open item again, not fixed
+ * here - see scratchpad/a14-rulings-v2.md CORRECTION 2.
+ */
+function matchStudentFileConvention(
+  name: string
+): { studentPart: string; filePart: string } | null {
+  const parts = name.split("_");
+
+  // Expected format: studentname_date_time_filename (or the synthetic
+  // sanitizedname_userId_seq_filename equivalent) - either way, at least
+  // four underscore-separated parts.
+  if (parts.length < 4) {
+    return null;
+  }
+
+  const studentPart = parts[0].trim();
+  const filePart = parts.slice(3).join("_").trim();
+
+  if (!studentPart || !filePart) {
+    return null;
+  }
+
+  return { studentPart, filePart };
+}
+
+/** Builds the identity key from a convention match: just the lowered student
+ *  name. A14 rulings v2 CORRECTION 2 withdrew the parts[1]/userId fold a
+ *  prior pass added here - see matchStudentFileConvention above for why. */
+function identityFromConventionMatch(match: {
+  studentPart: string;
+}): { studentKey: string; studentDisplay: string } {
+  return {
+    studentKey: match.studentPart.toLowerCase(),
+    studentDisplay: match.studentPart,
+  };
+}
+
+function leafStemFallback(baseName: string): { studentKey: string; studentDisplay: string } {
+  const stem = removeLastExtension(baseName);
+  const match = stem.match(/^([A-Za-z0-9]+)/);
+  const fallbackStudent = (match?.[1] ?? stem).trim() || "unknown";
+  return { studentKey: fallbackStudent.toLowerCase(), studentDisplay: fallbackStudent };
+}
+
+/**
+ * Parse one submission file path into the student identity it belongs to,
+ * plus the citation name/extension to show for that file.
+ *
+ * `zipChain` (A14) is the whole sequence of zip-archive entry names this
+ * file crossed to reach its current path, OUTERMOST FIRST (built by
+ * extraction.ts's collectFromZip as it recurses into nested zips) - never
+ * just the outermost or innermost name in isolation. It defaults to an
+ * empty array, which reproduces today's exact behavior byte-for-byte: a
+ * caller that does not thread the chain through gets the unfixed algorithm,
+ * not a silently different one, so an unwired call site is provably
+ * detectable (see grouping-zip-parents.wiring.test.ts) rather than
+ * accidentally "working" for the wrong reason.
+ *
+ * THE ALGORITHM (binding per the A14 rulings, corrected by rulings v2's
+ * CORRECTION 1, in this exact priority order):
+ *   1. inferredLookup.byRaw - an exact per-file model inference. Stays the
+ *      single highest-priority signal; untouched by this fix.
+ *   2. LEAF FIRST: if the leaf's own name (baseName) matches the convention,
+ *      use ITS identity. An ancestor is consulted only once the leaf's own
+ *      check fails - a false positive on a leaf costs one file, a false
+ *      positive on an ancestor costs the whole run.
+ *   3. THE CROSSING CHAIN, scanned NARROWEST FIRST (A14 rulings v2
+ *      CORRECTION 1 - this scanned outward-in, outermost first, before, and
+ *      that was wrong): walk zipChain from its LAST entry (innermost)
+ *      toward its first (outermost), and use the first crossing whose own
+ *      (base-named) entry name matches the convention. The same
+ *      false-positive-cost argument from step 2 applies at every level of
+ *      the chain, not just the leaf/ancestor boundary - an outer crossing is
+ *      the widest scope there is, so matching it first is broad-before-
+ *      narrow and can attribute an entire wrapper or bulk-download zip's
+ *      worth of students onto whichever name happens to pass the convention
+ *      check first (e.g. a wrapper literally named
+ *      "CS101_Fall_2026_submissions.zip", which itself has four
+ *      underscore-separated parts). This is a crossing-derived, ground-truth
+ *      identity - ruling M2 says it must outrank inferredLookup.byBase (a
+ *      mere base-name guess), which is why byBase is not consulted until
+ *      after this step.
+ *   4. inferredLookup.byBase - a base-name guess, consulted only once
+ *      neither the leaf nor any crossing produced a ground-truth identity.
+ *   5. THE INNERMOST CROSSING's stem, when the chain is non-empty - the
+ *      per-student zip in the ordinary nested case. This is what fixes the
+ *      filed bug (two students' zips each holding main.py/report.docx no
+ *      longer collapse onto "main"/"report").
+ *   6. Today's leaf-stem fallback, unchanged - reached only when the chain
+ *      is empty (or absent) and nothing above matched, which is exactly
+ *      today's behavior for every shape this fix does not touch.
+ */
 export function parseSubmissionFileName(
   filePath: string,
-  inferredLookup?: InferredFileNameLookup
+  inferredLookup?: InferredFileNameLookup,
+  zipChain: string[] = []
 ): {
   studentKey: string;
   studentDisplay: string;
@@ -76,42 +185,75 @@ export function parseSubmissionFileName(
 } {
   const baseName = getBaseFileName(filePath);
 
-  const inferred =
-    inferredLookup?.byRaw.get(filePath) ?? inferredLookup?.byBase.get(baseName);
-
-  if (inferred) {
+  // 1. byRaw - exact per-file model inference, unchanged, still the top
+  // priority signal.
+  const rawInferred = inferredLookup?.byRaw.get(filePath);
+  if (rawInferred) {
     return {
-      studentKey: inferred.studentDisplay.toLowerCase(),
-      studentDisplay: inferred.studentDisplay,
-      citationFileName: inferred.citationFileName,
-      extension: getFileExtension(baseName) || getFileExtension(inferred.citationFileName) || "(none)",
+      studentKey: rawInferred.studentDisplay.toLowerCase(),
+      studentDisplay: rawInferred.studentDisplay,
+      citationFileName: rawInferred.citationFileName,
+      extension: getFileExtension(baseName) || getFileExtension(rawInferred.citationFileName) || "(none)",
     };
   }
 
-  const parts = baseName.split("_");
+  // 2. LEAF FIRST.
+  const leafMatch = matchStudentFileConvention(baseName);
+  if (leafMatch) {
+    return {
+      ...identityFromConventionMatch(leafMatch),
+      citationFileName: leafMatch.filePart,
+      extension: getFileExtension(leafMatch.filePart) || "(none)",
+    };
+  }
 
-  // Expected format: studentname_date_time_filename
-  if (parts.length >= 4) {
-    const studentPart = parts[0].trim();
-    const filePart = parts.slice(3).join("_").trim();
-
-    if (studentPart && filePart) {
+  // 3. THE CROSSING CHAIN, scanned narrowest first - innermost crossing to
+  // outermost (A14 rulings v2 CORRECTION 1). citationFileName/extension stay
+  // leaf-derived (baseName) here - identity may come from an ancestor, but
+  // the file a student and grader actually see is always the leaf's own
+  // name (code-run-selection.ts, prompts.ts both depend on this staying a
+  // bare leaf name).
+  for (let i = zipChain.length - 1; i >= 0; i -= 1) {
+    const crossing = zipChain[i];
+    const crossingMatch = matchStudentFileConvention(getBaseFileName(crossing));
+    if (crossingMatch) {
       return {
-        studentKey: studentPart.toLowerCase(),
-        studentDisplay: studentPart,
-        citationFileName: filePart,
-        extension: getFileExtension(filePart) || "(none)",
+        ...identityFromConventionMatch(crossingMatch),
+        citationFileName: baseName,
+        extension: getFileExtension(baseName) || "(none)",
       };
     }
   }
 
-  const stem = removeLastExtension(baseName);
-  const match = stem.match(/^([A-Za-z0-9]+)/);
-  const fallbackStudent = (match?.[1] ?? stem).trim() || "unknown";
+  // 4. byBase - a guess, and per ruling M2 it must not outrank the
+  // ground-truth crossing-chain identity above, which is why it is only
+  // consulted here.
+  const baseInferred = inferredLookup?.byBase.get(baseName);
+  if (baseInferred) {
+    return {
+      studentKey: baseInferred.studentDisplay.toLowerCase(),
+      studentDisplay: baseInferred.studentDisplay,
+      citationFileName: baseInferred.citationFileName,
+      extension: getFileExtension(baseName) || getFileExtension(baseInferred.citationFileName) || "(none)",
+    };
+  }
 
+  // 5. THE INNERMOST CROSSING's stem - the per-student zip in the ordinary
+  // nested case, and the fix for the filed bug.
+  if (zipChain.length > 0) {
+    const innermost = zipChain[zipChain.length - 1];
+    const fallback = leafStemFallback(getBaseFileName(innermost));
+    return {
+      ...fallback,
+      citationFileName: baseName,
+      extension: getFileExtension(baseName) || "(none)",
+    };
+  }
+
+  // 6. Today's leaf-stem fallback, unchanged.
+  const fallback = leafStemFallback(baseName);
   return {
-    studentKey: fallbackStudent.toLowerCase(),
-    studentDisplay: fallbackStudent,
+    ...fallback,
     citationFileName: baseName,
     extension: getFileExtension(baseName) || "(none)",
   };
@@ -126,19 +268,30 @@ export function getFileExtension(filePath: string): string {
 
 export function inferStudentPrefix(
   filePath: string,
-  inferredLookup?: InferredFileNameLookup
+  inferredLookup?: InferredFileNameLookup,
+  zipChain?: string[]
 ): { key: string; display: string } {
-  const parsed = parseSubmissionFileName(filePath, inferredLookup);
+  const parsed = parseSubmissionFileName(filePath, inferredLookup, zipChain);
   return {
     key: parsed.studentKey,
     display: parsed.studentDisplay,
   };
 }
 
+/**
+ * `zipParents` (A14): per-file zip-crossing chains, keyed by the same file
+ * path used in `submissions`/`rawData` - populated by extraction.ts's
+ * collectFromZip. A file absent from `zipParents` (or the whole map being
+ * `undefined`, which is what a caller that predates this fix passes) is
+ * treated as having crossed no zip boundary at all, which is exactly
+ * today's assumption and keeps every un-migrated caller byte-for-byte
+ * unchanged.
+ */
 export function groupSubmissionsByStudent(
   submissions: Record<string, string>,
   inferredLookup?: InferredFileNameLookup,
-  rawData?: Record<string, string>
+  rawData?: Record<string, string>,
+  zipParents?: Record<string, string[]>
 ): Array<{
   student: string;
   content: string;
@@ -148,7 +301,7 @@ export function groupSubmissionsByStudent(
   const grouped = new Map<string, { student: string; files: Array<[string, string]> }>();
 
   for (const [filePath, content] of Object.entries(submissions)) {
-    const inferred = inferStudentPrefix(filePath, inferredLookup);
+    const inferred = inferStudentPrefix(filePath, inferredLookup, zipParents?.[filePath]);
     const existing = grouped.get(inferred.key);
 
     if (!existing) {
@@ -168,13 +321,13 @@ export function groupSubmissionsByStudent(
   return entries.map((entry) => {
     const mergedContent = entry.files
       .map(([filePath, content]) => {
-        const parsed = parseSubmissionFileName(filePath, inferredLookup);
+        const parsed = parseSubmissionFileName(filePath, inferredLookup, zipParents?.[filePath]);
         return `File: ${parsed.citationFileName}\n\n${content}`;
       })
       .join("\n\n---\n\n");
 
     const submittedFiles = entry.files.map(([filePath, content]) => {
-      const parsed = parseSubmissionFileName(filePath, inferredLookup);
+      const parsed = parseSubmissionFileName(filePath, inferredLookup, zipParents?.[filePath]);
       const preview = toPreviewContent(content);
 
       return {

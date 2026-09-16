@@ -404,7 +404,7 @@ export async function gradeSubmissions(
   const { inferFileNameConvention } = await import("./rubric");
   const { groupSubmissionsByStudent } = await import("./utils");
 
-  const { submissions, rawData, attemptedSupportedFiles, failedSupportedFiles } =
+  const { submissions, rawData, attemptedSupportedFiles, failedSupportedFiles, zipParents } =
     await extractSubmissions(zipBuffer);
 
   const rawFileNames = Object.keys(submissions);
@@ -412,7 +412,8 @@ export async function gradeSubmissions(
   const studentSubmissions = groupSubmissionsByStudent(
     submissions,
     inferredFileNameLookup,
-    rawData
+    rawData,
+    zipParents
   );
   if (studentSubmissions.length === 0) {
     if (attemptedSupportedFiles > 0) {

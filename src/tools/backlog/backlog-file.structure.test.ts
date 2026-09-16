@@ -22,8 +22,11 @@
 //      already throw inside parseBacklogYaml, but asserting it explicitly
 //      here means a future reader sees WHY the fixture matters, not just
 //      that parsing happened not to throw.
-//   3. the row count is a FROZEN LITERAL (29, the count this migration
-//      produced), not `.length` compared to itself or to some derived
+//   3. the row count is a FROZEN LITERAL (31: the 29 this migration produced,
+//      plus A14 and A15, the two live defects the N15a seam check found and
+//      filed on 2026-09-15 - the bump below is what that filing looked like,
+//      and it is the canary working as designed rather than an obstacle),
+//      not `.length` compared to itself or to some derived
 //      value. A silently dropped row - the exact failure mode a `.yml` merge
 //      conflict or a careless hand-edit produces - changes what parses, and
 //      a literal is the only assertion that notices when nothing else does.
@@ -54,7 +57,7 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // Frozen literal (see header comment above for why `.length` is not an
 // acceptable substitute). Bump this by hand, in the same commit, the next
 // time a row is legitimately added to or removed from docs/backlog.yml.
-const EXPECTED_ROW_COUNT = 29;
+const EXPECTED_ROW_COUNT = 31;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

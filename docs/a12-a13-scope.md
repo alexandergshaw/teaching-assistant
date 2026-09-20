@@ -1,17 +1,32 @@
 # A12 + A13 scope: the visible state for a row the grader did not grade
 
-**Round 2.** Authored by the SCOPING seat, 2026-09-20, against `da6ae54`
-(`git rev-parse --short HEAD`). Round 1 of this artifact was checked NOT CLEAN:
-3 blockers, 5 majors, all NEW classes, so the routing table in
-`docs/loop/iteration-caps.md` gives a NORMAL REVISION ROUND and nothing is
-disposed by cap. This round is a restructuring, so section 0 is the disposition
-table the caps card's entry gate 3 requires, and the checker audits it before
-reading anything else.
+**Round 3.** Authored by the SCOPING seat, 2026-09-20, against `ce2123f`
+(`git rev-parse --short HEAD`). Round 1 was checked NOT CLEAN (3 blockers, 5
+majors, all NEW classes) and produced round 2 - a normal revision round under
+`docs/loop/iteration-caps.md`. Round 2 was checked NOT CLEAN (3 blockers), one
+of which needed an orchestrator ruling before the artifact could be revised
+coherently. **RULING R has landed** (quoted in full where it is applied,
+section 0.1) and the other two round-2 blockers were DESIGN BLOCKERS this
+round reconstructs: AC-6's scope narrows to `kind === "not-attempted"`
+(section 5, section 6), and AC-3b - found NOT CONSTRUCTIBLE AS WRITTEN - is
+replaced by a construction that is (section 5.1, section 6). Per
+`iteration-caps.md` cap 2 ("per artifact: two revisions, then a disposal
+round"), round 1 -> round 2 was this artifact's first revision and round 2 ->
+round 3 (this document) is its **second and final revision**. If round 3 is
+not checked clean, the next round is a disposal round: no new requirements,
+only dispositions.
+
+Section 0 (round 1 -> round 2, unchanged, not re-litigated) and section 0.1
+(round 2 -> round 3, new) are both disposition tables the caps card's entry
+gate 3 requires, and the checker audits both before reading anything else.
+Section 0 is carried verbatim from round 2; only section 0.1 is new.
 
 **Every quantity below names the command that produced it.** Line counts use
 `@(Get-Content <path>).Count` from PowerShell, never `Measure-Object -Line`
 (`docs/loop/this-repo.md` section 3: the two instruments disagree by 42 on one
-file in this repo).
+file in this repo). From the Bash tool, `wc -l` agrees with `Get-Content
+.Count` (both instruments, same file, this round: 963 for
+`gradingResultsHelpers.test.ts`).
 
 **Every claim about what an instructor SEES is a reading claim.** vitest here
 is node-env and collects only `src/**/*.test.ts`; no component in this repo is
@@ -21,14 +36,23 @@ screen. Only the owner, in a browser, can confirm that - RES-4.
 **I did not run `npx tsc --noEmit`.** Other agents are active and
 `tsconfig.tsbuildinfo` has exactly one legal caller, the wave gate
 (`docs/loop/this-repo.md` section 2). Every criterion below whose instrument is
-tsc says so and names the wave gate as its step.
+tsc says so and names the wave gate as its step. **I did run** `npx vitest run
+src/app/components/grading-results/gradingResultsHelpers.test.ts` against the
+UNMODIFIED file, to establish this round's baseline before proposing edits to
+it: `Test Files  1 passed (1)`, `Tests  90 passed (90)`. That baseline is what
+the wave gate must still show, plus this round's new tests, once the edits in
+section 5.1 land. I also verified the two new regexes this round proposes
+(section 5.1) by direct execution - `node -e` scripts against representative
+and adversarial fixtures, not by inspection - and pasted the output where each
+regex is introduced.
 
 **Paths I did not open and did not edit:** everything under
 `src/app/components/snapshot-grading/` and
 `src/app/components/assessment-shared/` - an A11 remediation is live there.
-`git status --short` at authoring time shows fifteen modified paths and one
-untracked path, all under those two directories plus `src/lib/grade/prompts*`
-and `docs/a16-scope.md`. None appears in this document's `owns`.
+`git status --short` at this round's authoring time shows exactly one modified
+path, `docs/a16-scope.md`, which does not appear in this document's `owns` -
+re-measured this round; round 2's authoring-time snapshot (fifteen modified
+paths) is stale and superseded, not re-quoted.
 
 ---
 
@@ -79,6 +103,60 @@ withdrawal names its reason and any enforcer it was protecting.**
 
 Nothing above is marked "handed over" except RES-1's narrowed remainder and
 RES-2/3, which name their receivers in section 9.
+
+---
+
+## 0.1 Disposition table - every round-2 requirement the round-2 check touched
+
+Round 2's check was NOT CLEAN: 3 blockers. One is RULING R, quoted below in
+full and then applied. The other two are the design blockers this round
+reconstructs. Every other round-2 id is accounted for below, either KEPT
+UNCHANGED or KEPT WITH AN ADDENDUM (a note added alongside it, not a rewrite
+of its substance) - listed exhaustively so no id is silently skipped:
+
+- **KEPT UNCHANGED, not re-opened, omitted from the table below:** AC-1, AC-2,
+  AC-3a, AC-4, AC-5, AC-7, G1, G1b, G2, G3, G4, N1, N2, N3, N4, N5, S1, S2, S3,
+  S4, S5, S5b, S5c, S6, S6b, S8, S9, RES-1..RES-7, section 4's seam argument.
+- **KEPT WITH AN ADDENDUM - substance unchanged, a note added because Ruling R
+  or the AC-6/AC-3b reconstruction touches something adjacent to it (each
+  addendum is at the id's own location, not duplicated here):** AC-8 (a
+  second, independent instrument now also covers it - R1-R4), G5 (restated
+  with the new `kind` boundary explicit), N6 (no longer newly introduced,
+  relabelled), S7 (unchanged in substance; S7b is its sibling on the second
+  file, not a revision of S7 itself), S10, S11, S12 (unchanged - AC-6's
+  byte-comparison condition they guard gained a `kind` guard, but the
+  mutations and their kills are identical), S13 (a second instrument named
+  alongside the existing one), S14 (unchanged).
+
+Re-stating a fully unchanged row's substance here would be re-litigating it,
+which the caps card forbids at this artifact's final revision - hence the
+compact list above rather than one full row per id.
+
+**RULING R, verbatim from the orchestrator, landed 2026-09-20: "REGISTER THE
+LEAF AND NARROW THE PATTERN; DO NOT DUPLICATE."** Four parts, all inside
+`gradingResultsHelpers.test.ts`'s `"grading-results client files stay
+client-bundle-safe"` describe block (`:824-889`, read this round), which
+therefore moves from the "adopted, must stay green, never edited" class into
+this chunk's `owns`: (1) register the new leaf in `CLIENT_FILES`; (2) narrow
+the `@/lib/grade/` ban to exempt `@/lib/grade/types` specifically, rather than
+duplicating a parallel guard or a local copy of `composeOverallComment`-style
+duplication to route around it; (3) add a guard that `types.ts` stays
+import-free, so the exemption cannot quietly become false; (4) add a
+completeness assertion to `CLIENT_FILES` so a future file cannot escape by
+omission. Section 5.1 is the construction; the acceptance criteria are R1-R4
+in section 6.
+
+| Round-2 item | Disposition | Where it went |
+|---|---|---|
+| AC-3b (frozen copy set over `classifyRow` alone) | **WITHDRAWN as written, REPLACED by a reconstructed AC-3b** -> AC-3b (section 6) | Round-2 check: NOT CONSTRUCTIBLE AS WRITTEN, two independent reasons. (1) The bound (`maxSubmissions`) exists only inside `engine.ts`'s message template; `classifyRow(result, edit)` has no run and no count in its signature, so the leaf could state the count only by parsing it out of `result.ungraded.message` - forbidden by G2 ("computed, never parsed out of prose") and, measured this round, structurally impossible without a template: `grep -rn "maxSubmissions" src/lib/grade/types.ts` returns nothing, and `GradingRun` (`types.ts:308-318`, read this round) carries no such field, so no typed channel exists today without editing the fenced-off `engine.ts`. (2) AC-3b as written collected strings from `classifyRow` alone, never from `correctUngradedFeedbackSeed` - the function whose output actually lands in the instructor's textarea - so a fresh false instruction could ship inside `owns` with AC-3b fully green. **Disposal: (d) DELETE the count requirement** (section 5's "must state... the count" is withdrawn; no enforcer protected it, since AC-3b's own instrument never existed until this round) **and (a) RELOCATE the coverage gap to a new criterion, AC-3c**, which ties `correctUngradedFeedbackSeed`'s output to the SAME frozen record `classifyRow` reads, by construction, rather than by a second enumeration. |
+| AC-6 (byte-comparison over `isUngraded(result)`) | **REVISED** -> AC-6 (section 6) | Round-2 check: `engine.ts:152`'s `buildUngradedRow` sets `strengths = outcome.message` for **both** members of `UngradedOutcome` (verified again this round: `engine.ts:264`'s `grading-failed` branch sets `message: `${GRADING_FAILURE_PREFIX}${message}``, a real per-submission diagnostic, not a false instruction), so AC-6 driven over `isUngraded` mandates overwriting a `grading-failed` row's only diagnostic with a frozen `not-attempted` literal - the opposite of what this chunk exists to fix. Narrowed to `result.ungraded?.kind === "not-attempted"`; the `grading-failed` behaviour (unconditionally unchanged) is now its own clause, protected by new sabotage S15. |
+| Section 5, "What the corrected copy must say" ("must state the fact and the count") | **WITHDRAWN, count clause only** | Same finding as AC-3b above. The fact and the action both survive; the count does not, because nothing on `classifyRow`'s signature can supply it without either parsing prose (forbidden) or editing `engine.ts` (fenced off for this chunk). Stated as a deliberate, reasoned trade, not a silent drop. |
+| `gradingResultsHelpers.test.ts`'s classification in the "Callers, fixtures and oracles" table (round 2: "adopted, upgraded from checked-safe") | **REVISED - moves into `owns`** | Ruling R part 0 (its own framing): the file the ruling edits is this one. Section 5.1 is new; the old table row is corrected in section 5. |
+| Section 3.3's "No landed test catches this" | **CORRECTED - now stale, superseded** | True when round 2 was written (no test enforced the leaf's import path). False after Ruling R lands: `gradingResultsHelpers.test.ts`'s `it.each(CLIENT_FILES)` now runs over the leaf once registered (section 5.1), and AC-8's build-gate instrument keeps its own independent check (S13) - two instruments on the same hazard, not a replacement of one by the other. |
+
+Nothing above is marked "handed over" to a party outside this chunk; Ruling
+R's obligations and both design reconstructions are discharged inside `owns`
+by this same round.
 
 ---
 
@@ -244,11 +322,19 @@ bundle, and `next build` fails to compile while `npx tsc --noEmit`, `npx
 eslint` and `npx vitest run` all stay green. That file avoids the hazard by
 keeping a LOCAL DUPLICATE of `composeOverallComment` rather than importing it.
 
-**No landed test catches this.** `src/lib/canvas-client-boundary.test.ts`
-guards only `@/lib/canvas` and `@/lib/canvas-modules`, only DIRECT imports, and
-only in files carrying `"use client"` - its own header at `:65-70` and
-`:36-45` says both limits explicitly. `@/lib/grade` is not in its barrel set,
-and the new leaf is a plain `.ts` module with no `"use client"` directive.
+**No landed test catches this - CORRECTED this round, per section 0.1.**
+`src/lib/canvas-client-boundary.test.ts` guards only `@/lib/canvas` and
+`@/lib/canvas-modules`, only DIRECT imports, and only in files carrying
+`"use client"` - its own header at `:65-70` and `:36-45` says both limits
+explicitly, and that part of this paragraph still holds. But a DIFFERENT
+landed test does cover this directory:
+`gradingResultsHelpers.test.ts:824-889`'s `"grading-results client files stay
+client-bundle-safe"` guard, which round 1 and round 2 both failed to name.
+Ruling R (section 0.1, section 5.1) requires registering the new leaf in that
+guard's `CLIENT_FILES` list, so after this chunk lands the hazard named in
+this section IS caught by a landed test - two independent instruments on one
+hazard, the guard test at `verify`-adjacent scope and `npm run build` (AC-8,
+below) at the wave gate.
 
 **Safe precedent, opened:** `src/app/components/grading-recording/grading-row.ts:44`
 value-imports `{ composeOverallComment, RESUBMIT_NOTICE } from "@/lib/grade/types"`
@@ -293,7 +379,7 @@ disclosure" - and it does not exist until P2 exists.
 
 | Export | Signature | Why it is in the leaf and not the component |
 |---|---|---|
-| `UNGRADED_DISCLOSURE_COPY` | a frozen record of every user-facing string the leaf can return | AC-3b's construction: the emitted set is a value a test can compare, not a property of prose. |
+| `UNGRADED_DISCLOSURE_COPY` | a frozen `Record` keyed by outcome shape - at minimum `"submission-count-bound"` and `"run-deadline"` (the two `stoppedBy` members), plus whatever `classifyRow` needs for its other states (AC-2's rescued row, the `grading-failed` label) | AC-3b/AC-3c's construction: the emitted set is a value a test can compare, not a property of prose - REVISED this round to drop count-interpolation (section 0.1) and to be the single source both `classifyRow` and `correctUngradedFeedbackSeed` read, rather than two independently authored copies. |
 | `classifyRow` | `(result: GradeRow, edit: RowEdit) => RowDisclosure` | AC-1/AC-2. `RowDisclosure` carries a discriminated `state` key and the copy for it. |
 | `describeSkippedStatus` | `(message?: string) => string` | AC-4/B1. Moving the `:626` ternary arm into a function is what makes the fallback EXECUTABLE - a component expression is not, because no component renders here. |
 | `correctUngradedFeedbackSeed` | `(result: GradeRow, edit: RowEdit) => RowEdit` | AC-6/B3. See below. |
@@ -309,11 +395,29 @@ loadGradingResultsEdits(canvasUrl, run)   ->   correctUngradedSeeds(run, loadGra
 ```
 
 where `correctUngradedSeeds` maps `correctUngradedFeedbackSeed` over the run's
-rows. **The replacement condition is a byte comparison, not a heuristic:**
+rows. **The replacement condition is a byte comparison guarded by a
+discriminant, not a heuristic - REVISED this round (section 0.1: round-2's
+version drove this from `isUngraded(result)` alone, which reaches both
+`UngradedOutcome` members):**
 
-> Replace `edit.strengths` when `isUngraded(result)` AND `edit.strengths` is
-> either exactly `result.ungraded.message` or a member of
-> `UNGRADED_DISCLOSURE_COPY`. Otherwise return `edit` unchanged.
+> Replace `edit.strengths` when **`result.ungraded?.kind === "not-attempted"`**
+> AND `edit.strengths` is either exactly `result.ungraded.message` or a member
+> of `UNGRADED_DISCLOSURE_COPY`. **Otherwise - including every
+> `kind === "grading-failed"` row, unconditionally - return `edit` unchanged.**
+
+The kind guard is load-bearing, not a defensive extra: `engine.ts:152`
+(`buildUngradedRow`) sets `strengths = outcome.message` for **both** members of
+`UngradedOutcome`, so an untouched `grading-failed` row's `edit.strengths`
+ALSO equals `result.ungraded.message` today, by the same pass-through - the
+first half of the byte comparison is satisfied by both kinds alike. Only the
+`kind` check keeps the correction from also overwriting
+`engine.ts:264`'s real diagnostic (`` `${GRADING_FAILURE_PREFIX}${message}` ``,
+carrying the actual thrown error - this repo's only per-submission failure
+detail) with a `not-attempted` template. `GradingFailedOutcome` has no
+`stoppedBy` field (`types.ts:162-169`, read this round), so the guard is also
+what keeps the lookup below type-safe: TypeScript narrows `result.ungraded` to
+`NotAttemptedOutcome` inside the guarded branch, and `.stoppedBy` is illegal
+outside it. Sabotage: S15.
 
 Three properties this gets, each of which a weaker attachment point loses:
 
@@ -334,21 +438,35 @@ Three properties this gets, each of which a weaker attachment point loses:
 function that does exactly this and its doc comment says it is the only writer
 of `overall`. Use it; do not recompose by hand.
 
-**What the corrected copy must say** is the leaf's own authorship and the
-checker should read it as copy, not as mechanism. It must state the fact and
-the count, must not contain `Re-run to grade the rest`, and must say what
-re-running actually does on this surface - that pressing Grade again with the
-queue unchanged re-grades the same first N, so the queue has to be narrowed
-first. Section 6's AC-3b freezes whatever the implementer writes.
+**What the corrected copy must say - REVISED this round (section 0.1).** It is
+the leaf's own authorship and the checker should read it as copy, not as
+mechanism. It must state the fact, must not contain
+`Re-run to grade the rest`, and must say what re-running actually does on this
+surface - that pressing Grade again with the queue unchanged re-grades the
+same first N, so the queue has to be narrowed first. **It must NOT attempt to
+state the specific count** (round 2 required this; round 2's check found it
+not constructible, section 0.1's AC-3b entry). `classifyRow`'s signature is
+`(result: GradeRow, edit: RowEdit)` - no run, no count - and `GradingRun`
+(`types.ts:308-318`) carries no `maxSubmissions` field
+(`grep -rn "maxSubmissions" src/lib/grade/types.ts` returns nothing, run this
+round), so the only way to put a number in the copy would be parsing one out
+of `result.ungraded.message`, which G2 forbids and which would also make the
+emitted string vary per run - defeating AC-3b's frozen-literal shape outright.
+The two `stoppedBy` values get their own frozen literal each (one for
+`"submission-count-bound"`, one for `"run-deadline"`), neither containing a
+number, and section 6's AC-3b freezes both, plus AC-3c ties
+`correctUngradedFeedbackSeed`'s replacement to the same two literals by
+construction (section 5.1).
 
 `GradingResults.tsx` calls every export the leaf adds, so the wave contains its
 own caller. No parent component is edited; no new prop.
 
-### Test (1 new file)
+### Test (1 new file, 1 edited file)
 
 | Path | Role |
 |---|---|
 | `src/app/components/grading-results/ungradedDisclosure.test.ts` | NEW. The chunk's whole oracle and its whole `verify`. Pure-function tests over the leaf, plus the source-text wiring assertions over `GradingResults.tsx`. |
+| `src/app/components/grading-results/gradingResultsHelpers.test.ts` | **EDITED, per Ruling R (section 0.1).** Not new, not merely adopted. Baseline this round: `npx vitest run` on the unmodified file - `Test Files 1 passed (1)`, `Tests 90 passed (90)` - and `@(Get-Content ...).Count` / `wc -l` both **963** lines. The exact edit and its measured line budget are in section 5.1. |
 
 ### Callers, fixtures and oracles that could break - classified
 
@@ -364,7 +482,8 @@ instrument and report what these missed.
 | `grading-results/gradingResultsExtraction.wiring.test.ts` | **adopted - highest break risk** | `tableRowsAreDrivenBySortedResults` (`:66-73`) requires the literal `sortedResults.map(` in the source. Rewriting the tbody as `sortedResults.filter(...).map(` turns it RED. |
 | `rubricBreakdownPercent.wiring.test.ts` | adopted | Requires `formatScorePercent` to stay referenced in `GradingResults.tsx` (`:92-93`). |
 | `grading-results/gradingResultsPostOutcome.test.ts` | adopted | Pins `fanOutGradingPostResult`'s `{status:"skipped", message}` shape - the same message `:626` must start rendering. |
-| `grading-results/gradingResultsHelpers.test.ts`, `sortGradeRows.test.ts` | **adopted, upgraded from checked-safe** | AC-6 now calls `applyFeedbackFieldEdit`. That function is not edited, but this chunk becomes a consumer of its `overall`-recomposition contract, so a future change to it breaks this chunk. Its tests must stay green and the implementer must not edit them. |
+| `sortGradeRows.test.ts` | adopted | AC-6 now calls `applyFeedbackFieldEdit`. That function is not edited, but this chunk becomes a consumer of its `overall`-recomposition contract, so a future change to it breaks this chunk. This file's tests must stay green and the implementer must not edit them. |
+| `grading-results/gradingResultsHelpers.test.ts` | **REVISED this round - moved OUT of this table, INTO `owns` (section 5.1)** | Round 2 classified it "adopted, upgraded from checked-safe" - wrong after Ruling R, which requires editing its `CLIENT_FILES`/`BANNED_IMPORT_PATTERNS` guard directly. Kept here only as a pointer so a reader scanning this table does not conclude the file is merely adopted. |
 | `src/lib/grade/grade-result-doors.wiring.test.ts` | checked-safe, walker | Requires every caller of `postCanvasGradesAction` to reference `ungraded`. `GradingResults.tsx` passes today only via the COMMENT at `:256-260` - do not delete it unless real code replaces it. RES-7. |
 | `src/file-size-ceiling.structure.test.ts` | **budget gate**, walker | `LIMIT = 1000` at `:30` (`sed -n '28,32p'`). `ALLOWED_OVERAGE` at `:64` lists four files (`sed -n '64,90p'`), none of them `GradingResults.tsx`. **Headroom is 84 lines** (1000 - 916). Never add an entry to that list to fit this chunk. |
 | **`src/lib/client-state-sweep.registry.test.ts`** | **NEW ROW - conditional, walker** | Omitted in round 1. `collectModuleScopeCaches` (`:61-74`) walks all of `SRC_DIR` via `readdirSync` (`:49`). `:116-121` asserts the registered-file set equals an exact FIVE-file list (`EXPECTED_REGISTERED_FILES`, `:101-107`), and `:123-133` requires every OTHER module-scope cache to be registered or listed in `DELIBERATELY_UNREGISTERED` (`:86-96`). **A module-scope memo in the "pure leaf" trips the third test.** The design forbids one; this row is what makes that a gate rather than an intention. |
@@ -376,12 +495,189 @@ instrument and report what these missed.
 
 ### Explicitly NOT owned
 
-`src/lib/grade/engine.ts`, `types.ts`, `postable.ts`;
+`src/lib/grade/engine.ts`, `types.ts` (read by the new guard test in section
+5.1, never edited - S14 already established the precedent of never touching
+this file even transiently, and the guard's sabotage-equivalent is an in-string
+canary rather than a live mutation of it, section 8), `postable.ts`;
 `src/app/components/grading-results/gradingResultsHelpers.ts` (read and called,
-never edited); everything under `src/app/components/repo-grades/`;
+never edited - distinct from `gradingResultsHelpers.test.ts`, which IS owned,
+section 5.1); everything under `src/app/components/repo-grades/`;
 `src/app/actions/github.ts`; `src/app/actions/grading.ts`;
 `src/lib/github-grading-run-store.ts`; everything under
 `src/app/components/snapshot-grading/` and `assessment-shared/` (live A11 work).
+
+---
+
+## 5.1 Ruling R, applied - the exact edit and its measured line budget
+
+All four parts live in the one describe block Ruling R names
+(`:824-889`). Every regex below was verified this round by direct execution
+(`node -e`), not by inspection - output pasted under each one.
+
+### Part 1 + 4 together: register the leaf, and make omission impossible
+
+```
+const CLIENT_FILES = [
+  "./gradingResultsHelpers.ts",
+  "./RowFeedbackBoxes.tsx",
+  "./SubmittedFilesPanel.tsx",
+  "./icons.tsx",
+  "./useResultsSort.ts",
+  "./ResultsTableHeaderRow.tsx",
+  "./FeedbackExpandModal.tsx",
+  "./ungradedDisclosure.ts",        // NEW - Ruling R part 1
+  "../GradingResults.tsx",
+];
+```
+
+Then, appended inside the same describe block, the completeness assertion
+(part 4):
+
+```
+it("CLIENT_FILES lists every non-test .ts/.tsx file in this directory (Ruling R part 4)", () => {
+  const dir = fileURLToPath(new URL(".", import.meta.url));
+  const localFiles = readdirSync(dir).filter((n) => /\.(ts|tsx)$/.test(n) && !n.endsWith(".test.ts"));
+  for (const name of localFiles) expect(CLIENT_FILES).toContain(`./${name}`);
+});
+```
+
+Measured this round, with the leaf not yet built, so the real directory
+listing does not yet include it - `node -e` against
+`fs.readdirSync("src/app/components/grading-results")` filtered the same way:
+
+```
+[
+  "./FeedbackExpandModal.tsx", "./gradingResultsHelpers.ts", "./icons.tsx",
+  "./ResultsTableHeaderRow.tsx", "./RowFeedbackBoxes.tsx",
+  "./SubmittedFilesPanel.tsx", "./useResultsSort.ts"
+]
+```
+
+Seven files, all seven already in `CLIENT_FILES` - so this assertion is GREEN
+today, before this chunk lands, which is the correct starting state (S19
+proves the direction of failure). Once `ungradedDisclosure.ts` exists on disk,
+this same assertion is what makes part 1's registration non-optional: if the
+leaf is created but the array entry above is omitted or later deleted, this
+test reds immediately, on the real file listing, with no reliance on anyone
+remembering to add a case for it. `readdirSync` needs adding to this file's
+existing `import { readFileSync } from "node:fs";` (becomes
+`import { readFileSync, readdirSync } from "node:fs";`, same line, no line
+count change).
+
+### Part 2: narrow the ban, exempting `@/lib/grade/types` only
+
+```
+const BANNED_IMPORT_PATTERNS: RegExp[] = [
+  /from ["']@\/lib\/grade["']/,
+  /from ["']@\/lib\/grade\/(?!types["'])/,   // narrowed - Ruling R part 2
+  /from ["']@\/lib\/supabase\/server["']/,
+  /from ["']next\/headers["']/,
+];
+```
+
+Verified this round with `node -e` against six fixtures, all matching the
+required direction:
+
+```
+"import { generateRubric } from \"@/lib/grade/rubric\";" -> true OK
+"import { X } from '@/lib/grade/rubric';" -> true OK
+"import type { UngradedOutcome } from \"@/lib/grade/types\";" -> false OK
+"import type { UngradedOutcome } from '@/lib/grade/types';" -> false OK
+"import { X } from \"@/lib/grade/typesFoo\";" -> true OK
+"import { X } from \"@/lib/grade\";" -> false OK
+```
+
+The negative lookahead bans every submodule of `@/lib/grade/` except the exact
+specifier `@/lib/grade/types` (both quote styles); a near-miss like
+`@/lib/grade/typesFoo` is still banned, so the exemption is not a prefix match.
+The existing canary test (`:865-881`) gets two more lines proving the
+exemption in both quote styles, alongside its existing positive cases -
+extending an existing test rather than adding a new one:
+
+```
+expect(BANNED_IMPORT_PATTERNS.some((p) => p.test('import type { X } from "@/lib/grade/types";'))).toBe(false);
+expect(BANNED_IMPORT_PATTERNS.some((p) => p.test("import type { X } from '@/lib/grade/types';"))).toBe(false);
+```
+
+### Part 3: guard that `types.ts` stays import-free
+
+The exemption in part 2 is sound only as long as `src/lib/grade/types.ts`
+itself carries no VALUE import - a type-only import is erased at compile time
+and pulls in no runtime code, so it cannot smuggle `next/headers` back in
+through the exemption. Measured this round: `types.ts` has exactly one
+`import` occurrence, `import type { CodeRunResult } from "../code-runner";`
+at `:1` (`grep -n "import" src/lib/grade/types.ts`), and this pattern
+distinguishes it from a value import, verified by `node -e`:
+
+```
+real file matches (should be false): false
+known-bad line matches (should be true): true
+known-good type-only line matches (should be false): false
+side-effect import matches (should be true): true
+namespace import matches (should be true): true
+```
+
+```
+const VALUE_IMPORT_PATTERN = /^import(?!\s+type\b)\s/m;
+
+it("types.ts stays import-free, so the exemption above stays sound (Ruling R part 3)", () => {
+  expect(VALUE_IMPORT_PATTERN.test('import { x } from "@/lib/supabase/server";')).toBe(true);
+  expect(VALUE_IMPORT_PATTERN.test('import type { CodeRunResult } from "../code-runner";')).toBe(false);
+  const source = readFileSync(
+    fileURLToPath(new URL("../../../lib/grade/types.ts", import.meta.url)),
+    "utf8"
+  );
+  expect(source).not.toMatch(VALUE_IMPORT_PATTERN);
+});
+```
+
+The relative path resolves from this test file
+(`src/app/components/grading-results/`) up three levels to `src/`, then into
+`lib/grade/types.ts` - the same `new URL(relativePath, import.meta.url)`
+idiom the file's existing `CLIENT_FILES` reads already use, just aimed
+outside this directory instead of inside it.
+
+**Because `types.ts` is fenced off (not owned by this chunk, and S14 already
+established the precedent of never touching it even transiently), this
+guard's sabotage-equivalent is the in-string canary above (a known-bad STRING,
+not a real file mutation) - consistent with `traps-search.md`'s "every
+absence claim needs a canary," not a live mutation of an out-of-scope file.**
+
+### Measured line budget
+
+Base measurement this round: `@(Get-Content
+src/app/components/grading-results/gradingResultsHelpers.test.ts).Count` (and
+`wc -l`, agreeing) = **963**. `file-size-ceiling.structure.test.ts`'s
+`LIMIT = 1000` (`:30`) applies to this file - it is NOT in `ALLOWED_OVERAGE`
+(`grep -n "gradingResultsHelpers" src/file-size-ceiling.structure.test.ts`
+returns nothing, checked this round) - so it is a live, uncushioned wall,
+exactly like `GradingResults.tsx`'s.
+
+Every snippet above was written to a scratch file exactly as drafted and
+measured with `wc -l` against the equivalent original block (both agree with
+`@(Get-Content).Count` per this-repo.md; neither was estimated):
+
+| Addition | Measured lines | Command |
+|---|---|---|
+| `BANNED_IMPORT_PATTERNS` block, narrowed in place (6 lines before, 6 lines after - the exemption comment moved inline rather than added as its own lines) | net **+0** | `wc -l` on both the original 6-line block and the drafted 6-line replacement |
+| Canary block addition (the 2 new `expect` lines quoted above, no added comment) | **+2** | `wc -l` on the drafted addition |
+| "types.ts stays import-free" block (1 const line, 1 blank line, then a 9-line `it(...)` including the multi-line `readFileSync` call) | **+11** | `wc -l` on the drafted block |
+| Completeness assertion `it` (5 lines total: open, 3 body statements, close) | **+5** | `wc -l` on the drafted block |
+| `CLIENT_FILES` new entry | **+1** | direct count |
+
+**Total measured addition: 19 lines** (0+2+11+5+1). `963 + 19 = 982`, leaving
+**18 lines** of headroom under the 1000-line ceiling (the exact same
+instrument as `GradingResults.tsx`'s 84-line headroom, section 5). The
+"types.ts stays import-free" block is the largest single piece and is written
+with a wrapped `readFileSync` call for readability; an implementer who writes
+it on one line saves roughly 3 lines, which only widens the margin. Budget
+this wave's actual diff (blank lines between tests, any additional comment)
+at up to 30 new lines as a conservative cap - `963 + 30 = 993`, still 7 lines
+under - and if the real
+diff exceeds that, the implementer reports the overage rather than absorbing
+it silently; this is not a wall to discover at the wave gate. Sabotage S7b
+proves the wall is real for this file specifically, the same way S7 does for
+`GradingResults.tsx`.
 
 ---
 
@@ -403,11 +699,16 @@ and `closure-runner.ts:31` reads the `Tests` line, never the `Test Files` line.
 **THE RULED COST, stated here as the ruling requires every row to state it:**
 this chunk's guarantees do not all live in that one file. AC-7 (the `never`
 arm) and AC-8 (the client-bundle boundary) have no vitest instrument at all,
-and the budget gate lives in `file-size-ceiling.structure.test.ts`. Those three
-lean on the WAVE GATE. That is acceptable **because the closure is verify AND
-wave gate, never verify alone** - and it is stated rather than hidden, because
-a verify that looks like the whole closure is exactly the L14 failure in a
-different costume.
+and the budget gate lives in `file-size-ceiling.structure.test.ts`. **Ruling R
+adds a fourth: R1-R4 (section 6, below) live in
+`gradingResultsHelpers.test.ts`, a SECOND test file this chunk edits, and
+`verify`'s single path never runs it.** Those four lean on the WAVE GATE,
+which runs `npm test` over the whole suite and so runs
+`gradingResultsHelpers.test.ts` (baseline this round: 90/90 passing, section
+5.1) alongside everything else. That is acceptable **because the closure is
+verify AND wave gate, never verify alone** - and it is stated rather than
+hidden, because a verify that looks like the whole closure is exactly the L14
+failure in a different costume.
 
 **L15 - load sensitivity is a CLASS, not one file.** It has a second instance
 (`recording-files.kinds.test.ts`), and both instances share the mechanism: a
@@ -424,12 +725,17 @@ re-run that file alone before treating it as a regression.
 
 ### Pass condition - the three things `traps-spec.md` requires
 
-- **Object under comparison:** the set of acceptance criteria AC-1..AC-8 below,
-  each evaluated against `src/app/components/grading-results/ungradedDisclosure.ts`
-  and `src/app/components/GradingResults.tsx` as they sit on disk.
+- **Object under comparison:** the set of acceptance criteria AC-1..AC-8 plus
+  AC-3c and R1-R4 (all below), evaluated against
+  `src/app/components/grading-results/ungradedDisclosure.ts`,
+  `src/app/components/GradingResults.tsx` and
+  `src/app/components/grading-results/gradingResultsHelpers.test.ts` as they
+  sit on disk - REVISED this round (section 0.1) to add the third file, which
+  Ruling R moved into `owns`.
 - **Instrument, per quantity:**
-  - AC-1, AC-2, AC-3a, AC-3b, AC-4, AC-6: **direct calls** to the leaf's
-    exported functions from the test file. Real execution, no source reading.
+  - AC-1, AC-2, AC-3a, AC-3b, AC-3c, AC-4, AC-6: **direct calls** to the
+    leaf's exported functions from the test file. Real execution, no source
+    reading.
   - AC-5: `readFileSync` over `src/app/components/GradingResults.tsx` with the
     CR-tolerant unanchored comment strip described below, plus a canary block
     proving each matcher separates a known-good from a known-bad fixture BEFORE
@@ -438,11 +744,16 @@ re-run that file alone before treating it as a regression.
     legal caller in this repo.
   - AC-8: `npm run build`, graded on the compiled-successfully line and NOT on
     the exit code, at the wave gate.
+  - R1-R4: **direct calls and `readFileSync` inside
+    `gradingResultsHelpers.test.ts` itself**, run via `npm test` at the wave
+    gate (not `verify` - see the ruled cost above).
   - Size budget: `@(Get-Content src/app/components/GradingResults.tsx).Count`
-    at the wave gate, compared against `LIMIT = 1000`.
+    AND `@(Get-Content .../gradingResultsHelpers.test.ts).Count`, both at the
+    wave gate, both compared against `LIMIT = 1000` - REVISED this round to
+    add the second file (section 5.1).
 - **Direction of failure:** RED if ANY row of the table below is unsatisfied.
   The condition ranges over the WHOLE table - a partial fix that satisfies
-  seven of eight is a FAIL, not a pass with a note. No prose anywhere in this
+  most of it is a FAIL, not a pass with a note. No prose anywhere in this
   document exempts a row; if a checker finds one that appears to, the prose is
   the defect and the table wins.
 
@@ -453,21 +764,43 @@ re-run that file alone before treating it as a regression.
 | AC-1 | `classifyRow` returns a distinct `state` for each of: a graded postable row; a graded row refused by `checkRowPostability`; `ungraded.kind === "grading-failed"`; `stoppedBy === "submission-count-bound"`; `stoppedBy === "run-deadline"`. **Four of these five are observable on this surface; `"run-deadline"` is built for type closure only (section 3.2) and the test says so in a comment naming that section.** | leaf calls |
 | AC-2 | A rescued ungraded row (ungraded, and `edit.total` carries a real score) classifies as its own `state`, and its copy states that it cannot be posted from this table. | leaf calls |
 | AC-3a | No member of `UNGRADED_DISCLOSURE_COPY` contains the substring `Re-run to grade the rest`. | leaf calls |
-| AC-3b | **The construction that replaces round 1's uncomputable clause.** The test file holds a FROZEN LITERAL copy of every user-facing string the leaf can emit - written out in the test, never imported from the leaf. The test drives `classifyRow` over the enumerated product of its inputs, collects every string on every returned `RowDisclosure`, and asserts `new Set(collected)` equals `new Set(frozenLiterals)` - **both directions**. A new sentence anywhere in the leaf is then a set diff a human must read and approve, which is the review this repo can actually perform. | leaf calls |
+| AC-3b | **RECONSTRUCTED this round (section 0.1) - round 2's version was NOT CONSTRUCTIBLE.** The test file holds a FROZEN LITERAL copy of every string `UNGRADED_DISCLOSURE_COPY` can hold - written out in the test, never imported from the leaf, and containing NO interpolated count (the count is not constructible here; section 5's "What the corrected copy must say"). The test drives `classifyRow` over the enumerated product of its inputs (five outcome shapes x the rescued-edit variants AC-2 needs), collects every string on every returned `RowDisclosure`, and asserts `new Set(collected)` equals `new Set(frozenLiterals)` - **both directions**. A new sentence anywhere in `classifyRow` is then a set diff a human must read and approve, which is the review this repo can actually perform. | leaf calls |
+| AC-3c | **NEW this round (section 0.1) - closes round 2's second AC-3b hole: the frozen set covered `classifyRow` alone and never the string that actually lands in the instructor's textarea.** For each `stoppedBy` value in `NotAttemptedOutcome`'s two-member union, `correctUngradedFeedbackSeed`'s replacement `strengths` is BYTE-IDENTICAL to `UNGRADED_DISCLOSURE_COPY[stoppedBy]` - the SAME frozen member AC-3b already enumerates, read by construction rather than independently authored. Exhaustive over both members of a closed union, not a hand-picked sample. | leaf calls |
 | AC-4 | `describeSkippedStatus(m)` returns a NON-EMPTY string for every one of `undefined`, `""`, `"   "`, and a real reason; and for a real reason it returns that reason (not a substitute). `GradingResults.tsx`'s `"skipped"` arm calls it, and the literal `"Not posted - no grade or comment to send"` no longer appears in `GradingResults.tsx` as that arm's whole output. | leaf calls + source text |
 | AC-5 | **Rendered, not merely called.** Inside the tbody map region of `GradingResults.tsx` - the source between the index of `sortedResults.map(` and the index of the closing `</tr>` - the attribute `data-ungraded-state=` occurs at least once, inside a JSX interpolation, and `classifyRow` is called within that same region. The attribute name is pinned as a FROZEN LITERAL IN THE TEST FILE, never imported from the component or the leaf (an assertion reading a value the implementation also reads proves nothing - `traps-tests.md`). It is a contract, not an implementation spelling: it also gives RES-4's browser check something nameable to look for. | source text |
-| AC-6 | **B3.** `correctUngradedFeedbackSeed(result, edit)` returns an edit whose `strengths` differs from `result.ungraded.message` when `edit.strengths` equals that message; returns an edit whose `strengths` is unchanged when the instructor has typed anything else; is IDEMPOTENT (applying it twice equals applying it once); and recomputes `overall` so it is `applyFeedbackFieldEdit`'s output rather than the stale composition. And `GradingResults.tsx` applies it at BOTH `loadGradingResultsEdits` call sites - if the source shows one wrapped and one bare, RED. | leaf calls + source text |
+| AC-6 | **B3, NARROWED this round (section 0.1) - round 2's version was scoped to `isUngraded(result)`, which reaches BOTH `UngradedOutcome` members and mandated overwriting a `grading-failed` row's own diagnostic.** `correctUngradedFeedbackSeed(result, edit)`: when `result.ungraded?.kind === "not-attempted"` AND `edit.strengths` is exactly `result.ungraded.message` or a member of `UNGRADED_DISCLOSURE_COPY`, returns an edit with `strengths` replaced by `UNGRADED_DISCLOSURE_COPY[result.ungraded.stoppedBy]` (AC-3c ties this to the frozen set); returns an edit whose `strengths` is unchanged when the instructor has typed anything else; is IDEMPOTENT; recomputes `overall` via `applyFeedbackFieldEdit` rather than a stale composition; and - the new clause - **returns `edit` completely unchanged, unconditionally, when `result.ungraded?.kind === "grading-failed"`**, even if `edit.strengths` happens to equal `result.ungraded.message` (which it does by default, per `engine.ts:152`'s pass-through - the same condition shape that fires for `not-attempted`, which is exactly why the `kind` guard is load-bearing rather than redundant). And `GradingResults.tsx` applies it at BOTH `loadGradingResultsEdits` call sites - if the source shows one wrapped and one bare, RED. | leaf calls + source text |
 | AC-7 | The leaf's `stoppedBy` switch has an exhaustive arm typed `never`, so a third union member is a compile error. | `npx tsc --noEmit`, **wave gate only** |
-| AC-8 | The leaf value-imports from `@/lib/grade/types`, not from `@/lib/grade`, and the build still reports its compiled-successfully line. | `npm run build`, **wave gate**; plus a source-text check in the test file that the specifier `"@/lib/grade"` followed immediately by a closing quote does not appear in the leaf |
+| AC-8 | The leaf value-imports from `@/lib/grade/types`, not from `@/lib/grade`, and the build still reports its compiled-successfully line. | `npm run build`, **wave gate**; plus a source-text check in the test file that the specifier `"@/lib/grade"` followed immediately by a closing quote does not appear in the leaf. **A second, independent instrument now also covers this** (section 0.1, section 5.1): `gradingResultsHelpers.test.ts`'s `it.each(CLIENT_FILES)`, once the leaf is registered - see R1-R4 below, which is a distinct set of criteria, not a restatement of AC-8. |
+
+### Ruling R acceptance criteria (R1-R4)
+
+Live in `gradingResultsHelpers.test.ts`, not in the leaf's own test file; run
+by `npm test` at the wave gate (the ruled cost, above), never by `verify`.
+Each corresponds 1:1 to one of Ruling R's four numbered parts (section 0.1).
+
+| id | Criterion | Instrument |
+|---|---|---|
+| R1 | `CLIENT_FILES` contains the literal `"./ungradedDisclosure.ts"`. | source text (array literal) |
+| R2 | `BANNED_IMPORT_PATTERNS`'s second entry matches `"@/lib/grade/rubric"` (both quote styles) and does NOT match `"@/lib/grade/types"` (both quote styles) - all four cases exercised, not just the two round 2's version already covered. | direct `RegExp.test` calls, verified this round by `node -e` (section 5.1) |
+| R3 | `VALUE_IMPORT_PATTERN` does not match the real contents of `src/lib/grade/types.ts`, and the canary proves the same pattern DOES match a known-bad value-import line and does NOT match the file's real type-only import line. | `readFileSync` on `types.ts` (read-only, never edited - S14's precedent) plus direct `RegExp.test` calls |
+| R4 | For every `.ts`/`.tsx` file in `src/app/components/grading-results/` whose name does not end `.test.ts`, `CLIENT_FILES` contains `./<that filename>`. | `readdirSync` on the real directory at test run time, so a future file is caught automatically (section 5.1) |
+
+**Direction of failure, stated separately from AC-1..AC-8's table because R1-R4
+run in a different file at a different gate:** RED if any of R1-R4 fails,
+exactly as for the AC table. R4 is the one built to catch an omission the
+other three cannot: R1-R3 protect the mechanism Ruling R specifies; R4 protects
+against a FUTURE file skipping the mechanism entirely.
 
 **The review obligation AC-3b carries, which is not a test and is not
 pretending to be one.** Freezing the copy set makes a new instruction VISIBLE;
 it cannot make it WRONG. So the artifact's checker, and the verify pass after
 the build, each read the frozen set and ask one question per member: does this
 sentence name an action the instructor can perform on THIS surface? That is a
-human judgement with a bounded input - eight or so strings - rather than an
-unbounded property of model prose. Round 1 wrote it as a criterion and it had
-no instrument at all; this is the honest downgrade.
+human judgement with a bounded input - the frozen set shrank this round
+(section 0.1: no per-run count, so no per-count variants) to roughly four to
+six strings - rather than an unbounded property of model prose. Round 1 wrote
+it as a criterion and it had no instrument at all; this is the honest
+downgrade.
 
 **Fixtures come from the emitted shape.** Every `GradeResult` fixture in the
 test file is built from the field set `buildUngradedRow` emits
@@ -513,11 +846,21 @@ real byte (`traps-search.md`: Write/Edit materialise `\uXXXX` escapes, and
 - **G4. Nothing new becomes postable.** The chunk adds no call to
   `postCanvasGradesAction` and changes neither `canPostRow` (`:579`) nor
   `gradableResults` (`:261-264`).
-- **G5 (new, B3). The engine's instruction no longer reaches the screen
-  uncorrected on this surface**, for a row whose box the instructor has not
-  edited. Bounded honestly: it is corrected in the SEED, so a row whose stored
-  edit is neither the engine message nor a frozen leaf string is left alone by
-  design - that is a typed edit and overwriting it would be worse.
+- **G5 (B3, NARROWED this round - section 0.1). The engine's instruction no
+  longer reaches the screen uncorrected on this surface, for a `not-attempted`
+  row whose box the instructor has not edited.** Bounded honestly, twice over:
+  it is corrected in the SEED, so a row whose stored edit is neither the
+  engine message nor a frozen leaf string is left alone by design (a typed
+  edit, overwriting it would be worse); and it does NOT extend to a
+  `grading-failed` row - that row's `engine.ts:264` diagnostic is left alone
+  unconditionally, by construction (AC-6's `kind` guard), because it is real
+  per-submission information, not a false instruction.
+- **G6 (new, Ruling R - section 0.1).** The `@/lib/grade/` client-bundle ban's
+  exemption for `@/lib/grade/types` is not merely asserted safe; it is GUARDED
+  by construction. R3 makes the exemption's precondition (`types.ts` carries no
+  value import) an executing assertion against the real file, not a one-time
+  observation recorded in this document. If a future edit adds a value import
+  to `types.ts`, R3 reds before the exemption can silently become false.
 
 ### NOT guaranteed - state these; do not let a green suite imply otherwise
 
@@ -535,9 +878,18 @@ real byte (`traps-search.md`: Write/Edit materialise `\uXXXX` escapes, and
   `engine.ts:307`/`:320` verbatim. RES-1.
 - **N5. Contrast, focus order and announcement of the new marker.** No test
   here computes contrast or renders a live region. RES-5.
-- **N6 (new).** That the `"run-deadline"` copy is ever seen. Section 3.2: it is
+- **N6.** That the `"run-deadline"` copy is ever seen. Section 3.2: it is
   built for type closure and is not reachable from the three importers by any
   path I traced.
+- **N7 (new this round - section 0.1).** That the corrected copy states the
+  run's specific submission count or time limit. It deliberately does not:
+  `classifyRow`/`correctUngradedFeedbackSeed`'s signatures carry no run and no
+  count, `GradingRun` (`types.ts:308-318`) has no `maxSubmissions` field, and
+  building one would mean either parsing a number out of prose (G2 forbids it)
+  or editing the fenced-off `engine.ts`. The corrected copy states the fact and
+  the category (bound-stopped vs. deadline-stopped) and what re-running does;
+  it does not echo the number. Not a residual - a stated, reasoned withdrawal
+  (section 0.1), not a deferred proof.
 
 ---
 
@@ -571,11 +923,24 @@ on the tree at once.
 | **S10** | **NEW (B3).** Make `correctUngradedFeedbackSeed` return `edit` unchanged. | `ungradedDisclosure.test.ts` | AC-6: the engine's sentence goes back to the What Went Well box. This is B3's kill control and the artifact fails its round if this stays GREEN. |
 | **S11** | **NEW (B3).** Make `correctUngradedFeedbackSeed` replace `strengths` unconditionally for an ungraded row, ignoring the equality test. | `ungradedDisclosure.test.ts` | AC-6's other direction: a rescued row's typed feedback must survive. Without this, AC-6 is satisfiable by a function that destroys instructor work. |
 | **S12** | **NEW.** In `GradingResults.tsx`, wrap only the `:164` call site and leave `:183` bare. | `ungradedDisclosure.test.ts` | AC-6's second half. `:183` runs on every run refresh, so a one-site fix looks correct until the run changes - a defect no single-render reading would show. |
+| **S15** | **NEW this round (section 0.1) - AC-6's narrowing control.** Widen the guard from `result.ungraded?.kind === "not-attempted"` to `result.ungraded !== undefined`, and read `.stoppedBy` off `result.ungraded` via a type assertion (`(result.ungraded as NotAttemptedOutcome).stoppedBy`) so it still compiles. | `ungradedDisclosure.test.ts` | AC-6's new clause: a `grading-failed` fixture whose `edit.strengths` equals its own `result.ungraded.message` (true by default, per `engine.ts:152`'s pass-through for BOTH kinds) has its diagnostic overwritten with a `not-attempted` template. This is the exact defect round 2's check found and the exact reason AC-6 was narrowed - without S15, a re-widened guard passes every other sabotage. |
+| **S16** | **NEW this round (section 0.1) - AC-3c's kill control.** Hand-author a second, slightly different copy of the count-bound string directly inside `correctUngradedFeedbackSeed` instead of reading `UNGRADED_DISCLOSURE_COPY["submission-count-bound"]`. | `ungradedDisclosure.test.ts` | AC-3c: proves the replacement text is drawn from the SAME frozen member `classifyRow` reads, not a second, independently authored string that could drift - the exact hole round 2's check found in AC-3b. |
 | S7 | Add 90 lines of filler to `GradingResults.tsx`, pushing it from 916 to 1006. | `src/file-size-ceiling.structure.test.ts` | The 84-line headroom is a real wall, not an assumption. |
+| **S7b** | **NEW this round (section 0.1/5.1).** Add ~40 lines of filler to `gradingResultsHelpers.test.ts`, pushing it from 963 to over 1000. | `src/file-size-ceiling.structure.test.ts` | The 18-line measured headroom (section 5.1) is a real wall for this SECOND file too, not in `ALLOWED_OVERAGE` and not assumed. |
 | S8 | Delete the comment at `GradingResults.tsx:256-260` **and** every real `ungraded` reference the chunk added. | `src/lib/grade/grade-result-doors.wiring.test.ts` | Proves the door walker still binds this file after the edit, and proves it is currently satisfied by a COMMENT - which is why RES-7 exists. |
 | S9 | In `ungradedDisclosure.test.ts`, replace a live AC-5 assertion's subject with a trailing-comment copy of itself (the L13 mode-2 shape). | `ungradedDisclosure.test.ts` | Proves the chosen `stripComments` is not trailing-comment-blind. If this stays GREEN, the helper is the anchored form and must be replaced. |
-| **S13** | **NEW (M1/AC-8), WAVE GATE.** Change the leaf's import to `from "@/lib/grade"`. | `npm run build` - the compiled-successfully line disappears | Proves the client-bundle hazard is real for THIS file rather than inherited from `gradingResultsHelpers.ts`'s comment. `npx tsc --noEmit`, `npm run lint` and `npm test` must all still be GREEN on the mutant - that contrast IS the finding, and recording it is the point. |
+| **S13** | **NEW (M1/AC-8), WAVE GATE.** Change the leaf's import to `from "@/lib/grade"`. | `npm run build` - the compiled-successfully line disappears | Proves the client-bundle hazard is real for THIS file rather than inherited from `gradingResultsHelpers.ts`'s comment. `npx tsc --noEmit`, `npm run lint` and `npm test` must all still be GREEN on the mutant - that contrast IS the finding, and recording it is the point. **REVISED this round (section 0.1): with Ruling R landed, `gradingResultsHelpers.test.ts`'s `it.each(CLIENT_FILES)` ALSO reds on this exact mutation** (the leaf is now registered), giving a second, faster-feedback instrument for the same hazard at `npm test` rather than only at `npm run build`. Run both; a mutant caught by one and not the other is itself a finding. |
 | **S14** | **NEW (M3/AC-7), WAVE GATE.** Widen the leaf's switch parameter to a local alias adding a third `stoppedBy` member. | `npx tsc --noEmit` goes from no output to an error on the `never` arm | Proves G1b is a construction rather than a claim. `types.ts` is NOT edited - the widening is local to the leaf and reverted. |
+| **S17** | **NEW this round (Ruling R part 2, R2's kill control).** Revert the narrowed pattern to round 2's unqualified form, `/from ["']@\/lib\/grade\//`. | `gradingResultsHelpers.test.ts`'s `it.each(CLIENT_FILES)`, on `./ungradedDisclosure.ts` | Proves the narrowing is load-bearing for the leaf's own registration, not merely a documented intention: without it, the leaf's own `@/lib/grade/types` import trips the guard that Ruling R exists to let it pass. |
+| **S19** | **NEW this round (Ruling R part 1+4, R1/R4's kill control).** Delete the `"./ungradedDisclosure.ts"` line from `CLIENT_FILES` while the leaf file still exists on disk. | `gradingResultsHelpers.test.ts`'s completeness assertion (R4) | Proves R4 actually enforces R1's registration rather than merely restating it: a real file present without a corresponding entry reds immediately, with no dependence on anyone noticing the omission by eye. |
+
+**R3 (types.ts stays import-free) has no live-mutation sabotage, by design
+(section 5.1).** `types.ts` is fenced off - not owned by this chunk, and S14
+already established the precedent of never touching it even transiently. R3's
+canary (section 5.1: the pattern fires on a known-bad value-import STRING and
+not on the file's real type-only import line) is the sabotage-equivalent for
+this one criterion, per `traps-search.md`'s "every absence claim needs a
+canary."
 
 S9 is deliberately a sabotage of the TEST's own instrument rather than of the
 implementation. That is the only way to prove the comment-stripping half is
@@ -617,4 +982,12 @@ Stated rather than filled in, per `docs/loop/this-repo.md` section 6.
   `npx tsc --noEmit` (other agents are active; it has one legal caller) and I
   did not run `npm run build`. Both are named as wave-gate instruments with
   named sabotages, not asserted as passing.
+- **The actual run of R1-R4, S7b, S15, S16, S17 and S19.** These criteria and
+  sabotages do not exist in the tree yet - I designed and verified their
+  MECHANISM this round (the regexes by direct `node -e` execution, pasted
+  where introduced; the file-listing and line-budget claims by real
+  `readdirSync`/`wc -l` runs against the actual directory and file, also
+  pasted), but none of them has been written into
+  `gradingResultsHelpers.test.ts` or executed as a vitest test. That is the
+  implementer's wave, gated by `npm test` as stated throughout section 6.
 - **Contrast of any token.** RES-5. No test in this repo computes it.

@@ -921,9 +921,11 @@ describe("GradingResults.tsx's empty Files cell stays wired to filesColumnEmptyL
     expect(BARE_DASH_TERNARY_PATTERN.test('cond ? "a" : "b"')).toBe(false);
   });
 
-  it("GradingResults.tsx calls filesColumnEmptyLabel(filesRetained) for the empty Files cell", () => {
+  it("A16-1 re-extraction: GradingResults.tsx renders FilesCell (filesRetained threaded through), which itself calls filesColumnEmptyLabel(filesRetained)", () => {
     const source = readStrippedSource("../GradingResults.tsx");
-    expect(source).toMatch(CALL_PATTERN);
+    expect(source).toMatch(/<FilesCell\b/);
+    expect(source).toMatch(/filesRetained=\{filesRetained\}/);
+    expect(readStrippedSource("./FilesCell.tsx")).toMatch(CALL_PATTERN);
   });
 });
 
@@ -950,10 +952,12 @@ describe("GradingResults.tsx wires its Browse-all-files button to SubmittedFiles
     expect(OPEN_PATTERN.test("onClick={() => setBrowseFilesFor(sortedResults[0])}")).toBe(false);
   });
 
-  it("GradingResults.tsx's Browse button opens the CURRENT row, and renders the panel", () => {
+  it("A16-1 re-extraction: GradingResults.tsx wires FilesCell's onBrowseAll to setBrowseFilesFor and renders the panel; FilesCell opens the CURRENT row", () => {
     const source = readStrippedSource("../GradingResults.tsx");
-    expect(source).toMatch(OPEN_PATTERN);
+    expect(source).toMatch(/<FilesCell\b/);
+    expect(source).toMatch(/onBrowseAll=\{setBrowseFilesFor\}/);
     expect(source).toMatch(RENDER_PATTERN);
+    expect(readStrippedSource("./FilesCell.tsx")).toMatch(/onClick=\{\(\) => onBrowseAll\(result\)\}/);
   });
 });
 

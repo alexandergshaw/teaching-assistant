@@ -73,8 +73,19 @@ function toValidObservation(candidate: unknown): ClassTrendsInsightObservation |
  * exception - this app has no error boundary, so a throw here would take the
  * whole tab down with it.
  */
-export default function ClassTrendsPanel({ entry }: { entry: GradingRunEntry }) {
-  const [expanded, setExpanded] = useState(false);
+export default function ClassTrendsPanel({
+  entry,
+  defaultExpanded = false,
+}: {
+  entry: GradingRunEntry;
+  /** A16-1 (docs/a16-scope.md section 4.6, "Half 2 item 1a: layer A disclosed
+   * by default"): the four new LMS Grading mounts open this panel by default
+   * (a run just graded is exactly when the instructor wants trends visible),
+   * while Drafted Grades' existing mount omits this prop and keeps its
+   * original collapsed-by-default behaviour unchanged. */
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [insight, setInsight] = useState<InsightState>({ status: "idle" });
 
   const report = useMemo(() => computeClassTrends(entry), [entry]);

@@ -52,9 +52,45 @@ describe("importsAndRendersIcon (canary)", () => {
   });
 });
 
-describe("GradingResults.tsx renders all three icons moved to icons.tsx", () => {
-  it.each(["CopyIcon", "EyeIcon", "DownloadIcon"])("imports and renders %s from ./grading-results/icons", (name) => {
-    expect(importsAndRendersIcon(GRADING_RESULTS_SOURCE, name)).toBe(true);
+describe("GradingResults.tsx renders CopyIcon (moved to icons.tsx) directly", () => {
+  it("imports and renders CopyIcon from ./grading-results/icons", () => {
+    expect(importsAndRendersIcon(GRADING_RESULTS_SOURCE, "CopyIcon")).toBe(true);
+  });
+});
+
+// A16-1 (docs/REGRESSION.md entry 359, docs/a16-scope.md section 4.4):
+// EyeIcon/DownloadIcon moved one hop further, from being rendered directly
+// in GradingResults.tsx to being rendered inside FilesCell.tsx (the Files
+// column's per-row content, also moved out in this same extraction).
+// GradingResults.tsx no longer imports either icon directly - it renders
+// FilesCell, which itself imports and renders both from ./icons (a same-
+// directory import there, since FilesCell.tsx lives in grading-results/
+// alongside icons.tsx - a different literal from GRADING_RESULTS_SOURCE's
+// own "./grading-results/icons", so this is checked with its own pattern
+// rather than reusing importsAndRendersIcon unchanged).
+const FILES_CELL_SOURCE = read("src/app/components/grading-results/FilesCell.tsx");
+
+function importsAndRendersIconFrom(source: string, name: string, fromPath: string): boolean {
+  const importPattern = new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["']${fromPath.replace(/\./g, "\\.")}["']`);
+  const renderPattern = new RegExp(`<${name}\\b`);
+  return importPattern.test(source) && renderPattern.test(source);
+}
+
+describe("GradingResults.tsx renders FilesCell, which renders EyeIcon/DownloadIcon (A16-1 re-extraction)", () => {
+  it("imports FilesCell from ./grading-results/FilesCell and renders <FilesCell", () => {
+    expect(
+      /import\s*\{[^}]*\bFilesCell\b[^}]*\}\s*from\s*["']\.\/grading-results\/FilesCell["']/.test(GRADING_RESULTS_SOURCE)
+    ).toBe(true);
+    expect(/<FilesCell\b/.test(GRADING_RESULTS_SOURCE)).toBe(true);
+  });
+
+  it("GradingResults.tsx no longer IMPORTS EyeIcon/DownloadIcon (they moved into FilesCell.tsx) - a header comment naming the historical icons.tsx move is not an import", () => {
+    expect(/import\s*\{[^}]*\bEyeIcon\b/.test(GRADING_RESULTS_SOURCE)).toBe(false);
+    expect(/import\s*\{[^}]*\bDownloadIcon\b/.test(GRADING_RESULTS_SOURCE)).toBe(false);
+  });
+
+  it.each(["EyeIcon", "DownloadIcon"])("FilesCell.tsx imports and renders %s from ./icons", (name) => {
+    expect(importsAndRendersIconFrom(FILES_CELL_SOURCE, name, "./icons")).toBe(true);
   });
 });
 
@@ -193,5 +229,117 @@ describe("rendersFeedbackExpandModalWired (canary)", () => {
 describe("GradingResults.tsx renders FeedbackExpandModal, gated and fully wired", () => {
   it("gates on expandedBox and wires student/field/edit/onChange/onClose", () => {
     expect(rendersFeedbackExpandModalWired(GRADING_RESULTS_SOURCE)).toBe(true);
+  });
+});
+
+// ── A16-1 (docs/a16-scope.md section 4.4): the trends mount ────────────────
+// V1/V2/V13. Source-text tests over-specify: these pin presence, ordering
+// and structural containment, never prose or attribute spelling.
+
+/** True when `source` both imports ClassTrendsPanel from
+ * ./drafted-grades/ClassTrendsPanel AND actually renders it - mirrors
+ * importsAndRendersIcon above. */
+function importsAndRendersClassTrendsPanel(source: string): boolean {
+  const importPattern = /import\s+ClassTrendsPanel\s+from\s*["']\.\/drafted-grades\/ClassTrendsPanel["']/;
+  const renderPattern = /<ClassTrendsPanel\b/;
+  return importPattern.test(source) && renderPattern.test(source);
+}
+
+describe("importsAndRendersClassTrendsPanel (canary)", () => {
+  it("reports true when the source imports AND renders ClassTrendsPanel from ./drafted-grades/ClassTrendsPanel", () => {
+    const fixture = [
+      'import ClassTrendsPanel from "./drafted-grades/ClassTrendsPanel";',
+      "const x = <ClassTrendsPanel entry={entry} />;",
+    ].join("\n");
+    expect(importsAndRendersClassTrendsPanel(fixture)).toBe(true);
+  });
+
+  it("reports false when imported but never rendered (S1: dead import)", () => {
+    const fixture = 'import ClassTrendsPanel from "./drafted-grades/ClassTrendsPanel";';
+    expect(importsAndRendersClassTrendsPanel(fixture)).toBe(false);
+  });
+
+  it("reports false when rendered but not imported from that path (a local reimplementation)", () => {
+    const fixture = "function ClassTrendsPanel() { return null; }\nconst x = <ClassTrendsPanel entry={entry} />;";
+    expect(importsAndRendersClassTrendsPanel(fixture)).toBe(false);
+  });
+});
+
+describe("GradingResults.tsx renders ClassTrendsPanel (V1)", () => {
+  it("imports and renders it from ./drafted-grades/ClassTrendsPanel", () => {
+    expect(importsAndRendersClassTrendsPanel(GRADING_RESULTS_SOURCE)).toBe(true);
+  });
+});
+
+/** True when the <ClassTrendsPanel tag is preceded, within the same gated
+ * expression, by a hasTrendableResults(...) && - i.e. the panel cannot
+ * render with zero trendable results (S2's mutation removes exactly this). */
+function classTrendsMountIsGated(source: string): boolean {
+  const match = /hasTrendableResults\([^)]*\)\s*&&([\s\S]{0,400})/.exec(source);
+  if (!match) return false;
+  return /<ClassTrendsPanel\b/.test(match[1]);
+}
+
+describe("classTrendsMountIsGated (canary)", () => {
+  it("reports true when the tag follows hasTrendableResults(...) && within the same expression", () => {
+    const fixture = "return hasTrendableResults(entry) && (\n  <ClassTrendsPanel entry={entry} />\n);";
+    expect(classTrendsMountIsGated(fixture)).toBe(true);
+  });
+
+  it("reports false when the guard is removed (S2: the exact regression this guards)", () => {
+    const fixture = "return <ClassTrendsPanel entry={entry} />;";
+    expect(classTrendsMountIsGated(fixture)).toBe(false);
+  });
+
+  it("reports false when hasTrendableResults is called but the tag is far outside its gated expression", () => {
+    const fixture =
+      "const x = hasTrendableResults(entry);\n" + "a".repeat(500) + "\nreturn <ClassTrendsPanel entry={entry} />;";
+    expect(classTrendsMountIsGated(fixture)).toBe(false);
+  });
+});
+
+describe("GradingResults.tsx's ClassTrendsPanel mount is gated by hasTrendableResults (V2)", () => {
+  it("the tag is not reachable unless hasTrendableResults(...) is true", () => {
+    expect(classTrendsMountIsGated(GRADING_RESULTS_SOURCE)).toBe(true);
+  });
+});
+
+/** True when a <GradingResults render tag passes an assignmentName prop -
+ * used against the three real call sites (V13), not GradingResults.tsx
+ * itself. */
+function rendersGradingResultsWithAssignmentName(source: string): boolean {
+  // `<GradingResults\b` alone would also match `<GradingResultsHandle>` (a
+  // type annotation, e.g. `useRef<GradingResultsHandle>`) since "Handle"
+  // starts with a word character `\b` does not exclude - require the tag
+  // name to end at a non-identifier character (whitespace, `/`, or `>`).
+  const tagMatch = /<GradingResults(?=[\s/>])/.exec(source);
+  if (!tagMatch) return false;
+  const window = source.slice(tagMatch.index, tagMatch.index + 3000);
+  return /assignmentName=/.test(window);
+}
+
+describe("rendersGradingResultsWithAssignmentName (canary)", () => {
+  it("reports true when the render tag passes assignmentName=", () => {
+    const fixture = '<GradingResults run={run} canvasUrl={canvasUrl} assignmentName={row.title} />';
+    expect(rendersGradingResultsWithAssignmentName(fixture)).toBe(true);
+  });
+
+  it("reports false when the render tag omits assignmentName (S10: the exact regression this guards)", () => {
+    const fixture = "<GradingResults run={run} canvasUrl={canvasUrl} />";
+    expect(rendersGradingResultsWithAssignmentName(fixture)).toBe(false);
+  });
+
+  it("reports false when there is no <GradingResults render at all", () => {
+    expect(rendersGradingResultsWithAssignmentName("const x = 1;")).toBe(false);
+  });
+});
+
+describe("assignmentName reaches all three <GradingResults call sites (V13)", () => {
+  it.each([
+    "src/app/components/GradingTab.tsx",
+    "src/app/components/LiveFeedPanel.tsx",
+    "src/app/components/GithubGradingPanel.tsx",
+  ])("%s passes assignmentName= to <GradingResults", (relativePath) => {
+    expect(rendersGradingResultsWithAssignmentName(read(relativePath))).toBe(true);
   });
 });

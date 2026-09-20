@@ -105,6 +105,14 @@ describe("ClassTrendsPanel reaches both layers of the class trends feature", () 
     expect(strippedPanel).not.toMatch(/\.student\b/);
   });
 
+  it("A16-1 (V7): the expanded initializer is seeded from the new defaultExpanded prop, not a hardcoded literal", () => {
+    // S7's mutation ("useState(false)", ignoring the prop entirely) must
+    // trip this - a hardcoded false would still compile and would still let
+    // Drafted Grades' own mount (which passes no defaultExpanded) behave
+    // identically, so nothing else here would catch it.
+    expect(strippedPanel).toMatch(/useState\(\s*defaultExpanded\s*\)/);
+  });
+
   it("wraps every fetch response path so a network failure never throws", () => {
     // Requirement 7: this app has no error boundary, so ClassTrendsPanel must
     // never let the layer B fetch throw uncaught. The fetch call itself, and

@@ -207,7 +207,7 @@ describe("canary 2b - a synthetic depth-2 fixture, proving the walk recurses", (
 describe("canary 3 - the real check: layer C's own four files reach nothing forbidden", () => {
   it(
     "zero violations rooted at class-trends-draft.ts, classTrendsDraftState.ts, " +
-      "ClassTrendsDraftPanel.tsx, and ClassTrendsPanel.tsx",
+      "ClassTrendsDraftPanel.tsx, ClassTrendsPanel.tsx, and classTrendsEntry.ts",
     { timeout: 30000 },
     () => {
       const roots = [
@@ -215,6 +215,11 @@ describe("canary 3 - the real check: layer C's own four files reach nothing forb
         join(SRC, "app/components/drafted-grades/classTrendsDraftState.ts"),
         join(SRC, "app/components/drafted-grades/ClassTrendsDraftPanel.tsx"),
         join(SRC, "app/components/drafted-grades/ClassTrendsPanel.tsx"),
+        // A16-1 (docs/a16-scope.md section 4.2, "Both:" bullet): the
+        // adapter's output is built in render and handed straight to the
+        // panel, never written anywhere - it must never reach a
+        // posting/persisting capability either.
+        join(SRC, "app/components/grading-results/classTrendsEntry.ts"),
       ];
       const violations = walkForForbiddenImports(roots);
       expect(

@@ -852,6 +852,13 @@ export default function GithubGradingPanel() {
             <GradingResults
               run={run}
               canvasUrl=""
+              // A16-1 (docs/a16-scope.md section 4.3): the grading folder
+              // this RUN actually covered (lastGradedFolder, captured at
+              // grade time - :775 already describes it the same way, tied
+              // to what this run covered even if the folder box above has
+              // since been edited), normalized the same way that line does.
+              // "" (whole repo) when no folder scope was set.
+              assignmentName={lastGradedFolder ? normalizeGradingFolder(lastGradedFolder) : ""}
               copiedKey={copiedKey}
               onCopy={onCopy}
               onOpenPreview={handleOpenPreview}

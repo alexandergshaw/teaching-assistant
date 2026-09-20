@@ -431,6 +431,10 @@ export default function LiveFeedPanel({
               ref={resultsHandle}
               run={activeRun}
               canvasUrl={canvasUrl}
+              // A16-1 (docs/a16-scope.md section 4.3): row.title is already
+              // in scope at this mount and is rendered as the assignment
+              // name elsewhere on this same detail pane (":376"/":424").
+              assignmentName={row.title}
               copiedKey={copiedKey}
               onCopy={onCopy}
               onOpenPreview={onOpenPreview}

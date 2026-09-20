@@ -427,6 +427,14 @@ export default function GradingTab({
         <GradingResults
           run={run}
           canvasUrl={canvasUrl}
+          // A16-1 (docs/a16-scope.md section 4.3): no assignment name source
+          // of truth exists on this classic zip/canvas path - GradingTabProps
+          // carries none, and gradingTarget is livefeed-only (gated out by
+          // `source !== "livefeed"` above). One named hole, not a blanket
+          // default: the trends panel's per-assignment copy degrades to
+          // "this assignment" (class-trends-draft.ts) rather than reading a
+          // wrong name.
+          assignmentName=""
           copiedKey={copiedKey}
           onCopy={onCopy}
           onOpenPreview={onOpenPreview}

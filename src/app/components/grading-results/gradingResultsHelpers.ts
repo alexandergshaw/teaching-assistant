@@ -454,6 +454,24 @@ export function filesColumnEmptyLabel(filesRetained: boolean): string {
   return filesRetained ? "-" : FILES_NOT_RETAINED_LABEL;
 }
 
+// A16-1 (docs/REGRESSION.md entry 359, docs/a16-scope.md section 4.4): moved
+// out of GradingResults.tsx ahead of that feature's own additions - both are
+// pure, no React, no DOM/Blob/URL API, so both are a plain MOVE.
+
+/** Deep link to a single student's submission in SpeedGrader, when the run
+ * came from a Canvas source (so a SpeedGrader base URL exists) and this
+ * result carries a numeric Canvas user id. */
+export function speedGraderHref(speedGraderUrl: string | null | undefined, userId: number | undefined): string | null {
+  return speedGraderUrl && typeof userId === "number" ? `${speedGraderUrl}&student_id=${userId}` : null;
+}
+
+/** The filename a downloaded submission file should use: `name` unchanged
+ * when it already ends with `.extension` (case-insensitively), else
+ * `name.extension` appended. */
+export function buildDownloadFilename(name: string, extension: string): string {
+  return name.toLowerCase().endsWith(`.${extension.toLowerCase()}`) ? name : `${name}.${extension}`;
+}
+
 export function escapeCsvCell(value: string): string {
   const sanitized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   return `"${sanitized.replace(/"/g, '""')}"`;

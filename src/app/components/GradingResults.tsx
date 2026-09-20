@@ -11,22 +11,26 @@ import type { CodeRunResult } from "@/lib/code-runner";
 import { ModalShell } from "./ui/ModalShell";
 import { RowFeedbackBoxes } from "./grading-results/RowFeedbackBoxes";
 import SubmittedFilesPanel from "./grading-results/SubmittedFilesPanel";
-import { CopyIcon, EyeIcon, DownloadIcon } from "./grading-results/icons";
+import { FilesCell } from "./grading-results/FilesCell";
+import { CopyIcon } from "./grading-results/icons";
 import { useResultsSort } from "./grading-results/useResultsSort";
 import { ResultsTableHeaderRow } from "./grading-results/ResultsTableHeaderRow";
 import { FeedbackExpandModal } from "./grading-results/FeedbackExpandModal";
+import ClassTrendsPanel from "./drafted-grades/ClassTrendsPanel";
+import { hasTrendableResults, toClassTrendsEntry } from "./grading-results/classTrendsEntry";
 import styles from "../page.module.css";
 import {
   applyFeedbackFieldEdit,
   blankRowEdit,
   buildCsvContent,
+  buildDownloadFilename,
   defaultRowEdit,
   fanOutGradingPostResult,
-  filesColumnEmptyLabel,
   loadGradingResultsEdits,
   persistGradingResultsEdits,
   parseEarnedPoints,
   recomputeTotal,
+  speedGraderHref,
   type AreaEdit,
   type FeedbackField,
   type GradeRow,
@@ -94,6 +98,13 @@ export type GradingResultsProps = {
   run: GradingRun;
   /** Canvas assignment/discussion URL grades post back to. */
   canvasUrl: string;
+  /** A16-1 (docs/a16-scope.md section 4.3): the name shown in the trends
+   * panel's per-assignment copy (e.g. "A note on {assignmentName}..."). No
+   * source-of-truth name exists for the classic zip/canvas flow (verified:
+   * GradingTabProps carries none, and gradingTarget is livefeed-only) - that
+   * caller passes "", one named hole rather than a blanket default. Required
+   * (not optional) so tsc forces every call site to answer explicitly. */
+  assignmentName: string;
   copiedKey: string | null;
   onCopy: (key: string, value: string) => Promise<void>;
   /** `trigger` is the clicked IconButton itself (`event.currentTarget`,
@@ -146,6 +157,7 @@ export interface GradingResultsHandle {
 const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(function GradingResults({
   run,
   canvasUrl,
+  assignmentName,
   copiedKey,
   onCopy,
   onOpenPreview,
@@ -460,13 +472,6 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   const codeRunFor = (row: GradeRow): CodeRunResult | null =>
     codeRuns[row.student] ?? row.codeExecution ?? null;
 
-  // Deep link to a single student's submission in SpeedGrader, when the run came
-  // from a Canvas source (so we have the assignment's SpeedGrader base + userId).
-  const speedGraderHref = (userId: number | undefined): string | null =>
-    run.speedGraderUrl && typeof userId === "number"
-      ? `${run.speedGraderUrl}&student_id=${userId}`
-      : null;
-
   // Sort state, the derived sorted row list, and the handlers that read/write
   // them - see ./grading-results/useResultsSort.ts's own header comment for
   // why this is a pure relocation, not a behaviour change.
@@ -485,7 +490,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = name.toLowerCase().endsWith(`.${extension.toLowerCase()}`) ? name : `${name}.${extension}`;
+    a.download = buildDownloadFilename(name, extension);
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -560,6 +565,24 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
         </section>
       )}
 
+      {(() => {
+        // A16-1 (docs/a16-scope.md sections 4.1/4.6): the SAME ClassTrendsPanel
+        // Drafted Grades already mounts, reached from every LMS Grading
+        // surface through this one component. The adapter passes `run` by
+        // REFERENCE (classTrendsEntry.ts's own header comment) - no
+        // filtering, reordering or rewriting of any result - and the mount
+        // is gated on hasTrendableResults so a run with nothing graded yet
+        // renders nothing at all, never a "Trends (0)" button.
+        const classTrendsEntry = toClassTrendsEntry(run, { courseName: "", assignmentName, canvasUrl });
+        return (
+          hasTrendableResults(classTrendsEntry) && (
+            <div style={{ margin: "0 0 var(--space-2)" }}>
+              <ClassTrendsPanel entry={classTrendsEntry} defaultExpanded />
+            </div>
+          )
+        );
+      })()}
+
       <div className={styles.matrixWrap}>
         <table className={styles.matrix}>
           <thead>
@@ -575,7 +598,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               const areaMap = new Map(result.rubricAreas.map((area) => [area.area, area]));
               const edit = edits[result.student] ?? defaultRowEdit(result);
               const status = postStatus[result.student];
-              const sgHref = speedGraderHref(result.userId);
+              const sgHref = speedGraderHref(run.speedGraderUrl, result.userId);
               const canPostRow = canvasGradable && typeof result.userId === "number";
               const rowPosting = posting || status?.status === "posting";
 
@@ -684,78 +707,13 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                     })()}
                   </td>
                   <td>
-                    {result.submittedFiles.length > 0 ? (
-                      <>
-                        <ul className={styles.matrixFileList}>
-                          {result.submittedFiles.map((file) => (
-                            <li key={`${result.student}-file-name-${file.name}`} className={styles.matrixFileItem}>
-                              <span className={styles.matrixFileName}>
-                                {file.extension && file.extension !== "(none)" && !file.name.toLowerCase().endsWith(`.${file.extension.toLowerCase()}`)
-                                  ? `${file.name}.${file.extension}`
-                                  : file.name}
-                              </span>
-                              <div className={styles.fileIconGroup}>
-                                <IconButton
-                                  size="small"
-                                  title={`Preview ${file.name}`}
-                                  aria-label={`Preview ${file.name}`}
-                                  onClick={(event) =>
-                                    onOpenPreview(
-                                      result.student,
-                                      {
-                                        student: result.student,
-                                        name: file.name,
-                                        extension: file.extension,
-                                        content: file.previewContent || "No extracted text available for this file.",
-                                        truncated: file.previewTruncated,
-                                        // F3 requirement 3: a second, distinct
-                                        // cut - the whole submission (this file
-                                        // included) may have been trimmed again
-                                        // before the model saw it, even when
-                                        // this one file's own content was not.
-                                        submissionTruncated: result.submissionTruncated,
-                                        rawBase64: file.rawBase64,
-                                        mimeType: file.mimeType,
-                                      },
-                                      event.currentTarget
-                                    )
-                                  }
-                                >
-                                  <EyeIcon />
-                                </IconButton>
-                                {file.rawBase64 && (
-                                  <IconButton
-                                    size="small"
-                                    title={`Download ${file.name}`}
-                                    aria-label={`Download ${file.name}`}
-                                    onClick={() =>
-                                      handleDownloadFile(
-                                        file.name,
-                                        file.extension,
-                                        file.rawBase64!,
-                                        file.mimeType ?? "application/octet-stream"
-                                      )
-                                    }
-                                  >
-                                    <DownloadIcon />
-                                  </IconButton>
-                                )}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                        <Button
-                          variant="text"
-                          size="small"
-                          onClick={() => setBrowseFilesFor(result)}
-                          sx={{ minWidth: 0, textTransform: "none", p: "var(--space-1) var(--space-1)", mt: 0.5 }}
-                        >
-                          Browse all files
-                        </Button>
-                      </>
-                    ) : (
-                      filesColumnEmptyLabel(filesRetained)
-                    )}
+                    <FilesCell
+                      result={result}
+                      filesRetained={filesRetained}
+                      onOpenPreview={onOpenPreview}
+                      onDownloadFile={handleDownloadFile}
+                      onBrowseAll={setBrowseFilesFor}
+                    />
                   </td>
                   {run.rubricAreaNames.map((areaName) => {
                     const area = areaMap.get(areaName);

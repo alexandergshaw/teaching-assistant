@@ -98,9 +98,15 @@ function coerceKnowledgeContextAtBoundary(value: string | undefined): string | u
  *
  * WIRED AND REACHABLE. Corrected 2026-09-20: this block used to say "NOT YET
  * WIRED TO A PRODUCTION CALLER", which was true only on the day it was
- * written. Measured today: GradingRecordingPanel.tsx imports this action at
- * :105 and calls it at :566, so the screen-capture grading path runs through
- * here in production.
+ * written. Measured today: GradingRecordingPanel.tsx imports this action and
+ * calls it from the grade handler, so the screen-capture grading path runs
+ * through here in production. Re-measure with
+ * `grep -n "gradeCapturedSubmissionsAction" src/app/components/grading-recording/GradingRecordingPanel.tsx`.
+ *
+ * DELIBERATELY NO LINE NUMBERS, even though the ones this block first carried
+ * were correct. A pending chunk extracts ~40 lines from above both call sites,
+ * so accurate numbers here would be stale inside the same commit that adds
+ * them. Name the file and the command; those survive.
  *
  * The stale version was load-bearing in the wrong direction - an A8 scoping
  * pass reasoned from a comment of exactly this shape on the sibling file

@@ -65,7 +65,15 @@ import type { ExtractedSubmission } from "@/app/components/grading-recording/gra
  * from it and reached a wrong conclusion about what this tree contains.
  * MEASURED, and re-measure rather than trusting this line too: `grep -rn
  * "extractGradingSubmissionsAction" src --include=*.ts --include=*.tsx`
- * shows the caller at GradingRecordingPanel.tsx:89 (import) and :419 (call).
+ * shows the caller in GradingRecordingPanel.tsx - it imports the action near
+ * the top of its import block and calls it inside the capture loop.
+ *
+ * DELIBERATELY NO LINE NUMBERS. The previous version cited :89 and :419;
+ * measured 2026-09-20 those are :99 and :440, wrong by 10 and 21, and any
+ * replacement rots the same way the next time something above them moves.
+ * Naming the file and the command is the part that stays true. This comment
+ * shape has now cost this row three separate passes - first as a false
+ * reachability claim, then as citations nobody re-measured.
  *
  * The consumer is the capture loop in GradingRecordingPanel.tsx: it calls
  * this action per frame batch, feeds the returned `submissions` through

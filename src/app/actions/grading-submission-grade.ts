@@ -4,12 +4,15 @@
 // (docs/grading-via-recording-acceptance-criteria.md sections 0 and 3).
 //
 // R0-2/R0-3: this action produces the feature's own row-shaped result -
-// { id, totalScore, strengths, improvements, overallComment, failed } - never
-// a GradeResult (no `student`, no `userId`, no `rubricAreas`, no `feedback`).
-// `failed` (FIX 2) is a real boolean discriminator, not derived from prose -
-// see grading-feedback-prompt.ts's GradingRecordingFeedback for where it is
-// set and grading-rows.ts's classifyGradingResult for the one place it is
-// read.
+// { id, totalScore, strengths, improvements, overallComment, failed,
+// rubricAreas } - never a GradeResult (no `student`, no `userId`, no
+// `feedback`). `rubricAreas` (docs/a16-scope.md A16-2, hop H4) is a plain
+// per-area breakdown array, not an identity field - it carries no student
+// name and nothing that could bind this result to a Canvas record, so its
+// presence does not weaken R0-2's boundary. `failed` (FIX 2) is a real
+// boolean discriminator, not derived from prose - see
+// grading-feedback-prompt.ts's GradingRecordingFeedback for where it is set
+// and grading-rows.ts's classifyGradingResult for the one place it is read.
 // It never calls gradeEntries/gradeStudentEntries (src/lib/grade/engine.ts),
 // which exists to produce a postable result carrying a userId - the exact
 // thing R0-2 rules out here structurally. It only reuses the pure grading

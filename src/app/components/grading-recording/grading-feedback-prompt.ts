@@ -30,7 +30,7 @@ import {
   pointsWereDeducted,
   parseEarnedPossibleScore,
 } from "@/lib/grade/parsing";
-import { composeOverallComment, RESUBMIT_NOTICE } from "@/lib/grade/types";
+import { composeOverallComment, RESUBMIT_NOTICE, type RubricAreaResult } from "@/lib/grade/types";
 
 /** One graded submission's feedback fields - the fields
  *  gradeCapturedSubmissionsAction returns per row (never a GradeResult, never
@@ -55,6 +55,17 @@ export interface GradingRecordingFeedback {
    *  that should ever need to branch on this is classifyGradingResult
    *  (grading-rows.ts) - see that function's own doc comment. */
   failed: boolean;
+  /** docs/a16-scope.md A16-2, hop H1/H2: the per-rubric-area breakdown the
+   *  model actually returned (composeGradingRowResult), scaled through the
+   *  same scaleResultToPoints call every other grader in this repo uses, or
+   *  `[]` on a failure row (composeFailedGradingRow - a call that never
+   *  produced real feedback has no areas to report). This is the field
+   *  the recording tool used to discard at this exact hop (docs/BACKLOG.md's
+   *  F1: "recording discards rubricAreas") - restoring it here is what lets
+   *  a run through this tool feed class trends the way every other grading
+   *  path already does. Never persisted (see grading-row-serialization.ts's
+   *  own header on why `toWire` does not gain this key). */
+  rubricAreas: RubricAreaResult[];
 }
 
 /**
@@ -152,7 +163,14 @@ export function composeGradingRowResult(rawResponseText: string): GradingRecordi
   const resubmitNotice = pointsWereDeducted(totalScore, rubricAreas) ? RESUBMIT_NOTICE : "";
   const overallComment = composeOverallComment(strengths, improvements, resubmitNotice);
 
-  return { totalScore: safeTotalScore(totalScore), strengths, improvements, overallComment, failed: false };
+  return {
+    totalScore: safeTotalScore(totalScore),
+    strengths,
+    improvements,
+    overallComment,
+    failed: false,
+    rubricAreas,
+  };
 }
 
 /** See composeGradingRowResult's own "NEVER 0/0" paragraph above. */
@@ -183,5 +201,6 @@ export function composeFailedGradingRow(message: string): GradingRecordingFeedba
     improvements: "",
     overallComment: composeOverallComment(strengths, "", ""),
     failed: true,
+    rubricAreas: [],
   };
 }

@@ -87,6 +87,7 @@ function makeRow(id: string, name: string, text: string): GradingRow {
     overallComment: "",
     error: "",
     userEdited: false,
+    rubricAreas: [],
   };
 }
 

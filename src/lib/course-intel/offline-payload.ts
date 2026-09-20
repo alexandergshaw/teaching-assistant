@@ -204,6 +204,10 @@ function buildGradingRow(raw: Record<string, unknown>, ordinal: number): Grading
     assessment: readField(raw.assessment) || undefined,
     submittedAt: readField(raw.submittedAt) || undefined,
     submissionTimeStatus,
+    // A16-2 hop H9: required on GradingRow. This offline mapping has no
+    // rubric-area source of its own (see this function's own header - EVERY
+    // OTHER FIELD IS BLANK, ENUMERATED EXPLICITLY), so it is always [].
+    rubricAreas: [],
   };
 }
 

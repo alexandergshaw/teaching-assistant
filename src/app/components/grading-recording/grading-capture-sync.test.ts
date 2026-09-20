@@ -17,6 +17,7 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     overallComment: "",
     error: "",
     userEdited: false,
+    rubricAreas: [],
     ...overrides,
   };
 }

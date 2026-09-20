@@ -54,6 +54,7 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     // would just re-apply this same default.
     submissionTimeStatus: "unknown",
     submittedAt: "",
+    rubricAreas: [],
     ...overrides,
   };
 }

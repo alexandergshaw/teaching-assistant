@@ -283,6 +283,14 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<GradingRow> 
     assessment,
     submissionTimeStatus,
     submittedAt,
+    // docs/a16-scope.md A16-2, hop H11 (0.4's ruling on why H10 is gone):
+    // this run's cohort is `useState` and does not survive a reload, so
+    // `rubricAreas` never reaches storage - `toWire` above deliberately does
+    // NOT enumerate this key, and this list of 16 is unchanged. `fromWire`
+    // emits `[]` UNCONDITIONALLY, never reading `raw.rubricAreas` - even if
+    // some future write path (or a hand-edited value in storage) put the key
+    // there, this function must not read it back.
+    rubricAreas: [],
   } as unknown as NoPostableIdentity<GradingRow>;
 }
 

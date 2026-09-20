@@ -27,6 +27,7 @@ function row(overrides: Partial<GradingRow> & { id: string; studentName: string 
     overallComment: "",
     error: "",
     userEdited: false,
+    rubricAreas: [],
     ...overrides,
   };
 }

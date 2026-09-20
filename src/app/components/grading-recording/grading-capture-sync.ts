@@ -79,6 +79,9 @@ function blankGradingRow(id: string, sub: ExtractedSubmission): GradingRow {
     overallComment: "",
     error: "",
     userEdited: false,
+    // A16-2 hop H9: rubricAreas is required on GradingRow - a brand-new row
+    // has never been graded yet, so it starts with none.
+    rubricAreas: [],
   };
 }
 

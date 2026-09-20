@@ -57,6 +57,7 @@ function gradingRow(over: Partial<GradingRow> = {}): GradingRow {
     userEdited: false,
     course: COURSE,
     assessment: "essay-2",
+    rubricAreas: [],
     ...over,
   };
 }

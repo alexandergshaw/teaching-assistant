@@ -45,6 +45,7 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     userEdited: false,
     submissionTimeStatus: "unknown",
     submittedAt: "",
+    rubricAreas: [],
     ...overrides,
   };
 }

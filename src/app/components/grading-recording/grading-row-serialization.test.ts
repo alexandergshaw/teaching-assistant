@@ -81,6 +81,7 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     // relying on omission, which would just re-apply this same default.
     submissionTimeStatus: "unknown",
     submittedAt: "",
+    rubricAreas: [],
     ...overrides,
   };
 }
@@ -404,6 +405,10 @@ describe("frozen serialization oracle", () => {
       assessment: "essay-2",
       submissionTimeStatus: "known",
       submittedAt: "2026-09-01T23:59:00Z",
+      // A16-2: rubricAreas is never persisted (H10 withdrawn) - present here
+      // only so this literal satisfies GradingRow and round-trips against
+      // fromWire's own unconditional [] (V22).
+      rubricAreas: [],
     },
     {
       id: "grade-1-1",
@@ -427,6 +432,7 @@ describe("frozen serialization oracle", () => {
       // to already carry the value the round trip will produce.
       submissionTimeStatus: "unknown",
       submittedAt: "",
+      rubricAreas: [],
     },
     {
       id: "grade-1-2",
@@ -446,6 +452,7 @@ describe("frozen serialization oracle", () => {
       // comment above.
       submissionTimeStatus: "marked-late",
       submittedAt: "",
+      rubricAreas: [],
     },
     {
       id: "grade-1-3",
@@ -463,6 +470,7 @@ describe("frozen serialization oracle", () => {
       // D23c: see grade-1-1's own identical comment above.
       submissionTimeStatus: "unknown",
       submittedAt: "",
+      rubricAreas: [],
     },
   ];
 
@@ -582,6 +590,57 @@ describe("assessment (D22b/D23e)", () => {
     const restored = deserializeGradingRows(serializeGradingRows(rows));
     expect(restored[0].course).toBe("course-A");
     expect(restored[0].assessment).toBe("essay-2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/a16-scope.md A16-2, hop H11, V22. Unlike course/assessment above,
+// `rubricAreas` is NOT round-tripped - H10 was withdrawn (0.4's ruling: the
+// run cohort is `useState` and does not survive a reload, so nothing reads
+// a persisted value back). `toWire` never writes the key (the frozen 16-key
+// oracle below stays 16), and `fromWire` emits `[]` UNCONDITIONALLY on every
+// input - a legacy row with no key at all, a row where the key was somehow
+// corrupted, and a row where the key was hand-injected into storage all
+// deserialize identically, because `fromWire` never reads `raw.rubricAreas`.
+// ---------------------------------------------------------------------------
+
+describe("rubricAreas is never read back from storage (A16-2 H11/V22 - H10 withdrawn)", () => {
+  it("a legacy row with no rubricAreas key at all deserializes with rubricAreas: []", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "legacy-1", studentName: "Maria Alvarez", submissionText: "An old submission." }],
+    });
+    expect(deserializeGradingRows(raw)[0].rubricAreas).toEqual([]);
+  });
+
+  it("a corrupt rubricAreas value in storage is ignored, never surfaced or thrown on", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [{ id: "a", studentName: "Maria", submissionText: "x", rubricAreas: "not an array at all" }],
+    });
+    expect(() => deserializeGradingRows(raw)).not.toThrow();
+    expect(deserializeGradingRows(raw)[0].rubricAreas).toEqual([]);
+  });
+
+  it("a rubricAreas key hand-injected into storage with a real-looking value is still discarded on read - fromWire never reads the key at all", () => {
+    const raw = JSON.stringify({
+      v: GRADING_TABLE_VERSION,
+      rows: [
+        {
+          id: "a",
+          studentName: "Maria",
+          submissionText: "x",
+          rubricAreas: [{ area: "Correctness", score: "9/10", comment: "hand-injected" }],
+        },
+      ],
+    });
+    expect(deserializeGradingRows(raw)[0].rubricAreas).toEqual([]);
+  });
+
+  it("serializeGradingRows never writes a rubricAreas key, even when the in-memory row carries real areas", () => {
+    const rows = [makeRow({ id: "a", rubricAreas: [{ area: "Correctness", score: "9/10", comment: "" }] })];
+    const written = JSON.parse(serializeGradingRows(rows));
+    expect(written.rows[0]).not.toHaveProperty("rubricAreas");
   });
 });
 

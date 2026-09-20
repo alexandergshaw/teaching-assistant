@@ -177,6 +177,27 @@ describe("composeGradingRowResult", () => {
     });
     expect(composeGradingRowResult(raw).failed).toBe(false);
   });
+
+  // docs/a16-scope.md A16-2, hop H1: this is the exact hop the recording
+  // tool used to drop `rubricAreas` at - composeGradingRowResult destructured
+  // it out of scaleResultToPoints' return and never put it back on the
+  // returned object. V16.
+  it("returns the per-area breakdown - the scaleResultToPoints output, not a dropped or empty array (A16-2 H1)", () => {
+    const raw = JSON.stringify({
+      overallComment: "Solid work.",
+      improvements: "",
+      rubricResults: [
+        { area: "Correctness", score: "8/10", comment: "Mostly right." },
+        { area: "Style", score: "7/10", comment: "A bit messy." },
+      ],
+    });
+
+    const result = composeGradingRowResult(raw);
+
+    expect(result.rubricAreas).toHaveLength(2);
+    expect(result.rubricAreas.map((a) => a.area)).toEqual(["Correctness", "Style"]);
+    expect(result.rubricAreas.map((a) => a.score)).toEqual(["8/10", "7/10"]);
+  });
 });
 
 describe("composeFailedGradingRow - per-submission failure isolation", () => {
@@ -215,5 +236,11 @@ describe("composeFailedGradingRow - per-submission failure isolation", () => {
   // `strengths`.
   it("sets failed: true - this is the ONLY composer that produces a failure row", () => {
     expect(composeFailedGradingRow("network error").failed).toBe(true);
+  });
+
+  // docs/a16-scope.md A16-2, hop H2: a failure row must never carry any
+  // rubric area (there was no scoring pass to have produced one). V17.
+  it("rubricAreas is always [] on a failure row (A16-2 H2)", () => {
+    expect(composeFailedGradingRow("network error").rubricAreas).toEqual([]);
   });
 });

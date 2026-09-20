@@ -55,6 +55,7 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     overallComment: "",
     error: "",
     userEdited: false,
+    rubricAreas: [],
     ...overrides,
   };
 }
@@ -199,6 +200,7 @@ describe("applyGradingResultToRow (AC44-equivalent userEdited guard, item 5)", (
     improvements: "Machine improvements.",
     overallComment: "Machine comment.",
     state: "ready" as const,
+    rubricAreas: [{ area: "Correctness", score: "9/10", comment: "Nice." }],
   };
 
   it("an UNEDITED row accepts the full result", () => {
@@ -239,6 +241,28 @@ describe("applyGradingResultToRow (AC44-equivalent userEdited guard, item 5)", (
     const next = applyGradingResultToRow(row, result);
     expect(next.error).toBe("");
   });
+
+  // docs/a16-scope.md A16-2, hop H7 (the drop hop) / hop H8: applyAssessmentResult
+  // (the shared core this function delegates to) enumerates six fields by
+  // hand and would silently drop a seventh - this is the sabotage the repo
+  // has now paid for twice (S19). Written UNCONDITIONALLY, so both an
+  // unedited AND an edited row still pick up a fresh set of areas (H8: this
+  // is a machine verdict, not instructor-authored text, so userEdited never
+  // gates it).
+  it("carries the applied rubricAreas through on an UNEDITED row (A16-2 H7/V20)", () => {
+    const row = makeRow({ userEdited: false, rubricAreas: [] });
+    const next = applyGradingResultToRow(row, result);
+    expect(next.rubricAreas).toEqual(result.rubricAreas);
+  });
+
+  it("carries the applied rubricAreas through on an EDITED row too - not gated by userEdited (A16-2 H8/V20)", () => {
+    const row = makeRow({
+      userEdited: true,
+      rubricAreas: [{ area: "Stale", score: "0/10", comment: "from a prior attempt" }],
+    });
+    const next = applyGradingResultToRow(row, result);
+    expect(next.rubricAreas).toEqual(result.rubricAreas);
+  });
 });
 
 describe("applyRosterMatchToRow", () => {
@@ -273,6 +297,7 @@ describe("classifyGradingResult (BLOCKER 3 / FIX 2 - a failure must land in \"fa
       improvements: "Cite more sources.",
       overallComment: "Strong thesis. Cite more sources.",
       failed: false,
+      rubricAreas: [{ area: "Thesis", score: "9/10", comment: "Strong." }],
     };
     expect(classifyGradingResult(result)).toEqual({
       totalScore: "9/10",
@@ -280,7 +305,23 @@ describe("classifyGradingResult (BLOCKER 3 / FIX 2 - a failure must land in \"fa
       improvements: "Cite more sources.",
       overallComment: "Strong thesis. Cite more sources.",
       state: "ready",
+      rubricAreas: [{ area: "Thesis", score: "9/10", comment: "Strong." }],
     });
+  });
+
+  // docs/a16-scope.md A16-2, hop H6, part of V19: a success's areas pass
+  // straight through - never dropped by classifyGradingResult.
+  it("an ordinary success carries its rubricAreas through unchanged (A16-2 H6)", () => {
+    const areas = [{ area: "Correctness", score: "8/10", comment: "Good." }];
+    const result = {
+      totalScore: "8/10",
+      strengths: "Fine.",
+      improvements: "",
+      overallComment: "Fine.",
+      failed: false,
+      rubricAreas: areas,
+    };
+    expect(classifyGradingResult(result).rubricAreas).toEqual(areas);
   });
 
   it("a composeFailedGradingRow-shaped result (the real production shape) maps to \"failed\" with the verbatim message in `error`, and every feedback field blanked", () => {
@@ -288,14 +329,15 @@ describe("classifyGradingResult (BLOCKER 3 / FIX 2 - a failure must land in \"fa
     // produces for message "Gemini rejected the request (400)." - totalScore
     // "", improvements "", strengths carrying the prefixed message,
     // overallComment composed from strengths alone (composeOverallComment
-    // with empty improvements/resubmitNotice is a no-op join), and
-    // failed: true.
+    // with empty improvements/resubmitNotice is a no-op join), failed: true,
+    // and rubricAreas: [].
     const result = {
       totalScore: "",
       strengths: "This submission could not be graded: Gemini rejected the request (400).",
       improvements: "",
       overallComment: "This submission could not be graded: Gemini rejected the request (400).",
       failed: true,
+      rubricAreas: [] as never[],
     };
     const next = classifyGradingResult(result);
     expect(next.state).toBe("failed");
@@ -304,6 +346,23 @@ describe("classifyGradingResult (BLOCKER 3 / FIX 2 - a failure must land in \"fa
     expect(next.strengths).toBe("");
     expect(next.improvements).toBe("");
     expect(next.overallComment).toBe("");
+    expect(next.rubricAreas).toEqual([]);
+  });
+
+  // docs/a16-scope.md A16-2, hop H6, part of V19: even if the action
+  // somehow sent areas through on a failure result (it never does today -
+  // composeFailedGradingRow always returns []), classifyGradingResult must
+  // still blank them - a failed attempt has no real areas to report.
+  it("a failure never carries any rubricArea through, even if the input result happened to have some (A16-2 H6)", () => {
+    const result = {
+      totalScore: "",
+      strengths: "This submission could not be graded: timeout",
+      improvements: "",
+      overallComment: "This submission could not be graded: timeout",
+      failed: true,
+      rubricAreas: [{ area: "Stale", score: "5/10", comment: "from a prior attempt" }],
+    };
+    expect(classifyGradingResult(result).rubricAreas).toEqual([]);
   });
 
   it("the verbatim message survives exactly - not truncated, not re-worded, not generic", () => {
@@ -314,6 +373,7 @@ describe("classifyGradingResult (BLOCKER 3 / FIX 2 - a failure must land in \"fa
       improvements: "",
       overallComment: `${GRADING_FAILURE_PREFIX}${message}`,
       failed: true,
+      rubricAreas: [],
     });
     expect(next.error).toBe(message);
   });
@@ -325,6 +385,7 @@ describe("classifyGradingResult (BLOCKER 3 / FIX 2 - a failure must land in \"fa
       improvements: "",
       overallComment: "fine",
       failed: false,
+      rubricAreas: [],
     };
     expect(classifyGradingResult(result).state).toBe("ready");
   });
@@ -350,6 +411,7 @@ describe("classifyGradingResult (BLOCKER 3 / FIX 2 - a failure must land in \"fa
       improvements: "",
       overallComment: "This submission could not be graded: that phrase is literally the title of the essay.",
       failed: false,
+      rubricAreas: [],
     };
     const next = classifyGradingResult(result);
     expect(next.state).toBe("ready");
@@ -367,6 +429,7 @@ describe("classifyGradingResult (BLOCKER 3 / FIX 2 - a failure must land in \"fa
       improvements: "",
       overallComment: "Grading failed for this submission - the model timed out after 30 seconds.",
       failed: true,
+      rubricAreas: [],
     };
     const next = classifyGradingResult(result);
     expect(next.state).toBe("failed");

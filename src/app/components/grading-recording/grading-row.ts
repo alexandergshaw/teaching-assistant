@@ -41,7 +41,7 @@
 // combined field set is identical to what this interface declared before.
 
 import type { AssessmentFeedback, AssessmentRowCore, AssessmentRowState } from "../assessment-shared/assessment-row";
-import { composeOverallComment, RESUBMIT_NOTICE } from "@/lib/grade/types";
+import { composeOverallComment, RESUBMIT_NOTICE, type RubricAreaResult } from "@/lib/grade/types";
 
 /**
  * How confident we are that the name read off the screen belongs to a real
@@ -207,6 +207,20 @@ export interface GradingRow extends AssessmentRowCore {
    *  when the INSTRUCTOR worked, not when the STUDENT submitted. Nothing in
    *  this file ever reads a clock to populate this field. */
   submittedAt?: string;
+  /** docs/a16-scope.md A16-2, hop H9: the per-rubric-area breakdown from the
+   *  most recent grading attempt that reached "ready" - `[]` on a row that
+   *  has never been successfully graded, or whose last attempt failed
+   *  (classifyGradingResult, grading-rows.ts). REQUIRED, not optional -
+   *  same reasoning `snapshot-row.ts` already gives for its own areas field:
+   *  an optional field here would make the read side's `[]` default
+   *  decorative rather than a real, always-present fact about the row.
+   *  Written UNCONDITIONALLY by applyGradingResultToRow, even on an edited
+   *  row (H8) - this is a machine verdict about the submission, not
+   *  instructor-authored feedback text, so `userEdited` never gates it.
+   *  Never persisted (grading-row-serialization.ts's `toWire` does not
+   *  enumerate this key - the run this data serves is in-memory only, see
+   *  that file's own header). */
+  rubricAreas: RubricAreaResult[];
 }
 
 /**

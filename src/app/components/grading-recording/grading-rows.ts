@@ -29,6 +29,7 @@ import {
   type AssessmentFeedbackField,
   type AssessmentResultInput,
 } from "../assessment-shared/assessment-row";
+import type { RubricAreaResult } from "@/lib/grade/types";
 
 // ---------------------------------------------------------------------------
 // Sorting - "sortable by name" is the only sort this table needs (the AC's
@@ -125,9 +126,21 @@ export function editGradingRowField(row: GradingRow, field: GradingFeedbackField
   return editAssessmentField(row, field, value);
 }
 
-/** A type alias of the shared core's AssessmentResultInput - kept as its
- *  own named export, identical reasoning to `GradingFeedbackField` above. */
-export type GradingResultInput = AssessmentResultInput;
+/**
+ * docs/a16-scope.md A16-2, hop H7: a LOCAL EXTENSION of the shared core's
+ * AssessmentResultInput, not a bare alias any more. The shared core's own
+ * applyAssessmentResult (assessment-shared/assessment-row.ts) enumerates its
+ * six fields by hand rather than spreading, so a widened result type is
+ * silently DROPPED there - `rubricAreas` cannot round-trip through that
+ * function. This surface's own applyGradingResultToRow below routes around
+ * that by delegating to applyAssessmentResult for the six shared fields and
+ * then setting `rubricAreas` itself, so the widening lives here, once,
+ * rather than editing the shared core (out of scope - see docs/a16-scope.md
+ * section 4.5's own "what A16-2 deliberately does NOT do").
+ */
+export interface GradingResultInput extends AssessmentResultInput {
+  rubricAreas: RubricAreaResult[];
+}
 
 /**
  * AC44-equivalent, in its simplest form. This wave builds no grading
@@ -148,12 +161,20 @@ export type GradingResultInput = AssessmentResultInput;
  * instructor's own words. Only the four scored fields
  * (totalScore/strengths/improvements/overallComment) are held back.
  *
- * WAVE 1 of the snapshot-grading extraction: a thin wrapper over the shared
- * core's applyAssessmentResult (assessment-shared/assessment-row.ts) - see
- * editGradingRowField's own identical note above.
+ * WAVE 1 of the snapshot-grading extraction: delegates to the shared core's
+ * applyAssessmentResult (assessment-shared/assessment-row.ts) for the six
+ * fields that function knows about, then sets `rubricAreas` itself (A16-2,
+ * hop H7 - this is the drop hop the repo has now paid for twice: the shared
+ * core enumerates its own return by hand and would otherwise silently drop
+ * any field it does not name). `rubricAreas` is written UNCONDITIONALLY,
+ * never gated by `userEdited` (hop H8) - it is a machine verdict about the
+ * submission, not instructor-authored text, the same reasoning
+ * applyAssessmentResult's own doc comment already gives for why `state`/
+ * `error` are not gated either.
  */
 export function applyGradingResultToRow(row: GradingRow, result: GradingResultInput): GradingRow {
-  return applyAssessmentResult(row, result);
+  const applied = applyAssessmentResult(row, result);
+  return { ...applied, rubricAreas: result.rubricAreas };
 }
 
 /** Merges a roster-match verdict (grading-roster-match.ts's
@@ -231,6 +252,13 @@ export interface GradingRecordingResult {
   improvements: string;
   overallComment: string;
   failed: boolean;
+  /** docs/a16-scope.md A16-2, hop H5: this is a HAND-COPIED duplicate of
+   *  gradeCapturedSubmissionsAction's own result shape (this file's own
+   *  header, above), so this field has to be added here too, or `tsc`
+   *  accepts the extra property arriving on the argument structurally and
+   *  silently drops it - the most likely hop in the whole chain to be
+   *  missed for exactly that reason. */
+  rubricAreas: RubricAreaResult[];
 }
 
 /**
@@ -255,6 +283,10 @@ export function classifyGradingResult(result: GradingRecordingResult): GradingRe
       overallComment: "",
       state: "failed",
       error,
+      // A16-2 hop H6: a failure never carries any rubric area, whatever the
+      // action happened to send through - the raw failure text is not a
+      // score.
+      rubricAreas: [],
     };
   }
   return {
@@ -263,6 +295,8 @@ export function classifyGradingResult(result: GradingRecordingResult): GradingRe
     improvements: result.improvements,
     overallComment: result.overallComment,
     state: "ready",
+    // A16-2 hop H6: an ordinary success passes its areas straight through.
+    rubricAreas: result.rubricAreas,
   };
 }
 

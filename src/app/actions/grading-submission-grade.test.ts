@@ -90,13 +90,19 @@ describe("gradeCapturedSubmissionsAction - ownership and input guards, before an
 });
 
 describe("gradeCapturedSubmissionsAction - never a GradeResult, never a student id", () => {
-  // KEY-SET PIN, deliberately widened for FIX 2: `failed` (a real boolean
-  // discriminator - see grading-feedback-prompt.ts's GradingRecordingFeedback
-  // and grading-rows.ts's classifyGradingResult) is exactly the kind of
-  // addition this pin exists to PERMIT - it is a plain boolean flag, not an
-  // identity field - while the pin's own job (proving no `userId`/`student`
-  // field can leak onto this row) is unchanged and still asserted below.
-  it("a graded row has exactly {id, totalScore, strengths, improvements, overallComment, failed} - no student, no userId, no rubricAreas, no feedback field", async () => {
+  // KEY-SET PIN, WIDENED AGAIN for docs/a16-scope.md A16-2 (hop H4): this
+  // test used to assert the ABSENCE of `rubricAreas` (its own title said "no
+  // rubricAreas"). Owner answer 2 reverses that: the recording tool was
+  // discarding its rubric-area data at exactly this hop, and A16-2's whole
+  // point is to stop it. `rubricAreas` (a per-area breakdown array) is
+  // exactly the kind of addition this pin exists to PERMIT, same reasoning
+  // FIX 2's `failed` addition already used - it carries no student name and
+  // nothing that could bind this result to a Canvas record, so its presence
+  // does not weaken the pin's actual job: proving no `userId`/`student`/
+  // `feedback` field can leak onto this row. That job is unchanged and still
+  // asserted below - only the `not.toHaveProperty("rubricAreas")` assertion
+  // is removed, and no other line in this block.
+  it("a graded row has exactly {id, totalScore, strengths, improvements, overallComment, failed, rubricAreas} - no student, no userId, no feedback field", async () => {
     vi.mocked(callLlm).mockResolvedValueOnce(gradeResponse("Nice work.", "Add tests.", "9/10"));
 
     const result = await gradeCapturedSubmissionsAction(
@@ -110,15 +116,17 @@ describe("gradeCapturedSubmissionsAction - never a GradeResult, never a student 
     if (!("results" in result)) return;
     expect(result.results).toHaveLength(1);
     expect(Object.keys(result.results[0]).sort()).toEqual(
-      ["id", "totalScore", "strengths", "improvements", "overallComment", "failed"].sort()
+      ["id", "totalScore", "strengths", "improvements", "overallComment", "failed", "rubricAreas"].sort()
     );
     expect(result.results[0]).not.toHaveProperty("student");
     expect(result.results[0]).not.toHaveProperty("userId");
-    expect(result.results[0]).not.toHaveProperty("rubricAreas");
     expect(result.results[0]).not.toHaveProperty("feedback");
     expect(JSON.stringify(result)).not.toContain("userId");
     // A real, ordinary success is failed: false.
     expect(result.results[0].failed).toBe(false);
+    // docs/a16-scope.md A16-2, V16/H4: the area the fixture's rubric response
+    // carried through to a real rubric area on the result.
+    expect((result.results[0] as { rubricAreas: unknown[] }).rubricAreas.length).toBeGreaterThan(0);
   });
 
   it("threads submission ids straight through unmodified - never derived from or replaced by the student name", async () => {

@@ -34,9 +34,10 @@ function isSnapshotRole(v: unknown): v is SnapshotRole {
 // ---------------------------------------------------------------------------
 // toWire: enumerates every field explicitly - the nine AssessmentRowCore/
 // feedback fields (id, studentName, state, error, userEdited, totalScore,
-// strengths, improvements, overallComment) plus seven snapshot-specific
+// strengths, improvements, overallComment) plus eight snapshot-specific
 // fields (shotReports, rubricAreas, missingRoles, instructionLikeContent,
-// instructionLikeContentQuote, imageFallbackNote, evidenceDropped). NEVER
+// instructionLikeContentQuote, imageFallbackNote, evidenceDropped,
+// strengthsNotice). NEVER
 // spreads `...row` - a spread is exactly the gap that would let a future
 // field (an identity field, most plausibly) leak into storage silently.
 // This is the same discipline grading-row-serialization.ts's toWire runs,
@@ -106,6 +107,10 @@ function toWire(
     // all - toWire only ever sees the row it is given, never clears this bit
     // itself outside of a dropBulk write).
     evidenceDropped: opts.dropBulk ? true : r.evidenceDropped,
+    // Backlog A11: under-claiming default direction, matching evidenceDropped
+    // above rather than userEdited's deliberate over-claiming exception - a
+    // corrupt/missing value here means "no notice", never a fabricated one.
+    strengthsNotice: r.strengthsNotice,
   };
 }
 
@@ -215,6 +220,10 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<SnapshotAsse
   // drop" - both cases where nothing was in fact dropped, so
   // under-claiming here is correct, unlike userEdited above).
   const evidenceDropped = typeof r.evidenceDropped === "boolean" ? r.evidenceDropped : false;
+  // Backlog A11: under-claiming default, same rule as evidenceDropped above -
+  // a corrupt/missing value degrades to "no notice" rather than fabricating
+  // one that was never actually set.
+  const strengthsNotice = typeof r.strengthsNotice === "string" ? r.strengthsNotice : "";
 
   return {
     id,
@@ -233,6 +242,7 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<SnapshotAsse
     instructionLikeContentQuote,
     imageFallbackNote,
     evidenceDropped,
+    strengthsNotice,
   } as unknown as NoPostableIdentity<SnapshotAssessmentRow>;
 }
 

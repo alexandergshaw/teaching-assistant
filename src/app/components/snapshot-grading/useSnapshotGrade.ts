@@ -16,7 +16,6 @@
 import { useCallback } from "react";
 import type { MutableRefObject } from "react";
 import { DEFAULT_PROVIDER } from "@/lib/llm";
-import { applyAssessmentResult } from "../assessment-shared/assessment-row";
 import { snapshotGradeAction } from "@/app/actions/snapshot-grade";
 import { verifySnapshotCitations } from "./snapshot-citations";
 import {
@@ -25,6 +24,7 @@ import {
   resolveGradeTarget,
   upsertSnapshotRow,
   buildShotReports,
+  applySnapshotGradeResult,
   type SnapshotAssessmentRow,
   type ShotReadEntry,
   type ConfirmedRubricArea,
@@ -258,13 +258,7 @@ export function useSnapshotGrade(
         );
         if (isNewRow) activeRowIdRef.current = base.id;
 
-        const scored = applyAssessmentResult(base, {
-          state: "ready",
-          totalScore,
-          strengths: "",
-          improvements: result.answer.improvements,
-          overallComment: result.answer.overallComment,
-        });
+        const scored = applySnapshotGradeResult(base, result.answer, totalScore);
         const merged: SnapshotAssessmentRow = {
           ...scored,
           shotReports,

@@ -39,14 +39,14 @@ function makeRow(overrides: Partial<TestRow> = {}): TestRow {
 }
 
 describe("joinAssessmentFeedback", () => {
-  it("joins strengths/improvements/overallComment with a blank line, in that order, excluding totalScore", () => {
+  it("joins strengths/overallComment/improvements with a blank line, in that order, excluding totalScore", () => {
     const row = makeRow({
       totalScore: "9/10",
       strengths: "Strong thesis.",
       improvements: "Cite more sources.",
       overallComment: "Great work overall.",
     });
-    expect(joinAssessmentFeedback(row)).toBe("Strong thesis.\n\nCite more sources.\n\nGreat work overall.");
+    expect(joinAssessmentFeedback(row)).toBe("Strong thesis.\n\nGreat work overall.\n\nCite more sources.");
   });
 
   it("omits a blank field entirely rather than leaving a bare blank line", () => {
@@ -90,6 +90,54 @@ describe("editAssessmentField (AC18-equivalent)", () => {
     expect(row.strengths).toBe("original");
     expect(row.userEdited).toBe(false);
   });
+
+  // Backlog A11 Ruling Q: some row shapes (not this file's own TestRow, but
+  // a real caller's row) carry a companion "<field>Notice" property - a
+  // durable notice explaining why that field came back empty from a machine
+  // result. A notice that survives the edit it asked for is worse than no
+  // notice, so editAssessmentField clears it in the same write once the
+  // paired field is filled in with a non-blank value. This is a runtime,
+  // convention-based check, so it must be exercised against a row shape that
+  // actually carries the companion property - TestRow does not, and adding
+  // one there would test nothing.
+  interface RowWithNotice extends TestRow {
+    strengthsNotice: string;
+  }
+
+  function makeRowWithNotice(overrides: Partial<RowWithNotice> = {}): RowWithNotice {
+    return { ...makeRow(), strengthsNotice: "", ...overrides };
+  }
+
+  it("Ruling Q: clears the paired '<field>Notice' property when the field is filled with a non-blank value", () => {
+    const row = makeRowWithNotice({ strengths: "", strengthsNotice: "The model did not return this." });
+    const next = editAssessmentField(row, "strengths", "Filled in by hand.");
+    expect(next.strengths).toBe("Filled in by hand.");
+    expect((next as RowWithNotice).strengthsNotice).toBe("");
+  });
+
+  it("Ruling Q: does NOT clear the paired notice when the new value is blank or whitespace-only", () => {
+    const row = makeRowWithNotice({ strengths: "", strengthsNotice: "The model did not return this." });
+    const next = editAssessmentField(row, "strengths", "   ");
+    expect((next as RowWithNotice).strengthsNotice).toBe("The model did not return this.");
+  });
+
+  it("Ruling Q: editing an UNRELATED field leaves the paired notice untouched", () => {
+    const row = makeRowWithNotice({ strengths: "", strengthsNotice: "The model did not return this." });
+    const next = editAssessmentField(row, "overallComment", "A comment.");
+    expect((next as RowWithNotice).strengthsNotice).toBe("The model did not return this.");
+  });
+
+  it("Ruling Q: is a no-op on a row shape that carries no companion notice property at all", () => {
+    const row = makeRow({ strengths: "" });
+    const next = editAssessmentField(row, "strengths", "Filled in by hand.");
+    expect("strengthsNotice" in next).toBe(false);
+  });
+
+  // SABOTAGE (Ruling Q): if the `noticeKey in source` clearing block in
+  // editAssessmentField (assessment-row.ts) is deleted entirely, the first
+  // test above goes RED - expected "" but got "The model did not return
+  // this." - because the notice property is preserved unchanged by the
+  // object spread alone. Restoring the block turns it green again.
 });
 
 describe("applyAssessmentResult (AC44-equivalent userEdited guard)", () => {

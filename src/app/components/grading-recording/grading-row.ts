@@ -153,20 +153,29 @@ export interface GradingRow extends AssessmentRowCore {
    *  the one place that discipline lives, mirroring
    *  `stampGradingRowsWithCourse`'s own.
    *
-   *  HONEST FINDING, verified directly against GradingRecordingPanel.tsx
-   *  before this field was added: the panel has no assessment selector of
-   *  any kind today - only a course picker and a free-text rubric box with
-   *  no name or id attached to it. So nothing currently calls
-   *  `stampGradingRowsWithAssessment` with a real value, and every row -
-   *  old and new alike - reads UNATTRIBUTED on this axis until a future
-   *  wave adds a real capture-time source (an assessment picker, or a name
-   *  typed alongside the rubric) and wires it through useGradingRows.ts the
-   *  same way `courseId` is wired today. This field and its helpers exist
-   *  now so that future wiring is a small, additive change rather than a
-   *  second course-scoping effort from scratch - not because a value is
-   *  available yet. Never populate this with a guess (the rubric text, the
-   *  course name, a hash of anything) to make it look wired; an honest
-   *  UNATTRIBUTED default is the correct value until a real source exists.
+   *  WIRED. Re-measured 2026-09-20: this paragraph used to read "HONEST
+   *  FINDING, verified directly against GradingRecordingPanel.tsx ... the
+   *  panel has no assessment selector of any kind today ... nothing currently
+   *  calls `stampGradingRowsWithAssessment` with a real value." That was true
+   *  when written and is false now at every clause. The panel renders an
+   *  assessment selector, derives an id from it, and passes that id into
+   *  useGradingRows, which stamps it - and `assessment` is in the persisted
+   *  wire key set, so a stamped row survives a reload. Trace it with
+   *  `grep -n "assessmentId" GradingRecordingPanel.tsx` and
+   *  `grep -n "stampGradingRowsWithAssessment" useGradingRows.ts` rather than
+   *  trusting this paragraph.
+   *
+   *  WHY THIS MATTERS BEYOND THE FACT: two scoping passes on the class-trends
+   *  work read this comment and concluded the recording tool had no batch
+   *  boundary for a run to be grouped by, when it has had one all along. A
+   *  comment that asserts its own verification is read as measurement and
+   *  re-measured by nobody. If a later wave un-wires this, say so here - do
+   *  not restore the old wording to describe a tree it no longer describes.
+   *
+   *  The discipline the rest of this block states still holds: absent means
+   *  UNATTRIBUTED, a row already carrying an assessment is never silently
+   *  re-adopted, and this is never populated with a guess (the rubric text,
+   *  the course name, a hash of anything) to make it look wired.
    *
    *  Optional (unlike `nameMatch`/`state`, which are required) for the same
    *  reason `course` above is optional and not the reason `nameMatch` isn't:

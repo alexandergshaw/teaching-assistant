@@ -17,8 +17,13 @@
 // applyAssessmentResult below turns tsc red at those two call sites; removing
 // it turns tsc green again. See the report for both quoted diagnostics.
 
-import type { AssessmentRowCore, NoPostableIdentity } from "../assessment-shared/assessment-row";
+import {
+  applyAssessmentResult,
+  type AssessmentRowCore,
+  type NoPostableIdentity,
+} from "../assessment-shared/assessment-row";
 import type { SnapshotRole, SnapshotShot } from "./snapshot-shot";
+import type { SnapshotGradeAnswer } from "./snapshot-parse";
 import type { LlmProvider } from "@/lib/llm";
 import { deriveTotalScore } from "@/lib/grade/parsing";
 
@@ -134,6 +139,16 @@ export interface SnapshotAssessmentRow extends AssessmentRowCore {
    *  and the read-side default decorative, since a caller could always omit
    *  it and TypeScript would not object. */
   evidenceDropped: boolean;
+  /** Backlog A11 (docs/backlog.yml row A11, Ruling G): a durable post-reload
+   *  notice, set together with `strengths` by `applySnapshotGradeResult`
+   *  below and by nothing else - never optional, for the same reason
+   *  `evidenceDropped` above is required: an optional field makes the wire
+   *  enumeration and the read-side default decorative. `""` when the grade
+   *  actually returned a non-empty `strengths` value; `STRENGTHS_MISSING_
+   *  NOTICE` when the model's response omitted the key or returned only
+   *  whitespace, so the box's persistent emptiness is explained rather than
+   *  looking like a stuck instructor-editable field nobody ever touched. */
+  strengthsNotice: string;
 }
 
 export type NoPostableSnapshotRow = NoPostableIdentity<SnapshotAssessmentRow>;
@@ -160,6 +175,67 @@ export function createEmptySnapshotRow(id: string, studentName: string): Snapsho
     missingRoles: [],
     instructionLikeContent: false,
     evidenceDropped: false,
+    strengthsNotice: "",
+  };
+}
+
+/** Backlog A11 Ruling P: the two durable notices shown when a grade's
+ *  `strengths` field came back absent or blank, given DIFFERENT text so the
+ *  parse-boundary distinction (`SnapshotGradeAnswer.strengthsMissing`,
+ *  snapshot-parse.ts) actually reaches the one consumer it exists for. Prior
+ *  to Ruling P both states shared one notice string, so the distinction
+ *  never reached the owner's own post-merge check (RES-2) - the two states
+ *  read identically no matter which had actually happened. "absent" means
+ *  the model never returned a strengths key at all, which reads as a
+ *  possible prompt or model-compliance problem, not a legitimate "nothing to
+ *  add"; "blank" means the model returned the key with only an empty or
+ *  whitespace string, a legitimate case of having nothing to praise. */
+export const STRENGTHS_ABSENT_NOTICE =
+  "The model did not return a strengths section for this grade at all, which may mean the prompt or the model's response did not comply as expected - fill it in by hand if it would help.";
+
+/** Backlog A11 Ruling P: see STRENGTHS_ABSENT_NOTICE just above for why this
+ *  is deliberately a different string, not a shared constant reused for both
+ *  raw-JSON states. */
+export const STRENGTHS_BLANK_NOTICE =
+  "The model returned an empty strengths section for this grade - it had nothing to add. Fill it in by hand if it would help.";
+
+/**
+ * Backlog A11 (Ruling D's third pin, discharged by construction rather than
+ * by assertion): builds the full `AssessmentResultInput` (including
+ * `totalScore`, which `SnapshotGradeAnswer` does not itself carry) and calls
+ * the shared `applyAssessmentResult`, then sets `strengthsNotice` alongside
+ * it - so there is no intermediate "mapper result" a caller could reassign
+ * `strengths` on afterward, the way `useSnapshotGrade.ts` used to before this
+ * function existed. On a `userEdited` base row, `applyAssessmentResult`
+ * itself holds back the four scored fields (including `strengths`); this
+ * function must leave `strengthsNotice` untouched in that same arm, or the
+ * notice would describe a field it never wrote - making that banned state
+ * unrepresentable rather than merely asserted absent.
+ */
+export function applySnapshotGradeResult(
+  base: SnapshotAssessmentRow,
+  answer: SnapshotGradeAnswer,
+  totalScore: string
+): SnapshotAssessmentRow {
+  const applied = applyAssessmentResult(base, {
+    state: "ready",
+    totalScore,
+    strengths: answer.strengths,
+    improvements: answer.improvements,
+    overallComment: answer.overallComment,
+  });
+  if (base.userEdited) {
+    return applied;
+  }
+  const strengthsNotice =
+    answer.strengthsMissing === "present"
+      ? ""
+      : answer.strengthsMissing === "absent"
+        ? STRENGTHS_ABSENT_NOTICE
+        : STRENGTHS_BLANK_NOTICE;
+  return {
+    ...applied,
+    strengthsNotice,
   };
 }
 

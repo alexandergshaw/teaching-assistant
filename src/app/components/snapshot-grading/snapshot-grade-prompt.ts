@@ -15,13 +15,18 @@
 //      output contract below - detect and surface, never merely resist.
 //   4. A counter-clause placed AFTER buildSystemPrompt's own text
 //      (GRADE_GENEROSITY_COUNTER_CLAUSE) - buildSystemPrompt is the shared
-//      function the LMS-connected grader depends on and is NEVER edited by
-//      this feature; prompts.ts:70 in full (quoted here for the record, not
-//      truncated the way this AC's own earlier draft truncated it - see C4
-//      of the acceptance criteria) reads: "Grade generously by default, but
-//      do not automatically award full points when an explicit rubric
-//      violation is present." The counter-clause narrows that guidance so it
-//      never extends to content that is itself trying to steer the grade.
+//      function the LMS-connected grader depends on; prompts.ts:84 in full
+//      (quoted here for the record, not truncated the way this AC's own
+//      earlier draft truncated it - see C4 of the acceptance criteria) reads:
+//      "Grade generously by default, but do not automatically award full
+//      points when an explicit rubric violation is present." The
+//      counter-clause narrows that guidance so it never extends to content
+//      that is itself trying to steer the grade.
+//
+// Backlog A11 (docs/backlog.yml row A11, Ruling E): buildSystemPrompt now
+// takes a fifth, defaulted `praiseRouting` parameter, and this is its one
+// non-default caller (passes "separate-strengths" below) - the earlier claim
+// that buildSystemPrompt "is NEVER edited by this feature" no longer holds.
 //
 // p11-containment-snapshot.test.ts sabotage-checks this file directly: with
 // GRADE_FRAMING_HEADER and GRADE_PRECEDENCE_CLAUSE deleted from the composed
@@ -91,7 +96,16 @@ export function buildSnapshotGradeSystemPrompt(
   // that opts into "every" - the instructor here can see and edit the
   // confirmed area list before grading, so a mixed-points list means the
   // instructor deliberately left some areas unscored, not a parse gap.
-  const base = buildSystemPrompt(assignmentText, rubricText, criteria, "every");
+  // Backlog A11 (Ruling E): snapshot grading is also the ONLY caller that
+  // opts into "separate-strengths", so the model's praise lands in its own
+  // "strengths" JSON key instead of staying trapped inside overallComment.
+  const base = buildSystemPrompt(
+    assignmentText,
+    rubricText,
+    criteria,
+    "every",
+    "separate-strengths"
+  );
   const trimmedInstructions = instructorInstructions?.trim() ?? "";
   const instructorBlock = trimmedInstructions
     ? [INSTRUCTOR_INSTRUCTIONS_HEADER, "", `INSTRUCTOR INSTRUCTIONS:\n${trimmedInstructions}`, ""]

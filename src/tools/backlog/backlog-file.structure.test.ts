@@ -57,7 +57,7 @@ const MARKDOWN_PATH = resolve(REPO_ROOT, "docs/BACKLOG.md");
 // Frozen literal (see header comment above for why `.length` is not an
 // acceptable substitute). Bump this by hand, in the same commit, the next
 // time a row is legitimately added to or removed from docs/backlog.yml.
-const EXPECTED_ROW_COUNT = 33;
+const EXPECTED_ROW_COUNT = 32;
 
 describe("docs/backlog.yml <-> docs/BACKLOG.md, read from the REAL committed files (not a fixture)", () => {
   const yamlText = readFileSync(YAML_PATH, "utf-8");

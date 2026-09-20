@@ -113,6 +113,7 @@ describe("parseSnapshotReadResponse", () => {
 describe("parseSnapshotGradeResponse", () => {
   it("parses scores and joins verbatim evidence by area name", () => {
     const raw = JSON.stringify({
+      strengths: "Clear structure throughout.",
       overallComment: "Nice work overall.",
       improvements: "Consider tightening the intro.",
       rubricResults: [{ area: "Correctness", score: "8/10" }],
@@ -122,6 +123,8 @@ describe("parseSnapshotGradeResponse", () => {
     });
     const result = parseSnapshotGradeResponse(raw);
     expect(result).toEqual({
+      strengths: "Clear structure throughout.",
+      strengthsMissing: "present",
       overallComment: "Nice work overall.",
       improvements: "Consider tightening the intro.",
       rubricResults: [
@@ -170,5 +173,59 @@ describe("parseSnapshotGradeResponse", () => {
 
   it("returns null for unparseable text", () => {
     expect(parseSnapshotGradeResponse("garbage")).toBeNull();
+  });
+
+  // Backlog A11 (Ruling A / Ruling J3, PC-4): strengths and strengthsMissing
+  // are classified from the RAW value BEFORE any coercion, so a missing key
+  // and an empty/whitespace-only string stay distinguishable at the parse
+  // boundary even though both degrade `strengths` to "" and both fire the
+  // same downstream notice.
+  describe("strengths / strengthsMissing (backlog A11)", () => {
+    it("present: a non-empty strengths string parses through and strengthsMissing is 'present'", () => {
+      const raw = JSON.stringify({
+        strengths: "Great use of examples.",
+        overallComment: "x",
+        improvements: "y",
+        rubricResults: [{ area: "Style", score: "5/5" }],
+      });
+      const result = parseSnapshotGradeResponse(raw);
+      expect(result?.strengths).toBe("Great use of examples.");
+      expect(result?.strengthsMissing).toBe("present");
+    });
+
+    it("absent: no strengths key at all degrades to '' and strengthsMissing is 'absent'", () => {
+      const raw = JSON.stringify({
+        overallComment: "x",
+        improvements: "y",
+        rubricResults: [{ area: "Style", score: "5/5" }],
+      });
+      const result = parseSnapshotGradeResponse(raw);
+      expect(result?.strengths).toBe("");
+      expect(result?.strengthsMissing).toBe("absent");
+    });
+
+    it("blank: a whitespace-only strengths string degrades to '' and strengthsMissing is 'blank', not 'absent'", () => {
+      const raw = JSON.stringify({
+        strengths: "   ",
+        overallComment: "x",
+        improvements: "y",
+        rubricResults: [{ area: "Style", score: "5/5" }],
+      });
+      const result = parseSnapshotGradeResponse(raw);
+      expect(result?.strengths).toBe("");
+      expect(result?.strengthsMissing).toBe("blank");
+    });
+
+    it("a non-string strengths value (e.g. a number) is treated as absent, not present", () => {
+      const raw = JSON.stringify({
+        strengths: 42,
+        overallComment: "x",
+        improvements: "y",
+        rubricResults: [{ area: "Style", score: "5/5" }],
+      });
+      const result = parseSnapshotGradeResponse(raw);
+      expect(result?.strengths).toBe("");
+      expect(result?.strengthsMissing).toBe("absent");
+    });
   });
 });

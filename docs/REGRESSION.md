@@ -44199,3 +44199,61 @@ instructor edit to strengths or improvements leaves overallComment stale
 (editAssessmentField does not recompose, unlike both sibling surfaces), so that
 row still copies superseded text. And a diverged comment loses the notice,
 because the instructor overwrote the only place it was stored.
+
+## 432. Snapshot grading fills the Strengths box, and says so when it cannot (A11)
+
+The snapshot Strengths box was empty on every grade and nothing could fill it:
+the shared component renders an editable field bound to feedback.strengths, the
+hook hardcoded it to "", and the snapshot model contract had exactly two prose
+fields because the prompt never asked for a third.
+
+THE DESIGN, and why it is a defaulted parameter rather than an appendix:
+buildSystemPrompt gains a fifth defaulted parameter praiseRouting, modelled on
+scoringInstructionMode, and the praise-routing loci are rewritten AT SOURCE in
+the non-default arm. An earlier design appended a counter-clause after the
+shared prompt instead; that fails because the composed prompt still contains
+every original line verbatim, including the JSON schema description the model
+copies, with an appendix forty lines later trying to reverse it.
+
+AC:
+- The DEFAULT arm is byte-identical. engine.ts and grading-feedback-prompt.ts
+  send that prompt and neither is edited, and grading-feedback-prompt.ts maps
+  overallComment into the RECORDING surface's Strengths box - so drift there
+  silently degrades a second surface. Proven two ways: the composed default
+  hashes identical to git HEAD across 8 argument tuples, and the frozen oracle
+  literals match HEAD's output rather than the migrated function's.
+- The praise-routing locus set is FOURTEEN and takes THREE instruments to
+  derive. An overallComment grep gives 12; a praise-word regex gives 6, a
+  strict SUBSET; a pairwise-vocabulary grep supplies :92 and :95, which neither
+  of the others returns and which are the lines making the non-duplication
+  block two-place. Extend only the first twelve and the composed prompt forbids
+  overallComment/improvements duplication while saying nothing about
+  strengths/overallComment - reproducing the sibling surface's defect here.
+- :99 IS THE HIGHEST-RISK LOCUS, above the schema line. Once overallComment
+  carries only deductions, a 2:1 positive ratio INSIDE overallComment is
+  unsatisfiable and the model's only escape is to put the praise back.
+  Rewriting the others and not this one is worse than changing nothing.
+- The parse boundary is THREE-VALUED, classified from the raw value before
+  coercion: absent, blank, present. Absent and blank get DIFFERENT notice text,
+  because the whole point of the split is telling "the prompt rewrite failed"
+  from "the model complied and had nothing to say" - collapsed to one string it
+  reaches no consumer.
+- The notice CLEARS when the field is filled. It tells the instructor to fill
+  the box by hand; without the clear it still renders above the now-filled box
+  and persists across reload. A notice that survives the action it requests is
+  worse than no notice.
+- Copy order is [strengths, overallComment, improvements] on this surface only.
+
+GUARD NOTES, each earned by a sabotage that was silent before it:
+- strengthsNotice cannot travel through applyAssessmentResult, which returns a
+  fixed field set. It attaches in the leaf, after the call. Five of six
+  delivery hops are pinned by executing assertions; the sixth, the hook's
+  merged literal, needs its OWN pin - the general /strengths\s*:\s*""/ regex
+  does not match strengthsNotice: "" because it requires a colon immediately
+  after "strengths".
+- Adding a required field to SnapshotGradeAnswer does NOT redden tsc at the old
+  hardcode, because "" satisfies string. Two guards are needed and they are
+  non-redundant: a unit oracle on the leaf, and a source-text pin on the hook.
+  Sabotaging either leaves the other green - verified both directions.
+- editSnapshotRowField in SnapshotResultCard is DEAD CODE, called by nothing.
+  The live edit path is the panel calling editAssessmentField directly.

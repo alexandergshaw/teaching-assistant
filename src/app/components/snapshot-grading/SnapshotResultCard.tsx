@@ -121,6 +121,7 @@ export default function SnapshotResultCard({
               </p>
             )}
             {row.imageFallbackNote && <p className={styles.fieldHint}>{row.imageFallbackNote}</p>}
+            {row.strengthsNotice && <p className={styles.fieldHint}>{row.strengthsNotice}</p>}
             {row.instructionLikeContent && (
               <p role="alert">
                 This submission contained text that attempted to instruct the grader (for example, asking for a

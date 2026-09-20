@@ -96,17 +96,21 @@ export interface AssessmentRowCore extends AssessmentFeedback {
 }
 
 /**
- * Lifted verbatim from grading-row.ts's joinFeedback (grading-row.ts:228).
- * docs/recording-controls-ux-acceptance-criteria.md CC14: joins exactly the
- * three FEEDBACK fields - strengths, improvements, overallComment - by a
- * blank line, in that order, `totalScore` deliberately excluded (it is a
- * grade, not feedback - see this file's own header on why a row here can
- * never carry a postable identity, the same reasoning that keeps a score
- * out of a copied comment). A field left blank is omitted entirely rather
- * than leaving a bare blank line in its place.
+ * Originally lifted from grading-row.ts's joinFeedback (grading-row.ts:228),
+ * joining strengths, improvements, overallComment by a blank line in that
+ * order. Backlog A11 reordered it to strengths, overallComment, improvements:
+ * strengths states what went well, overallComment names what was deducted and
+ * why, and improvements is the coaching derived FROM those deductions - advice
+ * that precedes its own justification reads backwards, and ending on
+ * forward-looking advice reads better than ending on the list of deductions.
+ * `totalScore` is deliberately excluded (it is a grade, not feedback - see
+ * this file's own header on why a row here can never carry a postable
+ * identity, the same reasoning that keeps a score out of a copied comment). A
+ * field left blank is omitted entirely rather than leaving a bare blank line
+ * in its place.
  */
 export function joinAssessmentFeedback(row: AssessmentFeedback): string {
-  return [row.strengths, row.improvements, row.overallComment].filter((field) => field.trim() !== "").join("\n\n");
+  return [row.strengths, row.overallComment, row.improvements].filter((field) => field.trim() !== "").join("\n\n");
 }
 
 /**
@@ -116,6 +120,17 @@ export function joinAssessmentFeedback(row: AssessmentFeedback): string {
  * to ready, clearing any stale error - typing a score or comment by hand is
  * itself a way of "having" feedback, even before any grading pass has run
  * for this row.
+ *
+ * Backlog A11 Ruling Q: some row shapes carry a companion field named
+ * `${field}Notice` (a per-field durable notice explaining why that field
+ * came back empty from a machine result). A notice that survives the edit
+ * it asked for is worse than no notice, so once the paired field is filled
+ * in with a non-blank value, its companion notice - if the row shape
+ * carries one at all - is cleared to "" in the same write. This is a
+ * runtime, convention-based check (`${field}Notice" in source`) rather than
+ * a typed field on `AssessmentRowCore`, so it is a no-op on any row shape
+ * that never declares such a companion field, and this function stays
+ * generic over every row shape that extends the core.
  */
 export function editAssessmentField<R extends AssessmentRowCore>(
   row: NoPostableIdentity<R>,
@@ -125,7 +140,18 @@ export function editAssessmentField<R extends AssessmentRowCore>(
   const source = row as R;
   const nextState: AssessmentRowState =
     source.state === "pending" || source.state === "failed" ? "ready" : source.state;
-  return { ...source, [field]: value, userEdited: true, state: nextState, error: "" } as unknown as NoPostableIdentity<R>;
+  const next: Record<string, unknown> = {
+    ...source,
+    [field]: value,
+    userEdited: true,
+    state: nextState,
+    error: "",
+  };
+  const noticeKey = `${field}Notice`;
+  if (value.trim() !== "" && noticeKey in source) {
+    next[noticeKey] = "";
+  }
+  return next as unknown as NoPostableIdentity<R>;
 }
 
 export interface AssessmentResultInput extends AssessmentFeedback {

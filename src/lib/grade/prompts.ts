@@ -39,8 +39,83 @@ export function buildSystemPrompt(
    *  line rather than silently losing it - deriveTotalScore (./parsing.ts)
    *  returns "" when no area carries points, and formatFeedback omits the
    *  Total Score line entirely when that happens. See docs/REGRESSION.md. */
-  scoringInstructionMode: "some" | "every" = "some"
+  scoringInstructionMode: "some" | "every" = "some",
+  /** Backlog A11 (docs/backlog.yml row A11, Ruling E). Snapshot grading is the
+   *  only caller that passes "separate-strengths" - it routes the model's
+   *  praise into its own "strengths" JSON key instead of leaving it inside
+   *  overallComment, so the snapshot Strengths box (which is instructor-
+   *  editable and persisted) can actually be filled from a grade instead of
+   *  shipping empty by construction. engine.ts's unattended Canvas bulk path
+   *  and grading-recording/grading-feedback-prompt.ts's recording path keep
+   *  the default "in-overall-comment" (today's behaviour, unchanged) because
+   *  neither parses a "strengths" key: engine.ts would simply drop the praise,
+   *  and grading-feedback-prompt.ts:150 does
+   *  `const strengths = parsed.overallComment` - so moving praise out of
+   *  overallComment there would fill ITS Strengths box with deduction text
+   *  instead. The default branch of every locus below is byte-identical to
+   *  before this parameter existed; see prompts-praise-routing.test.ts. */
+  praiseRouting: "in-overall-comment" | "separate-strengths" = "in-overall-comment"
 ): string {
+  const separateStrengths = praiseRouting === "separate-strengths";
+  // Locus 69 (shape). Default: no "strengths" key at all - a narrowed
+  // overallComment description would be a lie about the shape actually sent.
+  // Non-default: a shape extension, never a narrowing of an existing key.
+  const strengthsSchemaLine = separateStrengths
+    ? `  "strengths": "what the student did well",\n`
+    : "";
+  const overallCommentSchemaLine = separateStrengths
+    ? `  "overallComment": "for each deduction, the rubric area and specific reason",`
+    : `  "overallComment": "what the student did well, and for each deduction the rubric area and specific reason",`;
+  // Locus 90.
+  const strengthsRoutingRule = separateStrengths
+    ? `- In the "strengths" field, summarize what the student did well, in the same warm, direct, second-person style as overallComment. In overallComment, name each deduction: the rubric area and specific reason. Do not include praise, improvement suggestions, next steps, advice for future work, or tips on how to push the work further in overallComment - put praise in "strengths" and everything else in the separate "improvements" field, so neither scatters back into overallComment.`
+    : `- In overallComment, summarize strengths and, for each deduction, the rubric area and specific reason. Do not include improvement suggestions, next steps, advice for future work, or tips on how to push the work further in overallComment - put all of that in the separate "improvements" field instead, so it never scatters back into overallComment.`;
+  // Locus 92 (CRITICAL pairwise header, extended to three fields).
+  const criticalHeaderRule = separateStrengths
+    ? `- CRITICAL - these three fields are displayed to the student as SEPARATE, side-by-side boxes, not as one paragraph. Each must be independently readable on its own, AND must not repeat material from any of the others. Concretely:`
+    : `- CRITICAL - these fields are displayed to the student as SEPARATE, side-by-side boxes, not as one paragraph. Each must be independently readable on its own, AND must not repeat material from the other. Concretely:`;
+  // Locus 93.
+  const improvementsOpeningRule = separateStrengths
+    ? `  - "improvements" must NOT open with a compliment, a summary of what went well, or any restatement of praise already given in strengths. Start it directly with the guidance itself.`
+    : `  - "improvements" must NOT open with a compliment, a summary of what went well, or any restatement of praise already given in overallComment. Start it directly with the guidance itself.`;
+  // Locus 94 (extended to three; the worked example moves to strengths).
+  const noRepeatRule = separateStrengths
+    ? `  - Do not repeat the same observation, fact, or phrase in more than one of these fields. If you have already said the code is clean in strengths, do not say it again in overallComment or improvements, in any wording.`
+    : `  - Do not repeat the same observation, fact, or phrase in both fields. If you have already said the code is clean in overallComment, do not say it again in improvements, in any wording.`;
+  // Locus 95 (extended to three).
+  const noCrossReferenceRule = separateStrengths
+    ? `  - Do not write sentences that only make sense after reading one of the other fields. No "as mentioned above", no "besides that", no "otherwise", and no pronoun whose subject was only introduced in another field.`
+    : `  - Do not write sentences that only make sense after reading the other field. No "as mentioned above", no "besides that", no "otherwise", and no pronoun whose subject was only introduced in the other field.`;
+  // Locus 96 (three-way division). Reworded, not merely extended, under
+  // separate-strengths: R13's own pin requires the composed prompt to carry
+  // no trace of the default branch's exact "is the intended division"
+  // sentence (the direct test of Ruling E's appendix-design complaint - an
+  // appendix could never remove that sentence from the base text it follows,
+  // only a rewrite at source can). The default branch keeps that spelling
+  // unchanged (lowercase "intended division", per Ruling H's correction).
+  const intendedDivisionRule = separateStrengths
+    ? `  - Praising work in strengths, naming deductions in overallComment, and advising in improvements is how these three fields are meant to divide the feedback. Recapping the praise or the deductions in the wrong field is the specific thing to avoid.`
+    : `  - Praising work in overallComment and then advising in improvements is the intended division. Recapping the praise before the advice is the specific thing to avoid.`;
+  // Locus 99 - HIGHEST RISK. Restated at the whole-feedback level, anchored to
+  // strengths for positives, because once overallComment carries only
+  // deductions a 2:1 ratio INSIDE overallComment is unsatisfiable and the
+  // only way a model could satisfy it is to put praise back into
+  // overallComment, reversing the fix.
+  const ratioRule = separateStrengths
+    ? `- Maintain at least a 2:1 positive-to-negative ratio across the whole feedback: for every negative point named in overallComment, include at least two distinct positive points in strengths. Do not add compliments to overallComment or "improvements" to satisfy this ratio - overallComment carries deductions only, and any positive point belongs in strengths, never duplicated into either other box.`
+    : `- Maintain at least a 2:1 positive-to-negative ratio in overallComment: for every negative point, include at least two distinct positive points. This ratio applies to overallComment ONLY - do not add compliments to "improvements" to satisfy it, which would duplicate praise across the two boxes.`;
+  // Locus 100 (first clause extended to three fields; the fourth clause
+  // already read against overallComment now reads against strengths, the
+  // field that has actually already praised the work).
+  const toneRule = separateStrengths
+    ? `- Write strengths, overallComment, and improvements in a warm, friendly, and conversational tone that still reads as overwhelmingly professional. In "improvements", warmth means framing the ADVICE encouragingly ("a good next step is...", "you'll find it easier once..."), not complimenting work that strengths has already praised.`
+    : `- Write overallComment and improvements in a warm, friendly, and conversational tone that still reads as overwhelmingly professional. In "improvements", warmth means framing the ADVICE encouragingly ("a good next step is...", "you'll find it easier once..."), not complimenting work that overallComment has already praised.`;
+  // Locus 106 (two-field enumeration extended to three; A10 shipped a
+  // RESUBMIT_NOTICE on the recording surface and the model must stay barred
+  // from authoring resubmission language in any prose field, including strengths).
+  const resubmissionRule = separateStrengths
+    ? `- Do not mention resubmission, regrading, or late penalties in strengths, overallComment, or improvements; that is handled separately.`
+    : `- Do not mention resubmission, regrading, or late penalties in overallComment or improvements; that is handled separately.`;
   const pinned =
     criteria.length > 0
       ? `
@@ -66,7 +141,7 @@ ${rubric}${pinned}
 
 Grade each student submission against the rubric and respond ONLY in JSON using this shape:
 {
-  "overallComment": "what the student did well, and for each deduction the rubric area and specific reason",
+${strengthsSchemaLine}${overallCommentSchemaLine}
   "improvements": "what the student could do better - coaching, next steps, advice for future work",
   "rubricResults": [
     {
@@ -87,23 +162,23 @@ Rules:
 - If the assignment instructions state required file names for the submission (for example, an exact filename each required file must use), compare each required name against the SUBMITTED FILES list provided with the submission, using exact, case-sensitive matching. A required file that is missing from that list, or present only under a different name, is an explicit rubric violation for the relevant rubric area, not ambiguity and not a speculative issue - deduct for it accordingly and name the missing or misnamed file in overallComment. If the assignment instructions state no required file names, this rule does not apply and must not be used as grounds for any deduction.
 - Example code, sample solutions, and worked examples printed in the assignment instructions are not a reference solution and are not themselves evidence that a rubric requirement is met. Resemblance between the submission and code shown in the instructions does not, by itself, satisfy a requirement. If the instructions state that an example demonstrates a different scenario or task than the one assigned, a submission that reproduces that example instead of completing the assigned task has not met the requirements the example does not cover.
 - If the assignment instructions state required functionality the submission must implement (for example, specific operations, calculations, features, or behaviors), check each one against what the submission actually does. A required behavior that is absent from the submission is an explicit rubric violation for the relevant rubric area, not ambiguity and not a speculative issue - deduct for it accordingly and name the specific missing behavior in overallComment. If the assignment instructions state no required functionality beyond the general task description, this rule does not apply and must not be used as grounds for any deduction.
-- In overallComment, summarize strengths and, for each deduction, the rubric area and specific reason. Do not include improvement suggestions, next steps, advice for future work, or tips on how to push the work further in overallComment - put all of that in the separate "improvements" field instead, so it never scatters back into overallComment.
+${strengthsRoutingRule}
 - In the "improvements" field, give concrete, actionable suggestions for how the student could improve: next steps, advice for future work, or tips on how to push the work further. Write it in the same warm, direct, second-person style as overallComment. If the submission already meets every rubric area at the highest level and you have no honest improvement to suggest, return an empty string for "improvements" rather than inventing filler.
-- CRITICAL - these fields are displayed to the student as SEPARATE, side-by-side boxes, not as one paragraph. Each must be independently readable on its own, AND must not repeat material from the other. Concretely:
-  - "improvements" must NOT open with a compliment, a summary of what went well, or any restatement of praise already given in overallComment. Start it directly with the guidance itself.
-  - Do not repeat the same observation, fact, or phrase in both fields. If you have already said the code is clean in overallComment, do not say it again in improvements, in any wording.
-  - Do not write sentences that only make sense after reading the other field. No "as mentioned above", no "besides that", no "otherwise", and no pronoun whose subject was only introduced in the other field.
-  - Praising work in overallComment and then advising in improvements is the intended division. Recapping the praise before the advice is the specific thing to avoid.
+${criticalHeaderRule}
+${improvementsOpeningRule}
+${noRepeatRule}
+${noCrossReferenceRule}
+${intendedDivisionRule}
 - Every score must include what it is out of, in the format earned/possible (for example 7/10).
 - Cite only the assignment filename portion inferred from submitted raw filenames (exclude student-identifying prefixes and timestamp metadata when present).
-- Maintain at least a 2:1 positive-to-negative ratio in overallComment: for every negative point, include at least two distinct positive points. This ratio applies to overallComment ONLY - do not add compliments to "improvements" to satisfy it, which would duplicate praise across the two boxes.
-- Write overallComment and improvements in a warm, friendly, and conversational tone that still reads as overwhelmingly professional. In "improvements", warmth means framing the ADVICE encouragingly ("a good next step is...", "you'll find it easier once..."), not complimenting work that overallComment has already praised.
+${ratioRule}
+${toneRule}
 - Mimic how a personable, encouraging professor would write feedback.
 - Use natural contractions (for example you're, don't, it's, that's, you've) to keep the tone conversational, while staying professional.
 - Don't use long dashes (—) or short dashes (–) in feedback, as they can cause formatting issues in some LMS platforms. Use colons, parentheses, or commas instead.
 - Write feedback in a direct, student-facing style with short concrete phrases like "Nice job with the formatting" and "Your logic here reads cleanly," and second-person words like "you", "your", "yours", and "you're" are allowed. Using the student's name is strictly prohibited.
 - Never reference automated grading, AI, machine grading, or that this feedback was generated by a tool. Write every comment as a human instructor speaking directly to the student.
-- Do not mention resubmission, regrading, or late penalties in overallComment or improvements; that is handled separately.
+${resubmissionRule}
 - Do not include markdown fences or any text outside the JSON object.`;
 }
 

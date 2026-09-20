@@ -226,6 +226,45 @@ describe("BLOCKER C: a stale student-boundary generation discards the grade reso
   });
 });
 
+// ---------------------------------------------------------------------------
+// Backlog A11 (docs/backlog.yml row A11, Ruling D / Ruling G / Ruling J2):
+// the dead-ship guard is TWO guards, not one - a source-text pin alone would
+// not catch an implementer who writes the empty-string literal INSIDE the
+// new applySnapshotGradeResult leaf instead of here (snapshot-row.test.ts's
+// e2e oracle is the other half, over the leaf's actual output). This file's
+// half is that the hook itself carries no empty-string strengths literal, no
+// longer calls the shared mutator directly, and calls the leaf in the right
+// position - reusing the SAME stripComments/stripped this file already
+// built above, never a fourth copy of that helper.
+// ---------------------------------------------------------------------------
+
+describe("backlog A11: useSnapshotGrade.ts no longer hardcodes strengths and delegates to the leaf", () => {
+  it("carries no empty-string strengths literal anywhere in the hook (RULING J2's unpinned sixth hop)", () => {
+    expect(stripped).not.toMatch(/strengths\s*:\s*""/);
+  });
+
+  // RULING J2: a colon-adjacent regex alone would miss `strengthsNotice: ""`
+  // slipped into the merged literal in the idiom of its six siblings - this
+  // is that dedicated pin, separate from the general strengths check above.
+  it("carries no empty-string strengthsNotice literal anywhere in the hook", () => {
+    expect(stripped).not.toMatch(/strengthsNotice\s*:\s*""/);
+  });
+
+  it("no longer calls the shared applyAssessmentResult directly - the only route is the leaf", () => {
+    expect(stripped).not.toContain("applyAssessmentResult(");
+  });
+
+  it("calls applySnapshotGradeResult(, after totalScore is computed and before the merged row is built", () => {
+    expect(stripped).toMatch(/applySnapshotGradeResult\(/);
+    const totalScoreIdx = stripped.indexOf("const totalScore = computeSnapshotTotalScore(");
+    const scoredIdx = stripped.indexOf("applySnapshotGradeResult(");
+    const mergedIdx = stripped.indexOf("const merged: SnapshotAssessmentRow = {");
+    expect(totalScoreIdx).toBeGreaterThan(-1);
+    expect(scoredIdx).toBeGreaterThan(totalScoreIdx);
+    expect(mergedIdx).toBeGreaterThan(scoredIdx);
+  });
+});
+
 describe("R1-E: the transcript lookup is matched by shot.id, not by read-time position alone", () => {
   it("builds an id-keyed transcript map from shotReads before deriving the index-keyed one verifySnapshotCitations reads", () => {
     const idMapIdx = stripped.indexOf("const transcriptsByShotId = new Map<string, string>();");

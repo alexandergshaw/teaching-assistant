@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { editAssessmentField, applyAssessmentResult } from "../assessment-shared/assessment-row";
+import { editAssessmentField, applyAssessmentResult, joinAssessmentFeedback } from "../assessment-shared/assessment-row";
 import {
   createEmptySnapshotRow,
   mintSnapshotRowId,
@@ -17,6 +17,9 @@ import {
   isGradeEligible,
   removeConfirmedArea,
   addConfirmedArea,
+  applySnapshotGradeResult,
+  STRENGTHS_ABSENT_NOTICE,
+  STRENGTHS_BLANK_NOTICE,
   GRADE_PASS_IMAGE_BUDGET_BYTES,
   READ_BATCH_SIZE,
   type SnapshotShotReadReport,
@@ -26,6 +29,7 @@ import {
 } from "./snapshot-row";
 import type { SnapshotShot } from "./snapshot-shot";
 import { snapshotRowCodec } from "./snapshot-row-serialization";
+import { parseSnapshotGradeResponse } from "./snapshot-parse";
 
 // Duplicated per-file (test notes M1): not imported from
 // snapshot-row-serialization.test.ts or snapshot-shot.test.ts - a
@@ -58,6 +62,7 @@ function makeFullRow(overrides: Partial<SnapshotAssessmentRow> = {}): SnapshotAs
     instructionLikeContentQuote: undefined,
     imageFallbackNote: undefined,
     evidenceDropped: false,
+    strengthsNotice: "",
     ...overrides,
   };
 }
@@ -92,6 +97,11 @@ describe("createEmptySnapshotRow", () => {
   it("sets evidenceDropped to false (B3: required on every freshly-minted row, not optional)", () => {
     const row = createEmptySnapshotRow("r1", "Sam");
     expect(row.evidenceDropped).toBe(false);
+  });
+
+  it("sets strengthsNotice to '' (backlog A11 / Ruling G: required on every freshly-minted row, not optional)", () => {
+    const row = createEmptySnapshotRow("r1", "Sam");
+    expect(row.strengthsNotice).toBe("");
   });
 });
 
@@ -608,6 +618,110 @@ describe("buildShotReports (R1-B/R1-H: the SAME i+1 construction as buildIdByGlo
   // shotReads-keyed-by-1-based-index case goes red too, since shotReads.get
   // (0) misses every entry keyed the old (correct) way, silently returning
   // "not-read" for shots that WERE read. Restoring `i + 1` turns both green.
+});
+
+// ---------------------------------------------------------------------------
+// Backlog A11 (docs/backlog.yml row A11, R11): the end-to-end composed-row
+// oracle. Every case runs RAW MODEL JSON through the production parser
+// (parseSnapshotGradeResponse, a .ts leaf - never duplicated from another
+// *.test.ts) -> applySnapshotGradeResult -> joinAssessmentFeedback, so the
+// fixture is built from the emitted shape rather than hand-written to match
+// whatever the implementation happens to read (traps-tests.md: "a fixture
+// that uses a shape the UI never emits proves nothing"). This is the oracle
+// the backlog row has demanded since round 1: any build of the "populate the
+// Strengths box" path needs one that composes a row end to end, because
+// nothing else here renders a component to catch two boxes reading
+// byte-identically side by side.
+// ---------------------------------------------------------------------------
+
+function rawGradeJson(strengthsField: string): string {
+  // strengthsField is inlined verbatim (including its own quoting, or its
+  // absence) so the "absent" case can omit the key entirely - a
+  // JSON.stringify-based builder could never produce a genuinely missing key.
+  return `{
+    ${strengthsField}
+    "overallComment": "Missed citing the rubric area for clarity.",
+    "improvements": "Add a topic sentence to the second paragraph.",
+    "rubricResults": [{ "area": "Clarity", "score": "4/5" }]
+  }`;
+}
+
+describe("applySnapshotGradeResult -> joinAssessmentFeedback, end to end (backlog A11, R11)", () => {
+  it("present: strengths flows through, strengthsNotice is '', and the copy is three blocks in strengths/overallComment/improvements order", () => {
+    const raw = rawGradeJson('"strengths": "Great use of concrete examples.",');
+    const answer = parseSnapshotGradeResponse(raw);
+    expect(answer).not.toBeNull();
+    const base = createEmptySnapshotRow("r1", "Sam");
+    const row = applySnapshotGradeResult(base, answer!, "4/5");
+
+    expect(row.strengths).toBe("Great use of concrete examples.");
+    expect(row.strengthsNotice).toBe("");
+    expect(joinAssessmentFeedback(row)).toBe(
+      "Great use of concrete examples.\n\nMissed citing the rubric area for clarity.\n\nAdd a topic sentence to the second paragraph."
+    );
+  });
+
+  it("absent: strengths is '', the ABSENT notice fires (not the blank one), and the copy is exactly two blocks - byte-identical to today's shape", () => {
+    const raw = rawGradeJson("");
+    const answer = parseSnapshotGradeResponse(raw);
+    expect(answer).not.toBeNull();
+    expect(answer!.strengthsMissing).toBe("absent");
+    const base = createEmptySnapshotRow("r1", "Sam");
+    const row = applySnapshotGradeResult(base, answer!, "4/5");
+
+    expect(row.strengths).toBe("");
+    expect(row.strengthsNotice).toBe(STRENGTHS_ABSENT_NOTICE);
+    expect(joinAssessmentFeedback(row)).toBe(
+      "Missed citing the rubric area for clarity.\n\nAdd a topic sentence to the second paragraph."
+    );
+  });
+
+  it("blank: the BLANK notice fires (not the absent one) and the same two-block copy as absent, but strengthsMissing is distinguishably 'blank' at the parse boundary", () => {
+    const raw = rawGradeJson('"strengths": "   ",');
+    const answer = parseSnapshotGradeResponse(raw);
+    expect(answer).not.toBeNull();
+    expect(answer!.strengthsMissing).toBe("blank");
+    const base = createEmptySnapshotRow("r1", "Sam");
+    const row = applySnapshotGradeResult(base, answer!, "4/5");
+
+    expect(row.strengths).toBe("");
+    expect(row.strengthsNotice).toBe(STRENGTHS_BLANK_NOTICE);
+    expect(joinAssessmentFeedback(row)).toBe(
+      "Missed citing the rubric area for clarity.\n\nAdd a topic sentence to the second paragraph."
+    );
+  });
+
+  it("Ruling P: the absent and blank notices are different strings, so the parse-boundary distinction actually reaches the notice a reader sees", () => {
+    expect(STRENGTHS_ABSENT_NOTICE).not.toBe(STRENGTHS_BLANK_NOTICE);
+    expect(STRENGTHS_ABSENT_NOTICE.length).toBeGreaterThan(0);
+    expect(STRENGTHS_BLANK_NOTICE.length).toBeGreaterThan(0);
+  });
+
+  // SABOTAGE (Ruling P): if applySnapshotGradeResult's strengthsNotice
+  // ternary is collapsed back to `answer.strengthsMissing === "present" ? ""
+  // : STRENGTHS_ABSENT_NOTICE` (i.e. the "blank" arm is folded into the
+  // "absent" one, reproducing the pre-Ruling-P single-notice behaviour), the
+  // "blank" case above goes RED - expected STRENGTHS_BLANK_NOTICE, got
+  // STRENGTHS_ABSENT_NOTICE - and this file's own "different strings" pin
+  // stays green in isolation only because the two constants would still both
+  // exist; the composed-row case is what actually catches the collapse.
+  // Restoring the three-way ternary turns it green again.
+
+  it("R5's invariant: a userEdited base row leaves both strengths and strengthsNotice untouched", () => {
+    const edited = {
+      ...editAssessmentField(createEmptySnapshotRow("r1", "Sam"), "strengths", "Instructor's own hand-typed praise."),
+      // A pre-existing, non-default value here proves "untouched" rather than
+      // merely "happens to still be the empty default".
+      strengthsNotice: "PRE-EXISTING NOTICE",
+    };
+    const raw = rawGradeJson('"strengths": "Model praise that must never land here.",');
+    const answer = parseSnapshotGradeResponse(raw);
+    expect(answer).not.toBeNull();
+    const row = applySnapshotGradeResult(edited, answer!, "4/5");
+
+    expect(row.strengths).toBe("Instructor's own hand-typed praise.");
+    expect(row.strengthsNotice).toBe("PRE-EXISTING NOTICE");
+  });
 });
 
 // ---------------------------------------------------------------------------

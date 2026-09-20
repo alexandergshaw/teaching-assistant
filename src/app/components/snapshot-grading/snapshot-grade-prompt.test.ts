@@ -137,3 +137,37 @@ describe("buildSnapshotGradeSystemPrompt scopes to scoringInstructionMode=\"ever
     expect(prompt).toMatch(/Score each area out of the points shown for it/);
   });
 });
+
+// Backlog A11 (docs/backlog.yml row A11, R13): the composed snapshot prompt
+// is pinned end to end, in the idiom of the "every"-scoping block above,
+// which exists precisely so a dropped argument in this file's own call to
+// buildSystemPrompt is caught even when prompts.test.ts stays green.
+// Ruling E's whole complaint about the round-1 design was that an appendix
+// clause AFTER buildSystemPrompt's own text cannot reverse loci already
+// inside the JSON shape the model copies - these two negatives are the
+// direct test of that: they fail on an appendix-style fix and pass only on a
+// rewrite at source (praiseRouting: "separate-strengths").
+describe("buildSnapshotGradeSystemPrompt opts into separate-strengths praise routing (backlog A11, R13)", () => {
+  const prompt = buildSnapshotGradeSystemPrompt("Write a function.", "Correctness: 10 pts", [
+    { name: "Correctness", points: 10 },
+  ]);
+
+  it('the composed prompt contains a "strengths" key in the JSON shape', () => {
+    expect(prompt).toMatch(/"strengths":\s*"what the student did well"/);
+  });
+
+  it('does NOT contain the default branch\'s "In overallComment, summarize strengths" text', () => {
+    expect(prompt).not.toContain("In overallComment, summarize strengths");
+  });
+
+  it('does NOT contain the default branch\'s "is the intended division" text (lowercase, per Ruling H\'s correction)', () => {
+    expect(prompt).not.toContain("is the intended division");
+    // ...and the non-default REWORDING of that same clause IS present, so
+    // this is not merely a typo-proof negative - an appendix could never
+    // remove the default branch's exact sentence from the base text it
+    // follows; only a rewrite at source can.
+    expect(prompt).toContain(
+      "Praising work in strengths, naming deductions in overallComment, and advising in improvements is how these three fields are meant to divide the feedback."
+    );
+  });
+});

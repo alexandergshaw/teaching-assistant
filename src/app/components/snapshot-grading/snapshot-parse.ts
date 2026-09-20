@@ -136,13 +136,26 @@ export interface SnapshotRubricAreaAnswer {
   /** RULING A: classified from the RAW shotIndex value before any coercion,
    *  so a missing or non-numeric field (e.g. "shot 3") can never become
    *  indistinguishable from a genuinely sanctioned pasted-text citation
-   *  (snapshot-grade-prompt.ts:43's explicit shotIndex: 0 contract). Coercing
+   *  (snapshot-grade-prompt.ts:71's explicit shotIndex: 0 contract). Coercing
    *  first and branching on the coerced number was the exact defect this
    *  field exists to close - see coercion-changes-set-membership.md. */
   source: "shot" | "pasted" | "unknown";
 }
 
 export interface SnapshotGradeAnswer {
+  strengths: string;
+  /** RULING J3 (backlog row A11): classified from the RAW `strengths` value
+   *  BEFORE any coercion, the same idiom as `source` above
+   *  (snapshot-parse.ts, ten lines up) - "absent" and "blank" are genuinely
+   *  different facts in the raw model JSON and must not be collapsed before
+   *  they are even observed. "absent" means the model never returned a
+   *  `strengths` key at all (the prompt rewrite failed to reach it);
+   *  "blank" means the model returned the key but an empty or
+   *  whitespace-only string (it complied with the shape and had nothing to
+   *  say); "present" means a non-empty string was returned. One notice still
+   *  fires for either "absent" or "blank" - the collapse happens at the
+   *  notice layer, not here. */
+  strengthsMissing: "absent" | "blank" | "present";
   overallComment: string;
   improvements: string;
   rubricResults: SnapshotRubricAreaAnswer[];
@@ -170,6 +183,7 @@ export function parseSnapshotGradeResponse(raw: string): SnapshotGradeAnswer | n
   if (!json) return null;
   try {
     const parsed = JSON.parse(json) as {
+      strengths?: unknown;
       overallComment?: unknown;
       improvements?: unknown;
       rubricResults?: unknown;
@@ -218,7 +232,25 @@ export function parseSnapshotGradeResponse(raw: string): SnapshotGradeAnswer | n
 
     if (scores.length === 0) return null;
 
+    // RULING J3: classify from the RAW value before any coercion. "absent"
+    // (no strengths key at all) and "blank" (an empty/whitespace-only
+    // string) are different facts about the raw JSON and must stay
+    // distinguishable here, even though both fire the same downstream notice.
+    const rawStrengths = parsed.strengths;
+    const strengthsMissing: "absent" | "blank" | "present" =
+      typeof rawStrengths !== "string"
+        ? "absent"
+        : rawStrengths.trim() === ""
+          ? "blank"
+          : "present";
+    // "absent" and "blank" both degrade `strengths` to "" - only the raw fact
+    // captured in `strengthsMissing` above keeps them distinguishable. A
+    // whitespace-only string is not a value worth carrying into the row.
+    const strengths = strengthsMissing === "present" ? (rawStrengths as string) : "";
+
     return {
+      strengths,
+      strengthsMissing,
       overallComment: typeof parsed.overallComment === "string" ? parsed.overallComment : "",
       improvements: typeof parsed.improvements === "string" ? parsed.improvements : "",
       rubricResults: scores.map((s) => normalizeRubricArea(s, evidence)),

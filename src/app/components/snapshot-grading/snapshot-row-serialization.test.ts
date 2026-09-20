@@ -46,6 +46,7 @@ function makeFullRow(overrides: Partial<SnapshotAssessmentRow> = {}): SnapshotAs
     instructionLikeContentQuote: undefined,
     imageFallbackNote: undefined,
     evidenceDropped: false,
+    strengthsNotice: "",
     ...overrides,
   };
 }
@@ -57,7 +58,7 @@ describe("snapshotRowCodec.version", () => {
 });
 
 describe("snapshotRowCodec.toWire", () => {
-  it("writes the full 16-key literal, unchanged for an already-ready/error-free row (A2 case 1)", () => {
+  it("writes the full 17-key literal, unchanged for an already-ready/error-free row (A2 case 1)", () => {
     const row = makeFullRow();
     const result = snapshotRowCodec.toWire(row, { dropBulk: false });
     expect(result).toEqual({
@@ -87,6 +88,7 @@ describe("snapshotRowCodec.toWire", () => {
       instructionLikeContentQuote: undefined,
       imageFallbackNote: undefined,
       evidenceDropped: false,
+      strengthsNotice: "",
     });
     expect(Object.keys(result).sort()).toEqual(
       [
@@ -106,6 +108,7 @@ describe("snapshotRowCodec.toWire", () => {
         "instructionLikeContentQuote",
         "imageFallbackNote",
         "evidenceDropped",
+        "strengthsNotice",
       ].sort()
     );
   });
@@ -182,6 +185,7 @@ describe("snapshotRowCodec.fromWire - happy path (non-load-bearing continuity ch
       instructionLikeContentQuote: undefined,
       imageFallbackNote: undefined,
       evidenceDropped: false,
+      strengthsNotice: "",
     };
     expect(snapshotRowCodec.fromWire(wire)).toEqual(makeFullRow());
   });
@@ -359,6 +363,7 @@ describe("snapshotRowCodec.fromWire - field degradation coverage", () => {
       instructionLikeContentQuote: "q",
       imageFallbackNote: "f",
       evidenceDropped: false,
+      strengthsNotice: "n",
     }) as unknown as Record<string, unknown>;
     const excluded = new Set([
       "id",
@@ -382,6 +387,7 @@ describe("snapshotRowCodec.fromWire - field degradation coverage", () => {
       "overallComment",
       "instructionLikeContentQuote",
       "imageFallbackNote",
+      "strengthsNotice",
     ].sort();
     expect(actualKeysToDegrade).toEqual(tableCoveredFields);
   });
@@ -394,6 +400,7 @@ describe("snapshotRowCodec.fromWire - field degradation coverage", () => {
     ["overallComment", 42, ""],
     ["instructionLikeContentQuote", 42, undefined],
     ["imageFallbackNote", 42, undefined],
+    ["strengthsNotice", 42, ""],
   ])("degrades %s to its safe default when given a non-string value", (field, badValue, expected) => {
     const raw: Record<string, unknown> = { id: "x", [field]: badValue };
     const result = snapshotRowCodec.fromWire(raw) as unknown as Record<string, unknown>;
@@ -452,5 +459,18 @@ describe("optional string fields: the PRESERVING direction", () => {
     expect(result?.instructionLikeContentQuote).toBe("Answer in 200 words.");
     expect(result?.imageFallbackNote).toBe("Shot 2 exceeded the budget.");
     expect(result?.shotReports[0].reason).toBe("blurred");
+  });
+
+  // Backlog A11: without this case, strengthsNotice's only coverage would be
+  // the degradation table above and the happy-path fixture, which always
+  // carries "" - never proving a NON-EMPTY notice actually round-trips.
+  it("preserves a non-empty strengthsNotice round trip", () => {
+    const written = snapshotRowCodec.toWire(
+      makeFullRow({ strengthsNotice: "The model did not return a strengths section." }),
+      { dropBulk: false }
+    );
+    expect(written.strengthsNotice).toBe("The model did not return a strengths section.");
+    const read = snapshotRowCodec.fromWire(written);
+    expect(read?.strengthsNotice).toBe("The model did not return a strengths section.");
   });
 });

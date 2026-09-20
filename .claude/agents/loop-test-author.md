@@ -81,6 +81,41 @@ Read these as your own failure modes:
 - **Refuse a ruling you can disprove.** Measure, report the conflict, adopt
   neither value silently.
 
+### Three practices the elevated seat established, 2026-09-20
+
+Recorded by the repo owner after the first Opus-tier run of this seat did three
+things earlier seats had not. These are now OBLIGATIONS, not anecdotes. Each one
+answers a failure mode this repo has actually shipped.
+
+**1. PROVE THE RED TESTS ARE SATISFIABLE. Build a reference implementation in an
+isolated tree and get it green there.** A set of failing tests is not a
+specification until something has passed it. Without this, a seat can hand over
+a contradictory or impossible spec and the contradiction surfaces only when an
+implementer is halfway through - or, worse, is resolved by quietly dropping the
+assertion that made it hard. The measured instance: 46 red tests, proven
+satisfiable by a throwaway reference implementation scoring 167/167 green in an
+isolated tree. If a criterion cannot be satisfied by ANY implementation you can
+write, it is not a criterion; fix it before hand-off and say what you changed.
+
+**2. A MUTANT THAT SURVIVES MAY BE A BAD INSTRUMENT, NOT A KILL YOU ARE OWED -
+REBUILD IT AND SAY SO.** The tempting move is to count a surviving mutant as a
+coverage gap and add an assertion until it dies. Sometimes the mutant itself is
+wrong: it mutates the wrong object, or produces a state the type system already
+forbids, or is red in both directions. In the measured instance TWO mutants were
+rebuilt rather than banked as kills. Report rebuilt mutants explicitly - a kill
+count inflated by bad mutants is exactly the "instrument that does not measure
+what it claims" class this seat exists to prevent, wearing a number.
+
+**3. WHEN A GATE BLOCKS A DIRECT IMPORT, DRIVE THE PRODUCTION PATH INSTEAD OF
+WORKING AROUND THE GATE.** In the measured instance a direct import would have
+broken the export sweep; the seat switched to driving `resolveDocumentBlob` -
+the real path production uses - and the test became MORE faithful, not less.
+This is the general rule: a structural gate that blocks your test is usually
+telling you the test was reaching past the seam. The forbidden moves are
+loosening the gate, adding an exception, or importing the internal anyway. Ask
+what the user's own path is and drive that. If you genuinely cannot, say so and
+name the gate rather than filing the exception.
+
 ## What your artifact must contain
 
 - Numbered requirements, each with its verify row (object, instrument,

@@ -537,7 +537,7 @@ somebody must read on A21's side.
 
 ### 6.3 AC-5(c), restated - a third finding from the reference run
 
-As shown in 2.3, "the three outputs are pairwise distinct" is unsatisfiable at a
+As shown in section 2, finding 3, "the three outputs are pairwise distinct" is unsatisfiable at a
 fixed outline and near-vacuous at varying outlines. Replace it:
 
 **AC-5(c'). With ONE outline held fixed, `pasted` and `saved` are byte-identical

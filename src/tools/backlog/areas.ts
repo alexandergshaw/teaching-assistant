@@ -42,6 +42,7 @@ export const BACKLOG_AREAS: readonly BacklogArea[] = [
   { slug: "owner-guard-call-sites", label: "requireOwner() call-site authorization" },
   { slug: "orphan-upload-sweep", label: "Orphan-upload sweep" },
   { slug: "loop-and-docs-maintenance", label: "The loop's own docs, gates and process debt" },
+  { slug: "walkthrough-announcement-surface", label: "Announcement from a walkthrough: draft controls and what the tool says it reads" },
 ];
 
 export function isBacklogArea(slug: string): boolean {

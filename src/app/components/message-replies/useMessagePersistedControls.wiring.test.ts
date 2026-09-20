@@ -37,4 +37,17 @@ describe("useMessagePersistedControls.ts wiring", () => {
   it("skipAnswered defaults ON: only an explicit stored '0' turns it off", () => {
     expect(SOURCE).toMatch(/STORAGE_KEY_SKIP_ANSWERED\) !== "0"/);
   });
+
+  // A20 (docs/a20-scope.md AC1, RULING B3): message-replies.structure.test.ts's
+  // own "finds exactly N distinct ta- keys" canary is a COUNT - a key that is
+  // read but never written would move that count exactly as a correctly
+  // wired key would, and the canary cannot tell the two apart. This is a
+  // genuine read+write assertion instead, the same DIRECT/INDIRECT
+  // distinction recording-split.structure.test.ts's own C5c comment
+  // documents for this directory's STORAGE_KEY_* convention.
+  it("A20: a STORAGE_KEY_AUTO_DOWNLOAD const bound to \"ta-rec-msg-auto-download\", read AND written through that identifier", () => {
+    expect(SOURCE).toMatch(/const STORAGE_KEY_AUTO_DOWNLOAD = "ta-rec-msg-auto-download";/);
+    expect(SOURCE).toMatch(/readLocalStorage\(STORAGE_KEY_AUTO_DOWNLOAD\)/);
+    expect(SOURCE).toMatch(/writeLocalStorage\(STORAGE_KEY_AUTO_DOWNLOAD,/);
+  });
 });

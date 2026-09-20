@@ -43,6 +43,7 @@ import {
   shouldLoopContinue,
   shouldTickerRun,
   accumulateDroppedFrames,
+  videoExtensionFromMimeType,
   type FrameSignature,
 } from "./discussion-capture";
 
@@ -428,5 +429,48 @@ describe("FrameSignature usage", () => {
     const sig: FrameSignature = computeFrameSignature(solidPixels(2, 2, 50), 2, 2);
     expect(sig).toBeInstanceOf(Uint8Array);
     expect(framesDifferEnough(sig, sig)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A20 (docs/a20-scope.md AC6, RULING Y4/M-D): ONE extension rule for both the
+// auto-download filename and the manual review link, widened to name every
+// container Trap 3 discusses. M-D's own fixture (a matroska container using
+// the standard AAC codec string, which contains the substring "mp4" inside
+// "mp4a") pins the branch ORDER, not just the branch set - container-specific
+// checks must run before the generic "mp4" check.
+// ---------------------------------------------------------------------------
+
+describe("videoExtensionFromMimeType (AC6)", () => {
+  it("maps a webm mimeType to webm", () => {
+    expect(videoExtensionFromMimeType("video/webm;codecs=vp9")).toBe("webm");
+  });
+
+  it("maps a plain mp4 mimeType to mp4", () => {
+    expect(videoExtensionFromMimeType("video/mp4")).toBe("mp4");
+  });
+
+  it("maps a matroska mimeType to mkv", () => {
+    expect(videoExtensionFromMimeType("video/x-matroska")).toBe("mkv");
+  });
+
+  it("maps a quicktime mimeType to mov", () => {
+    expect(videoExtensionFromMimeType("video/quicktime")).toBe("mov");
+  });
+
+  it("maps an ogg mimeType to ogv", () => {
+    expect(videoExtensionFromMimeType("video/ogg")).toBe("ogv");
+  });
+
+  it("falls back to webm for an unrecognized or empty mimeType - a known, named limit, not a silent gap", () => {
+    expect(videoExtensionFromMimeType("")).toBe("webm");
+    expect(videoExtensionFromMimeType("application/octet-stream")).toBe("webm");
+  });
+
+  // M-D's own regression fixture: a matroska container using the standard
+  // AAC codec string contains "mp4" as a substring of "mp4a" - an mp4-first
+  // check would misname this file ".mp4" instead of ".mkv".
+  it("M-D: a matroska container with the AAC codec string (mp4a.40.2) still maps to mkv, not mp4", () => {
+    expect(videoExtensionFromMimeType("video/x-matroska;codecs=avc1,mp4a.40.2")).toBe("mkv");
   });
 });

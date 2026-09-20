@@ -125,8 +125,18 @@ export interface UseMessageRepliesReturn {
   setThreadExpand: (v: boolean) => void;
   saveVideo: boolean;
   setSaveVideo: (v: boolean) => void;
+  /** A20 (docs/a20-scope.md): "Download automatically when recording stops". */
+  autoDownload: boolean;
+  setAutoDownload: (v: boolean) => void;
   recordingUrl: string | null;
   recordingBytes: number;
+  /** A20/AC6: the negotiated mime type the last saved recording was actually
+   *  encoded with - threaded so the manual review link and the auto-download
+   *  filename can never disagree about the extension for the same blob. */
+  recordingMimeType: string | null;
+  /** A20/AC7 (RULING W4): whether auto-download was requested for the
+   *  session that just stopped - not the live checkbox value. */
+  lastSessionAutoDownload: boolean;
 
   knowledgeContextLabel: string | null;
   knowledgeContext: RecordingKnowledgeContext | null;
@@ -249,6 +259,8 @@ export function useMessageReplies(active: boolean): UseMessageRepliesReturn {
     setThreadExpand,
     saveVideo,
     setSaveVideo,
+    autoDownload,
+    setAutoDownload,
   } = controls;
 
   const { courses, coursesLoading, coursesError, hasActivatedRef } = useDiscussionCourses(active);
@@ -319,6 +331,12 @@ export function useMessageReplies(active: boolean): UseMessageRepliesReturn {
   useEffect(() => {
     saveVideoRef.current = saveVideo;
   }, [saveVideo]);
+  // A20: mirrors saveVideoRef exactly - start() reads this at dispatch time,
+  // never a closure captured before the last await.
+  const autoDownloadRef = useRef(autoDownload);
+  useEffect(() => {
+    autoDownloadRef.current = autoDownload;
+  }, [autoDownload]);
   const acronymRef = useRef(acronym);
   useEffect(() => {
     acronymRef.current = acronym;
@@ -589,7 +607,11 @@ export function useMessageReplies(active: boolean): UseMessageRepliesReturn {
       hasWrittenKbLabelRef.current = true;
     }
     try {
-      await captureRef.current.start({ saveVideo: saveVideoRef.current });
+      await captureRef.current.start({
+        saveVideo: saveVideoRef.current,
+        autoDownload: autoDownloadRef.current,
+        downloadFileNameBase: "message-replies-capture",
+      });
     } catch (err) {
       pushNotice(`Could not start the screen capture: ${err instanceof Error ? err.message : "unknown error"}`);
     }
@@ -707,8 +729,12 @@ export function useMessageReplies(active: boolean): UseMessageRepliesReturn {
 
     saveVideo,
     setSaveVideo,
+    autoDownload,
+    setAutoDownload,
     recordingUrl: capture.recordingUrl,
     recordingBytes: capture.recordingBytes,
+    recordingMimeType: capture.recordingMimeType,
+    lastSessionAutoDownload: capture.lastSessionAutoDownload,
 
     knowledgeContextLabel,
     knowledgeContext,

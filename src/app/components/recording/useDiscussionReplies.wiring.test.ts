@@ -83,3 +83,66 @@ describe("dropped-frame accumulator (REGRESSION 383 fix, discussion side)", () =
     expect(total).toBe(9); // NOT 3
   });
 });
+
+// A20 (docs/a20-scope.md AC4/AC6, RULING W2/M-F): the control-to-call chain's
+// discussion-side call site. Without this, `autoDownload:` (or
+// `downloadFileNameBase:`) could be dropped from the start({...}) call and
+// every OTHER gate would stay green - the capture call still exists and
+// fires, it is just never told to auto-download, or downloads under the
+// wrong filename stem.
+describe("useDiscussionReplies.ts wiring - A20's start({...}) call carries autoDownload and its own filename stem", () => {
+  const startAnchor = "await captureRef.current.start({";
+  const startIdx = source.indexOf(startAnchor);
+  const startEnd = source.indexOf("});", startIdx);
+
+  it("anchor resolves: finds the captureRef.current.start({ call", () => {
+    expect(startIdx, "expected to find await captureRef.current.start({").toBeGreaterThan(-1);
+  });
+
+  it("anchor resolves: finds the call's closing });", () => {
+    expect(startEnd, "expected to find the start({...}) call's closing });").toBeGreaterThan(startIdx);
+  });
+
+  const callSlice = startIdx > -1 && startEnd > startIdx ? source.slice(startIdx, startEnd) : "";
+
+  it("the call passes autoDownload: autoDownloadRef.current", () => {
+    expect(callSlice).toMatch(/autoDownload:\s*autoDownloadRef\.current/);
+  });
+
+  it('the call pins its own filename stem, "discussion-capture" - never the fallback "recording"', () => {
+    expect(callSlice).toMatch(/downloadFileNameBase:\s*"discussion-capture"/);
+  });
+});
+
+// A20 (docs/a20-scope.md AC6/AC7): the panel-half checks. No dedicated
+// DiscussionRepliesPanel wiring test exists (this row's own owns table does
+// not add one) - this file already reads panelSource (see the dropped-frame
+// describe block above), so these live here rather than in a new file.
+describe("DiscussionRepliesPanel.tsx - A20's manual-link extension and post-stop differing state (AC6/AC7)", () => {
+  it("AC6/M-E: the manual review link's download= is a computed expression that itself calls videoExtensionFromMimeType, never a hardcoded literal", () => {
+    const anchor = 'href={recordingUrl} download={';
+    const idx = panelSource.indexOf(anchor);
+    expect(idx, "expected the recording review link's download={...} attribute").toBeGreaterThan(-1);
+    const closeIdx = panelSource.indexOf("}>", idx);
+    const attr = panelSource.slice(idx, closeIdx);
+    expect(attr).not.toMatch(/download="[^{]/); // never a bare string literal
+    expect(attr).toMatch(/videoExtensionFromMimeType\(/);
+  });
+
+  it("AC7/RULING W4: a second, narrower conditional block - distinct from the unconditional recordingUrl link - gated on lastSessionAutoDownload AND recordingBytes > 0", () => {
+    expect(panelSource).toMatch(/\{lastSessionAutoDownload && recordingBytes > 0 && \(/);
+    // Distinct from (not folded into) the unconditional link block.
+    const linkIdx = panelSource.indexOf("{recordingUrl && (");
+    const secondIdx = panelSource.indexOf("{lastSessionAutoDownload && recordingBytes > 0 && (");
+    expect(linkIdx).toBeGreaterThan(-1);
+    expect(secondIdx).toBeGreaterThan(linkIdx);
+  });
+
+  it("AC7/RULING W4: the new block is NOT conditioned on the live autoDownload checkbox value", () => {
+    const idx = panelSource.indexOf("{lastSessionAutoDownload && recordingBytes > 0 && (");
+    const endIdx = panelSource.indexOf(")}", idx);
+    const block = panelSource.slice(idx, endIdx);
+    expect(block).not.toMatch(/\{autoDownload &&/);
+  });
+});
+

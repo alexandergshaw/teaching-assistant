@@ -131,4 +131,31 @@ describe("useMessageReplies.ts wiring", () => {
     expect(SOURCE).not.toMatch(/getWritingStyleBlock/);
     expect(SOURCE).not.toMatch(/writingSampleRef/);
   });
+
+  // A20 (docs/a20-scope.md AC4/AC6, RULING W2/M-F): the control-to-call
+  // chain's message-side call site - same reasoning as the discussion
+  // sibling's own test of the identical shape.
+  describe("A20's start({...}) call carries autoDownload and its own filename stem", () => {
+    const startAnchor = "await captureRef.current.start({";
+    const startIdx = SOURCE.indexOf(startAnchor);
+    const startEnd = SOURCE.indexOf("});", startIdx);
+
+    it("anchor resolves: finds the captureRef.current.start({ call", () => {
+      expect(startIdx, "expected to find await captureRef.current.start({").toBeGreaterThan(-1);
+    });
+
+    it("anchor resolves: finds the call's closing });", () => {
+      expect(startEnd, "expected to find the start({...}) call's closing });").toBeGreaterThan(startIdx);
+    });
+
+    const callSlice = startIdx > -1 && startEnd > startIdx ? SOURCE.slice(startIdx, startEnd) : "";
+
+    it("the call passes autoDownload: autoDownloadRef.current", () => {
+      expect(callSlice).toMatch(/autoDownload:\s*autoDownloadRef\.current/);
+    });
+
+    it('the call pins its own filename stem, "message-replies-capture" - never the fallback "recording"', () => {
+      expect(callSlice).toMatch(/downloadFileNameBase:\s*"message-replies-capture"/);
+    });
+  });
 });

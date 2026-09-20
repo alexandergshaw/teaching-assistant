@@ -48,6 +48,11 @@ export interface UseDiscussionPersistedControlsReturn {
   setCourseId: (id: string) => void;
   saveVideo: boolean;
   setSaveVideo: (v: boolean) => void;
+  /** A20 (docs/a20-scope.md, Section 5.1): "Download automatically when
+   *  recording stops" - a real, distinct preference an instructor may hold
+   *  independently of saveVideo, defaulting to off. */
+  autoDownload: boolean;
+  setAutoDownload: (v: boolean) => void;
   /** docs/reply-composition-controls-acceptance-criteria.md C5/JOB1: what
    *  every drafted reply must contain. Threaded whole into runDraftLoop the
    *  same way `audience` already is, via useDiscussionReplies.ts's own
@@ -144,6 +149,15 @@ export function useDiscussionPersistedControls(): UseDiscussionPersistedControls
     writeLocalStorage("ta-rec-disc-save-video", v ? "1" : "0");
   }, []);
 
+  // A20: "Download automatically when recording stops" - defaults to off.
+  const [autoDownload, setAutoDownloadState] = useState<boolean>(
+    () => readLocalStorage("ta-rec-disc-auto-download") === "1"
+  );
+  const setAutoDownload = useCallback((v: boolean) => {
+    setAutoDownloadState(v);
+    writeLocalStorage("ta-rec-disc-auto-download", v ? "1" : "0");
+  }, []);
+
   // C5a: coercion is `coerceReplyComposition` (discussion-draft-loop.ts), a
   // plain exported function per that rule - never inline here, since vitest
   // in this repo is node-env and renders no hook.
@@ -197,6 +211,8 @@ export function useDiscussionPersistedControls(): UseDiscussionPersistedControls
     setCourseId,
     saveVideo,
     setSaveVideo,
+    autoDownload,
+    setAutoDownload,
     composition,
     setComposition,
     resourceKinds,

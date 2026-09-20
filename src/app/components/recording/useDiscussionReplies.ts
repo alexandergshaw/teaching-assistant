@@ -179,6 +179,8 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
     setCourseId,
     saveVideo,
     setSaveVideo,
+    autoDownload,
+    setAutoDownload,
     composition,
     setComposition,
     resourceKinds,
@@ -296,6 +298,13 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
   useEffect(() => {
     saveVideoRef.current = saveVideo;
   }, [saveVideo]);
+
+  // A20: mirrors saveVideoRef exactly - start() reads this at dispatch time,
+  // never a closure captured before the last await.
+  const autoDownloadRef = useRef(autoDownload);
+  useEffect(() => {
+    autoDownloadRef.current = autoDownload;
+  }, [autoDownload]);
 
   // C5/JOB1: mirrors audienceRef/saveVideoRef exactly - runDraftLoop reads
   // this at dispatch time, never a closure captured before the last await.
@@ -616,7 +625,11 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
       hasWrittenKbLabelRef.current = true;
     }
     try {
-      await captureRef.current.start({ saveVideo: saveVideoRef.current });
+      await captureRef.current.start({
+        saveVideo: saveVideoRef.current,
+        autoDownload: autoDownloadRef.current,
+        downloadFileNameBase: "discussion-capture",
+      });
     } catch (err) {
       // AC5: a cancelled picker (NotAllowedError) is swallowed inside C1's
       // own start() and never reaches here as a rejection - this branch is
@@ -825,8 +838,12 @@ export function useDiscussionReplies(active: boolean): UseDiscussionRepliesRetur
 
     saveVideo,
     setSaveVideo,
+    autoDownload,
+    setAutoDownload,
     recordingUrl: capture.recordingUrl,
     recordingBytes: capture.recordingBytes,
+    recordingMimeType: capture.recordingMimeType,
+    lastSessionAutoDownload: capture.lastSessionAutoDownload,
 
     composition,
     setComposition,

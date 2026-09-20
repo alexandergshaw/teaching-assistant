@@ -362,6 +362,7 @@ describe("recording-split structure", () => {
         "ta-rec-disc-address-name",
         "ta-rec-disc-answer-questions",
         "ta-rec-disc-audience",
+        "ta-rec-disc-auto-download",
         "ta-rec-disc-course",
         "ta-rec-disc-filter",
         "ta-rec-disc-flags",
@@ -512,8 +513,8 @@ describe("recording-split structure", () => {
         expect(discKeys.length).toBeGreaterThan(0);
       });
 
-      it("finds exactly sixteen ta-rec-disc-* keys (C5c-ii's nine, the 'activate from Knowledge base' group's own ta-rec-disc-kb-context-label, the resource-controls group's own resource-kinds/video-min/video-max, the aesthetics-pass redesign's own flags/status-filter, and the post-questions group's own answer-questions)", () => {
-        expect(discKeys).toHaveLength(16);
+      it("finds exactly seventeen ta-rec-disc-* keys (C5c-ii's nine, the 'activate from Knowledge base' group's own ta-rec-disc-kb-context-label, the resource-controls group's own resource-kinds/video-min/video-max, the aesthetics-pass redesign's own flags/status-filter, the post-questions group's own answer-questions, and A20's own auto-download)", () => {
+        expect(discKeys).toHaveLength(17);
       });
 
       // D1/D9 migration (aesthetics-pass redesign): "ta-rec-disc-flags" is

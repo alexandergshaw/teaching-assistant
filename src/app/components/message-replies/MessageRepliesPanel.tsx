@@ -24,6 +24,7 @@ import RunLogRow from "../recording/RunLogRow";
 import CarriedKnowledgePages from "../recording/CarriedKnowledgePages";
 import AddKnowledgePages from "../recording/AddKnowledgePages";
 import { composeCaptureLiveSentence, useThrottledLiveSentence } from "../recording/captureLiveRegion";
+import { videoExtensionFromMimeType } from "../recording/discussion-capture";
 import { triggerFileDownload } from "../course-planning/utils";
 import { useMessageReplies } from "./useMessageReplies";
 import MessageCaptureSettings from "./MessageCaptureSettings";
@@ -91,8 +92,12 @@ export default function MessageRepliesPanel({ active }: { active: boolean }) {
     setThreadExpand,
     saveVideo,
     setSaveVideo,
+    autoDownload,
+    setAutoDownload,
     recordingUrl,
     recordingBytes,
+    recordingMimeType,
+    lastSessionAutoDownload,
     knowledgeContextLabel,
     knowledgeContext,
     setKnowledgeContext,
@@ -288,6 +293,8 @@ export default function MessageRepliesPanel({ active }: { active: boolean }) {
         coursesError={coursesError}
         saveVideo={saveVideo}
         setSaveVideo={setSaveVideo}
+        autoDownload={autoDownload}
+        setAutoDownload={setAutoDownload}
         composition={composition}
         onChangeComposition={setComposition}
         signoff={signoff}
@@ -361,9 +368,16 @@ export default function MessageRepliesPanel({ active }: { active: boolean }) {
       )}
       {recordingUrl && (
         <p className={styles.fieldHint}>
-          <a href={recordingUrl} download="message-replies-capture.webm">
+          <a href={recordingUrl} download={`message-replies-capture.${videoExtensionFromMimeType(recordingMimeType ?? "")}`}>
             {`Download recording (${(recordingBytes / 1048576).toFixed(1)} MB)`}
           </a>
+        </p>
+      )}
+      {/* A20/AC7 (RULING Y1, W4, M-G) - see DiscussionRepliesPanel.tsx's own
+          comment for the full account; identical shape on this surface. */}
+      {lastSessionAutoDownload && recordingBytes > 0 && (
+        <p className={styles.fieldHint}>
+          This should already be in your Downloads folder - if it isn&apos;t there, use the link above.
         </p>
       )}
 

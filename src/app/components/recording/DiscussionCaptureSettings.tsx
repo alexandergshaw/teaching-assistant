@@ -43,6 +43,10 @@ const AUDIENCE_OPTIONS: readonly SegmentedToggleOption<DiscussionAudience>[] = [
   { value: "peers", label: "Fellow educators" },
 ];
 
+// A20: the auto-download checkbox's disabled reason must be discoverable by
+// more than sighted mouse-hover alone (docs/a20-scope.md Section 5.4).
+const AUTO_DOWNLOAD_HINT_ID = "discussion-capture-auto-download-hint";
+
 export interface DiscussionCaptureSettingsProps {
   courseId: string;
   setCourseId: (next: string) => void;
@@ -51,6 +55,9 @@ export interface DiscussionCaptureSettingsProps {
   coursesError: string | null;
   saveVideo: boolean;
   setSaveVideo: (next: boolean) => void;
+  /** A20 (docs/a20-scope.md): "Download automatically when recording stops". */
+  autoDownload: boolean;
+  setAutoDownload: (next: boolean) => void;
   audience: DiscussionAudience;
   setAudience: (next: DiscussionAudience) => void;
   /** F11: the UNFILTERED row count - gates the Redraft slot's visibility (AC61). */
@@ -80,6 +87,8 @@ export default function DiscussionCaptureSettings({
   coursesError,
   saveVideo,
   setSaveVideo,
+  autoDownload,
+  setAutoDownload,
   audience,
   setAudience,
   totalCount,
@@ -128,6 +137,27 @@ export default function DiscussionCaptureSettings({
               label="Also save the screen recording"
             />
             <p className={styles.fieldHint}>Applies to the next capture.</p>
+          </div>
+        </div>
+        <div className={styles.adaptRow}>
+          <div>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={autoDownload}
+                  onChange={(e) => setAutoDownload(e.target.checked)}
+                  disabled={!saveVideo}
+                  aria-describedby={AUTO_DOWNLOAD_HINT_ID}
+                />
+              }
+              label="Download automatically when recording stops"
+            />
+            <p id={AUTO_DOWNLOAD_HINT_ID} className={styles.fieldHint}>
+              {saveVideo
+                ? "Applies to the next capture."
+                : 'Turn on "Also save the screen recording" first - there is nothing to download otherwise.'}
+            </p>
           </div>
         </div>
         {coursesLoading && (

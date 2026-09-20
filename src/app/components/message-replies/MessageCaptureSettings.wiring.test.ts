@@ -98,4 +98,29 @@ describe("MessageCaptureSettings.tsx - M11's sign-off/instructor-name fields and
     const legends = stripped.match(/<legend className=\{controls\.sectionLegend\}>([^<]+)<\/legend>/g) ?? [];
     expect(legends.length).toBeGreaterThanOrEqual(3); // Capture, Replies, Context
   });
+
+  // A20 (docs/a20-scope.md AC4, RULING W2): the control-to-call chain's
+  // message-side checkbox binding. Anchored on the checkbox's own label text
+  // (Section 5.1's exact wording), never on surrounding whitespace or the
+  // exact JSX shape around it.
+  it('M14: "Download automatically when recording stops" checkbox is bound to autoDownload/setAutoDownload', () => {
+    const idx = stripped.indexOf("Download automatically when recording stops");
+    expect(idx).toBeGreaterThan(-1);
+    const block = stripped.slice(Math.max(0, idx - 400), idx);
+    expect(block).toMatch(/checked=\{autoDownload\}/);
+    expect(block).toMatch(/onChange=\{\(e\) => setAutoDownload\(e\.target\.checked\)\}/);
+  });
+
+  // B4's placement constraint: the new checkbox must sit AFTER the shared
+  // skip-answered/thread-expand row, never between its own opening tag and
+  // "Skip answered threads", and never between "Skip answered threads" and
+  // "Show the whole thread" - both would silently corrupt the three
+  // placement-sensitive assertions above (M12's backwards slice, the
+  // .adaptRow tag lookup, and M13's forward slice).
+  it("A20: the auto-download checkbox is placed AFTER the skip-answered/thread-expand row, not inside it", () => {
+    const showIdx = stripped.indexOf("Show the whole thread");
+    const autoIdx = stripped.indexOf("Download automatically when recording stops");
+    expect(showIdx).toBeGreaterThan(-1);
+    expect(autoIdx).toBeGreaterThan(showIdx);
+  });
 });

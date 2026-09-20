@@ -35,6 +35,8 @@ const STORAGE_KEY_SIGNOFF = "ta-rec-msg-signoff";
 const STORAGE_KEY_SKIP_ANSWERED = "ta-rec-msg-skip-answered";
 const STORAGE_KEY_THREAD_EXPAND = "ta-rec-msg-thread-expand";
 const STORAGE_KEY_SAVE_VIDEO = "ta-rec-msg-save-video";
+// A20 (docs/a20-scope.md): "Download automatically when recording stops".
+const STORAGE_KEY_AUTO_DOWNLOAD = "ta-rec-msg-auto-download";
 
 export interface UseMessagePersistedControlsReturn {
   courseId: string;
@@ -54,6 +56,9 @@ export interface UseMessagePersistedControlsReturn {
   setThreadExpand: (v: boolean) => void;
   saveVideo: boolean;
   setSaveVideo: (v: boolean) => void;
+  /** A20: "Download automatically when recording stops", off by default. */
+  autoDownload: boolean;
+  setAutoDownload: (v: boolean) => void;
 }
 
 export function useMessagePersistedControls(): UseMessagePersistedControlsReturn {
@@ -107,6 +112,12 @@ export function useMessagePersistedControls(): UseMessagePersistedControlsReturn
     writeLocalStorage(STORAGE_KEY_SAVE_VIDEO, v ? "1" : "0");
   }, []);
 
+  const [autoDownload, setAutoDownloadState] = useState<boolean>(() => readLocalStorage(STORAGE_KEY_AUTO_DOWNLOAD) === "1");
+  const setAutoDownload = useCallback((v: boolean) => {
+    setAutoDownloadState(v);
+    writeLocalStorage(STORAGE_KEY_AUTO_DOWNLOAD, v ? "1" : "0");
+  }, []);
+
   return {
     courseId,
     setCourseId,
@@ -122,5 +133,7 @@ export function useMessagePersistedControls(): UseMessagePersistedControlsReturn
     setThreadExpand,
     saveVideo,
     setSaveVideo,
+    autoDownload,
+    setAutoDownload,
   };
 }

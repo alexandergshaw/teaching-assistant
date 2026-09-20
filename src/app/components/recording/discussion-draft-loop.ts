@@ -100,8 +100,18 @@ export interface UseDiscussionRepliesReturn {
 
   saveVideo: boolean;
   setSaveVideo: (v: boolean) => void;
+  /** A20 (docs/a20-scope.md): "Download automatically when recording stops". */
+  autoDownload: boolean;
+  setAutoDownload: (v: boolean) => void;
   recordingUrl: string | null;
   recordingBytes: number;
+  /** A20/AC6: the negotiated mime type the last saved recording was actually
+   *  encoded with - threaded so the manual review link and the auto-download
+   *  filename can never disagree about the extension for the same blob. */
+  recordingMimeType: string | null;
+  /** A20/AC7 (RULING W4): whether auto-download was requested for the
+   *  session that just stopped - not the live checkbox value. */
+  lastSessionAutoDownload: boolean;
 
   /** docs/reply-composition-controls-acceptance-criteria.md C5/JOB1: what
    *  every drafted reply must contain (ingredients, address-by-name,

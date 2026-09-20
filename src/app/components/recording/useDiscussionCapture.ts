@@ -27,8 +27,13 @@ import {
   framesDifferEnough,
   resolveTargetWidth,
   packFrameBatch,
+  videoExtensionFromMimeType,
 } from "./discussion-capture";
 import type { FrameSignature, CapturedFrame } from "./discussion-capture";
+// A20 (docs/a20-scope.md, RULING Y3): the house helper for a one-shot,
+// synchronously-revoked download - never a hand-rolled object-URL dance
+// against the long-lived recordingUrl (Section 6, Trap 2 of that doc).
+import { triggerFileDownload } from "../course-planning/utils";
 
 export interface UseDiscussionCaptureReturn {
   capturing: boolean;
@@ -48,6 +53,20 @@ export interface UseDiscussionCaptureReturn {
   recordingError: string | null;
   recordingUrl: string | null;
   recordingBytes: number;
+  /** A20/AC6: the negotiated mime type this session's recording was actually
+   *  encoded with (`recorder.mimeType || mimeType || "video/webm"`), so a
+   *  caller downstream (the panel's manual review link) can name the file
+   *  with `videoExtensionFromMimeType` too - without this, the manual link
+   *  and the auto-download filename could disagree about the format of the
+   *  identical blob. Null until a session with `saveVideo: true` stops. */
+  recordingMimeType: string | null;
+  /** A20/AC7 (RULING W4): whether auto-download was requested for the
+   *  SESSION THAT JUST STOPPED - not the live persisted-control value. Set
+   *  once, inside the same `if (mountedRef.current)` branch that sets
+   *  recordingUrl/recordingBytes/recordingMimeType, so ticking the checkbox
+   *  after Stop can never retroactively claim a download that never
+   *  happened, and unticking it can never erase the fact that one did. */
+  lastSessionAutoDownload: boolean;
   /** AC10b/S5: a single kept frame that alone exceeds
    *  EXTRACT_BATCH_WIRE_BUDGET (even after a half-quality re-encode) was
    *  dropped, and this is why - forwarded into `notices` by the
@@ -55,7 +74,7 @@ export interface UseDiscussionCaptureReturn {
    *  discipline as `recordingError`. */
   frameEncodeNotice: string | null;
   previewRef: React.RefObject<HTMLVideoElement | null>;
-  start: (opts: { saveVideo: boolean }) => Promise<void>;
+  start: (opts: { saveVideo: boolean; autoDownload?: boolean; downloadFileNameBase?: string }) => Promise<void>;
   stop: () => void;
   /** Removes and returns up to `max` frames, oldest first, packed to fit
    *  `maxWireBytes` (AC10a). Never returns more than asked for; always
@@ -98,6 +117,8 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingBytes, setRecordingBytes] = useState(0);
+  const [recordingMimeType, setRecordingMimeType] = useState<string | null>(null);
+  const [lastSessionAutoDownload, setLastSessionAutoDownload] = useState(false);
   const [frameEncodeNotice, setFrameEncodeNotice] = useState<string | null>(null);
 
   const previewRef = useRef<HTMLVideoElement | null>(null);
@@ -167,6 +188,8 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     revokeRecordingUrl();
     setRecordingUrl(null);
     setRecordingBytes(0);
+    setRecordingMimeType(null);
+    setLastSessionAutoDownload(false);
   }, [revokeRecordingUrl]);
 
   // AC8, AC8b, AC8c, AC8d, AC9, AC9a, AC10: the ticker callback. Runs off a
@@ -379,7 +402,7 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const start = useCallback(async (opts: { saveVideo: boolean }) => {
+  const start = useCallback(async (opts: { saveVideo: boolean; autoDownload?: boolean; downloadFileNameBase?: string }) => {
     if (capturingRef.current) return;
 
     let stream: MediaStream;
@@ -419,6 +442,8 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     revokeRecordingUrl();
     setRecordingUrl(null);
     setRecordingBytes(0);
+    setRecordingMimeType(null);
+    setLastSessionAutoDownload(false);
     chunksRef.current = [];
 
     const track = stream.getVideoTracks()[0];
@@ -470,12 +495,26 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
           if (evt.data.size > 0) chunksRef.current.push(evt.data);
         };
         recorder.onstop = () => {
-          const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mimeType || "video/webm" });
+          const resolvedMimeType = recorder.mimeType || mimeType || "video/webm";
+          const blob = new Blob(chunksRef.current, { type: resolvedMimeType });
           const url = URL.createObjectURL(blob);
           if (mountedRef.current) {
             recordingUrlRef.current = url;
             setRecordingUrl(url);
             setRecordingBytes(blob.size);
+            setRecordingMimeType(resolvedMimeType);
+            setLastSessionAutoDownload(opts.autoDownload === true);
+            // A20/RULING Y3: the house helper, using the `blob` already in
+            // scope here - never the long-lived recordingUrl/recordingUrlRef
+            // above, which has three independent revoke triggers (Section 6,
+            // Trap 2 of docs/a20-scope.md). This mints and revokes its OWN
+            // object URL synchronously inside one call.
+            if (opts.autoDownload) {
+              triggerFileDownload(
+                blob,
+                `${opts.downloadFileNameBase ?? "recording"}.${videoExtensionFromMimeType(resolvedMimeType)}`
+              );
+            }
           } else {
             URL.revokeObjectURL(url);
           }
@@ -528,6 +567,8 @@ export function useDiscussionCapture(): UseDiscussionCaptureReturn {
     recordingError,
     recordingUrl,
     recordingBytes,
+    recordingMimeType,
+    lastSessionAutoDownload,
     frameEncodeNotice,
     previewRef,
     start,

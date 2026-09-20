@@ -104,4 +104,31 @@ describe("MessageRepliesPanel.tsx - M3's RunLogRow/primary rules and M9/M18's hi
     expect(children).toMatch(/<CarriedKnowledgePages/);
     expect(children).toMatch(/<AddKnowledgePages/);
   });
+
+  // A20 (docs/a20-scope.md AC6/AC7) - identical shape to the discussion
+  // sibling's own equivalent check (useDiscussionReplies.wiring.test.ts).
+  it("AC6/M-E: the manual review link's download= is a computed expression that itself calls videoExtensionFromMimeType, never a hardcoded literal", () => {
+    const anchor = "href={recordingUrl} download={";
+    const idx = stripped.indexOf(anchor);
+    expect(idx, "expected the recording review link's download={...} attribute").toBeGreaterThan(-1);
+    const closeIdx = stripped.indexOf("}>", idx);
+    const attr = stripped.slice(idx, closeIdx);
+    expect(attr).not.toMatch(/download="[^{]/);
+    expect(attr).toMatch(/videoExtensionFromMimeType\(/);
+  });
+
+  it("AC7/RULING W4: a second, narrower conditional block - distinct from the unconditional recordingUrl link - gated on lastSessionAutoDownload AND recordingBytes > 0", () => {
+    expect(stripped).toMatch(/\{lastSessionAutoDownload && recordingBytes > 0 && \(/);
+    const linkIdx = stripped.indexOf("{recordingUrl && (");
+    const secondIdx = stripped.indexOf("{lastSessionAutoDownload && recordingBytes > 0 && (");
+    expect(linkIdx).toBeGreaterThan(-1);
+    expect(secondIdx).toBeGreaterThan(linkIdx);
+  });
+
+  it("AC7/RULING W4: the new block is NOT conditioned on the live autoDownload checkbox value", () => {
+    const idx = stripped.indexOf("{lastSessionAutoDownload && recordingBytes > 0 && (");
+    const endIdx = stripped.indexOf(")}", idx);
+    const block = stripped.slice(idx, endIdx);
+    expect(block).not.toMatch(/\{autoDownload &&/);
+  });
 });

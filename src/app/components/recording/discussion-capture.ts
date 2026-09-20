@@ -411,6 +411,35 @@ export function draftDispatchForce(source: DraftDispatchSource): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// A20/AC6 (docs/a20-scope.md, RULING Y4/M-D): ONE extension rule for both the
+// auto-download filename and the manual review link's `download=` attribute,
+// on both the discussion and message-replies surfaces (the message side
+// imports this from here rather than restating it - see this repo's own
+// "one owner for a shared computation" discipline, same reasoning as
+// packFrameBatch above).
+//
+// M-D correction: container-specific checks MUST run before the generic
+// "mp4" check. `video/x-matroska;codecs=avc1,mp4a.40.2` - a matroska
+// container using the standard AAC codec string - contains the substring
+// "mp4" inside "mp4a", so an `mp4`-first check would misname a matroska file
+// ".mp4". Ordering here is guarded by discussion-capture.test.ts's own fixed
+// fixture using that exact string.
+//
+// An unrecognized or empty mimeType falls back to "webm" - today's existing
+// behaviour, not a claim that this function knows every container a browser
+// could ever negotiate.
+// ---------------------------------------------------------------------------
+
+export function videoExtensionFromMimeType(mimeType: string): "mp4" | "webm" | "mkv" | "mov" | "ogv" {
+  if (mimeType.includes("matroska")) return "mkv";
+  if (mimeType.includes("quicktime")) return "mov";
+  if (mimeType.includes("ogg")) return "ogv";
+  if (mimeType.includes("webm")) return "webm";
+  if (mimeType.includes("mp4")) return "mp4";
+  return "webm";
+}
+
+// ---------------------------------------------------------------------------
 // NEW-1: the consumer loops' own continuation predicate, pulled out as a
 // pure function for the same reason as the two functions just above - so the
 // LOGIC is unit-testable at all, since vitest in this repo is node-env and

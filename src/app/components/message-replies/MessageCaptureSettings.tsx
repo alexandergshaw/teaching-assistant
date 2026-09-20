@@ -37,6 +37,9 @@ import { formalityAriaValueText, formalityIndexFromStop, formalityStopFromIndex 
 
 const FORMALITY_LABEL_ID = "message-reply-formality-label";
 const ADDRESS_BY_NAME_HINT_ID = "message-reply-address-by-name-hint";
+// A20: the auto-download checkbox's disabled reason must be discoverable by
+// more than sighted mouse-hover alone (docs/a20-scope.md Section 5.4).
+const AUTO_DOWNLOAD_HINT_ID = "message-reply-auto-download-hint";
 
 const FORMALITY_MARKS = REPLY_FORMALITY_STOPS.map((stop, index) => ({ value: index, label: REPLY_FORMALITY_LABELS[stop] }));
 
@@ -48,6 +51,9 @@ export interface MessageCaptureSettingsProps {
   coursesError: string | null;
   saveVideo: boolean;
   setSaveVideo: (next: boolean) => void;
+  /** A20 (docs/a20-scope.md): "Download automatically when recording stops". */
+  autoDownload: boolean;
+  setAutoDownload: (next: boolean) => void;
   composition: MessageCompositionSettings;
   onChangeComposition: (next: MessageCompositionSettings) => void;
   signoff: string;
@@ -72,6 +78,8 @@ export default function MessageCaptureSettings({
   coursesError,
   saveVideo,
   setSaveVideo,
+  autoDownload,
+  setAutoDownload,
   composition,
   onChangeComposition,
   signoff,
@@ -242,6 +250,27 @@ export default function MessageCaptureSettings({
             control={<Checkbox size="small" checked={threadExpand} onChange={(e) => setThreadExpand(e.target.checked)} />}
             label="Show the whole thread"
           />
+        </div>
+        <div className={styles.adaptRow}>
+          <div>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={autoDownload}
+                  onChange={(e) => setAutoDownload(e.target.checked)}
+                  disabled={!saveVideo}
+                  aria-describedby={AUTO_DOWNLOAD_HINT_ID}
+                />
+              }
+              label="Download automatically when recording stops"
+            />
+            <p id={AUTO_DOWNLOAD_HINT_ID} className={styles.fieldHint}>
+              {saveVideo
+                ? "Applies to the next capture."
+                : 'Turn on "Also save the screen recording" first - there is nothing to download otherwise.'}
+            </p>
+          </div>
         </div>
       </fieldset>
 

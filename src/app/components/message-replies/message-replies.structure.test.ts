@@ -98,8 +98,8 @@ describe("directory-wide ta- key ordinal canary (M3 - this directory has no cana
   const keys = combinedSource.match(/(?<![a-zA-Z])ta-[a-z-]*[a-z]/g) ?? [];
   const distinctKeys = new Set(keys);
 
-  it("finds exactly fourteen distinct ta- keys across every non-test file in this directory (M5's ta-rec-msg-* inventory)", () => {
-    expect(distinctKeys.size).toBe(14);
+  it("finds exactly fifteen distinct ta- keys across every non-test file in this directory (M5's ta-rec-msg-* inventory plus A20's own auto-download)", () => {
+    expect(distinctKeys.size).toBe(15);
   });
 
   it("the scan's non-test file list includes MessageCaptureSettings.tsx", () => {

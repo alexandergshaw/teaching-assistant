@@ -15,7 +15,7 @@ import styles from "../../page.module.css";
 import controls from "./RecordingControls.module.css";
 import { fmt } from "./types";
 import { isConfirmArmed } from "../content-tab/modules/confirmArming";
-import { tableClipboardText, draftingArmSignature } from "./discussion-capture";
+import { tableClipboardText, draftingArmSignature, videoExtensionFromMimeType } from "./discussion-capture";
 import { copyAllButtonLabel, isDraftAllPendingEligible, REPLY_STATUS_FILTER_LABELS } from "./discussion-table-view";
 import { isFindMissingEligible, isResourceLaneBusy, resourceQueueProgressText } from "./useReplyResources";
 import { useDiscussionReplies } from "./useDiscussionReplies";
@@ -111,6 +111,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     coursesError,
     saveVideo,
     setSaveVideo,
+    autoDownload,
+    setAutoDownload,
     // docs/reply-composition-controls-acceptance-criteria.md C5/JOB1: fully
     // owned (persistence, coercion, arming) by useDiscussionReplies - this
     // panel only threads the object into DiscussionReplyControls and passes
@@ -135,6 +137,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
     setKnowledgeContext,
     recordingUrl,
     recordingBytes,
+    recordingMimeType,
+    lastSessionAutoDownload,
     capturing,
     elapsedSec,
     pendingFrames,
@@ -626,6 +630,8 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
         coursesError={coursesError}
         saveVideo={saveVideo}
         setSaveVideo={setSaveVideo}
+        autoDownload={autoDownload}
+        setAutoDownload={setAutoDownload}
         audience={audience}
         setAudience={setAudience}
         totalCount={totalCount}
@@ -770,9 +776,21 @@ export default function DiscussionRepliesPanel({ active }: { active: boolean }) 
       )}
       {recordingUrl && (
         <p className={styles.fieldHint}>
-          <a href={recordingUrl} download="discussion-capture.webm">
+          <a href={recordingUrl} download={`discussion-capture.${videoExtensionFromMimeType(recordingMimeType ?? "")}`}>
             {`Download recording (${(recordingBytes / 1048576).toFixed(1)} MB)`}
           </a>
+        </p>
+      )}
+      {/* A20/AC7 (RULING Y1, W4, M-G): a structurally distinct element,
+          separate from the unconditional link above, that renders only when
+          auto-download was requested for THE SESSION THAT JUST STOPPED (not
+          the live checkbox value) and the capture produced a non-empty
+          recording. This is what makes "I turned auto-download on and got
+          nothing" distinguishable from "I never asked for it" - see
+          docs/a20-scope.md Section 5.6. */}
+      {lastSessionAutoDownload && recordingBytes > 0 && (
+        <p className={styles.fieldHint}>
+          This should already be in your Downloads folder - if it isn&apos;t there, use the link above.
         </p>
       )}
 

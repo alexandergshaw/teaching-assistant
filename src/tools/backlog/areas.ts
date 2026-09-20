@@ -44,6 +44,7 @@ export const BACKLOG_AREAS: readonly BacklogArea[] = [
   { slug: "loop-and-docs-maintenance", label: "The loop's own docs, gates and process debt" },
   { slug: "walkthrough-announcement-surface", label: "Announcement from a walkthrough: draft controls and what the tool says it reads" },
   { slug: "recording-capture-surfaces", label: "Screen-capture surfaces: what they record, keep and hand back" },
+  { slug: "announcement-composition-surfaces", label: "Announcement composition: prompts, templates and what reaches the model" },
 ];
 
 export function isBacklogArea(slug: string): boolean {

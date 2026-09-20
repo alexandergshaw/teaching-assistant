@@ -8,6 +8,10 @@ import {
   formatGradingRecordingLogCsv,
   formatGradingRecordingLogJson,
   gradingRecordingLogFileName,
+  blockedGradingRun,
+  erroredGradingRun,
+  completedGradingRun,
+  buildGradingRecordingLogDownload,
   type GradingRecordingLogInput,
   type GradingRecordingRunLog,
 } from "./grading-recording-log";
@@ -356,5 +360,80 @@ describe("gradingRecordingLogFileName", () => {
     expect(gradingRecordingLogFileName("", "json", "2026-08-31T09:05:07.000Z")).toBe(
       "grading-recording-log-20260831-090507.json"
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// blockedGradingRun / erroredGradingRun / completedGradingRun - the three
+// named builders extracted out of GradingRecordingPanel.tsx's handleGradeAll
+// (A8-R wave 0's line-budget derivation, docs/a8r-scope.md section 7). Pure:
+// `at` is always the caller's value, never Date.now()/toISOString() called
+// inside the builder.
+// ---------------------------------------------------------------------------
+
+describe("blockedGradingRun", () => {
+  it("carries the refusal reason with blocked true and no graded/failed counts", () => {
+    expect(blockedGradingRun(AT, 3, "No rubric pasted yet.")).toEqual({
+      at: AT,
+      rowCount: 3,
+      blocked: true,
+      reason: "No rubric pasted yet.",
+      error: "",
+      graded: 0,
+      failed: 0,
+    });
+  });
+});
+
+describe("erroredGradingRun", () => {
+  it("carries the verbatim call failure with blocked false and no graded/failed counts", () => {
+    expect(erroredGradingRun(AT, 5, "The model returned an empty response.")).toEqual({
+      at: AT,
+      rowCount: 5,
+      blocked: false,
+      reason: "",
+      error: "The model returned an empty response.",
+      graded: 0,
+      failed: 0,
+    });
+  });
+});
+
+describe("completedGradingRun", () => {
+  it("carries the graded/failed split with blocked false and no reason/error", () => {
+    expect(completedGradingRun(AT, 5, 4, 1)).toEqual({
+      at: AT,
+      rowCount: 5,
+      blocked: false,
+      reason: "",
+      error: "",
+      graded: 4,
+      failed: 1,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildGradingRecordingLogDownload - the pure text/filename/mimeType
+// assembly extracted out of GradingRecordingPanel.tsx's handleDownloadLog.
+// The panel keeps the actual triggerFileDownload DOM side effect itself -
+// this file stays pure, per its own header.
+// ---------------------------------------------------------------------------
+
+describe("buildGradingRecordingLogDownload", () => {
+  it("assembles CSV text, a .csv filename, and the CSV mime type", () => {
+    const log = buildGradingRecordingRunLog(emptyInput({ courseName: "CS 101" }), [row({ id: "r1", studentName: "A" })]);
+    const result = buildGradingRecordingLogDownload(log, "csv", "2026-08-31T09:05:07.000Z");
+    expect(result.text).toBe(formatGradingRecordingLogCsv(log));
+    expect(result.filename).toBe(gradingRecordingLogFileName("CS 101", "csv", "2026-08-31T09:05:07.000Z"));
+    expect(result.mimeType).toBe("text/csv;charset=utf-8");
+  });
+
+  it("assembles JSON text, a .json filename, and the JSON mime type", () => {
+    const log = buildGradingRecordingRunLog(emptyInput({ courseName: "CS 101" }), [row({ id: "r1", studentName: "A" })]);
+    const result = buildGradingRecordingLogDownload(log, "json", "2026-08-31T09:05:07.000Z");
+    expect(result.text).toBe(formatGradingRecordingLogJson(log, { exportedAt: "2026-08-31T09:05:07.000Z" }));
+    expect(result.filename).toBe(gradingRecordingLogFileName("CS 101", "json", "2026-08-31T09:05:07.000Z"));
+    expect(result.mimeType).toBe("application/json;charset=utf-8");
   });
 });

@@ -133,9 +133,10 @@ import {
   buildGradingRecordingRunLog,
   summarizeGradingRecordingRunLog,
   gradingRecordingLogSummaryLine,
-  formatGradingRecordingLogCsv,
-  formatGradingRecordingLogJson,
-  gradingRecordingLogFileName,
+  buildGradingRecordingLogDownload,
+  blockedGradingRun,
+  erroredGradingRun,
+  completedGradingRun,
   type GradingRecordingLogBatch,
   type GradingRecordingLogEncodeNotice,
   type GradingRecordingLogGradingRun,
@@ -541,18 +542,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       // docs/DEV_LOOP.md's downloadable-log rule: a refused attempt is a real
       // event ("why didn't grading run") - logged here rather than silently
       // leaving no trace of the click at all.
-      setLogGradingRuns((prev) => [
-        ...prev,
-        {
-          at: new Date().toISOString(),
-          rowCount: gradingRows.totalCount,
-          blocked: true,
-          reason: readiness.reason ?? "",
-          error: "",
-          graded: 0,
-          failed: 0,
-        },
-      ]);
+      setLogGradingRuns((prev) => [...prev, blockedGradingRun(new Date().toISOString(), gradingRows.totalCount, readiness.reason ?? "")]);
       return;
     }
     setGradeError(null);
@@ -573,15 +563,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         setGradeError(result.error);
         setLogGradingRuns((prev) => [
           ...prev,
-          {
-            at: new Date().toISOString(),
-            rowCount: submissions.length,
-            blocked: false,
-            reason: "",
-            error: result.error,
-            graded: 0,
-            failed: 0,
-          },
+          erroredGradingRun(new Date().toISOString(), submissions.length, result.error),
         ]);
         return;
       }
@@ -603,22 +585,14 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       }
       setLogGradingRuns((prev) => [
         ...prev,
-        { at: new Date().toISOString(), rowCount: submissions.length, blocked: false, reason: "", error: "", graded, failed },
+        completedGradingRun(new Date().toISOString(), submissions.length, graded, failed),
       ]);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not grade these submissions.";
       setGradeError(message);
       setLogGradingRuns((prev) => [
         ...prev,
-        {
-          at: new Date().toISOString(),
-          rowCount: gradingRows.totalCount,
-          blocked: false,
-          reason: "",
-          error: message,
-          graded: 0,
-          failed: 0,
-        },
+        erroredGradingRun(new Date().toISOString(), gradingRows.totalCount, message),
       ]);
     } finally {
       setGradingBusy(false);
@@ -645,13 +619,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
     gradingRows.rawRows
   );
   const handleDownloadLog = (format: "csv" | "json") => {
-    const now = new Date().toISOString();
-    const text =
-      format === "csv"
-        ? formatGradingRecordingLogCsv(currentGradingLog)
-        : formatGradingRecordingLogJson(currentGradingLog, { exportedAt: now });
-    const filename = gradingRecordingLogFileName(currentGradingLog.courseName, format, now);
-    const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
+    const { text, filename, mimeType } = buildGradingRecordingLogDownload(currentGradingLog, format, new Date().toISOString());
     triggerFileDownload(new Blob([text], { type: mimeType }), filename);
   };
 

@@ -84,6 +84,20 @@ describe("buildGradingRecordingPrompt - assembly order and verbatim knowledge-co
   });
 });
 
+// G-R0 (docs/a8r-scope.md section 5): frozen BEFORE the A8-R migration lands
+// a `kind` parameter on buildGradingRecordingPrompt (traps-tests.md: "Freeze
+// the oracle before the migration, not after"). Wave 2 asserts that the
+// "unknown" member reproduces this literal byte for byte - this is the
+// pre-migration snapshot that assertion is checked against, kept as its own
+// dedicated literal rather than reusing the assembly-order test above so a
+// later edit to that test cannot silently drift the G-R0 baseline too.
+describe("buildGradingRecordingPrompt - G-R0 frozen pre-migration literal", () => {
+  it("matches the frozen literal today, before A8-R adds a kind parameter", () => {
+    const prompt = buildGradingRecordingPrompt("SYS", "Ada Lovelace", "body", undefined);
+    expect(prompt).toBe("SYS\n\nStudent: Ada Lovelace\n\nSubmission:\nbody");
+  });
+});
+
 describe("composeGradingRowResult", () => {
   it("authors strengths/improvements from the model, composes overallComment through composeOverallComment (never authored a second time)", () => {
     const raw = JSON.stringify({

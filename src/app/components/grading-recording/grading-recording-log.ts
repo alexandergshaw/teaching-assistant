@@ -148,6 +148,29 @@ export interface GradingRecordingLogGradingRun {
   failed: number;
 }
 
+/** Three named builders for the three ways a "Grade submissions" click can
+ * end, extracted out of GradingRecordingPanel.tsx (A8-R wave 0's line-budget
+ * derivation, docs/a8r-scope.md section 7) so the panel's three call sites
+ * are each one line instead of an inline object literal. Pure - no clock
+ * reads, `at` is always supplied by the caller, matching every other builder
+ * in this file. */
+export function blockedGradingRun(at: string, rowCount: number, reason: string): GradingRecordingLogGradingRun {
+  return { at, rowCount, blocked: true, reason, error: "", graded: 0, failed: 0 };
+}
+
+export function erroredGradingRun(at: string, rowCount: number, error: string): GradingRecordingLogGradingRun {
+  return { at, rowCount, blocked: false, reason: "", error, graded: 0, failed: 0 };
+}
+
+export function completedGradingRun(
+  at: string,
+  rowCount: number,
+  graded: number,
+  failed: number
+): GradingRecordingLogGradingRun {
+  return { at, rowCount, blocked: false, reason: "", error: "", graded, failed };
+}
+
 /** One reply row's - here, one submission row's - full debugging picture,
  * read from the live GradingRow at the moment the log is built (download
  * time) - never accumulated as its own event stream, since every field here
@@ -454,4 +477,20 @@ export function gradingRecordingLogFileName(courseName: string, extension: strin
   const slug = slugify(courseName);
   const parts = ["grading-recording-log", slug, fileStamp(atIso)].filter((part) => part !== "");
   return `${parts.join("-")}.${extension}`;
+}
+
+/** Everything GradingRecordingPanel.tsx's Download click needs, assembled in
+ * one pure call (A8-R wave 0's line-budget derivation, docs/a8r-scope.md
+ * section 7) - the panel still performs the actual triggerFileDownload side
+ * effect itself, since this file has no React/DOM import and stays pure per
+ * its own header. */
+export function buildGradingRecordingLogDownload(
+  log: GradingRecordingRunLog,
+  format: "csv" | "json",
+  atIso: string
+): { text: string; filename: string; mimeType: string } {
+  const text = format === "csv" ? formatGradingRecordingLogCsv(log) : formatGradingRecordingLogJson(log, { exportedAt: atIso });
+  const filename = gradingRecordingLogFileName(log.courseName, format, atIso);
+  const mimeType = format === "csv" ? "text/csv;charset=utf-8" : "application/json;charset=utf-8";
+  return { text, filename, mimeType };
 }

@@ -68,12 +68,18 @@ needs, and stop.
 
 **THE MECHANICAL TEST. Apply it before ending every turn.**
 
-> **Look at your LAST TOOL CALL. If it was a commit, a push, a render, a
-> measurement, or nothing at all, YOU HAVE STALLED. The last tool call must be
-> a DISPATCH or an EDIT that advances a backlog item.**
+> **Before ending a turn, ask: IS WORK ON A BACKLOG ITEM RUNNING OR LANDED
+> RIGHT NOW, because of something I did THIS TURN? A dispatched agent counts.
+> A commit, a push, a measurement, or a summary does not. If the honest answer
+> is no, YOU HAVE STALLED - go start something before you reply.**
 
 A push is the middle of a turn, never the end. A status summary is not work.
 If the final thing you did was report, go back and start something.
+
+(Stated as "is work running" rather than "was the last call a dispatch",
+because the literal version forbids ending a turn after a push even when two
+agents are already working. The question is whether the queue is moving when
+you stop, not which call happened to be last.)
 
 This test exists because the prose below failed five times, most recently on
 2026-09-20 in the same session it was last tightened. The failing turn shipped

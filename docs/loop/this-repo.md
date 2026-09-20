@@ -252,14 +252,29 @@ Current IDs and first-party API rates, per the `claude-api` skill (cached
 
 Fable is not used at any tier.
 
-**`.claude/agents/` is read at SESSION START, so a definition added or renamed
-mid-session is NOT available until the session restarts.** Measured 2026-09-13:
-after committing the then-four `loop-*` definitions, dispatching `loop-implementer`
-returned `Agent type 'loop-implementer' not found`, listing only the built-ins.
-Until a restart, dispatch `general-purpose` with an explicit `model` matching the
-intended tier and point the brief at the definition file by path. This is the one
-sanctioned use of a per-call `model` override, and it exists only because the
-definition cannot be loaded - it is not a licence to re-tier a seat.
+**A new definition in `.claude/agents/` CAN register mid-session - do not
+assume otherwise, and do not plan a restart around it.** Corrected 2026-09-20.
+
+This paragraph used to state flatly that `.claude/agents/` is read at session
+start and that a definition added mid-session is unavailable until a restart.
+That was measured 2026-09-13, when dispatching `loop-implementer` right after
+committing the then-four definitions returned `Agent type 'loop-implementer'
+not found`, listing only the built-ins. Measured again 2026-09-20: committing
+`loop-architect` and `loop-test-author` made BOTH types available in the same
+session, with no restart, announced by the harness as soon as they landed.
+
+So the two observations disagree, and the honest reading is that availability
+is not something to predict from this card. CHECK, DO NOT ASSUME: try the
+dispatch. The 2026-09-13 failure is real and may recur (timing, or a rename
+rather than an addition, are both plausible differences that were never
+isolated), so the fallback below still stands - but leading with it cost a
+false claim to the owner in the session that added these two tiers.
+
+FALLBACK, only if the dispatch actually fails: use `general-purpose` with an
+explicit `model` matching the intended tier and point the brief at the
+definition file by path. This is the one sanctioned use of a per-call `model`
+override, and it exists only because the definition cannot be loaded - it is
+not a licence to re-tier a seat.
 
 **Opus is exactly 2.5x Sonnet per token at ANY input/output mix** - 5 against 2
 on input, 25 against 10 on output, both ratios 2.5. So this policy's cost can be

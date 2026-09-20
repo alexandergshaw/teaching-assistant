@@ -96,13 +96,19 @@ function coerceKnowledgeContextAtBoundary(value: string | undefined): string | u
  * context. Never binds a score to a student record and never posts
  * anywhere - see this file's own header and grading-row.ts's R0-2 account.
  *
- * NOT YET WIRED TO A PRODUCTION CALLER: this action has no caller in this
- * change. It is built to be called by the panel/table layer a sibling file
- * set owns (GradingRecordingPanel.tsx / GradingTable*.tsx / useGradingRows.ts
- * under src/app/components/grading-recording/, per this task's own file-lane
- * split) once a batch of GradingRow entries is ready to grade - see this
- * file's own report for the explicit statement of what is and is not
- * reachable today.
+ * WIRED AND REACHABLE. Corrected 2026-09-20: this block used to say "NOT YET
+ * WIRED TO A PRODUCTION CALLER", which was true only on the day it was
+ * written. Measured today: GradingRecordingPanel.tsx imports this action at
+ * :105 and calls it at :566, so the screen-capture grading path runs through
+ * here in production.
+ *
+ * The stale version was load-bearing in the wrong direction - an A8 scoping
+ * pass reasoned from a comment of exactly this shape on the sibling file
+ * (grading-submission-extract.ts, corrected 2026-09-15) and concluded this
+ * tree contains no surface that grades captured submissions. It does: this
+ * one. A reachability claim in a comment goes stale the moment a caller
+ * lands and nothing fails when it does, so trace the callers rather than
+ * trusting this paragraph.
  */
 export async function gradeCapturedSubmissionsAction(
   submissions: ReadonlyArray<{ id: string; studentName: string; submissionText: string }>,

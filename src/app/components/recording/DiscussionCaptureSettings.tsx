@@ -148,7 +148,7 @@ export default function DiscussionCaptureSettings({
                   checked={autoDownload}
                   onChange={(e) => setAutoDownload(e.target.checked)}
                   disabled={!saveVideo}
-                  aria-describedby={AUTO_DOWNLOAD_HINT_ID}
+                  slotProps={{ input: { "aria-describedby": AUTO_DOWNLOAD_HINT_ID } }}
                 />
               }
               label="Download automatically when recording stops"

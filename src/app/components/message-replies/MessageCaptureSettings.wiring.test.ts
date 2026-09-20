@@ -123,4 +123,25 @@ describe("MessageCaptureSettings.tsx - M11's sign-off/instructor-name fields and
     expect(showIdx).toBeGreaterThan(-1);
     expect(autoIdx).toBeGreaterThan(showIdx);
   });
+
+  // Mirrors DiscussionCaptureSettings.wiring.test.ts's own two assertions
+  // (Residual R2, docs/a20-ux-pass.md Q1/Q3): the message side's source is
+  // symmetric with the discussion side but had no test pinning either the
+  // disabled guard or the aria wiring, so a future edit could silently drop
+  // one on this surface alone while the discussion side kept it.
+  it("A20: the auto-download checkbox is disabled while saveVideo is off - there is nothing to auto-download from a capture with no recording", () => {
+    const idx = stripped.indexOf("Download automatically when recording stops");
+    const block = stripped.slice(Math.max(0, idx - 400), idx);
+    expect(block).toMatch(/disabled=\{!saveVideo\}/);
+  });
+
+  it("A20: the disabled reason is discoverable by more than sighted mouse-hover alone - aria-describedby reaches the input via slotProps", () => {
+    const idx = stripped.indexOf("Download automatically when recording stops");
+    const block = stripped.slice(Math.max(0, idx - 400), idx);
+    const describedByMatch = block.match(/slotProps=\{\{\s*input:\s*\{\s*"aria-describedby":\s*([A-Za-z0-9_]+)\s*\}\s*\}\}/);
+    expect(describedByMatch).not.toBeNull();
+    const hintId = describedByMatch?.[1] ?? "";
+    expect(hintId.length).toBeGreaterThan(0);
+    expect(stripped).toMatch(new RegExp(`<p id=\\{${hintId}\\}`));
+  });
 });

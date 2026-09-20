@@ -42,10 +42,10 @@ describe("DiscussionCaptureSettings.tsx - A20's auto-download checkbox, pinned a
     expect(block).toMatch(/disabled=\{!saveVideo\}/);
   });
 
-  it("the disabled reason is discoverable by more than sighted mouse-hover alone - aria-describedby points at a visible hint paragraph", () => {
+  it("the disabled reason is discoverable by more than sighted mouse-hover alone - aria-describedby reaches the input via slotProps", () => {
     const idx = stripped.indexOf("Download automatically when recording stops");
     const block = stripped.slice(Math.max(0, idx - 400), idx);
-    const describedByMatch = block.match(/aria-describedby=\{([A-Za-z0-9_]+)\}/);
+    const describedByMatch = block.match(/slotProps=\{\{\s*input:\s*\{\s*"aria-describedby":\s*([A-Za-z0-9_]+)\s*\}\s*\}\}/);
     expect(describedByMatch).not.toBeNull();
     const hintId = describedByMatch?.[1] ?? "";
     expect(hintId.length).toBeGreaterThan(0);

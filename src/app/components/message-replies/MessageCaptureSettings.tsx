@@ -181,7 +181,7 @@ export default function MessageCaptureSettings({
                   size="small"
                   checked={composition.addressByName}
                   onChange={(e) => onChangeComposition({ ...composition, addressByName: e.target.checked })}
-                  aria-describedby={ADDRESS_BY_NAME_HINT_ID}
+                  slotProps={{ input: { "aria-describedby": ADDRESS_BY_NAME_HINT_ID } }}
                 />
               }
               label="Open each reply with the student's first name"
@@ -260,7 +260,7 @@ export default function MessageCaptureSettings({
                   checked={autoDownload}
                   onChange={(e) => setAutoDownload(e.target.checked)}
                   disabled={!saveVideo}
-                  aria-describedby={AUTO_DOWNLOAD_HINT_ID}
+                  slotProps={{ input: { "aria-describedby": AUTO_DOWNLOAD_HINT_ID } }}
                 />
               }
               label="Download automatically when recording stops"

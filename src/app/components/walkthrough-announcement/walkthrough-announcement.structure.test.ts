@@ -455,3 +455,181 @@ describe("G6: the courseId seed from localStorage is TRIMMED", () => {
     expect(reads.length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A18 AC-1: the empty-material hint stops claiming the app "records" - it
+// reads a shared screen and discards the frames, never saves video. The
+// anchor is a whitespace-tolerant regex (not a plain indexOf) because this
+// file's own neighbouring hints at :800-803 and :885-887 are already
+// multi-line, so a realistic reflow of this hint into the same shape must
+// not defeat the check.
+// ---------------------------------------------------------------------------
+
+describe("A18 AC-1: the empty-material hint no longer says the app records", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  const ANCHOR_RE = /\{!hasMaterial\s*&&\s*<p\s+className=\{styles\.fieldHint\}>/;
+  const anchorMatch = panelSource.match(ANCHOR_RE);
+
+  it("finds the empty-material hint's conditional + <p className={styles.fieldHint}> opening (anchor resolves)", () => {
+    expect(
+      anchorMatch,
+      "expected to find the empty-material hint's conditional + <p className={styles.fieldHint}> opening " +
+        "(whitespace-tolerant); if this is not found, the conditional's returned content was likely replaced " +
+        "with something other than a reworded <p> - e.g. null - which is the wrong fix"
+    ).toBeTruthy();
+  });
+
+  it("finds the hint's closing </p> after the anchor (anchor resolves)", () => {
+    const afterAnchor = anchorMatch!.index! + anchorMatch![0].length;
+    const closeIdx = panelSource.indexOf("</p>", afterAnchor);
+    expect(closeIdx, "expected to find the hint's closing </p>").toBeGreaterThan(-1);
+  });
+
+  function hintText(): string {
+    const afterAnchor = anchorMatch!.index! + anchorMatch![0].length;
+    const closeIdx = panelSource.indexOf("</p>", afterAnchor);
+    return panelSource.slice(afterAnchor, closeIdx).replace(/\s+/g, " ").trim();
+  }
+
+  it("does not contain the whole word record/recording", () => {
+    expect(hintText()).not.toMatch(/\brecord(ing)?\b/i);
+  });
+
+  it("still mentions capturing or reading, so the hint was reworded, not deleted", () => {
+    const text = hintText();
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).toMatch(/\b(captur|read)\w*\b/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A18 AC-3: the privacy disclosure drops the word "record" from its first
+// sentence only. The second sentence (the screen/window recommendation and
+// the three named surfaces to close) is frozen as an exact literal per
+// ruling W2 - a keyword-only check was demonstrated to pass an
+// advice-inverting rewrite that keeps every keyword.
+// ---------------------------------------------------------------------------
+
+describe("A18 AC-3: the privacy disclosure's first sentence drops \"record\"; the second sentence is frozen verbatim", () => {
+  const fieldsetSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementCourseFieldset.tsx"),
+    "utf-8"
+  );
+
+  const fieldsetCloseIdx = fieldsetSource.lastIndexOf("</fieldset>");
+  const pOpenIdx = fieldsetSource.lastIndexOf('<p className={styles.fieldHint}>', fieldsetCloseIdx);
+
+  it("finds the privacy disclosure's opening <p> before the fieldset's close (anchor resolves)", () => {
+    expect(
+      pOpenIdx,
+      "expected to find the privacy disclosure's opening <p> before the fieldset's close"
+    ).toBeGreaterThan(-1);
+  });
+
+  const pCloseIdx = fieldsetSource.indexOf("</p>", pOpenIdx);
+
+  it("finds the disclosure's closing </p> (anchor resolves)", () => {
+    expect(pCloseIdx, "expected to find the disclosure's closing </p>").toBeGreaterThan(-1);
+  });
+
+  const raw = fieldsetSource.slice(pOpenIdx + '<p className={styles.fieldHint}>'.length, pCloseIdx);
+  const normalized = raw.replace(/\s+/g, " ").trim();
+
+  const FROZEN_SECOND_SENTENCE =
+    "Share a single window rather than your whole screen, and close any " +
+    "gradebook, inbox, or student submission first.";
+
+  it("the second sentence is byte-equal to the frozen literal - it must not change by even one character", () => {
+    expect(
+      normalized.endsWith(FROZEN_SECOND_SENTENCE),
+      "the disclosure's second sentence - the screen/window recommendation and the three named surfaces - " +
+        "must not change by even one character"
+    ).toBe(true);
+  });
+
+  const firstSentence = normalized.slice(0, normalized.length - FROZEN_SECOND_SENTENCE.length).trim();
+
+  it("the first sentence is non-empty", () => {
+    expect(
+      firstSentence.length,
+      "expected non-empty text before the frozen second sentence"
+    ).toBeGreaterThan(0);
+  });
+
+  it("the first sentence does not contain the whole word record/recording", () => {
+    expect(firstSentence).not.toMatch(/\brecord(ing)?\b/i);
+  });
+
+  it("the first sentence still says what is transmitted (Frames)", () => {
+    expect(firstSentence).toMatch(/\bframes\b/i);
+  });
+
+  it("the first sentence still names the recipient as third-party", () => {
+    expect(firstSentence).toMatch(/third-party/i);
+  });
+
+  it("the first sentence still names the recipient type as an AI provider", () => {
+    expect(firstSentence).toMatch(/AI provider/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A18 AC-4: the protected video-script wording (a recording the instructor
+// makes ELSEWHERE, to read a script aloud while re-recording) must survive
+// untouched. The two-line source comment is pinned as two independent
+// single-line fragments rather than one whole-string literal, so a pure
+// reflow of the comment (moving the wrap point, identical words) does not
+// trip this criterion.
+// ---------------------------------------------------------------------------
+
+describe("A18 AC-4: the protected video-script wording is untouched", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it('keeps the "Video script draft" legend', () => {
+    expect(panelSource).toContain("Video script draft");
+  });
+
+  it('keeps the "Generate video script" button label', () => {
+    expect(panelSource).toContain("Generate video script");
+  });
+
+  it("keeps the downloaded filename walkthrough-video-script.txt", () => {
+    expect(panelSource).toContain('"walkthrough-video-script.txt"');
+  });
+
+  it('keeps the comment fragment "read aloud while"', () => {
+    expect(panelSource).toContain("read aloud while");
+  });
+
+  it('keeps the comment fragment "re-recording"', () => {
+    expect(panelSource).toContain("re-recording");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A18 AC-6: the two stale "record button" comments are corrected - there is
+// no "record button" in this panel; the actual controls are labelled "Start
+// capture" / "Stop capture".
+// ---------------------------------------------------------------------------
+
+describe("A18 AC-6: no stale \"record button\" phrase remains in the panel", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  it("finds zero occurrences of the stale phrase", () => {
+    expect(
+      (panelSource.match(/\brecord button\b/gi) ?? []).length,
+      'expected zero occurrences of the stale phrase "record button" - the actual controls are ' +
+        '"Start capture" / "Stop capture"'
+    ).toBe(0);
+  });
+});

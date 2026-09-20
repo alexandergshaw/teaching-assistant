@@ -250,7 +250,7 @@ export default function AnnouncementCourseFieldset({
       />
 
       <p className={styles.fieldHint}>
-        Frames from your screen are sent to a third-party AI provider to be read while you record. Share a single
+        Frames from your screen are sent to a third-party AI provider to be read while you capture. Share a single
         window rather than your whole screen, and close any gradebook, inbox, or student submission first.
       </p>
     </fieldset>

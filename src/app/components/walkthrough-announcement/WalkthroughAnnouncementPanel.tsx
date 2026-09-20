@@ -28,7 +28,7 @@
 // P11: the pasted exemplar's RAW TEXT never leaves this component - only
 // its derived outline (deriveAnnouncementOutline, a pure client-safe leaf)
 // reaches draftWalkthroughAnnouncementAction.
-// P15: a disclosure sits in the settings block, before the record button -
+// P15: a disclosure sits in the settings block, before the capture controls -
 // frames are sent to a third-party AI provider, and a single shared window
 // is safer than a whole screen.
 
@@ -750,7 +750,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
       )}
 
       {/* AC1/AC3: course, module, exemplar, format toggles and notes - all
-          reachable BEFORE the record button, all persisted where the
+          reachable BEFORE the capture controls, all persisted where the
           standing rule requires it (course/module/notes/emoji/resources
           under ta- keys; the exemplar itself in Supabase, per decision P3,
           never localStorage). Extracted to AnnouncementCourseFieldset.tsx
@@ -880,7 +880,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
           Researching resources for this module…
         </p>
       )}
-      {!hasMaterial && <p className={styles.fieldHint}>Record and stop a walkthrough first - nothing has been read yet.</p>}
+      {!hasMaterial && <p className={styles.fieldHint}>Capture and stop a walkthrough first - nothing has been read yet.</p>}
       {hasMaterial && readyToDraftCount === 0 && !anyDrafting && (
         <p className={styles.fieldHint}>
           Every draft slot already has a draft - add another slot, or use Regenerate on one.

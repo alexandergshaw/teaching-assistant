@@ -389,7 +389,7 @@ export async function draftWalkthroughAnnouncementAction(
   try {
     const user = await requireUser();
     if (!input.materialsText.trim()) {
-      return { error: "Nothing was captured yet - record a walkthrough first.", diag: unattemptedLlmDiag(provider) };
+      return { error: "Nothing was captured yet - capture a walkthrough first.", diag: unattemptedLlmDiag(provider) };
     }
 
     const styleBlock = await getWritingStyleBlock(user.id);
@@ -535,7 +535,7 @@ export async function draftWalkthroughVideoScriptAction(
   try {
     const user = await requireUser();
     if (!input.materialsText.trim()) {
-      return { error: "Nothing was captured yet - record a walkthrough first.", diag: unattemptedLlmDiag(provider) };
+      return { error: "Nothing was captured yet - capture a walkthrough first.", diag: unattemptedLlmDiag(provider) };
     }
 
     const styleBlock = await getWritingStyleBlock(user.id);

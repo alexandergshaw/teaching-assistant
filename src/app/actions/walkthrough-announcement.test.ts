@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 
 // Mirrors media.intro-script-diag.test.ts's own pattern: mock only the real
 // I/O boundaries (auth, Supabase, the LLM client, getGeminiModel) and let
@@ -524,5 +526,41 @@ describe("postWalkthroughAnnouncementAction (P1: markdown-safe posting path)", (
     vi.mocked(createAnnouncementFromMarkdown).mockRejectedValue(new Error("Canvas rejected the request"));
     const result = await postWalkthroughAnnouncementAction("https://canvas.example.edu/courses/1", "T", "M");
     expect(result).toEqual({ error: "Canvas rejected the request" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A18 AC-2: the two duplicated empty-input error strings stop saying "record
+// a walkthrough" - the app reads a shared screen and never saves video. This
+// is a source-text check (the runtime assertions above only check
+// toHaveProperty("error"), never the string's text) anchored on the stable,
+// unchanged prefix "Nothing was captured yet - ".
+// ---------------------------------------------------------------------------
+
+describe("A18 AC-2: the empty-input error strings stop saying \"record a walkthrough\"", () => {
+  const source = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/actions/walkthrough-announcement.ts"),
+    "utf-8"
+  );
+
+  it("occurs exactly twice - no stray third guard, and neither occurrence left unedited", () => {
+    const matches = source.match(/Nothing was captured yet - /g) ?? [];
+    expect(matches.length).toBe(2);
+  });
+
+  it("neither occurrence contains the whole word \"record\"", () => {
+    const prefix = "Nothing was captured yet - ";
+    let searchFrom = 0;
+    let count = 0;
+    for (;;) {
+      const start = source.indexOf(prefix, searchFrom);
+      if (start === -1) break;
+      const end = source.indexOf(".", start);
+      const occurrence = source.slice(start, end + 1);
+      expect(occurrence).not.toMatch(/\brecord\b/i);
+      count += 1;
+      searchFrom = end + 1;
+    }
+    expect(count).toBe(2);
   });
 });

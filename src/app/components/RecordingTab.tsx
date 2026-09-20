@@ -565,8 +565,8 @@ export default function RecordingTab({ active = true }: { active?: boolean }) {
   return (
     <TabShell
       eyebrow="Recording"
-      title="Record from a camera"
-      subtitle="Record video from any attached camera or your screen, preview it live, and download the takes."
+      title="Recording, Capture & Playback Tools"
+      subtitle="Recording, capture, and playback tools for this course. Some record and preview live; others read a shared screen, or work from a recording you already have."
     >
       {/* D6 (docs/aesthetics-pass-acceptance-criteria.md section 4b): this
           strip rendered eight role="tab" buttons with aria-selected but no

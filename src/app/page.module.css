@@ -3280,6 +3280,30 @@ a.instFieldValue:hover {
   background: color-mix(in srgb, var(--field-background) 95%, var(--accent) 5%);
 }
 
+/* RES-5 (docs/a12-a13-scope.md, Ruling U1): a postable:false row must not
+   render like an ordinary graded row. This tints the whole row and gives
+   its leading cell a left border, on top of the even/odd striping above -
+   the attribute selector's higher specificity (an attribute selector plus
+   an element, against nth-child's pseudo-class plus an element) wins over
+   both striping rules regardless of source order. Colour is not the only
+   carrier: describeUngradedRowLabel (GradingResults.tsx) renders a text
+   label in the same cell, which is the part a colour-blind reader relies on. */
+.matrix tbody tr[data-ungraded-state]:not([data-ungraded-state="postable"]) td {
+  background: color-mix(in srgb, var(--field-background) 88%, var(--warning) 12%);
+}
+
+.matrix tbody tr[data-ungraded-state]:not([data-ungraded-state="postable"]) td:first-child {
+  border-left: 3px solid var(--warning);
+  background: color-mix(in srgb, var(--field-background) 88%, var(--warning) 12%);
+}
+
+.ungradedRowLabel {
+  color: var(--warning-ink);
+  font-weight: 600;
+  font-size: var(--font-size-xs);
+  margin-top: var(--space-1);
+}
+
 .matrixCellDetail {
   position: relative;
   display: flex;

@@ -62,6 +62,11 @@ import { checkRowPostability } from "../../lib/grade/postable";
 // What Went Well box; correctUngradedSeeds is the wiring that reaches the
 // live `edits` map at both places it is (re)seeded from a run, below.
 import { classifyRow, correctUngradedSeeds, describeSkippedStatus } from "./grading-results/ungradedDisclosure";
+// RES-5 (docs/a12-a13-scope.md, Ruling U1): the `data-ungraded-state`
+// attribute above is machine-readable only. This gives a non-postable row a
+// rendered, visible label, so a colour-blind reader (and every other reader)
+// can see it without relying on styling alone.
+import { describeUngradedRowLabel } from "./grading-results/ungradedRowLabel";
 
 // CopyIcon/EyeIcon/DownloadIcon moved to ./grading-results/icons.tsx (this
 // file's line-budget extraction). ExpandIcon moved to
@@ -609,14 +614,16 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               const sgHref = speedGraderHref(run.speedGraderUrl, result.userId);
               const canPostRow = canvasGradable && typeof result.userId === "number";
               const rowPosting = posting || status?.status === "posting";
+              const ungradedState = classifyRow(result, edit).state;
+              const ungradedRowLabel = describeUngradedRowLabel(ungradedState);
 
               return (
-                <tr
-                  key={`${result.student}-matrix`}
-                  data-ungraded-state={classifyRow(result, edit).state}
-                >
+                <tr key={`${result.student}-matrix`} data-ungraded-state={ungradedState}>
                   <td>
                     <div style={{ fontWeight: 600 }}>{result.student}</div>
+                    {ungradedRowLabel && (
+                      <div className={styles.ungradedRowLabel}>{ungradedRowLabel}</div>
+                    )}
                     {sgHref && (
                       <a
                         href={sgHref}

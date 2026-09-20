@@ -850,6 +850,7 @@ describe("grading-results client files stay client-bundle-safe", () => {
     "./FeedbackExpandModal.tsx",
     "./FilesCell.tsx", // A16-1: the Files-column cell moved out to its own file.
     "./ungradedDisclosure.ts", // A12/A13 (docs/a12-a13-scope.md) - Ruling R part 1.
+    "./ungradedRowLabel.ts", // RES-5 (docs/a12-a13-scope.md, Ruling U1) - the visible-label leaf.
     "../GradingResults.tsx",
   ];
 

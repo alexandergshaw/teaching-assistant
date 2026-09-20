@@ -83,15 +83,29 @@ export type ClassTrendsDraftResult =
  * ("based on the N submissions graded so far"). If a clause could render for
  * an area covered by fewer results than that (even if it clears the floor),
  * the draft would state a set larger than the set the clause is actually
- * backed by - true today only by the config accident that
- * GRADE_MAX_SUBMISSIONS and the floor are both 5 (gemini.ts:25 vs this
- * file's DEFAULT_CLASS_TRENDS_DRAFT_FLOOR). Raise GRADE_MAX_SUBMISSIONS and
- * a draft reading "based on the 30 submissions graded so far" could carry a
- * clause backed by only 5 of those 30 with nothing disclosing the gap. Tying
- * every rendered clause's basis to the SAME field the opening line states
- * closes that regardless of how the two knobs are configured. DO NOT
- * "simplify" this back to a floor comparison - see the header comment on
- * the collision this guards against. */
+ * backed by.
+ *
+ * THE CONDITION THIS WARNED ABOUT HAS ARRIVED - re-measured 2026-09-20.
+ * This paragraph used to say the hazard was absent "only by the config
+ * accident that GRADE_MAX_SUBMISSIONS and the floor are both 5
+ * (gemini.ts:25)", and framed the divergence as hypothetical: "Raise
+ * GRADE_MAX_SUBMISSIONS and a draft reading 'based on the 30 submissions
+ * graded so far' could carry a clause backed by only 5 of those 30."
+ * It was raised. The cap is now DEFAULT_MAX_SUBMISSIONS = 40 at
+ * gemini.ts:32 - wrong in this comment on both the value and the line -
+ * while DEFAULT_CLASS_TRENDS_DRAFT_FLOOR is still 5. The two knobs no
+ * longer coincide, so a floor comparison and the strict rule below now
+ * give DIFFERENT answers on an ordinary run.
+ *
+ * The code was already right: `===` never depended on the accident. What
+ * changed is that the instruction below stopped being defensive and became
+ * load-bearing, at the moment its own justification started reading as a
+ * hypothetical. That is why the facts are corrected here rather than left.
+ *
+ * Tying every rendered clause's basis to the SAME field the opening line
+ * states closes the gap regardless of how the two knobs are configured. DO
+ * NOT "simplify" this back to a floor comparison - see the header comment
+ * on the collision this guards against. */
 function areaFullyCovered(area: AreaTrend, report: ClassTrendsReport): boolean {
   return area.resultsWithArea === report.totalResults;
 }

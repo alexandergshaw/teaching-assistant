@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildWalkthroughAnnouncementPrompt,
   renderOutlineBlock,
+  timingLabel,
   truncateMaterialsForPrompt,
   WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP,
   type WalkthroughAnnouncementPromptArgs,
@@ -491,5 +492,40 @@ describe("A19: on an empty-notes call, the midweek block's forward reference poi
     expect(prompt).toMatch(
       /(\bnotes\b[\s\S]{0,80}\b(even if|regardless)\b)|(\b(even if|regardless)\b[\s\S]{0,80}\bnotes\b)/i
     );
+  });
+});
+
+describe("A19 UX pass gap: the midweek block instructs surfacing a likely difficulty, never as an observed fact about this class", () => {
+  const midweek = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek" }));
+
+  it("instructs the model that it may flag a likely point of difficulty in the material", () => {
+    expect(midweek).toMatch(/point of difficulty|likely to (?:trip|confuse)|commonly get wrong/i);
+  });
+
+  it("forbids presenting that point of difficulty as an observation of this class's actual behavior", () => {
+    expect(midweek).toMatch(/never (?:as an observation|from anything about) .{0,60}this class/i);
+  });
+
+  it("does not itself contain a 'who is behind' style claim even with the new instruction present", () => {
+    expect(midweek).not.toMatch(/\bwho(?:'s| is) behind\b/i);
+  });
+
+  it("does not itself contain a submission-count-style claim even with the new instruction present", () => {
+    expect(midweek).not.toMatch(/\bhow many (?:of you|students)\b/i);
+  });
+});
+
+describe("A19 UX pass edit: the midweek permitted-tone example is widened to include the class-overall-midpoint phrasing", () => {
+  it("offers the midpoint framing as a second example alongside the existing partway-through one", () => {
+    const midweek = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek" }));
+    expect(midweek).toMatch(/partway through the week's work by now/i);
+    expect(midweek).toMatch(/class overall is around the midpoint/i);
+  });
+});
+
+describe("A19 UX pass edit: timingLabel register parity with receiptLabel's sentence-style output", () => {
+  it("both timing labels share the 'Written in ... tone' construction", () => {
+    expect(timingLabel("beginning-of-week")).toBe("Written in beginning-of-week tone");
+    expect(timingLabel("midweek")).toBe("Written in midweek check-in tone");
   });
 });

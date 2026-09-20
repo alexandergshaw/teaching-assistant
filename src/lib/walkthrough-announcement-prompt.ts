@@ -195,8 +195,9 @@ export function timingClause(timing: AnnouncementTiming): string {
     return [
       "MIDWEEK CHECK-IN",
       "- This is a midweek check-in, not a status report - frame it around what is coming up and what is still due this week, not a recap of what has already happened.",
-      "- No submission, completion, or gradebook data was given to you for this announcement. Do not claim to know which students have or have not turned something in, name anyone as behind or caught up, or state a count or fraction of the class - even a rough one. A general, forward-looking expectation for the class as a whole (for example, that students should be partway through the week's work by now) is fine; a claim about what any individual or group has actually done is not.",
+      "- No submission, completion, or gradebook data was given to you for this announcement. Do not claim to know which students have or have not turned something in, name anyone as behind or caught up, or state a count or fraction of the class - even a rough one. A general, forward-looking expectation for the class as a whole is fine - for example, that students should be partway through the week's work by now, or that the class overall is around the midpoint - but a claim about what any individual or group has actually done is not.",
       "- This holds even if the instructor notes above mention a number, a name, or a completion status: that information is for your own planning context, not verified tracking data you are allowed to cite or confirm in this announcement.",
+      "- You may also flag one likely point of difficulty for this stretch of material - a step with several sub-parts, a setting people commonly get wrong, a distinction that is easy to blur - drawn only from the captured walkthrough content and ordinary pedagogical judgment about material like this, never from anything about what this class has actually done. Phrase it as a heads-up about the material itself (for example, that a certain step tends to trip people up), never as an observation of this class's behavior or progress.",
     ].join("\n");
   }
   return [
@@ -212,7 +213,7 @@ export function timingClause(timing: AnnouncementTiming): string {
  * which tone it was drafted in).
  */
 export function timingLabel(timing: AnnouncementTiming): string {
-  return timing === "midweek" ? "Midweek check-in tone" : "Beginning-of-week tone";
+  return timing === "midweek" ? "Written in midweek check-in tone" : "Written in beginning-of-week tone";
 }
 
 function renderOutlineSection(section: OutlineSection): string {

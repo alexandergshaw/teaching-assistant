@@ -62,6 +62,18 @@ id is listed individually below. Nothing is silently dropped.
 
 ### 0.2 Verify conditions V1-V19
 
+**Disposal round correction (blocker B-1).** The "New id" column below is
+re-derived from section 7 as it actually stands after this round's edits
+(rebuilt LAST, after S1's section-2.2 rewrite and V33's replacement, per the
+ruling that disposed this blocker - renumbering before the content settled
+would have re-broken it). The round-3 check found 25 of 41 rows citing an id
+that names a DIFFERENT requirement in section 7/8 - mostly because section 7
+grew past a single flat V1-V19 run into three named groups (A16-1's V1-V15,
+A16-2's V16-V24, the wave gate's V25-V28, A16-3's V29-V34) and several rows
+below kept their OLD rev-2 number instead of picking up their new one. Every
+id below was checked against section 7's current row-by-description, not
+copied from the previous draft.
+
 | Rev-2 | Disposition | New id / reason |
 |---|---|---|
 | V1 mount renders `<ClassTrendsPanel` | **KEPT** | V1. Moves file: the assertion lives in the existing `gradingResultsExtraction.wiring.test.ts`, not a new file (B4). |
@@ -71,20 +83,27 @@ id is listed individually below. Nothing is silently dropped.
 | V5 `computeClassTrends` before first `fetch(` | **KEPT unchanged** | V5. Existing landed assertion, `classTrends.wiring.test.ts:79-88`. |
 | V6 Drafted Grades mount tag unchanged | **KEPT unchanged** | V6. |
 | V7 `expanded` seeded from the new prop | **KEPT** | V7. |
-| V8 line counts vs 1000 | **KEPT** | V8. |
-| V9 whole suite | **KEPT** | V9. |
-| V10 `npx tsc --noEmit` | **KEPT, OWNER NAMED** | V10. Major M1: one caller, named in section 6.5. |
-| V11 `composeGradingRowResult` returns scaled areas | **KEPT** | V11. |
-| V12 `composeFailedGradingRow` returns `[]` | **KEPT** | V12. |
-| V13 action's per-row key set | **KEPT, RESPECIFIED BY SYMBOL** | V13. Blocker B5: the rev-2 line numbers were wrong at the edit point. |
-| V14 `classifyGradingResult` success/failure | **KEPT** | V14. |
-| V15 `applyGradingResultToRow` both `userEdited` values | **KEPT** | V15. |
-| V16 `toWire` 17-key set | **WITHDRAWN AND REPLACED** | H10 is withdrawn (0.4). Replaced by **V16 (the 16-key oracle is UNCHANGED and must stay unchanged)**. The enforcer it protected - `grading-row-serialization.test.ts:620-637`, `EXPECTED_WIRE_KEYS` - is not weakened; it is left in place with more power, not less. |
-| V17 `fromWire` legacy/corrupt tolerance | **KEPT, RESTATED** | V17. Now: `fromWire` emits `rubricAreas: []` unconditionally, because `toWire` never writes the key. |
-| V18 round trip through the real codec | **WITHDRAWN** | There is nothing to round-trip once the field is not persisted. Enforcer it protected: none existed; it was a new assertion. Its purpose - catching a write side and a read side that each look plausible and disagree - is discharged by V16, which now forbids the write side existing at all. |
-| V19 "as V8, V9, V10" for A16-2 | **WITHDRAWN AS WRITTEN** | Major M1: it handed the single-caller `tsc` row to a second concurrent chunk. Replaced by V19 naming only the per-chunk line-count and single-path vitest instruments, with `tsc` owned once by the wave gate. |
+| V8 line counts vs 1000 | **KEPT** | **V14** (A16-1's own line-count row; A16-2's parallel line-count row is V23). Corrected: section 7's own V8 is now the panel never reading `.student` (the privacy pin), a different requirement. |
+| V9 whole suite | **KEPT** | **V15** (A16-1's own whole-suite row; A16-2's parallel run is V24). Corrected: section 7's own V9 is now layer C's four canary-3 roots plus the new adapter leaf, a different A16-1 requirement. |
+| V10 `npx tsc --noEmit` | **KEPT, OWNER NAMED** | **V25**. Major M1: one caller, named in section 6.6. Corrected: V10 in the current section 7 is `assignmentName` reaching the three call sites, an A16-1 requirement, not this one. |
+| V11 `composeGradingRowResult` returns scaled areas | **KEPT** | **V16**. Corrected: section 7's V11 is now the per-area score cells routing through the shared helper (`rubricBreakdownPercent.wiring.test.ts`), an A16-1 requirement. |
+| V12 `composeFailedGradingRow` returns `[]` | **KEPT** | **V17**. Corrected: section 7's V12 is now the modal-adoption counts (A16-1). |
+| V13 action's per-row key set | **KEPT, RESPECIFIED BY SYMBOL** | **V18**. Blocker B5: the rev-2 line numbers were wrong at the edit point. Corrected: section 7's V13 is now `assignmentName` reaching all three call sites (A16-1), a different requirement entirely. |
+| V14 `classifyGradingResult` success/failure | **KEPT** | **V19**. Corrected: section 7's V14 is now the line-count row (A16-1). |
+| V15 `applyGradingResultToRow` both `userEdited` values | **KEPT** | **V20**. Corrected: section 7's V15 is now the whole-suite row (A16-1). |
+| V16 `toWire` 17-key set | **WITHDRAWN AND REPLACED** | H10 is withdrawn (0.4). Replaced by **V21 (the 16-key oracle is UNCHANGED and must stay unchanged)**. Corrected id (section 7's own V16 is now `composeGradingRowResult`'s return, a different requirement). The enforcer it protected - `grading-row-serialization.test.ts:620-637`, `EXPECTED_WIRE_KEYS` - is not weakened. **It is not "strengthened" either: the oracle is byte-identical, so its assertion strength is unchanged.** What changed is that A16-2 creates a new way to break it (S21), which the unchanged oracle is already positioned to catch. |
+| V17 `fromWire` legacy/corrupt tolerance | **KEPT, RESTATED** | **V22**. Corrected (section 7's own V17 is now `composeFailedGradingRow`'s return). Now: `fromWire` emits `rubricAreas: []` unconditionally, because `toWire` never writes the key. |
+| V18 round trip through the real codec | **WITHDRAWN** | There is nothing to round-trip once the field is not persisted. Enforcer it protected: none existed; it was a new assertion. Its purpose - catching a write side and a read side that each look plausible and disagree - is discharged by V21, which now forbids the write side existing at all. |
+| V19 "as V8, V9, V10" for A16-2 | **WITHDRAWN AS WRITTEN** | Major M1: it handed the single-caller `tsc` row to a second concurrent chunk. Replaced by **V23** (line counts plus the structural gates, single-path vitest, A16-2), with `tsc` owned once by the wave gate at **V25** and A16-2's own whole-suite run at **V24**. |
 
 ### 0.3 Sabotages S1-S22
+
+**Disposal round correction (blocker B-1), same method as 0.2.** A16-1's own
+sabotage table grew from 8 rows to 11 between revisions (the privacy-pin
+sabotage, the canary-3-root sabotage, and the dropped-`assignmentName`
+sabotage were added), which shifts every A16-2 id below it by +3. The "New
+id" column is re-checked against section 8 as it now stands, not carried
+forward by the old count.
 
 | Rev-2 | Disposition | New id / reason |
 |---|---|---|
@@ -95,21 +114,25 @@ id is listed individually below. Nothing is silently dropped.
 | S5 `hasTrendableResults` returns `results.length > 0` | **KEPT** | S5. |
 | S6 move `computeClassTrends` inside `requestInsight` | **KEPT** | S6. |
 | S7 hardcode `useState(false)` | **KEPT** | S7. |
-| S8 paste 100 filler lines into `GradingResults.tsx` | **KEPT** | S8. |
-| S9 delete `rubricAreas` from the compose return | **KEPT** | S9. |
-| S10 return `parsed.rubricAreas` unscaled | **KEPT** | S10. |
-| S11 failure row carries the last success's areas | **KEPT** | S11. |
-| S12 revert the action oracle to six keys | **KEPT** | S12. |
-| S13 add `student` to the action's pushed result | **KEPT** | S13. |
-| S14 drop areas from the success branch | **KEPT** | S14. |
-| S15 pass areas through on the failure branch | **KEPT** | S15. |
-| S16 remove the explicit `rubricAreas:` in `applyGradingResultToRow` | **KEPT** | S16. Still the load-bearing one. |
-| S17 gate the write behind `!row.userEdited` | **KEPT** | S17. |
-| S18 add the key to `toWire` without updating the list | **KEPT, DIRECTION PRESERVED, ORACLE UNCHANGED** | S18. Now run against the UNCHANGED 16-key oracle, which is a stronger position: the oracle was never widened, so it cannot have been loosened. |
-| S19 remove the key from `toWire` with the list at 17 | **WITHDRAWN** | Unreachable: the list stays at 16 and `toWire` never gains the key. Enforcer it protected: none; it was the second half of a pair whose first half (S18) survives. |
-| S20 `dropBulk: true` deletes rather than blanks | **KEPT unchanged** | S20. Existing landed assertion at `grading-row-serialization.test.ts:644-650`, untouched by A16. |
-| S21 `fromWire` returns `raw.rubricAreas` unguarded | **KEPT, RESTATED** | S21: `fromWire` reads the key at all, instead of emitting `[]`. |
-| S22 make `GradingRow.rubricAreas` optional | **WITHDRAWN AND REPLACED** | Major M2: the null result was avoidable. Weakening a required field to optional cannot break a caller - that is a property of the mutation direction, not a finding. Replaced by **S22**, the strengthening direction: delete `rubricAreas` from the production constructor at `src/lib/course-intel/offline-payload.ts`'s `buildGradingRow` and watch `tsc` go red. |
+| S8 paste 100 filler lines into `GradingResults.tsx` | **KEPT** | **S11**. Corrected: section 8's own S8 is now the privacy-pin sabotage (`entry.run.results[0].student`), added since this item was last numbered. |
+| S9 delete `rubricAreas` from the compose return | **KEPT** | **S12**. Corrected: section 8's own S9 is now the canary-3-root sabotage (importing `postCanvasGradesAction` into the adapter leaf). |
+| S10 return `parsed.rubricAreas` unscaled | **KEPT** | **S13**. Corrected: section 8's own S10 is now dropping the `assignmentName` prop at `LiveFeedPanel.tsx:430`. |
+| S11 failure row carries the last success's areas | **KEPT** | **S14**. |
+| S12 revert the action oracle to six keys | **KEPT** | **S15**. |
+| S13 add `student` to the action's pushed result | **KEPT** | **S16**. |
+| S14 drop areas from the success branch | **KEPT** | **S17**. |
+| S15 pass areas through on the failure branch | **KEPT** | **S18**. |
+| S16 remove the explicit `rubricAreas:` in `applyGradingResultToRow` | **KEPT** | **S19**. Still the load-bearing one. |
+| S17 gate the write behind `!row.userEdited` | **KEPT** | **S20**. |
+| S18 add the key to `toWire` without updating the list | **KEPT, DIRECTION PRESERVED, ORACLE UNCHANGED** | **S21**. Now run against the UNCHANGED 16-key oracle: the oracle was never widened, so it cannot have been loosened. |
+| S19 remove the key from `toWire` with the list at 17 | **WITHDRAWN** | Unreachable: the list stays at 16 and `toWire` never gains the key. Enforcer it protected: none; it was the second half of a pair whose first half (now S21) survives. No id - a withdrawn-with-no-replacement item gets none. |
+| S20 `dropBulk: true` deletes rather than blanks | **KEPT unchanged** | No A16 id - this is not one of A16's own numbered sabotage rows. It is the existing, pre-A16 assertion at `grading-row-serialization.test.ts:644-650`, cited inside V21's RED description, untouched by A16. |
+| S21 `fromWire` returns `raw.rubricAreas` unguarded | **KEPT, RESTATED** | **S22**: `fromWire` reads the key at all, instead of emitting `[]`. |
+| S22 make `GradingRow.rubricAreas` optional | **WITHDRAWN AND REPLACED** | Major M2: the null result was avoidable. Weakening a required field to optional cannot break a caller - that is a property of the mutation direction, not a finding. Replaced by **S23**, the strengthening direction: delete `rubricAreas` from the production constructor at `src/lib/course-intel/offline-payload.ts`'s `buildGradingRow` and watch `tsc` go red. |
+
+A16-3's own sabotages (S24, S25) are new to this revision - they dispose
+blocker B-2 and the S8 mount-removal-test gap respectively (section 8) and do
+not correspond to any rev-2 item, so they are not rows in this table.
 
 ### 0.4 Rulings, requirements and residuals carried from revisions 1-2
 
@@ -129,7 +152,7 @@ id is listed individually below. Nothing is silently dropped.
 | **H10 (persist `rubricAreas` through `toWire`/`fromWire`)** | **WITHDRAWN** | Reason, and it follows from answer 3: the cohort is a `useState` id set that does not survive a reload, so no reader of a persisted `rubricAreas` exists. **Enforcer it protected:** none - it *moved* one (the 16-key oracle at `grading-row-serialization.test.ts:620-637`), and withdrawing leaves that enforcer intact at 16 keys. Consequence recorded as RES-A16-13. |
 | H11 (read-back tolerance) | **KEPT, RESTATED** | `fromWire` emits `rubricAreas: []`, never reads the key. |
 | H12 (the hook forwards the widened alias) | **KEPT** | In `owns` as a caller. |
-| Section 4.3's three mount states | **KEPT** | Section 4.6. |
+| Section 4.3's three mount states | **KEPT, REDUCED TO TWO** | Section 4.6. Disposal round, blocker B-5: the middle state ("graded but unscorable") had no predicate of its own and no verify row; dropped rather than given one. |
 | The "adapter emits `student: ""`" construction | **WITHDRAWN** | Blocker B7. Replaced by section 4.2. |
 | RES-A16-1 (series-of-assignments) | **WITHDRAWN** (rev-2 disposition) | Handed to the cross-assignment row. |
 | RES-A16-2 (recording discards areas) | **PROMOTED to A16-2** (rev-2 disposition) | Unchanged. |
@@ -231,41 +254,79 @@ far" at `:242`.
 - The success branch already mints an ISO timestamp and logs
   `rowCount: submissions.length` at `:606`.
 
+**REVISION 3 CORRECTION (disposal round, blocker B-2).** The design below this
+line originally stored `lastRunCohort.ids` and resolved them against
+`gradingRows.rawRows` at render time. That is the same defect owner answer 3
+already ruled out for the label cohort, reintroduced through a different live
+control: `gradingRows.rawRows` is `scopedRawRows`
+(`useGradingRows.ts:444-447`), which is filtered by `courseScope` - itself
+driven by the live Course `TextField` at `GradingRecordingPanel.tsx:755-770`,
+`onChange` at `:760`. Changing the course selector after a run would silently
+empty or change the resolved cohort, exactly the "empties and the panel
+disappears" failure this section's item 3 already uses to reject the label
+cohort. **The fix is to snapshot the resolved row data at run time, not to
+assert harder against the live array.**
+
 A16-3 adds ONE piece of state to the panel:
 
 ```
-lastRunCohort: { at: string; ids: readonly string[] } | null
+lastRunCohort: { at: string; rows: readonly GradingRunCohortRow[] } | null
 ```
 
 set exactly once, inside `handleGradeAll`, on the branch that reached the apply
-loop at `:598-603`, from `submissions.map((s) => s.id)` and the same `at`
-string `:606` already builds. It is **never** derived from `assessmentLabel`,
+loop at `:598-603`. **It snapshots the resolved row data at that moment; it
+does not store ids to be resolved against a live array later.**
+`GradingRunCohortRow` carries exactly the fields the disclosure line (below)
+and 4.6's mapping need: `id`, `studentName`, `assessment`, the `state` the
+loop just computed via `classifyGradingResult`, and `rubricAreas` when
+`state === "ready"`. It is built from `submissions` (`:561-565`) merged with
+each iteration's `classified` result inside the same loop at `:598-603` -
+`submissions` is itself already a plain array copied out of
+`gradingRows.rawRows` once, at call time, so building the snapshot from it
+needs no further read of any live array, before or after. (`submissions`
+gains one field it does not carry today, `assessment: r.assessment`, needed
+only so the snapshot can carry the multi-label predicate below; nothing else
+about it changes.) The snapshot is **never** derived from `assessmentLabel`,
 `assessmentId`, `gradingRows.rows`, `gradingRows.filterText` or
-`gradingRows.sort`. That is the pinnable property, and section 7's V22 pins it.
+`gradingRows.sort`, and after this correction it is also never derived from
+`gradingRows.rawRows` a second time. That is the pinnable property, and
+section 7's V29 pins the setter half and V33 (corrected below) pins the
+render half.
 
-**Resolution at render.** The panel resolves `lastRunCohort.ids` against
-`gradingRows.rawRows` (`useGradingRows.ts:460`, the course-scoped raw array -
-**not** `gradingRows.rows` at `:198`, which is sorted and filtered and is what
-`GradingTable` receives at `GradingRecordingPanel.tsx:970`). Ids with no
-matching row are DROPPED, because `capture.onRemoveRow` can delete a row after
-the run. A trend that changes when the instructor types in the search box is
-wrong, and no gate in this repo would catch it.
+**Why a snapshot, not ids resolved later.** Resolving `ids` against any
+course-scoped or otherwise live array makes the cohort's contents a function
+of a control the instructor can still touch after the run - the Course
+select is exactly such a control, and it is not the only one this tree has
+(the label was the first one owner answer 3 struck down). Snapshotting the
+row data at the moment `handleGradeAll` applies its results makes that whole
+class of bad state unrepresentable: nothing the cohort renders afterward
+reads any live array, ever, so there is no live control left that can affect
+it.
+
+**What happens to a row deleted after the run.** Because the snapshot no
+longer resolves against a live array, a row removed by `capture.onRemoveRow`
+after the run stays IN the cohort's trend - the run graded it, and the run's
+trend reports what the run graded, not what the table currently holds. This
+replaces the earlier draft's "ids with no matching row are dropped": that
+behaviour depended on the live-array resolution this correction removes, and
+"the trend reports what was graded" is the more honest reading of "a RUN
+produced trends" (1.1) than "the trend reports what is still in the table."
 
 **What happens to the contamination hazard answer 1 cares about.** It is not
 solved by the label and never was: `handleGradeAll` grades two assignments'
 rows together against one rubric whatever the label says. So the honest move is
 DISCLOSURE, not filtering. A16-3 emits a cohort line above the panel stating
-the count, and - when the cohort's resolved rows carry more than one distinct
+the count, and - when the snapshot's rows carry more than one distinct
 `assessment` value (counting `undefined` as one) - stating that the run spanned
-more than one label. Pure predicate over the resolved rows, in the adapter
+more than one label. Pure predicate over the snapshot rows, in the adapter
 leaf, unit-testable. `assessment` becomes the DETECTOR of contamination instead
 of the definition of the cohort.
 
 **The cohort does not survive a reload**, because `lastRunCohort` is `useState`
-(like the existing `logGradingRuns` at `:198`). That is consistent with
-"trends are an output of a run": after a reload there is no run, so there is no
-panel, which is exactly the pre-run state of section 4.6. It is also what makes
-H10 unnecessary (0.4) and what creates RES-A16-13.
+(like the existing `logGradingRuns` at `GradingRecordingPanel.tsx:198`). That is
+consistent with "trends are an output of a run": after a reload there is no
+run, so there is no panel, which is exactly the pre-run state of section 4.6.
+It is also what makes H10 unnecessary (0.4) and what creates RES-A16-13.
 
 ### 2.3 Grading (from screenshots): still no boundary, and A11's landing does not change that
 
@@ -390,7 +451,22 @@ left untouched by A16:**
   same screen-read label the table already displays) and **no `userId` key**.
   The absence is already structural - `GradingRow` has no `userId` and
   `grading-row.ts:23-26` says posting one is a compile error, not a discipline
-  - but TypeScript is structural at runtime, so V21 pins it at runtime too.
+  - but TypeScript is structural at runtime too.
+  **Four other `GradeResultBase` required fields have no `GradingRow` source
+  at all** (disposal round, ruling S-7b): `resubmitNotice`, `feedback`,
+  `mergedFileCount`, `submittedFiles` (`types.ts:189-217` enumerates
+  `GradeResultBase`; `GradingRow`/`AssessmentRowCore` carry none of the four).
+  `resubmitNotice` is not merely absent but carries its own invariant
+  (`types.ts:208-212`: "the exact wording and condition every producer used
+  before this feature... every producer must say it identically or not at
+  all") - and the recording row already bakes it into `overallComment`
+  instead of keeping it separate: `composeOverallComment` at
+  `grading-feedback-prompt.ts:153` composes `strengths, improvements,
+  resubmitNotice` into one string, so a correct adapter emits
+  `resubmitNotice: ""` unconditionally (never re-deriving or repeating the
+  notice) and lets the baked-in copy stand inside `overallComment`. `feedback`,
+  `mergedFileCount` and `submittedFiles` have no recording-surface equivalent
+  at all and are emitted at their zero values (`""`, `0`, `[]`).
 - **Both:** the adapter leaf is added to `classTrendsDraft.not-postable.test.ts`'s
   canary-3 roots (`:213-218`), so a posting/persisting import inside it goes
   red. `grading-row.ts:23-26`'s ban is on **persisting** a recording row into
@@ -528,11 +604,25 @@ hasTrendableResults(entry) === entry.run.results.some(r => !r.ungraded && r.rubr
 `gradedResults(entry.run.results)` at `class-trends.ts:272`, defined at
 `types.ts:180-182` as `r.ungraded === undefined`.
 
+**Disposal round correction (blocker B-5): dropped, not given its own
+predicate.** An earlier draft of this section named THREE mount states -
+pre-run, "graded but unscorable", and trends - while the Rule above names
+only ONE predicate, and section 7 has no verify row for the middle state.
+`hasTrendableResults` cannot distinguish "no graded result yet" from "graded,
+but every result has zero areas" - both make the predicate false, and
+FALSE renders identically either way under the Rule as stated. Giving the
+middle state its own render (a one-line message) would need a second,
+separate predicate plus its own verify row, which is new design surface a
+disposal round does not add. So the middle state is dropped rather than
+given one: `class-trends.ts:266-271`'s "a rubric that parsed no criteria"
+condition is real, but A16 renders it the same as pre-run (nothing), not as
+a distinct line, until a later item adds the second predicate this would
+require.
+
 | State | Condition | What renders |
 |---|---|---|
-| **Pre-run** | no graded result with any area | **Nothing at all.** No panel, no heading, no zero. Without this gate the shipped panel renders a Button reading `Trends (0)` - `ClassTrendsPanel.tsx:125` interpolates `report.areas.length` into its own label. |
-| **Graded but unscorable** | at least one graded result, every one with `rubricAreas.length === 0` | **One line, not a panel:** the run produced no per-area scores, so there is nothing to trend. Real condition - `class-trends.ts:266-271` describes it (a rubric that parsed no criteria). |
-| **Trends** | the predicate is true | The panel, open by default via `defaultExpanded`, with the cohort line (2.2 for the recording surface). |
+| **Pre-run** (also covers "graded, but every result has zero areas" - see above) | `hasTrendableResults(entry)` is false | **Nothing at all.** No panel, no heading, no zero. Without this gate the shipped panel renders a Button reading `Trends (0)` - `ClassTrendsPanel.tsx:125` interpolates `report.areas.length` into its own label. |
+| **Trends** | `hasTrendableResults(entry)` is true | The panel, open by default via `defaultExpanded`, with the cohort line (2.2 for the recording surface). |
 
 **The ungraded mapping, for the two adapters that CONSTRUCT results.** A16-1
 does not (4.1), so this binds A16-3 and, later, A16-5.
@@ -678,18 +768,21 @@ returns a non-zero count. Canary that it can miss:
 returns `0`. Never `grep -P` here - it exits 0 without checking
 (`this-repo.md` section 5).
 
-That command returns 37 paths. The subset that ASSERTS (a `*.test.ts` that
-reads the file as source, or hardcodes its path in a list) - each opened:
+**Re-measured for the disposal round (blocker B-4): the command returns 41
+paths**, not 37 - `grep -rln "GradingResults.tsx\|ClassTrendsPanel.tsx" src
+--include=*.ts --include=*.tsx | sort | wc -l` prints `41` on this tree. The
+subset that ASSERTS (a `*.test.ts` that reads the file as source, or
+hardcodes its path in a list) - each opened:
 
 ```
 src/app/components/GradingResults.tsx
 src/app/components/GradingTab.tsx                                       [caller: required assignmentName prop]
 src/app/components/LiveFeedPanel.tsx                                    [caller: required assignmentName prop]
-src/app/components/GithubGradingPanel.tsx                               [caller: required assignmentName prop]
 src/app/components/grading-results/<extracted leaves>                   [4.4; names decided by the extraction]
 src/app/components/grading-results/classTrendsEntry.ts                  [adapter + hasTrendableResults]
 src/app/components/grading-results/classTrendsEntry.test.ts             [unit]
 src/app/components/grading-results/gradingResultsExtraction.wiring.test.ts
+src/app/components/grading-results/gradingResultsHelpers.ts             [blocker B-3: the extraction's likely destination - see the sixth missed file below]
 src/app/components/grading-results/gradingResultsHelpers.test.ts
 src/app/components/grading-results/gradingResultsPostOutcome.test.ts
 src/app/components/grading-results/sortGradeRows.test.ts
@@ -699,9 +792,22 @@ src/app/components/drafted-grades/ClassTrendsPanel.tsx                  [default
 src/app/components/drafted-grades/classTrends.wiring.test.ts            [added assertion]
 src/app/components/drafted-grades/classTrendsDraft.wiring.test.ts
 src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts
+src/lib/grade/postable.test.ts                                          [blocker B-3: reads GradingResults.tsx as source - see the sixth missed file below]
 ```
 
-**The five revision 2 missed, and why each is in, opened and cited:**
+**`GithubGradingPanel.tsx` is a caller (4.3) but is NOT one of the 41.**
+Blocker B-4: an earlier draft of this table printed it as if it were part of
+this command's output; it is not - `grep -n "GradingResults.tsx\|ClassTrendsPanel.tsx"
+src/app/components/GithubGradingPanel.tsx` returns nothing, because that file
+imports the component as `"./GradingResults"` (no `.tsx`, no literal
+`ClassTrendsPanel.tsx`) and renders `<GradingResults` without the `.tsx`
+suffix. It is in `owns` regardless, for the independent reason section 4.3
+gives (it is a render site needing the new `assignmentName` prop), not
+because this floor-grep found it. Stated so the figure and the command that
+produced it agree, per `this-repo.md`: every quantity names the command that
+produced it.
+
+**The six revision 2 missed, and why each is in, opened and cited:**
 
 | File | Why it is in `owns` |
 |---|---|
@@ -710,6 +816,13 @@ src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts
 | `ui/modalAdoption.wiring.test.ts` | hardcodes `"src/app/components/GradingResults.tsx"` in `WAVE5_ADOPTERS` at `:108`, and pins two counts by symbol: `expect(DIALOG_SITES.length).toBe(53)` and `expect(DIALOG_SITES.length - ADOPTING_PATHS.size).toBe(...)`. `DIALOG_SITES` is derived from a walk over all `.tsx` files, so a new `.tsx` leaf in the extraction moves both. |
 | `drafted-grades/classTrendsDraft.wiring.test.ts` | reads `ClassTrendsPanel.tsx` as `PANEL_PATH` at `:16` and `panelSource` at `:21`. Never mentioned in revision 2 at all. A16-1 edits that panel. |
 | `drafted-grades/classTrendsDraft.not-postable.test.ts` | **`ClassTrendsPanel.tsx` IS one of the four canary-3 roots**, at `:213-218`. Revision 2 excluded it by answering "does A16-1 add a file that layer C reaches?", which is the wrong question: **A16-1 EDITS a root.** It also gains the adapter leaf as a fifth root (4.2). Its `{ timeout: 30000 }` at `:211` is the precedent for L15. |
+| `src/lib/grade/postable.test.ts` | Blocker B-3. `:187` reads `GradingResults.tsx` as source; `:190` pins the RELATIVE import literal `'import { checkRowPostability } from "../../lib/grade/postable"'`, and `:201` reads a fixed 1200-character window after `handlePostOne`'s definition. A16-1's extraction (4.4) can move either the import or `handlePostOne` itself out of `GradingResults.tsx`, which turns a post-grades SAFETY test red on a correct refactor. |
+
+`gradingResultsHelpers.ts` (not a test - the leaf itself) is also newly named
+above, not just implied by "`<extracted leaves>`": it already exists (4.4
+item 1) and is the most likely destination for whatever A16-1's extraction
+moves out of `GradingResults.tsx`, so it is an edit target on its own, not
+only a file the extraction happens to touch.
 
 Not in `owns`, each with its reason, opened:
 
@@ -719,8 +832,10 @@ Not in `owns`, each with its reason, opened:
 - `src/lib/grade/class-trends.ts`, `class-trends-insight.ts`,
   `class-trends-draft.ts`, `route.ts` - untouched. A16 is placement and
   disclosure, not computation. Anything needing to change there is N13b's.
-- `src/app/components/repo-grades/*` - eight of the 37 hits name
-  `GradingResults.tsx` in prose comments only. A16-5 owns that directory later.
+- `src/app/components/repo-grades/*` - eleven of the 41 hits name
+  `GradingResults.tsx` in prose comments only, verified by opening every one:
+  none reads it as source or hardcodes its path. A16-5 owns that directory
+  later.
 
 ### 6.3 `owns` for A16-2, re-derived
 
@@ -777,7 +892,41 @@ find one that spreads a base object, nor a fixture factory that casts. The
 implementer re-derives with its own instrument - and the wave-gate `tsc` run is
 the only thing that sees this whole class - and reports what this missed.
 
-### 6.4 Disjointness, computed
+### 6.4 `owns` for A16-3, derived (S8: A16-3 had none of its own)
+
+**Derivation command**, same method as 6.2:
+
+```bash
+grep -rln "GradingRecordingPanel.tsx" src --include=*.ts --include=*.tsx | sort
+```
+
+The subset that ASSERTS (reads the file as source, or hardcodes its path in a
+list), each opened:
+
+```
+src/app/components/grading-recording/GradingRecordingPanel.tsx
+src/app/components/grading-recording/GradingAssessmentDeclarationControls.test.ts   [PANEL_PATH, :242]
+src/app/components/grading-recording/GradingRecordingPanel.assessment.test.ts       [PANEL_PATH, :37]
+src/app/components/grading-recording/GradingRecordingPanel.wiring.test.ts           [PANEL_PATH, :35 - V29/V33/V34's own file]
+src/app/components/grading-recording/markLate.wiring.test.ts                        [read("GradingRecordingPanel.tsx"), :33]
+src/app/components/recording/AddKnowledgePages.test.ts                              [GRADING_PANEL_PATH, :237]
+src/app/components/recording/runLogRow.test.ts                                      [RUN_BEARING_PANELS, :16 - a repo-wide count of ONE <RunLogRow> per panel]
+src/app/components/ui/buttonVariant.test.ts                                         [hardcodes the path with a pinned Button count of 3, :157]
+src/app/components/grading-recording/<adapter leaf>.ts                              [names decided at implementation; the run-cohort adapter and hasTrendableResults-equivalent, mirroring classTrendsEntry.ts]
+src/app/components/grading-recording/<adapter leaf>.test.ts                         [unit, V30-V33]
+src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts             [4.2's "Both:" bullet - A16-3's adapter leaf is its own canary-3 root, added to the same file A16-1 already edited (6.2); not caught by this section's own grep since the file names the leaf by import path, not by the literal "GradingRecordingPanel.tsx"]
+```
+
+Not in `owns`: `grading-rows.test.ts`, `discussion-knowledge-context.test.ts`,
+`ModuleDeckCapturePanel.wiring.test.ts` and `snapshot-autofire.structure.test.ts`
+all name `GradingRecordingPanel.tsx` in a prose comment only, verified by
+opening each - none reads it as source or hardcodes its path.
+
+**This list is a FLOOR**, same caveat as 6.2/6.3: a `nameMatch:`- or path-style
+grep cannot find a walker that reaches the file some other way. The
+implementer re-derives.
+
+### 6.5 Disjointness, computed
 
 Write each `owns` list to a file in the scratchpad, then:
 
@@ -820,7 +969,32 @@ A16-1 passes `run` by reference and A16-3 emits a real `student` on every
 result, so **N13b enriches every mount A16 created with no further placement
 work** - a claim revision 2 made while its own V3 forbade it (blocker B7).
 
-### 6.5 Shared resources no file list shows (major M1)
+**A16-3's own pairings (disposal round, ruling S-8d - 6.4 gave A16-3 its own
+`owns` list; this is what it does and does not intersect with):**
+
+```bash
+cat a16-3.txt a16-1.txt | sort | uniq -d          # A16-3 x A16-1
+```
+Expected, by inspection of 6.2's and 6.4's lists:
+```
+src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts
+```
+One shared path, and it is **not a concurrency hazard**: 6.1 states A16-3
+depends on A16-1, so this is a sequential edit to a file A16-1 already
+landed, not two agents editing it at once. It exists because 4.2's "Both:"
+bullet has A16-3 add its OWN adapter leaf as a SIXTH canary-3 root, in the
+same file A16-1 already edited to add its own FIFTH. The implementer runs the
+command and confirms no other path is shared before treating the two chunks
+as sequenced-but-independent.
+
+```bash
+cat a16-3.txt a16-2.txt | sort | uniq -d          # A16-3 x A16-2
+```
+Expected output: *(empty)*. A16-3 depends on the `GradingRow` shape A16-2
+finishes (H1-H12), by inspection of 6.3's list against 6.4's it edits none of
+A16-2's owned files - it only reads the widened type A16-2 lands.
+
+### 6.6 Shared resources no file list shows (major M1)
 
 `parallel-disjointness.md` section 5, applied rather than quoted:
 
@@ -842,7 +1016,7 @@ work** - a claim revision 2 made while its own V3 forbade it (blocker B7).
 - **`git status --short` in the MAIN checkout is the only proof a wave landed.**
   `Glob` returns a `.claude/worktrees` copy first.
 
-### 6.6 Directory walkers a by-name grep misses
+### 6.7 Directory walkers a by-name grep misses
 
 `grep -rln "readdirSync\|walkTsxFiles\|globSync\|opendirSync" src --include=*.ts`
 returns 34 files. The ones that can fire on A16:
@@ -923,7 +1097,8 @@ silently drops a path that matches nothing and exits 0, and
 | V30 | The cohort resolver over an enumerated product of the four `AssessmentRowState` members x {areas, no areas} x {id present, id removed} | `npx vitest run` on the A16-3 adapter leaf's unit test | any cell disagrees with the table in 4.6; or a removed id produces anything but omission; or a `"failed"` row lands in `gradedResults` |
 | V31 | `totalResults` against the cohort | same file | `computeClassTrends(adapter(cohort, rows)).totalResults` is not the count of `"ready"` rows in the cohort. Direction of failure: an inflated N reaches `buildAreaSummary` (`class-trends.ts:207`, emitted at `:242`) and `class-trends-draft.ts:185`, a sentence addressed to students. |
 | V32 | The cohort line's multi-label predicate | same file | it does not report "more than one label" when the resolved rows carry two distinct `assessment` values (counting `undefined` as one) |
-| V33 | The trends input array | same file | the adapter reads `gradingRows.rows` (sorted/filtered, `useGradingRows.ts:198`) rather than `rawRows` (`:460`). A trend that changes when the instructor types in the search box is wrong and no gate here would catch it otherwise. |
+| V33 | **The trend input is the snapshot, never a render-time array read** (disposes blocker B-2; deletes and replaces the rev-3-draft V33, which mandated the defective read) | source-text assertion in the same `grading-recording/*.wiring.test.ts` as V29, over the adapter/mount call site | the adapter's or the mount's call into it references `gradingRows.rows`, `gradingRows.rawRows` (`useGradingRows.ts:452-455` computes `rows`; `:460` returns `rawRows`, itself `scopedRawRows` at `:444-447`), or any other array read at render time, instead of `lastRunCohort.rows`. A trend that changes when the instructor types in the search box, or changes the Course selector, is wrong, and no gate here would otherwise catch it. |
+| V34 | **A16-3's mount renders `ClassTrendsPanel`**, mirroring V1 | same file | `GradingRecordingPanel.tsx` does not import `ClassTrendsPanel` AND does not render `<ClassTrendsPanel` above `<GradingTable>` (`:969`), guarded by the cohort's own trendable-results predicate (4.6). Added per the disposal round (S8): A16-3's verify set otherwise had no row for the mount's own presence, only for the cohort logic behind it. |
 
 **Source-text tests over-specify.** Pin the fact and the ordering; never the
 spelling. V1/V2/V5/V6/V7/V13/V29 pin presence, ordering and structural
@@ -989,6 +1164,13 @@ A16-2 sequence their passes.
 | S21 | H11 | Add `rubricAreas` to `toWire` | `grading-row-serialization.test.ts:639-642`, against the **unchanged** 16-key oracle. Stronger than the rev-2 pair: the oracle was never widened, so it cannot have been loosened. |
 | S22 | H11 | Make `fromWire` return `raw.rubricAreas as RubricAreaResult[]` unguarded | same file, V22's garbage fixture |
 | S23 | **H9, the required-field class** | Delete the `rubricAreas` line from the production constructor `buildGradingRow` in `src/lib/course-intel/offline-payload.ts` (the returned literal at `:190-207`) | **`npx tsc --noEmit` goes RED**, and no vitest path does. This is major M2's replacement for the rev-2 null result: weakening a required field to optional cannot break a caller - that is a property of the mutation direction, not a finding - while the strengthening direction is a real, observable failure, and it demonstrates the exact class the wave gate exists to catch. **Run at the wave gate, which owns the single `tsc` caller, not by the implementer.** |
+
+### A16-3
+
+| # | Mutation (implementation only) | Goes RED in |
+|---|---|---|
+| S24 | In the mount or the adapter, resolve the trend against `gradingRows.rawRows` or `gradingRows.rows` by id instead of reading `lastRunCohort.rows` directly | V33. This is the sabotage that proves blocker B-2 is actually closed, not just reworded - it reintroduces the exact live-array read the correction removes. |
+| S25 | Delete the `<ClassTrendsPanel .../>` line from `GradingRecordingPanel.tsx` | V34 |
 
 **Fixtures come from the emitted shape.** Every A16-2 fixture is built by
 running the real producer - `composeGradingRowResult` over a real
@@ -1107,10 +1289,10 @@ entry missing any of the three is a deletion, and would be called that.
 | **RES-A16-9** | A row whose `totalScore` the instructor overrode by hand still contributes the MODEL's area scores to the trend (H8), so the trend can disagree with the score on screen. The alternative leaves the row's areas stale, which is worse. A known, chosen trade-off. | The repo owner | Edit one row's score, re-grade, compare the trend line with the visible scores | After A16-3's push |
 | **RES-A16-11** | Whether A16-1's extraction trips `ui/buttonVariant.test.ts`, `ui/confirmArmButtons.test.ts` or `courses/page-module-css-orphan-classes.test.ts` is unverified. They scan for `.tsx` components, Buttons and CSS classes; the extraction may add a `.tsx`. | A16-1's implementer | Run each as a single-path `npx vitest run` before and after the diff | A16-1's wave gate |
 | **RES-A16-12** | `this-repo.md:68-83` records that extracting a hook out of `SnapshotGradingPanel.tsx` failed lint on `preserve-manual-memoization` naming a callback nobody touched. Whether that generalises to the `GradingResults.tsx` extraction (A16-1) or the `GradingRecordingPanel.tsx` one (A16-3) is unverified. | Each chunk's implementer | `npm run lint`, against the four-warning baseline | Each chunk's wave gate (V26) |
-| **RES-A16-13** | **The recording tool's trends do not survive a reload**, because `lastRunCohort` is `useState` and `rubricAreas` is no longer persisted (H10 withdrawn). An instructor who grades, reloads, and sees graded rows with no trends may read that as a bug rather than as "trends are an output of a run". Whether that is acceptable is a product judgement this environment cannot make. | The repo owner | An owner observation: grade a batch, reload, look | After A16-3's push. **Named upgrade path if the answer is no**, so it is scoped rather than open: persist the cohort id set under a new `ta-rec-grade-*` key - which moves the seven-key set at `grading-rows.test.ts:508-516` - and reinstate H10, which moves the 16-key oracle at `grading-row-serialization.test.ts:620-637`. Two named enforcers, both currently untouched. |
+| **RES-A16-13** | **The recording tool's trends do not survive a reload**, because `lastRunCohort` is `useState` and `rubricAreas` is no longer persisted (H10 withdrawn). An instructor who grades, reloads, and sees graded rows with no trends may read that as a bug rather than as "trends are an output of a run". **This is inconsistent across A16-1's own four LMS-grading surfaces**: the github path's run survives a reload today and will keep doing so untouched - `loadStoredGithubGradingRun` (`github-grading-run-store.ts:357`) restores it from `localStorage`, and `:186-187,:247` already carry `rubricAreas` through, so its trends also survive - while the recording surface's do not, and the zip/canvas and livefeed surfaces never had a surviving run to begin with (2.1). The same feature therefore reloads differently depending on which grading tool produced it. Whether that inconsistency, or the recording surface's non-survival specifically, is acceptable is a product judgement this environment cannot make. **Recommendation, acted on now (disposal round, ruling S-7a): ship as specified - no persistence for the recording surface, leaving the cross-surface inconsistency as a known, disclosed gap** rather than blocking A16-3 on reconciling it; the two other surfaces (zip/canvas, livefeed) already behave this way and are unaffected by this feature. | The repo owner | An owner observation: grade a batch on each of the four surfaces, reload each, compare | After A16-3's push. **Named upgrade path if the recommendation is rejected**, so it is scoped rather than open: persist the cohort id set under a new `ta-rec-grade-*` key - which moves the seven-key set at `grading-rows.test.ts:508-516` - and reinstate H10, which moves the 16-key oracle at `grading-row-serialization.test.ts:620-637`. Two named enforcers, both currently untouched. |
 | **RES-A16-14** | **`GradingTab.tsx:427` (zip/canvas) has no assignment name to pass** and ships `assignmentName: ""` (4.3), so `class-trends-draft.ts:185` opens the student-facing draft with "A note on this assignment" and the guard at `:176` is vacuous. | A16-1's implementer, escalating to the owner if a source exists | `grep -n "assignmentName\|title\|assignment" src/app/components/GradingTab.tsx src/app/actions-types.ts` paired with a canary; open `GradeActionState` | A16-1's verify. If a name IS reachable from `GradeActionState`, thread it and strike this. |
 | **RES-A16-15** | **The surface enumeration in section 3 is a FLOOR** derived from four identifier-shaped searches, and an identifier-shaped zero looks exactly like a real absence (`traps-search.md`). | The implementer of each chunk | Re-derive by what a grading surface puts ON SCREEN - a per-student score column, a rubric-area breakdown, a "Grade" button - not only by type name; report what this list missed | Each chunk's wave gate |
-| **RES-A16-16** | **The `owns` lists in 6.2 and 6.3 are FLOORS.** 6.3's `nameMatch:` search cannot find a constructor that spreads a base object or a fixture factory that casts; 6.2's path search cannot find a test that reaches `GradingResults.tsx` through a directory walk. | Each chunk's implementer | Their own derivation, plus the wave-gate `tsc` (V25), which is the only instrument that sees the whole required-field class | Each chunk's wave gate, diffing `git status --short` against the assignment |
+| **RES-A16-16** | **The `owns` lists in 6.2, 6.3 and 6.4 are FLOORS.** 6.3's `nameMatch:` search cannot find a constructor that spreads a base object or a fixture factory that casts; 6.2's and 6.4's path searches cannot find a test that reaches `GradingResults.tsx` or `GradingRecordingPanel.tsx` through a directory walk. | Each chunk's implementer | Their own derivation, plus the wave-gate `tsc` (V25), which is the only instrument that sees the whole required-field class | Each chunk's wave gate, diffing `git status --short` against the assignment |
 
 **Handed over, not residual:** cross-assignment trend accumulation (1.3).
 Receiver: a new backlog row. Obligation: decide the accumulator, and whether
@@ -1194,6 +1376,23 @@ With the claim corrected to reachability, the removal test traces:
   on a dead import and on a local reimplementation, in the shape that file
   already uses four times (`:38-53`, `:76-99`, `:120-135`, `:162-191`).
 
+**The same removal test for A16-3's mount** (disposal round, ruling S-8c;
+A16-1's advantage and A16-3's are the same claim on a second surface, so the
+same trace applies):
+
+- **The deletion:** the `<ClassTrendsPanel .../>` tag in
+  `GradingRecordingPanel.tsx`, immediately above `<GradingTable>` (`:969`).
+  Deleting it removes the advantage on this surface entirely and exactly -
+  the recording tool's per-run trends stop being reachable from the recording
+  panel at all, once A16-2's data fix ships they are reachable nowhere else
+  (2.1 lists no other run object for this surface), so this deletion is a
+  stronger regression here than on A16-1's four surfaces, which keep the
+  Drafted Grades mount as a fallback.
+- **The assertion whose observed value changes:** V34, in
+  `GradingRecordingPanel.wiring.test.ts` (6.4) - mirroring V1's "imports AND
+  renders `ClassTrendsPanel`". Observed value PASS before the deletion, FAIL
+  after. That is S25.
+
 **The honest limit, recorded rather than papered over.** The part of the
 advantage that is genuinely about clicks and attention - the panel being
 visible without navigating, open by default, beside the results - has **no
@@ -1201,11 +1400,11 @@ buildable removal test here**, because no component is rendered by any test.
 That is RES-A16-4, with an owner and a step. `leverage.md:173-178` already
 names this limit for the LIVE-LOOP class and requires exactly this disclosure.
 
-### 11.3 Two owner questions, batched, gating nothing
+### 11.3 Three owner questions, batched, gating nothing
 
-Both are `iteration-caps.md` **(b) Reduce** - scope calls that no number of
-revision rounds resolves. A recommendation is attached to each so work does not
-wait on an answer.
+All three are `iteration-caps.md` **(b) Reduce** - scope calls that no number
+of revision rounds resolves. A recommendation is attached to each so work does
+not wait on an answer.
 
 1. **Does the disclosure state need to persist across reloads?** The repo's
    standing persisted-control rule would say yes. Under the run cohort, three
@@ -1224,3 +1423,13 @@ wait on an answer.
    (`ClassTrendsDraftPanel.tsx:42-48`) and the floor at `class-trends-draft.ts:18`
    and `:154` refuses below 5 graded submissions. Suppressing it would need a
    new prop on a file N13b is about to change.
+3. **Is A16's leverage claim (click-cost and reachability, section 11.1) the
+   right call for a feature this shape, or does it warrant a redesign or a
+   rejection instead?** `leverage.md:109-121` requires this be "decided by the
+   human who scoped it, never defaulted by the agent writing the criteria" -
+   and section 11.1 defaulted to "Accept the cost explicitly" without asking.
+   Disposal round, ruling S-6: put to the owner rather than re-argued.
+   **Recommendation, acted on now: accept the cost explicitly, as 11.1 already
+   states.** A16 ships as a placement/reachability improvement over an
+   already-built, already-guaranteed computation - not a new capability - and
+   nothing built here forecloses a later redesign if the owner disagrees.

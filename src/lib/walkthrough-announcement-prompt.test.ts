@@ -7,6 +7,7 @@ import {
   WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP,
   type WalkthroughAnnouncementPromptArgs,
 } from "./walkthrough-announcement-prompt";
+import type { AnnouncementTiming } from "./walkthrough-announcement-prompt";
 import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline, type OutlineSection } from "./announcement-outline-types";
 
 function section(overrides: Partial<OutlineSection> = {}): OutlineSection {
@@ -43,6 +44,7 @@ function baseArgs(overrides: Partial<WalkthroughAnnouncementPromptArgs> = {}): W
     styleBlock: "\n\nMATCH THE INSTRUCTOR'S PERSONAL WRITING STYLE (tone, rhythm, vocabulary) shown in this sample:\nHi folks, quick update.",
     emojiPolicy: "forbidden",
     researchedResources: [],
+    timing: "beginning-of-week",
     ...overrides,
   };
 }
@@ -105,6 +107,7 @@ describe("buildWalkthroughAnnouncementPrompt - containment (P11)", () => {
         "styleBlock",
         "emojiPolicy",
         "researchedResources",
+        "timing",
       ].sort()
     );
   });
@@ -396,5 +399,97 @@ describe("buildWalkthroughAnnouncementPrompt - outline rendering (AC2)", () => {
     expect(lower).toContain("ordered list");
     expect(lower).toContain("due-date");
     expect(lower).toContain("links: yes");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A19: two tones over the same captured pages (docs/a19-scope.md).
+// AC-8/AC-9/AC-10a-d. baseArgs() defaults to "beginning-of-week" (section
+// 4.2/4.4's fixture-churn pricing: this ONE shared builder is the only site
+// that needed updating for every one of the 35 pre-existing calls in this
+// file, per the call-site census).
+// ---------------------------------------------------------------------------
+
+describe("A19 AC-8: the beginning-of-week arm's own instruction block is present in every existing fixture", () => {
+  it("the composed prompt contains the beginning-of-week heading", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs());
+    expect(prompt).toContain("BEGINNING-OF-WEEK FRAMING");
+  });
+});
+
+describe("A19 AC-9: timing: \"midweek\" measurably changes the composed prompt", () => {
+  const beginningOfWeek = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "beginning-of-week" }));
+  const midweek = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek" }));
+
+  it("midweek output differs from beginning-of-week output", () => {
+    expect(midweek).not.toBe(beginningOfWeek);
+  });
+
+  it("midweek output contains the named heading MIDWEEK CHECK-IN", () => {
+    expect(midweek).toContain("MIDWEEK CHECK-IN");
+  });
+
+  it("beginning-of-week output does not contain the midweek heading", () => {
+    expect(beginningOfWeek).not.toContain("MIDWEEK CHECK-IN");
+  });
+});
+
+describe("A19 AC-10a: the midweek-only branch is present iff timing === \"midweek\", exhaustive over the closed union", () => {
+  const ALL_TIMINGS: readonly AnnouncementTiming[] = ["beginning-of-week", "midweek"];
+
+  it("exactly one of the two timings produces the MIDWEEK CHECK-IN block", () => {
+    const withHeading = ALL_TIMINGS.filter((timing) =>
+      buildWalkthroughAnnouncementPrompt(baseArgs({ timing })).includes("MIDWEEK CHECK-IN")
+    );
+    expect(withHeading).toEqual(["midweek"]);
+  });
+});
+
+describe("A19 AC-10b: the false-progress-claim guard is EVIDENTIARY, not normative (Ruling V2a, narrowed)", () => {
+  const midweek = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek" }));
+
+  it("disclaims being given tracking data", () => {
+    expect(midweek).toMatch(/\bno\b.{0,20}\b(submission|completion|gradebook)\b/i);
+  });
+
+  it("does not itself contain a 'who is behind' style claim", () => {
+    expect(midweek).not.toMatch(/\bwho(?:'s| is) behind\b/i);
+  });
+
+  it("does not itself contain a submission-count-style claim", () => {
+    expect(midweek).not.toMatch(/\bhow many (?:of you|students)\b/i);
+  });
+
+  it("AC-10b control: normative pacing language alone must not trip either ban (Ruling V2a's own owner-requested tone)", () => {
+    const withPacing = `${midweek}\nYou should be partway through this week's work by now, and the class overall is around the midpoint.`;
+    expect(withPacing).not.toMatch(/\bwho(?:'s| is) behind\b/i);
+    expect(withPacing).not.toMatch(/\bhow many (?:of you|students)\b/i);
+  });
+});
+
+describe("A19 AC-10d: the midweek block states explicit precedence over the instructor's notes", () => {
+  it("the precedence sentence names both notes and its own winning side, in either word order", () => {
+    const midweek = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek" }));
+    expect(midweek).toMatch(
+      /(\bnotes\b[\s\S]{0,80}\b(even if|regardless)\b)|(\b(even if|regardless)\b[\s\S]{0,80}\bnotes\b)/i
+    );
+  });
+
+  it("the precedence clause is placed after the INSTRUCTOR NOTES block, so 'the instructor notes above' is literally true", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek", notes: "Mention the new office hours." }));
+    const notesIdx = prompt.indexOf("INSTRUCTOR NOTES");
+    const midweekIdx = prompt.indexOf("MIDWEEK CHECK-IN");
+    expect(notesIdx).toBeGreaterThan(-1);
+    expect(midweekIdx).toBeGreaterThan(notesIdx);
+  });
+});
+
+describe("A19: on an empty-notes call, the midweek block's forward reference points at an absent block (M-d) - the sentence still ships, unconditionally", () => {
+  it("the precedence sentence still appears even when notes is empty", () => {
+    const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek", notes: "" }));
+    expect(prompt).not.toContain("INSTRUCTOR NOTES");
+    expect(prompt).toMatch(
+      /(\bnotes\b[\s\S]{0,80}\b(even if|regardless)\b)|(\b(even if|regardless)\b[\s\S]{0,80}\bnotes\b)/i
+    );
   });
 });

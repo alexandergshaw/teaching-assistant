@@ -10,6 +10,16 @@
 
 import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline } from "@/lib/announcement-outline-types";
 import type { ResourceSearchOutcome } from "@/lib/resource-search-outcome";
+import { timingLabel, type AnnouncementTiming } from "@/lib/walkthrough-announcement-prompt";
+
+export type { AnnouncementTiming };
+export { timingLabel };
+
+/** New slots always default to "beginning-of-week" - not persisted (A19
+ * section 4.1's departure from this repo's standing "every new control
+ * persists under a ta- key" rule, on the strength of TemplateChoice's own,
+ * identical non-persistence). */
+const DEFAULT_TIMING: AnnouncementTiming = "beginning-of-week";
 
 export const MAX_ANNOUNCEMENT_BATCH_SIZE = 3;
 
@@ -70,6 +80,12 @@ export interface Drafted {
    * caller omit it with every gate green, which is exactly how this notice
    * shipped dead in an earlier round. Rendered by AnnouncementDraftSlot.tsx. */
   readonly researchNotice: ResearchNotice;
+  /** A19: the tone this draft was ACTUALLY built with - a fact about the
+   * past, frozen at draft time, never re-resolved (same shape as
+   * `builtFrom` above). REQUIRED, not optional - an optional field ships
+   * dead with every gate green, exactly per researchNotice's own comment
+   * above. */
+  readonly timing: AnnouncementTiming;
 }
 
 export type SlotDraft =
@@ -80,6 +96,10 @@ export type SlotDraft =
 export interface DraftSlot {
   readonly id: string;
   readonly choice: TemplateChoice;
+  /** A19: the LIVE, per-slot tone control - orthogonal to `choice` (an
+   * instructor can want a midweek announcement in a saved exemplar's
+   * format). REQUIRED, not optional - same reasoning as `choice` itself. */
+  readonly timing: AnnouncementTiming;
   readonly draft: SlotDraft;
   readonly postArmedFor: string | null;
   readonly regenerateArmed: boolean;
@@ -313,10 +333,11 @@ export function resolveChoice(
   return { template: { kind: "none" }, outline: EMPTY_ANNOUNCEMENT_OUTLINE };
 }
 
-export function makeSlot(id: string, choice: TemplateChoice): DraftSlot {
+export function makeSlot(id: string, choice: TemplateChoice, timing: AnnouncementTiming): DraftSlot {
   return {
     id,
     choice,
+    timing,
     draft: { phase: "empty", error: null },
     postArmedFor: null,
     regenerateArmed: false,
@@ -329,7 +350,7 @@ export function makeSlot(id: string, choice: TemplateChoice): DraftSlot {
 }
 
 export function initialSlots(id: string): readonly DraftSlot[] {
-  return [makeSlot(id, { kind: "default" })];
+  return [makeSlot(id, { kind: "default" }, DEFAULT_TIMING)];
 }
 
 export function emptySlotIds(slots: readonly DraftSlot[]): readonly string[] {
@@ -337,9 +358,10 @@ export function emptySlotIds(slots: readonly DraftSlot[]): readonly string[] {
 }
 
 export type SlotsAction =
-  | { type: "add"; id: string; choice: TemplateChoice }
+  | { type: "add"; id: string; choice: TemplateChoice; timing: AnnouncementTiming }
   | { type: "remove"; id: string }
   | { type: "choose"; id: string; choice: TemplateChoice }
+  | { type: "choose-timing"; id: string; timing: AnnouncementTiming }
   | { type: "edit"; id: string; field: "title" | "message"; value: string }
   | { type: "generate-started"; ids: readonly string[] }
   | { type: "regenerate-started"; id: string }
@@ -351,7 +373,7 @@ export type SlotsAction =
   | { type: "posting"; id: string }
   | { type: "post-result"; id: string; result: { course: string } | { error: string } }
   | { type: "copy-result"; id: string; error: string | null };
-// 14 members. See announcement-draft-slots.test.ts - the C1 guard there is
+// 15 members. See announcement-draft-slots.test.ts - the C1 guard there is
 // an exhaustive `Record<SlotsAction["type"], true>` literal, which tsc
 // refuses to compile if a 15th member is added here without a matching key
 // there ("property is missing"). A plain `SlotsAction["type"][]` array only
@@ -373,7 +395,7 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
   switch (action.type) {
     case "add": {
       if (state.length >= MAX_ANNOUNCEMENT_BATCH_SIZE) return state;
-      return [...state, makeSlot(action.id, action.choice)];
+      return [...state, makeSlot(action.id, action.choice, action.timing)];
     }
     case "remove": {
       if (state.length <= 1) return state;
@@ -382,6 +404,9 @@ export function slotsReducer(state: readonly DraftSlot[], action: SlotsAction): 
     }
     case "choose": {
       return updateSlot(state, action.id, (slot) => ({ ...slot, choice: action.choice, regenerateArmed: false }));
+    }
+    case "choose-timing": {
+      return updateSlot(state, action.id, (slot) => ({ ...slot, timing: action.timing, regenerateArmed: false }));
     }
     case "edit": {
       return updateSlot(state, action.id, (slot) => {

@@ -36,7 +36,7 @@ import {
 } from "@/lib/lms-generation/generation-diag";
 import { deriveAnnouncementOutline } from "@/lib/announcement-outline";
 import { EMPTY_ANNOUNCEMENT_OUTLINE, type AnnouncementOutline } from "@/lib/announcement-outline-types";
-import { buildWalkthroughAnnouncementPrompt } from "@/lib/walkthrough-announcement-prompt";
+import { buildWalkthroughAnnouncementPrompt, type AnnouncementTiming } from "@/lib/walkthrough-announcement-prompt";
 import { walkthroughAnnouncementMaxOutputTokens } from "@/lib/walkthrough-announcement-bounds";
 import { composeWalkthroughScriptPrompt } from "@/lib/walkthrough-script-prompt";
 import { collectPermittedUrls, stripUnpermittedUrls } from "@/lib/walkthrough-announcement-link-guard";
@@ -308,7 +308,7 @@ export async function gatherWalkthroughResourcesAction(
 
 // ── Drafting (AC2-AC8, decisions P1/P7/P11) ─────────────────────────────────
 
-interface WalkthroughAnnouncementDraftInput {
+export interface WalkthroughAnnouncementDraftInput {
   courseLabel: string;
   moduleLabel: string | null;
   /** The reduced walkthrough materials text (module-deck-capture/module-
@@ -358,6 +358,10 @@ interface WalkthroughAnnouncementDraftInput {
    * invented prose.
    */
   researchOutcome: ResourceOutcome;
+  /** A19: which of the two tones (docs/a19-scope.md) this draft should use -
+   * REQUIRED, same reasoning as emojiPolicy above. Forwarded into
+   * buildWalkthroughAnnouncementPrompt below. */
+  timing: AnnouncementTiming;
 }
 
 /**
@@ -409,6 +413,8 @@ export async function draftWalkthroughAnnouncementAction(
       // action and going nowhere.
       emojiPolicy: input.emojiPolicy,
       researchedResources: input.researchedResources,
+      // A19: forwards the caller's chosen tone into the composer (AC-6/AC-7).
+      timing: input.timing,
     });
 
     const prompt = [

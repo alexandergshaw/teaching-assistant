@@ -633,3 +633,131 @@ describe("A18 AC-6: no stale \"record button\" phrase remains in the panel", () 
     ).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A19 (docs/a19-scope.md): two tones over the same captured pages. AC-6,
+// AC-7 and AC-11 each use the anchor-resolves construction copied verbatim
+// from docs/a18-scope.md's Ruling W3 (this file's own A18 blocks above use
+// the same shape): every indexOf-based slice asserts BOTH boundaries
+// resolve (> -1) before trusting the slice, because an unresolved indexOf
+// returns -1 and `.slice(-1, end)` or `.slice(start, -1)` silently widens
+// to nearly the whole file instead of going red.
+// ---------------------------------------------------------------------------
+
+describe("A19 AC-6: draftOne forwards ctx.timing into WalkthroughAnnouncementDraftInput.timing, sliced structurally", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  const startIdx = panelSource.indexOf("const draftOne = useCallback(");
+  const endIdx = panelSource.indexOf("},\n    []\n  );", startIdx);
+
+  it("finds draftOne's own useCallback opening (start anchor resolves)", () => {
+    expect(startIdx, "expected to find draftOne's own useCallback opening").toBeGreaterThan(-1);
+  });
+
+  it("finds draftOne's closing dependency array (end anchor resolves)", () => {
+    expect(endIdx, "expected to find draftOne's closing dependency array").toBeGreaterThan(-1);
+  });
+
+  it("the bounded slice forwards timing: ctx.timing", () => {
+    const slice = panelSource.slice(startIdx, endIdx);
+    expect(slice).toMatch(/timing:\s*ctx\.timing/);
+  });
+});
+
+describe("A19 AC-7: draftWalkthroughAnnouncementAction forwards input.timing into the composer call, sliced structurally", () => {
+  const ACTION_PATH = path.resolve(process.cwd(), "src/app/actions/walkthrough-announcement.ts");
+  const actionSource = fs.readFileSync(ACTION_PATH, "utf-8");
+
+  const startIdx = actionSource.indexOf("export async function draftWalkthroughAnnouncementAction(");
+
+  // "Next top-level export" boundary (section 6's own alternative to a
+  // bracket-depth scan): the function's return type itself contains object
+  // literals with their own braces (`Promise<({...} | {...}) & {...}>`), so
+  // a naive brace-depth count from the first `{` after startIdx closes on
+  // the RETURN TYPE's own brace, not the function body's - the very
+  // widening hazard Ruling V3 exists to close, just via a different
+  // mechanism than an unresolved indexOf. The next top-level export
+  // (draftWalkthroughVideoScriptAction, confirmed adjacent by direct
+  // reading of the source file) is a reliable, simpler boundary here.
+  const endIdx = actionSource.indexOf("export async function draftWalkthroughVideoScriptAction(", startIdx);
+
+  it("finds draftWalkthroughAnnouncementAction's own opening (start anchor resolves)", () => {
+    expect(startIdx, "expected to find draftWalkthroughAnnouncementAction's own opening").toBeGreaterThan(-1);
+  });
+
+  it("finds draftWalkthroughAnnouncementAction's closing brace (end anchor resolves)", () => {
+    expect(endIdx, "expected to find draftWalkthroughAnnouncementAction's closing brace").toBeGreaterThan(-1);
+  });
+
+  it("the bounded slice forwards timing: input.timing", () => {
+    const slice = actionSource.slice(startIdx, endIdx);
+    expect(slice).toMatch(/timing:\s*input\.timing/);
+  });
+});
+
+describe("A19 AC-11: the per-slot timing control is reachable from the rendered row, sliced structurally", () => {
+  const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+
+  const startIdx = source.indexOf('label="Timing"');
+  const endIdx = source.indexOf("</TextField>", startIdx);
+
+  it("finds the timing control's own label (start anchor resolves)", () => {
+    expect(startIdx, "expected to find the new per-slot timing control's own label").toBeGreaterThan(-1);
+  });
+
+  it("finds the timing control's closing tag (end anchor resolves)", () => {
+    expect(endIdx, "expected to find the timing control's closing tag").toBeGreaterThan(-1);
+  });
+
+  it("the bounded slice wires onChooseTiming (reading claim: no component is rendered by any test here)", () => {
+    const slice = source.slice(startIdx, endIdx);
+    expect(slice).toContain("onChooseTiming");
+  });
+});
+
+describe("A19 AC-15: researchFingerprint does NOT include timing (a deliberate non-goal, section 4)", () => {
+  const panelSource = fs.readFileSync(
+    path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "WalkthroughAnnouncementPanel.tsx"),
+    "utf-8"
+  );
+
+  const startIdx = panelSource.indexOf("const researchFingerprint = useCallback(");
+  const endIdx = panelSource.indexOf("}, []);", startIdx);
+
+  it("finds researchFingerprint's own definition (start anchor resolves)", () => {
+    expect(startIdx, "expected to find researchFingerprint's own definition").toBeGreaterThan(-1);
+  });
+
+  it("finds researchFingerprint's own closing (end anchor resolves)", () => {
+    expect(endIdx, "expected to find researchFingerprint's own closing").toBeGreaterThan(-1);
+  });
+
+  it("the fingerprint's own JSON.stringify array does not reference timing", () => {
+    const slice = panelSource.slice(startIdx, endIdx);
+    expect(slice).not.toMatch(/\btiming\b/i);
+  });
+});
+
+describe("A19 AC-12: staleTiming mirrors staleChoice - static source-text token comparison, not a runtime read", () => {
+  const source = fs.readFileSync(path.join(WALKTHROUGH_ANNOUNCEMENT_DIR, "AnnouncementDraftSlot.tsx"), "utf-8");
+
+  const startIdx = source.indexOf("const staleTiming =");
+  const endIdx = source.indexOf(";", startIdx);
+
+  it("finds staleTiming's own expression (start anchor resolves)", () => {
+    expect(startIdx, "expected to find staleTiming's own declaration").toBeGreaterThan(-1);
+  });
+
+  it("finds staleTiming's own statement terminator (end anchor resolves)", () => {
+    expect(endIdx, "expected to find staleTiming's own statement terminator").toBeGreaterThan(-1);
+  });
+
+  it("staleTiming's own expression compares with !==, mirroring staleChoice's own guard-pair shape", () => {
+    const slice = source.slice(startIdx, endIdx);
+    expect(slice).toMatch(/phase === "drafted" && slot\.draft\.phase === "drafted"/);
+    expect(slice).toContain("!==");
+  });
+});

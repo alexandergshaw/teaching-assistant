@@ -23,10 +23,17 @@ import {
   optionsForSlot,
   receiptLabel,
   savedFormatsStatusText,
+  timingLabel,
+  type AnnouncementTiming,
   type DraftSlot,
   type TemplateChoice,
   type TemplateOptionSource,
 } from "./announcement-draft-slots";
+
+const TIMING_OPTIONS: readonly { readonly value: AnnouncementTiming; readonly label: string }[] = [
+  { value: "beginning-of-week", label: "Beginning of week" },
+  { value: "midweek", label: "Midweek check-in" },
+];
 
 export interface AnnouncementDraftSlotProps {
   readonly slot: DraftSlot;
@@ -37,6 +44,7 @@ export interface AnnouncementDraftSlotProps {
   readonly courseName: string | null;
   readonly canRemove: boolean;
   readonly onChooseTemplate: (id: string, choice: TemplateChoice) => void;
+  readonly onChooseTiming: (id: string, timing: AnnouncementTiming) => void;
   readonly onEdit: (id: string, field: "title" | "message", value: string) => void;
   readonly onRegenerateArm: (id: string) => void;
   readonly onRegenerateConfirm: (id: string) => void;
@@ -56,6 +64,7 @@ export default function AnnouncementDraftSlot({
   courseName,
   canRemove,
   onChooseTemplate,
+  onChooseTiming,
   onEdit,
   onRegenerateArm,
   onRegenerateConfirm,
@@ -77,6 +86,9 @@ export default function AnnouncementDraftSlot({
   const staleChoice =
     phase === "drafted" && slot.draft.phase === "drafted" ? choiceId(slot.choice) !== builtFromId(slot.draft.draft.builtFrom) : false;
 
+  const staleTiming =
+    phase === "drafted" && slot.draft.phase === "drafted" ? slot.timing !== slot.draft.draft.timing : false;
+
   return (
     <fieldset className={controls.section}>
       <legend className={controls.sectionLegend}>Draft {ordinal}</legend>
@@ -95,6 +107,21 @@ export default function AnnouncementDraftSlot({
         {options.map((option) => (
           <MenuItem key={option.id} value={option.id}>
             {option.unavailable ? `${option.label} (no longer available)` : option.label}
+          </MenuItem>
+        ))}
+      </TextField>
+
+      <TextField
+        select
+        size="small"
+        label="Timing"
+        className={controls.fieldMd}
+        value={slot.timing}
+        onChange={(e) => onChooseTiming(slot.id, e.target.value as AnnouncementTiming)}
+      >
+        {TIMING_OPTIONS.map((option) => (
+          <MenuItem key={option.value} value={option.value}>
+            {option.label}
           </MenuItem>
         ))}
       </TextField>
@@ -135,6 +162,7 @@ export default function AnnouncementDraftSlot({
       {phase === "drafted" && slot.draft.phase === "drafted" && (
         <>
           <p className={styles.fieldHint}>{receiptLabel(slot.draft.draft.builtFrom)}</p>
+          <p className={styles.fieldHint}>{timingLabel(slot.draft.draft.timing)}</p>
           {/* G3 Ruling 5/14/30: "off", "found", "ran and found nothing", and
               "failed" must be distinguishable to the instructor - researchNotice
               carries the real text; "off" renders nothing here since the
@@ -147,6 +175,11 @@ export default function AnnouncementDraftSlot({
           {staleChoice && (
             <p className={styles.fieldHint}>
               This draft was made from a different format - Regenerate to apply your new choice.
+            </p>
+          )}
+          {staleTiming && (
+            <p className={styles.fieldHint}>
+              This draft was made with a different timing - Regenerate to apply your new choice.
             </p>
           )}
 

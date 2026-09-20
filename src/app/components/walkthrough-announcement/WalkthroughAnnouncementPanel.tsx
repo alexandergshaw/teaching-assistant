@@ -633,6 +633,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         emojiPolicy: ctx.emojiOn ? "requested" : "forbidden",
         researchedResources,
         researchOutcome: ctx.researchOutcome,
+        timing: ctx.timing,
       });
       if ("error" in result) return { error: result.error };
       return { title: result.title, message: result.message, researchNotice: result.researchNotice };
@@ -662,6 +663,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
     addSlot,
     removeSlot,
     chooseTemplate,
+    chooseTiming,
     editSlot,
     generate,
     regenerate,
@@ -777,12 +779,15 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
         savedExemplars={savedExemplars}
         canAddSlotFromExemplar={slots.length < MAX_ANNOUNCEMENT_BATCH_SIZE}
         onAddSlotFromExemplar={(ex) =>
-          addSlot({
-            kind: "saved",
-            exemplarId: ex.id,
-            label: ex.label || new Date(ex.createdAt).toLocaleDateString(),
-            outline: ex.outline,
-          })
+          addSlot(
+            {
+              kind: "saved",
+              exemplarId: ex.id,
+              label: ex.label || new Date(ex.createdAt).toLocaleDateString(),
+              outline: ex.outline,
+            },
+            "beginning-of-week"
+          )
         }
         removeArmedId={removeArmedId}
         onArmRemoveExemplar={(id) => setRemoveArmedId(id)}
@@ -908,6 +913,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             courseName={selectedCourse?.name ?? null}
             canRemove={slots.length > 1}
             onChooseTemplate={chooseTemplate}
+            onChooseTiming={chooseTiming}
             onEdit={editSlot}
             onRegenerateArm={armRegenerate}
             onRegenerateConfirm={regenerate}
@@ -923,7 +929,7 @@ export default function WalkthroughAnnouncementPanel({ active }: { active: boole
             size="small"
             variant="outlined"
             disabled={slots.length >= MAX_ANNOUNCEMENT_BATCH_SIZE}
-            onClick={() => addSlot({ kind: "default" })}
+            onClick={() => addSlot({ kind: "default" }, "beginning-of-week")}
           >
             Add another draft slot
           </Button>

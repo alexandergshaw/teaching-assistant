@@ -28,6 +28,7 @@ import {
   makeSlot,
   resolveChoice,
   slotsReducer,
+  type AnnouncementTiming,
   type DraftSlot,
   type LiveDefaults,
   type ResearchNotice,
@@ -61,6 +62,10 @@ export interface AnnouncementDraftRequestContext {
  * field. */
 export interface AnnouncementDraftDispatchContext extends AnnouncementDraftRequestContext {
   readonly researchOutcome: ResourceOutcome;
+  /** A19: the SLOT's own timing, not a shared/batch value (AC-5) - there is
+   * no `timing` on AnnouncementDraftRequestContext above; it is per-slot,
+   * read from `slot.timing` at each dispatch site, never from `ctx`. */
+  readonly timing: AnnouncementTiming;
 }
 
 /** Local mirror of markdown.ts's own `escapeHtml` (markdown.ts:28-29) - not
@@ -210,6 +215,7 @@ export function useAnnouncementDraftSlots(args: {
             message: result.message,
             researchNotice: result.researchNotice,
             builtFrom: resolved.template,
+            timing: ctx.timing,
           },
         });
       };
@@ -221,14 +227,15 @@ export function useAnnouncementDraftSlots(args: {
     []
   );
 
-  const addSlot = useCallback((choice: TemplateChoice) => {
+  const addSlot = useCallback((choice: TemplateChoice, timing: AnnouncementTiming) => {
     const id = `wta-slot-${nextIdRef.current}`;
     nextIdRef.current += 1;
-    dispatch({ type: "add", id, choice });
+    dispatch({ type: "add", id, choice, timing });
   }, []);
 
   const removeSlot = useCallback((id: string) => dispatch({ type: "remove", id }), []);
   const chooseTemplate = useCallback((id: string, choice: TemplateChoice) => dispatch({ type: "choose", id, choice }), []);
+  const chooseTiming = useCallback((id: string, timing: AnnouncementTiming) => dispatch({ type: "choose-timing", id, timing }), []);
   const editSlot = useCallback(
     (id: string, field: "title" | "message", value: string) => dispatch({ type: "edit", id, field, value }),
     []
@@ -284,7 +291,7 @@ export function useAnnouncementDraftSlots(args: {
     for (const id of ids) {
       const slot = slotsRef.current.find((s) => s.id === id);
       if (!slot) continue;
-      void runDraft(id, resolveChoice(slot.choice, live), { ...ctx, researchOutcome: outcome });
+      void runDraft(id, resolveChoice(slot.choice, live), { ...ctx, researchOutcome: outcome, timing: slot.timing });
     }
   }, [runDraft]);
 
@@ -305,7 +312,7 @@ export function useAnnouncementDraftSlots(args: {
       const fingerprint = argsRef.current.researchFingerprint(ctx);
       const outcome = resolveRegenerateResearchOutcome(ctx.researchOn, researchCacheRef.current, fingerprint);
 
-      void runDraft(id, resolveChoice(slot.choice, live), { ...ctx, researchOutcome: outcome });
+      void runDraft(id, resolveChoice(slot.choice, live), { ...ctx, researchOutcome: outcome, timing: slot.timing });
     },
     [runDraft]
   );
@@ -391,6 +398,7 @@ export function useAnnouncementDraftSlots(args: {
     addSlot,
     removeSlot,
     chooseTemplate,
+    chooseTiming,
     editSlot,
     generate,
     regenerate,
@@ -404,5 +412,5 @@ export function useAnnouncementDraftSlots(args: {
 }
 
 function initialSlotsFromId(id: string): readonly DraftSlot[] {
-  return [makeSlot(id, { kind: "default" })];
+  return [makeSlot(id, { kind: "default" }, "beginning-of-week")];
 }

@@ -52,6 +52,7 @@ describe("P11 end to end: a pasted exemplar cannot reach the model", () => {
       styleBlock: "",
       emojiPolicy: "forbidden",
       researchedResources: [],
+      timing: "beginning-of-week",
     });
 
     // The injection sentence.

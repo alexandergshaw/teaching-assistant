@@ -112,6 +112,7 @@ describe("draftWalkthroughAnnouncementAction", () => {
       coverageBlock: "[P1] Week 4 Overview",
       notes: "Mention the exam date.",
       emojiPolicy: "forbidden",
+      timing: "beginning-of-week",
       researchedResources: NO_RESEARCHED_RESOURCES,
       researchOutcome: NO_RESEARCH,
     });
@@ -140,6 +141,48 @@ describe("draftWalkthroughAnnouncementAction", () => {
     expect(promptText).toContain("[P1] Week 4 Overview");
   });
 
+  it("A19 AC-6/AC-7: forwards input.timing into the composed prompt - a midweek request produces the MIDWEEK CHECK-IN block, a beginning-of-week one does not", async () => {
+    vi.mocked(callLlm).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: '{"title": "T", "message": "M"}',
+    } as never);
+
+    await draftWalkthroughAnnouncementAction({
+      courseLabel: "PSYC 101",
+      moduleLabel: "Week 4",
+      materialsText: "## Week 4 Overview\nWe covered functions and scope.",
+      outline: REALISTIC_OUTLINE,
+      coverageBlock: "[P1] Week 4 Overview",
+      notes: "Mention the exam date.",
+      emojiPolicy: "forbidden",
+      researchedResources: NO_RESEARCHED_RESOURCES,
+      researchOutcome: NO_RESEARCH,
+      timing: "midweek",
+    });
+
+    const [midweekRequest] = vi.mocked(callLlm).mock.calls[0];
+    const midweekPrompt = (midweekRequest.contents[0].parts[0] as { text: string }).text;
+    expect(midweekPrompt).toContain("MIDWEEK CHECK-IN");
+
+    vi.mocked(callLlm).mockClear();
+    await draftWalkthroughAnnouncementAction({
+      courseLabel: "PSYC 101",
+      moduleLabel: "Week 4",
+      materialsText: "## Week 4 Overview\nWe covered functions and scope.",
+      outline: REALISTIC_OUTLINE,
+      coverageBlock: "[P1] Week 4 Overview",
+      notes: "Mention the exam date.",
+      emojiPolicy: "forbidden",
+      researchedResources: NO_RESEARCHED_RESOURCES,
+      researchOutcome: NO_RESEARCH,
+      timing: "beginning-of-week",
+    });
+    const [beginningOfWeekRequest] = vi.mocked(callLlm).mock.calls[0];
+    const beginningOfWeekPrompt = (beginningOfWeekRequest.contents[0].parts[0] as { text: string }).text;
+    expect(beginningOfWeekPrompt).not.toContain("MIDWEEK CHECK-IN");
+  });
+
   it("requests markdown bold/italic emphasis in the full composed prompt handed to the model, including the action's own JSON-requirements string (which the prompt-builder's own test file cannot see, since it is composed here at :263, one file away from the library)", async () => {
     vi.mocked(callLlm).mockResolvedValue({
       ok: true,
@@ -155,6 +198,7 @@ describe("draftWalkthroughAnnouncementAction", () => {
       coverageBlock: "[P1] Week 4 Overview",
       notes: "Mention the exam date.",
       emojiPolicy: "forbidden",
+      timing: "beginning-of-week",
       researchedResources: NO_RESEARCHED_RESOURCES,
       researchOutcome: NO_RESEARCH,
     });
@@ -204,6 +248,7 @@ describe("draftWalkthroughAnnouncementAction", () => {
       coverageBlock: "",
       notes: "",
       emojiPolicy: "forbidden",
+      timing: "beginning-of-week",
       researchedResources: NO_RESEARCHED_RESOURCES,
       researchOutcome: NO_RESEARCH,
     });
@@ -224,6 +269,7 @@ describe("draftWalkthroughAnnouncementAction", () => {
       coverageBlock: "",
       notes: "",
       emojiPolicy: "forbidden",
+      timing: "beginning-of-week",
       researchedResources: NO_RESEARCHED_RESOURCES,
       researchOutcome: NO_RESEARCH,
     });
@@ -246,6 +292,7 @@ describe("draftWalkthroughAnnouncementAction", () => {
       coverageBlock: "",
       notes: "",
       emojiPolicy: "forbidden",
+      timing: "beginning-of-week",
       researchedResources: NO_RESEARCHED_RESOURCES,
       researchOutcome: NO_RESEARCH,
     });
@@ -269,6 +316,7 @@ describe("draftWalkthroughAnnouncementAction", () => {
       coverageBlock: "",
       notes: "",
       emojiPolicy: "forbidden",
+      timing: "beginning-of-week",
       researchedResources: [{ title: "MDN Arrays", url: "https://developer.mozilla.org/arrays" }],
       researchOutcome: {
         kind: "found",
@@ -302,6 +350,7 @@ describe("draftWalkthroughAnnouncementAction", () => {
       coverageBlock: "",
       notes: "",
       emojiPolicy: "forbidden",
+      timing: "beginning-of-week",
       researchedResources: [{ title: "MDN", url: "https://developer.mozilla.org/arrays" }],
       researchOutcome: { kind: "off" } as never,
     });

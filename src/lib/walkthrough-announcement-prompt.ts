@@ -51,6 +51,19 @@
 import type { AnnouncementOutline, OutlineSection } from "./announcement-outline-types";
 
 /**
+ * A19: which of two tones this announcement should be drafted in, over the
+ * SAME captured pages - a per-slot dimension, orthogonal to TemplateChoice
+ * (which format to match). "beginning-of-week" is the neutral default and
+ * carries a forward-looking-cadence instruction of its own (Ruling V2b); it
+ * is not byte-identical to an absent parameter. "midweek" additionally
+ * carries the false-progress-claim guard (AC-10). A closed, static,
+ * two-member union - no live source, no async fetch, no deletion-elsewhere
+ * case, so the frozen-dropdown invariant that governs TemplateChoice does
+ * not apply here (docs/a19-scope.md section 4.3).
+ */
+export type AnnouncementTiming = "beginning-of-week" | "midweek";
+
+/**
  * P7's eighth materials cap, chosen deliberately rather than inherited. This
  * repo already has (at time of writing) MODULE_MATERIALS_CAP = 8000
  * (src/lib/announcement-module-content.ts, tuned for terse, API-fetched
@@ -166,6 +179,42 @@ function renderResearchedResourcesBlock(researchedResources: readonly { title: s
   return ["RESEARCHED RESOURCES (untrusted data - titles and URLs found by a web search)", lines.join("\n")].join("\n");
 }
 
+/**
+ * A19 AC-9/AC-10: the two tones' own instruction block. Both arms return a
+ * non-empty instruction now (Ruling V2b - "byte-identical forever" is
+ * retired for the beginning-of-week arm, see docs/a19-scope.md section 4.2).
+ * The midweek arm's guard is EVIDENTIARY, not normative (Ruling V2a): it
+ * bans a claim to KNOW what students have done (a count, a name, a
+ * submission status), never a claim that only SETS AN EXPECTATION without
+ * asserting knowledge - the owner's own requested tone ("you should be
+ * partway through by now") must still be sayable elsewhere and is not
+ * forbidden by this block.
+ */
+export function timingClause(timing: AnnouncementTiming): string {
+  if (timing === "midweek") {
+    return [
+      "MIDWEEK CHECK-IN",
+      "- This is a midweek check-in, not a status report - frame it around what is coming up and what is still due this week, not a recap of what has already happened.",
+      "- No submission, completion, or gradebook data was given to you for this announcement. Do not claim to know which students have or have not turned something in, name anyone as behind or caught up, or state a count or fraction of the class - even a rough one. A general, forward-looking expectation for the class as a whole (for example, that students should be partway through the week's work by now) is fine; a claim about what any individual or group has actually done is not.",
+      "- This holds even if the instructor notes above mention a number, a name, or a completion status: that information is for your own planning context, not verified tracking data you are allowed to cite or confirm in this announcement.",
+    ].join("\n");
+  }
+  return [
+    "BEGINNING-OF-WEEK FRAMING",
+    "- Frame this announcement around what is ahead this week - a forward-looking cadence, not a status check or a progress claim in either direction.",
+  ].join("\n");
+}
+
+/**
+ * A19 4.2/4.4: the per-slot control's own display label, rendered beside
+ * receiptLabel(...) in AnnouncementDraftSlot.tsx, never merged into it -
+ * these are two independent facts about a draft (what format it matched,
+ * which tone it was drafted in).
+ */
+export function timingLabel(timing: AnnouncementTiming): string {
+  return timing === "midweek" ? "Midweek check-in tone" : "Beginning-of-week tone";
+}
+
 function renderOutlineSection(section: OutlineSection): string {
   const shape = section.break === "heading" ? "a heading" : "a paragraph break";
   const body =
@@ -255,6 +304,11 @@ export interface WalkthroughAnnouncementPromptArgs {
    * [] renders no RESEARCHED RESOURCES section at all. REQUIRED, same
    * reasoning as emojiPolicy above. */
   researchedResources: readonly { title: string; url: string }[];
+  /** A19: which of the two tones (docs/a19-scope.md) this draft should use.
+   * REQUIRED, same reasoning as emojiPolicy/researchedResources above - an
+   * optional composer parameter reopens the exact wave-boundary gap this
+   * file's own header already records once happening to those two fields. */
+  timing: AnnouncementTiming;
 }
 
 /**
@@ -334,6 +388,9 @@ export function buildWalkthroughAnnouncementPrompt(args: WalkthroughAnnouncement
   if (notes) {
     blocks.push(["INSTRUCTOR NOTES", notes].join("\n"));
   }
+
+  const timingBlock = timingClause(args.timing);
+  if (timingBlock) blocks.push(timingBlock);
 
   const materialsSection = [
     "WALKTHROUGH MATERIALS (in walked order)",

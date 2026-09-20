@@ -1,5 +1,5 @@
 // docs/announcement-from-walkthrough-acceptance-criteria.md 8: one describe block per member of the SlotsAction
-// union (read off the type, 14 members), not per any transition table row -
+// union (read off the type, 15 members as of A19), not per any transition table row -
 // so a 15th member added later fails this file's own construction, not just
 // whatever this document happens to list today. Every guard/effect
 // assertion below was sabotage-checked while this file was written: the
@@ -43,10 +43,11 @@ const DRAFTED: Drafted = {
   message: "Hello",
   builtFrom: { kind: "pasted" },
   researchNotice: { kind: "off" },
+  timing: "beginning-of-week",
 };
 
 function drafted(id: string, overrides: Partial<DraftSlot> = {}): DraftSlot {
-  return { ...makeSlot(id, { kind: "default" }), draft: { phase: "drafted", draft: DRAFTED, error: null }, ...overrides };
+  return { ...makeSlot(id, { kind: "default" }, "beginning-of-week"), draft: { phase: "drafted", draft: DRAFTED, error: null }, ...overrides };
 }
 
 const SRC_EMPTY: TemplateOptionSource = {
@@ -63,14 +64,19 @@ const SRC_EMPTY: TemplateOptionSource = {
 const ALL_SAVED_FORMATS_STATES: readonly SavedFormatsState[] = ["loading", "loaded", "failed", "timedout"];
 
 describe("initialSlots / makeSlot / emptySlotIds", () => {
-  it("initialSlots returns exactly one slot, choice default, phase empty", () => {
+  it("initialSlots returns exactly one slot, choice default, phase empty, timing beginning-of-week", () => {
     const slots = initialSlots(FIRST_SLOT_ID);
     expect(slots).toHaveLength(1);
-    expect(slots[0]).toMatchObject({ id: FIRST_SLOT_ID, choice: { kind: "default" }, draft: { phase: "empty", error: null } });
+    expect(slots[0]).toMatchObject({
+      id: FIRST_SLOT_ID,
+      choice: { kind: "default" },
+      timing: "beginning-of-week",
+      draft: { phase: "empty", error: null },
+    });
   });
 
   it("emptySlotIds returns only ids of empty-phase slots", () => {
-    const slots = [makeSlot("a", { kind: "default" }), drafted("b"), makeSlot("c", { kind: "none" })];
+    const slots = [makeSlot("a", { kind: "default" }, "beginning-of-week"), drafted("b"), makeSlot("c", { kind: "none" }, "beginning-of-week")];
     expect(emptySlotIds(slots)).toEqual(["a", "c"]);
   });
 });
@@ -162,13 +168,13 @@ describe("resolveChoice - Set C", () => {
 
 describe("optionsForSlot - Set G", () => {
   it("always contains an option whose id === choiceId(slot.choice), even for a saved choice absent from src.saved", () => {
-    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A }, "beginning-of-week");
     const options = optionsForSlot(slot, SRC_EMPTY);
     expect(options.some((o) => o.id === choiceId(slot.choice))).toBe(true);
   });
 
   it("POSITIVE case (relocated obligation 1): a saved choice absent from a SUCCESSFULLY loaded list is flagged unavailable: true", () => {
-    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A }, "beginning-of-week");
     const src: TemplateOptionSource = { ...SRC_EMPTY, savedState: "loaded", saved: [] };
     const options = optionsForSlot(slot, src);
     const synthetic = options.find((o) => o.id === choiceId(slot.choice));
@@ -180,28 +186,28 @@ describe("optionsForSlot - Set G", () => {
   });
 
   it("NEGATIVE case: the same absent saved choice is NOT unavailable while the list is still loading", () => {
-    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A }, "beginning-of-week");
     const options = optionsForSlot(slot, { ...SRC_EMPTY, savedState: "loading" });
     const synthetic = options.find((o) => o.id === choiceId(slot.choice));
     expect(synthetic?.unavailable).toBe(false);
   });
 
   it("NEGATIVE case: the same absent saved choice is NOT unavailable when the list failed to load", () => {
-    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A }, "beginning-of-week");
     const options = optionsForSlot(slot, { ...SRC_EMPTY, savedState: "failed" });
     const synthetic = options.find((o) => o.id === choiceId(slot.choice));
     expect(synthetic?.unavailable).toBe(false);
   });
 
   it("G1 NEGATIVE case: the same absent saved choice is NOT unavailable after the fetch timed out - a timeout proves nothing about whether the format still exists", () => {
-    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A }, "beginning-of-week");
     const options = optionsForSlot(slot, { ...SRC_EMPTY, savedState: "timedout" });
     const synthetic = options.find((o) => o.id === choiceId(slot.choice));
     expect(synthetic?.unavailable).toBe(false);
   });
 
   it("G1 table: unavailable is true only for 'loaded', false for every other SavedFormatsState, for a saved choice absent from the list", () => {
-    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A });
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "gone", label: "Gone Format", outline: OUTLINE_A }, "beginning-of-week");
     for (const state of ALL_SAVED_FORMATS_STATES) {
       const options = optionsForSlot(slot, { ...SRC_EMPTY, savedState: state });
       const synthetic = options.find((o) => o.id === choiceId(slot.choice));
@@ -210,14 +216,14 @@ describe("optionsForSlot - Set G", () => {
   });
 
   it("does not synthesize an extra option when the saved choice IS present in src.saved", () => {
-    const slot = makeSlot("a", { kind: "saved", exemplarId: "e1", label: "Present", outline: OUTLINE_A });
+    const slot = makeSlot("a", { kind: "saved", exemplarId: "e1", label: "Present", outline: OUTLINE_A }, "beginning-of-week");
     const src: TemplateOptionSource = { ...SRC_EMPTY, saved: [{ id: "e1", label: "Present", outline: OUTLINE_A }] };
     const options = optionsForSlot(slot, src);
     expect(options.filter((o) => o.id === "saved:e1")).toHaveLength(1);
   });
 
   it("H2 POSITIVE: a pasted choice with the paste box now empty (hasPastedText: false) still gets a synthetic pasted option, flagged unavailable - without this, the dropdown falls back to Default while resolveChoice still resolves to pasted (i.e. the empty outline), a silent divergence between displayed and drafted state", () => {
-    const slot = makeSlot("a", { kind: "pasted" });
+    const slot = makeSlot("a", { kind: "pasted" }, "beginning-of-week");
     const options = optionsForSlot(slot, { ...SRC_EMPTY, hasPastedText: false });
     const synthetic = options.find((o) => o.id === choiceId(slot.choice));
     expect(synthetic).toBeDefined();
@@ -230,45 +236,61 @@ describe("optionsForSlot - Set G", () => {
   });
 
   it("H2 NEGATIVE: a pasted choice while the paste box IS populated does not synthesize a second pasted option", () => {
-    const slot = makeSlot("a", { kind: "pasted" });
+    const slot = makeSlot("a", { kind: "pasted" }, "beginning-of-week");
     const options = optionsForSlot(slot, { ...SRC_EMPTY, hasPastedText: true });
     expect(options.filter((o) => o.id === "pasted")).toHaveLength(1);
   });
 });
 
 // ---------------------------------------------------------------------------
-// slotsReducer - one describe per SlotsAction member (14).
+// slotsReducer - one describe per SlotsAction member (15, as of A19).
 // ---------------------------------------------------------------------------
 
 describe('"add"', () => {
-  it("appends a new empty slot with the given choice", () => {
+  it("appends a new empty slot with the given choice and timing", () => {
     const state = initialSlots(FIRST_SLOT_ID);
-    const next = slotsReducer(state, { type: "add", id: "wta-slot-2", choice: { kind: "none" } });
+    const next = slotsReducer(state, { type: "add", id: "wta-slot-2", choice: { kind: "none" }, timing: "beginning-of-week" });
     expect(next).toHaveLength(2);
-    expect(next[1]).toMatchObject({ id: "wta-slot-2", choice: { kind: "none" }, draft: { phase: "empty" } });
+    expect(next[1]).toMatchObject({
+      id: "wta-slot-2",
+      choice: { kind: "none" },
+      timing: "beginning-of-week",
+      draft: { phase: "empty" },
+    });
+  });
+
+  it("A19 AC-4: a new slot may be added with the midweek timing, distinct from another slot's beginning-of-week timing", () => {
+    const state = slotsReducer(initialSlots(FIRST_SLOT_ID), {
+      type: "add",
+      id: "wta-slot-2",
+      choice: { kind: "none" },
+      timing: "midweek",
+    });
+    expect(state[0].timing).toBe("beginning-of-week");
+    expect(state[1].timing).toBe("midweek");
   });
 
   it("a saved choice can be pre-chosen from the browse list", () => {
     const state = initialSlots(FIRST_SLOT_ID);
     const choice = { kind: "saved" as const, exemplarId: "e1", label: "L", outline: OUTLINE_A };
-    const next = slotsReducer(state, { type: "add", id: "wta-slot-2", choice });
+    const next = slotsReducer(state, { type: "add", id: "wta-slot-2", choice, timing: "beginning-of-week" });
     expect(next[1].choice).toEqual(choice);
   });
 
   it("guard: no-op at MAX_ANNOUNCEMENT_BATCH_SIZE", () => {
     let state = initialSlots(FIRST_SLOT_ID);
     for (let i = 2; i <= MAX_ANNOUNCEMENT_BATCH_SIZE; i++) {
-      state = slotsReducer(state, { type: "add", id: `wta-slot-${i}`, choice: { kind: "none" } });
+      state = slotsReducer(state, { type: "add", id: `wta-slot-${i}`, choice: { kind: "none" }, timing: "beginning-of-week" });
     }
     expect(state).toHaveLength(MAX_ANNOUNCEMENT_BATCH_SIZE);
-    const beyond = slotsReducer(state, { type: "add", id: "wta-slot-overflow", choice: { kind: "none" } });
+    const beyond = slotsReducer(state, { type: "add", id: "wta-slot-overflow", choice: { kind: "none" }, timing: "beginning-of-week" });
     expect(beyond).toBe(state);
   });
 });
 
 describe('"remove"', () => {
   it("drops the slot by id", () => {
-    const state = slotsReducer(initialSlots(FIRST_SLOT_ID), { type: "add", id: "wta-slot-2", choice: { kind: "none" } });
+    const state = slotsReducer(initialSlots(FIRST_SLOT_ID), { type: "add", id: "wta-slot-2", choice: { kind: "none" }, timing: "beginning-of-week" });
     const next = slotsReducer(state, { type: "remove", id: FIRST_SLOT_ID });
     expect(next.map((s) => s.id)).toEqual(["wta-slot-2"]);
   });
@@ -280,7 +302,7 @@ describe('"remove"', () => {
   });
 
   it("guard: unknown id is a no-op", () => {
-    const state = slotsReducer(initialSlots(FIRST_SLOT_ID), { type: "add", id: "wta-slot-2", choice: { kind: "none" } });
+    const state = slotsReducer(initialSlots(FIRST_SLOT_ID), { type: "add", id: "wta-slot-2", choice: { kind: "none" }, timing: "beginning-of-week" });
     const next = slotsReducer(state, { type: "remove", id: "does-not-exist" });
     expect(next).toBe(state);
   });
@@ -305,6 +327,34 @@ describe('"choose"', () => {
     const state = initialSlots(FIRST_SLOT_ID);
     const next = slotsReducer(state, { type: "choose", id: "does-not-exist", choice: { kind: "none" } });
     expect(next).toBe(state);
+  });
+});
+
+describe('"choose-timing" (A19)', () => {
+  it("effect: writes the timing and clears regenerateArmed", () => {
+    const state = [drafted(FIRST_SLOT_ID, { regenerateArmed: true })];
+    const next = slotsReducer(state, { type: "choose-timing", id: FIRST_SLOT_ID, timing: "midweek" });
+    expect(next[0].timing).toBe("midweek");
+    expect(next[0].regenerateArmed).toBe(false);
+  });
+
+  it("guard: leaves draft byte-identical", () => {
+    const state = [drafted(FIRST_SLOT_ID)];
+    const next = slotsReducer(state, { type: "choose-timing", id: FIRST_SLOT_ID, timing: "midweek" });
+    expect(next[0].draft).toBe(state[0].draft);
+  });
+
+  it("guard: unknown id is a no-op", () => {
+    const state = initialSlots(FIRST_SLOT_ID);
+    const next = slotsReducer(state, { type: "choose-timing", id: "does-not-exist", timing: "midweek" });
+    expect(next).toBe(state);
+  });
+
+  it("does not affect the slot's own template choice - orthogonal fields", () => {
+    const state = [makeSlot(FIRST_SLOT_ID, { kind: "none" }, "beginning-of-week")];
+    const next = slotsReducer(state, { type: "choose-timing", id: FIRST_SLOT_ID, timing: "midweek" });
+    expect(next[0].choice).toEqual({ kind: "none" });
+    expect(next[0].timing).toBe("midweek");
   });
 });
 
@@ -339,7 +389,7 @@ describe('"edit"', () => {
 
 describe('"generate-started" - Set A', () => {
   it("effect: moves every named empty slot to drafting with restore: null", () => {
-    const state = [makeSlot("a", { kind: "default" }), makeSlot("b", { kind: "default" })];
+    const state = [makeSlot("a", { kind: "default" }, "beginning-of-week"), makeSlot("b", { kind: "default" }, "beginning-of-week")];
     const next = slotsReducer(state, { type: "generate-started", ids: ["a", "b"] });
     expect(next[0].draft).toEqual({ phase: "drafting", restore: null });
     expect(next[1].draft).toEqual({ phase: "drafting", restore: null });
@@ -347,19 +397,19 @@ describe('"generate-started" - Set A', () => {
 
   it("guard: a drafted slot is byte-identical when not named", () => {
     const drafted1 = drafted("a");
-    const state = [drafted1, makeSlot("b", { kind: "default" })];
+    const state = [drafted1, makeSlot("b", { kind: "default" }, "beginning-of-week")];
     const next = slotsReducer(state, { type: "generate-started", ids: ["b"] });
     expect(next[0]).toBe(drafted1);
   });
 
   it("guard: a drafting slot stays byte-identical even if named again", () => {
-    const state = slotsReducer([makeSlot("a", { kind: "default" })], { type: "generate-started", ids: ["a"] });
+    const state = slotsReducer([makeSlot("a", { kind: "default" }, "beginning-of-week")], { type: "generate-started", ids: ["a"] });
     const next = slotsReducer(state, { type: "generate-started", ids: ["a"] });
     expect(next).toBe(state);
   });
 
   it("guard: unknown id ignored", () => {
-    const state = [makeSlot("a", { kind: "default" })];
+    const state = [makeSlot("a", { kind: "default" }, "beginning-of-week")];
     const next = slotsReducer(state, { type: "generate-started", ids: ["does-not-exist"] });
     expect(next).toBe(state);
   });
@@ -427,7 +477,7 @@ describe('"result" - Set D-succ / Set D-fail (flagship chain, part 2)', () => {
   it("Set D-succ effect: success yields drafted with builtFrom deep-equal, and clears postArmedFor, postedTo, postError, copyError, posting", () => {
     const state = [
       {
-        ...makeSlot(FIRST_SLOT_ID, { kind: "default" }),
+        ...makeSlot(FIRST_SLOT_ID, { kind: "default" }, "beginning-of-week"),
         draft: { phase: "drafting" as const, restore: null },
         postArmedFor: "sig",
         postedTo: "Old Course",
@@ -454,13 +504,13 @@ describe('"result" - Set D-succ / Set D-fail (flagship chain, part 2)', () => {
   });
 
   it("Set D-fail: result{error} with restore === null yields phase empty with the error", () => {
-    const state = slotsReducer([makeSlot(FIRST_SLOT_ID, { kind: "default" })], { type: "generate-started", ids: [FIRST_SLOT_ID] });
+    const state = slotsReducer([makeSlot(FIRST_SLOT_ID, { kind: "default" }, "beginning-of-week")], { type: "generate-started", ids: [FIRST_SLOT_ID] });
     const next = slotsReducer(state, { type: "result", id: FIRST_SLOT_ID, result: { error: "boom" } });
     expect(next[0].draft).toEqual({ phase: "empty", error: "boom" });
   });
 
   it("Set D-fail: a rejection-arm result{error} exits drafting exactly as the action-error path does", () => {
-    const state = slotsReducer([makeSlot(FIRST_SLOT_ID, { kind: "default" })], { type: "generate-started", ids: [FIRST_SLOT_ID] });
+    const state = slotsReducer([makeSlot(FIRST_SLOT_ID, { kind: "default" }, "beginning-of-week")], { type: "generate-started", ids: [FIRST_SLOT_ID] });
     const rejected = slotsReducer(state, {
       type: "result",
       id: FIRST_SLOT_ID,
@@ -659,9 +709,9 @@ describe("savedFormatsStatusText - G1", () => {
   });
 });
 
-describe("SlotsAction union has exactly 14 members (C1)", () => {
+describe("SlotsAction union has exactly 15 members (C1)", () => {
   it("compile-time exhaustiveness: a Record keyed by every union member fails TypeScript compilation (not merely this test) if a member is added without a matching key here - an array typed SlotsAction['type'][] only checks each element IS a member, never that every member is present, so it cannot catch an addition", () => {
-    // If a 15th SlotsAction member is ever added, tsc reports this object
+    // If a 16th SlotsAction member is ever added, tsc reports this object
     // literal is missing that property - the failure is `npx tsc --noEmit`,
     // not a red assertion below, which is why the runtime check is only the
     // key COUNT, not membership.
@@ -669,6 +719,7 @@ describe("SlotsAction union has exactly 14 members (C1)", () => {
       add: true,
       remove: true,
       choose: true,
+      "choose-timing": true,
       edit: true,
       "generate-started": true,
       "regenerate-started": true,
@@ -681,6 +732,6 @@ describe("SlotsAction union has exactly 14 members (C1)", () => {
       "post-result": true,
       "copy-result": true,
     };
-    expect(Object.keys(memberTypes)).toHaveLength(14);
+    expect(Object.keys(memberTypes)).toHaveLength(15);
   });
 });

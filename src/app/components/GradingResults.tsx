@@ -56,6 +56,12 @@ import { formatScorePercent, scorePercentValue } from "./repo-grades/repoGradeSc
 // safe submodule) to keep this client bundle away from @/lib/grade's
 // server-only barrel.
 import { checkRowPostability } from "../../lib/grade/postable";
+// A12/A13 (docs/a12-a13-scope.md): classifyRow gives a count-bound/deadline-
+// stopped or rescued row a distinct, correct disclosure instead of the
+// engine's own "Re-run to grade the rest" sentence landing verbatim in the
+// What Went Well box; correctUngradedSeeds is the wiring that reaches the
+// live `edits` map at both places it is (re)seeded from a run, below.
+import { classifyRow, correctUngradedSeeds, describeSkippedStatus } from "./grading-results/ungradedDisclosure";
 
 // CopyIcon/EyeIcon/DownloadIcon moved to ./grading-results/icons.tsx (this
 // file's line-budget extraction). ExpandIcon moved to
@@ -173,7 +179,9 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // whatever was last persisted for THIS canvasUrl, validated and merged
   // against the current run by loadGradingResultsEdits (never trusts stored
   // data - see its own doc comment in gradingResultsHelpers.ts).
-  const [edits, setEdits] = useState<Record<string, RowEdit>>(() => loadGradingResultsEdits(canvasUrl, run));
+  const [edits, setEdits] = useState<Record<string, RowEdit>>(() =>
+    correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run))
+  );
   const [prevRun, setPrevRun] = useState(run);
   const [postStatus, setPostStatus] = useState<Record<string, PostState>>({});
   const [postSummary, setPostSummary] = useState("");
@@ -192,7 +200,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
   // the seeded map for a student the new run doesn't have.
   if (run !== prevRun) {
     setPrevRun(run);
-    setEdits(loadGradingResultsEdits(canvasUrl, run));
+    setEdits(correctUngradedSeeds(run, loadGradingResultsEdits(canvasUrl, run)));
     setPostStatus({});
     setPostSummary("");
     setExpandedBox(null);
@@ -603,7 +611,10 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
               const rowPosting = posting || status?.status === "posting";
 
               return (
-                <tr key={`${result.student}-matrix`}>
+                <tr
+                  key={`${result.student}-matrix`}
+                  data-ungraded-state={classifyRow(result, edit).state}
+                >
                   <td>
                     <div style={{ fontWeight: 600 }}>{result.student}</div>
                     {sgHref && (
@@ -646,7 +657,7 @@ const GradingResults = forwardRef<GradingResultsHandle, GradingResultsProps>(fun
                           : status.status === "posting"
                             ? "Posting…"
                             : status.status === "skipped"
-                              ? "Not posted - no grade or comment to send"
+                              ? describeSkippedStatus(status.message)
                               : `Failed: ${status.message ?? ""}`}
                       </div>
                     )}

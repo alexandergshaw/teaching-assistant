@@ -20,7 +20,7 @@
 // input and confirming its output is NOT what a broken implementation would
 // produce - i.e. this test would fail against broken escaping.
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -848,43 +848,74 @@ describe("grading-results client files stay client-bundle-safe", () => {
     "./useResultsSort.ts",
     "./ResultsTableHeaderRow.tsx",
     "./FeedbackExpandModal.tsx",
+    "./FilesCell.tsx", // A16-1: the Files-column cell moved out to its own file.
+    "./ungradedDisclosure.ts", // A12/A13 (docs/a12-a13-scope.md) - Ruling R part 1.
     "../GradingResults.tsx",
   ];
 
-  // A quoted import specifier, not this describe block's own prose above
-  // (which mentions next/headers and @/lib/grade in backticks/code font
-  // while explaining exactly why this guard exists) - matching the "from
-  // '...'" shape every banned string can only appear in as a real import.
+  // KNOWN GAP, not this chunk's file: classTrendsEntry.ts (A16-1) type-only
+  // imports the banned "@/lib/grade" barrel; fixing it edits a file outside
+  // this chunk's owns. Excluded from R4's sweep, filed as a follow-up.
+  const KNOWN_UNREGISTERED_LOCAL_FILES = ["./classTrendsEntry.ts"];
+
+  // Ruling R part 2: narrowed to exempt "@/lib/grade/types" only - a
+  // near-miss like "@/lib/grade/typesFoo" is still banned.
   const BANNED_IMPORT_PATTERNS: RegExp[] = [
     /from ["']@\/lib\/grade["']/,
-    /from ["']@\/lib\/grade\//,
+    /from ["']@\/lib\/grade\/(?!types["'])/,
     /from ["']@\/lib\/supabase\/server["']/,
     /from ["']next\/headers["']/,
   ];
 
-  it("canary: the ban patterns actually fire on a known-bad import string", () => {
+  it("canary: the ban patterns fire on known-bad imports, spare the react import, and spare Ruling R's exemption (both quote styles)", () => {
     const knownBad = [
       'import { composeOverallComment } from "@/lib/grade";',
       "import { composeOverallComment } from '@/lib/grade';",
       'import { generateRubric } from "@/lib/grade/rubric";',
+      "import { generateRubric } from '@/lib/grade/rubric';",
       'import { createServiceClient } from "@/lib/supabase/server";',
       'import { headers } from "next/headers";',
     ];
-    for (const fixture of knownBad) {
-      expect(BANNED_IMPORT_PATTERNS.some((pattern) => pattern.test(fixture))).toBe(true);
-    }
-    // And a negative control: an ordinary, unrelated import must NOT trip it,
-    // so this canary is proven to discriminate, not just match everything.
-    expect(BANNED_IMPORT_PATTERNS.some((pattern) => pattern.test('import { useState } from "react";'))).toBe(
-      false
-    );
+    const fires = (fixture: string) => BANNED_IMPORT_PATTERNS.some((pattern) => pattern.test(fixture));
+    for (const fixture of knownBad) expect(fires(fixture)).toBe(true);
+    expect(fires('import { useState } from "react";')).toBe(false);
+    expect(fires('import type { X } from "@/lib/grade/types";')).toBe(false);
+    expect(fires("import type { X } from '@/lib/grade/types';")).toBe(false);
   });
 
-  it.each(CLIENT_FILES)("%s never imports @/lib/grade (or a submodule), @/lib/supabase/server, or next/headers", (relativePath) => {
+  it.each(CLIENT_FILES)("%s never imports the banned modules", (relativePath) => {
     const source = readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
     for (const pattern of BANNED_IMPORT_PATTERNS) {
       expect(source).not.toMatch(pattern);
     }
+  });
+
+  // Ruling U3: VALUE_IMPORT_PATTERN was withdrawn (misses re-exports/require/
+  // dynamic import). Replaced by a walled-set count: types.ts must carry
+  // exactly one `from "` occurrence, and it must be the known type-only
+  // import. types.ts is read-only here (S14's precedent).
+  it('types.ts carries exactly one `from "` occurrence, and it is the known type-only import (Ruling U3)', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../../../lib/grade/types.ts", import.meta.url)),
+      "utf8"
+    );
+    const fromLines = source
+      .split(/\r?\n/)
+      .filter((line) => line.includes(' from "') && !/^\s*(\*|\/\/)/.test(line.trim()));
+    expect(fromLines).toEqual(['import type { CodeRunResult } from "../code-runner";']);
+  });
+
+  // Ruling R part 4: a completeness sweep so a future file cannot escape
+  // CLIENT_FILES by omission - the gap FilesCell.tsx/ungradedDisclosure.ts left.
+  it("CLIENT_FILES lists every non-test .ts/.tsx file in this directory (Ruling R part 4)", () => {
+    const dir = fileURLToPath(new URL(".", import.meta.url));
+    const localFiles = readdirSync(dir)
+      .filter(
+        (n) => /\.(ts|tsx)$/.test(n) && !n.endsWith(".test.ts") && !n.endsWith(".test.tsx") && !n.endsWith(".d.ts")
+      )
+      .map((n) => `./${n}`)
+      .filter((n) => !KNOWN_UNREGISTERED_LOCAL_FILES.includes(n));
+    for (const name of localFiles) expect(CLIENT_FILES).toContain(name);
   });
 });
 

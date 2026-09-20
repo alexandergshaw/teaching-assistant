@@ -152,6 +152,46 @@ describe("joinFeedback derives what overallComment still contributes (A10)", () 
     );
   });
 
+  it("diverged row that ENDS WITH the notice: the instructor's own sentence survives, because the predicate is byte equality and not endsWith", () => {
+    // THE ENFORCER FOR THE DESIGN DECISION THIS ROW EXISTS FOR, and nothing
+    // else in the repo holds it. Swapping the byte-equality predicate for
+    // endsWith(RESUBMIT_NOTICE) - the shape that was explicitly considered and
+    // rejected - passes every other test in this file and in src. Measured.
+    //
+    // It is not cosmetic. This overallComment is NOT the composition of the
+    // row's own parts (the instructor typed a sentence in front of the
+    // notice), so it has diverged and must be copied WHOLE. Under endsWith it
+    // classifies as the notice branch instead, and the instructor's sentence
+    // is silently dropped from a copy headed to a student - the one
+    // false-negative class the design forbids, because the omitted text is
+    // recoverable from nowhere else in the copy.
+    const row = makeRow({
+      strengths: "Strong thesis.",
+      improvements: "Cite more sources.",
+      overallComment: `Please come see me in office hours. ${RESUBMIT_NOTICE}`,
+    });
+    expect(joinFeedback(row)).toBe(
+      `Strong thesis.\n\nCite more sources.\n\nPlease come see me in office hours. ${RESUBMIT_NOTICE}`
+    );
+  });
+
+  it("leading whitespace on strengths is carried into the copy, not trimmed away", () => {
+    // Pins the trim mutant the row pre-declared and left unguarded: mapping
+    // the parts through .trim() before the filter passes every other case,
+    // because no other fixture carries leading whitespace. When either
+    // equality branch fires the copy emits the RAW parts while overallComment
+    // holds the TRIMMED join, so the copy is a strict superset - that is the
+    // property being pinned here, and trimming would quietly narrow it.
+    const strengths = "  Strong thesis.  ";
+    const improvements = "Cite more sources.";
+    const row = makeRow({
+      strengths,
+      improvements,
+      overallComment: composeOverallComment(strengths, improvements, ""),
+    });
+    expect(joinFeedback(row)).toBe(`${strengths}\n\n${improvements}`);
+  });
+
   it("stale row (CHARACTERISATION, not fixed, byte-identical to today): editAssessmentField changes strengths without recomposing overallComment, so the copy still carries the pre-edit text inside overallComment", () => {
     const original = makeRow({
       strengths: "Old strengths.",
@@ -219,16 +259,31 @@ function readStripped(relativePath: string): string {
 }
 
 describe("seam pins: each caller binds its own surface's join function", () => {
+  // Whitespace-tolerant by construction. A literal `joinCopyText={joinFeedback}`
+  // false-reds on `joinCopyText={ joinFeedback }`, and this repo has no
+  // formatter (no prettier in package.json or on disk), so an ordinary hand
+  // edit reaches that shape. Pin the fact and the ordering, never the spacing.
   it("GradingTableRow.tsx binds joinFeedback and does not contain joinAssessmentFeedback", () => {
     const stripped = readStripped("src/app/components/grading-recording/GradingTableRow.tsx");
-    expect(stripped).toContain("joinCopyText={joinFeedback}");
+    expect(stripped).toMatch(/joinCopyText=\{\s*joinFeedback\s*\}/);
     expect(stripped).not.toContain("joinAssessmentFeedback");
   });
 
   it("SnapshotResultCard.tsx binds joinAssessmentFeedback and does not contain joinFeedback", () => {
     const stripped = readStripped("src/app/components/snapshot-grading/SnapshotResultCard.tsx");
-    expect(stripped).toContain("joinCopyText={joinAssessmentFeedback}");
+    expect(stripped).toMatch(/joinCopyText=\{\s*joinAssessmentFeedback\s*\}/);
     expect(stripped).not.toContain("joinFeedback");
+  });
+
+  it("the joinCopyText prop stays REQUIRED - an optional one would silently hand a future caller the duplicating join", () => {
+    // Measured sabotage: making the prop optional with a
+    // `= joinAssessmentFeedback` default keeps every other assertion green,
+    // because the call-site pin below looks for `joinAssessmentFeedback(`
+    // with a paren and a default is a bare reference. Today's two callers
+    // still pass it, so nothing regresses now - a third caller is the hazard.
+    const stripped = readStripped("src/app/components/assessment-shared/AssessmentFeedbackFields.tsx");
+    expect(stripped).toMatch(/joinCopyText:\s*\(/);
+    expect(stripped).not.toMatch(/joinCopyText\?\s*:/);
   });
 
   it("AssessmentFeedbackFields.tsx does not CALL joinAssessmentFeedback (it may still import the AssessmentFeedback type - pin the call, not the import) and applies joinCopyText to its own feedback prop", () => {

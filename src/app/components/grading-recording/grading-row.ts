@@ -40,8 +40,7 @@
 // every existing `GradingRow` literal still compiles unchanged, because the
 // combined field set is identical to what this interface declared before.
 
-import type { AssessmentRowCore, AssessmentRowState } from "../assessment-shared/assessment-row";
-import type { AssessmentFeedback } from "../assessment-shared/assessment-row";
+import type { AssessmentFeedback, AssessmentRowCore, AssessmentRowState } from "../assessment-shared/assessment-row";
 import { composeOverallComment, RESUBMIT_NOTICE } from "@/lib/grade/types";
 
 /**

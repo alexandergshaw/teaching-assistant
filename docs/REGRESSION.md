@@ -44146,3 +44146,56 @@ Guard notes: the wiring test matches the whole activeRun expression, not its
 terms - term-by-term containment passed a semantic inversion using || that
 rendered another row's run. The livefeed guard must be a live conjunction;
 presence of the literal passed an inert (... || true) gate.
+
+## 431. Copy feedback stops emitting every part twice (A10)
+
+On the recording grading page the Copy control joined [strengths, improvements,
+overallComment] while overallComment was ALREADY the blank-filtered space join
+of strengths + improvements + resubmitNotice. Every part shipped twice.
+
+THE DESIGN, and why it is four lines instead of a field: the resubmit notice is
+stored nowhere else on the row, so naively dropping overallComment deletes it.
+But it is RECOVERABLE - overallComment on this surface is
+composeOverallComment(strengths, improvements, resubmitNotice), and
+RESUBMIT_NOTICE is a frozen constant the prompt forbids the model producing. So
+joinFeedback re-derives: [strengths, improvements, overallCommentSection(row)],
+where overallCommentSection compares overallComment by BYTE EQUALITY against the
+two candidate compositions and returns the notice, "" or the text itself.
+
+AC:
+- A deduction row copies strengths, improvements and the notice, each exactly
+  once. A full-credit row copies two parts and must NOT contain the notice.
+- A DIVERGED overallComment - one that equals neither candidate composition -
+  is the instructor's own text and is copied whole.
+- joinFeedback takes AssessmentFeedback, not GradingRow. Under strict a
+  (row: GradingRow) => string cannot satisfy the required
+  joinCopyText: (feedback: AssessmentFeedback) => string prop. Measured TS2322.
+- AssessmentFeedbackFields takes a REQUIRED joinCopyText prop; the recording
+  surface passes joinFeedback, the snapshot surface passes
+  joinAssessmentFeedback (byte-identical to its prior behaviour).
+
+GUARD NOTES, all of them earned by a sabotage that was silent before it:
+- The predicate is byte equality and NOT endsWith. endsWith plus "a diverged
+  comment is copied whole" is a contradictory cell: an instructor who pastes
+  the notice into their own comment gets it twice. Worse, measured - under
+  endsWith a diverged comment ENDING with the notice classifies as the notice
+  branch and the instructor's own sentence is SILENTLY DROPPED from a copy
+  headed to a student. There is one test for exactly that shape and it is the
+  only thing in the repo holding this decision.
+- The joinCopyText prop must stay REQUIRED. Making it optional with a
+  defaulting fallback left every other assertion green, because the call-site
+  pin looks for joinAssessmentFeedback( with a paren and a default is a bare
+  reference. A future third caller would silently get the duplicating join.
+- The seam pins are whitespace-tolerant regexes. This repo has no formatter, so
+  a literal pin false-reds on an ordinary hand edit that adds a space.
+- There is deliberately NO empty-overallComment guard: it is provably
+  unobservable, so a deletion mutant of it could never go red.
+- Nothing else in src reds if this fix is reverted. The whole evidence base is
+  copy-feedback.test.ts, which therefore carries its own no-op control - seven
+  cases duplicated from grading-row.test.ts, byte-identical.
+
+NOT FIXED, byte-identical to before and pinned as characterisation: an
+instructor edit to strengths or improvements leaves overallComment stale
+(editAssessmentField does not recompose, unlike both sibling surfaces), so that
+row still copies superseded text. And a diverged comment loses the notice,
+because the instructor overwrote the only place it was stored.

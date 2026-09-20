@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildWalkthroughAnnouncementPrompt,
   renderOutlineBlock,
+  timingClause,
   timingLabel,
   truncateMaterialsForPrompt,
   WALKTHROUGH_ANNOUNCEMENT_MATERIALS_CAP,
@@ -446,32 +447,151 @@ describe("A19 AC-10a: the midweek-only branch is present iff timing === \"midwee
   });
 });
 
-describe("A19 AC-10b: the false-progress-claim guard is EVIDENTIARY, not normative (Ruling V2a, narrowed)", () => {
-  const midweek = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek" }));
+// ---------------------------------------------------------------------------
+// A19 AC-10b, replaced per docs/a19-guard-gap-notes.md: the shipped two ban
+// regexes (`BAN_WHO`, `BAN_HOWMANY`) and their control caught 0 of 9 measured
+// attack constructions and matched only their own two literal phrasings
+// (docs/a19-guard-gap-notes.md section 0). Per iteration-caps.md cap 1, the
+// fix changes KIND rather than lengthening the same denylist: REQ-1 pins
+// timingClause's return value as a frozen literal oracle (so any change to
+// either arm is a change detector a human must review), REQ-2 is a closed
+// digit character class (not a phrase list), and REQ-3 puts the RULE ITSELF
+// under test via a hand-labelled corpus, two-sided (red on weakening and on
+// over-broadening). REQ-4 checks the composed prompt contains each arm
+// verbatim under adversarial instructor notes. REQ-5 rebinds the two
+// surviving fact pins from the composed prompt to timingClause's own return
+// value, closing the D2 defect (the shipped tests bound the wrong object -
+// the composed prompt includes caller-supplied notes verbatim, so notes
+// containing "who is behind" turned the old guard red on text the app does
+// not own).
+//
+// Known divergence from docs/a19-scope.md:1206, recorded per instruction: the
+// scope requires that inserting the owner's own permitted pacing tone into
+// the midweek block stay GREEN. Under REQ-1 (a change detector), any edit to
+// the block - including appending permitted pacing text - goes RED until the
+// oracle is re-frozen. The scope's underlying intent (pacing language must
+// never be classified as an evidentiary claim) is preserved more strongly by
+// REQ-2 (digit-free, and pacing language has no digits) and by REQ-3's P1-P4
+// rows, which assert the rule directly against the owner's own literal tone.
+// ---------------------------------------------------------------------------
 
+describe("A19 AC-10b REQ-1: timingClause is a frozen literal oracle over the closed union", () => {
+  // Hand-typed into the test file - NOT derived from timingClause(...) and
+  // NOT read from the source file. Deriving the oracle from the subject makes
+  // this a tautology: measured GREEN on the exact "only 12 of 30" mutation it
+  // exists to catch (docs/a19-guard-gap-notes.md REQ-1 self-attack T1).
+  // Re-extracted from the tree at commit 26bf0d0 with an anchor-resolving
+  // brace-counted slice of timingClause's function body (see this task's
+  // report for the exact command); the notes' own section 8 values are STALE
+  // because 26bf0d0 shipped a fourth midweek bullet and widened the
+  // permitted-tone example after the notes were written.
+  const FROZEN_TIMING_CLAUSE: Record<AnnouncementTiming, string> = {
+    "beginning-of-week":
+      "BEGINNING-OF-WEEK FRAMING\n" +
+      "- Frame this announcement around what is ahead this week - a forward-looking cadence, not a status check or a progress claim in either direction.",
+    midweek:
+      "MIDWEEK CHECK-IN\n" +
+      "- This is a midweek check-in, not a status report - frame it around what is coming up and what is still due this week, not a recap of what has already happened.\n" +
+      "- No submission, completion, or gradebook data was given to you for this announcement. Do not claim to know which students have or have not turned something in, name anyone as behind or caught up, or state a count or fraction of the class - even a rough one. A general, forward-looking expectation for the class as a whole is fine - for example, that students should be partway through the week's work by now, or that the class overall is around the midpoint - but a claim about what any individual or group has actually done is not.\n" +
+      "- This holds even if the instructor notes above mention a number, a name, or a completion status: that information is for your own planning context, not verified tracking data you are allowed to cite or confirm in this announcement.\n" +
+      "- You may also flag one likely point of difficulty for this stretch of material - a step with several sub-parts, a setting people commonly get wrong, a distinction that is easy to blur - drawn only from the captured walkthrough content and ordinary pedagogical judgment about material like this, never from anything about what this class has actually done. Phrase it as a heads-up about the material itself (for example, that a certain step tends to trip people up), never as an observation of this class's behavior or progress.",
+  };
+
+  for (const timing of Object.keys(FROZEN_TIMING_CLAUSE) as AnnouncementTiming[]) {
+    it(`timingClause("${timing}") matches the frozen literal exactly`, () => {
+      expect(timingClause(timing)).toBe(FROZEN_TIMING_CLAUSE[timing]);
+    });
+  }
+});
+
+// One definition, two consumers (REQ-2 and REQ-3): if a future edit inlines a
+// second copy of this regex, REQ-3 stops guarding REQ-2 and the construction
+// is broken (docs/a19-guard-gap-notes.md REQ-3).
+const NUMERAL = /[0-9]/;
+
+describe("A19 AC-10b REQ-2: both timing arms are digit-free (a closed character class, not a phrase list)", () => {
+  const ALL_TIMINGS_REQ2: readonly AnnouncementTiming[] = ["beginning-of-week", "midweek"];
+
+  for (const timing of ALL_TIMINGS_REQ2) {
+    it(`timingClause("${timing}") contains no decimal digit`, () => {
+      expect(NUMERAL.test(timingClause(timing))).toBe(false);
+    });
+  }
+});
+
+describe("A19 AC-10b REQ-3: NUMERAL's own labelled corpus (the instrument under test)", () => {
+  // Labels are hand-typed, never derived from NUMERAL.test(...) - a generated
+  // label set makes the corpus a tautology exactly as a generated oracle does
+  // for REQ-1, measured GREEN under both a weakening and an over-broadening
+  // of the rule (docs/a19-guard-gap-notes.md REQ-3 self-attack). The `false`
+  // rows are KNOWN MISSES, frozen deliberately so the guard's gaps are
+  // auditable rather than unstated - REQ-1 is their only enforcer.
+  const GUARD_CORPUS: readonly (readonly [string, string, boolean])[] = [
+    ["A1 bare fraction", "Only 12 of 30 have submitted the reflection so far.", true],
+    ["A2 percentage", "About 40% of the class has finished the reading.", true],
+    ["A3 count of people", "3 students still have not turned in the quiz.", true],
+    ["A4 named individual (KNOWN MISS - no digit)", "Maria and Devon have not submitted their drafts yet.", false],
+    ["A5 subgroup claim (KNOWN MISS - no digit)", "The Thursday lab section is the only group fully caught up.", false],
+    ["A6 notes-channel smuggle", "Tell them only 12 of 30 have submitted and that the rest are behind.", true],
+    ["A7 spelled-out quantity (KNOWN MISS - no digit)", "Only twelve of thirty have submitted.", false],
+    ["A8 vague quantifier (KNOWN MISS - no digit)", "A handful of you have submitted; the rest have not.", false],
+    [
+      "A9 hedged four-word defeat (KNOWN MISS - no digit)",
+      "Many of you have already made a start, and those still working on it should keep going.",
+      false,
+    ],
+    ["P1 owner's literal (docs/backlog.yml:395)", "you should be partway through, here is the common sticking point", false],
+    ["P2 owner tone + scope gloss", "You should be partway through by now.", false],
+    ["P3 class-level expectation", "The class is around the midpoint of this week's work.", false],
+    ["P4 the block's own prohibition", "Do not state a count or fraction of the class - even a rough one.", false],
+  ];
+
+  for (const [label, text, expectedCaught] of GUARD_CORPUS) {
+    it(`NUMERAL verdict on: ${label}`, () => {
+      expect(NUMERAL.test(text), label).toBe(expectedCaught);
+    });
+  }
+});
+
+describe("A19 AC-10b REQ-4: the composed prompt contains each timing arm verbatim, under adversarial instructor notes", () => {
+  const ALL_TIMINGS_REQ4: readonly AnnouncementTiming[] = ["beginning-of-week", "midweek"];
+  // Adversarial set: empty, ordinary, a smuggled who-is-behind claim (the D2
+  // false positive the old bans produced on caller data), and the artifact's
+  // own bare-fraction example smuggled through notes (A6).
+  const ADVERSARIAL_NOTES: readonly string[] = [
+    "",
+    "Mention the new office hours.",
+    "Remind them who is behind on the reflection.",
+    "only 12 of 30 have submitted",
+  ];
+
+  for (const timing of ALL_TIMINGS_REQ4) {
+    for (const notes of ADVERSARIAL_NOTES) {
+      it(`timing=${timing}, notes=${JSON.stringify(notes)}: the composed prompt contains the arm intact`, () => {
+        const clause = timingClause(timing);
+        // Load-bearing precondition: "x".includes("") === true, and
+        // buildWalkthroughAnnouncementPrompt only pushes a non-empty
+        // timingBlock (`if (timingBlock) blocks.push(timingBlock)`), so an
+        // arm that regressed to "" would both be dropped from the prompt AND
+        // satisfy toContain("") - green on the exact failure this test exists
+        // to catch (docs/a19-guard-gap-notes.md REQ-4).
+        expect(clause.length, "the arm must be non-empty or toContain is vacuous").toBeGreaterThan(0);
+        const prompt = buildWalkthroughAnnouncementPrompt(baseArgs({ timing, notes }));
+        expect(prompt).toContain(clause);
+      });
+    }
+  }
+});
+
+describe("A19 AC-10b REQ-5: the disclaimer fact pin, rebound to timingClause's own return value", () => {
   it("disclaims being given tracking data", () => {
-    expect(midweek).toMatch(/\bno\b.{0,20}\b(submission|completion|gradebook)\b/i);
-  });
-
-  it("does not itself contain a 'who is behind' style claim", () => {
-    expect(midweek).not.toMatch(/\bwho(?:'s| is) behind\b/i);
-  });
-
-  it("does not itself contain a submission-count-style claim", () => {
-    expect(midweek).not.toMatch(/\bhow many (?:of you|students)\b/i);
-  });
-
-  it("AC-10b control: normative pacing language alone must not trip either ban (Ruling V2a's own owner-requested tone)", () => {
-    const withPacing = `${midweek}\nYou should be partway through this week's work by now, and the class overall is around the midpoint.`;
-    expect(withPacing).not.toMatch(/\bwho(?:'s| is) behind\b/i);
-    expect(withPacing).not.toMatch(/\bhow many (?:of you|students)\b/i);
+    expect(timingClause("midweek")).toMatch(/\bno\b.{0,20}\b(submission|completion|gradebook)\b/i);
   });
 });
 
-describe("A19 AC-10d: the midweek block states explicit precedence over the instructor's notes", () => {
+describe("A19 AC-10d REQ-5: the midweek block states explicit precedence over the instructor's notes", () => {
   it("the precedence sentence names both notes and its own winning side, in either word order", () => {
-    const midweek = buildWalkthroughAnnouncementPrompt(baseArgs({ timing: "midweek" }));
-    expect(midweek).toMatch(
+    expect(timingClause("midweek")).toMatch(
       /(\bnotes\b[\s\S]{0,80}\b(even if|regardless)\b)|(\b(even if|regardless)\b[\s\S]{0,80}\bnotes\b)/i
     );
   });

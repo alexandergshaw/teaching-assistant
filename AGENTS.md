@@ -66,6 +66,29 @@ a queue that has quietly stopped while looking full. The single legitimate stop
 is when every remaining item is owner-blocked: say so, list what each one
 needs, and stop.
 
+**THE MECHANICAL TEST. Apply it before ending every turn.**
+
+> **Look at your LAST TOOL CALL. If it was a commit, a push, a render, a
+> measurement, or nothing at all, YOU HAVE STALLED. The last tool call must be
+> a DISPATCH or an EDIT that advances a backlog item.**
+
+A push is the middle of a turn, never the end. A status summary is not work.
+If the final thing you did was report, go back and start something.
+
+This test exists because the prose below failed five times, most recently on
+2026-09-20 in the same session it was last tightened. The failing turn shipped
+a row, pushed it, wrote an accurate summary, and closed with "Next: A11's
+revision needs its round-2 check; A8-R is chunked and ready" - both startable,
+neither started. Writing down what to do next and then not doing it is the
+purest form of the violation.
+
+Why it slips past the wording below: after a long correct chunk, stalling does
+not feel like asking permission, it feels like FINISHING. Report, commit, push,
+summarise, stop reads as a complete unit. It is not - the queue moved zero
+items while the summary was written. The tell is a turn that ends by describing
+the backlog instead of changing it. Write the summary AFTER the dispatch, about
+work already running.
+
 **Do not:**
 - Ask "should I proceed?", "want me to continue?", or any variant.
 - End a turn by NAMING the next item instead of starting it ("Next up: X").

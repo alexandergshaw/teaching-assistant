@@ -39,6 +39,7 @@ import controls from "../recording/RecordingControls.module.css";
 import rowStyles from "./GradingTable.module.css";
 import {
   gradingRowSubmissionTimeStatus,
+  joinFeedback,
   type GradingRow,
   type GradingRowNameMatch,
 } from "./grading-row";
@@ -266,6 +267,7 @@ function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyErr
                 feedback={row}
                 onEditField={onEditField}
                 onCopyError={onCopyError}
+                joinCopyText={joinFeedback}
               />
             </div>
           </div>

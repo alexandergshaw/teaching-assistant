@@ -41,7 +41,8 @@
 // combined field set is identical to what this interface declared before.
 
 import type { AssessmentRowCore, AssessmentRowState } from "../assessment-shared/assessment-row";
-import { joinAssessmentFeedback } from "../assessment-shared/assessment-row";
+import type { AssessmentFeedback } from "../assessment-shared/assessment-row";
+import { composeOverallComment, RESUBMIT_NOTICE } from "@/lib/grade/types";
 
 /**
  * How confident we are that the name read off the screen belongs to a real
@@ -219,19 +220,41 @@ export const GRADING_ROW_HAYSTACK = (row: GradingRow): readonly string[] => [
 ];
 
 /**
- * docs/recording-controls-ux-acceptance-criteria.md CC14: "Copy feedback"
- * (GradingTableRow.tsx) copies exactly the three FEEDBACK fields - strengths,
- * improvements, overallComment - joined by a blank line, in that order.
- * `totalScore` is deliberately excluded: it is a grade, not feedback, and
- * pasting it into a Canvas comment box alongside prose would read as this
- * app asserting a score it never posts anywhere (see this file's own header
- * on why a GradingRow can never carry a postable identity). A field left
- * blank is omitted entirely rather than leaving a bare blank line in its
- * place - a row with only an overall comment copies as one paragraph, not
- * two blank lines followed by one.
+ * overallComment on this surface is DERIVED (never independently authored) -
+ * it is composeOverallComment(strengths, improvements, resubmitNotice), a
+ * blank-filtered space join (src/lib/grade/types.ts). So copying strengths,
+ * improvements AND overallComment verbatim duplicates every part. This
+ * classifies overallComment against the row's own current strengths/
+ * improvements: when it equals the composition WITH the resubmit notice, the
+ * notice is the only new information it carries and that alone is returned;
+ * when it equals the composition with no notice, it carries nothing beyond
+ * strengths/improvements and "" is returned; otherwise an instructor has
+ * hand-typed or edited it, it has DIVERGED from the derivation, and the
+ * whole text is returned so their words are never dropped from a copy.
  */
-export function joinFeedback(row: GradingRow): string {
-  return joinAssessmentFeedback(row);
+function overallCommentSection(row: AssessmentFeedback): string {
+  const { strengths, improvements, overallComment } = row;
+  if (overallComment === composeOverallComment(strengths, improvements, RESUBMIT_NOTICE)) return RESUBMIT_NOTICE;
+  if (overallComment === composeOverallComment(strengths, improvements, "")) return "";
+  return overallComment;
+}
+
+/**
+ * docs/recording-controls-ux-acceptance-criteria.md CC14: "Copy feedback"
+ * copies strengths, improvements, and whatever overallCommentSection above
+ * decides overallComment still contributes - joined by a blank line, in that
+ * order. `totalScore` is deliberately excluded: it is a grade, not feedback,
+ * and pasting it into a Canvas comment box alongside prose would read as
+ * this app asserting a score it never posts anywhere (see this file's own
+ * header on why a GradingRow can never carry a postable identity). A field
+ * left blank is omitted entirely rather than leaving a bare blank line in
+ * its place - a row with only an overall comment copies as one paragraph,
+ * not two blank lines followed by one.
+ */
+export function joinFeedback(row: AssessmentFeedback): string {
+  return [row.strengths, row.improvements, overallCommentSection(row)]
+    .filter((f) => f.trim() !== "")
+    .join("\n\n");
 }
 
 // ---------------------------------------------------------------------------

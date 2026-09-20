@@ -32,7 +32,7 @@ import rowStyles from "../grading-recording/GradingTable.module.css";
 import { CopyIcon, CheckIcon } from "../recording/discussion-icons";
 import { writeClipboardText } from "../ui/clipboard";
 import { visuallyHidden } from "../ui/visuallyHidden";
-import { joinAssessmentFeedback, type AssessmentFeedback, type AssessmentFeedbackField } from "./assessment-row";
+import type { AssessmentFeedback, AssessmentFeedbackField } from "./assessment-row";
 
 // Mirrors recording/DiscussionReplyRow.tsx's own COPY_RESET_MS exactly -
 // the same 1.5s window every other icon-swap confirmation on these
@@ -81,6 +81,12 @@ export interface AssessmentFeedbackFieldsProps {
   feedback: AssessmentFeedback;
   onEditField: (id: string, field: AssessmentFeedbackField, value: string) => void;
   onCopyError: (message: string) => void;
+  /** Builds the text the Copy control writes to the clipboard. Required,
+   *  deliberately: this file has no honest default of its own, because what
+   *  belongs in a copy depends on how the feedback fields were produced -
+   *  the caller supplies the text its own surface copies, rather than this
+   *  shared file guessing at a composition that fits every surface. */
+  joinCopyText: (feedback: AssessmentFeedback) => string;
 }
 
 /**
@@ -95,17 +101,18 @@ export default function AssessmentFeedbackFields({
   feedback,
   onEditField,
   onCopyError,
+  joinCopyText,
 }: AssessmentFeedbackFieldsProps) {
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopyFeedback = async () => {
-    // An all-empty row's joinAssessmentFeedback is "" - copying that
-    // silently would leave the instructor's clipboard empty with no sign
-    // anything went wrong, and the check/CheckIcon swap would falsely
-    // claim a successful copy. Refused before it ever reaches the
-    // clipboard, and the icon never swaps.
-    const text = joinAssessmentFeedback(feedback);
+    // An all-empty row's joined text is "" - copying that silently would
+    // leave the instructor's clipboard empty with no sign anything went
+    // wrong, and the check/CheckIcon swap would falsely claim a successful
+    // copy. Refused before it ever reaches the clipboard, and the icon
+    // never swaps.
+    const text = joinCopyText(feedback);
     if (text === "") {
       onCopyError(`There is no feedback to copy for ${displayName} yet.`);
       return;

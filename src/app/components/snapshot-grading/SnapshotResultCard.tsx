@@ -17,7 +17,7 @@
 import { TextField } from "@mui/material";
 import styles from "../../page.module.css";
 import AssessmentFeedbackFields, { AssessmentScoreField } from "../assessment-shared/AssessmentFeedbackFields";
-import { editAssessmentField } from "../assessment-shared/assessment-row";
+import { editAssessmentField, joinAssessmentFeedback } from "../assessment-shared/assessment-row";
 import {
   summarizeShotReports,
   resolveCitationShotPosition,
@@ -191,6 +191,7 @@ export default function SnapshotResultCard({
             feedback={row}
             onEditField={onEditField}
             onCopyError={onCopyError}
+            joinCopyText={joinAssessmentFeedback}
           />
         </>
       )}

@@ -44,8 +44,19 @@ re-tier a seat. Full mapping, model IDs and prices in `this-repo.md` section 8.
 |---|---|---|
 | `loop-checker` | opus | The adversarial check over each artifact |
 | `loop-top` | opus | Only where a mistake is inherited by everything downstream and is NOT itself checked: the chunking, and a seam every wave is built against |
-| `loop-seat` | sonnet | Acceptance criteria, design seats, plans, test notes, verification, remediation, root-cause analysis |
-| `loop-implementer` | sonnet | Code, fixes, tests written from notes, mechanical sweeps |
+| `loop-architect` | opus | The architecture and design seat - the pass that decides SHAPE: where a seam falls, what is one layer versus two, which object a requirement binds to |
+| `loop-test-author` | opus | Test notes, acceptance-criteria instruments, frozen oracles, sabotage design - the seat that decides WHAT IS MEASURED and HOW IT FAILS |
+| `loop-seat` | sonnet | The remaining authoring seats: plans, verification reports, remediation, root-cause analysis, and the UX/data/security/reliability passes |
+| `loop-implementer` | sonnet | Code, fixes, tests WRITTEN FROM a test-author's notes, mechanical sweeps |
+
+**Two seats are exceptions to that principle, elevated by the repo owner on
+2026-09-20 because their mistakes have KNOCK-ON EFFECTS a checker catches too
+late.** `loop-architect` decides shape, and every later wave is built against
+it - a checker that catches a shape error catches it after the artifact is
+written, not after the shape is wrong. `loop-test-author` writes the thing that
+DOES the checking: a weak instrument does not fail loudly, it passes, and every
+downstream step inherits a green signal that means nothing. Both are backstopped
+by `loop-checker` like any seat; what differs is the blast radius of a miss.
 
 **The principle, to reason from if the numbers change: spend the strong tier
 where there is no backstop, not where the work is verifiable.** A seat is

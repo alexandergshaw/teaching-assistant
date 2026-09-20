@@ -245,6 +245,8 @@ Current IDs and first-party API rates, per the `claude-api` skill (cached
 |---|---|---|---|---|
 | `loop-checker` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
 | `loop-top` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
+| `loop-architect` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
+| `loop-test-author` | Claude Opus 5 | `claude-opus-5` | 5.00 | 25.00 |
 | `loop-seat` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
 | `loop-implementer` | Claude Sonnet 5 | `claude-sonnet-5` | 2.00 | 10.00 |
 
@@ -252,7 +254,7 @@ Fable is not used at any tier.
 
 **`.claude/agents/` is read at SESSION START, so a definition added or renamed
 mid-session is NOT available until the session restarts.** Measured 2026-09-13:
-after committing the four `loop-*` definitions, dispatching `loop-implementer`
+after committing the then-four `loop-*` definitions, dispatching `loop-implementer`
 returned `Agent type 'loop-implementer' not found`, listing only the built-ins.
 Until a restart, dispatch `general-purpose` with an explicit `model` matching the
 intended tier and point the brief at the definition file by path. This is the one

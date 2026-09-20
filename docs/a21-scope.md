@@ -143,9 +143,15 @@ surface ships today.** Opened, all of it:
   `void provider; return callGemini(req);`.
 
 So an instructor with Embedded selected would have gone from a deterministic
-scaffold to a real Gemini call, with every gate green. The word "embedded"
-appeared ZERO times in round 1's 1279 lines
-(`grep -ci "embedded" docs/a21-scope.md` against the `ad60a6a` copy: `0`).
+scaffold to a real Gemini call, with every gate green. Round 1's 1279 lines
+(`git show ad60a6a:docs/a21-scope.md | wc -l` -> 1279) contain the string
+"embedded" EXACTLY ONCE, case-insensitively
+(`git show ad60a6a:docs/a21-scope.md | grep -ci "embedded"` -> 1), and the one
+hit is `:103`, an incidental `src/lib/embedded-grader/rubric-applied.ts:84` in a
+pasted grep result about a different subject. The provider was not discussed at
+all. (The checker's brief and my own first draft of this paragraph both said
+ZERO; I ran the command rather than repeating it, and it is 1. Recorded because
+this section's whole subject is a measurement that was not taken.)
 
 It is sharper than a missed branch. `docs/loop/leverage.md:42` names "holding it
 by making no model call at all" as the purest instance of the GUARANTEED class

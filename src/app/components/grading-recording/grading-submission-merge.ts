@@ -45,6 +45,8 @@
 // file's own report (delivered alongside this change) for the attack that
 // remains open.
 
+import type { GradingSubmissionKind } from "@/lib/grade/submission-kind";
+
 /**
  * One submission as READ off a batch of frames, before any merging and
  * before it becomes a GradingRow. Deliberately NOT GradingRow
@@ -54,6 +56,16 @@
 export interface ExtractedSubmission {
   name: string;
   text: string;
+  /** docs/a8r-scope.md (A8-R) TR-4: what the extraction model suggested this
+   *  submission is, minted alongside the text and travelling WITH whichever
+   *  reading's text a merged entry ends up holding - never independently
+   *  re-derived by this file. See the fold branches below for the one place
+   *  that rule actually gets enforced. */
+  suggestedSubmissionKind: GradingSubmissionKind;
+  /** The cue the model says it saw - travels with `suggestedSubmissionKind`
+   *  the same way. See docs/a8r-scope.md section 6 (CUE-1) for what a real
+   *  cue looks like. */
+  submissionKindCue: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -414,10 +426,29 @@ export function mergeExtractedSubmissions<T extends ExtractedSubmission>(
     const current = next[matchIndex];
     const overlap = findContinuationOverlap(current.text, submission.text);
     if (overlap !== null) {
+      // docs/a8r-scope.md (A8-R) TR-4: the continuation-join branch keeps
+      // the EARLIER reading's suggestedSubmissionKind/submissionKindCue -
+      // `{ ...s, text: joined }` already does this (every other field of
+      // `s`, the earlier existing entry, is untouched) - because the cue
+      // this surface can observe is an opener, and the opener is in the
+      // earlier reading, never the later continuation.
       const joined = joinContinuationText(current.text, submission.text, overlap);
       next = next.map((s, i) => (i === matchIndex ? { ...s, text: joined } : s));
     } else if (submission.text.length > current.text.length) {
-      next = next.map((s, i) => (i === matchIndex ? { ...s, text: submission.text } : s));
+      // TR-4: the replace branch's entry ends up holding the NEW
+      // submission's text, so it takes the NEW submission's suggestion and
+      // cue too - never the stale pair `s` (the reading being replaced)
+      // already carried.
+      next = next.map((s, i) =>
+        i === matchIndex
+          ? {
+              ...s,
+              text: submission.text,
+              suggestedSubmissionKind: submission.suggestedSubmissionKind,
+              submissionKindCue: submission.submissionKindCue,
+            }
+          : s
+      );
     }
     // else: equal-or-shorter, non-continuation text - the existing (longer-
     // or-equal) reading wins and the entry keeps its existing object

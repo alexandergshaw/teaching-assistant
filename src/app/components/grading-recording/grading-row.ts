@@ -42,6 +42,7 @@
 
 import type { AssessmentFeedback, AssessmentRowCore, AssessmentRowState } from "../assessment-shared/assessment-row";
 import { composeOverallComment, RESUBMIT_NOTICE, type RubricAreaResult } from "@/lib/grade/types";
+import type { GradingSubmissionKind } from "@/lib/grade/submission-kind";
 
 /**
  * How confident we are that the name read off the screen belongs to a real
@@ -221,6 +222,34 @@ export interface GradingRow extends AssessmentRowCore {
    *  enumerate this key - the run this data serves is in-memory only, see
    *  that file's own header). */
   rubricAreas: RubricAreaResult[];
+  /** docs/a8r-scope.md (A8-R) section 3: what the extraction model suggested
+   *  this submission is, at mint time - never written again after that
+   *  (TR-1/TR-4: it travels with whichever reading's text the merged entry
+   *  ends up holding). Read only to OFFER a confirmation; never rendered or
+   *  sent to the model directly (submission-kind-callsites.structure.test.ts
+   *  pins that). REQUIRED, not optional, for the identical reason
+   *  `nameMatch` above is required rather than optional: `"unknown"` already
+   *  expresses everything absence could, so an optional field here would
+   *  make the wire enumeration and the read-side default decorative. */
+  suggestedSubmissionKind: GradingSubmissionKind;
+  /** The exact on-screen words or layout feature the model says it used to
+   *  suggest `suggestedSubmissionKind` - an opener, a "Replying to" line, a
+   *  thread position - never the submission text restated (docs/a8r-scope.md
+   *  section 6, CUE-1). Empty when the model had no basis, which is what the
+   *  batch-accept eligibility rule (CUE-2) keys on. Travels with the text the
+   *  same way `suggestedSubmissionKind` does. */
+  submissionKindCue: string;
+  /** The instructor-CONFIRMED kind. Starts at `"unknown"` and no machine
+   *  path ever writes anything else to it - only an explicit instructor
+   *  click (confirmSubmissionKind / acceptSuggestedKinds, useGradingRows.ts)
+   *  does. "Confirmed" is therefore a property of the VALUE
+   *  (`submissionKind !== "unknown"`), never a parallel boolean that could
+   *  desync from it. This is the only one of the three fields the label
+   *  (G-R2) and the prompt (G-R1) are ever composed from - never
+   *  `suggestedSubmissionKind` (the call-site canary,
+   *  submission-kind-callsites.structure.test.ts, pins that the composer
+   *  files contain zero references to the suggestion). */
+  submissionKind: GradingSubmissionKind;
 }
 
 /**

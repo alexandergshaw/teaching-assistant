@@ -179,7 +179,7 @@ describe("R1a - the empty-vs-nothing distinction", () => {
     });
     const result = await extractGradingSubmissionsAction([{ base64: "x" }], "gemini");
     expect(result).toEqual({
-      submissions: [{ name: "Maria Alvarez", text: "A real submission with several words in it" }],
+      submissions: [{ name: "Maria Alvarez", text: "A real submission with several words in it", suggestedSubmissionKind: "unknown", submissionKindCue: "" }],
       confirmedEmpty: false,
       skippedUnnamed: 0,
     });
@@ -204,7 +204,7 @@ describe("R1a - the empty-vs-nothing distinction", () => {
     });
     const result = await extractGradingSubmissionsAction([{ base64: "x" }], "gemini");
     expect(result).toEqual({
-      submissions: [{ name: "Maria Alvarez", text: "A named, real submission with words" }],
+      submissions: [{ name: "Maria Alvarez", text: "A named, real submission with words", suggestedSubmissionKind: "unknown", submissionKindCue: "" }],
       confirmedEmpty: false,
       skippedUnnamed: 1,
     });
@@ -271,7 +271,7 @@ describe("field coercion", () => {
     const result = await extractGradingSubmissionsAction([{ base64: "x" }], "gemini");
     expect("submissions" in result).toBe(true);
     if ("submissions" in result) {
-      expect(result.submissions[0]).toEqual({ name: "Maria Alvarez", text: "Some text with several words" });
+      expect(result.submissions[0]).toEqual({ name: "Maria Alvarez", text: "Some text with several words", suggestedSubmissionKind: "unknown", submissionKindCue: "" });
     }
   });
 
@@ -313,9 +313,80 @@ describe("field coercion", () => {
     });
     const result = await extractGradingSubmissionsAction([{ base64: "x" }], "gemini");
     expect(result).toEqual({
-      submissions: [{ name: "Maria Alvarez", text: "Real submission text here" }],
+      submissions: [{ name: "Maria Alvarez", text: "Real submission text here", suggestedSubmissionKind: "unknown", submissionKindCue: "" }],
       confirmedEmpty: false,
       skippedUnnamed: 0,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/a8r-scope.md (A8-R) CUE-1: the mint reads submissionKind/kindCue off
+// the model's raw response, through coerceSubmissionKind - the same
+// coercion fromWire uses (docs/a8r-scope.md section 4.1's W1-WIRE), so a
+// model response outside the four-member set reads as "unknown" rather than
+// a runtime crash.
+// ---------------------------------------------------------------------------
+
+describe("A8-R CUE-1: submissionKind/kindCue at the mint", () => {
+  it("coerces a real submissionKind and trims kindCue", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify([
+        {
+          studentName: "Maria Alvarez",
+          submissionText: "A reply with several words in it",
+          submissionKind: "reply",
+          kindCue: "  Replying to Diego Chen  ",
+        },
+      ]),
+    });
+    const result = await extractGradingSubmissionsAction([{ base64: "x" }], "gemini");
+    expect("submissions" in result).toBe(true);
+    if ("submissions" in result) {
+      expect(result.submissions[0].suggestedSubmissionKind).toBe("reply");
+      expect(result.submissions[0].submissionKindCue).toBe("Replying to Diego Chen");
+    }
+  });
+
+  it("defaults to unknown/empty when the model omits both fields (a response captured before this contract existed)", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify([{ studentName: "Maria Alvarez", submissionText: "A submission with no kind fields at all" }]),
+    });
+    const result = await extractGradingSubmissionsAction([{ base64: "x" }], "gemini");
+    expect("submissions" in result).toBe(true);
+    if ("submissions" in result) {
+      expect(result.submissions[0].suggestedSubmissionKind).toBe("unknown");
+      expect(result.submissions[0].submissionKindCue).toBe("");
+    }
+  });
+
+  it("coerces an out-of-set submissionKind to unknown rather than trusting it verbatim", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify([
+        { studentName: "Maria Alvarez", submissionText: "A submission with a bogus kind", submissionKind: "submission", kindCue: "some cue" },
+      ]),
+    });
+    const result = await extractGradingSubmissionsAction([{ base64: "x" }], "gemini");
+    expect("submissions" in result).toBe(true);
+    if ("submissions" in result) {
+      expect(result.submissions[0].suggestedSubmissionKind).toBe("unknown");
+    }
+  });
+
+  it("empty string kindCue stays empty, never resurrected", async () => {
+    vi.mocked(callLlm).mockResolvedValueOnce({
+      ok: true,
+      text: JSON.stringify([
+        { studentName: "Maria Alvarez", submissionText: "A submission with no basis given", submissionKind: "initial-post", kindCue: "" },
+      ]),
+    });
+    const result = await extractGradingSubmissionsAction([{ base64: "x" }], "gemini");
+    expect("submissions" in result).toBe(true);
+    if ("submissions" in result) {
+      expect(result.submissions[0].submissionKindCue).toBe("");
+    }
   });
 });

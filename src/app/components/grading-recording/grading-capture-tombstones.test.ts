@@ -88,11 +88,14 @@ function makeRow(id: string, name: string, text: string): GradingRow {
     error: "",
     userEdited: false,
     rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
   };
 }
 
 function makeTracked(name: string, text: string, rowId: string, dismissed = false): TrackedSubmission {
-  return { name, text, rowId, dismissed };
+  return { name, text, suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId, dismissed };
 }
 
 let idCounter = 0;
@@ -157,12 +160,50 @@ describe("seedTrackedFromRows - pure", () => {
     ];
     const seeded = seedTrackedFromRows(rows, dismissed, "course-a", mintId);
     expect(seeded).toHaveLength(3);
-    expect(seeded[0]).toEqual({ name: "Alice", text: "alice text", rowId: "r-1", dismissed: false });
-    expect(seeded[1]).toEqual({ name: "Bob", text: "bob text", rowId: "r-2", dismissed: false });
+    expect(seeded[0]).toEqual({
+      name: "Alice",
+      text: "alice text",
+      suggestedSubmissionKind: "unknown",
+      submissionKindCue: "",
+      rowId: "r-1",
+      dismissed: false,
+    });
+    expect(seeded[1]).toEqual({
+      name: "Bob",
+      text: "bob text",
+      suggestedSubmissionKind: "unknown",
+      submissionKindCue: "",
+      rowId: "r-2",
+      dismissed: false,
+    });
     expect(seeded[2].name).toBe("Carol");
     expect(seeded[2].dismissed).toBe(true);
     // Dave (course-b) is excluded from a course-a seed.
     expect(seeded.some((e) => e.name === "Dave")).toBe(false);
+  });
+
+  // docs/a8r-scope.md (A8-R) TR-2: GradingRow is the home of record for
+  // suggestedSubmissionKind/submissionKindCue, so a live entry's reload seed
+  // must read them BACK OFF the row - not default them the way a tombstone
+  // (which has no row) does.
+  it("a live entry's suggestedSubmissionKind/submissionKindCue travel with the row, not defaulted to unknown", () => {
+    const row = { ...makeRow("r-1", "Alice", "alice text"), suggestedSubmissionKind: "reply" as const, submissionKindCue: "Replying to Bob" };
+    const seeded = seedTrackedFromRows([row], [], "course-a", mintId);
+    expect(seeded[0]).toEqual({
+      name: "Alice",
+      text: "alice text",
+      suggestedSubmissionKind: "reply",
+      submissionKindCue: "Replying to Bob",
+      rowId: "r-1",
+      dismissed: false,
+    });
+  });
+
+  it("a tombstone entry (no row to read from) always seeds as unknown/empty, never resurrecting a guess", () => {
+    const dismissed: DismissedSubmission[] = [{ name: "Carol", text: "carol text", course: "course-a" }];
+    const seeded = seedTrackedFromRows([], dismissed, "course-a", mintId);
+    expect(seeded[0].suggestedSubmissionKind).toBe("unknown");
+    expect(seeded[0].submissionKindCue).toBe("");
   });
 
   it("course A -> B -> A: course A's seed is byte-identical both times", () => {
@@ -259,7 +300,7 @@ describe("commitCaptureAdvance - rows committed before the tombstone projection 
 
     // Batch 1: a fresh submission, then dismiss it.
     const first = commitCaptureAdvance(
-      { tracked, rows, incoming: [{ name: "Alice", text: "top of the essay" }], courseScope: "course-a", mintId },
+      { tracked, rows, incoming: [{ name: "Alice", text: "top of the essay", suggestedSubmissionKind: "unknown", submissionKindCue: "" }], courseScope: "course-a", mintId },
       (r) => {
         rows = r;
         commitRows();
@@ -277,7 +318,7 @@ describe("commitCaptureAdvance - rows committed before the tombstone projection 
       {
         tracked,
         rows,
-        incoming: [{ name: "Alice", text: "top of the essay, continuing into more of the same paragraph right here" }],
+        incoming: [{ name: "Alice", text: "top of the essay, continuing into more of the same paragraph right here", suggestedSubmissionKind: "unknown", submissionKindCue: "" }],
         courseScope: "course-a",
         mintId,
       },
@@ -312,7 +353,7 @@ describe("commitTrackingReset - Clear table's reset, both halves (RULING 1/2, AC
     const trackedAfterReset = commitTrackingReset("course-a");
     let rows: GradingRow[] = [];
     const advance = commitCaptureAdvance(
-      { tracked: trackedAfterReset, rows, incoming: [{ name: "Alice", text: "alice text" }], courseScope: "course-a", mintId },
+      { tracked: trackedAfterReset, rows, incoming: [{ name: "Alice", text: "alice text", suggestedSubmissionKind: "unknown", submissionKindCue: "" }], courseScope: "course-a", mintId },
       (r) => {
         rows = r;
       }

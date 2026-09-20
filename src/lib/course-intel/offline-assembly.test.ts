@@ -58,6 +58,9 @@ function gradingRow(over: Partial<GradingRow> = {}): GradingRow {
     course: COURSE,
     assessment: "essay-2",
     rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
     ...over,
   };
 }

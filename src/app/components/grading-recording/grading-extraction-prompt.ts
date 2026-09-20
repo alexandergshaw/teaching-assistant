@@ -92,9 +92,14 @@ export function buildSubmissionExtractionPrompt(frameCount: number): string {
     "IF THERE ARE NO SUBMISSIONS",
     '- If these images show only navigation, a gradebook or submission list with nothing open, a loading state, or an empty page, do NOT return an empty array. Return an array with exactly one element instead: {"noSubmissionsVisible": true, "reason": "..."}, where "reason" briefly names what the images actually show (for example "a gradebook list, no submission open" or "a loading spinner"). Always include this element rather than returning nothing at all - a page that genuinely holds no submissions must be told apart from a page you could not make sense of.',
 
+    "WHETHER A SUBMISSION IS A REPLY",
+    "- Canvas discussion boards often split a student's ORIGINAL POST from their REPLIES to classmates - look for an opening \"@Name\" mention, a \"Replying to ...\" line, a \"Re:\" prefix, a quoted excerpt of another post, or a visibly indented/nested position under someone else's post. Any of these means the submission is a reply, not an original post.",
+    "- For each submission, also return \"submissionKind\": one of \"initial-post\" (starts the thread, no reply markers), \"reply\" (replies to another student's post), or \"other\" (not a discussion post at all - an essay, code, a short answer). If you genuinely cannot tell, return \"other\".",
+    "- Also return \"kindCue\": the EXACT words or layout feature you actually saw that made you choose that kind - quote an opening \"@Name\", a \"Replying to X\" line, a \"Re:\" prefix, or name the layout feature (for example \"indented under another post\"). If nothing on screen told you, return an empty string \"\" - do NOT describe the submission's own content as the cue.",
+
     "OUTPUT",
     "Return ONLY a JSON array, and nothing else.",
-    'Each element is either a submission - {"studentName": "...", "submissionText": "..."} - or, only when nothing else applies, the single no-submissions element described above. No other keys.',
+    'Each element is either a submission - {"studentName": "...", "submissionText": "...", "submissionKind": "...", "kindCue": "..."} - or, only when nothing else applies, the single no-submissions element described above. No other keys.',
     '"studentName" is the name exactly as it is shown, with no title, no timestamp and no role label.',
     '"submissionText" is the submission\'s words as plain text. Use "\\n" between paragraphs. Do not use markdown and do not use backticks.',
     "Order the array the way the submissions appear on the page, top to bottom.",

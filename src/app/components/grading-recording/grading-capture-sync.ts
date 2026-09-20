@@ -82,6 +82,13 @@ function blankGradingRow(id: string, sub: ExtractedSubmission): GradingRow {
     // A16-2 hop H9: rubricAreas is required on GradingRow - a brand-new row
     // has never been graded yet, so it starts with none.
     rubricAreas: [],
+    // docs/a8r-scope.md (A8-R) TR-1: a brand-new row's suggestion comes
+    // straight off the entry that minted it (whatever the extraction model
+    // said); `submissionKind` (the CONFIRMED value) always starts at
+    // "unknown" - no machine path ever writes anything else to it.
+    suggestedSubmissionKind: sub.suggestedSubmissionKind,
+    submissionKindCue: sub.submissionKindCue,
+    submissionKind: "unknown",
   };
 }
 
@@ -142,7 +149,17 @@ export function advanceGradingCapture(
   const makeEntry = (sub: ExtractedSubmission): TrackedSubmission => {
     const rowId = mintId();
     minted.add(rowId);
-    return { name: sub.name, text: sub.text, rowId, dismissed: false };
+    return {
+      name: sub.name,
+      text: sub.text,
+      // docs/a8r-scope.md (A8-R) TR-4: the entry starts carrying the
+      // suggestion/cue the extraction batch actually minted alongside this
+      // reading - never re-derived here.
+      suggestedSubmissionKind: sub.suggestedSubmissionKind,
+      submissionKindCue: sub.submissionKindCue,
+      rowId,
+      dismissed: false,
+    };
   };
   const merged = mergeExtractedSubmissions(tracked, incoming, makeEntry);
 

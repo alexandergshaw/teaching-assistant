@@ -32,6 +32,9 @@ function row(overrides: Partial<GradingRow> & { id: string; studentName: string 
     error: "",
     userEdited: false,
     rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
     ...overrides,
   };
 }

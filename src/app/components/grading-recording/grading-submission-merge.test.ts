@@ -122,7 +122,7 @@ describe("isSameSubmission - identity fields and their stability", () => {
 describe("mergeExtractedSubmissions", () => {
   it("adds a brand-new submission when nothing matches", () => {
     const existing: ExtractedSubmission[] = [];
-    const result = mergeExtractedSubmissions(existing, [{ name: "Maria Alvarez", text: "A real submission with enough words to compare" }], identity);
+    const result = mergeExtractedSubmissions(existing, [{ name: "Maria Alvarez", text: "A real submission with enough words to compare", suggestedSubmissionKind: "unknown", submissionKindCue: "" }], identity);
     expect(result.submissions).toHaveLength(1);
     expect(result.addedCount).toBe(1);
     expect(result.mergedCount).toBe(0);
@@ -130,10 +130,10 @@ describe("mergeExtractedSubmissions", () => {
 
   it("merges a re-read of the same submission into the existing entry rather than adding a duplicate row", () => {
     const existing: ExtractedSubmission[] = [
-      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell" },
+      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
     ];
     const result = mergeExtractedSubmissions(existing, [
-      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration" },
+      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
     ], identity);
     expect(result.submissions).toHaveLength(1);
     expect(result.addedCount).toBe(0);
@@ -144,10 +144,10 @@ describe("mergeExtractedSubmissions", () => {
 
   it("does NOT merge two different students' submissions into one row", () => {
     const existing: ExtractedSubmission[] = [
-      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP" },
+      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
     ];
     const result = mergeExtractedSubmissions(existing, [
-      { name: "David Chen", text: "The mitochondria is the powerhouse of the cell and produces ATP" },
+      { name: "David Chen", text: "The mitochondria is the powerhouse of the cell and produces ATP", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
     ], identity);
     expect(result.submissions).toHaveLength(2);
     expect(result.addedCount).toBe(1);
@@ -156,11 +156,11 @@ describe("mergeExtractedSubmissions", () => {
 
   it("keeps the equal-or-shorter reading unapplied (the first/longer version wins) and does not change the array entry's identity when nothing changes", () => {
     const existing: ExtractedSubmission[] = [
-      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration" },
+      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
     ];
     const existingRef = existing[0];
     const result = mergeExtractedSubmissions(existing, [
-      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell" },
+      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
     ], identity);
     expect(result.mergedCount).toBe(1);
     expect(result.submissions[0].text).toBe(existingRef.text);
@@ -169,8 +169,8 @@ describe("mergeExtractedSubmissions", () => {
 
   it("collapses two matching entries within the SAME incoming batch to one row", () => {
     const result = mergeExtractedSubmissions([], [
-      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell" },
-      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration" },
+      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
+      { name: "Maria Alvarez", text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
     ], identity);
     expect(result.submissions).toHaveLength(1);
     expect(result.addedCount).toBe(1);
@@ -179,11 +179,97 @@ describe("mergeExtractedSubmissions", () => {
   });
 
   it("handles an empty incoming batch as a no-op", () => {
-    const existing: ExtractedSubmission[] = [{ name: "Maria Alvarez", text: "Some submission text here" }];
+    const existing: ExtractedSubmission[] = [{ name: "Maria Alvarez", text: "Some submission text here", suggestedSubmissionKind: "unknown", submissionKindCue: "" }];
     const result = mergeExtractedSubmissions(existing, [], identity);
     expect(result.submissions).toEqual(existing);
     expect(result.addedCount).toBe(0);
     expect(result.mergedCount).toBe(0);
+  });
+
+  // docs/a8r-scope.md (A8-R) TR-4: "the suggestion and the cue travel WITH
+  // the text". Three branches, tested independently so a fix to one cannot
+  // hide a defect in another.
+  describe("TR-4: suggestedSubmissionKind/submissionKindCue travel with whichever reading's text wins", () => {
+    it("continuation-join branch: the EARLIER reading's suggestion/cue win, even though the text is the later reading's continuation", () => {
+      const existing: ExtractedSubmission[] = [
+        {
+          name: "Maria Alvarez",
+          text: "Mitochondria are the powerhouse of the cell and they produce energy during the process of cellular respiration",
+          suggestedSubmissionKind: "initial-post",
+          submissionKindCue: "No @mention - opens the thread.",
+        },
+      ];
+      const result = mergeExtractedSubmissions(
+        existing,
+        [
+          {
+            name: "Maria Alvarez",
+            text: "During the process of cellular respiration the cell converts glucose into usable energy in the form of ATP molecules for the organism to use",
+            suggestedSubmissionKind: "reply",
+            submissionKindCue: "some later cue that must NOT win",
+          },
+        ],
+        identity
+      );
+      expect(result.mergedCount).toBe(1);
+      expect(result.submissions[0].text).toContain("ATP molecules"); // the join DID happen
+      expect(result.submissions[0].suggestedSubmissionKind).toBe("initial-post");
+      expect(result.submissions[0].submissionKindCue).toBe("No @mention - opens the thread.");
+    });
+
+    it("replace branch: the NEW (longer) reading's suggestion/cue win, since the entry now holds the new reading's text", () => {
+      const existing: ExtractedSubmission[] = [
+        {
+          name: "Maria Alvarez",
+          text: "The mitochondria is the powerhouse of the cell",
+          suggestedSubmissionKind: "unknown",
+          submissionKindCue: "",
+        },
+      ];
+      const result = mergeExtractedSubmissions(
+        existing,
+        [
+          {
+            name: "Maria Alvarez",
+            text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration",
+            suggestedSubmissionKind: "reply",
+            submissionKindCue: "Replying to Diego Chen",
+          },
+        ],
+        identity
+      );
+      expect(result.mergedCount).toBe(1);
+      expect(result.submissions[0].text).toContain("respiration"); // the replace DID happen
+      expect(result.submissions[0].suggestedSubmissionKind).toBe("reply");
+      expect(result.submissions[0].submissionKindCue).toBe("Replying to Diego Chen");
+    });
+
+    it("keep branch (equal-or-shorter, non-continuation): the EXISTING entry's suggestion/cue are untouched, since its text is untouched", () => {
+      const existing: ExtractedSubmission[] = [
+        {
+          name: "Maria Alvarez",
+          text: "The mitochondria is the powerhouse of the cell and produces ATP through respiration",
+          suggestedSubmissionKind: "initial-post",
+          submissionKindCue: "No @mention - opens the thread.",
+        },
+      ];
+      const result = mergeExtractedSubmissions(
+        existing,
+        [
+          {
+            name: "Maria Alvarez",
+            text: "The mitochondria is the powerhouse of the cell",
+            suggestedSubmissionKind: "reply",
+            submissionKindCue: "must NOT win - this reading's text lost",
+          },
+        ],
+        identity
+      );
+      expect(result.mergedCount).toBe(1);
+      expect(result.submissions[0].text).toBe(existing[0].text); // the keep branch - text unchanged
+      expect(result.submissions[0].suggestedSubmissionKind).toBe("initial-post");
+      expect(result.submissions[0].submissionKindCue).toBe("No @mention - opens the thread.");
+    });
   });
 });
 
@@ -251,6 +337,8 @@ describe("shared-opening-template collision - two different students restating t
   const johnsSubmission = {
     name: "John Smith",
     text: `${sharedTemplate} the Boston Tea Party and other acts of colonial protest against unfair British taxes`,
+    suggestedSubmissionKind: "unknown" as const,
+    submissionKindCue: "",
   };
   // A DIFFERENT student who shares John's surname, read off a cropped
   // header as just "Smith" - the same crop the previous describe block
@@ -258,6 +346,8 @@ describe("shared-opening-template collision - two different students restating t
   const annasSubmissionCroppedName = {
     name: "Smith",
     text: `${sharedTemplate} the outbreak of armed conflict at Lexington and Concord in April of that year`,
+    suggestedSubmissionKind: "unknown" as const,
+    submissionKindCue: "",
   };
 
   it("the two submissions' real (post-template) content is genuinely different, not near-0 distance", () => {
@@ -342,6 +432,8 @@ describe("continuation across batches - a body-only later reading rejoins its to
   const topOfSubmission = {
     name: "Maria Alvarez",
     text: "Mitochondria are the powerhouse of the cell and they produce energy during the process of cellular respiration",
+    suggestedSubmissionKind: "unknown" as const,
+    submissionKindCue: "",
   };
   // Genuinely different opening (no shared prefix with topOfSubmission at
   // all) - this is the MIDDLE of the same document, read in a later batch.
@@ -352,6 +444,8 @@ describe("continuation across batches - a body-only later reading rejoins its to
   const bodyOfSubmission = {
     name: "Maria Alvarez",
     text: "During the process of cellular respiration the cell converts glucose into usable energy in the form of ATP molecules for the organism to use",
+    suggestedSubmissionKind: "unknown" as const,
+    submissionKindCue: "",
   };
 
   it("findContinuationOverlap finds the splice point", () => {
@@ -385,14 +479,14 @@ describe("continuation across batches - a body-only later reading rejoins its to
   });
 
   it("a continuation from a DIFFERENT student's name is never joined, even if the text happens to splice", () => {
-    const differentStudentBody = { name: "David Chen", text: bodyOfSubmission.text };
+    const differentStudentBody = { name: "David Chen", text: bodyOfSubmission.text, suggestedSubmissionKind: "unknown" as const, submissionKindCue: "" };
     expect(isSameSubmission(topOfSubmission, differentStudentBody)).toBe(false);
     const result = mergeExtractedSubmissions([topOfSubmission], [differentStudentBody], identity);
     expect(result.submissions).toHaveLength(2);
   });
 
   it("a cropped (weak) name match alone does not qualify for the continuation path, even with a real splice", () => {
-    const croppedBody = { name: "Alvarez", text: bodyOfSubmission.text };
+    const croppedBody = { name: "Alvarez", text: bodyOfSubmission.text, suggestedSubmissionKind: "unknown" as const, submissionKindCue: "" };
     // studentNamesMatch still tolerates the crop as a name...
     expect(studentNamesMatch(topOfSubmission.name, croppedBody.name)).toBe(true);
     // ...but the continuation path itself requires "exact" confidence, and

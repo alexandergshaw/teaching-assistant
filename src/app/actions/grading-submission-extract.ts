@@ -53,6 +53,7 @@ import {
   buildSubmissionExtractionPrompt,
 } from "@/app/components/grading-recording/grading-extraction-prompt";
 import type { ExtractedSubmission } from "@/app/components/grading-recording/grading-submission-merge";
+import { coerceSubmissionKind } from "@/lib/grade/submission-kind";
 
 /**
  * Read the student submissions visible across a batch of screen-capture
@@ -139,7 +140,14 @@ export async function extractGradingSubmissionsAction(
     if (!r.text.trim()) return { error: describeEmptyLlmText(r, "Reading the submissions") };
 
     const raw = parseLenientJsonArray(r.text) as
-      | Array<{ studentName?: unknown; submissionText?: unknown; noSubmissionsVisible?: unknown; reason?: unknown }>
+      | Array<{
+          studentName?: unknown;
+          submissionText?: unknown;
+          noSubmissionsVisible?: unknown;
+          reason?: unknown;
+          submissionKind?: unknown;
+          kindCue?: unknown;
+        }>
       | null;
     if (!raw) return { error: "Could not read any submissions from that part of the screen." };
 
@@ -167,7 +175,14 @@ export async function extractGradingSubmissionsAction(
       const name = (p.studentName as string).trim();
       const text = (p.submissionText as string).trim();
       const truncated = text.length > MAX_SUBMISSION_CHARS ? `${text.slice(0, MAX_SUBMISSION_CHARS)}...` : text;
-      submissions.push({ name, text: truncated });
+      // docs/a8r-scope.md (A8-R) CUE-1: the mint. coerceSubmissionKind
+      // defaults anything the model did not return (or returned outside the
+      // four-member set) to "unknown" - a model response captured before
+      // this contract existed reads identically to one that genuinely had no
+      // basis to suggest a kind.
+      const suggestedSubmissionKind = coerceSubmissionKind(p.submissionKind);
+      const submissionKindCue = typeof p.kindCue === "string" ? p.kindCue.trim() : "";
+      submissions.push({ name, text: truncated, suggestedSubmissionKind, submissionKindCue });
     }
 
     // Outcome 3: nothing usable AND no confirmation marker - the model did

@@ -129,12 +129,28 @@ export function seedTrackedFromRows(
   const live: TrackedSubmission[] = rows.map((row) => ({
     name: row.studentName,
     text: row.submissionText,
+    // docs/a8r-scope.md (A8-R) TR-2: GradingRow is the home of record for
+    // both fields (TR-1), so a reload seed reads them back OFF the row
+    // rather than re-deriving or defaulting them - the accumulator is a
+    // PROJECTION of the row table, not a second record of its own.
+    suggestedSubmissionKind: row.suggestedSubmissionKind,
+    submissionKindCue: row.submissionKindCue,
     rowId: row.id,
     dismissed: false,
   }));
   const tombstones: TrackedSubmission[] = dismissed
     .filter((entry) => entry.course === courseScope)
-    .map((entry) => ({ name: entry.name, text: entry.text, rowId: mintId(), dismissed: true }));
+    .map((entry) => ({
+      name: entry.name,
+      text: entry.text,
+      // A DismissedSubmission has no row and no kind - "unknown"/"" is
+      // honest rather than lossy, since a dismissed entry never reaches a
+      // label or a prompt (docs/a8r-scope.md section 4.2, TR-3).
+      suggestedSubmissionKind: "unknown",
+      submissionKindCue: "",
+      rowId: mintId(),
+      dismissed: true,
+    }));
   return [...live, ...tombstones];
 }
 

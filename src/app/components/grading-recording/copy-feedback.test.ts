@@ -46,6 +46,9 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     submissionTimeStatus: "unknown",
     submittedAt: "",
     rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
     ...overrides,
   };
 }

@@ -38,9 +38,11 @@
 // R0-2 (grading-row.ts's own header): GradingRow carries no student id and
 // never will - "posting one is a COMPILE ERROR, not a discipline." This file
 // honours that the same way: `toWire` below builds its output by EXPLICITLY
-// enumerating GradingRow's known fields (sixteen as of D23 -
-// course/assessment/submissionTimeStatus/submittedAt included; see below),
-// never by spreading `...row`. A runtime value typed as `GradingRow` that
+// enumerating GradingRow's known fields (nineteen as of A8-R's W1-WIRE -
+// course/assessment/submissionTimeStatus/submittedAt (D23) and
+// suggestedSubmissionKind/submissionKindCue/submissionKind (A8-R) included;
+// see below), never by spreading `...row`. A runtime value typed as
+// `GradingRow` that
 // somehow carried an extra property (TypeScript's structural typing does not
 // forbid this at the object-literal call sites that build one) still could
 // not leak that property into localStorage through this file - the boundary
@@ -74,6 +76,7 @@
 // grading-row.ts's own doc comments on those three fields.
 
 import type { GradingRow, GradingRowNameMatch, GradingRowState, GradingRowSubmissionTimeStatus } from "./grading-row";
+import { coerceSubmissionKind } from "@/lib/grade/submission-kind";
 import type { NoPostableIdentity } from "../assessment-shared/assessment-row";
 import {
   serializeAssessmentRows,
@@ -168,6 +171,13 @@ function toWire(row: NoPostableIdentity<GradingRow>, opts: { dropBulk: boolean }
     // could not find one this time) never resurrects a stale one after a
     // reload.
     submittedAt: submissionTimeStatus === "known" ? r.submittedAt ?? "" : "",
+    // docs/a8r-scope.md (A8-R) W1-WIRE: all three submission-kind fields are
+    // GradingRow's home of record (TR-1) and must survive a reload, unlike
+    // `rubricAreas` immediately above - taking EXPECTED_WIRE_KEYS from 16 to
+    // 19 keys, deliberately, in the same commit that adds these three.
+    suggestedSubmissionKind: r.suggestedSubmissionKind,
+    submissionKindCue: r.submissionKindCue,
+    submissionKind: r.submissionKind,
   };
 }
 
@@ -266,6 +276,18 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<GradingRow> 
   // resurrect itself.
   const submittedAt = submissionTimeStatus === "known" && typeof r.submittedAt === "string" ? r.submittedAt : "";
 
+  // W1-WIRE: a legacy stored row with none of these three keys (every row
+  // captured before A8-R) deserializes to "unknown" for the two model-
+  // suggested fields and "" for the cue - coerceSubmissionKind (shared with
+  // the extraction action, docs/a8r-scope.md section 4.1) is the same
+  // discipline `nameMatch` above already runs, applied to this union
+  // instead of a locally declared Set. `submissionKind` (the CONFIRMED
+  // value) gets the identical fallback: an instructor's confirmation never
+  // resurrects itself from garbled or absent storage.
+  const suggestedSubmissionKind = coerceSubmissionKind(r.suggestedSubmissionKind);
+  const submissionKindCue = typeof r.submissionKindCue === "string" ? r.submissionKindCue : "";
+  const submissionKind = coerceSubmissionKind(r.submissionKind);
+
   return {
     id,
     studentName,
@@ -286,11 +308,16 @@ function fromWire(raw: Record<string, unknown>): NoPostableIdentity<GradingRow> 
     // docs/a16-scope.md A16-2, hop H11 (0.4's ruling on why H10 is gone):
     // this run's cohort is `useState` and does not survive a reload, so
     // `rubricAreas` never reaches storage - `toWire` above deliberately does
-    // NOT enumerate this key, and this list of 16 is unchanged. `fromWire`
+    // NOT enumerate this key (unlike the three submission-kind fields below,
+    // which A8-R's W1-WIRE DOES enumerate - a run's rubric feedback is
+    // session-only, a submission's recognized kind is not). `fromWire`
     // emits `[]` UNCONDITIONALLY, never reading `raw.rubricAreas` - even if
     // some future write path (or a hand-edited value in storage) put the key
     // there, this function must not read it back.
     rubricAreas: [],
+    suggestedSubmissionKind,
+    submissionKindCue,
+    submissionKind,
   } as unknown as NoPostableIdentity<GradingRow>;
 }
 

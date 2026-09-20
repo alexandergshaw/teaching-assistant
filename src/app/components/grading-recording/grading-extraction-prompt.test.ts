@@ -42,12 +42,24 @@ describe("buildSubmissionExtractionPrompt", () => {
     expect(prompt.toLowerCase()).toContain("backtick");
   });
 
-  it("says nothing about discussion-board furniture - proves this is a fresh prompt, not the discussion one reused (R4b)", () => {
+  // REVERSED by docs/a8r-scope.md (A8-R), CUE-1, the same way A16-2 reversed
+  // a different pinned assertion (grading-row-serialization.test.ts's
+  // EXPECTED_WIRE_KEYS, 16 -> 19): this test used to assert the prompt said
+  // NOTHING about replies/threads, as a proxy for "this is a fresh prompt,
+  // not the discussion one reused (R4b)". A8-R's owner-reported defect is
+  // exactly that this surface must recognize a reply AS a reply, so the
+  // prompt now legitimately asks the model to look for reply markers -  the
+  // vocabulary the old assertion banned is now load-bearing content, not
+  // evidence of reuse. R4b's real concern (no functions imported from
+  // discussion-reply-prompt.ts / discussion-capture.ts) is a static, typed
+  // fact this file's own header states and is not something a source-text
+  // assertion on the rendered STRING could ever prove either way.
+  it("asks the model to recognize and report whether a submission is a reply (A8-R CUE-1) - the load-bearing schema addition", () => {
     const prompt = buildSubmissionExtractionPrompt(5);
-    const lower = prompt.toLowerCase();
-    expect(lower).not.toContain("thread");
-    expect(lower).not.toContain("reply");
-    expect(lower).not.toContain("discussion board");
+    expect(prompt).toContain("submissionKind");
+    expect(prompt).toContain("kindCue");
+    expect(prompt.toLowerCase()).toContain("reply");
+    expect(prompt).toContain("initial-post");
   });
 
   describe("R3: the name rule (safety-critical - a misread name misattributes real feedback)", () => {

@@ -82,6 +82,9 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     submissionTimeStatus: "unknown",
     submittedAt: "",
     rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
     ...overrides,
   };
 }
@@ -409,6 +412,11 @@ describe("frozen serialization oracle", () => {
       // only so this literal satisfies GradingRow and round-trips against
       // fromWire's own unconditional [] (V22).
       rubricAreas: [],
+      // A8-R W1-WIRE: a confirmed initial post - both suggestedSubmissionKind
+      // and submissionKind agree, unlike grade-1-2 below.
+      suggestedSubmissionKind: "initial-post",
+      submissionKindCue: "No @mention or Replying-to line - opens the thread.",
+      submissionKind: "initial-post",
     },
     {
       id: "grade-1-1",
@@ -433,6 +441,11 @@ describe("frozen serialization oracle", () => {
       submissionTimeStatus: "unknown",
       submittedAt: "",
       rubricAreas: [],
+      // A8-R W1-WIRE: never extracted with a suggestion at all - the default,
+      // unconfirmed case.
+      suggestedSubmissionKind: "unknown",
+      submissionKindCue: "",
+      submissionKind: "unknown",
     },
     {
       id: "grade-1-2",
@@ -453,6 +466,12 @@ describe("frozen serialization oracle", () => {
       submissionTimeStatus: "marked-late",
       submittedAt: "",
       rubricAreas: [],
+      // A8-R W1-WIRE: an instructor-CONFIRMED reply - exercises the case
+      // where submissionKind differs from "unknown" and the label/prompt
+      // must switch away from "Submission" for this row (G-R1/G-R2, wave 2).
+      suggestedSubmissionKind: "reply",
+      submissionKindCue: "Replying to Maria Alvarez",
+      submissionKind: "reply",
     },
     {
       id: "grade-1-3",
@@ -471,6 +490,12 @@ describe("frozen serialization oracle", () => {
       submissionTimeStatus: "unknown",
       submittedAt: "",
       rubricAreas: [],
+      // A8-R W1-WIRE: suggested but never confirmed - exercises the case
+      // where suggestedSubmissionKind and submissionKind DISAGREE, which
+      // CUE-2's batch-accept eligibility rule (wave 2) is keyed on.
+      suggestedSubmissionKind: "other",
+      submissionKindCue: "",
+      submissionKind: "unknown",
     },
   ];
 
@@ -479,14 +504,17 @@ describe("frozen serialization oracle", () => {
   // submissionTimeStatus/submittedAt are now part of the wire format -
   // grade-1-0 carries a real assessment + a "known" submission time,
   // grade-1-2 carries a "marked-late" verdict with no timestamp, and
-  // grade-1-1/grade-1-3 exercise the all-absent/default case).
+  // grade-1-1/grade-1-3 exercise the all-absent/default case; regenerated
+  // again for A8-R's W1-WIRE - grade-1-0 is a confirmed initial post,
+  // grade-1-1 has no suggestion at all, grade-1-2 is a confirmed reply, and
+  // grade-1-3 is suggested but never confirmed).
   const FROZEN_FULL =
-    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"Utilitarian calculus applied to the trolley problem shows that pulling the lever minimizes total harm, though quantifying happiness across people remains genuinely hard.","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z"},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"I could not read this submission clearly off the screen.","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":""},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"Consequentialism is the view that only outcomes matter morally.","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":""},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"No strong opinion either way on the reading.","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":""}]}';
+    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"Utilitarian calculus applied to the trolley problem shows that pulling the lever minimizes total harm, though quantifying happiness across people remains genuinely hard.","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z","suggestedSubmissionKind":"initial-post","submissionKindCue":"No @mention or Replying-to line - opens the thread.","submissionKind":"initial-post"},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"I could not read this submission clearly off the screen.","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"unknown","submissionKindCue":"","submissionKind":"unknown"},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"Consequentialism is the view that only outcomes matter morally.","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":"","suggestedSubmissionKind":"reply","submissionKindCue":"Replying to Maria Alvarez","submissionKind":"reply"},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"No strong opinion either way on the reading.","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"other","submissionKindCue":"","submissionKind":"unknown"}]}';
 
   // Captured verbatim from a real run of serializeGradingRowsWithoutSubmissionText
   // against the same oracleRows - identical except every submissionText is "".
   const FROZEN_NOTEXT =
-    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z"},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":""},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":""},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":""}]}';
+    '{"v":1,"rows":[{"id":"grade-1-0","studentName":"Maria Alvarez","nameMatch":"matched","rosterCandidates":["Maria Alvarez"],"submissionText":"","state":"ready","totalScore":"9/10","strengths":"Clear thesis and strong use of the reading.","improvements":"Consider addressing the counterargument from deontological ethics.","overallComment":"Strong work, Maria - clear thesis and strong use of the reading. Consider addressing the counterargument from deontological ethics.","error":"","userEdited":false,"assessment":"essay-2","submissionTimeStatus":"known","submittedAt":"2026-09-01T23:59:00Z","suggestedSubmissionKind":"initial-post","submissionKindCue":"No @mention or Replying-to line - opens the thread.","submissionKind":"initial-post"},{"id":"grade-1-1","studentName":"Diego Chen","nameMatch":"unmatched","rosterCandidates":[],"submissionText":"","state":"failed","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"Gemini rejected the request (400).","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"unknown","submissionKindCue":"","submissionKind":"unknown"},{"id":"grade-1-2","studentName":"Priya Nair","nameMatch":"no-roster","rosterCandidates":[],"submissionText":"","state":"ready","totalScore":"10/10 (my own call)","strengths":"My own hand-typed strengths.","improvements":"My own hand-typed improvements.","overallComment":"My own hand-typed comment.","error":"","userEdited":true,"submissionTimeStatus":"marked-late","submittedAt":"","suggestedSubmissionKind":"reply","submissionKindCue":"Replying to Maria Alvarez","submissionKind":"reply"},{"id":"grade-1-3","studentName":"Sam Lee","nameMatch":"ambiguous","rosterCandidates":["Sam Lee","Samuel Lee"],"submissionText":"","state":"pending","totalScore":"","strengths":"","improvements":"","overallComment":"","error":"","userEdited":false,"submissionTimeStatus":"unknown","submittedAt":"","suggestedSubmissionKind":"other","submissionKindCue":"","submissionKind":"unknown"}]}';
 
   it("matches the frozen literal byte-for-byte (full write)", () => {
     expect(serializeGradingRows(oracleRows)).toBe(FROZEN_FULL);
@@ -693,9 +721,16 @@ describe("the persisted wire row's exact key set (frozen oracle, real codec)", (
     "assessment",
     "submissionTimeStatus",
     "submittedAt",
+    // docs/a8r-scope.md (A8-R) W1-WIRE: taking this list from 16 to 19 keys,
+    // deliberately, in the same commit that adds these three fields to
+    // GradingRow - see grading-row-serialization.ts's own toWire/fromWire
+    // for why (TR-1: GradingRow is the home of record for all three).
+    "suggestedSubmissionKind",
+    "submissionKindCue",
+    "submissionKind",
   ];
 
-  it("writes exactly these 16 keys and no others", () => {
+  it("writes exactly these 19 keys and no others", () => {
     const wire = gradingRowCodec.toWire(makeRow(), { dropBulk: false });
     expect(Object.keys(wire)).toEqual(EXPECTED_WIRE_KEYS);
   });

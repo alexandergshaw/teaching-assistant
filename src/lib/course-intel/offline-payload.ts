@@ -208,6 +208,13 @@ function buildGradingRow(raw: Record<string, unknown>, ordinal: number): Grading
     // rubric-area source of its own (see this function's own header - EVERY
     // OTHER FIELD IS BLANK, ENUMERATED EXPLICITLY), so it is always [].
     rubricAreas: [],
+    // docs/a8r-scope.md (A8-R): required on GradingRow. This offline mapping
+    // has no submission-kind source either (the same reasoning as
+    // rubricAreas immediately above) - always the "no suggestion, not
+    // confirmed" defaults.
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
   };
 }
 

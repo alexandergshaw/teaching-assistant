@@ -56,6 +56,9 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     error: "",
     userEdited: false,
     rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
     ...overrides,
   };
 }

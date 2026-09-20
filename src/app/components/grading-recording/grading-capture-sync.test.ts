@@ -18,6 +18,9 @@ function makeRow(overrides: Partial<GradingRow> = {}): GradingRow {
     error: "",
     userEdited: false,
     rubricAreas: [],
+    suggestedSubmissionKind: "unknown",
+    submissionKindCue: "",
+    submissionKind: "unknown",
     ...overrides,
   };
 }
@@ -31,7 +34,7 @@ function testMintId(): string {
 describe("advanceGradingCapture - single-call behaviour, re-pinned by id (not index)", () => {
   it("mints a fresh row (via the injected mintId) for a submission with no existing tracked entry", () => {
     idCounter = 0;
-    const result = advanceGradingCapture([], [], [{ name: "Maria Alvarez", text: "hello" }], testMintId);
+    const result = advanceGradingCapture([], [], [{ name: "Maria Alvarez", text: "hello", suggestedSubmissionKind: "unknown", submissionKindCue: "" }], testMintId);
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].id).toBe("minted-1");
     expect(result.rows[0].studentName).toBe("Maria Alvarez");
@@ -45,7 +48,7 @@ describe("advanceGradingCapture - single-call behaviour, re-pinned by id (not in
 
   it("a new row defaults to nameMatch 'no-roster' with no candidates - roster matching happens in a later pass, never a guess here", () => {
     idCounter = 0;
-    const result = advanceGradingCapture([], [], [{ name: "Maria Alvarez", text: "hello" }], testMintId);
+    const result = advanceGradingCapture([], [], [{ name: "Maria Alvarez", text: "hello", suggestedSubmissionKind: "unknown", submissionKindCue: "" }], testMintId);
     expect(result.rows[0].nameMatch).toBe("no-roster");
     expect(result.rows[0].rosterCandidates).toEqual([]);
   });
@@ -55,7 +58,7 @@ describe("advanceGradingCapture - single-call behaviour, re-pinned by id (not in
     const seed = advanceGradingCapture(
       [],
       [],
-      [{ name: "Maria Alvarez", text: "the mitochondria is the powerhouse of the cell" }],
+      [{ name: "Maria Alvarez", text: "the mitochondria is the powerhouse of the cell", suggestedSubmissionKind: "unknown", submissionKindCue: "" }],
       testMintId
     );
     const rowId = seed.rows[0].id;
@@ -69,7 +72,7 @@ describe("advanceGradingCapture - single-call behaviour, re-pinned by id (not in
     const result = advanceGradingCapture(
       seed.tracked,
       rowsWithUnrelatedFirst,
-      [{ name: "Maria Alvarez", text: "the mitochondria is the powerhouse of the cell and produces ATP through respiration" }],
+      [{ name: "Maria Alvarez", text: "the mitochondria is the powerhouse of the cell and produces ATP through respiration", suggestedSubmissionKind: "unknown", submissionKindCue: "" }],
       testMintId
     );
     const updated = result.rows.find((r) => r.id === rowId)!;
@@ -90,7 +93,7 @@ describe("advanceGradingCapture - single-call behaviour, re-pinned by id (not in
     const seed = advanceGradingCapture(
       [],
       [],
-      [{ name: "Maria Alvarez", text: "the mitochondria is the powerhouse of the cell" }],
+      [{ name: "Maria Alvarez", text: "the mitochondria is the powerhouse of the cell", suggestedSubmissionKind: "unknown", submissionKindCue: "" }],
       testMintId
     );
     const updatedText = "the mitochondria is the powerhouse of the cell and produces ATP";
@@ -98,8 +101,8 @@ describe("advanceGradingCapture - single-call behaviour, re-pinned by id (not in
       seed.tracked,
       seed.rows,
       [
-        { name: "Maria Alvarez", text: updatedText },
-        { name: "Diego Chen", text: "a completely different submission about something else entirely for grading" },
+        { name: "Maria Alvarez", text: updatedText, suggestedSubmissionKind: "unknown", submissionKindCue: "" },
+        { name: "Diego Chen", text: "a completely different submission about something else entirely for grading", suggestedSubmissionKind: "unknown", submissionKindCue: "" },
       ],
       testMintId
     );
@@ -110,10 +113,10 @@ describe("advanceGradingCapture - single-call behaviour, re-pinned by id (not in
 
   it("does not mutate the input rows array, tracked array, or their entries", () => {
     idCounter = 0;
-    const seed = advanceGradingCapture([], [], [{ name: "Maria Alvarez", text: "original" }], testMintId);
+    const seed = advanceGradingCapture([], [], [{ name: "Maria Alvarez", text: "original", suggestedSubmissionKind: "unknown", submissionKindCue: "" }], testMintId);
     const rowsSnapshot = seed.rows[0];
     const trackedSnapshot = seed.tracked[0];
-    advanceGradingCapture(seed.tracked, seed.rows, [{ name: "Maria Alvarez", text: "changed" }], testMintId);
+    advanceGradingCapture(seed.tracked, seed.rows, [{ name: "Maria Alvarez", text: "changed", suggestedSubmissionKind: "unknown", submissionKindCue: "" }], testMintId);
     expect(seed.rows[0]).toBe(rowsSnapshot);
     expect(seed.rows[0].submissionText).toBe("original");
     expect(seed.tracked[0]).toBe(trackedSnapshot);
@@ -130,6 +133,8 @@ describe("advanceGradingCapture - end-to-end with mergeExtractedSubmissions acro
         {
           name: "Maria Alvarez",
           text: "Mitochondria are the powerhouse of the cell and they produce energy during the process of cellular respiration",
+          suggestedSubmissionKind: "unknown",
+          submissionKindCue: "",
         },
       ],
       testMintId
@@ -146,6 +151,8 @@ describe("advanceGradingCapture - end-to-end with mergeExtractedSubmissions acro
         {
           name: "Maria Alvarez",
           text: "During the process of cellular respiration the cell converts glucose into usable energy in the form of ATP molecules for the organism to use",
+          suggestedSubmissionKind: "unknown",
+          submissionKindCue: "",
         },
       ],
       testMintId
@@ -173,7 +180,7 @@ describe("advanceGradingCapture - end-to-end with mergeExtractedSubmissions acro
 // ---------------------------------------------------------------------------
 describe("advanceGradingCapture - ORACLE-2 branch table", () => {
   it("branch 1 (dismissed): emits no row and carries the entry forward unchanged, never resurrecting its old row from a stale rows array", () => {
-    const dismissedEntry: TrackedSubmission = { name: "Gone Student", text: "some text here", rowId: "row-gone", dismissed: true };
+    const dismissedEntry: TrackedSubmission = { name: "Gone Student", text: "some text here", suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId: "row-gone", dismissed: true };
     // A stale `rows` array still carrying the dismissed entry's row - this
     // is exactly the resurrection defect (a); the branch must refuse it.
     const staleRows = [makeRow({ id: "row-gone", studentName: "Gone Student" })];
@@ -186,7 +193,7 @@ describe("advanceGradingCapture - ORACLE-2 branch table", () => {
   it("branch 2 (live, byId.has): refreshes only studentName/submissionText, carries every other row field forward untouched", () => {
     const oldText = "the mitochondria is the powerhouse of the cell";
     const newText = "the mitochondria is the powerhouse of the cell and produces ATP";
-    const tracked: TrackedSubmission[] = [{ name: "Maria Alvarez", text: oldText, rowId: "row-1", dismissed: false }];
+    const tracked: TrackedSubmission[] = [{ name: "Maria Alvarez", text: oldText, suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId: "row-1", dismissed: false }];
     const rows = [
       makeRow({
         id: "row-1",
@@ -201,7 +208,7 @@ describe("advanceGradingCapture - ORACLE-2 branch table", () => {
         rosterCandidates: ["Maria Alvarez"],
       }),
     ];
-    const result = advanceGradingCapture(tracked, rows, [{ name: "Maria Alvarez", text: newText }], () => "unused");
+    const result = advanceGradingCapture(tracked, rows, [{ name: "Maria Alvarez", text: newText, suggestedSubmissionKind: "unknown", submissionKindCue: "" }], () => "unused");
     expect(result.rows).toHaveLength(1);
     const row = result.rows[0];
     expect(row.id).toBe("row-1");
@@ -214,14 +221,14 @@ describe("advanceGradingCapture - ORACLE-2 branch table", () => {
 
   it("branch 3 (live, minted.has): a brand-new entry this call minted gets a blank row", () => {
     idCounter = 0;
-    const result = advanceGradingCapture([], [], [{ name: "Diego Chen", text: "brand new submission text" }], testMintId);
+    const result = advanceGradingCapture([], [], [{ name: "Diego Chen", text: "brand new submission text", suggestedSubmissionKind: "unknown", submissionKindCue: "" }], testMintId);
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].id).toBe("minted-1");
     expect(result.rows[0].state).toBe("pending");
   });
 
   it("branch 4 (live, neither): a DIVERGENCE - never suppresses, never treats a missing row as a deletion. Emits a fresh row and reports the old id in divergentRowIds (AC-A9-12)", () => {
-    const tracked: TrackedSubmission[] = [{ name: "Maria Alvarez", text: "orphaned entry text here", rowId: "row-missing", dismissed: false }];
+    const tracked: TrackedSubmission[] = [{ name: "Maria Alvarez", text: "orphaned entry text here", suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId: "row-missing", dismissed: false }];
     // No row "row-missing" in `rows` at all, and `dismissed` is false - this
     // must NOT be read as an instructor deletion.
     const result = advanceGradingCapture(tracked, [], [], () => "fresh-id");
@@ -235,8 +242,8 @@ describe("advanceGradingCapture - ORACLE-2 branch table", () => {
   });
 
   it("control: the order of independent tracked entries is a no-op - every cell stays green regardless of which is listed first", () => {
-    const dismissedEntry: TrackedSubmission = { name: "Gone Student", text: "gone text here please", rowId: "row-gone", dismissed: true };
-    const liveEntry: TrackedSubmission = { name: "Maria Alvarez", text: "live text here please", rowId: "row-1", dismissed: false };
+    const dismissedEntry: TrackedSubmission = { name: "Gone Student", text: "gone text here please", suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId: "row-gone", dismissed: true };
+    const liveEntry: TrackedSubmission = { name: "Maria Alvarez", text: "live text here please", suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId: "row-1", dismissed: false };
     const rows = [makeRow({ id: "row-1" }), makeRow({ id: "row-gone", studentName: "Gone Student" })];
 
     const dismissedFirst = advanceGradingCapture([dismissedEntry, liveEntry], rows, [], () => "unused");
@@ -256,9 +263,9 @@ describe("advanceGradingCapture - ORACLE-2 branch table", () => {
 describe("advanceGradingCapture - ORACLE-1 misattribution, frozen literal", () => {
   function threeRowFixture() {
     const tracked: TrackedSubmission[] = [
-      { name: "Student A", text: "student a submission text here", rowId: "r-a", dismissed: false },
-      { name: "Student B", text: "student b submission text here", rowId: "r-b", dismissed: false },
-      { name: "Student C", text: "student c submission text here", rowId: "r-c", dismissed: false },
+      { name: "Student A", text: "student a submission text here", suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId: "r-a", dismissed: false },
+      { name: "Student B", text: "student b submission text here", suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId: "r-b", dismissed: false },
+      { name: "Student C", text: "student c submission text here", suggestedSubmissionKind: "unknown", submissionKindCue: "", rowId: "r-c", dismissed: false },
     ];
     const rows = [
       makeRow({ id: "r-a", studentName: "Student A", totalScore: "1/10", strengths: "typed-a", userEdited: false }),
@@ -289,7 +296,7 @@ describe("advanceGradingCapture - ORACLE-1 misattribution, frozen literal", () =
       // case - an overlapping capture frame re-reads whoever is on screen.
       const incoming = tracked
         .filter((t) => remainingIds.includes(t.rowId))
-        .map((t) => ({ name: t.name, text: t.text }));
+        .map((t) => ({ name: t.name, text: t.text, suggestedSubmissionKind: t.suggestedSubmissionKind, submissionKindCue: t.submissionKindCue }));
       const result = advanceGradingCapture(tracked, rowsAfterDeletion, incoming, () => "minted-not-expected");
 
       // studentName is LOAD-BEARING here and its absence made this oracle
@@ -345,7 +352,7 @@ describe("advanceGradingCapture - ORACLE-3 continuation stays suppressed across 
     expect(submissionTextSimilarityDistance(topText, tailText)).toBeGreaterThan(SIMILARITY_THRESHOLD);
 
     // Batch 1: top is read.
-    const batch1 = advanceGradingCapture([], [], [{ name: "Maria Alvarez", text: topText }], testMintId);
+    const batch1 = advanceGradingCapture([], [], [{ name: "Maria Alvarez", text: topText, suggestedSubmissionKind: "unknown", submissionKindCue: "" }], testMintId);
     expect(batch1.rows).toHaveLength(1);
 
     // The instructor dismisses it (simulated directly here - the commit
@@ -360,7 +367,7 @@ describe("advanceGradingCapture - ORACLE-3 continuation stays suppressed across 
     // Batch 3 ("body"): a continuation of the dismissed entry's text arrives.
     // It folds into the dismissed entry (still exact name + continuation
     // splice) and emits NO row.
-    const batch3 = advanceGradingCapture(batch2.tracked, batch2.rows, [{ name: "Maria Alvarez", text: bodyText }], () => "unused-3");
+    const batch3 = advanceGradingCapture(batch2.tracked, batch2.rows, [{ name: "Maria Alvarez", text: bodyText, suggestedSubmissionKind: "unknown", submissionKindCue: "" }], () => "unused-3");
     expect(batch3.rows).toHaveLength(0);
     expect(batch3.tracked).toHaveLength(1);
     expect(batch3.tracked[0].dismissed).toBe(true);
@@ -369,7 +376,7 @@ describe("advanceGradingCapture - ORACLE-3 continuation stays suppressed across 
     // Batch 4 ("tail"): another continuation, splicing onto the body text
     // (and sharing nothing directly with the top text - see the independent
     // axis above). Must still emit NO row.
-    const batch4 = advanceGradingCapture(batch3.tracked, batch3.rows, [{ name: "Maria Alvarez", text: tailText }], () => "unused-4");
+    const batch4 = advanceGradingCapture(batch3.tracked, batch3.rows, [{ name: "Maria Alvarez", text: tailText, suggestedSubmissionKind: "unknown", submissionKindCue: "" }], () => "unused-4");
     expect(batch4.rows).toHaveLength(0);
     expect(batch4.tracked).toHaveLength(1);
     expect(batch4.tracked[0].dismissed).toBe(true);

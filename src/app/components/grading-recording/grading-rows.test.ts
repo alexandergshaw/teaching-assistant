@@ -37,6 +37,9 @@ import {
   gradingClearTableSignature,
   GRADING_TABLE_COLUMN_COUNT,
   DEFAULT_GRADING_SORT,
+  confirmSubmissionKind,
+  isEligibleForBatchAccept,
+  acceptSuggestedKinds,
 } from "./grading-rows";
 import { GRADING_ROW_HAYSTACK, type GradingRow } from "./grading-row";
 import { filterRowsByQuery } from "../recording/discussion-table-view";
@@ -461,6 +464,97 @@ describe("removeGradingRow (\"no row can be removed\" fix)", () => {
     const original = rows.slice();
     removeGradingRow(rows, "a");
     expect(rows).toEqual(original);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/a8r-scope.md (A8-R) section 3/6: confirmSubmissionKind,
+// isEligibleForBatchAccept (CUE-2), acceptSuggestedKinds.
+// ---------------------------------------------------------------------------
+
+describe("confirmSubmissionKind", () => {
+  it("sets submissionKind to the given kind and touches nothing else", () => {
+    const row = makeRow({ id: "a", suggestedSubmissionKind: "reply", submissionKindCue: "Replying to Bob" });
+    const next = confirmSubmissionKind(row, "reply");
+    expect(next.submissionKind).toBe("reply");
+    expect(next.suggestedSubmissionKind).toBe("reply");
+    expect(next.submissionKindCue).toBe("Replying to Bob");
+  });
+
+  it("an instructor can confirm a DIFFERENT kind than the one suggested - never restricted to the suggestion", () => {
+    const row = makeRow({ id: "a", suggestedSubmissionKind: "reply" });
+    const next = confirmSubmissionKind(row, "initial-post");
+    expect(next.submissionKind).toBe("initial-post");
+  });
+
+  it("does not mutate the input row", () => {
+    const row = makeRow({ id: "a" });
+    confirmSubmissionKind(row, "reply");
+    expect(row.submissionKind).toBe("unknown");
+  });
+});
+
+// CUE-2's eligibility rule ranges over the full product of {suggestion
+// unknown/known} x {cue empty/non-empty} x {confirmed/unconfirmed} - eight
+// cases by construction, not a hand-picked sample (docs/a8r-scope.md
+// section 6's own pass condition).
+describe("isEligibleForBatchAccept (CUE-2)", () => {
+  const CASES: Array<{
+    suggested: GradingRow["suggestedSubmissionKind"];
+    cue: string;
+    confirmed: GradingRow["submissionKind"];
+    eligible: boolean;
+  }> = [
+    { suggested: "unknown", cue: "", confirmed: "unknown", eligible: false },
+    { suggested: "unknown", cue: "", confirmed: "reply", eligible: false },
+    { suggested: "unknown", cue: "a cue", confirmed: "unknown", eligible: false },
+    { suggested: "unknown", cue: "a cue", confirmed: "reply", eligible: false },
+    { suggested: "reply", cue: "", confirmed: "unknown", eligible: false },
+    { suggested: "reply", cue: "", confirmed: "initial-post", eligible: false },
+    { suggested: "reply", cue: "a cue", confirmed: "unknown", eligible: true },
+    { suggested: "reply", cue: "a cue", confirmed: "initial-post", eligible: false },
+  ];
+
+  it.each(CASES)(
+    "suggested=$suggested cue=%j confirmed=$confirmed -> eligible=$eligible",
+    ({ suggested, cue, confirmed, eligible }) => {
+      const row = makeRow({
+        id: "a",
+        suggestedSubmissionKind: suggested,
+        submissionKindCue: cue,
+        submissionKind: confirmed,
+      });
+      expect(isEligibleForBatchAccept(row)).toBe(eligible);
+    }
+  );
+
+  it("a whitespace-only cue is treated as no basis at all (trimmed before the check)", () => {
+    const row = makeRow({ id: "a", suggestedSubmissionKind: "reply", submissionKindCue: "   ", submissionKind: "unknown" });
+    expect(isEligibleForBatchAccept(row)).toBe(false);
+  });
+});
+
+describe("acceptSuggestedKinds", () => {
+  it("confirms every eligible row to its own suggestion, leaves the rest untouched", () => {
+    const eligible = makeRow({ id: "a", suggestedSubmissionKind: "reply", submissionKindCue: "Replying to Bob", submissionKind: "unknown" });
+    const noCue = makeRow({ id: "b", suggestedSubmissionKind: "reply", submissionKindCue: "", submissionKind: "unknown" });
+    const alreadyConfirmed = makeRow({ id: "c", suggestedSubmissionKind: "reply", submissionKindCue: "cue", submissionKind: "initial-post" });
+    const rows = [eligible, noCue, alreadyConfirmed];
+    const next = acceptSuggestedKinds(rows);
+    expect(next[0].submissionKind).toBe("reply");
+    expect(next[1]).toBe(noCue); // same object identity - nothing happened
+    expect(next[2]).toBe(alreadyConfirmed); // same object identity - already confirmed, untouched
+  });
+
+  it("degrades to a no-op array when every row's cue is empty (the safe default, never a silent mass-accept)", () => {
+    const rows = [
+      makeRow({ id: "a", suggestedSubmissionKind: "reply", submissionKindCue: "" }),
+      makeRow({ id: "b", suggestedSubmissionKind: "initial-post", submissionKindCue: "" }),
+    ];
+    const next = acceptSuggestedKinds(rows);
+    expect(next[0]).toBe(rows[0]);
+    expect(next[1]).toBe(rows[1]);
+    expect(next.every((r) => r.submissionKind === "unknown")).toBe(true);
   });
 });
 

@@ -22,13 +22,19 @@
 // DiscussionRepliesPanel.tsx already use for useReplyRows().
 
 import { useState } from "react";
-import { TextField, IconButton, InputAdornment } from "@mui/material";
+import { TextField, IconButton, InputAdornment, Button } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import tableStyles from "../workflows/AutomationsTable.module.css";
 import rowStyles from "./GradingTable.module.css";
 import GradingTableRow from "./GradingTableRow";
-import { GRADING_TABLE_COLUMN_COUNT, gradingClearTableSignature, type GradingFeedbackField, type GradingSort } from "./grading-rows";
+import {
+  GRADING_TABLE_COLUMN_COUNT,
+  gradingClearTableSignature,
+  isEligibleForBatchAccept,
+  type GradingFeedbackField,
+  type GradingSort,
+} from "./grading-rows";
 import type { GradingRow } from "./grading-row";
 // WAVE 3 of the assessment-grading extraction: the keyed-ref-map
 // focus-after-remove machinery moved verbatim to assessment-shared - see
@@ -99,6 +105,11 @@ export interface GradingTableProps {
    *  see GradingTableRow.tsx's own prop doc for why this feeds the panel's
    *  existing notice path rather than a new row-local affordance. */
   onCopyError: (message: string) => void;
+  /** docs/a8r-scope.md (A8-R) section 3: forwarded straight to each row -
+   *  see GradingTableRow.tsx's own prop doc. */
+  onConfirmSubmissionKind: (id: string, kind: GradingRow["submissionKind"]) => void;
+  /** CUE-2 (docs/a8r-scope.md section 6): the toolbar's batch action. */
+  onAcceptSuggestedKinds: () => void;
 }
 
 export default function GradingTable({
@@ -113,6 +124,8 @@ export default function GradingTable({
   onMarkLate,
   onClearTable,
   onCopyError,
+  onConfirmSubmissionKind,
+  onAcceptSuggestedKinds,
 }: GradingTableProps) {
   // "Clear table" confirm-arm - AC19/AC19a discipline (see the import
   // comment above and gradingClearTableSignature's own header): armed-for is
@@ -131,6 +144,13 @@ export default function GradingTable({
   // last-row removal), giving a fallback target that survives even the
   // "removed the only remaining row" case.
   const { containerRef, registerRemoveRef, handleRemove } = useRemoveFocusRefs(rows, onRemoveRow);
+
+  // CUE-2 (docs/a8r-scope.md section 6): shown only when clicking it would
+  // change something - the same "no dead controls" discipline
+  // GradingTableRow.tsx's own "Mark late" doc comment names. Computed over
+  // the currently visible (filtered) rows, matching the "Showing N of M"
+  // hint immediately below.
+  const hasEligibleForBatchAccept = rows.some(isEligibleForBatchAccept);
 
   if (totalCount === 0) {
     return (
@@ -172,6 +192,18 @@ export default function GradingTable({
               Clear
             </button>
           </span>
+        )}
+        {/* CUE-2 (docs/a8r-scope.md section 6): a non-destructive batch
+            action, so it needs no ConfirmArmButtons - it only ever confirms
+            rows the model itself gave a real basis for, and never touches a
+            row the instructor already confirmed. buttonVariant.test.ts's
+            FROZEN_PRIMARY_SITES pins GradingTable.tsx at its current
+            primary-button count - outlined, same as "Clear table", not
+            contained. */}
+        {hasEligibleForBatchAccept && (
+          <Button size="small" variant="outlined" onClick={onAcceptSuggestedKinds}>
+            Accept suggested kinds
+          </Button>
         )}
         {/* CC5 - "no row can be removed" fix - the whole-table wipe, now the
             shared ConfirmArmButtons component: one Button element whose
@@ -245,6 +277,7 @@ export default function GradingTable({
                   onMarkLate={onMarkLate}
                   onCopyError={onCopyError}
                   registerRemoveRef={registerRemoveRef}
+                  onConfirmSubmissionKind={onConfirmSubmissionKind}
                 />
               ))
             )}

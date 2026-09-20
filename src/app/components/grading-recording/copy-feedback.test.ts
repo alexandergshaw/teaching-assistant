@@ -296,3 +296,39 @@ describe("seam pins: each caller binds its own surface's join function", () => {
     expect(stripped).toContain("joinCopyText(feedback)");
   });
 });
+
+// ---------------------------------------------------------------------------
+// docs/a8r-scope.md (A8-R) G-R2b: "for a row whose kind the instructor
+// confirmed, the on-screen label cannot say 'Submission'." A source-text
+// claim and nothing more (no component is rendered by any test in this
+// repo) - the object is the comment-stripped source of GradingTableRow.tsx,
+// re-reading the SAME path :271 above already reads, so no new reader is
+// needed. Absence-plus-presence, per traps-search.md: an absence claim
+// needs a canary, or a typo in the pattern reports clean forever.
+// ---------------------------------------------------------------------------
+
+describe("G-R2b: GradingTableRow.tsx no longer hard-codes the two pre-A8-R 'Submission' literals", () => {
+  it("does not contain the literal defect byte sequences that used to say 'Submission' unconditionally", () => {
+    const stripped = readStripped("src/app/components/grading-recording/GradingTableRow.tsx");
+    expect(stripped).not.toContain(">Submission</span>");
+    expect(stripped).not.toContain("`Submission from ${");
+  });
+
+  it("calls submissionKindLabel( at least twice - once for the block label, once for the confirm control's own label", () => {
+    const stripped = readStripped("src/app/components/grading-recording/GradingTableRow.tsx");
+    const occurrences = (stripped.match(/submissionKindLabel\(/g) ?? []).length;
+    expect(occurrences).toBeGreaterThanOrEqual(2);
+  });
+
+  it("canary: both defect patterns DO match against a fixture string that contains them - proves the patterns themselves can fire, not just report clean", () => {
+    const fixtureWithDefects = 'return <span className={styles.ghMeta}>Submission</span>;\nconst label = `Submission from ${row.studentName}`;';
+    expect(fixtureWithDefects).toContain(">Submission</span>");
+    expect(fixtureWithDefects).toContain("`Submission from ${");
+  });
+
+  it("dodges the known false-positive identifiers naturally present in this file (GradingRowSubmissionTimeStatus, gradingRowSubmissionTimeStatus, submissionBlock, submissionCell) - none of them contain either exact byte sequence", () => {
+    const falsePositiveBait = "GradingRowSubmissionTimeStatus gradingRowSubmissionTimeStatus submissionBlock submissionCell";
+    expect(falsePositiveBait).not.toContain(">Submission</span>");
+    expect(falsePositiveBait).not.toContain("`Submission from ${");
+  });
+});

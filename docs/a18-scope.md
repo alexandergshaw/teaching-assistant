@@ -151,7 +151,7 @@ Every citation below was re-opened this round, not copied from round 1.
 | `walkthrough-announcement.ts:392` and `:538` "Nothing was captured yet - record a walkthrough first." | `grep -n "Nothing was captured yet" src/app/actions/walkthrough-announcement.ts` | **Confirmed**, both lines identical, verbatim. In scope (AC-2). |
 | `WalkthroughAnnouncementPanel.tsx` is 979 lines against the 1000-line ceiling | `wc -l` (Bash) **and** `@(Get-Content <path>).Count` (PowerShell), both run this round | **Confirmed both ways: 979.** 21 lines of headroom, unchanged. |
 | `walkthrough-announcement.ts` is 602 lines | Same two commands, this round | **Confirmed both ways: 602.** |
-| `RecordingTab.tsx` is the mount file, at 917 lines | `wc -l` and `@(Get-Content).Count`, this round | **Confirmed both ways: 917.** 83 lines of headroom against the 1000-line ceiling enforced by `recording-split.structure.test.ts:47-53`. **On the round-2 ruling m3 ("the block is `:46-53`, not `:47-53`, because `:46` is the `it(`"): could not apply as stated.** Re-opened `recording-split.structure.test.ts` this round: line 46 is `describe("split structure guard (ratchet canary)", () => {`; line 47 is `it("should keep RecordingTab.tsx under 1000 lines", () => {`; line 53 is the `expect(lineCount).toBeLessThanOrEqual(1000);` assertion. The `it(` opens at :47, not :46 - the ruling's stated reason does not match the file. The original `:47-53` citation (the `it(` block, open to assertion) is the measured-correct one and is left unchanged; this discrepancy is flagged for the orchestrator rather than silently resolved either way. |
+| `RecordingTab.tsx` is the mount file, at 917 lines | `wc -l` and `@(Get-Content).Count`, this round | **Confirmed both ways: 917.** 83 lines of headroom against the 1000-line ceiling enforced by `recording-split.structure.test.ts:47-53`. **On the round-2 ruling m3 ("the block is `:46-53`, not `:47-53`, because `:46` is the `it(`"): settled by measurement this round, not adopted.** Measured directly: `grep -n "describe(\|it(" src/app/components/recording/recording-split.structure.test.ts \| head -20` returns line 46 as `describe("split structure guard (ratchet canary)", () => {` and line 47 as `it("should keep RecordingTab.tsx under 1000 lines", () => {`; line 53 is the `expect(lineCount).toBeLessThanOrEqual(1000);` assertion the ceiling depends on. The `it(` opens at `:47`, not `:46` as the ruling's brief stated - that stated reason was false, independently confirmed by the orchestrator after I reported the conflict rather than adopting the ruling's number. The citation names the actual enforcing construct, the `it(` block that runs the assertion, so `:47-53` (open to assertion) is what "the block" means here, and it is left unchanged. |
 
 **On the path correction from round 1 (M4 - striking the drift framing):**
 Row A18's own text never gives a path for the mount file at all - it says
@@ -415,8 +415,39 @@ nothing.
 | **`src/app/components/RecordingTab.tsx`** | **Edit: the shared TabShell title AND subtitle (AC-5, title added this round per ruling Z1)** | **568, 569** |
 | `src/app/components/walkthrough-announcement/walkthrough-announcement.structure.test.ts` | Add new source-text assertions (AC-1, AC-3, AC-4, AC-6); existing 17 `describe(` blocks (`grep -c "^describe(" walkthrough-announcement.structure.test.ts`, re-run this round, still 17) must keep passing unmodified - checked individually against every existing `indexOf`/`toMatch` target (section 5) | New describes appended |
 | `src/app/actions/walkthrough-announcement.test.ts` | Add new source-text assertions (AC-2); existing runtime assertions at `:209` and `:431` only check `toHaveProperty("error")`, never the string's text | New describe appended |
-| **`src/app/components/recording/recording-split.structure.test.ts` or a sibling structure test** | **Add new source-text assertion (AC-5, now covering both title and subtitle).** This file already reads `RecordingTab.tsx` as source text for unrelated reasons (the twelve-tab-strip count, the restore guard); it is the natural home for the title/subtitle check, though a new adjacent test file is equally acceptable - the assertion, not its filename, is the requirement. Re-confirmed this round: none of its 12+ existing `it(` blocks anchor within 400 characters of lines 567-569 (checked directly, section 5). | New `it(` appended |
+| **`src/app/components/recording/recording-tab-header.structure.test.ts` (NEW file)** | **Add new source-text assertion (AC-5, covering both title and subtitle).** Moved off `recording-split.structure.test.ts` this round - see the disjointness note below. This new file reads `RecordingTab.tsx` as source text solely for the `eyebrow`/`title`/`subtitle` check; nothing else lives in it. | New file, one `describe(`/`it(` |
 | `src/app/components/drafted-grades/classTrendsDraft.not-postable.test.ts` | **Read-only, no edit.** Re-confirmed at HEAD `58a4254` this round (not in the concurrent-edit set at this measurement): "canary 2a" (`:185-195`, re-grepped this round, unchanged line numbers) uses `WalkthroughAnnouncementPanel.tsx` as a positive-control fixture for a forbidden-import-graph walk, asserting only `violations.length > 0` - never inspects string literals. None of this row's edits touch an import statement, so this test is unaffected. | n/a |
+
+**Disjointness note (relocated this round, off `recording-split.structure.test.ts`).**
+Earlier this round AC-5's new assertion was planned for
+`recording-split.structure.test.ts` (already reads `RecordingTab.tsx` as
+source text for unrelated reasons - the twelve-tab-strip count, the restore
+guard). That file is **also** in A20's owns list: A20 must insert a storage
+key into the 63-entry frozen array between `:364` and `:365`, and bump a
+frozen count from `16` to `17` at `:516` (confirmed by reading
+`docs/a20-scope.md:619-627`, which cites the same file and the same two
+edits). Two rows appending to the same frozen-count structure test
+concurrently is the exact hazard `parallel-disjointness.md` exists for, and
+in this repo a concurrent-agent collision has already pushed unverified work
+to main. This artifact already said "a new adjacent test file is equally
+acceptable" for AC-5, so that option is taken here, specifically to keep A18
+and A20 file-disjoint rather than sequenced: AC-5's new assertion moves into
+a brand-new sibling file, `recording-tab-header.structure.test.ts`, which
+A18 owns exclusively. Re-run disjointness check, this round, real output:
+
+```
+$ sort A18_owns.txt A20_owns.txt | uniq -d
+(empty)
+```
+
+(A18's file list for this check: the seven files in the `owns` table above,
+plus the new `recording-tab-header.structure.test.ts`. A20's file list: the
+seventeen files/additions in `docs/a20-scope.md`'s own "Files this row's
+implementation will edit or add" section, `:963-980`, including
+`recording-split.structure.test.ts` itself.) With the move, the two rows'
+file sets no longer intersect at all - A20's own intersection check reported
+"(empty)" against an undisclosed temp file and was wrong, which is how this
+was missed before this round.
 
 Nothing else reads these five strings/loci as source text; nothing else
 needs to change.
@@ -759,7 +790,11 @@ of a keyword-presence check, and extended to the title (Z1). Also revised to
 resolve a title/subtitle given as either an inline JSX string literal or a
 named source-level constant, so extracting either to a constant (e.g.
 `RECORDING_TAB_TITLE`, `RECORDING_TAB_SUBTITLE`) stays legal - m7's fix,
-the same shape of problem m8 already fixed for AC-4's comment pin:**
+the same shape of problem m8 already fixed for AC-4's comment pin. **Lives in
+a new file, `recording-tab-header.structure.test.ts`, not in
+`recording-split.structure.test.ts`** - moved there this round to stay
+file-disjoint from A20, which edits `recording-split.structure.test.ts` at
+`:364`/`:365` and `:516` (see the disjointness note in section 3):**
 
 ```
 const eyebrowIdx = source.indexOf('eyebrow="Recording"');
@@ -910,14 +945,19 @@ in addition to re-confirming round 1's check for AC-1/AC-3/AC-4.
   anchor. Round 1's conclusion (no collision with AC-1's territory) was
   correct; only the description of the mechanism was wrong, and is corrected
   here.
-- **AC-5 (revised - now title and subtitle):** the proposed `it(` anchors on
-  `eyebrow="Recording"` and a `title="..."`/`title={CONST}` plus
-  `subtitle="..."`/`subtitle={CONST}` attribute within 400 characters of it.
-  Checked against `recording-split.structure.test.ts`'s own 12+ existing
-  `it(` blocks (line ranges re-read this round): none contain the strings
-  `eyebrow`, `subtitle=`, or `title=` anywhere in the file (`grep -n` returns
-  nothing), so there is no existing assertion to collide with, and the new
-  one introduces no anchor any other block already depends on.
+- **AC-5 (revised - now title and subtitle, and relocated off
+  `recording-split.structure.test.ts` this round - see section 3's
+  disjointness note):** the proposed `it(` anchors on `eyebrow="Recording"`
+  and a `title="..."`/`title={CONST}` plus `subtitle="..."`/`subtitle={CONST}`
+  attribute within 400 characters of it, in the new file
+  `recording-tab-header.structure.test.ts`. Being a brand-new file, it has no
+  existing assertions to collide with by construction. Checked against
+  `recording-split.structure.test.ts`'s own 12+ existing `it(` blocks anyway
+  (line ranges re-read this round), since the new file still reads
+  `RecordingTab.tsx` as source text the same way that file does: none contain
+  the strings `eyebrow`, `subtitle=`, or `title=` anywhere in
+  `recording-split.structure.test.ts` (`grep -n` returns nothing), confirming
+  no other test in the repo already anchors on this territory either.
 - **AC-6 (new):** a whole-file phrase scan for "record button" collides with
   nothing by construction (it does not anchor on a code structure another
   test depends on) and no existing test contains that phrase (`grep -rln
@@ -1085,7 +1125,7 @@ Y", verified against a citation) is a ready template for both.
 
 | # | Residual | Owner | Instrument | Step |
 |---|---|---|---|---|
-| R1 | The seventeen sabotage mutations in section 6 (corrected count, MJ-2) are planned, not executed | Test seat / implementer | The extended `walkthrough-announcement.structure.test.ts`, `walkthrough-announcement.test.ts`, and the new `recording-split.structure.test.ts` (or sibling) assertion, once written | The Build/Test wave that follows this scoping round |
+| R1 | The seventeen sabotage mutations in section 6 (corrected count, MJ-2) are planned, not executed | Test seat / implementer | The extended `walkthrough-announcement.structure.test.ts`, `walkthrough-announcement.test.ts`, and the new `recording-tab-header.structure.test.ts` assertion, once written | The Build/Test wave that follows this scoping round |
 | R3 | Layer 3 placement (`eyebrow`/`aria-label` only - the title moved out of this residual into AC-5, ruling Z1) and, folded in this round per m8, the six-plus screen-reading views' own tab-strip labels (R6, no longer a separate row) | Owner | None available in this checkout (IA/product decision) | Owner answers the batched escalation in section 9; if renamed or re-titled, a new backlog row is scoped, using the AC-5 twelve-view technique |
 | R4 | `docs/REGRESSION.md` gets an entry for this fix at push, naming the discharging commit, **and must fold in a PARTIAL-coverage correction (new this round, per m9 / `seats.md`'s Baseline instruction):** `docs/REGRESSION.md:41936` records `walkthrough-announcement.structure.test.ts` as **427 lines**, against this round's measured **457** (`@(Get-Content ...).Count`, re-run this round) - that entry is stale and should be corrected inline by the push rather than perpetuated. Separately, `:41688` and `:41805` cite `:107`/`:111` for an earlier, three-key version of the ta- key canary; those are historical (section "413a - what is measured true today") and are not claimed to be current - no correction owed there, only to the 427-line figure. | Orchestrator, at push | `docs/REGRESSION.md` append + correction, per `DEV_LOOP.md`'s push checklist | The push that lands this row's code change |
 | R5 | AC-5's checks are frozen-literal equality checks (title and subtitle each pinned exactly, per Z2) and cannot verify the replacement copy reads naturally to a human across all twelve contexts - no component is rendered by any test here | Owner / UX seat | Manual read of the rendered tab header once implemented | The Verify stage of the Build wave that follows this scoping round |
@@ -1108,25 +1148,32 @@ its own sabotage rows (S6), not a residual - see the disposition table
 
 ---
 
-## 11. Line budget for the three grown test files (m5, MJ-3 - corrected this round to add the third)
+## 11. Line budget for the two grown test files, plus one new file (m5, MJ-3, revised again this round)
 
-**Corrected title (MJ-3):** this section was titled "the two grown test
-files," but the `owns` table (section 3) also edits a third test file,
-`src/app/components/recording/recording-split.structure.test.ts` (AC-5's new
-title/subtitle assertion), which was never budgeted. Added below; it fits.
+**History of this section's title, tracked rather than silently re-edited a
+second time.** MJ-3 (round 2 to round 3) corrected this from "the two grown
+test files" to "the three grown test files," adding
+`recording/recording-split.structure.test.ts` (measured 590) because AC-5's
+new assertion was, at that point, planned for that file. **Later in this same
+round**, AC-5's assertion was relocated to a brand-new file,
+`recording-tab-header.structure.test.ts`, to stay file-disjoint from A20
+(section 3's disjointness note). That makes MJ-3's addition moot for
+`recording-split.structure.test.ts` specifically - A18 no longer edits it at
+all, for any reason - so it is **dropped** from this table rather than kept
+and relabelled, and the new file is budgeted in its place.
 
 | File | Current lines | Instrument | Against |
 |---|---|---|---|
 | `walkthrough-announcement.structure.test.ts` | 457 | `wc -l` and `@(Get-Content).Count`, both agree | `LIMIT = 1000` (`src/file-size-ceiling.structure.test.ts:30`); not in `ALLOWED_OVERAGE` (`:64-81`, re-read this round, four entries, none matching this file) |
 | `walkthrough-announcement.test.ts` | 528 | Same two instruments, agree | Same ceiling, same non-membership in `ALLOWED_OVERAGE` |
-| `recording/recording-split.structure.test.ts` | **590** (NEW this round, MJ-3) | `wc -l` and `@(Get-Content).Count`, both agree, this round | Same ceiling; not in `ALLOWED_OVERAGE`'s four entries (re-checked this round: `lms-generation.test.ts`, `lms-generation-refine.test.ts`, `registry-helpers.assembleLectureFiles.test.ts`, `bulkBarGroups.test.ts` - none is this file) |
+| `recording/recording-tab-header.structure.test.ts` (**NEW file, replacing the dropped `recording-split.structure.test.ts` row**) | Does not exist yet - no line count to measure | n/a until created | A brand-new file holding one `describe(`/`it(` block (the title/subtitle check) starts at effectively zero lines, nowhere near the 1000-line ceiling; no `ALLOWED_OVERAGE` entry could ever be needed for a file this small |
 
-All three files gain a handful of new `it(` blocks across
-AC-1/AC-2/AC-3/AC-4/AC-5/AC-6 (no line estimate is asserted here beyond "well
+Both existing files gain a handful of new `it(` blocks across
+AC-1/AC-2/AC-3/AC-4/AC-6 (no line estimate is asserted here beyond "well
 under 1000 either way," per this row's own instrument requirement not to
-guess line counts the implementer's actual diff will settle). At 590,
-`recording-split.structure.test.ts` has 410 lines of headroom before it would
-even need an `ALLOWED_OVERAGE` entry, so a handful of new assertions is safe.
+guess line counts the implementer's actual diff will settle). The new file
+carries only AC-5's assertion and needs no budget beyond "far under the
+ceiling by construction."
 
 ---
 
@@ -1171,13 +1218,13 @@ say produces "no new requirements - only dispositions."
 | BL-2 | Repeat class: AC-5's keyword-presence check is defeated by appending four words that satisfy the regex while still making the false claim - the same mechanism W2 already retired for the privacy sentence | **Constructed away** by ruling Z2 (not merely strengthened - the caps forbid a second attempt at the same mechanism): both title and subtitle frozen as exact literals after whitespace normalization | AC-5 assertions 4-5 (section 4); sabotage S5, S5b, S5c (section 6) |
 | MJ-1 | AC-6 cites "17 `*.structure.test.ts` files"; the named command returns 19, and counts files, not "files that read comments as source text" | **Kept, corrected** - command re-run (19 total); the narrower claim re-measured directly (17 of the 19 read raw source without stripping comments, excluding `registry.structure.test.ts` (no `readFileSync` at all) and `snapshot-role-setrole-callsites.structure.test.ts` (strips comments before matching)) | AC-6 (section 4) |
 | MJ-2 | Section 6 has 15 rows but is called "fourteen" three times, including M1's own correction row; `:749` names four negative controls but lists three | **Kept, corrected** - all three "fourteen" references corrected to the round's actual, re-measured row count (17, after this round's AC-5 revision added S5c/S5d); the fourth negative control is supplied (S5d), resolving the name/list mismatch by completing the list rather than shortening the name | Section 6 (table and closing paragraph); R1 (section 10) |
-| MJ-3 | Section 11 ("Line budget for the two grown test files") omits the `owns` table's third edited test file, `recording-split.structure.test.ts`, measured 590, never budgeted | **Kept, added** - section retitled, third file added with its measured line count and ceiling check | Section 11 |
+| MJ-3 | Section 11 ("Line budget for the two grown test files") omits the `owns` table's third edited test file, `recording-split.structure.test.ts`, measured 590, never budgeted | **Kept, then superseded later in this same round** - the third file was added with its measured line count and ceiling check, then, once AC-5 relocated off that file entirely (the disjointness-with-A20 fix, below), the row was dropped and replaced with the new file it moved to | Section 11 |
 | MJ-4 | The twelve-view table only evaluates the disjunctive second sentence, which cannot be false of any view by construction; the universal first sentence was never checked, and is false for `slides` | **Relocated/fixed** by ruling Z3: a new per-view table (Table A) checks the corrected first-sentence category claim against all twelve, including the `slides` case Z3 named | AC-5 Table A (section 4) |
 | MJ-5 | Section 9's heading claims to state "what it costs to leave it" but its content is the cost of DOING the fix | **Kept, corrected** - rewritten to state the actual cost of leaving `:567`/`:591` (and, folded in per m8, the tab-strip labels) unfixed; the `:568` title question is now moot per Z1 and is stated as moot rather than silently dropped | Section 9 |
 | MJ-6 | AC-6's `.match(/\brecord button\b/i)` (no `/g`) can only return length 0 or 1, but the surrounding prose claims "2 occurrences" and S6 predicts "1 or 2" | **Kept, corrected** - regex flag changed to `/gi`; "fires today at 2 occurrences" re-confirmed against the corrected instrument by direct grep | AC-6 (section 4) |
 | m1 | `moduledeck` row cited `RecordingTab.tsx:876` (a `<div role="tabpanel">`) for a comment actually at `:870`, ambiguous against a near-identical twin at `:880` (`walkannounce`) | **Kept, corrected** - re-opened the file this round; citation now reads `:870-876`, quoted phrase attributed to `:870` specifically, twin noted | AC-5 Table A, `moduledeck` row (section 4) |
 | m2 | `captions` row's citation, `SpeedPanel.tsx:9`, is the wrong view's file and the wrong line (quote is at `:8`); the claim needed `useBurnCaptions.ts` opened, not just asserted | **Kept, corrected** - opened `caption-studio/hooks/useBurnCaptions.ts:141,147` this round, confirmed `MediaRecorder.isTypeSupported`/`new MediaRecorder(...)` re-encodes an INPUT video | AC-5 Table A, `captions` row (section 4) |
-| m3 | `recording-split.structure.test.ts` ceiling block cited as `:47-53`; ruling says it should be `:46-53` because `:46` is the `it(` | **Could not apply as stated** - re-opened the file this round: line 46 is `describe(...)`, line 47 is `it(...)`. The ruling's own stated reason (":46 is the `it(`") does not match the measured file. The original `:47-53` citation is left unchanged as the measured-correct one; the discrepancy is reported rather than silently resolved in either direction | Section 1, `RecordingTab.tsx` line-count row |
+| m3 | `recording-split.structure.test.ts` ceiling block cited as `:47-53`; ruling says it should be `:46-53` because `:46` is the `it(` | **Settled by measurement, not adopted** - re-opened the file this round: line 46 is `describe(...)`, line 47 is `it(...)`. The ruling's own stated reason (":46 is the `it(`") did not match the measured file; this was reported rather than adopted, and the orchestrator independently confirmed the same reading and withdrew the ruling. The original `:47-53` citation (the enforcing `it(` block) is the measured-correct one and is left unchanged | Section 1, `RecordingTab.tsx` line-count row |
 | m4 | The `ta-` key canary's exact-match/rename-risk bullet does not name the PROSE-scan half of the same hazard | **Kept, added** - the bullet now states both halves (exact-match/rename AND prose-scan across non-test files, citing `:93-99`) and assesses the prose risk as near-nil given the lookbehind, rather than leaving it unnamed or overstating it | Section 2, Layer 2, second bullet |
 | m5 | AC-3 assertions 7-8 pin `/third-party/i` and `/AI provider/i` as exact phrases; a synonym-preserving rewrite would go RED, the same over-specification class the section-4 preamble disclaims | **Justified, not fixed** - the risk runs as a false negative (rejecting a good rewrite), not the false-positive shape the caps exist to catch, so no third round is owed; recorded as an accepted, one-word-fix-away limitation instead of a defect | AC-3, after assertion 8 (section 4) |
 | m6 | AC-5 assertion 4 (`matches /\bread\b/i\|/\bcaptur\w*\b/i`) is invalid JavaScript (`TS2363`) | **Deleted**, not repaired - Z2 retires the keyword-presence mechanism this assertion belonged to; assertions 4-5 (the frozen-literal checks) replace it | AC-5 (section 4, "Retired this round" note) |
@@ -1185,3 +1232,10 @@ say produces "no new requirements - only dispositions."
 | m8 | Residual R6 has instrument "None in this checkout" and a conditional step, and was never folded into section 9's batched escalation - the only vehicle that reaches the owner | **Folded in**, not deleted - R6's content (confirmed correctly out of scope) now lives inside section 9's "what is blocked" and "what it costs to leave it"; the residual register no longer carries it as a separate row | Section 9; section 10 (closing note replacing the R6 row) |
 | m9 | The replacement drops "download the takes" without the twelve-view table recording that a clause was retired; `TakesPanel` is at `RecordingTab.tsx:726` | **Kept, added** - a "Dropped clause" note in AC-5 names the drop, cites `:726`, and explains why the drop does not make the replacement false for `record`/`announcement` | AC-5, "Dropped clause" note (section 4) |
 | Entry gate 3 | The m6 disposition row (round 1 to round 2 table, above) pointed at a bullet that did not yet contain what it claimed (the prose-scan half was missing until m4, this round) | **Fixed** - the bullet now contains the exact-match mechanism, the rename risk, AND the prose-scan half (m4's fix), so the m6 disposition row's citation is accurate as of this round; the round-1-to-round-2 table itself was not rebuilt, per the ruling's instruction | Section 2, Layer 2, second bullet; m6's row annotation above, amended |
+
+### Two further corrections, received mid-round after the table above was written
+
+| id | Finding | Disposition | New id / location |
+|---|---|---|---|
+| m3 (correction to the row above) | The orchestrator's own m3 ruling text ("`:46` is the `it(`") was itself false - independently re-checked by a fresh reader after this artifact reported the conflict rather than adopting the ruling | **Confirmed, not re-opened as a new class** - this is not a new defect in the artifact, it is confirmation that the artifact's refusal to adopt an unmeasured ruling was correct. No content changed; the m3 row above and section 1's own note now both say the range was "settled by measurement... after the orchestrator's brief got it wrong," naming the actual measurement (`grep -n "describe(\|it(" recording-split.structure.test.ts`) rather than either party's unmeasured assertion | Section 1 (`RecordingTab.tsx` line-count row); section 12, m3 row (above) |
+| File-set collision with A20 (new finding, not from the round-2 check) | `recording-split.structure.test.ts` sat in BOTH A18's and A20's owns tables - A18 for AC-5's new title/subtitle assertion, A20 (mandatorily) for a storage-key insert at `:364`/`:365` and a frozen-count bump `16`->`17` at `:516`. Two rows appending to the same frozen-count structure test concurrently is the exact hazard `parallel-disjointness.md` exists for; A20's own intersection check had reported empty against an undisclosed temp file and missed this | **Relocated** - A18 had already named "a new adjacent test file is equally acceptable" for AC-5; that option is taken. AC-5's new assertion moves to a brand-new file, `recording-tab-header.structure.test.ts`, owned exclusively by A18. Re-run disjointness check this round, real output: `sort A18_owns.txt A20_owns.txt \| uniq -d` returns empty (pasted in full in section 3's disjointness note) | AC-5 instrument (section 4); owns table and disjointness note (section 3); section 5 collision bullet; section 11 (row dropped and replaced) |

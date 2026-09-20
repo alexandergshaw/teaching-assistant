@@ -5,6 +5,7 @@ import {
   composeGradingRowResult,
   composeFailedGradingRow,
 } from "./grading-feedback-prompt";
+import { SUBMISSION_KINDS } from "@/lib/grade/submission-kind";
 
 // Frozen literal oracles throughout (per this repo's own rule: a source-text
 // test that pins the SPELLING of prose over-specifies and breaks on harmless
@@ -95,6 +96,45 @@ describe("buildGradingRecordingPrompt - G-R0 frozen pre-migration literal", () =
   it("matches the frozen literal today, before A8-R adds a kind parameter", () => {
     const prompt = buildGradingRecordingPrompt("SYS", "Ada Lovelace", "body", undefined);
     expect(prompt).toBe("SYS\n\nStudent: Ada Lovelace\n\nSubmission:\nbody");
+  });
+
+  // G-R0's own promise, checked: calling with a FIFTH argument of "unknown"
+  // reproduces the frozen four-argument literal above byte for byte - A8-R
+  // changes nothing the model sees until an instructor confirms a kind.
+  it('the "unknown" member reproduces the frozen literal byte for byte', () => {
+    const withoutKind = buildGradingRecordingPrompt("SYS", "Ada Lovelace", "body", undefined);
+    const withUnknown = buildGradingRecordingPrompt("SYS", "Ada Lovelace", "body", undefined, "unknown");
+    expect(withUnknown).toBe(withoutKind);
+    expect(withUnknown).toBe("SYS\n\nStudent: Ada Lovelace\n\nSubmission:\nbody");
+  });
+});
+
+// docs/a8r-scope.md (A8-R) G-R1: "for a row whose kind the instructor
+// confirmed, the model's request body cannot say 'Submission'." Iterates
+// SUBMISSION_KINDS so a fifth member added later cannot escape this test
+// (traps-tests.md: coverage a property of construction, not enumeration).
+describe("buildGradingRecordingPrompt - G-R1, the header switches with kind", () => {
+  it('every member other than "unknown" produces a request body that does NOT contain "Submission:"', () => {
+    for (const kind of SUBMISSION_KINDS) {
+      if (kind === "unknown") continue;
+      const prompt = buildGradingRecordingPrompt("SENTINEL SYSTEM PROMPT", "Maria Alvarez", "body text", undefined, kind);
+      expect(prompt).not.toContain("\n\nSubmission:\n");
+    }
+  });
+
+  it('"initial-post" composes an "Initial post:" header, "reply" composes a "Reply:" header', () => {
+    const initial = buildGradingRecordingPrompt("SYS", "Maria Alvarez", "body", undefined, "initial-post");
+    expect(initial).toContain("\n\nInitial post:\nbody");
+    const reply = buildGradingRecordingPrompt("SYS", "Maria Alvarez", "body", undefined, "reply");
+    expect(reply).toContain("\n\nReply:\nbody");
+  });
+
+  it("sabotage target: restoring the literal \"Submission:\" template must turn the reply case above red", () => {
+    // This test intentionally duplicates the assertion above under a name
+    // that documents WHY it exists (traps-tests.md: a test is not evidence
+    // until you have watched it fail) - see this wave's sabotage report.
+    const reply = buildGradingRecordingPrompt("SYS", "Maria Alvarez", "body", undefined, "reply");
+    expect(reply).not.toContain("\n\nSubmission:\n");
   });
 });
 

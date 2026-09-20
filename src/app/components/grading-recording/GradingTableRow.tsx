@@ -43,6 +43,7 @@ import {
   type GradingRow,
   type GradingRowNameMatch,
 } from "./grading-row";
+import { submissionKindLabel } from "@/lib/grade/submission-kind";
 import { GRADING_TABLE_COLUMN_COUNT, type GradingFeedbackField } from "./grading-rows";
 // docs/recording-controls-ux-acceptance-criteria.md CC5: the one arm/confirm
 // component for every destructive or overwriting action.
@@ -90,9 +91,20 @@ export interface GradingTableRowProps {
    *  focus to the next row's Remove control - the same keyed-ref-map idiom
    *  DiscussionRepliesPanel.tsx:461-464 uses. */
   registerRemoveRef: (id: string, el: HTMLButtonElement | null) => void;
+  /** docs/a8r-scope.md (A8-R) section 3: an instructor confirming (or
+   *  overriding) this row's kind. */
+  onConfirmSubmissionKind: (id: string, kind: GradingRow["submissionKind"]) => void;
 }
 
-function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyError, registerRemoveRef }: GradingTableRowProps) {
+function GradingTableRowImpl({
+  row,
+  onEditField,
+  onRemove,
+  onMarkLate,
+  onCopyError,
+  registerRemoveRef,
+  onConfirmSubmissionKind,
+}: GradingTableRowProps) {
   const matchBadge = NAME_MATCH_BADGE[row.nameMatch];
   // R3b: an unmatched/ambiguous name never blocks the feedback - it only
   // changes what the row SAYS. Candidates are shown, never auto-applied
@@ -247,15 +259,52 @@ function GradingTableRowImpl({ row, onEditField, onRemove, onMarkLate, onCopyErr
           <div className={rowStyles.rowBody}>
             <div className={rowStyles.submissionBlock}>
               <div className={rowStyles.blockHead}>
-                <span className={styles.ghMeta}>Submission</span>
+                {/* G-R2 (docs/a8r-scope.md section 5): the CONFIRMED kind
+                    only - never row.suggestedSubmissionKind (the call-site
+                    canary, submission-kind-callsites.structure.test.ts,
+                    pins that this file may read the suggestion only to
+                    OFFER a confirmation, in kindConfirmLabel below, never to
+                    compose this label itself). */}
+                <span className={styles.ghMeta}>{submissionKindLabel(row.submissionKind)}</span>
+                {/* CUE-2/section 3: offered only while unconfirmed and the
+                    model actually suggested something - a text button,
+                    matching "Remove"/"Mark late" (buttonVariant.test.ts's
+                    FROZEN_PRIMARY_SITES pins this file's primary-button
+                    count at 0). Confirming NEVER auto-applies from a
+                    render - it is always an explicit instructor click
+                    (INV, section 3). */}
+                {row.submissionKind === "unknown" && row.suggestedSubmissionKind !== "unknown" && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() => onConfirmSubmissionKind(row.id, row.suggestedSubmissionKind)}
+                    aria-label={`Confirm ${row.studentName}'s submission as ${submissionKindLabel(row.suggestedSubmissionKind).toLowerCase()}`}
+                  >
+                    {`Confirm: ${submissionKindLabel(row.suggestedSubmissionKind)}`}
+                  </Button>
+                )}
               </div>
+              {/* The BASIS is the CUE, not the text (docs/a8r-scope.md
+                  section 6) - a slice of the submission restated would be a
+                  rubber stamp, since the full text already renders one block
+                  below. Shown only alongside the confirm control above -
+                  once confirmed, the row's own label already says what it
+                  needs to. */}
+              {row.submissionKind === "unknown" && row.suggestedSubmissionKind !== "unknown" && row.submissionKindCue.trim() !== "" && (
+                <p className={rowStyles.kindCue}>{`Basis: ${row.submissionKindCue}`}</p>
+              )}
               {/* WCAG 2.1.1: a scrollable region must itself be a keyboard
                   stop, and role="group" gives a bare scroller a role that
                   actually takes an accessible name - same fix
                   recording/DiscussionReplyRow.tsx applies to its own post
                   scroller (that file's own comment has the full account of
                   why a plain <div> cannot be named). */}
-              <div className={rowStyles.submissionCell} tabIndex={0} role="group" aria-label={`Submission from ${row.studentName}`}>
+              <div
+                className={rowStyles.submissionCell}
+                tabIndex={0}
+                role="group"
+                aria-label={`${submissionKindLabel(row.submissionKind)} from ${row.studentName}`}
+              >
                 {row.submissionText}
               </div>
             </div>

@@ -552,6 +552,7 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         id: r.id,
         studentName: r.studentName,
         submissionText: r.submissionText,
+        submissionKind: r.submissionKind,
       }));
       const result = await gradeCapturedSubmissionsAction(
         submissions,
@@ -946,6 +947,8 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
         onMarkLate={gradingRows.markSubmissionLate}
         onClearTable={capture.onClearTable}
         onCopyError={handleCopyFeedbackError}
+        onConfirmSubmissionKind={gradingRows.confirmSubmissionKind}
+        onAcceptSuggestedKinds={gradingRows.acceptSuggestedKinds}
       />
 
       {rubricModalOpen && (

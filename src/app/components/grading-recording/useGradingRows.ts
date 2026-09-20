@@ -151,6 +151,8 @@ import {
   applyGradingResultToRow,
   applyRosterMatchToRow,
   removeGradingRow,
+  confirmSubmissionKind,
+  acceptSuggestedKinds,
   DEFAULT_GRADING_SORT,
   type GradingSort,
   type GradingFeedbackField,
@@ -164,6 +166,7 @@ import {
   type GradingRow,
   type GradingRowNameMatch,
 } from "./grading-row";
+import type { GradingSubmissionKind } from "@/lib/grade/submission-kind";
 import { gradingRowCodec } from "./grading-row-serialization";
 import { useAssessmentRowStore } from "../assessment-shared/useAssessmentRowStore";
 
@@ -249,6 +252,20 @@ export interface UseGradingRowsReturn {
    *  own "row is gone" discipline. See this file's own header (LATE MARKING)
    *  for the honest finding on why nothing calls this yet. */
   markSubmissionLate: (id: string) => void;
+
+  /** docs/a8r-scope.md (A8-R) section 3: an instructor confirming (or
+   *  overriding) one row's submission kind - grading-rows.ts's
+   *  confirmSubmissionKind. A no-op when `id` is not found, mirroring
+   *  editField/applyRosterMatch/markSubmissionLate's own "row is gone"
+   *  discipline. */
+  confirmSubmissionKind: (id: string, kind: GradingSubmissionKind) => void;
+
+  /** CUE-2 (docs/a8r-scope.md section 6): confirms every ELIGIBLE row
+   *  (grading-rows.ts's isEligibleForBatchAccept) to its own suggestion in
+   *  one commit. A no-op (no re-render) when nothing in the current course
+   *  scope is eligible - never a mass-confirm of rows the model gave no
+   *  basis for. */
+  acceptSuggestedKinds: () => void;
 
   /** Item 4. Null once the last persistence write succeeded (in full or in
    *  the reduced, submission-text-dropped form); the exact user-facing
@@ -430,6 +447,32 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
     [commitRows, rowsRef]
   );
 
+  // docs/a8r-scope.md (A8-R) section 3: a no-op when `id` is not found,
+  // mirroring markSubmissionLate/editField's own "row is gone" discipline.
+  const confirmSubmissionKindCb = useCallback(
+    (id: string, kind: GradingSubmissionKind) => {
+      const raw = rowsRef.current;
+      const idx = raw.findIndex((r) => r.id === id);
+      if (idx === -1) return;
+      const next = raw.map((r, i) => (i === idx ? confirmSubmissionKind(r, kind) : r));
+      commitRows(next);
+    },
+    [commitRows, rowsRef]
+  );
+
+  // CUE-2: D21d - scoped to THIS course only, mirroring clearTable's own
+  // course filter immediately below. Confirming a batch of suggestions must
+  // never reach into another course's (or the unattributed bucket's) rows
+  // just because they happen to share this browser's table. Each in-scope
+  // row is run through acceptSuggestedKinds independently so an
+  // out-of-scope row's object identity is untouched, not just its content.
+  const acceptSuggestedKindsCb = useCallback(() => {
+    const raw = rowsRef.current;
+    commitRows(
+      raw.map((r) => (gradingRowMatchesCourse(r, courseScope) ? acceptSuggestedKinds([r])[0] : r))
+    );
+  }, [commitRows, rowsRef, courseScope]);
+
   const clearTable = useCallback(() => {
     // D21d: clears only THIS course's own rows - mirrors useReplyRows.ts's
     // own clearTable exactly. An instructor clearing one class's table must
@@ -470,6 +513,8 @@ export function useGradingRows(courseId: string, assessmentId: string): UseGradi
     removeRow,
     clearTable,
     markSubmissionLate,
+    confirmSubmissionKind: confirmSubmissionKindCb,
+    acceptSuggestedKinds: acceptSuggestedKindsCb,
     persistError,
   };
 }

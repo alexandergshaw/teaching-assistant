@@ -98,6 +98,16 @@ tr.bodyRow td {
   color: var(--text-secondary);
 }
 
+/* docs/a8r-scope.md (A8-R) section 6: the CUE line - the exact on-screen
+   basis the model saw for its suggested kind, shown only while unconfirmed.
+   Same visual treatment as .rosterCandidates immediately above (a small,
+   secondary-color hint line under the block it annotates). */
+.kindCue {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
 /* CC3: the small left offset a badge takes when it follows another badge or
    label inline, moved out of an inline style object. */
 .badgeGap {

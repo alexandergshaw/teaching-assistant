@@ -340,3 +340,55 @@ export function removeGradingRow(rows: ReadonlyArray<GradingRow>, id: string): G
 export function gradingClearTableSignature(totalCount: number): string {
   return clearTableSignature(totalCount);
 }
+
+// ---------------------------------------------------------------------------
+// docs/a8r-scope.md (A8-R) section 3/6: the instructor-confirmed submission
+// kind, and the CUE-2 batch-accept eligibility rule it is built on. Pure -
+// same discipline as every other mutator/selector in this file.
+// ---------------------------------------------------------------------------
+
+/**
+ * An instructor confirming (or overriding) a row's kind - a direct write,
+ * mirroring markSubmissionLate's own shape (useGradingRows.ts): a single
+ * field set, no arming, no userEdited side effect (confirming a KIND is not
+ * editing a FEEDBACK field, so it never touches that guard). `kind` is
+ * whatever the instructor picked - usually `row.suggestedSubmissionKind` via
+ * a one-click "Confirm: X" control, but never restricted to it: an
+ * instructor who disagrees with the suggestion can confirm a different
+ * member instead.
+ */
+export function confirmSubmissionKind(row: GradingRow, kind: GradingRow["submissionKind"]): GradingRow {
+  return { ...row, submissionKind: kind };
+}
+
+/**
+ * CUE-2 (docs/a8r-scope.md section 6): a row is eligible for the batch
+ * "Accept suggested kinds" action only when ALL three hold:
+ *  1. the model suggested something (`suggestedSubmissionKind !== "unknown"`),
+ *  2. it gave a real basis for that suggestion (`submissionKindCue` non-empty
+ *     after trimming) - a suggestion the model could not justify is excluded
+ *     from the bulk action and must be confirmed one row at a time,
+ *  3. the row is not already confirmed (`submissionKind === "unknown"`) - the
+ *     instructor's own prior decision is never silently overwritten.
+ */
+export function isEligibleForBatchAccept(row: GradingRow): boolean {
+  return (
+    row.suggestedSubmissionKind !== "unknown" &&
+    row.submissionKindCue.trim() !== "" &&
+    row.submissionKind === "unknown"
+  );
+}
+
+/**
+ * The batch accept itself: every eligible row (isEligibleForBatchAccept)
+ * gets `submissionKind` set to its own `suggestedSubmissionKind`; every
+ * other row is returned with its OWN OBJECT IDENTITY unchanged, mirroring
+ * this file's own removeGradingRow/editGradingRowField discipline of never
+ * creating a new reference for an entry nothing happened to. If every row's
+ * cue came back empty, this is simply a no-op array (same array of
+ * unchanged references) - the safe degrade CUE-2 requires, not a silent
+ * mass-accept.
+ */
+export function acceptSuggestedKinds(rows: ReadonlyArray<GradingRow>): GradingRow[] {
+  return rows.map((row) => (isEligibleForBatchAccept(row) ? confirmSubmissionKind(row, row.suggestedSubmissionKind) : row));
+}

@@ -31,6 +31,7 @@ import {
   parseEarnedPossibleScore,
 } from "@/lib/grade/parsing";
 import { composeOverallComment, RESUBMIT_NOTICE, type RubricAreaResult } from "@/lib/grade/types";
+import { SUBMISSION_KIND_PROMPT_LABELS, type GradingSubmissionKind } from "@/lib/grade/submission-kind";
 
 /** One graded submission's feedback fields - the fields
  *  gradeCapturedSubmissionsAction returns per row (never a GradeResult, never
@@ -113,10 +114,18 @@ export function buildGradingRecordingPrompt(
   systemPrompt: string,
   studentName: string,
   submissionText: string,
-  knowledgeContext: string | undefined
+  knowledgeContext: string | undefined,
+  // docs/a8r-scope.md (A8-R) G-R1: the instructor-CONFIRMED kind only -
+  // never `suggestedSubmissionKind` (the submission-kind-callsites.
+  // structure.test.ts canary pins that this file contains zero references
+  // to the suggestion). Defaults to "unknown" so G-R0's own frozen literal
+  // (grading-feedback-prompt.test.ts) still calls this with four arguments
+  // and gets byte-identical output to before this parameter existed.
+  kind: GradingSubmissionKind = "unknown"
 ): string {
   const knowledgeBlock = knowledgeContext ? `\n\n${knowledgeContext}` : "";
-  return `${systemPrompt}\n\nStudent: ${studentName}\n\nSubmission:\n${submissionText}${knowledgeBlock}`;
+  const header = SUBMISSION_KIND_PROMPT_LABELS[kind];
+  return `${systemPrompt}\n\nStudent: ${studentName}\n\n${header}:\n${submissionText}${knowledgeBlock}`;
 }
 
 /**

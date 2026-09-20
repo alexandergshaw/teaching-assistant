@@ -70,6 +70,7 @@ import {
   composeFailedGradingRow,
   type GradingRecordingFeedback,
 } from "@/app/components/grading-recording/grading-feedback-prompt";
+import type { GradingSubmissionKind } from "@/lib/grade/submission-kind";
 
 // Second, hard backstop on the already-framed, already-capped (10000 chars -
 // DEFAULT_KNOWLEDGE_CONTEXT_MAX_CHARS in src/lib/chat/knowledge-context.ts)
@@ -106,10 +107,14 @@ function coerceKnowledgeContextAtBoundary(value: string | undefined): string | u
  * through here in production. Re-measure with
  * `grep -n "gradeCapturedSubmissionsAction" src/app/components/grading-recording/GradingRecordingPanel.tsx`.
  *
- * DELIBERATELY NO LINE NUMBERS, even though the ones this block first carried
- * were correct. A pending chunk extracts ~40 lines from above both call sites,
- * so accurate numbers here would be stale inside the same commit that adds
- * them. Name the file and the command; those survive.
+ * CORRECTED AGAIN, docs/a8r-scope.md (A8-R) RES-8: this block used to claim
+ * "a pending chunk extracts ~40 lines from above both call sites" and gave
+ * that as the reason to omit line numbers. That claim was never part of any
+ * chunk's actual plan and did not match this file - re-measured at 192 (this
+ * file) and 195 lines (`wc -l` and PowerShell `(Get-Content).Count` agree,
+ * neither near the 1000-line ceiling), so no extraction was ever owed here.
+ * It was a stale forward-note, exactly the kind this file's own reader is
+ * warned elsewhere not to trust - deleted rather than carried forward again.
  *
  * The stale version was load-bearing in the wrong direction - an A8 scoping
  * pass reasoned from a comment of exactly this shape on the sibling file
@@ -120,7 +125,7 @@ function coerceKnowledgeContextAtBoundary(value: string | undefined): string | u
  * trusting this paragraph.
  */
 export async function gradeCapturedSubmissionsAction(
-  submissions: ReadonlyArray<{ id: string; studentName: string; submissionText: string }>,
+  submissions: ReadonlyArray<{ id: string; studentName: string; submissionText: string; submissionKind: GradingSubmissionKind }>,
   rubricText: string,
   knowledgeContext: string | undefined,
   provider: LlmProvider
@@ -153,7 +158,12 @@ export async function gradeCapturedSubmissionsAction(
           systemPrompt,
           submission.studentName,
           submission.submissionText,
-          safeKnowledgeContext
+          safeKnowledgeContext,
+          // docs/a8r-scope.md (A8-R) G-R1: the CONFIRMED kind only - never
+          // suggestedSubmissionKind, which this file never even receives
+          // (the call-site canary, submission-kind-callsites.structure.
+          // test.ts, pins that this file contains zero references to it).
+          submission.submissionKind
         );
         const parts: LlmPart[] = [{ text: prompt }];
 

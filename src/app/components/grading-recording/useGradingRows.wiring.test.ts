@@ -75,6 +75,34 @@ describe("useGradingRows.ts D23c markSubmissionLate wiring", () => {
   });
 
   it("is threaded through to the hook's return value", () => {
-    expect(SOURCE).toMatch(/markSubmissionLate,\s*\n\s*persistError,/);
+    expect(SOURCE).toMatch(/markSubmissionLate,\s*\n\s*confirmSubmissionKind: confirmSubmissionKindCb,\s*\n\s*acceptSuggestedKinds: acceptSuggestedKindsCb,\s*\n\s*persistError,/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/a8r-scope.md (A8-R) section 3/6: confirmSubmissionKind/
+// acceptSuggestedKinds wiring. Same reachability posture as
+// markSubmissionLate above - the real per-row/toolbar controls live in
+// GradingTableRow.tsx/GradingTable.tsx, outside this file, but these checks
+// pin that the hook's OWN plumbing is correct before any caller exists to
+// exercise it end to end.
+// ---------------------------------------------------------------------------
+
+describe("useGradingRows.ts A8-R confirmSubmissionKind/acceptSuggestedKinds wiring", () => {
+  it("confirmSubmissionKind is a no-op when the id is not found - mirrors markSubmissionLate's own guard", () => {
+    expect(SOURCE).toMatch(
+      /const confirmSubmissionKindCb = useCallback\(\s*\(id: string, kind: GradingSubmissionKind\) => \{\s*const raw = rowsRef\.current;\s*const idx = raw\.findIndex\(\(r\) => r\.id === id\);\s*if \(idx === -1\) return;/
+    );
+  });
+
+  it("confirmSubmissionKind delegates to grading-rows.ts's confirmSubmissionKind, never reimplementing the field write inline", () => {
+    expect(SOURCE).toMatch(/i === idx \? confirmSubmissionKind\(r, kind\) : r/);
+  });
+
+  it("acceptSuggestedKinds is scoped to the CURRENT course - never a bare commitRows(acceptSuggestedKinds(rowsRef.current)) that would reach into another course's rows", () => {
+    expect(SOURCE).not.toMatch(/commitRows\(acceptSuggestedKinds\(rowsRef\.current\)\);/);
+    expect(SOURCE).toMatch(
+      /raw\.map\(\(r\) => \(gradingRowMatchesCourse\(r, courseScope\) \? acceptSuggestedKinds\(\[r\]\)\[0\] : r\)\)/
+    );
   });
 });

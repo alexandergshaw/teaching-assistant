@@ -38,3 +38,39 @@ export function coerceSubmissionKind(raw: unknown): GradingSubmissionKind {
     ? (raw as GradingSubmissionKind)
     : "unknown";
 }
+
+// ---------------------------------------------------------------------------
+// docs/a8r-scope.md (A8-R) section 3: "unknown" maps to today's pre-A8-R
+// strings everywhere - the single fact that makes G-R0/G-R1/G-R2 provable.
+// Every OTHER member maps to something else. The call-site canary
+// (submission-kind-callsites.structure.test.ts) pins which files may ever
+// reference these two Records - the composers (grading-feedback-prompt.ts,
+// grading-submission-grade.ts, GradingRecordingPanel.tsx, this file) must
+// contain zero references to `suggestedSubmissionKind`/`submissionKindCue`,
+// so the suggestion physically cannot reach a label or a prompt without an
+// instructor's confirmation.
+// ---------------------------------------------------------------------------
+
+/** G-R2: the on-screen label. "unknown" is the literal word this surface has
+ * always shown - see GradingTableRow.tsx's own "Submission" span before
+ * A8-R, now replaced by `submissionKindLabel(row.submissionKind)`. */
+export const SUBMISSION_KIND_LABELS: Record<GradingSubmissionKind, string> = {
+  "initial-post": "Initial post",
+  reply: "Reply",
+  other: "Other work",
+  unknown: "Submission",
+};
+
+/** G-R1: the request body's header, composed by buildGradingRecordingPrompt
+ * (grading-feedback-prompt.ts) as `${SUBMISSION_KIND_PROMPT_LABELS[kind]}:`.
+ * "unknown" reproduces today's literal "Submission:" byte for byte (G-R0). */
+export const SUBMISSION_KIND_PROMPT_LABELS: Record<GradingSubmissionKind, string> = {
+  "initial-post": "Initial post",
+  reply: "Reply",
+  other: "Other work",
+  unknown: "Submission",
+};
+
+export function submissionKindLabel(kind: GradingSubmissionKind): string {
+  return SUBMISSION_KIND_LABELS[kind];
+}

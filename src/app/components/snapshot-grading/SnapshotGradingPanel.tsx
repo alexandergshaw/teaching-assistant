@@ -23,7 +23,7 @@ import styles from "../../page.module.css";
 import { extractPastedImageFiles, isFileDragTypes } from "@/lib/chat/attachments";
 import { extractSubmissionImageFiles } from "@/lib/submission-archive-sniff";
 import { DEFAULT_PROVIDER } from "@/lib/llm";
-import { TextField, Button } from "@mui/material";
+import { TextField, Button, Checkbox, FormControlLabel } from "@mui/material";
 import { editAssessmentField } from "../assessment-shared/assessment-row";
 import type { AssessmentFeedbackField } from "../assessment-shared/assessment-row";
 import { useSnapshotCapture } from "./useSnapshotCapture";
@@ -33,8 +33,10 @@ import {
   groupShotsByRole,
   computeNextStudentCounts,
   describeNextStudentCounts,
+  shotsIncludingArrivals,
   MAX_SHOTS,
   type SnapshotRole,
+  type SnapshotShot,
 } from "./snapshot-shot";
 import { snapshotReadBatchAction } from "@/app/actions/snapshot-read";
 import { snapshotParseRubricAction } from "@/app/actions/snapshot-parse-rubric";
@@ -42,7 +44,7 @@ import {
   buildTranscriptBlock,
   nextParseRequestId,
   isStaleParseResult,
-  isConfirmedAreasReady,
+  isGradeEligible,
   removeConfirmedArea,
   addConfirmedArea,
   READ_BATCH_SIZE,
@@ -61,6 +63,7 @@ import SnapshotRoleSuggestions from "./SnapshotRoleSuggestions";
 import { buildPendingRoleSuggestions, type PendingRoleSuggestion } from "./snapshot-role-suggestion";
 import ConfirmedRubricAreasEditor from "./ConfirmedRubricAreasEditor";
 import { useSnapshotGrade } from "./useSnapshotGrade";
+import { useSnapshotAutoGrade } from "./useSnapshotAutoGrade";
 import { useSnapshotKeyboardShortcuts } from "./useSnapshotKeyboardShortcuts";
 import { useSnapshotRubricCapture } from "./useSnapshotRubricCapture";
 import SnapshotRubricCaptureReview from "./SnapshotRubricCaptureReview";
@@ -219,6 +222,7 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   });
 
   const activeRowIdRef = useRef<string | null>(null);
+  const studentGenerationRef = useRef(0); // BLOCKER C: bumped by Next student; a stale-generation grade resolution is discarded, see useSnapshotGrade.ts
   const [splitNotice, setSplitNotice] = useState<string | null>(null);
   const [nextStudentArmed, setNextStudentArmed] = useState(false);
   // MAJOR-3: ConfirmArmButtons' own Escape handler is a React onKeyDown on
@@ -340,6 +344,41 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     if (liveRegionRef.current) liveRegionRef.current.textContent = message;
   }, []);
 
+  const [encodeNotice, setEncodeNoticeState] = useState<string | null>(null);
+
+  // N15c (Ruling D4): above handleNextStudentConfirm/handleSnap/handleFiles/handleZipFile - each names a const declared here; referencing a later const is TS2448/TS2454.
+  const { handleGrade } = useSnapshotGrade({
+    shots,
+    transcriptText,
+    assignmentText,
+    rubricText,
+    confirmedRubricAreas,
+    instructorInstructions,
+    shotReads,
+    sessionRowsRef,
+    activeRowIdRef,
+    studentGenerationRef,
+    mountedRef,
+    beginGradeAbort,
+    commitSessionRows,
+    announce,
+    setGrading,
+    setGradeError,
+    setPinnedRubricAreas,
+    setSplitNotice,
+  });
+
+  // N15c: the auto-grade checkbox - decideAutoGrade is a pure function, unit-tested directly (snapshot-auto-grade-decision.ts).
+  const { autoGradeArmed, setAutoGradeArmed, triggerAutoGradeIfDue, clearPendingAutoGrade } = useSnapshotAutoGrade({
+    grading,
+    transcriptText,
+    rubricText,
+    confirmedRubricAreas,
+    shots,
+    handleGrade,
+    announce,
+  });
+
   // Computed here because also rendered directly in JSX below - the ref-freshness
   // cache moved to useSnapshotKeyboardShortcuts.ts, but stays constructed here:
   // removing it breaks eslint's react-compiler check on the unrelated
@@ -353,19 +392,16 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
 
   // "Next student" ends this student's grading pass - it is not "clear the
   // shots", and its enable rule must not be written against only one of its
-  // seven responsibilities. On confirm it: (1) clears per-student shots, (2)
-  // clears shotReads, (3) clears transcriptText, (4) clears splitNotice,
-  // (5) resets activeRowIdRef to null so the NEXT successful Grade mints a
-  // fresh row instead of updating the last one, (6) clears readError, and
-  // (7) clears gradeError. activeRowIdRef is reset
-  // NOWHERE else in this file. The control is therefore always enabled, even
-  // when there are no per-student shots to clear (clearedTotal === 0):
-  // resets (2)-(7) are useful work in exactly that case, and disabling the
-  // control there would strand activeRowIdRef pointing at the previous
-  // student's row - so the next Grade (which only requires transcript text,
-  // not a per-student shot) would find that row via resolveGradeTarget and
-  // upsertSnapshotRow would silently overwrite it, destroying a completed,
-  // persisted assessment.
+  // eight responsibilities: (1) per-student shots, (2) shotReads, (3)
+  // transcriptText, (4) splitNotice, (5) activeRowIdRef -> null (so the NEXT
+  // Grade mints a fresh row), (6) readError, (7) gradeError, (8)
+  // studentGenerationRef bumped (BLOCKER C - discards a grade still in
+  // flight for this student). activeRowIdRef is reset NOWHERE else in this
+  // file. Always enabled, even with clearedTotal === 0: resets (2)-(8) are
+  // useful work regardless, and disabling here would strand activeRowIdRef
+  // on the previous student's row, letting the next Grade silently
+  // overwrite a completed, persisted assessment via resolveGradeTarget/
+  // upsertSnapshotRow.
   const handleNextStudentConfirm = useCallback(() => {
     clearPerStudentShots();
     setShotReads(new Map());
@@ -376,41 +412,50 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     setGradeError(null); // a failure from the previous student's Grade must not survive into the next student's pass
     setPinnedRubricAreas(null); // the previous student's pinned-areas readout must not survive into the next student's pass
     activeRowIdRef.current = null; // the NEXT successful Grade mints a fresh row, never updates a finished one
+    studentGenerationRef.current += 1; // BLOCKER C fix: discards any grade still in flight for this student
     setNextStudentArmed(false);
+    // SHOULD-FIX 4: clears any auto-grade arrival still queued from the
+    // student who just ended, so the shared drain never unions it with the
+    // NEXT student's own tray.
+    clearPendingAutoGrade();
     announce("Cleared this student's shots. Assignment and rubric shots are kept.");
-  }, [clearPerStudentShots, announce]);
-
-  const [encodeNotice, setEncodeNoticeState] = useState<string | null>(null);
+  }, [clearPerStudentShots, announce, clearPendingAutoGrade]);
 
   const addEncodedShot = useCallback(
-    (base64: string, source: "capture" | "paste" | "drop", role?: SnapshotRole) => {
+    (base64: string, source: "capture" | "paste" | "drop", role?: SnapshotRole): SnapshotShot | null => {
       const budget = checkShotWireBudget(base64);
       if (!budget.ok) {
         setEncodeNoticeState(budget.error ?? "That shot was too large to add.");
-        return;
+        return null;
       }
       const shot = addShot(base64, source, role);
       if (!shot) {
         setEncodeNoticeState(`Already at the ${MAX_SHOTS}-shot limit - delete a shot to add another.`);
-        return;
+        return null;
       }
       setEncodeNoticeState(null);
       announce(`Added a ${shot.role} shot, ${source === "capture" ? "captured" : source}.`);
+      return shot;
     },
     [addShot, announce]
   );
 
+  // N15c (Ruling C5/D1): every entry point builds its own `added` list and
+  // calls triggerAutoGradeIfDue OUTSIDE any loop - once per call.
   const handleSnap = useCallback(() => {
     const base64 = captureFrame();
     if (!base64) {
       setEncodeNoticeState("Could not read a frame from the shared screen right now.");
       return;
     }
-    addEncodedShot(base64, "capture");
-  }, [captureFrame, addEncodedShot]);
+    const shot = addEncodedShot(base64, "capture");
+    const added = [shot];
+    triggerAutoGradeIfDue(added, shotsIncludingArrivals(shots, added));
+  }, [captureFrame, addEncodedShot, shots, triggerAutoGradeIfDue]);
 
   const handleFiles = useCallback(
     async (files: readonly File[], source: "paste" | "drop") => {
+      const added: (SnapshotShot | null)[] = [];
       for (const file of files) {
         // "The encoding decision": every pasted/dropped file is re-encoded
         // through the same canvas as a live snap - a PNG is never passed
@@ -419,12 +464,14 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         const base64 = await encodeFile(file);
         if (!base64) {
           setEncodeNoticeState(`Could not read "${file.name}" as an image.`);
+          added.push(null);
           continue;
         }
-        addEncodedShot(base64, source);
+        added.push(addEncodedShot(base64, source));
       }
+      triggerAutoGradeIfDue(added, shotsIncludingArrivals(shots, added));
     },
-    [encodeFile, addEncodedShot]
+    [encodeFile, addEncodedShot, shots, triggerAutoGradeIfDue]
   );
 
   // N5: a student submission ZIP as an alternative to a screenshot for the
@@ -435,6 +482,13 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
   // encodeFile call below is byte-for-byte the same call handleFiles above
   // makes), and always lands with role "submission" regardless of what role
   // happens to be armed - a ZIP is never a rubric or an assignment shot.
+  //
+  // N15c: `remainingSlots` is a stale-closure pre-decompress cap only - the
+  // tray's real limit is addShot's own live shotsRef check
+  // (useSnapshotShots.ts), so two concurrent ZIPs can never jointly exceed
+  // MAX_SHOTS. A bailed-out add still gets its own notice and a `null` in
+  // `added`, so triggerAutoGradeIfDue sees the true arrival count rather
+  // than the overrun being silently swallowed.
   const handleZipFile = useCallback(
     async (file: File) => {
       const remainingSlots = MAX_SHOTS - shots.length;
@@ -447,13 +501,15 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         announce(result.message);
         return;
       }
+      const added: (SnapshotShot | null)[] = [];
       for (const image of result.images) {
         const base64 = await encodeFile(image.file);
         if (!base64) {
           setEncodeNoticeState(`Could not read "${image.name}" from "${file.name}" as an image.`);
+          added.push(null);
           continue;
         }
-        addEncodedShot(base64, "drop", "submission");
+        added.push(addEncodedShot(base64, "drop", "submission"));
       }
       if (result.ignoredNames.length > 0) {
         // AC-F2: unusable entries are reported even when the archive
@@ -461,8 +517,9 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
         setEncodeNoticeState(result.message);
       }
       announce(result.message);
+      triggerAutoGradeIfDue(added, shotsIncludingArrivals(shots, added));
     },
-    [shots.length, encodeFile, addEncodedShot, announce]
+    [shots, encodeFile, addEncodedShot, announce, triggerAutoGradeIfDue]
   );
 
   // A1c: paste attached to the panel's own root element, NEVER document -
@@ -623,31 +680,6 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
     setPendingSuggestions([]);
   }, [pendingSuggestions, applyRoleSuggestions, announce]);
 
-  // D: THE GRADE PASS. Extracted to useSnapshotGrade.ts (backlog 3.5's
-  // line-budget note under Ruling B35-9, amended) so this panel's new state
-  // and control does not push the file over the repo-wide 1000-line ceiling
-  // (src/file-size-ceiling.structure.test.ts). Same logic, same guard (A6c)
-  // - this panel still owns every piece of state involved, passed in below.
-  const { handleGrade } = useSnapshotGrade({
-    shots,
-    transcriptText,
-    assignmentText,
-    rubricText,
-    confirmedRubricAreas,
-    instructorInstructions,
-    shotReads,
-    sessionRowsRef,
-    activeRowIdRef,
-    mountedRef,
-    beginGradeAbort,
-    commitSessionRows,
-    announce,
-    setGrading,
-    setGradeError,
-    setPinnedRubricAreas,
-    setSplitNotice,
-  });
-
   const handleEditRowField = useCallback(
     (id: string, field: AssessmentFeedbackField, value: string) => {
       commitSessionRows(
@@ -799,9 +831,19 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
 
       <p className={styles.fieldHint}>
         Reading, grading, and the Alt+R rubric-capture chord each upload to Google&apos;s Gemini API
-        (generativelanguage.googleapis.com) - the only three moments anything leaves this machine. Nothing is sent
-        until you press Read or Grade, or press Alt+R while sharing a screen.
+        (generativelanguage.googleapis.com) - the only three actions that send anything from this machine. Nothing is
+        sent until you press Read or Grade, or press Alt+R while sharing a screen - except that while auto-grade
+        below is armed, a landed submission shot triggers the same Grade upload automatically, with no separate
+        button press.
       </p>
+
+      <FormControlLabel
+        control={
+          // SHOULD-FIX 7: no aria-label - it would override the visible label text (MUI 9.0.1's `input` slot is the native input).
+          <Checkbox checked={autoGradeArmed} onChange={(e) => setAutoGradeArmed(e.target.checked)} />
+        }
+        label="Auto-grade each submission as it lands (armed - confirms once per page load before the first automatic upload)"
+      />
 
       <div className={styles.ghActions}>
         <Button variant="outlined" onClick={() => void handleRead()} disabled={reading || shots.length === 0}>
@@ -811,9 +853,13 @@ export default function SnapshotGradingPanel({ active }: SnapshotGradingPanelPro
           variant="contained"
           onClick={() => void handleGrade()}
           disabled={
-            grading ||
-            (!transcriptText.trim() && shots.length === 0) ||
-            !isConfirmedAreasReady(rubricText, confirmedRubricAreas)
+            !isGradeEligible({
+              grading,
+              shotCount: shots.length,
+              transcriptText,
+              rubricText,
+              confirmedRubricAreas,
+            })
           }
         >
           {grading ? "Grading..." : "Grade"}

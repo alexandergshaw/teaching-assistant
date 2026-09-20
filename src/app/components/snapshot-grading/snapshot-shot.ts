@@ -167,6 +167,34 @@ export function moveShotWithinRole(shots: readonly SnapshotShot[], id: string, d
   return next;
 }
 
+// ---------------------------------------------------------------------------
+// N15c (Ruling C5/D1): the auto-grade trigger must observe an ACTUAL
+// arrival, not merely "a handler ran" - addEncodedShot can silently bail
+// (wire-budget refusal, MAX_SHOTS) and return null, so a handler's own
+// `added` array can contain nulls alongside real shots. Both functions below
+// are pure leaves so decideAutoGrade (snapshot-auto-grade-decision.ts) can
+// compose them directly and a real unit test can execute the composition.
+// ---------------------------------------------------------------------------
+
+/** Counts only the non-null entries whose role is "submission" - a rubric or
+ *  assignment shot landing (or a null from a bailed-out add) must never, by
+ *  itself, be read as "a submission arrived". */
+export function countSubmissionArrivals(addedShots: readonly (SnapshotShot | null)[]): number {
+  return addedShots.filter((shot): shot is SnapshotShot => shot !== null && shot.role === "submission").length;
+}
+
+/** The array handleGrade's explicit shot-list parameter (Ruling D2) actually
+ *  receives: the tray as it stood before this call, plus every non-null shot
+ *  this call just added, in order. Extracted here (not built inline at each
+ *  of the three call sites) so it is independently unit-testable and each
+ *  call site stays a single line. */
+export function shotsIncludingArrivals(
+  existing: readonly SnapshotShot[],
+  added: readonly (SnapshotShot | null)[]
+): SnapshotShot[] {
+  return [...existing, ...added.filter((shot): shot is SnapshotShot => shot !== null)];
+}
+
 /**
  * The globalIndex -> shot.id map, built EXACTLY the way handleGrade labels
  * shots for the model: useSnapshotGrade.ts:95's shotsForGrade uses

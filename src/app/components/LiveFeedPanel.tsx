@@ -363,7 +363,7 @@ export default function LiveFeedPanel({
   };
 
   // Whether the current grading run belongs to the open item.
-  const activeRun = gradingRowKey && gradingRowKey === selectedKey ? run : null;
+  const activeRun = gradingRowKey && gradingRowKey === selectedKey && !pending ? run : null;
   const isGradingSelected = pending && gradingRowKey === selectedKey;
 
   const renderDetail = (row: CanvasQueueItem) => {
@@ -462,7 +462,7 @@ export default function LiveFeedPanel({
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", alignItems: "flex-start" }}>
             <Button variant="contained" size="small" onClick={() => onAutoGrade(row)} disabled={pending} sx={{ textTransform: "none" }}>
-              {pending ? "Grading…" : "Auto Grade"}
+              {isGradingSelected ? "Grading…" : "Auto Grade"}
             </Button>
             <p className={styles.fieldHint} style={{ margin: 0 }}>
               Runs the {graderLabel} on every submission, then shows the editable results here to post back
@@ -588,7 +588,7 @@ export default function LiveFeedPanel({
             {bulk.size > 0 && (
               <div className={styles.lfBulkBar}>
                 <span className={styles.lfBulkCount}>{bulk.size} selected</span>
-                <Button variant="contained" size="small" onClick={startSequence} sx={{ textTransform: "none" }}>
+                <Button variant="contained" size="small" onClick={startSequence} disabled={pending} sx={{ textTransform: "none" }}>
                   Grade in sequence
                 </Button>
                 <Button variant="outlined" size="small" onClick={() => void bulkMarkSeen()} sx={{ textTransform: "none" }}>

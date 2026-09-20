@@ -44090,3 +44090,59 @@ None of these is filled in by inference.
    A9 implementer. Instrument: a reading argument over React's effect ordering,
    stated explicitly in the fix's own notes, since no test here can render.
    Step: A9's design pass.
+
+## 429. Snapshot grading auto-grades on arrival (N15c)
+
+Arming the "Auto-grade each submission as it lands" checkbox on the snapshot
+grading panel grades each submission-role arrival automatically, confirming
+once per page load before the first automatic upload. Persisted under
+ta-snap-auto-grade-armed.
+
+AC, and the three defects that every green gate missed before verification
+caught them:
+- The decision reads the SAME arrivals-inclusive list the dispatch payload
+  uses. It previously read gateRef's pre-commit tray while the payload used
+  the post-arrival list, so the first arrival into an empty tray never fired.
+- A grade in flight when Next student is pressed cannot write to, mint or
+  re-point any row: a generation counter is captured before the await and
+  compared before every write. The grade is discarded and announced.
+- Serialization: inFlightRef is set synchronously before the call, so two
+  snapshotGradeAction calls cannot overlap; later arrivals queue and drain.
+
+Guard notes for whoever edits this next. The effect scanner that enforces
+"no useEffect invokes a dispatch" was twice defeated while green: first as a
+frozen occurrence count (an implementer simply re-blesses the number), then as
+a brace-depth heuristic (any if/for/try raises the depth, so a call inside a
+block was invisible, including a verbatim copy of the shape its own comment
+cited). It is now a call-site pin over all five dispatch identifiers. The
+per-handler slice in the AC11 pins is brace-matched from each useCallback,
+not cut at the literal "}, [" - that literal never appears in handleFiles or
+handleZipFile, so both slices used to over-run and handleFiles could lose its
+trigger entirely with the total still reading 3.
+
+## 430. Live Feed Auto Grade shows as pending (A15)
+
+GradingTab dispatches the grading action inside startTransition, so
+useActionState's pending flag actually becomes true on the Live Feed path.
+Previously the bare dispatch took React's isTransition=false branch and
+pending was never set, so the in-progress block never rendered and a second
+run was one click away.
+
+AC:
+- setGradingTarget commits INSIDE the transition; setCanvasUrl stays outside.
+  This is what closes the pending-FALSE intermediate-commit window - the
+  !pending term below is inert in a commit where pending is false, so do not
+  relax this on the belief that activeRun covers it.
+- activeRun = gradingRowKey && gradingRowKey === selectedKey && !pending,
+  which makes a stale run unrenderable for the whole pending window and makes
+  the detail footer's Post-and-next / Skip-to-next UNREACHABLE during a run.
+  They deliberately carry no per-control gate; the disabled={pending} count of
+  3 is asserted exactly so that adding one goes red.
+- The in-detail grading region stays. An earlier scoping required deleting it;
+  that region is the mask over the pending-true stale-run state.
+- The detail-pane Auto Grade label is row-scoped, not bound to global pending.
+
+Guard notes: the wiring test matches the whole activeRun expression, not its
+terms - term-by-term containment passed a semantic inversion using || that
+rendered another row's run. The livefeed guard must be a live conjunction;
+presence of the literal passed an inert (... || true) gate.

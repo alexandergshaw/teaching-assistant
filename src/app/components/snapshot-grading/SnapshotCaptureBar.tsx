@@ -57,8 +57,9 @@ export default function SnapshotCaptureBar({
     <div className={bar.captureBar}>
       <p className={bar.disclosure}>
         Nothing here leaves this device until you press Read or Grade, or press Alt+R while sharing a screen -
-        those are the only three moments anything is sent to Google&apos;s Gemini API. Reloading clears the shots
-        in the tray, but completed assessments are kept and shown again after a reload.
+        those are the only three actions that send anything to Google&apos;s Gemini API, except that while
+        auto-grade is armed, a landed submission shot can trigger the same Grade upload automatically. Reloading
+        clears the shots in the tray, but completed assessments are kept and shown again after a reload.
       </p>
 
       {shareError && (
@@ -116,11 +117,12 @@ export default function SnapshotCaptureBar({
           was considered and struck (n14-architecture.md section 0) - bare
           "s" stays the only snap binding. */}
       <p className={bar.keyHint}>
-        Keyboard: S to snap, N for next student, 1-6 to arm a role (Assignment, Rubric, Post,
-        Replies, Submission, Other) - none of these take Ctrl, Alt, or Cmd/Win. Alt+G also arms
-        Next Student (Space confirms) - Alt alone, not Ctrl+Alt (AltGr) or Cmd/Win. Alt+R captures
-        the shared screen, transcribes it, and opens it for review before it can become the rubric
-        - also Alt alone, not Ctrl+Alt (AltGr) or Cmd/Win.
+        Keyboard: S to snap (while auto-grade is armed, a snap can also start an automatic Grade
+        upload), N for next student, 1-6 to arm a role (Assignment, Rubric, Post, Replies, Submission,
+        Other) - none of these take Ctrl, Alt, or Cmd/Win. Alt+G also arms Next Student (Space
+        confirms) - Alt alone, not Ctrl+Alt (AltGr) or Cmd/Win. Alt+R captures the shared screen,
+        transcribes it, and opens it for review before it can become the rubric -
+        also Alt alone, not Ctrl+Alt (AltGr) or Cmd/Win.
       </p>
 
       <p aria-live="polite" role="status" className={bar.wireFigure}>

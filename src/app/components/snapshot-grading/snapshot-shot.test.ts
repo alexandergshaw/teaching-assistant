@@ -16,6 +16,8 @@ import {
   partitionShotsForNextStudent,
   computeNextStudentCounts,
   describeNextStudentCounts,
+  countSubmissionArrivals,
+  shotsIncludingArrivals,
   type SnapshotShot,
   type SnapshotRole,
 } from "./snapshot-shot";
@@ -332,4 +334,67 @@ describe("buildIdByGlobalIndex (R1-B: the SAME i+1 rule useSnapshotGrade.ts's sh
   // Restoring the `i + 1` body turns both green again. Not re-run
   // automatically here (that would require editing source mid-suite); see
   // the wave report for the actual before/after command output.
+});
+
+// ---------------------------------------------------------------------------
+// N15c (Ruling C5/D1, AC 7): the auto-grade trigger's own arrival count. An
+// overcount fires on nothing landed; an undercount never fires on a real
+// arrival.
+// ---------------------------------------------------------------------------
+
+describe("countSubmissionArrivals (N15c AC 7)", () => {
+  it("counts only non-null, role:submission entries across a matrix including nulls and every other role", () => {
+    const added = [
+      null,
+      makeShot({ id: "a", role: "submission" }),
+      makeShot({ id: "b", role: "assignment" }),
+      makeShot({ id: "c", role: "rubric" }),
+      makeShot({ id: "d", role: "post" }),
+      makeShot({ id: "e", role: "replies" }),
+      makeShot({ id: "f", role: "other" }),
+      makeShot({ id: "g", role: "submission" }),
+      null,
+    ];
+    expect(countSubmissionArrivals(added)).toBe(2);
+  });
+
+  it("returns 0 for an all-null array", () => {
+    expect(countSubmissionArrivals([null, null])).toBe(0);
+  });
+
+  it("returns 0 for an empty array", () => {
+    expect(countSubmissionArrivals([])).toBe(0);
+  });
+
+  it("returns 0 when every added shot is a non-submission role", () => {
+    expect(countSubmissionArrivals([makeShot({ role: "rubric" }), makeShot({ role: "assignment" })])).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N15c (Ruling D2/D3, AC 8): the array handleGrade's explicit shot list
+// parameter actually receives. A shot silently missing here is a silently
+// partial grade - D3's core prohibition.
+// ---------------------------------------------------------------------------
+
+describe("shotsIncludingArrivals (N15c AC 8)", () => {
+  it("returns [...existing, ...added.filter(non-null)], preserving order", () => {
+    const existing = [makeShot({ id: "e1" }), makeShot({ id: "e2" })];
+    const added = [null, makeShot({ id: "a1" }), null, makeShot({ id: "a2" })];
+    expect(shotsIncludingArrivals(existing, added).map((s) => s.id)).toEqual(["e1", "e2", "a1", "a2"]);
+  });
+
+  it("handles an empty existing array", () => {
+    const added = [makeShot({ id: "a1" })];
+    expect(shotsIncludingArrivals([], added).map((s) => s.id)).toEqual(["a1"]);
+  });
+
+  it("handles an added array full of nulls", () => {
+    const existing = [makeShot({ id: "e1" })];
+    expect(shotsIncludingArrivals(existing, [null, null]).map((s) => s.id)).toEqual(["e1"]);
+  });
+
+  it("handles both empty", () => {
+    expect(shotsIncludingArrivals([], [])).toEqual([]);
+  });
 });

@@ -3,19 +3,37 @@ import * as fs from "fs";
 import * as path from "path";
 import { SNAPSHOT_ROLE_LABELS } from "./snapshot-shot";
 
-// Shared by every canary below that asserts a call or a registration is
-// LIVE (not merely mentioned). A bare regex over raw source text matches
-// equally well inside `//` or `/* */` comments, so a call that is commented
-// out - dead code - would still satisfy a raw-source match. Comment-stripping
-// first closes that hole. Kept single-line-safe (no /s or /gs dotAll flag,
-// which vitest accepts but tsc rejects with TS1501).
+// Shared by every canary below that asserts a call or registration is LIVE
+// (not merely mentioned) - a bare regex over raw text matches inside a
+// comment too. Single-line safe (no /s or /gs, tsc rejects that as TS1501).
+// BLOCKER B fix: split on /\r?\n/, never bare "\n" - "." does not match "\r",
+// so on a CRLF working tree (`git ls-files --eol`: snapshot-row.ts and
+// siblings are i/lf w/crlf; core.autocrlf=true with no .gitattributes) the
+// old `.split("\n")` left a trailing "\r" that made `.replace(/\/\/.*$/,"")`
+// stop one char short of any trailing "//".
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
+    .split(/\r?\n/)
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
 }
+
+// CANARY (BLOCKER B), built with String.fromCharCode(13) (never a \r escape
+// in source text - Write/Edit materialize that as a literal character).
+// Sabotage proof: reverting to `.split("\n")` makes this fail.
+describe("stripComments handles CRLF line endings (BLOCKER B canary)", () => {
+  const CR = String.fromCharCode(13);
+
+  it("strips both a trailing and a whole-line // comment on CRLF-terminated lines", () => {
+    const fixture = `const x = 1;${CR}\nconst y = 2; // trailing comment must go${CR}\n// whole-line comment must go${CR}\nconst z = 3;`;
+    const stripped = stripComments(fixture);
+    expect(stripped).not.toContain("trailing comment must go");
+    expect(stripped).not.toContain("whole-line comment must go");
+    expect(stripped).toContain("const y = 2;");
+    expect(stripped).toContain("const z = 3;");
+  });
+});
 
 // THE WIRING WAVE'S OWN REACHABILITY CANARY (docs/snapshot-grading-
 // acceptance-criteria.md section 5, X5/X6). Copies module-deck-capture's own
@@ -103,133 +121,11 @@ describe('"snapgrade" is a member of the RecordingLaunchView union AND the RECOR
 // still keeps out of localStorage for the same sensitivity reason as before.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// WAVE 5, A7c: "the snap path calls no server action" from wave 4 extends to
-// "the read/grade actions are called ONLY from a click handler, never a
-// useEffect". GradingRecordingPanel.tsx:475-487 is the shape this must never
-// copy: a useEffect that fires a server action the moment some piece of
-// state crosses a threshold, with no button in the path. This test isolates
-// every useEffect BLOCK in SnapshotGradingPanel.tsx (bracket-counting from
-// each "useEffect(" to its own matching close) and asserts neither
-// snapshotReadBatchAction nor snapshotGradeAction is called from inside one.
-// ---------------------------------------------------------------------------
-
-describe("no auto-drain effect (A7c): the read/grade/OCR actions are reachable ONLY from a click handler or a chord", () => {
-  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
-  const panelSource = fs.readFileSync(panelPath, "utf-8");
-  // Backlog 3.5's line-budget extraction (Ruling B35-9, amended) moved
-  // handleGrade - and its snapshotGradeAction call - out of the panel into
-  // its own hook file, so this file's own scan needs to cover it too, or the
-  // whole "calls both actions somewhere" assertion would go dark rather than
-  // red the moment the extraction happened.
-  const hookPath = path.join(SNAPSHOT_GRADING_DIR, "useSnapshotGrade.ts");
-  const hookSource = fs.readFileSync(hookPath, "utf-8");
-  // N14 WAVE 2 (Ruling N14-15/n14-architecture.md section 7): this plan moved
-  // the keydown dispatch into useSnapshotKeyboardShortcuts.ts and the new OCR
-  // call into useSnapshotRubricCapture.ts - a construction-based rewrite that
-  // kept scanning only the two hardcoded paths above would be blind to a
-  // useEffect in either new file. Generalized below to every non-test
-  // .ts/.tsx file in this directory, so a future file needs no fifth name.
-  const allNonTestFiles = fs
-    .readdirSync(SNAPSHOT_GRADING_DIR)
-    .filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
-  const allSources = allNonTestFiles.map((f) => ({
-    file: f,
-    source: fs.readFileSync(path.join(SNAPSHOT_GRADING_DIR, f), "utf-8"),
-  }));
-  const rubricCaptureHookSource = fs.readFileSync(
-    path.join(SNAPSHOT_GRADING_DIR, "useSnapshotRubricCapture.ts"),
-    "utf-8"
-  );
-
-  function extractEffectBodies(source: string): string[] {
-    const bodies: string[] = [];
-    let searchFrom = 0;
-    for (;;) {
-      const start = source.indexOf("useEffect(", searchFrom);
-      if (start === -1) break;
-      let depth = 0;
-      let i = start + "useEffect(".length - 1; // sit on the opening "("
-      let end = -1;
-      for (; i < source.length; i++) {
-        if (source[i] === "(") depth++;
-        else if (source[i] === ")") {
-          depth--;
-          if (depth === 0) {
-            end = i;
-            break;
-          }
-        }
-      }
-      if (end === -1) break;
-      bodies.push(source.slice(start, end + 1));
-      searchFrom = end + 1;
-    }
-    return bodies;
-  }
-
-  it("finds at least two useEffect blocks in the panel - a scan over none proves nothing", () => {
-    expect(extractEffectBodies(panelSource).length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("calls both actions somewhere - snapshotReadBatchAction in the panel, snapshotGradeAction in the extracted grade hook - a check that neither is called anywhere proves nothing", () => {
-    // Comment-stripped: same class of hole as the N14 keyboard canary - a
-    // commented-out call would otherwise still satisfy a raw-source match.
-    expect(stripComments(panelSource)).toMatch(/snapshotReadBatchAction\(/);
-    expect(stripComments(hookSource)).toMatch(/snapshotGradeAction\(/);
-  });
-
-  it("no useEffect block in the panel calls snapshotReadBatchAction or snapshotGradeAction", () => {
-    const effectBodies = extractEffectBodies(panelSource);
-    for (const body of effectBodies) {
-      expect(body).not.toMatch(/snapshotReadBatchAction\(/);
-      expect(body).not.toMatch(/snapshotGradeAction\(/);
-    }
-  });
-
-  it("the extracted grade hook contains no useEffect at all - snapshotGradeAction is reachable only through the handleGrade it returns, never auto-fired", () => {
-    expect(hookSource).not.toMatch(/useEffect\(/);
-  });
-
-  it("handleRead and handleGrade are wired to onClick, not to a dependency-array effect", () => {
-    expect(panelSource).toMatch(/onClick=\{\(\)\s*=>\s*void handleRead\(\)\}/);
-    expect(panelSource).toMatch(/onClick=\{\(\)\s*=>\s*void handleGrade\(\)\}/);
-  });
-
-  // N14 WAVE 2 (Ruling N14-15): the OCR call is a NEW dedicated action
-  // (snapshotTranscribeRubricAction), reachable only through Alt+R's
-  // captureAndTranscribe, never a useEffect.
-  it("calls snapshotTranscribeRubricAction somewhere in the rubric-capture hook - a check that it is called nowhere proves nothing", () => {
-    expect(stripComments(rubricCaptureHookSource)).toMatch(/snapshotTranscribeRubricAction\(/);
-  });
-
-  it("the rubric-capture hook contains no useEffect at all - snapshotTranscribeRubricAction is reachable only through captureAndTranscribe, never auto-fired", () => {
-    expect(rubricCaptureHookSource).not.toMatch(/useEffect\(/);
-  });
-
-  it("BY CONSTRUCTION: no useEffect block in ANY non-test file in this directory calls snapshotReadBatchAction, snapshotGradeAction, or snapshotTranscribeRubricAction - generalized so a future file cannot pass this by not being on a hardcoded list (Ruling N14-15)", () => {
-    for (const { file, source } of allSources) {
-      const effectBodies = extractEffectBodies(source);
-      for (const body of effectBodies) {
-        expect(body, `${file} has a useEffect calling snapshotReadBatchAction`).not.toMatch(/snapshotReadBatchAction\(/);
-        expect(body, `${file} has a useEffect calling snapshotGradeAction`).not.toMatch(/snapshotGradeAction\(/);
-        expect(body, `${file} has a useEffect calling snapshotTranscribeRubricAction`).not.toMatch(
-          /snapshotTranscribeRubricAction\(/
-        );
-      }
-    }
-  });
-
-  it("useSnapshotKeyboardShortcuts.ts's own keydown effect never calls an action directly - only through the callback parameters it receives (captureAndTranscribe is passed in as onCaptureRubric, never imported)", () => {
-    const keyboardHookSource = fs.readFileSync(
-      path.join(SNAPSHOT_GRADING_DIR, "useSnapshotKeyboardShortcuts.ts"),
-      "utf-8"
-    );
-    expect(stripComments(keyboardHookSource)).not.toMatch(/snapshotReadBatchAction\(/);
-    expect(stripComments(keyboardHookSource)).not.toMatch(/snapshotGradeAction\(/);
-    expect(stripComments(keyboardHookSource)).not.toMatch(/snapshotTranscribeRubricAction\(/);
-  });
-});
+// N15c remediation round 3 (BLOCKER 1): the A7c/AC10 auto-fire reachability
+// block (extractEffectBodies/extractCallbackBody, the BY CONSTRUCTION gate,
+// the AC10 construction, and the five-name call-site pin) moved to its own
+// file - snapshot-autofire.structure.test.ts - so this file could add the
+// round-3 fixes below without crossing the 1000-line ceiling.
 
 // ---------------------------------------------------------------------------
 // MAJOR-1: A4d can be unwired with every other gate green. The directory-wide
@@ -285,8 +181,13 @@ describe("directory-wide ta-snap-* key exact-set canary (this directory has no c
     expect(keys.length).toBeGreaterThan(0);
   });
 
-  it("finds exactly the expected ta-snap-* key set (the armed-role toggle, H1-D's instructor grading-instructions field, and the completed-assessment table; U10 keeps shot bytes and rubric/assignment text out of localStorage)", () => {
-    expect(distinctKeys).toEqual(["ta-snap-armed-role", "ta-snap-grading-instructions", "ta-snap-table"]);
+  it("finds exactly the expected ta-snap-* key set (the armed-role toggle, N15c's auto-grade-armed checkbox, H1-D's instructor grading-instructions field, and the completed-assessment table; U10 keeps shot bytes and rubric/assignment text out of localStorage)", () => {
+    expect(distinctKeys).toEqual([
+      "ta-snap-armed-role",
+      "ta-snap-auto-grade-armed",
+      "ta-snap-grading-instructions",
+      "ta-snap-table",
+    ]);
   });
 
   // Comment-stripped once for the wiring checks below: same class of hole as
@@ -304,6 +205,11 @@ describe("directory-wide ta-snap-* key exact-set canary (this directory has no c
   it("H1-D: ta-snap-grading-instructions is wired to both a read and a write - a field that reaches this directory's source but is never actually read from or written to storage would still pass the exact-set check above", () => {
     expect(strippedCombinedSource).toMatch(/localStorage\.getItem\(\s*INSTRUCTOR_INSTRUCTIONS_KEY\s*\)/);
     expect(strippedCombinedSource).toMatch(/localStorage\.setItem\(\s*INSTRUCTOR_INSTRUCTIONS_KEY\s*,/);
+  });
+
+  it("N15c: ta-snap-auto-grade-armed is wired to both a read and a write - AC 14/15", () => {
+    expect(strippedCombinedSource).toMatch(/localStorage\.getItem\(\s*AUTO_GRADE_ARMED_KEY\s*\)/);
+    expect(strippedCombinedSource).toMatch(/localStorage\.setItem\(\s*AUTO_GRADE_ARMED_KEY\s*,/);
   });
 });
 
@@ -445,7 +351,7 @@ describe("confirmedRubricAreas resets ONLY inside applyReviewedRubricText, the o
 
   it("handleNextStudentConfirm's body contains NEITHER setConfirmedRubricAreas nor setConfirmedRubricAreasError - the confirmed list survives Next student", () => {
     const start = panelSource.indexOf("const handleNextStudentConfirm = useCallback(() => {");
-    const end = panelSource.indexOf("}, [clearPerStudentShots, announce]);", start);
+    const end = panelSource.indexOf("}, [clearPerStudentShots, announce, clearPendingAutoGrade]);", start);
     expect(start, "expected to find handleNextStudentConfirm's own body").toBeGreaterThan(-1);
     expect(end, "expected to find its own closing dependency array").toBeGreaterThan(start);
     const body = panelSource.slice(start, end);
@@ -595,6 +501,291 @@ describe("SnapshotRubricCaptureReview.tsx: Confirm is first in DOM order AND can
   it("the captured image is actually shown (Ruling N14-11) - a review surface with no image to check the transcript against is silent loss", () => {
     expect(reviewSource).toMatch(/<img\b/);
     expect(reviewSource).toMatch(/data:image\/jpeg;base64,\$\{base64\}/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N15c AC 9 (Ruling D1/D3): frozen call-site counts, decl vs. call
+// distinguished - the exact mechanism this design's own check ran
+// (rungate-v3.js) against a simulated build, now applied to the real
+// directory. Any count moving without a same-commit, human-reviewed bump is
+// an unreviewed new path to a paid call, or the trigger silently
+// disconnected from an entry point (the measured "wired to one of three"
+// evasion).
+// ---------------------------------------------------------------------------
+
+describe("N15c AC 9: frozen call-site counts across this directory, decl vs. call distinguished", () => {
+  const nonTestFiles = fs
+    .readdirSync(SNAPSHOT_GRADING_DIR)
+    .filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(".test.ts"));
+  const combined = stripComments(
+    nonTestFiles.map((f) => fs.readFileSync(path.join(SNAPSHOT_GRADING_DIR, f), "utf-8")).join("\n")
+  );
+
+  function counts(identifier: string): { total: number; decl: number; calls: number } {
+    const total = (combined.match(new RegExp(`${identifier}\\(`, "g")) ?? []).length;
+    const decl = (combined.match(new RegExp(`function ${identifier}\\(`, "g")) ?? []).length;
+    return { total, decl, calls: total - decl };
+  }
+
+  it("handleGrade( is 2 total / 0 decl / 2 calls (the button's onClick, and the auto-wrapper's void handleGrade(shotsForGrade)) - never a `function handleGrade(` form", () => {
+    expect(counts("handleGrade")).toEqual({ total: 2, decl: 0, calls: 2 });
+  });
+
+  it("snapshotGradeAction( is 1 total / 0 decl / 1 call - inside useSnapshotGrade.ts's handleGrade only", () => {
+    expect(counts("snapshotGradeAction")).toEqual({ total: 1, decl: 0, calls: 1 });
+  });
+
+  it("isGradeEligible( is 3 total / 1 decl / 2 calls - the `export function isGradeEligible(` declaration itself matches its own call regex (freeze at 3, not 2): 1 decl + 2 real calls (the Grade button's disabled expression, and decideAutoGrade's internal composition)", () => {
+    expect(counts("isGradeEligible")).toEqual({ total: 3, decl: 1, calls: 2 });
+  });
+
+  it("decideAutoGrade( is 2 total / 1 decl / 1 call - 1 decl + 1 call (inside useSnapshotAutoGrade.ts's attemptFire)", () => {
+    expect(counts("decideAutoGrade")).toEqual({ total: 2, decl: 1, calls: 1 });
+  });
+
+  it("countSubmissionArrivals( is 2 total / 1 decl / 1 call - 1 decl + 1 call (composed internally by decideAutoGrade; no external caller needs it directly)", () => {
+    expect(counts("countSubmissionArrivals")).toEqual({ total: 2, decl: 1, calls: 1 });
+  });
+
+  it("triggerAutoGradeIfDue( is 3 total / 0 decl / 3 calls - handleSnap, handleFiles, handleZipFile; never a `function` form (it is a hook's returned callback)", () => {
+    expect(counts("triggerAutoGradeIfDue")).toEqual({ total: 3, decl: 0, calls: 3 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N15c AC 11 (Wiring A, instruction 4): closes the hardcoded-arrivals gap.
+// Every triggerAutoGradeIfDue( call site's first argument must be the
+// literal identifier `added`, and the full call must read
+// triggerAutoGradeIfDue(added, shotsIncludingArrivals(shots, added)) - a
+// fabricated/hardcoded array at a call site is exactly the measured evasion
+// this pins against. The trigger call must also sit OUTSIDE every `for (`
+// block in each handler - a call inside the loop would fire once per file/
+// image instead of once per handler invocation.
+//
+// BLOCKER 2 fix (round 3): the old per-handler slice ended at
+// `stripped.indexOf("}, [", declIdx)`. handleSnap closes as `}, [captureFrame,
+// ...]);` on one line and slices right; handleFiles and handleZipFile close
+// as `},\n    [encodeFile, ...]` - that literal never appears - so both
+// slices ran past their own function into the paste useEffect further down
+// (measured: handleFiles' old slice contained 2 trigger call sites,
+// handleZipFile's 1). This rewrite bounds each handler by brace-matching
+// from its own `useCallback(` instead - never by a formatting-dependent
+// literal - and checks EVERY `for (` in the body, not just the first.
+// ---------------------------------------------------------------------------
+
+describe("N15c AC 11 (Wiring A): every triggerAutoGradeIfDue( call site reads the full expected shape, outside any for( loop", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = fs.readFileSync(panelPath, "utf-8");
+  const stripped = stripComments(panelSource);
+
+  const EXPECTED_CALL = "triggerAutoGradeIfDue(added, shotsIncludingArrivals(shots, added));";
+
+  // Duplicated (never imported from a sibling *.test.ts): brace-matches from
+  // a callback's own opening `{` to its own matching close, throwing rather
+  // than silently returning an empty/wrong slice if no brace is found.
+  function extractCallbackBody(declText: string): string {
+    const braceStart = declText.indexOf("{");
+    if (braceStart === -1) throw new Error("extractCallbackBody: no opening brace found");
+    let depth = 0;
+    for (let i = braceStart; i < declText.length; i++) {
+      if (declText[i] === "{") depth++;
+      else if (declText[i] === "}" && --depth === 0) return declText.slice(braceStart + 1, i);
+    }
+    throw new Error("extractCallbackBody: found an opening { with no matching close");
+  }
+
+  it("the exact call literal appears 3 times (handleSnap, handleFiles, handleZipFile)", () => {
+    const matches = stripped.split(EXPECTED_CALL).length - 1;
+    expect(matches).toBe(3);
+  });
+
+  it("each of handleSnap/handleFiles/handleZipFile's own bodies contains the call, and it sits OUTSIDE every `for (` block in that body", () => {
+    const handlerNames = ["handleSnap", "handleFiles", "handleZipFile"];
+    for (const name of handlerNames) {
+      const declIdx = stripped.indexOf(`const ${name} = useCallback(`);
+      expect(declIdx, `expected to find ${name}'s own declaration`).toBeGreaterThan(-1);
+      // Bound to this handler's OWN function-literal body via brace-matching
+      // from its own useCallback( - correct regardless of how the
+      // dependency array that follows happens to be formatted.
+      const body = extractCallbackBody(stripped.slice(declIdx));
+      const triggerIdx = body.indexOf("triggerAutoGradeIfDue(");
+      expect(triggerIdx, `expected to find triggerAutoGradeIfDue( inside ${name}`).toBeGreaterThan(-1);
+
+      // Every `for (` in this handler's body - not just the first - must
+      // close before the trigger call (never contain it).
+      for (let forIdx = body.indexOf("for ("); forIdx !== -1; forIdx = body.indexOf("for (", forIdx + 1)) {
+        const loopBraceStart = body.indexOf("{", forIdx);
+        let depth = 0;
+        let i = loopBraceStart;
+        let loopEnd = -1;
+        for (; i < body.length; i++) {
+          if (body[i] === "{") depth++;
+          else if (body[i] === "}") {
+            depth--;
+            if (depth === 0) {
+              loopEnd = i;
+              break;
+            }
+          }
+        }
+        expect(loopEnd, `expected to find the matching close of ${name}'s own for( loop at index ${forIdx}`).toBeGreaterThan(-1);
+        expect(
+          triggerIdx < forIdx || triggerIdx > loopEnd,
+          `triggerAutoGradeIfDue( in ${name} falls inside a for( loop spanning [${forIdx}, ${loopEnd}]`
+        ).toBe(true);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N15c AC 17: the disclosure-copy pins. The panel's own paragraph, and
+// SnapshotCaptureBar's disclosure paragraph, both used to state networking
+// happens ONLY on Read/Grade/Alt+R - false the moment auto-fire exists.
+// Instruction 8 (overriding the design's own third pin, which named
+// SnapshotCaptureBar.tsx:118-124 - that clause makes no networking claim at
+// all, so the criterion as originally written could not fail): the real
+// amendment is that the "S to snap" clause states S can initiate an upload
+// while auto-grade is armed.
+//
+// SHOULD-FIX 5 (round 3): the old pins scanned the whole 970-line panelSource
+// UN-STRIPPED - measured: removing the real disclosure paragraph and adding
+// one ordinary `// auto-grade... armed... automatically` comment elsewhere in
+// the file still satisfied the first assertion. Every other liveness check
+// in this file strips comments first; this rewrite does the same AND scopes
+// each assertion to the disclosure element itself, not the whole file.
+// ---------------------------------------------------------------------------
+
+describe("N15c AC 17: the disclosure copy accounts for auto-grade (rewritten, not silently left claiming 'only' three actions)", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const strippedPanelSource = stripComments(fs.readFileSync(panelPath, "utf-8"));
+  const barPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotCaptureBar.tsx");
+  const strippedBarSource = stripComments(fs.readFileSync(barPath, "utf-8"));
+
+  // The panel's own networking-disclosure <p>, anchored on its own opening
+  // sentence and closed at its own </p> - never the whole file.
+  const panelDisclosureStart = strippedPanelSource.indexOf(
+    "Reading, grading, and the Alt+R rubric-capture chord each upload"
+  );
+  const panelDisclosureEnd = strippedPanelSource.indexOf("</p>", panelDisclosureStart);
+
+  // SnapshotCaptureBar's own disclosure <p>, anchored on its own className.
+  const barDisclosureStart = strippedBarSource.indexOf('<p className={bar.disclosure}>');
+  const barDisclosureEnd = strippedBarSource.indexOf("</p>", barDisclosureStart);
+
+  it("finds both disclosure paragraphs by their own anchors - a check over -1 proves nothing", () => {
+    expect(panelDisclosureStart, "expected to find the panel's own disclosure paragraph").toBeGreaterThan(-1);
+    expect(panelDisclosureEnd).toBeGreaterThan(panelDisclosureStart);
+    expect(barDisclosureStart, "expected to find SnapshotCaptureBar's own disclosure paragraph").toBeGreaterThan(-1);
+    expect(barDisclosureEnd).toBeGreaterThan(barDisclosureStart);
+  });
+
+  it("the panel's own disclosure paragraph mentions auto-grade triggering an upload automatically", () => {
+    const disclosureText = strippedPanelSource.slice(panelDisclosureStart, panelDisclosureEnd);
+    expect(disclosureText).toMatch(/auto-grade[\s\S]{0,200}armed[\s\S]{0,200}automatically/);
+  });
+
+  it("SnapshotCaptureBar's disclosure paragraph mentions auto-grade triggering an upload automatically", () => {
+    const disclosureText = strippedBarSource.slice(barDisclosureStart, barDisclosureEnd);
+    expect(disclosureText).toMatch(/auto-grade is armed[\s\S]{0,200}automatically/);
+  });
+
+  it("instruction 8's real amendment: the 'S to snap' clause states S can initiate an upload while auto-grade is armed", () => {
+    expect(strippedBarSource).toMatch(/S to snap \(while auto-grade is armed, a snap can also start an automatic Grade\s+upload\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SHOULD-FIX 6: nothing in src/**/*.test.ts pinned the panel's Checkbox
+// before this - changing its onChange to a no-op would ship the feature's
+// only surface control dead with every other test in this repo green.
+// Mirrors moduleCard.selection.wiring.test.ts:94 and
+// GenerateFromSelectionSection.checkpoints.test.ts:76's own technique: pin
+// the tag, its checked binding, and its onChange binding, comment-stripped
+// so a commented-out version cannot satisfy this.
+// ---------------------------------------------------------------------------
+
+describe("SHOULD-FIX 6: the auto-grade Checkbox is actually bound to autoGradeArmed/setAutoGradeArmed", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = stripComments(fs.readFileSync(panelPath, "utf-8"));
+
+  it("renders a <Checkbox checked={autoGradeArmed} bound to the hook's own armed state", () => {
+    expect(panelSource).toMatch(/<Checkbox\s+checked=\{autoGradeArmed\}/);
+  });
+
+  it("its onChange forwards the native checkbox's .target.checked to setAutoGradeArmed - not a no-op and not a hardcoded literal", () => {
+    expect(panelSource).toMatch(/onChange=\{\(e\)\s*=>\s*setAutoGradeArmed\(e\.target\.checked\)\}/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SHOULD-FIX 4: handleNextStudentConfirm must actually call the hook's
+// boundary reset, not merely have it available - an import/destructure alone
+// (matching this directory's own A4d/N14-wave-1 reachability-canary
+// technique) proves nothing about whether it is actually invoked at the
+// student boundary.
+// ---------------------------------------------------------------------------
+
+describe("SHOULD-FIX 4: handleNextStudentConfirm actually calls clearPendingAutoGrade (the auto-grade queue's boundary reset)", () => {
+  const panelPath = path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx");
+  const panelSource = stripComments(fs.readFileSync(panelPath, "utf-8"));
+
+  it("finds handleNextStudentConfirm's own body", () => {
+    const start = panelSource.indexOf("const handleNextStudentConfirm = useCallback(() => {");
+    const end = panelSource.indexOf("}, [clearPerStudentShots, announce, clearPendingAutoGrade]);", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+  });
+
+  it("handleNextStudentConfirm's body calls clearPendingAutoGrade() - not merely destructuring it unused", () => {
+    const start = panelSource.indexOf("const handleNextStudentConfirm = useCallback(() => {");
+    const end = panelSource.indexOf("}, [clearPerStudentShots, announce, clearPendingAutoGrade]);", start);
+    const body = panelSource.slice(start, end);
+    expect(body).toMatch(/clearPendingAutoGrade\(\);/);
+  });
+
+  it("useSnapshotAutoGrade returns clearPendingAutoGrade, and its own body clears pendingAddedShotsRef.current to an empty array", () => {
+    const hookPath = path.join(SNAPSHOT_GRADING_DIR, "useSnapshotAutoGrade.ts");
+    const hookSource = stripComments(fs.readFileSync(hookPath, "utf-8"));
+    const start = hookSource.indexOf("const clearPendingAutoGrade = useCallback(() => {");
+    expect(start).toBeGreaterThan(-1);
+    const end = hookSource.indexOf("}, []);", start);
+    expect(end).toBeGreaterThan(start);
+    const body = hookSource.slice(start, end);
+    expect(body).toMatch(/pendingAddedShotsRef\.current\s*=\s*\[\]/);
+  });
+});
+
+// BLOCKER C (round 2 remediation): the cross-student overwrite. Next student
+// ends this pass WITHOUT waiting for or aborting a grade still in flight
+// (aborting was rejected - it skips setGrading(false) via
+// controller.signal.aborted, wedging `grading` true forever). Bumping
+// studentGenerationRef instead - see useSnapshotGrade.wiring.test.ts's own
+// BLOCKER C block for the hook half.
+describe("BLOCKER C: handleNextStudentConfirm bumps studentGenerationRef, and the panel wires it into useSnapshotGrade", () => {
+  const panelSource = stripComments(fs.readFileSync(path.join(SNAPSHOT_GRADING_DIR, "SnapshotGradingPanel.tsx"), "utf-8"));
+  const confirmStart = panelSource.indexOf("const handleNextStudentConfirm = useCallback(() => {");
+  const confirmEnd = panelSource.indexOf("}, [clearPerStudentShots, announce, clearPendingAutoGrade]);", confirmStart);
+  const confirmBody = panelSource.slice(confirmStart, confirmEnd);
+
+  it("declares studentGenerationRef = useRef(0), and handleNextStudentConfirm's body increments it - never merely declaring it unused", () => {
+    expect(panelSource).toMatch(/const studentGenerationRef = useRef\(0\);/);
+    expect(confirmStart).toBeGreaterThan(-1);
+    expect(confirmEnd).toBeGreaterThan(confirmStart);
+    expect(confirmBody).toMatch(/studentGenerationRef\.current\s*\+=\s*1;/);
+  });
+
+  it("handleNextStudentConfirm never calls gradeAbortRef - the naive fix (abort the in-flight call) was rejected because it wedges `grading` true forever", () => {
+    expect(confirmBody).not.toMatch(/gradeAbortRef/);
+  });
+
+  it("the useSnapshotGrade( call site passes studentGenerationRef through", () => {
+    const callStart = panelSource.indexOf("const { handleGrade } = useSnapshotGrade({");
+    const callEnd = panelSource.indexOf("});", callStart);
+    expect(callStart).toBeGreaterThan(-1);
+    expect(callEnd).toBeGreaterThan(callStart);
+    expect(panelSource.slice(callStart, callEnd)).toMatch(/studentGenerationRef,/);
   });
 });
 

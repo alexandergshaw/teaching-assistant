@@ -14,6 +14,7 @@ import {
   nextParseRequestId,
   isStaleParseResult,
   isConfirmedAreasReady,
+  isGradeEligible,
   removeConfirmedArea,
   addConfirmedArea,
   GRADE_PASS_IMAGE_BUDGET_BYTES,
@@ -21,6 +22,7 @@ import {
   type SnapshotShotReadReport,
   type SnapshotAssessmentRow,
   type ShotReadEntry,
+  type GradeEligibilityInputs,
 } from "./snapshot-row";
 import type { SnapshotShot } from "./snapshot-shot";
 import { snapshotRowCodec } from "./snapshot-row-serialization";
@@ -391,6 +393,56 @@ describe("isConfirmedAreasReady (Ruling B35-13: rubric-text-aware, not a blanket
 
   it("treats whitespace-only rubric text the same as no rubric text", () => {
     expect(isConfirmedAreasReady("   ", null)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N15c (Ruling C2/D1, AC 6): isGradeEligible is the SAME predicate the Grade
+// button's disabled prop consumes AND decideAutoGrade composes internally -
+// direction of failure: any of these true while the function returns true
+// reproduces C2's blocker independently of decideAutoGrade.
+// ---------------------------------------------------------------------------
+
+describe("isGradeEligible (N15c Ruling C2/D1, AC 6)", () => {
+  function makeEligibility(overrides: Partial<GradeEligibilityInputs> = {}): GradeEligibilityInputs {
+    return {
+      grading: false,
+      shotCount: 1,
+      transcriptText: "",
+      rubricText: "",
+      confirmedRubricAreas: null,
+      ...overrides,
+    };
+  }
+
+  it("returns false while grading, even with everything else eligible", () => {
+    expect(isGradeEligible(makeEligibility({ grading: true }))).toBe(false);
+  });
+
+  it("returns false with zero shots and blank transcript text", () => {
+    expect(isGradeEligible(makeEligibility({ shotCount: 0, transcriptText: "" }))).toBe(false);
+  });
+
+  it("returns true with zero shots but non-blank transcript text (Read already ran)", () => {
+    expect(isGradeEligible(makeEligibility({ shotCount: 0, transcriptText: "read out loud" }))).toBe(true);
+  });
+
+  it("returns false when rubric text is non-blank and confirmedRubricAreas is null (parse pending/errored)", () => {
+    expect(
+      isGradeEligible(makeEligibility({ rubricText: "non-blank", confirmedRubricAreas: null }))
+    ).toBe(false);
+  });
+
+  it("returns true when rubricText is blank, regardless of confirmedRubricAreas", () => {
+    expect(isGradeEligible(makeEligibility({ rubricText: "", confirmedRubricAreas: null }))).toBe(true);
+  });
+
+  it("returns true when every condition is satisfied", () => {
+    expect(
+      isGradeEligible(
+        makeEligibility({ grading: false, shotCount: 2, rubricText: "text", confirmedRubricAreas: [] })
+      )
+    ).toBe(true);
   });
 });
 

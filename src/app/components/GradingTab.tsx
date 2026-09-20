@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent, RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import {
   fetchCanvasMetaAction,
   type GradeActionState,
@@ -137,14 +137,16 @@ export default function GradingTab({
   // this assignment, then dispatch the grade action with the row's context.
   const handleAutoGrade = (row: CanvasQueueItem) => {
     setCanvasUrl(row.canvasUrl);
-    setGradingTarget({ title: row.title, courseName: row.courseName, key: `${row.kind}-${row.id}` });
     const fd = new FormData();
     fd.set("canvasUrl", row.canvasUrl);
     fd.set("assignmentInstructions", row.description || row.title);
     fd.set("rubric", row.rubricText);
     fd.set("provider", selectedProvider);
     fd.set("institution", row.institution);
-    formAction(fd);
+    startTransition(() => {
+      setGradingTarget({ title: row.title, courseName: row.courseName, key: `${row.kind}-${row.id}` });
+      formAction(fd);
+    });
   };
 
   // Scroll the results into view when a new grading run arrives (so Auto Grade
@@ -183,7 +185,7 @@ export default function GradingTab({
         </TextField>
       </div>
 
-      {pending && (
+      {source !== "livefeed" && pending && (
         <div className={styles.loadingState} role="status" aria-live="polite">
           <span className={styles.spinner} aria-hidden="true" />
           <div>

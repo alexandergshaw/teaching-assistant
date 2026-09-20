@@ -472,6 +472,35 @@ export function isConfirmedAreasReady(
   return rubricText.trim() === "" || confirmedRubricAreas !== null;
 }
 
+/**
+ * N15c (Ruling C2/D1): the Grade button's own enablement predicate,
+ * extracted so the auto-grade trigger (decideAutoGrade,
+ * snapshot-auto-grade-decision.ts) can compose the SAME check the button's
+ * `disabled` prop uses, rather than re-implementing the call without the
+ * guard - a trigger that grades while `grading` is in flight, or while the
+ * rubric parse is pending/errored, would silently defeat the
+ * confirmedRubricAreas mechanism and persist the row. Both the button and
+ * decideAutoGrade must consume this SAME exported function - not two
+ * expressions that merely agree today. Freeze the call-site count of
+ * `isGradeEligible(` at 3 (1 declaration - this line matches its own regex -
+ * plus 2 calls: the button's disabled expression, and decideAutoGrade's
+ * internal composition), not 2.
+ */
+export interface GradeEligibilityInputs {
+  grading: boolean;
+  shotCount: number;
+  transcriptText: string;
+  rubricText: string;
+  confirmedRubricAreas: ConfirmedRubricArea[] | null;
+}
+
+export function isGradeEligible(input: GradeEligibilityInputs): boolean {
+  if (input.grading) return false;
+  if (input.shotCount === 0 && !input.transcriptText.trim()) return false;
+  if (!isConfirmedAreasReady(input.rubricText, input.confirmedRubricAreas)) return false;
+  return true;
+}
+
 /** Removes the area at `index`. Out-of-range indexes are a no-op (the array
  *  is returned unchanged) rather than throwing - the caller's index always
  *  comes from a render of the same array, but a stale closure must not crash

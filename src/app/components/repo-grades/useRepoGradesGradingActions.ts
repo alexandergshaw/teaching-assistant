@@ -56,7 +56,7 @@ import {
   repoGradePostCandidateRows,
   scopeRepoGradeRowsToSelection,
 } from "./repoGradesPosting";
-import { buildBulkGradePlan, type BulkGradeOutcome } from "./repoGradesBulkGrade";
+import { buildBulkGradePlan, bulkGradeOutcomeFromRun, type BulkGradeOutcome } from "./repoGradesBulkGrade";
 import { useRepoGradesBulkGrade } from "./useRepoGradesBulkGrade";
 // A16 wave 3 (docs/a16-wave3-scope.md section 7): the folder-entry adapter.
 // This hook CALLS both, and holds no condition over either result - see
@@ -333,11 +333,31 @@ export function useRepoGradesGradingActions(
     }
 
     const first = result.run.results[0];
+    // A30 (RR-1, docs/a28-scope.md): the SAME question A28 answered for the
+    // bulk path - "did this success-shaped return actually grade anything?"
+    // - reused here rather than re-derived from `first`/`isUngraded` a
+    // second time. `detail` (the log's own free text) is built first so it
+    // can double as the classifier's `successDetail`, exactly the way
+    // useRepoGradesBulkGrade.ts's gradeOneTarget already builds its detail
+    // before calling bulkGradeOutcomeFromRun.
+    const cuts: string[] = [];
+    if (result.digestTruncated) cuts.push("some folder files were left out of the digest");
+    if (first?.submissionTruncated) cuts.push("the submission text was truncated before grading");
+    const rubricNote = describeResolvedRubricForLog(resolved, result.rubric);
+    const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
+    const detail = [
+      cuts.length > 0 ? `Graded by ${provider} - ${cuts.join("; ")}` : `Graded by ${provider}`,
+      rubricNote,
+      feedbackNote,
+    ]
+      .filter((part) => part !== "")
+      .join(" | ");
+    const outcome = bulkGradeOutcomeFromRun({ repo: row.repo, folder: column.folder }, result.run.results, detail);
     setCellEdits((prev) =>
       setRepoGradeCellEdit(prev, row.repo, column.folder, {
         grading: false,
-        gradeError: null,
-        score: first?.totalScore ?? "",
+        gradeError: outcome.status === "failed" ? outcome.detail : null,
+        score: outcome.score,
         // `comment` is set directly here, not through
         // applyRepoGradeFeedbackFieldEdit: `first.overallComment` is ALREADY
         // composeOverallComment(strengths, improvements, resubmitNotice)'s
@@ -398,43 +418,42 @@ export function useRepoGradesGradingActions(
     // `submissionTruncated` means the assembled text was cut again before the
     // model saw it. They are different cuts at different layers, so they are
     // named separately rather than merged into one "truncated" - a reader
-    // chasing missing code needs to know WHICH budget to raise.
-    const cuts: string[] = [];
-    if (result.digestTruncated) cuts.push("some folder files were left out of the digest");
-    if (first?.submissionTruncated) cuts.push("the submission text was truncated before grading");
-    // U12.50: `result.rubric` and `first.feedback` (src/lib/grade/types.ts:30)
-    // used to be requested off this call and then never read again - neither
-    // is discarded now. There is no per-cell UI slot for either yet (that
-    // would mean extending RepoGradeCellEdit, out of this wave's file set),
-    // so both are captured into THIS call's own log entry instead -
-    // RepoGradeLogEntry.detail is already free text (L2 item 10's own
-    // comment), so this needs no schema change, and the log is already this
-    // view's durable, downloadable record. The rubric is only worth logging
-    // when it was GENERATED (the instructor left the rubric field blank) -
-    // an instructor-typed rubric is already visible in the textarea, and
-    // repeating a possibly-long rubric on every one of a run's graded cells
-    // would bloat the log for no new information. `feedback` is only logged
-    // when it differs from `overallComment` (the same "only show if it adds
-    // something" rule DraftedGradesTab.tsx:663 already applies to the two).
-    const rubricNote = describeResolvedRubricForLog(resolved, result.rubric);
-    const feedbackNote = first?.feedback && first.feedback !== first?.overallComment ? `Feedback: ${first.feedback}` : "";
-    const detail = [
-      cuts.length > 0 ? `Graded by ${provider} - ${cuts.join("; ")}` : `Graded by ${provider}`,
-      rubricNote,
-      feedbackNote,
-    ]
-      .filter((part) => part !== "")
-      .join(" | ");
-    if (cuts.length > 0) {
+    // chasing missing code needs to know WHICH budget to raise. `cuts` itself
+    // (along with `rubricNote`/`feedbackNote`/`detail`) is computed ABOVE now,
+    // before `outcome` is classified - U12.50: `result.rubric` and
+    // `first.feedback` (src/lib/grade/types.ts:30) used to be requested off
+    // this call and then never read again - neither is discarded now. There
+    // is no per-cell UI slot for either yet (that would mean extending
+    // RepoGradeCellEdit, out of this wave's file set), so both are captured
+    // into THIS call's own log entry instead - RepoGradeLogEntry.detail is
+    // already free text (L2 item 10's own comment), so this needs no schema
+    // change, and the log is already this view's durable, downloadable
+    // record. The rubric is only worth logging when it was GENERATED (the
+    // instructor left the rubric field blank) - an instructor-typed rubric is
+    // already visible in the textarea, and repeating a possibly-long rubric on
+    // every one of a run's graded cells would bloat the log for no new
+    // information. `feedback` is only logged when it differs from
+    // `overallComment` (the same "only show if it adds something" rule
+    // DraftedGradesTab.tsx:663 already applies to the two).
+    //
+    // A30 (RR-1): the "graded, but <cuts>" announcement only fires on an
+    // ACTUAL grade - a model-failed repo (outcome.status === "failed") is
+    // already announced through its own gradeError/log path below, and
+    // "graded, but ..." would misdescribe a call that produced no grade.
+    if (outcome.status !== "failed" && cuts.length > 0) {
       setPostSummary(`${row.repo} / ${column.folder}: graded, but ${cuts.join("; ")}.`);
     }
 
+    // A30 (RR-1, docs/a28-scope.md): a model-failed, success-shaped result is
+    // now logged the same way the bulk path already logs it (A28) -
+    // "grade-failed" with a GRADING_FAILURE_PREFIX detail - instead of
+    // "grade-succeeded" for a call that graded nothing.
     recordLog([
-      buildLogEntry("grade-succeeded", {
+      buildLogEntry(outcome.status === "failed" ? "grade-failed" : "grade-succeeded", {
         repo: row.repo,
         folder: column.folder,
-        score: first?.totalScore ?? "",
-        detail,
+        score: outcome.score,
+        detail: outcome.detail,
       }),
     ]);
   };

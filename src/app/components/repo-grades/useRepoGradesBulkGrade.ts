@@ -14,11 +14,11 @@
 // repoGradeScoreWasEdited). CORRECTED (A28, docs/a28-scope.md): this used to
 // say "indistinguishable ... including the activity log", which stopped
 // being true once bulkGradeOutcomeFromRun (repoGradesBulkGrade.ts) started
-// classifying a model-failed repo as "failed" here. Until backlog row RR-1
-// gives the per-cell path (handleGradeCell,
-// useRepoGradesGradingActions.ts's handleGradeCell) the same classification,
-// the SAME model failure logs `grade-failed` from this bulk path and
-// `grade-succeeded` from the per-cell path.
+// classifying a model-failed repo as "failed" here. A30 (RR-1) closed the
+// gap this comment used to describe: handleGradeCell
+// (useRepoGradesGradingActions.ts) now reuses the SAME bulkGradeOutcomeFromRun
+// classifier, so a model failure logs `grade-failed` and shows a cell error
+// from both paths, not just this one.
 //
 // Why a worker pool and not Promise.all(plan.targets.map(...)): fanning out
 // every target at once would multiply the GitHub-ingest and model rate-limit
@@ -310,9 +310,18 @@ export function useRepoGradesBulkGrade(params: UseRepoGradesBulkGradeParams): Us
 
       const first = result.run.results[0];
       const score = first?.totalScore ?? "";
+      // A30 (RR-1, docs/a28-scope.md): reuse A28's classifier here too, so
+      // the cell shows the SAME "did this call actually grade anything"
+      // answer the outcome pushed below (and the log kind derived from it)
+      // already uses - never a second predicate on `first`/`isUngraded`.
+      // `successDetail` is "" here (the full detail string is only built
+      // below, after this call) - on failure that leaves `provisionalOutcome
+      // .detail` as exactly `first.ungraded.message`, the same
+      // GRADING_FAILURE_PREFIX-prefixed text the log entry carries.
+      const provisionalOutcome = bulkGradeOutcomeFromRun(target, result.run.results, "");
       onCellUpdate(target.repo, target.folder, {
         grading: false,
-        gradeError: null,
+        gradeError: provisionalOutcome.status === "failed" ? provisionalOutcome.detail : null,
         score,
         // See useRepoGradesGradingActions.ts's handleGradeCell for why
         // `comment` is set directly here rather than through

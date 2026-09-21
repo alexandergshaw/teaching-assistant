@@ -617,7 +617,7 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
       expect(entry?.detail.startsWith(GRADING_FAILURE_PREFIX)).toBe(true);
     });
 
-    it("R-7: M4 - the model-failed repo's cell still shows no error line and no score (RR-1, out of this row's scope)", async () => {
+    it("R-7 (A30/RR-1: the bulk path now shows a cell error too): M4 - the model-failed repo's cell has no score and a GRADING_FAILURE_PREFIX error line", async () => {
       const rows = setUpCase(M1_M4_M6_REPOS, implM4);
       const render = useTestRenderWith({ rows, columns: COLUMNS });
       const p = render.handleGradeColumn("week-1");
@@ -626,8 +626,81 @@ describe("A26/A27 lifecycle: useRepoGradesBulkGrade + useRepoGradesGradingAction
       await p;
 
       const edit = cellEditsState["org/b"]?.["week-1"];
-      expect(edit?.gradeError).toBeNull();
       expect(edit?.score ?? "").toBe("");
+      expect(edit?.gradeError).toBeTruthy();
+      expect((edit?.gradeError ?? "").startsWith(GRADING_FAILURE_PREFIX)).toBe(true);
+    });
+  });
+
+  // A30 (docs/backlog.yml A30, RR-1 from docs/a28-scope.md): the per-cell
+  // "Grade" button's own twin of A28. handleGradeCell is driven directly
+  // (never runBulkGrade/handleGradeColumn) - this is the function
+  // RepoGradeCellControl's onGrade prop actually reaches. Every case reuses
+  // this file's own fixtures (successResult/errorResult/modelFailedResult) -
+  // never a second, hand-rolled "did this call actually grade anything?"
+  // predicate; A28's bulkGradeOutcomeFromRun is the one the production code
+  // under test calls, and these tests assert on the two values the cell/log
+  // render from, never on a number recomputed here.
+  describe("A30: handleGradeCell reuses A28's classifier (RR-1)", () => {
+    it("a success is logged grade-succeeded, with no cell error", async () => {
+      gradeRepoActionMock.mockImplementation(async (repo: string) => successResult(repo));
+      const render = useTestRender();
+      const p = render.handleGradeCell(ROWS[0], COLUMNS[0]);
+      expect(rubricDeferreds.length).toBe(1);
+      rubricDeferreds[0].resolve(resolvedRubric());
+      await p;
+
+      const edit = cellEditsState["org/a"]?.["week-1"];
+      expect(edit?.gradeError).toBeNull();
+      expect(edit?.score).toBe("9");
+      expect(recordLogCalls.some((e) => e.kind === "grade-succeeded" && e.repo === "org/a")).toBe(true);
+    });
+
+    it("a returned { error } is logged grade-failed, with a cell error - unchanged by this row", async () => {
+      gradeRepoActionMock.mockImplementation(async (repo: string) => errorResult(repo));
+      const render = useTestRender();
+      const p = render.handleGradeCell(ROWS[0], COLUMNS[0]);
+      expect(rubricDeferreds.length).toBe(1);
+      rubricDeferreds[0].resolve(resolvedRubric());
+      await p;
+
+      const edit = cellEditsState["org/a"]?.["week-1"];
+      expect(edit?.gradeError).toBeTruthy();
+      expect(recordLogCalls.some((e) => e.kind === "grade-failed" && e.repo === "org/a")).toBe(true);
+    });
+
+    it("a REJECTED call is logged grade-failed, with a cell error (same case as R-6 above)", async () => {
+      gradeRepoActionMock.mockImplementation(async () => {
+        throw new Error("Failed to fetch");
+      });
+      const render = useTestRender();
+      const p = render.handleGradeCell(ROWS[0], COLUMNS[0]);
+      expect(rubricDeferreds.length).toBe(1);
+      rubricDeferreds[0].resolve(resolvedRubric());
+      await p;
+
+      const edit = cellEditsState["org/a"]?.["week-1"];
+      expect(edit?.gradeError).toBeTruthy();
+      expect(recordLogCalls.some((e) => e.kind === "grade-failed" && e.repo === "org/a")).toBe(true);
+    });
+
+    it("RED on HEAD: a model failure that comes back success-shaped is logged grade-failed, with a GRADING_FAILURE_PREFIX cell error and no score - the case this row defines", async () => {
+      gradeRepoActionMock.mockImplementation(async (repo: string) => modelFailedResult(repo));
+      const render = useTestRender();
+      const p = render.handleGradeCell(ROWS[0], COLUMNS[0]);
+      expect(rubricDeferreds.length).toBe(1);
+      rubricDeferreds[0].resolve(resolvedRubric());
+      await p;
+
+      const edit = cellEditsState["org/a"]?.["week-1"];
+      expect(edit?.score ?? "").toBe("");
+      expect(edit?.gradeError).toBeTruthy();
+      expect((edit?.gradeError ?? "").startsWith(GRADING_FAILURE_PREFIX)).toBe(true);
+
+      const entry = recordLogCalls.find((e) => e.repo === "org/a");
+      expect(entry?.kind).toBe("grade-failed");
+      expect(entry?.detail.startsWith(GRADING_FAILURE_PREFIX)).toBe(true);
+      expect(recordLogCalls.some((e) => e.kind === "grade-succeeded" && e.repo === "org/a")).toBe(false);
     });
   });
 });

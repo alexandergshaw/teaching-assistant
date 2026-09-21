@@ -58,7 +58,7 @@
 // depends on.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Autocomplete, Button, MenuItem, TextField } from "@mui/material";
+import { Button } from "@mui/material";
 import styles from "../../page.module.css";
 import controls from "../recording/RecordingControls.module.css";
 import { useLlmProvider } from "@/lib/llm-provider";
@@ -111,6 +111,16 @@ import GradingTable from "./GradingTable";
 import { RubricInputModal } from "./RubricInputModal";
 import { useGradingCourses } from "./useGradingCourses";
 import { parseRosterNames } from "./grading-course-roster";
+// docs/a16-wave1-scope.md sections 0/6/7: the Capture fieldset (the course
+// select with its loading/error/no-roster hints, plus the D22b/D23e
+// assessment Autocomplete with its own hint) moved into this NEW leaf once
+// this file was pressing on file-size-ceiling.structure.test.ts's 1000-line
+// ceiling. No hook moved with it - both useStates, both useCallback setters,
+// useGradingCourses, assessmentOptions and assessmentId all stay right here;
+// only the already-derived values and setters cross the boundary. See
+// GradingCaptureSettings.tsx's own header for the full reasoning and the
+// sibling precedent (DiscussionCaptureSettings.tsx/ModuleDeckSettings.tsx).
+import GradingCaptureSettings from "./GradingCaptureSettings";
 // docs/course-student-intelligence-acceptance-criteria.md D23a/D23b: the
 // deadline + authoritative-tool declaration store, and the one component
 // that gives it a UI - see that component's own header for the full
@@ -712,76 +722,18 @@ export default function GradingRecordingPanel({ active }: { active: boolean }) {
       )}
 
       {/* CC2: settings grouped under named sections, run row last. */}
-      <fieldset className={controls.section}>
-        <legend className={controls.sectionLegend}>Capture</legend>
-        {/* Fixer pass finding 2: the select used to UNMOUNT while courses
-            were loading (a ternary swapping the field for the loading line
-            entirely) - kept mounted and disabled instead, matching
-            DiscussionCaptureSettings.tsx/ModuleDeckSettings.tsx's own shape,
-            so the field's position on screen never jumps and a keyboard user
-            tabbing toward it does not land somewhere else mid-load. */}
-        <div className={styles.adaptRow}>
-          <TextField
-            select
-            label="Course (for roster matching)"
-            size="small"
-            value={courseId}
-            onChange={(e) => setCourseId(e.target.value)}
-            className={controls.fieldMd}
-            disabled={coursesLoading}
-          >
-            <MenuItem value="">No course selected</MenuItem>
-            {(courses ?? []).map((c) => (
-              <MenuItem key={c.id} value={c.id}>
-                {c.name}
-              </MenuItem>
-            ))}
-          </TextField>
-        </div>
-        {coursesLoading && (
-          <p role="status" aria-live="polite" className={controls.loadingLine}>
-            <span className={styles.spinner} aria-hidden="true" /> Loading your courses…
-          </p>
-        )}
-        {coursesError && (
-          <p className={styles.fieldHint}>Could not load your courses - roster matching is unavailable, capture still works.</p>
-        )}
-        {courseId && !selectedRosterText && (
-          <p className={styles.fieldHint}>
-            This course has no roster on file - names will show as &quot;No roster to check&quot; until one is added to its course tile.
-          </p>
-        )}
-        {/* D22b/D23e: the assessment selector - free text, since there is no
-            LMS to enumerate assignments from. Autocomplete/freeSolo mirrors
-            GithubRepoPicker.tsx's own established shape for "type-to-filter,
-            free entry allowed" in this codebase - suggestions come from this
-            course's own previously-typed labels (assessmentOptions above),
-            never a closed catalogue. Not required to start capture (course
-            selection is not required either, for the identical reason:
-            D21d/D22b both treat "unattributed" as an honest, correctable-
-            going-forward outcome rather than a blocked one) - the hint below
-            says exactly what happens if it is left blank, so nothing here is
-            ever enabled and then silently rejected. */}
-        <div className={styles.adaptRow}>
-          <Autocomplete
-            freeSolo
-            options={assessmentOptions}
-            value={assessmentLabel}
-            onInputChange={(_, next) => setAssessmentLabel(next)}
-            size="small"
-            className={controls.fieldMd}
-            renderInput={(params) => (
-              <TextField {...params} label="Assessment (your own label - e.g. Essay 2, Week 3 discussion)" />
-            )}
-          />
-        </div>
-        {assessmentId === "" && (
-          <p className={styles.fieldHint}>
-            No assessment set - submissions captured now will not be attributed to any assessment. Type one above at
-            any point; it will apply to submissions captured from then on, not to rows already recorded.
-          </p>
-        )}
-      </fieldset>
+      <GradingCaptureSettings
+        courseId={courseId}
+        setCourseId={setCourseId}
+        courses={courses}
+        coursesLoading={coursesLoading}
+        coursesError={coursesError}
+        selectedRosterText={selectedRosterText}
+        assessmentOptions={assessmentOptions}
+        assessmentLabel={assessmentLabel}
+        setAssessmentLabel={setAssessmentLabel}
+        assessmentId={assessmentId}
+      />
 
       <GradingAssessmentDeclarationControls
         courseId={courseId}

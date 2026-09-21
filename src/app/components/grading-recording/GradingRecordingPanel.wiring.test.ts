@@ -78,6 +78,41 @@ describe("dropped-frame accumulator (REGRESSION 383 fix)", () => {
 // store method) and the ORDERING (the hook is given the store's own
 // mutators), never the spelling of the composed handlers' own bodies -
 // those are unit-tested directly in grading-capture-tombstones.test.ts.
+// docs/a16-wave1-scope.md W1-G3: an extracted leaf with no caller ships dead
+// with every other gate green (this repo has done it twice). Both halves are
+// required - the import alone proves nothing if the panel never renders the
+// component.
+function importsAndRendersGradingCaptureSettings(text: string): boolean {
+  return /from "\.\/GradingCaptureSettings"/.test(text) && /<GradingCaptureSettings\b/.test(text);
+}
+
+describe("GradingCaptureSettings is imported AND rendered (W1-G3)", () => {
+  it("the panel imports from ./GradingCaptureSettings and renders <GradingCaptureSettings", () => {
+    expect(importsAndRendersGradingCaptureSettings(source)).toBe(true);
+  });
+
+  it("canary: an import with no render tag is detected as NOT wired - proves the detector cannot pass on a dead import", () => {
+    const deadImportOnly = 'import GradingCaptureSettings from "./GradingCaptureSettings";\n// never rendered anywhere below\n';
+    expect(importsAndRendersGradingCaptureSettings(deadImportOnly)).toBe(false);
+  });
+
+  it("the rendered element binds all ten props to the panel's own identifiers", () => {
+    const match = source.match(/<GradingCaptureSettings\b[\s\S]*?\/>/);
+    expect(match, "expected to find the <GradingCaptureSettings .../> element").not.toBeNull();
+    const el = match![0];
+    expect(el).toMatch(/courseId=\{courseId\}/);
+    expect(el).toMatch(/setCourseId=\{setCourseId\}/);
+    expect(el).toMatch(/courses=\{courses\}/);
+    expect(el).toMatch(/coursesLoading=\{coursesLoading\}/);
+    expect(el).toMatch(/coursesError=\{coursesError\}/);
+    expect(el).toMatch(/selectedRosterText=\{selectedRosterText\}/);
+    expect(el).toMatch(/assessmentOptions=\{assessmentOptions\}/);
+    expect(el).toMatch(/assessmentLabel=\{assessmentLabel\}/);
+    expect(el).toMatch(/setAssessmentLabel=\{setAssessmentLabel\}/);
+    expect(el).toMatch(/assessmentId=\{assessmentId\}/);
+  });
+});
+
 describe("Remove/Clear-table route through the one composed handler (RES-A9-10)", () => {
   it("binds onRemoveRow exactly once, to capture.onRemoveRow - never the bare store mutator", () => {
     const matches = source.match(/onRemoveRow=\{[^}]*\}/g) ?? [];

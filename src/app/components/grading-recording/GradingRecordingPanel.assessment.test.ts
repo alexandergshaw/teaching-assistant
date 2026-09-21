@@ -37,6 +37,14 @@ import * as path from "path";
 const PANEL_PATH = path.resolve(process.cwd(), "src/app/components/grading-recording/GradingRecordingPanel.tsx");
 const source = fs.readFileSync(PANEL_PATH, "utf-8");
 
+// docs/a16-wave1-scope.md section 8: wave 1 moved the Autocomplete markup and
+// the no-assessment hint out of the panel into GradingCaptureSettings.tsx.
+// The two `it` blocks below that pinned that markup by PATH are re-pointed
+// at the new leaf's own source text - never deleted (an assertion silently
+// dropped to make a refactor green is the exact failure W1-G5 exists for).
+const LEAF_PATH = path.resolve(process.cwd(), "src/app/components/grading-recording/GradingCaptureSettings.tsx");
+const leafSource = fs.readFileSync(LEAF_PATH, "utf-8");
+
 describe("GradingRecordingPanel.tsx D22b/D23e assessment selector wiring", () => {
   it('STORAGE_KEY_ASSESSMENT is the exact literal "ta-rec-grade-assessment", bound to a const (never a bare/template-literal key)', () => {
     expect(source).toMatch(/const STORAGE_KEY_ASSESSMENT = "ta-rec-grade-assessment";/);
@@ -67,12 +75,12 @@ describe("GradingRecordingPanel.tsx D22b/D23e assessment selector wiring", () =>
     );
   });
 
-  it("the Autocomplete field is freeSolo (never a closed set of options) and controlled by assessmentLabel/setAssessmentLabel", () => {
-    expect(source).toMatch(/<Autocomplete\s*\n\s*freeSolo\s*\n\s*options=\{assessmentOptions\}\s*\n\s*value=\{assessmentLabel\}\s*\n\s*onInputChange=\{\(_, next\) => setAssessmentLabel\(next\)\}/);
+  it("the Autocomplete field is freeSolo (never a closed set of options) and controlled by assessmentLabel/setAssessmentLabel - MOVED to GradingCaptureSettings.tsx in wave 1 (docs/a16-wave1-scope.md section 8)", () => {
+    expect(leafSource).toMatch(/<Autocomplete\s*\n\s*freeSolo\s*\n\s*options=\{assessmentOptions\}\s*\n\s*value=\{assessmentLabel\}\s*\n\s*onInputChange=\{\(_, next\) => setAssessmentLabel\(next\)\}/);
   });
 
-  it('the "no assessment set" hint is gated on assessmentId === "" (the trimmed value), never on assessmentLabel directly - so whitespace-only input still shows the hint', () => {
-    expect(source).toMatch(/\{assessmentId === "" && \(/);
+  it('the "no assessment set" hint is gated on assessmentId === "" (the trimmed value), never on assessmentLabel directly - so whitespace-only input still shows the hint - MOVED to GradingCaptureSettings.tsx in wave 1 (docs/a16-wave1-scope.md section 8)', () => {
+    expect(leafSource).toMatch(/\{assessmentId === "" && \(/);
   });
 
   it("capture is NOT disabled on a missing assessment - mirrors course's own non-blocking precedent (D21d): the Start/Stop capture Button's whole element carries no reference to assessmentId at all", () => {

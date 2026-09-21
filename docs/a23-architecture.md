@@ -6,6 +6,19 @@
 (`git log --oneline -1`), the session HEAD when this pass ran. Working tree at
 the start and end of this pass: `M docs/css-orphans.md` only
 (`git status --short`), which is outside this loop and was not touched.
+**DELTA, 2026-09-20.** A fresh checker returned NOT CLEAN (2 blockers, 5
+majors, 4 minors). This is a NARROW DELTA applied at `d7f69c5`
+(`git log --oneline -1`), not a revision round: only what the rulings name is
+changed, and every quantity added below was re-measured at `d7f69c5` by a
+command stated at its point of use. Rulings disposed: **Z1** (blocker - the
+deny list becomes an ALLOW list, section 4.2), **Z2** (blocker - a planted
+positive in each guard file, section 8), **Z3** (`types.ts` becomes a named
+ROOT, section 4.1), M1/M4/M5 and m1-m4 as marked, and M2 RELOCATED
+(section 9). What the checker re-derived and CONFIRMED, so it is not restated
+apologetically here: every real-tree number in sections 4.3 and 4.4, the
+39-violations-with-the-wall-off incident in 4.5, all four TypeScript claims,
+the `owns` derivation, the line budgets, the one-wave caller rule, AC-7's
+relocation, and every `file:line` in the document.
 **Consumes:** `docs/a23-criteria.md` at `c458f7a` (round 3, disposal round).
 The criteria are settled; this document decides mechanism only, which is the
 lane section 10 of that document explicitly leaves open
@@ -25,9 +38,14 @@ could earn. Recording the fired trigger rather than omitting the line.
 
 ---
 
-## 1. Two corrections to my own brief, measured
+## 1. Three corrections, measured
 
-`loop-architect.md:64-66` requires refusing a ruling the tree disproves. Two.
+`loop-architect.md:64-66` requires refusing a ruling the tree disproves. Two
+against my brief, and - added in the delta under Ruling M1 - one against a
+premise of the criteria I consume. A measurement that contradicts a document
+I am building on has to be FLAGGED, not quietly overwritten, which is this
+document's own standing definition; I measured the contradiction in section
+3.2 and did not flag it, and that is the defect M1 names.
 
 **(1) The brief says the `CLIENT_FILES` sweep "protects THIRTEEN client
 files". It protects TWELVE.** Command and output:
@@ -47,9 +65,24 @@ The twelve, by the same `sed` window with `grep -o '"\.[^"]*"'`:
 already corrected it as MJ-b (`docs/a23-criteria.md:932`); my brief inherited
 the pre-round-3 number. I adopt **12** and neither value silently.
 
-**(2) The class has FIVE sites in this tree, not three.** A23 charters three
-and I am not widening it. But an `owns` list that says "three" is wrong, and a
-residual that says "a third site" names the wrong denominator. Command, with
+**(2) The sweep returns FIVE FILES, carrying SIX instances of the class, of
+which A23 charters three.** A23 charters three and I am not widening it. But
+an `owns` list that says "three" is wrong, and a residual that says "a third
+site" names the wrong denominator. **Ruling M5: the ordinals in the first
+version of this document were incoherent** - section 1 called the two workflow
+files "sites 4 and 5" while section 7's `owns` table also called
+`ungradedDisclosure.test.ts` "site 4", putting three files under two ordinals.
+The numbering used everywhere below, fixed once here:
+
+| # | File | Status |
+|---|---|---|
+| file 1 | `repoGradesFeedbackAndFiles.wiring.test.ts` | holds **instance 1** (guard 1) - CHARTERED |
+| file 2 | `gradingResultsHelpersWiring.test.ts` | holds **instances 2 and 3** (guard 2 and the `:112-117` sweep) - CHARTERED |
+| file 3 | `ungradedDisclosure.test.ts` | holds **instance 4** - not chartered (RES-A23-9) |
+| file 4 | `course-schedule-docx.test.ts` | holds **instance 5** - not chartered (RES-A23-9) |
+| file 5 | `steps.weekly-announcement-schedule.test.ts` | holds **instance 6** (three `it` blocks over three objects) - not chartered (RES-A23-9) |
+
+Five files, six instances, three chartered. Command, with
 the canary `iteration-caps`/`traps-search` require, since a bash grep for an
 anchored import pattern has already returned a false empty twice on this row:
 
@@ -68,7 +101,7 @@ src/lib/workflows/course-schedule-docx.test.ts
 src/lib/workflows/registry/steps.weekly-announcement-schedule.test.ts
 ```
 
-Sites 4 and 5 are the identical mechanism, opened and read:
+Instances 5 and 6 are the identical mechanism, opened and read:
 `course-schedule-docx.test.ts:42-48` and
 `steps.weekly-announcement-schedule.test.ts:63-69,79-86,100-102`. Both are
 whole-source regex bans requiring the literal token `from` plus a quote, so
@@ -77,7 +110,23 @@ file's own source), so both additionally miss every transitive case.
 `steps.weekly-announcement-schedule.test.ts:89-94`'s own comment records that
 its list was hand-extended once already after a leaf extraction opened a gap -
 the lengthening-the-denylist history this row forbids repeating. Registered as
-RES-A23-9; not chartered here.
+RES-A23-9; not chartered here. **Their SEVERITY is now measured, not adjectival
+- see RES-A23-9 in section 11 and the closing bullet of section 12.**
+
+**(3) The criteria's premise for Ruling Y2 is contradicted by my own
+measurement, and I failed to flag it.** `docs/a23-criteria.md:559-562` (opened)
+states that a guard built from `valueImportSpecifiers` "CARRIES MORE HOLES than
+the per-line classifier it would replace". My section 3.2 probe measures the
+opposite on the aggregate: **19 disagreements for `valueImportSpecifiers`
+against 22 for guard 1's line classifier** over the same 46 fixtures - FEWER by
+three, and guard 1's classifier is the only comparator that sentence names.
+The criteria's two named clauses are both true (it does escape on the
+default-binding-plus-inline-type form, AC-2(c), and on every single-quoted
+case, AC-4); what the tree disproves is the aggregate word "MORE". **I adopt
+neither value silently: the rejection of `valueImportSpecifiers` stands, but it
+stands on the executable criteria AC-2(c)/AC-3/AC-4/AC-6, never on a
+holes-count comparison.** Flagged here per Ruling M1; no criterion changes,
+because Y2 already deleted the criterion that rested on the label.
 
 ---
 
@@ -145,6 +194,14 @@ The row's central prohibition is `iteration-caps.md:41-43`: the second attempt
 must change kind, not strength. The honest test is not "is my regex nicer" but
 **which direction does an un-enumerated form fail in**.
 
+**This table is stated on TWO axes, because Ruling Z1 measured that the first
+version of it was true on one and false on the other.** A defence that holds
+on syntax and fails on specifiers is not a change of kind; it is half a change
+of kind, and the half that failed is the half the REGRESSION-355 class lives
+in.
+
+**Axis 1 - SYNTAX (the form of the import). Stated correctly the first time.**
+
 | | The three broken guards | This design |
 |---|---|---|
 | What is enumerated | the spellings of a BANNED import | nothing - the grammar is the TypeScript parser's |
@@ -152,18 +209,51 @@ must change kind, not strength. The honest test is not "is my regex nicer" but
 | An un-enumerated syntax | is not matched, so the file is **PERMITTED** - silent green | is not an erased import, so it is **an edge to follow** - loud |
 | Completeness rests on | a human having listed every form | `ts.createSourceFile` covering the language |
 
-The default flips. That is the whole argument, and it is the only kind of
-change `iteration-caps.md:13-16` records as ever ending a chain here: replace
-the assertion with a CONSTRUCTION that makes the bad state unrepresentable.
-The bad state here is "a runtime dependency nobody enumerated". Under a parser
-there is no such state to be in - every module specifier in the file is either
-an erased type import or a runtime edge, and the classifier's own residue
-bucket catches the one remaining case (a non-literal specifier) by REPORTING
-it rather than skipping it.
+**Axis 2 - SPECIFIER (which module the import names). FALSE in the first
+version of this document; true only after Ruling Z1's fix.**
+
+| | The three broken guards | This design, as first written | This design, as corrected by Z1 |
+|---|---|---|---|
+| What is enumerated | banned specifier spellings (`BANNED_IMPORT_PATTERNS`) | banned specifier spellings (`FORBIDDEN_BARE_SPECIFIERS`) - **a deny list wearing a parser's clothes** | browser-SAFE specifiers (`ALLOWED_BARE_SPECIFIERS`) |
+| An un-enumerated specifier | not matched -> **PERMITTED**, silent green | `resolveSpecifier` returns `null` -> `continue` -> **PERMITTED**, silent green | not on the allow list -> **FAILS**, loud |
+| Completeness rests on | a human having listed every hazard | a human having listed every hazard | a human having listed every SAFE thing, measured complete today (section 4.2) |
+
+The delta's own killer case, measured: `node:async_hooks` was enumerated and
+**`async_hooks` without the prefix was not** - the same module, the same
+`AsyncLocalStorage` import that `src/lib/supabase/owner-context.ts:1` actually
+makes, the exact module the REGRESSION-355 class is about, and accepted by
+`tsc` with no error. Under the first version of this design it was silently
+permitted, inside the replacement for a guard withdrawn for exactly that.
+Section 4.2 shows it failing with the deny list emptied entirely.
+
+The default flips - on BOTH axes, which is what Z1 bought. That is the whole
+argument, and it is the only kind of change `iteration-caps.md:13-16` records
+as ever ending a chain here: replace the assertion with a CONSTRUCTION that
+makes the bad state unrepresentable. The bad state here is "a runtime
+dependency nobody enumerated". Under a parser plus an allow list there is no
+such state to be in - every module specifier in the file is either an erased
+type import, a followed edge, an explicitly allowed non-module, or a failure.
+
+**Two syntactic misses are NOT covered by the parser and are NOT covered here,
+because `npx tsc --noEmit` backstops both at the wave gate** (section 8 step
+4 runs it; `tsconfig.json:10` is `"module": "esnext"` and there is no
+`allowImportingTsExtensions` key, which is what makes both errors fire). Named
+rather than left implicit:
+
+```
+# explicit .ts extension - import { x } from "./t.ts";
+npx tsc --noEmit --isolatedModules --strict --module esnext --moduleResolution bundler <tmp>/ext.ts <tmp>/t.ts
+ext.ts(1,19): error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+
+# import-equals - import g = require("./t");
+npx tsc --noEmit --isolatedModules --strict --module esnext --moduleResolution bundler <tmp>/eq.ts <tmp>/t.ts
+eq.ts(1,1): error TS1202: Import assignment cannot be used when targeting ECMAScript modules.
+```
 
 I am not claiming the result cannot be wrong. I am claiming it cannot be
 **silently permissive by omission**, which is the specific failure this family
-has now committed three times.
+has now committed three times - and, after Z1, that claim is true of the
+specifier as well as the syntax.
 
 ### 3.2 The dominant idiom, MEASURED before adopting anything from it
 
@@ -206,8 +296,16 @@ default-binding-plus-inline-type form (`:108`'s "every braced part starts with
 `type`" test does not look at `clause.name`), the bare side-effect import,
 `require(<literal>)` and `import(<literal>)`. It is genuinely better than
 guard 1 on wrap and tab - `\s` in its character class spans newlines - and
-that is exactly what makes it a trap: it is better on the axis the row's title
-names and worse overall.
+that is exactly what makes it a trap: **it is better on the axis the row's
+title names, and, on this scoreboard, better overall too - 19 against guard
+1's 22.** Ruling M1 corrects the first version of this sentence, which said
+"worse overall" against its own numbers. The correction matters in only one
+direction: an argument that rests on a holes COUNT would now favour the idiom,
+so no argument here rests on one. **The rejection stands entirely on the
+executable criteria AC-2(c), AC-3, AC-4 and AC-6**, each of which it fails and
+section 4's design passes by measurement. See section 1 correction (3) for the
+conflict this creates with `docs/a23-criteria.md:559-562`, which is Ruling
+Y2's premise, and which I measured against without flagging.
 
 **A criterion that merely required naming a shape would have been satisfied by
 it.** `docs/a23-criteria.md:553-585` already deleted that criterion (Ruling
@@ -258,10 +356,15 @@ in here.
   reachable. `eslint.config.mjs` (read in full) is only
   `eslint-config-next/core-web-vitals` plus
   `eslint-config-next/typescript` plus a `globalIgnores` block, with no zone
-  configuration. But `no-restricted-paths` is DIRECT-ONLY and NAME-BASED,
-  which is the mechanism being withdrawn. Strictly weaker than the walk;
-  rejected on that ground, having checked it exists rather than assuming it
-  does not.
+  configuration. But `no-restricted-paths` is **DIRECT-ONLY**, and that ground
+  alone is sufficient and decisive: the class this row repairs is transitive,
+  and a one-hop rule cannot reach it. **Ruling m1 corrects the first version,
+  which also called it "NAME-BASED". It is not.** The rule's own documentation
+  matches its `from` attribute against the RESOLVED path, not the literal
+  specifier string, which makes it a resolved-path predicate - the same KIND
+  as `isForbiddenPath` here, not the kind being withdrawn. The second half of
+  that sentence is dropped rather than defended. Rejected on direct-only
+  reach, having checked the plugin exists rather than assuming it does not.
 - `next build`'s compile stage remains the only TRUE oracle (RES-A23-5) and
   cannot run to completion in this checkout - there is no `.env`, so the gate
   is read as the `Compiled successfully` line and never the exit code
@@ -278,22 +381,73 @@ constraint as this repo can get inside vitest.
 
 ### 4.1 Do they take the same shape? Two do; the third is RETIRED into them
 
-**Sites 1 and 3 - YES, identical shape.** `repoGradesFeedbackAndFiles.wiring.
+**Instances 1 and 3 - YES, identical shape.** `repoGradesFeedbackAndFiles.wiring.
 test.ts:287-305` and `gradingResultsHelpersWiring.test.ts:112-117` ask the same
 question about two directories. Both become: derive the root set from the
 directory, walk, assert zero violations. Uniformity here is a decision with a
 reason - they share the class, the corrective rule AND the object (a directory
 of client files) - not a default.
 
-**Site 2 - NO, it does not get a new shape. It is DELETED, and the walk is its
-named replacement enforcer.** `gradingResultsHelpersWiring.test.ts:123-132`'s
+**Instance 2 - NO, it does not get a new shape. It is DELETED, and the walk is
+its named replacement enforcer.** `gradingResultsHelpersWiring.test.ts:123-132`'s
 walled-set count exists solely to keep the `@/lib/grade/types` exemption at
-`:91` honest. Under the walk there IS no exemption: `types.ts` is an ordinary
-node, walked like every other, and its own reachability is what decides the
-verdict. `iteration-caps.md:71-72` (disposal (d)) requires that a deletion name the
-enforcer it was protecting; the enforcer is the walk, and section 4.3 proves it fires on
-five sabotages of types.ts that the deleted guard let through and on none that
-it correctly permitted.
+`:91` honest. Under the walk there is no NAME-BASED exemption left to police:
+`types.ts` is judged by its own reachability, not by a carve-out.
+`iteration-caps.md:71-72` (disposal (d)) requires that a deletion name the
+enforcer it was protecting; the enforcer is the walk, and section 4.3 proves it
+fires on five sabotages of types.ts that the deleted guard let through and on
+none that it correctly permitted.
+
+**Ruling Z3: `types.ts` IS A NAMED ROOT of the grading-results walk, and the
+first version of this section was wrong to rely on it being an ordinary
+node.** That sentence ("types.ts is an ordinary node, walked like every other")
+described coverage that is INCIDENTAL, not constructed, and it read as an
+instruction NOT to name the root. Measured at `d7f69c5` by
+`node <scratchpad>/a23-typesedges.mjs`, which walks the closure on runtime
+edges only and splits every edge INTO `types.ts` by whether it is erased:
+
+```
+closure nodes (runtime edges only) = 93
+
+RUNTIME edges into src/lib/grade/types.ts : 2
+  src/app/components/grading-results/ungradedDisclosure.ts:24  "@/lib/grade/types"
+  src/lib/grade/class-trends.ts:2  "./types"
+
+TYPE-ONLY edges into it (contribute nothing) : 4
+  src/app/components/grading-results/classTrendsEntry.ts:32  "@/lib/grade/types"
+  src/lib/grade/postable.ts:70  "./types"
+  src/lib/grade/prompts.ts:1  "./types"
+  src/lib/grade/utils.ts:1  "./types"
+
+types.ts in the closure? true
+```
+
+**Two runtime edges are the whole of the coverage.** Narrow those two to
+`import type` - the same narrowing A22 already performed on
+`classTrendsEntry.ts:32`, and which the four type-only rows show is this
+repo's routine move on this very file - and `types.ts` leaves the closure,
+Ruling U3's
+protection evaporates, and every gate stays green. That is a live path to
+silently losing the requirement, so the requirement gets bound to the object
+rather than to a reachability accident.
+
+**The fix is one array entry**, and it is already measured. The
+grading-results root set becomes the directory's non-test files, plus
+`GradingResults.tsx` (A22's non-local consumer), plus
+`src/lib/grade/types.ts`:
+
+```
+node <scratchpad>/a23-delta-probe.mjs
+===== SITE 2+3 grading-results (dir + GradingResults.tsx + types.ts AS A ROOT [Z3]) =====
+roots=13 nodes=93 171ms violations=0 residue=0 unallowed=0
+===== Z3 CONTROL: types.ts alone =====
+roots=1 nodes=1 1ms violations=0 residue=0 unallowed=0
+```
+
+Roots go 12 -> 13; **nodes stay at 93 and violations stay at 0**, because
+`types.ts` is in the closure today anyway. Z3 costs one line and zero walk
+time, and it buys the requirement a binding that a type-only narrowing cannot
+dissolve.
 
 This is the answer to the criteria's own open question at
 `docs/a23-criteria.md:858-861`. The three sites do NOT converge on one
@@ -308,25 +462,163 @@ reach, through any chain of runtime edges, a server-only leaf. The leaves,
 derived from the guards' own stated causal chains rather than from their
 denylists:
 
+**REWRITTEN BY RULING Z1 AND RULING m4.** The first version of this section
+wrote a deny list and then claimed "There is no list left to be incomplete."
+The first sentence falsified the second, and the checker was right to call the
+contradiction the row's founding class appearing inside its own replacement.
+Under `iteration-caps.md:41-43` that goes to disposal, and the legal disposal
+is a change of KIND: **an allow list, not a deny list.** What follows is that
+change, with the census that makes it cheap.
+
 ```ts
-const FORBIDDEN_PATH_PREFIXES = ["lib/supabase/server"];          // resolved, relative to src/, POSIX, no trailing slash
+// The hazard, by RESOLVED path. Relative to src/, POSIX, no trailing slash.
+const FORBIDDEN_PATH_PREFIXES = ["lib/supabase"];
+// The positively-stated exceptions INSIDE it. An allow list, so a new module
+// in src/lib/supabase/ that enters a client closure fails until a human says
+// it is browser-safe.
+const BROWSER_SAFE_MODULES = ["lib/supabase/client.ts"];
+
+// Diagnostics only - NOT what completeness rests on (see below).
 const FORBIDDEN_BARE_SPECIFIERS = ["next/headers", "node:async_hooks", "server-only"];
+
+// THE ALLOW LIST. Every literal specifier that is not a walked module and not
+// an allowed asset must be on this list, or the guard FAILS.
+const ALLOWED_BARE_SPECIFIERS = [
+  "@monaco-editor/react", "@mui/material", "@mui/material/Autocomplete",
+  "@mui/material/Button", "@mui/material/Checkbox", "@mui/material/FormControlLabel",
+  "@mui/material/IconButton", "@mui/material/MenuItem", "@mui/material/TextField",
+  "@supabase/ssr", "jszip", "next/dynamic", "node-html-parser", "react",
+];
+const ALLOWED_ASSET_EXTENSIONS = [".css"];
 ```
 
 `BANNED_IMPORT_PATTERNS` disappears entirely. `@/lib/grade` is banned not
 because it is on a list but because it reaches `lib/supabase/server` - measured
 in section 4.3's CONTROL. `@/lib/grade/types` is permitted for the opposite
-reason, derived rather than carved out. **There is no list left to be
-incomplete.**
+reason, derived rather than carved out.
 
 The no-trailing-slash rule is inherited from
-`classTrendsDraft.not-postable.test.ts:46-53`, which records the barrel-file
-defect that a trailing slash creates. `FORBIDDEN_BARE_SPECIFIERS` is an exact
-set-membership test on a parsed specifier string, not a pattern, and exists
-because `next/headers` and `node:async_hooks` resolve to nothing under
-`resolveSpecifier` - the shipped walkers return `null` for a bare specifier and
-would silently skip them. That is a hole in the precedent I am building on, and
-I am closing it rather than inheriting it.
+`classTrendsDraft.not-postable.test.ts:46-53,58`, which records the barrel-file
+defect that a trailing slash creates and whose own live value is
+`["app/actions", "lib/canvas", "lib/lms-generation", "lib/llm", "lib/gemini"]`
+- directory-level prefixes, no slash, which is the idiom `"lib/supabase"`
+now follows.
+
+#### The hole Z1 closed: a literal specifier with NO HOME in the returned shape
+
+Section 3.1 says every specifier is either an erased type import or a runtime
+edge. That was a two-bucket claim and the code had a third bucket it did not
+admit to: `resolveSpecifier` returns `null` for every bare specifier, the walk
+did `if (!dep) continue;`, and `null` is neither an edge nor residue. A
+LITERAL specifier that resolved to nothing was silently dropped. **Census, at
+`d7f69c5`** (`node <scratchpad>/a23-dropped.mjs`, which is the section-4.4
+walk probe with the `continue` instrumented):
+
+```
+SITE 1+3 repo-grades      DROPPED literal specifiers: instances=56 distinct=16
+SITE 2+3 grading-results  DROPPED literal specifiers: instances=33 distinct=11
+```
+
+**89 dropped instances, 18 distinct across the union of the two closures** (16
++ 11 with 9 shared). Four of the 18 are relative `*.module.css` paths; the
+other 14 are the bare package specifiers listed above. So the allow list
+**starts COMPLETE** - it is a transcription of a measurement, not a judgement -
+and every one of the 18 is browser-safe on the build's own evidence: they are
+in the shipped client closure of a tree that compiles and deploys today, which
+is RES-A23-5's oracle speaking.
+
+Every unresolved literal specifier now gets an explicit bucket. No `null`, no
+`continue`:
+
+| Bucket | Test | Verdict |
+|---|---|---|
+| `module` | resolves to a `.ts`/`.tsx` under `src/` | an EDGE - followed |
+| `asset` | `@/`- or `.`-relative, exists on disk, non-TS | allowed iff its extension is on `ALLOWED_ASSET_EXTENSIONS` |
+| `node-builtin` | `spec.startsWith("node:")` OR `builtinModules.includes(spec)` | **always FAILS** - the set comes from Node itself, not from a human list |
+| `missing` | `@/`- or `.`-relative, nothing on disk | **FAILS** (also caught by `tsc`, failed here anyway) |
+| `package` | anything else | allowed iff on `ALLOWED_BARE_SPECIFIERS` |
+
+#### The X4 proof: the deny list is no longer load-bearing
+
+The checker's killer case was that `node:async_hooks` was enumerated and
+**`async_hooks` was not** - the same module, the spelling
+`src/lib/supabase/owner-context.ts:1` does not happen to use, accepted by
+`tsc` with no error. The test of a real change of kind is whether the deny list
+can be deleted entirely without opening a hole.
+`node <scratchpad>/a23-x4-proof.mjs` runs the classifier with
+`FORBIDDEN_BARE_SPECIFIERS = []`:
+
+```
+===== X4: FORBIDDEN_BARE_SPECIFIERS = [] (deny list emptied entirely) =====
+  "node:async_hooks"             -> FAIL node-builtin
+  "async_hooks"                  -> FAIL node-builtin
+  "next/headers"                 -> FAIL package not on allow list
+  "server-only"                  -> FAIL package not on allow list
+  "node:fs"                      -> FAIL node-builtin
+  "fs"                           -> FAIL node-builtin
+  "crypto"                       -> FAIL node-builtin
+  "node:crypto"                  -> FAIL node-builtin
+  "react"                        -> ALLOWED package
+  "@mui/material/Dialog"         -> FAIL package not on allow list
+  "./repo-grades.module.css"     -> ALLOWED asset
+```
+
+All three deny-list entries, and both spellings of the X4 module, fail with
+the deny list empty. **`FORBIDDEN_BARE_SPECIFIERS` is kept only as a
+DIAGNOSTIC** - it produces a named violation with a better message instead of
+a generic "not on the allow list" - and it is explicitly NOT what completeness
+rests on. The leaf's own test must assert the two lists are disjoint
+(`ALLOWED_BARE_SPECIFIERS` and `FORBIDDEN_BARE_SPECIFIERS` share no element),
+compared as raw literal arrays, so the diagnostic can never contradict the
+allow list.
+
+**The cost, stated rather than buried.** `@mui/material/Dialog` failing is not
+a bug, it is the design: any NEW bare specifier entering either closure -
+including transitively, since the closures are 149 and 93 nodes - reds the
+guard until a human adds one line. That is the fail-CLOSED direction the row
+exists to buy, and it is a genuinely useful signal (a new third-party package
+arriving in a client closure is exactly the event that shipped
+REGRESSION-355). It is also real friction; recorded as RES-A23-14 with an
+owner and an instrument rather than hidden.
+
+#### Ruling m4: the prefix is widened, but NOT as prescribed - measured
+
+m4 is right that one prefix under `src/lib/supabase/` is thin: that directory
+holds **27 non-test modules** (`ls src/lib/supabase/*.ts | grep -v '\.test\.' |
+wc -l` -> `27`; m4 said "30+", and I adopt neither number silently), including
+`owner-context.ts`, the only `node:async_hooks` importer in `src/`
+(`grep -rn "async_hooks" src --include=*.ts --include=*.tsx | grep -v '\.test\.'`
+-> seven hits, six of them comments, one real: `src/lib/supabase/owner-context.ts:1`).
+
+**But `FORBIDDEN_PATH_PREFIXES = ["lib/supabase"]` as prescribed turns the
+repo-grades walk (file 1, instance 1) RED on the real tree, which would violate AC-12(a).** Measured before adopting
+it:
+
+```
+A23_PREFIX=lib/supabase node <scratchpad>/a23-dropped.mjs
+===== SITE 1+3 repo-grades (whole dir, tree-derived) =====
+roots=32  nodes walked=148  420ms
+violations=1
+  src/app/components/repo-grades/index.tsx
+      -> src/app/components/repo-grades/useRepoGradesData.ts
+      -> src/context/SupabaseProvider.tsx
+      value-imports "@/lib/supabase/client" -> src/lib/supabase/client.ts
+```
+
+`src/lib/supabase/client.ts` is the BROWSER client and belongs in a client
+closure. So the ruling's direction is taken and its literal form is not:
+the prefix widens to `"lib/supabase"` **plus `BROWSER_SAFE_MODULES`, a
+positively-stated list of the modules inside a forbidden directory that ARE
+browser-safe** - the same fail-closed kind as Z1, applied to the path axis
+instead of the specifier axis. It has exactly one entry today, and any new
+module in `src/lib/supabase/` that enters a client closure fails loudly until
+someone declares it. Verified green in section 4.4.
+
+And the X4 module is no longer caught by transitive luck at all: with the
+prefix widened, `owner-context.ts` is a direct hit; with the prefix ignored
+entirely, its `node:async_hooks` import fails as a node builtin under the
+allow list. Two independent bindings where the first version had one, and that
+one was an enumeration.
 
 **R2 (architectural preference, one hop) - OPTIONAL, and it is the owner's
 call.** R1 binds the HAZARD, not the NAME. If `@/lib/grade` were ever
@@ -392,6 +684,25 @@ TOTAL DISAGREEMENTS WITH THE WANT COLUMN: 0
 (37 sabotage runs)
 ```
 
+**DELTA: the 37 runs were RE-RUN under the corrected configuration** (widened
+prefix + `BROWSER_SAFE_MODULES` + the allow list), because a configuration
+change invalidates a measurement even when the verdicts survive.
+`node <scratchpad>/a23-sabotage-delta.mjs` at `d7f69c5`:
+
+```
+TOTAL DISAGREEMENTS WITH THE WANT COLUMN: 0
+(37 sabotage runs)
+```
+
+Every `want`/`OK` verdict above is unchanged. **The violation COUNTS change:
+the `violations=5` rows become `violations=4`**, because with
+`FORBIDDEN_PATH_PREFIXES = ["lib/supabase"]` the walk stops at the supabase
+boundary one hop earlier and no longer reports a fifth trail through
+`lib/supabase/effective-identity.ts`. The T-rows and S13/S14 are unchanged at
+1 and residue=1. Anyone re-deriving the table under the shipping config should
+expect 4, not 5; the block above is retained as measured under the narrow
+prefix, where the checker independently reproduced it.
+
 Every sabotage is written in **single quotes** - the style guard 2 and
 `valueImportSpecifiers` are both blind to. S1-S9 are the five shared holes plus
 brace-wrap plus the default-binding trap. S10-S12 are the false-positive
@@ -432,6 +743,26 @@ roots=12  nodes walked=93   166ms   violations=0   residue=0
 ===== SITE 2 types.ts alone (the U3 object) =====
 roots=1   nodes walked=1    2ms     violations=0   residue=0
 ```
+
+**DELTA: re-run under the SHIPPING configuration** - Z1's allow list, Z3's
+extra root, and m4's widened prefix with `BROWSER_SAFE_MODULES` - because
+three of the four inputs to this table changed.
+`node <scratchpad>/a23-delta-probe.mjs` at `d7f69c5`:
+
+```
+===== SITE 1+3 repo-grades (whole dir, tree-derived) =====
+roots=32 nodes=149 441ms violations=0 residue=0 unallowed=0
+===== SITE 2+3 grading-results (dir + GradingResults.tsx + types.ts AS A ROOT [Z3]) =====
+roots=13 nodes=93 171ms violations=0 residue=0 unallowed=0
+===== Z3 CONTROL: types.ts alone =====
+roots=1 nodes=1 1ms violations=0 residue=0 unallowed=0
+```
+
+`unallowed=0` is the new column and it is the one Z1 bought: **every one of
+the 89 dropped literal specifiers now lands in a named bucket and passes**,
+rather than being skipped. AC-12(a) holds under the corrected design -
+including the widened supabase prefix, which without `BROWSER_SAFE_MODULES`
+would be `violations=1` (section 4.2).
 
 Two things to read off this. **First, repo-grades goes from 4 hand-listed roots
 (`REPO_GRADES_CLIENT_FILES:265-270`) to all 32 non-test files in the
@@ -501,14 +832,40 @@ export interface EdgeScan {
 /** PURE. Parses with ts.createSourceFile; no file system access. */
 export function scanRuntimeEdges(source: string, fileName: string): EdgeScan;
 
+/** Z1: every LITERAL specifier gets a bucket. `null` is not a bucket. */
+export type SpecifierDisposition =
+  | { kind: "module"; resolved: string }          // a .ts/.tsx under src/ - an edge
+  | { kind: "asset"; resolved: string; ext: string } // on disk, not a module
+  | { kind: "node-builtin" }                      // node:x, or builtinModules.includes(x)
+  | { kind: "missing" }                           // relative/alias, nothing on disk
+  | { kind: "package" };                          // a bare npm specifier
+export function classifySpecifier(
+  specifier: string, importerAbs: string, srcRoot: string,
+): SpecifierDisposition;
+
 export interface WalkOptions {
   srcRoot: string;
   forbiddenPathPrefixes: string[];
+  /** Positively-stated exceptions inside a forbidden prefix (m4). */
+  browserSafeModules: string[];
+  /** DIAGNOSTIC ONLY - completeness rests on allowedBareSpecifiers. */
   forbiddenBareSpecifiers: string[];
+  /** THE ALLOW LIST. A bare specifier not on it FAILS. */
+  allowedBareSpecifiers: string[];
+  allowedAssetExtensions: string[];
   treatUseServerAsWall: boolean;
 }
 export interface Violation { trail: string[]; specifier: string; resolved: string | null; }
-export interface WalkResult { violations: Violation[]; unresolvable: string[]; nodes: number; }
+/** A literal specifier that is neither a followed edge nor on an allow list. */
+export interface Unallowed { trail: string[]; specifier: string; reason: SpecifierDisposition["kind"]; }
+export interface WalkResult {
+  violations: Violation[];
+  /** NON-literal specifier sites. Reported, never skipped. */
+  unresolvable: string[];
+  /** Z1: literal specifiers that fail the allow list. Reported, never skipped. */
+  unallowed: Unallowed[];
+  nodes: number;
+}
 export function walkRuntimeGraph(roots: string[], options: WalkOptions): WalkResult;
 
 /** One hop, for R2. Exact specifier strings, parsed - never raw text. */
@@ -525,6 +882,14 @@ file system, so the full cross-product runs against it directly. AC-11's six
 regression canaries are the same. AC-12(a) is a property of `walkRuntimeGraph`
 over the real roots. Nothing in the criteria needs an input this seam cannot
 receive.
+
+**Z1 re-checked against the same rule.** `classifySpecifier` needs the
+importer's absolute path and `srcRoot` to decide `asset` vs `missing`, and
+both are already arguments; it needs `builtinModules`, which is a `node:module`
+export, not an input. **It does NOT take the allow lists** - it reports a
+bucket and the WALK applies policy, so the pure classifier stays testable
+against a source string with no configuration. The disjointness assertion
+(section 4.2) compares two exported literal arrays and needs nothing else.
 
 **How `typescript` is loaded, and why not a bare import.** Inside the leaf:
 
@@ -562,8 +927,8 @@ instruments agree on every file here, which is itself worth stating.
 |---|---|---|---|---|
 | `src/lib/module-graph/runtime-import-graph.ts` (NEW) | - | - | ~190 | clear |
 | `src/lib/module-graph/runtime-import-graph.test.ts` (NEW) | - | - | ~240 | clear |
-| `src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts` | 305 | 305 | ~285 | clear |
-| `src/app/components/grading-results/gradingResultsHelpersWiring.test.ts` | 241 | 241 | ~235 | clear |
+| `src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts` | 305 | 305 | ~297 | clear |
+| `src/app/components/grading-results/gradingResultsHelpersWiring.test.ts` | 241 | 241 | ~247 | clear |
 
 Commands: `wc -l < <file>` (Bash tool) and
 `@(Get-Content <file>).Count` (PowerShell), both run at `c458f7a`.
@@ -572,21 +937,50 @@ Commands: `wc -l < <file>` (Bash tool) and
 checker can re-derive rather than trust it. `gradingResultsHelpersWiring.test.ts`
 loses `BANNED_IMPORT_PATTERNS` (`:89-94`, 6 lines), its canary (`:96-110`, 15),
 the `it.each` sweep (`:112-117`, 6) and the whole U3 block (`:119-132`, 14) =
--41, and gains a walk block of roughly 35. `repoGradesFeedbackAndFiles.wiring.
-test.ts` loses `:246-305` (60) and gains roughly 40. Neither file is on
+-41, and gains a walk block of roughly 35 **plus a REPLACEMENT canary of
+roughly 12 (Ruling Z2)** = +47. `repoGradesFeedbackAndFiles.wiring.test.ts`
+loses `:246-305` (60, which includes its canary at `:272-285`) and gains
+roughly 40 **plus its own replacement canary of roughly 12** = +52. **Both
+"after" figures went UP in the delta, not down, because Z2 replaces two canary
+blocks this plan previously deleted outright.** Neither file is on
 `src/file-size-ceiling.structure.test.ts`'s `ALLOWED_OVERAGE` ratchet
 (`grep -n -e "repoGradesFeedbackAndFiles" -e "gradingResultsHelpersWiring"
 src/file-size-ceiling.structure.test.ts` returns nothing; `LIMIT = 1000` at
 `:30`), so only the repo-wide limit applies and both are far under it. **Verify
 with `@(Get-Content).Count` at the wave gate; do not ship on these estimates.**
 
-**Runtime cost.** 430ms + 166ms for the two walks, plus the leaf's own pure
-fixtures. Suite baseline at `c458f7a`, re-measured rather than quoted:
-`npx vitest run` gives `Test Files 1092 passed (1092)` /
-`Tests 21761 passed (21761)`, exit 0, `Duration 70.73s`. Roughly 0.8% added.
+**Runtime cost. CORRECTED BY RULINGS m2 AND m3 - the first version's 0.8% was
+low by about a factor of three, because it omitted the leaf's own
+client-bundle guard.** Section 5 specifies that guard as a whole-`src` parsed
+sweep ("enumerate every file in `src/` whose parsed edges contain the leaf's
+specifier"), so its cost is the whole-src parse, not a walk.
+
+| Item | Cost | Instrument |
+|---|---|---|
+| repo-grades walk | 441ms | `node <scratchpad>/a23-delta-probe.mjs`, `d7f69c5` |
+| grading-results walk (13 roots) | 171ms | same run |
+| the leaf's own client-bundle guard (whole-`src` parse) | **1800ms / 1847ms** on two consecutive runs | `node <scratchpad>/a23-x4-proof.mjs`, `d7f69c5` |
+| the leaf's pure fixtures | not measurable before the file exists | - |
+
+Suite baseline at `c458f7a`, re-measured rather than quoted: `npx vitest run`
+gives `Test Files 1092 passed (1092)` / `Tests 21761 passed (21761)`, exit 0,
+`Duration 70.73s`. **(441 + 171 + ~1850) / 70730 = about 3.5%**, not 0.8%.
+
+**m2 - the performance ceiling is now RECORDED, not "undetermined".** The
+first version deferred it; it was one command. Parsing every non-test
+`.ts`/`.tsx` under `src/` with `ts.createSourceFile` - **1560 files, which is
+the hard ceiling on any closure this design can ever walk** - takes 1800ms and
+1847ms on two runs here, against the `{ timeout: 30000 }` both precedent
+walkers carry. **A margin of roughly 16x at the ceiling**, and the walk itself
+is O(nodes) with a visited set, so growth is linear in files reached, not
+quadratic. The checker independently measured 1929ms for the same sweep; I
+report my own two numbers and that one, and adopt none silently - the
+conclusion (a 15-16x margin) is identical under all three.
+
 `canvas-client-boundary.transitive.test.ts` and
 `classTrendsDraft.not-postable.test.ts` both carry explicit `{ timeout: 30000 }`
-on their walks; do the same.
+on their walks; do the same, on the leaf's whole-src guard as well as on the
+two directory walks.
 
 ---
 
@@ -622,6 +1016,10 @@ src/app/components/repo-grades/RepoGradeCellControl.tsx
 src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts
 src/lib/grade/postable.test.ts
 
+# DELTA, re-run at d7f69c5: the same command now returns TWELVE paths, because
+# this document itself exists in the tree and names both guard files. The
+# eleven above plus docs/a23-architecture.md. No src/ path changed.
+
 # Does anything read GUARD 2's OBJECT (types.ts) as source text? Only guard 2.
 grep -rn 'readFileSync' src --include=*.test.ts | grep -i types
 src/lib/prompt-announcement-types.test.ts:2:  (a different file - prompt-announcement-types.ts)
@@ -631,14 +1029,14 @@ src/lib/prompt-announcement-types.test.ts:2:  (a different file - prompt-announc
 |---|---|---|
 | `src/lib/module-graph/runtime-import-graph.ts` | **OWNED** (new) | the seam |
 | `src/lib/module-graph/runtime-import-graph.test.ts` | **OWNED** (new) | its caller and its cross-product |
-| `src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts` | **OWNED** | site 1 |
-| `src/app/components/grading-results/gradingResultsHelpersWiring.test.ts` | **OWNED** | sites 2 and 3 |
+| `src/app/components/repo-grades/repoGradesFeedbackAndFiles.wiring.test.ts` | **OWNED** | file 1 - instance 1 (guard 1) |
+| `src/app/components/grading-results/gradingResultsHelpersWiring.test.ts` | **OWNED** | file 2 - instances 2 and 3 |
 | `src/app/components/grading-results/classTrendsEntry.ts:28` | **ADOPTED** - comment correction owed | its comment states the sweep "matches RAW SOURCE, comments included". Under the AST extractor that is false. Opened; it is a comment, not an assertion, so it cannot go red - which is exactly why it will otherwise rot. Correct it in the same wave. |
 | `src/app/components/repo-grades/RepoGradeCellControl.tsx:47` | **CHECKED-SAFE** | comment, "bans that alias prefix outright". Still true under R1 (the barrel reaches a server leaf) and under R2. No edit. |
 | `src/lib/grade/postable.test.ts:227` | **CHECKED-SAFE** | comment naming guard 1 as the reason for a relative import. Unchanged. |
 | `src/app/components/grading-results/gradingResultsHelpers.test.ts:26` | **CHECKED-SAFE** | comment recording the file split. Unchanged. |
-| `src/app/components/grading-results/ungradedDisclosure.test.ts:495-515` | **ADOPTED - decision owed, see RES-A23-9** | site 4 of the class. Its object, `ungradedDisclosure.ts`, IS one of the twelve `CLIENT_FILES`, so R1 already covers it transitively (measured: zero violations). Leaving a redundant broken guard beside a working one is how the next reader believes the wrong thing. Recommend deleting its two `not.toMatch` assertions and citing R1; that is a scope call, not mine. |
-| `src/lib/workflows/course-schedule-docx.test.ts`, `src/lib/workflows/registry/steps.weekly-announcement-schedule.test.ts` | **OUT OF SCOPE** - RES-A23-9 | sites 4/5 of the class, different directories, different capability boundary. Not chartered. |
+| `src/app/components/grading-results/ungradedDisclosure.test.ts:495-515` | **ADOPTED - decision owed, see RES-A23-9** | file 3, **instance 4** of the class (Ruling M5: the first version called this "site 4" while also calling the two workflow files "sites 4 and 5"). Its object, `ungradedDisclosure.ts`, IS one of the twelve `CLIENT_FILES`, so R1 already covers it transitively (measured: zero violations). Leaving a redundant broken guard beside a working one is how the next reader believes the wrong thing. Recommend deleting its two `not.toMatch` assertions and citing R1; that is a scope call, not mine. |
+| `src/lib/workflows/course-schedule-docx.test.ts`, `src/lib/workflows/registry/steps.weekly-announcement-schedule.test.ts` | **OUT OF SCOPE** - RES-A23-9 | files 4 and 5, **instances 5 and 6** of the class, different directories, different capability boundary. Not chartered. Severity measured at zero live defects - section 12. |
 | `docs/backlog.yml`, `docs/BACKLOG.md` | **ORCHESTRATOR'S** | residuals below must land there or they do not exist |
 | `docs/a23/a23-probe.mjs`, `docs/a23/a23-scan.mjs` | **CHECKED-SAFE** | the criteria's measurement instruments. They run the OLD procedures and must keep doing so - they are the AC-7 "before" instrument. Do not update them to the new shape. |
 
@@ -695,7 +1093,9 @@ the fixtures forward" FIRST. Under this shape that suite is
    Re-run; record green.
 3. Re-point both guard files at the leaf, in ONE commit. Record
    `npx vitest run` over both guard files green against the unmodified tree
-   (AC-12(a)).
+   (AC-12(a)). **Each guard file lands its OWN canary in this step - see
+   below. "Green" is not evidence on its own, and step 3's only recorded
+   evidence in the first version of this plan WAS "green".**
 4. Wave gate: `git status --short` against exactly the list above, plus
    `npx tsc --noEmit` (one caller only), `npm run lint`
    (`4 problems (0 errors, 4 warnings)` is the baseline), `npx vitest run`.
@@ -707,6 +1107,69 @@ to state, for every fixture, whether it is a positive control expected red at
 step 1 or a regression canary expected green throughout (AC-8's direction
 labels). I am flagging this as a divergence from the criteria's literal
 wording rather than reading it away.
+
+### 8.1 Ruling Z2 - each guard file keeps a canary. NOT OPTIONAL.
+
+The first version of this plan deleted **both** guard files' canaries and
+specified no replacement: step 3 deletes
+`gradingResultsHelpersWiring.test.ts:96-110` (that block IS the canary) and
+`repoGradesFeedbackAndFiles.wiring.test.ts:246-305` (which contains the canary
+at `:272-285`). Section 9 then lists the canary discipline under REUSE -
+"a detector is not evidence until it has found a planted positive" - citing
+those very lines, and reused it in NEITHER file. An implementer who passes an
+empty root list, or the wrong `srcRoot`, lands both files green, the leaf
+green, and every gate green. **That is the same class as the guards this row
+is repairing: an assertion that cannot fail.**
+
+**Each guard file carries a canary proving ITS OWN walk finds a PLANTED
+POSITIVE**, using the same `walkRuntimeGraph` call with the same options
+object the real assertion uses and only the root set replaced. Measured, so
+the implementer has an expected number rather than a hope
+(`node <scratchpad>/a23-delta-probe.mjs`, `d7f69c5`, SHIPPING configuration):
+
+```
+===== Z2 CANARY grade barrel (src/lib/grade.ts) =====
+violations=4 nodes=74 unallowed=6 103ms
+  first violation trail:
+  src/lib/grade.ts
+      -> src/lib/grade/rubric.ts
+      -> src/lib/research/rubric-bank.ts
+      -> src/lib/research/db.ts
+      value-imports "@/lib/supabase/server" -> src/lib/supabase/server.ts
+  first unallowed:
+  src/lib/grade.ts
+      -> src/lib/grade/rubric.ts
+      -> src/lib/research/rubric-bank.ts
+      NODE BUILTIN "node:crypto" - never browser-safe
+
+===== Z2 CANARY owner-context (the X4 path) (src/lib/supabase/owner-context.ts) =====
+violations=2 nodes=3 unallowed=0 2ms
+  first violation trail:
+  src/lib/supabase/owner-context.ts
+      value-imports bare "node:async_hooks"
+```
+
+| Guard file | Canary root | Assert |
+|---|---|---|
+| `gradingResultsHelpersWiring.test.ts` | `src/lib/grade.ts` - the barrel its deleted `BANNED_IMPORT_PATTERNS` existed to ban, and the causal chain its own header at `:52-56` states | `violations.length` > 0, and the first trail contains `lib/supabase/server` |
+| `repoGradesFeedbackAndFiles.wiring.test.ts` | `src/lib/grade.ts` - guard 1's header at `:246-256` names the same barrel and REGRESSION 355 | same |
+
+**Assert `> 0` and the trail content, not `=== 4`.** The exact count is a
+property of an unrelated part of the tree and would make the canary a
+brittleness source, which is how a canary gets deleted. The `> 0` plus the
+named trail is what proves the walk discriminates; the trail is the part a
+wrong `srcRoot` or an empty root list cannot produce.
+
+**The 4 is not the 5 the checker measured**, and the difference is the delta's
+own doing: under the narrow prefix the barrel gives `violations=5 nodes=81`,
+under the shipping widened prefix it gives `violations=4 nodes=74`. This is
+precisely why the assertion is `> 0` and not a frozen count.
+
+`src/lib/supabase/owner-context.ts` is offered as a SECOND canary root for the
+grading-results file only if the implementer wants the X4 path covered by an
+executed positive as well as by section 4.2's classifier proof; it is cheap
+(nodes=3, 2ms) and it is the only file in `src/` that actually imports
+`node:async_hooks`. Not required.
 
 **Disjointness.** Write set is two new files under `src/lib/module-graph/`
 (a directory that does not exist today) and two existing test files in two
@@ -721,13 +1184,13 @@ other dirty path in the tree (`docs/css-orphans.md`): empty.
 
 | Symbol | `file:line` | What it gives |
 |---|---|---|
-| `resolveSpecifier` | `classTrendsDraft.not-postable.test.ts:80-94` | the bundler's own resolution order (`.ts`, `.tsx`, `index.ts`, `index.tsx`) for `@/` and relative specifiers. Move into the leaf verbatim. |
+| `resolveSpecifier` | `classTrendsDraft.not-postable.test.ts:80-94` | the bundler's own resolution order (`.ts`, `.tsx`, `index.ts`, `index.tsx`) for `@/` and relative specifiers. **DELTA: its four-candidate loop is reused verbatim, but NOT its `return null` contract** - under Z1 it becomes the `module` branch of `classifySpecifier`, and the `null` case splits into `asset` / `missing` / `node-builtin` / `package`. Reusing the `null` unchanged is exactly the hole Z1 found. |
 | `isForbiddenPath` + the no-trailing-slash rule | `classTrendsDraft.not-postable.test.ts:46-53,67-70` | prefix predicate on the path relative to `src/`, and the recorded barrel-file defect a trailing slash creates |
 | the `"use server"` wall | `canvas-client-boundary.transitive.test.ts:147-150` and its rule 2 at `:34-37` | the rule whose omission produced 39 false violations in my own first probe (section 4.5) |
 | the memo-before-read ordering | `canvas-client-boundary.transitive.test.ts:132-141` | its comment records the walk blowing its own timeout when the read came first. Keep the ordering. |
 | cycle guard | `canvas-client-boundary.transitive.test.ts:151` | import cycles exist here |
 | A22's root derivation | `gradingResultsHelpersWiring.test.ts:136-167` | `readdirSync` + predicate for local files, and the computed non-local-consumer set at `:153-166`. **KEPT ENTIRELY** - it becomes the walk's root set. |
-| the canary discipline | `gradingResultsHelpersWiring.test.ts:96-110`, `classTrendsDraft.not-postable.test.ts:150-205` | a detector is not evidence until it has found a planted positive |
+| the canary discipline | `gradingResultsHelpersWiring.test.ts:96-110`, `classTrendsDraft.not-postable.test.ts:150-205` | a detector is not evidence until it has found a planted positive. **DELTA: this row is now actually DISCHARGED, in section 8.1, in BOTH guard files with a measured expected trail.** The first version listed it here and reused it in neither file - citing a discipline is not applying it, which is the class Ruling Z2 names. |
 
 **Do NOT reuse, with the reason:**
 
@@ -738,6 +1201,34 @@ other dirty path in the tree (`docs/css-orphans.md`): empty.
 | the U3 frozen literal (`gradingResultsHelpersWiring.test.ts:131`) | deleted; the walk is the replacement enforcer (section 4.1). `docs/a23-criteria.md`'s F-4 measured that no second test in the tree asserts it, so changing it breaks no landed gate - re-verified: `grep -rn 'CodeRunResult } from "../code-runner"' src` returns 5 hits, one assertion (this line) and four real imports. |
 | `hasDirective` (`canvas-client-boundary.transitive.test.ts:108-110`) | a 200-character text slice. The parsed prologue costs nothing once the AST exists. Measured 0 disagreements today - stated so the swap is not sold as a bug fix. |
 | `stripComments` (`repoGradesFeedbackAndFiles.wiring.test.ts:39-41`) | needed only because the old mechanism read comments. The parser does not. Keep it for the OTHER blocks in that file, which this pass does not touch. |
+
+**Ruling M2 - RELOCATED, and not built here.** Section 3.2 scores four
+extractors over "23 constructs x 2 quote styles = 46 fixtures", and **that
+23-construct list appears nowhere in this document**, so its scoreboard
+(0 / 19 / 22 / 20) cannot be re-derived by anyone reading it. That is the
+"a quantity named but never defined" class, and the legal disposal is
+`iteration-caps.md:60-62` (a) Relocate, not another paragraph here.
+
+- **Receiver:** the TEST SEAT (`loop-test-author`).
+- **Obligation the receiver now carries:** land the 23 constructs as NAMED
+  FIXTURES with an explicit `want` column, in
+  `src/lib/module-graph/runtime-import-graph.test.ts` - which section 8 step 1
+  already plans to land, so this adds an obligation to an existing artifact
+  rather than inventing one. Each fixture is labelled positive control or
+  regression canary (AC-8's direction labels), and the step-1 red count is the
+  scoreboard, executed rather than quoted.
+- **Step at which it is measured:** wave step 1, where the fixtures run
+  against a duplicated `valueImportSpecifiers` and the red is recorded.
+- **Why not here:** a prose table of 23 constructs in a design document is a
+  second, unexecuted copy of an oracle that is about to exist as code. Ruling
+  Y5 already found that a fenced block nobody can run is not a measurement.
+
+I am NOT restating section 3.2's four numbers as settled. They came from a
+real run and the checker reproduced the design's other numbers, but until the
+fixture table exists as code, **the only claim section 3.2 supports is the
+one it is used for: `valueImportSpecifiers` fails AC-2(c) and AC-4**, which
+is independently visible in its `IMPORT_RE` at
+`classTrendsDraft.not-postable.test.ts:96` and its all-braces test at `:108`.
 
 **Instruments this pass produced, and a gap I am naming rather than papering
 over.** Every number in sections 3.2, 4.3 and 4.4 came from three scripts I
@@ -750,6 +1241,22 @@ wrote and ran at `c458f7a`:
 - `a23-reach.mjs` - F-5 reachability and the whole-`src` residue count
   (section 4.4)
 - `a23-sabotage-probe.mjs` - the 37 in-memory sabotage runs (section 4.3)
+
+and SIX more written for the DELTA, at `d7f69c5`:
+
+- `a23-dropped.mjs` - the 89/18 dropped-literal-specifier census (section 4.2)
+  and the widened-prefix measurement that showed m4's literal form turning
+  the repo-grades walk red
+- `a23-delta-probe.mjs` - the shipping configuration end to end: allow list,
+  `BROWSER_SAFE_MODULES`, `types.ts` as a root, and the two Z2 canaries
+  (sections 4.2, 4.4, 8.1)
+- `a23-x4-proof.mjs` - the deny-list-emptied classification table and the
+  whole-`src` parse ceiling (sections 4.2, 6)
+- `a23-typesedges.mjs` - the two runtime and four type-only edges into
+  `types.ts` (section 4.1)
+- `a23-sabotage-delta.mjs` - the 37 sabotage runs re-run under the shipping
+  configuration (section 4.3)
+- `a23-sites45-severity.mjs` - the RES-A23-9 severity number (section 12)
 
 **They are NOT committed, because this pass's write scope is exactly one path
 (`docs/a23-architecture.md`), and I am not widening it on my own authority.**
@@ -776,7 +1283,7 @@ dropped. **Id column derived last.**
 | AC-1 guard 1, wrap position and separator kind | SATISFIED by construction - whitespace is not a token to a parser | probe 1: P2a/P2b/P2c ok, both quote styles; sabotage S2/S3/S9 |
 | AC-2 (a) all-type spellings permitted | SATISFIED; the P3 false positive closes | S10/S11 do not fire; repo-grades real tree stays green with `repoGradesCellEdits.ts:30` in the roots |
 | AC-2 (b)(c)(d) mixed / default-binding / side-effect still flagged | SATISFIED - `clause.name` is checked explicitly, which is precisely where `valueImportSpecifiers` fails | S7, S4; probe 1 P4/P5/P6 |
-| AC-3 guard 1 x five non-`import` constructs x both quotes | SATISFIED | S4/S5/S6/S8 at site 1, both quote styles in probe 1 (C1/C1n/C2/C3/C4) |
+| AC-3 guard 1 x five non-`import` constructs x both quotes | SATISFIED | S4/S5/S6/S8 at instance 1, both quote styles in probe 1 (C1/C1n/C2/C3/C4) |
 | AC-4 guard 2, quote style | SATISFIED - the parser has no quote preference | T1 |
 | AC-5 guard 2 + the `:112-117` sweep, wrap and separator | SATISFIED, both clauses | T5; S2/S3/S9 |
 | AC-6 guard 2 + sweep, U3 construct set | SATISFIED, both clauses | T2/T3/T4; S4/S5/S6/S8 |
@@ -787,6 +1294,39 @@ dropped. **Id column derived last.**
 | AC-11 six regression canaries still caught | SATISFIED | probe 1: P1/P4/P5 ok; H1/H6/H10 equivalents are S1/S9 and the `export { x } from` row (C2) |
 | AC-12 (a) real tree passes | SATISFIED, and the root set WIDENS from 4 to 32 in repo-grades | section 4.4, both sites zero violations |
 | AC-12 (b) option (b) excluded | SATISFIED - this deletes the regexes entirely rather than running them unconditionally | section 4.2 |
+
+**Delta effect on this table.** Three rows change and none is weakened.
+**AC-3 / AC-6** gain the allow list: a banned specifier in a spelling nobody
+enumerated (the `async_hooks` case) now fails rather than being dropped
+(section 4.2's X4 block). **AC-12(a)** is re-measured under the shipping
+configuration and still holds at zero violations, zero residue and **zero
+unallowed** (section 4.4). **The U3/instance-2 row** is now enforced by a
+NAMED root rather than by an incidental one (section 4.1, Ruling Z3). The
+policy row's argument is re-stated on two axes and the specifier axis is only
+now true (section 3.1).
+
+### 10.1 Delta disposition - every checker finding, by id
+
+`iteration-caps.md` requires that a restructuring ship a disposition table.
+This is a delta rather than a restructuring, so the table maps the CHECK's
+findings rather than prior requirements. **No prior requirement of this
+document was withdrawn in the delta**; two were strengthened (R1's specifier
+handling, the U3 enforcer) and one plan step was added (8.1).
+
+| Finding | Disposition | Where |
+|---|---|---|
+| **B1** deny list inside its own replacement; 89/18 dropped literals; `async_hooks` un-enumerated | **DISPOSED by change of kind** - allow list, five explicit buckets, deny list demoted to diagnostic and proved non-load-bearing with it emptied | 4.2, and the specifier axis added to 3.1 |
+| **B2** both guard files' canaries deleted with no replacement | **FIXED** - a measured planted-positive canary specified for each file, asserting `> 0` and a named trail | 8.1, and the line budget in 6 |
+| **M1** "worse overall" contradicts its own scoreboard; conflict with `a23-criteria.md:559-562` unflagged | **CORRECTED and FLAGGED** - rejection re-grounded on AC-2(c)/AC-3/AC-4/AC-6 only | 3.2, and section 1 correction (3) |
+| **M2** the 23-construct list exists nowhere | **RELOCATED** to the test seat as named fixtures with a `want` column in `runtime-import-graph.test.ts` | 9 |
+| **M3** U3's enforcer is incidental, dissolvable by a type-only narrowing | **FIXED** - `types.ts` is a named root; two runtime edges measured | 4.1 |
+| **M4** RES-A23-4 wrongly marked superseded | **LABEL WITHDRAWN** - it keeps its own instrument and its own escalation | 11 |
+| **M5** three files under two ordinals | **FIXED** - five files, six instances, three chartered, in one table | 1, 7 |
+| **m1** `no-restricted-paths` called "NAME-BASED" | **HALF DROPPED** - direct-only is the whole ground | 3.3 |
+| **m2** performance recorded as undetermined | **MEASURED** - 1560 files, 1800/1847ms, 30000ms timeout | 6, 12 |
+| **m3** runtime budget omits the leaf's own whole-src guard | **CORRECTED** - 0.8% becomes about 3.5% | 6 |
+| **m4** one prefix under a 27-module directory | **DIRECTION TAKEN, LITERAL FORM REFUSED** - prescribed form measured turning the repo-grades walk red; widened prefix plus `BROWSER_SAFE_MODULES` instead | 4.2, 4.4 |
+| checker's ask: RES-A23-9 carries no severity estimate | **MEASURED** - zero live defects, one latent construct | 12, RES-A23-9 |
 
 ---
 
@@ -801,22 +1341,33 @@ not reissued; new entries take fresh numbers from 9.
 |---|---|---|---|---|
 | RES-A23-1 | **RE-BOUND, and it stops being unmeasurable.** The criteria narrowed AC-3/AC-6 to static-literal specifiers because a computed `import(pathVar)` "is caught by no construction available in this repo". Under this shape it IS caught - not resolved, but REPORTED: `scanRuntimeEdges` returns it in `unresolvable` and the guard fails rather than skipping. | Test seat | `docs/a23/a23-reach.mjs` - whole-`src` residue count, measured 0 across 1560 files today; plus sabotage S14, which fires | The leaf's own test asserts `unresolvable` is empty over both root closures, and the oracle round proves S14 red |
 | RES-A23-2 | **CLOSED by the widened root set.** `repoGradesPosting.ts:56`'s coverage-by-omission gap disappears when repo-grades roots are tree-derived (4 -> 32). Its `@/lib/grade/postable` import is then walked and is clean, which is the correct verdict. | Orchestrator, to strike from the row | `node docs/a23/a23-walk-probe.mjs` - repo-grades 32 roots, 0 violations | A23's backlog reconciliation |
-| RES-A23-4 | `snapshot-grading.structure.test.ts:801` - a fourth instance of the line-filter idiom, different capability boundary, not chartered. Superseded in scope by RES-A23-9, which names the real denominator. | Repo owner (scope call) | the `Grep` tool for `/^\s*import\b/` over `src`, with a matching-string canary | Escalated with RES-A23-9 |
+| RES-A23-4 | `snapshot-grading.structure.test.ts:801` - an instance of the line-filter idiom, different capability boundary, not chartered. **DELTA, Ruling M4: the "superseded in scope by RES-A23-9" label is WITHDRAWN. It was wrong.** RES-A23-9's denominator comes from a sweep for tests asserting a from-clause against a SERVER-ONLY specifier; `:801` asserts about `extractRubricCriteria`, so it is absent from that sweep BY CONSTRUCTION and can never appear in its five files. Two different classes were merged under one id. RES-A23-4 keeps its own instrument and its own escalation. | Repo owner (scope call) | the `Grep` tool for `/^\s*import\b/` over `src`, with a matching-string canary - **not** RES-A23-9's sweep | Escalated in its own right at A23's disposal |
 | RES-A23-5 | `next build`'s compile stage is the only TRUE oracle; every guard here is a proxy for it, and this checkout has no `.env` so the gate is the `Compiled successfully` line, never exit 0 (`this-repo.md:52-54`). | Repo owner | `npm run build`, grepping for `Compiled successfully`; then the Vercel deploy log | A23's push |
 | RES-A23-7 | **CLOSED as a mechanism.** The `:112-117` sweep's five-hole set is what this design replaces; F-5's live `dynamic(() => import("../MonacoFileEditor"))` is now FOLLOWED (`a23-reach.mjs`: reaches `MonacoFileEditor.tsx` = true). What remains is only the computed-specifier case, which is RES-A23-1. | Orchestrator, to fold into RES-A23-1 at the row | `node docs/a23/a23-reach.mjs` | A23's backlog reconciliation |
 | RES-A23-8 | The bash-grep false absence, trap-card candidate. Unchanged; reproduced a third time in this pass (section 1's canary exists because of it). | Orchestrator (`traps-search.md` is not this seat's to write) | the pair: a bash `grep -rn` for the anchored pattern (empty) against the `Grep` tool (finds every site), with a known-positive canary | A23's backlog reconciliation |
-| RES-A23-9 | **NEW. The class has FIVE sites, not three** (section 1). Sites 4 and 5 - `ungradedDisclosure.test.ts:495-515`, `course-schedule-docx.test.ts:42-48`, `steps.weekly-announcement-schedule.test.ts:63-69,79-86,100-102` - carry the identical five holes AND are direct-only. Site 4's object is already covered transitively by R1; sites 5a/5b guard a different boundary and are not. Not chartered by A23. | Repo owner (scope call), then orchestrator as a backlog row | the canaried sweep in section 1, re-run; then `walkRuntimeGraph` over each site's roots with that site's own forbidden set | Escalated at A23's disposal; a row filed if the owner widens scope |
+| RES-A23-9 | **NEW. The sweep returns FIVE FILES carrying SIX instances, of which three are chartered** (section 1, ordinals fixed under Ruling M5). Instances 4, 5 and 6 - `ungradedDisclosure.test.ts:495-515`, `course-schedule-docx.test.ts:42-48`, `steps.weekly-announcement-schedule.test.ts:63-69,79-86,100-102` - carry the identical five holes AND are direct-only. Instance 4's object is already covered transitively by R1; instances 5 and 6 guard a different boundary and are not. Not chartered by A23. **DELTA: the escalation now carries a SEVERITY NUMBER - ZERO live defects across all five guarded objects, one latent construct. Section 12.** | Repo owner (scope call), then orchestrator as a backlog row | `node <scratchpad>/a23-sites45-severity.mjs` - the transitive walk over each guarded object, plus a parsed construct census per object; and the canaried sweep in section 1, re-run | Escalated at A23's disposal WITH the number; a row filed if the owner widens scope |
 | RES-A23-10 | **NEW. R2 is a product call.** R1 binds the hazard, not the name, so if `@/lib/grade` ever stopped reaching a server leaf, R1 would permit importing it where today's name ban would not. One line of the same extractor restores the name ban. Recommendation: take R2. | Repo owner (an `iteration-caps.md` (b) Reduce) | `directRuntimeSpecifiers(root)` asserted not to contain `"@/lib/grade"`, over both root sets | Answered before the wave lands; if the answer is no, `directRuntimeSpecifiers` must not be written |
 | RES-A23-11 | **NEW. `verbatimModuleSyntax` is absent** (`cat tsconfig.json`; `isolatedModules: true` at `:13`). Its absence is why an unmarked `import { X }` is over-approximated as a runtime edge. Safe direction, and measured at zero cost today - but enabling it would make the classifier exact. Repo-wide flag change, out of scope for A23. | Repo owner (scope call) | `npx tsc --noEmit --verbatimModuleSyntax` over the tree; the error count is the cost | Escalated with RES-A23-9 |
 | RES-A23-13 | **NEW, and it is a gap in THIS document.** The four probes behind sections 3.2, 4.3 and 4.4 are not committed - this pass's write scope was one path - so those quantities are stated with their commands but are not re-runnable from the repo. Same class the criteria's Ruling Y5 already closed once. | Implementer (wave step 0), then orchestrator to confirm at the push | commit `a23-shape-probe.mjs`, `a23-walk-probe.mjs`, `a23-reach.mjs` and `a23-sabotage-probe.mjs` to `docs/a23/` beside the criteria's two, then re-run each from the repo root and diff the output against sections 3.2/4.3/4.4 | Wave step 0, BEFORE any guard file is edited - if a number does not reproduce, this design is wrong and must not be built |
+| RES-A23-14 | **NEW IN THE DELTA. The allow list's maintenance cost is real and is not zero.** `ALLOWED_BARE_SPECIFIERS` has 14 entries today and covers two closures of 149 and 93 nodes, so ANY new bare specifier entering either closure - including one added in a distant `src/lib/` file - reds the guard until a line is added. That is the fail-closed direction the row bought and it is also friction. If it is measured as noisy in practice, the legal next move is a narrower CLOSURE (fewer roots), never a return to a deny list. | Repo owner, after the wave lands | count the guard's red-because-of-allow-list events over the following rows; the guard's own failure message names the specifier and the trail | A23's backlog reconciliation, then reviewed at the next row that touches either directory |
+| RES-A23-15 | **NEW IN THE DELTA. `BROWSER_SAFE_MODULES` is an allow list with ONE entry and no test that it is minimal.** Nothing fails if a future edit adds a genuinely server-only module to it. The construction bounds the damage (an entry must be added deliberately) but does not prevent it. | Test seat | the leaf's own test asserts `BROWSER_SAFE_MODULES` has exactly the entries listed in section 4.2, as a frozen literal array - so widening it is a deliberate, visible, reviewed edit rather than a silent one | Wave step 2, with the leaf's test |
 | RES-A23-12 | **NEW. Whether a plain `import ts from "typescript"` resolves under vitest is UNMEASURED** - measuring it needs a file written into `src/`, which this pass may not do. The specified `createRequire` form IS measured working. | Implementer | `npx vitest run src/lib/module-graph/runtime-import-graph.test.ts` with each form | Wave step 2 |
 
 **None of these exist until they are in `docs/BACKLOG.md`**
 (`DEV_LOOP.md:79-84`). `docs/backlog.yml` is the orchestrator's file and this
 seat may not write it; recording them there is owed at A23's reconciliation.
-Specifically owed: **add** RES-A23-9 through RES-A23-13; **re-bind**
+Specifically owed: **add** RES-A23-9 through RES-A23-15; **re-bind**
 RES-A23-1's instrument to the residue check; **strike** RES-A23-2 and
-RES-A23-7 as closed by this design, each naming the measurement that closed it.
+RES-A23-7 as closed by this design, each naming the measurement that closed it;
+and **record that RES-A23-4 is escalated on its own instrument**, not folded
+into RES-A23-9 (Ruling M4).
+
+**Delta note on RES-A23-13.** It now owns TEN scratchpad probes, not four: the
+original four plus `a23-dropped.mjs`, `a23-delta-probe.mjs`, `a23-x4-proof.mjs`,
+`a23-typesedges.mjs`, `a23-sabotage-delta.mjs` and `a23-sites45-severity.mjs`
+(section 9). Wave step 0 commits and re-runs all ten. The delta did not widen
+this pass's write scope to commit them, for the same reason the first version
+did not: this pass owns exactly one path.
 
 ---
 
@@ -833,12 +1384,43 @@ RES-A23-7 as closed by this design, each naming the measurement that closed it.
   (`this-repo.md:30-41`). Nothing in this design changes runtime code, so the
   compile line should be unaffected, but that is a reading claim, not a
   measurement.
-- **Whether the walk's cost stays acceptable as the two directories grow.**
-  430ms and 166ms today, against a 70.73s suite. Both precedent walkers carry
-  `{ timeout: 30000 }` and one of them has already blown its own timeout once
-  (`canvas-client-boundary.transitive.test.ts:132-141`). I specified the
-  memo-before-read ordering that fixed it; I did not measure the growth curve.
-- **Whether sites 4 and 5 (RES-A23-9) have live defects.** I characterised
-  their mechanism by opening them and established that they share the holes. I
-  did not run the construct list against them - that is the scope call's job,
-  not this pass's.
+- ~~**Whether the walk's cost stays acceptable as the two directories
+  grow.**~~ **ANSWERED IN THE DELTA under Ruling m2 - this was a measurement I
+  owed, not an unknown.** The ceiling is one command: parsing every non-test
+  `.ts`/`.tsx` under `src/` (1560 files, the hard upper bound on any closure)
+  takes 1800ms / 1847ms here against a 30000ms timeout - a 16x margin at the
+  ceiling - and the walk is O(nodes) with a visited set. Section 6 carries the
+  numbers and the corrected 3.5% suite figure. What remains genuinely
+  unmeasured is only the growth CURVE of the two directories themselves, which
+  is a property of future commits, not of this tree.
+- ~~**Whether instances 4-6 (RES-A23-9) have live defects.**~~ **ANSWERED IN
+  THE DELTA - the escalation now carries a number.** `node
+  <scratchpad>/a23-sites45-severity.mjs` at `d7f69c5` walks each guarded object
+  transitively under the shipping forbidden set:
+
+  ```
+  ===== RES-A23-9 SEVERITY: transitive walk over each guarded object =====
+    instance 4  ungradedDisclosure.ts                            nodes=4   violations=0
+    instance 5  course-schedule-docx.ts                          nodes=5   violations=0
+    instance 6  steps.weekly-announcement-schedule.ts            nodes=90  violations=0
+    instance 6  announcement-package-run.ts                      nodes=11  violations=0
+    instance 6  steps.weekly-announcement-schedule.shared.ts     nodes=12  violations=0
+  ```
+
+  **SEVERITY: ZERO live defects.** All five guarded objects are clean
+  transitively today, so instances 4-6 are latent holes, not shipped bugs, and
+  the scope call is about prevention rather than repair. **One latent
+  construct is live**, from the parsed construct census in the same run:
+  `course-schedule-docx.ts` contains `await import("docx")` at `:79` - a
+  dynamic import with no `from` token at all, therefore invisible to that
+  file's own `/from ["']...["']/` guard. It is harmless today (`docx` is a real
+  browser-safe package), but it is the hole standing open: the same line
+  spelled `await import("@/lib/supabase/server")` would pass instance 5's guard
+  green. Every other object's census is plain `import` declarations only
+  (3, 5, 8 and 2 respectively; zero `require`, zero `export ... from`, zero
+  wrapped `from`).
+- **Whether instances 4-6 would stay clean under their OWN capability
+  boundaries.** I walked them against the grading boundary
+  (`lib/supabase` + the three bare specifiers). Instance 5's guard also bans
+  `@/app/actions`, and instance 6's also bans `@/app/actions/shared`, which are
+  different predicates. Running those is part of the scope call, not this pass.
